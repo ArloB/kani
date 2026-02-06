@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS manga (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    url TEXT NOT NULL,
+    name TEXT NOT NULL,
+    cover_url TEXT NOT NULL,
+    artist TEXT NOT NULL,
+    author TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    auto_download BOOLEAN NOT NULL DEFAULT 0,
+    library_path TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_id) REFERENCES sources(id)
+);
