@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use wasmtime::{Config, Engine, Linker, Module, Store};
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 pub struct ResponseData {
     pub body: String,

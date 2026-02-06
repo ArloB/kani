@@ -4,7 +4,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 /// Cached credentials from challenge solver
 #[derive(Clone, Default)]
