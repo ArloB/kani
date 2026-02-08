@@ -4,4 +4,7 @@ wasm_sources
 .env
 *.db
 Cargo.lock
-
+library
+kani-web/dist
+kani-extensions/*
+!kani-extensions/kani-example

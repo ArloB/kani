@@ -3,7 +3,10 @@
 //! These traits define the interface that WASM extensions must implement
 //! to provide manga source functionality.
 
-use crate::types::{Chapter, ChapterList, MangaInfo, MangaList};
+use crate::{
+    FilterList, PreferenceList,
+    types::{Chapter, ChapterList, MangaInfo, MangaList},
+};
 
 /// Result type for extension operations.
 pub type ExtensionResult<T> = Result<T, ExtensionError>;
@@ -68,18 +71,28 @@ pub trait MangaExtension {
     ///
     /// # Arguments
     /// * `manga_id` - The manga's unique identifier
-    fn get_chapter_list(&self, manga_id: &str) -> ExtensionResult<ChapterList>;
+    /// * `page` - Page number (1-indexed)
+    fn get_chapter_list(&self, manga_id: &str, page: i32) -> ExtensionResult<ChapterList>;
 
     /// Get page URLs for a chapter for downloading.
     ///
     /// # Arguments
-    /// * `manga_id` - The manga's unique identifier
     /// * `chapter_id` - The chapter's unique identifier
-    fn get_pages(&self, manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter>;
+    ///   To change if other extensions need more info
+    fn get_pages(&self, chapter_id: &str) -> ExtensionResult<Chapter>;
+
+    // Returns: A JSON schema defining the available filters (Drop-downs, Checkboxes, Text Inputs, Sort options).
+    // Host Responsibility: The main app reads this JSON, renders the UI natively, and then serializes the user's selection back into JSON to pass into search_manga
+    fn get_filter_list(&self) -> ExtensionResult<FilterList>;
+
+    // Purpose: Allow the user to set login credentials or domain overrides. The extension should expose a definition of what settings it needs, and the host handles storage.
+    fn get_preferences(&self) -> ExtensionResult<PreferenceList>;
+
+    fn set_preferences(&self, json_ptr: i32) -> ExtensionResult<()>;
 }
 
 /// Metadata about a source extension.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExtensionMetadata {
     /// Unique identifier for this extension
     pub id: String,

@@ -1,0 +1,14 @@
+[build]
+target = "index.html"
+
+[serve]
+port = 8080
+open = false
+
+[[proxy]]
+rewrite = "/api/"
+backend = "http://localhost:8242/"
+
+[[proxy]]
+rewrite = "/sources"
+backend = "http://localhost:8242/sources"

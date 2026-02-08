@@ -12,8 +12,8 @@ pub fn read_string_from_guest(
     ptr: i32,
     len: i32,
 ) -> Result<String, Error> {
-    let ptr = ptr as usize;
-    let len = len as usize;
+    let ptr = ptr as u32 as usize;
+    let len = len as u32 as usize;
 
     let data = memory.data(caller);
     if ptr + len > data.len() {
@@ -34,7 +34,7 @@ pub fn write_bytes_to_guest(
     ptr: i32,
     data: &[u8],
 ) -> Result<usize, Error> {
-    let ptr = ptr as usize;
+    let ptr = ptr as u32 as usize;
 
     let mem_data = memory.data_mut(caller);
     let available = mem_data.len().saturating_sub(ptr);
@@ -46,10 +46,4 @@ pub fn write_bytes_to_guest(
 
     mem_data[ptr..ptr + to_write].copy_from_slice(&data[..to_write]);
     Ok(to_write)
-}
-
-#[cfg(test)]
-mod tests {
-    // Memory tests would require a full WASM environment setup
-    // These are integration-level tests
 }

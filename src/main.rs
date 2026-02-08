@@ -13,7 +13,7 @@ use state::AppState;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::INFO)
         .init();
 
     let state = AppState::new()
@@ -27,12 +27,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             interval.tick().await;
             let mut sources = cleanup_state.sources.lock().await;
             for source in sources.values_mut() {
-                source.maybe_unload();
+                match source.maybe_unload() {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!("Failed to unload source: {}", e);
+                    }
+                }
             }
         }
     });
 
     let app = Router::new()
+        .route("/image_proxy", get(image_proxy))
+        // Source Routes
         .route("/sources", get(list_sources).post(add_source))
         .route(
             "/sources/{id}",
@@ -41,12 +48,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/sources/{id}/wasm", post(upload_wasm))
         .route("/sources/{id}/wasm/fetch", post(fetch_wasm))
         .route("/sources/{id}/popular/{page}", get(get_popular_manga))
-        .route("/sources/{id}/search/{query}/{page}", get(search_manga))
+        .route("/sources/{id}/search/{page}", get(search_manga))
         .route("/sources/{id}/details/{manga_id}", get(get_manga_details))
         .route(
-            "/sources/{id}/download/{manga_id}/{chapter_id}",
-            post(start_download),
+            "/sources/{id}/chapters/{manga_id}/{page}",
+            get(get_chapter_list),
         )
+        .route("/sources/{id}/download/{chapter_id}", post(start_download))
         .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8242")

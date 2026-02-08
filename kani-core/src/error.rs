@@ -40,6 +40,9 @@ pub enum Error {
 
     #[error("Extension error: {0}")]
     Extension(String),
+
+    #[error("{0}")]
+    Other(String),
 }
 
 impl<T> From<std::sync::PoisonError<T>> for Error {

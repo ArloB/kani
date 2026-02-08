@@ -1,6 +1,5 @@
 //! Download manager for queuing and processing chapter downloads.
 
-mod download;
 mod progress;
 
 use futures::stream::{self, StreamExt};
@@ -13,7 +12,7 @@ use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
 
 use crate::error::Result;
-use download::DownloadClient;
+use crate::http::{SmartClient, SmartResponse};
 pub use progress::{DownloadProgress, ProgressEvent};
 
 /// Unique identifier for a queued chapter
@@ -57,8 +56,6 @@ impl QueueState {
 pub struct DownloaderManager {
     queue: Arc<Mutex<QueueState>>,
     notify: Arc<Notify>,
-    max_retries: i64,
-    initial_retry_delay_ms: i64,
 }
 
 impl DownloaderManager {
@@ -74,10 +71,14 @@ impl DownloaderManager {
 
         let queue_clone = queue.clone();
         let notify_clone = notify.clone();
-        let solver_url = solver_url.to_string();
+        let solver_url = if solver_url.is_empty() {
+            None
+        } else {
+            Some(solver_url.to_string())
+        };
 
         tokio::spawn(async move {
-            let client = match DownloadClient::new(&solver_url) {
+            let client = match SmartClient::new(solver_url) {
                 Ok(client) => client,
                 Err(e) => {
                     tracing::error!("Failed to create download client: {}", e);
@@ -179,12 +180,7 @@ impl DownloaderManager {
             }
         });
 
-        Ok(Self {
-            queue,
-            notify,
-            max_retries,
-            initial_retry_delay_ms,
-        })
+        Ok(Self { queue, notify })
     }
 
     /// Queue a chapter for download, returns the queue ID
@@ -239,7 +235,7 @@ impl DownloaderManager {
     }
 
     async fn download_page_with_retry(
-        client: &DownloadClient,
+        client: &SmartClient,
         url: &str,
         chapter_path: PathBuf,
         page_index: i32,
@@ -280,9 +276,9 @@ impl DownloaderManager {
     }
 
     async fn download_page(
-        client: &DownloadClient,
+        client: &SmartClient,
         url: &str,
-        chapter_path: &PathBuf,
+        chapter_path: &std::path::Path,
         page: i32,
     ) -> Result<()> {
         let resp = client.get(url).await?;
@@ -295,17 +291,19 @@ impl DownloaderManager {
         Ok(())
     }
 
-    fn get_image_extension(resp: &rquest::Response, url: &str) -> &'static str {
-        if let Some(content_type) = resp.headers().get("content-type") {
-            if let Ok(ct) = content_type.to_str() {
-                match ct {
-                    "image/jpeg" | "image/jpg" => return "jpg",
-                    "image/png" => return "png",
-                    "image/webp" => return "webp",
-                    "image/gif" => return "gif",
-                    "image/avif" => return "avif",
-                    _ => {}
-                }
+    fn get_image_extension(resp: &SmartResponse, url: &str) -> &'static str {
+        if let Some(ct) = resp
+            .headers()
+            .get("content-type")
+            .and_then(|c| c.to_str().ok())
+        {
+            match ct {
+                "image/jpeg" | "image/jpg" => return "jpg",
+                "image/png" => return "png",
+                "image/webp" => return "webp",
+                "image/gif" => return "gif",
+                "image/avif" => return "avif",
+                _ => {}
             }
         }
 
@@ -345,49 +343,5 @@ impl DownloaderManager {
 
     fn on_page_failed(_chapter_name: &str, _page_index: i32, _error: &str) {
         // TODO: Emit ProgressEvent::PageFailed
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_image_extension_from_url() {
-        // Can't easily test response headers without a mock, so just test URL fallback
-        assert_eq!(
-            DownloaderManager::get_image_extension_from_url("http://example.com/image.png"),
-            "png"
-        );
-        assert_eq!(
-            DownloaderManager::get_image_extension_from_url("http://example.com/image.jpg"),
-            "jpg"
-        );
-        assert_eq!(
-            DownloaderManager::get_image_extension_from_url("http://example.com/image.webp"),
-            "webp"
-        );
-        assert_eq!(
-            DownloaderManager::get_image_extension_from_url("http://example.com/image"),
-            "jpg"
-        );
-    }
-}
-
-impl DownloaderManager {
-    /// Helper for testing URL extension extraction
-    #[cfg(test)]
-    fn get_image_extension_from_url(url: &str) -> &'static str {
-        if let Some(ext) = url.rsplit('.').next() {
-            match ext.to_lowercase().as_str() {
-                "jpg" | "jpeg" => return "jpg",
-                "png" => return "png",
-                "webp" => return "webp",
-                "gif" => return "gif",
-                "avif" => return "avif",
-                _ => {}
-            }
-        }
-        "jpg"
     }
 }

@@ -25,9 +25,6 @@ pub enum AppError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("Invalid WASM file")]
-    InvalidWasmFile,
-
     #[error("Migration error: {0}")]
     MigrationError(#[from] sqlx::migrate::MigrateError),
 
@@ -62,7 +59,6 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("TryFromIntError: {}", e),
             ),
-            AppError::InvalidWasmFile => (StatusCode::BAD_REQUEST, "Invalid WASM file".to_string()),
             AppError::MigrationError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Migration error: {}", e),

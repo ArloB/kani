@@ -1,0 +1,182 @@
+    Checking kani-core v0.1.0 (E:\code\kani\kani-core)
+error[E0382]: use of moved value: `store`
+  --> kani-core\src\sources.rs:45:31
+   |
+38 |         let store = self.store.as_mut().expect("Store not initialized");
+   |             ----- move occurs because `store` has type `&mut Store<HostState>`, which does not implement the `Copy` trait
+...
+42 |             .get_func(store, function_name)
+   |                       ----- value moved here
+...
+45 |         let func_ty = func.ty(store);
+   |                               ^^^^^ value used here after move
+   |
+help: consider creating a fresh reborrow of `store` here
+   |
+42 |             .get_func(&mut *store, function_name)
+   |                       ++++++
+
+error[E0382]: use of moved value: `store`
+  --> kani-core\src\sources.rs:50:25
+   |
+38 |         let store = self.store.as_mut().expect("Store not initialized");
+   |             ----- move occurs because `store` has type `&mut Store<HostState>`, which does not implement the `Copy` trait
+...
+45 |         let func_ty = func.ty(store);
+   |                               ----- value moved here
+...
+50 |         func.call_async(store, &args, &mut results)
+   |                         ^^^^^ value used here after move
+   |
+help: consider creating a fresh reborrow of `store` here
+   |
+45 |         let func_ty = func.ty(&mut *store);
+   |                               ++++++
+
+error[E0382]: use of moved value: `store`
+   --> kani-core\src\sources.rs:177:22
+    |
+170 |         let store = self.store.as_mut().expect("Store not initialized");
+    |             ----- move occurs because `store` has type `&mut Store<HostState>`, which does not implement the `Copy` trait
+...
+176 |             .get_func(store, "deallocate")
+    |                       ----- value moved here
+177 |             .or_else(|| instance.get_func(store, "free"))
+    |                      ^^                   ----- use occurs due to use in closure
+    |                      |
+    |                      value used here after move
+    |
+help: consider creating a fresh reborrow of `store` here
+    |
+176 |             .get_func(&mut *store, "deallocate")
+    |                       ++++++
+
+error[E0382]: use of moved value: `store`
+   --> kani-core\src\sources.rs:178:22
+    |
+170 |         let store = self.store.as_mut().expect("Store not initialized");
+    |             ----- move occurs because `store` has type `&mut Store<HostState>`, which does not implement the `Copy` trait
+...
+177 |             .or_else(|| instance.get_func(store, "free"))
+    |                      --                   ----- variable moved due to use in closure
+    |                      |
+    |                      value moved into closure here
+178 |             .or_else(|| instance.get_func(store, "__free"));
+    |                      ^^                   ----- use occurs due to use in closure
+    |                      |
+    |                      value used here after move
+    |
+help: consider creating a fresh reborrow of `store` here
+    |
+177 |             .or_else(|| instance.get_func(&mut *store, "free"))
+    |                                           ++++++
+
+error[E0382]: use of moved value: `store`
+   --> kani-core\src\sources.rs:183:17
+    |
+170 |         let store = self.store.as_mut().expect("Store not initialized");
+    |             ----- move occurs because `store` has type `&mut Store<HostState>`, which does not implement the `Copy` trait
+...
+178 |             .or_else(|| instance.get_func(store, "__free"));
+    |                      --                   ----- variable moved due to use in closure
+    |                      |
+    |                      value moved into closure here
+...
+183 |                 store,
+    |                 ^^^^^ value used here after move
+    |
+help: consider creating a fresh reborrow of `store` here
+    |
+178 |             .or_else(|| instance.get_func(&mut *store, "__free"));
+    |                                           ++++++
+
+error[E0382]: use of moved value: `store`
+   --> kani-core\src\sources.rs:213:22
+    |
+204 |         let store = self.store.as_mut().expect("Store not initialized");
+    |             ----- move occurs because `store` has type `&mut Store<HostState>`, which does not implement the `Copy` trait
+...
+212 |             .get_func(store, "allocate")
+    |                       ----- value moved here
+213 |             .or_else(|| instance.get_func(store, "malloc"))
+    |                      ^^                   ----- use occurs due to use in closure
+    |                      |
+    |                      value used here after move
+    |
+help: consider creating a fresh reborrow of `store` here
+    |
+212 |             .get_func(&mut *store, "allocate")
+    |                       ++++++
+
+error[E0382]: use of moved value: `store`
+   --> kani-core\src\sources.rs:218:25
+    |
+204 |         let store = self.store.as_mut().expect("Store not initialized");
+    |             ----- move occurs because `store` has type `&mut Store<HostState>`, which does not implement the `Copy` trait
+...
+213 |             .or_else(|| instance.get_func(store, "malloc"))
+    |                      --                   ----- variable moved due to use in closure
+    |                      |
+    |                      value moved into closure here
+...
+218 |             .call_async(store, &[wasmtime::Val::I32(len)], &mut results)
+    |                         ^^^^^ value used here after move
+    |
+help: consider creating a fresh reborrow of `store` here
+    |
+213 |             .or_else(|| instance.get_func(&mut *store, "malloc"))
+    |                                           ++++++
+
+error[E0382]: use of moved value: `store`
+   --> kani-core\src\sources.rs:227:25
+    |
+204 |         let store = self.store.as_mut().expect("Store not initialized");
+    |             ----- move occurs because `store` has type `&mut Store<HostState>`, which does not implement the `Copy` trait
+...
+218 |             .call_async(store, &[wasmtime::Val::I32(len)], &mut results)
+    |                         ----- value moved here
+...
+227 |             .get_memory(store, "memory")
+    |                         ^^^^^ value used here after move
+    |
+help: consider creating a fresh reborrow of `store` here
+    |
+218 |             .call_async(&mut *store, &[wasmtime::Val::I32(len)], &mut results)
+    |                         ++++++
+
+error[E0382]: use of moved value: `store`
+   --> kani-core\src\sources.rs:230:22
+    |
+204 |         let store = self.store.as_mut().expect("Store not initialized");
+    |             ----- move occurs because `store` has type `&mut Store<HostState>`, which does not implement the `Copy` trait
+...
+227 |             .get_memory(store, "memory")
+    |                         ----- value moved here
+...
+230 |         memory.write(store, ptr as usize, bytes).map_err(|e| {
+    |                      ^^^^^ value used here after move
+    |
+help: consider creating a fresh reborrow of `store` here
+    |
+227 |             .get_memory(&mut *store, "memory")
+    |                         ++++++
+
+error[E0382]: use of moved value: `store`
+   --> kani-core\src\sources.rs:164:32
+    |
+158 |         let store = self.store.as_mut().expect("Store not initialized");
+    |             ----- move occurs because `store` has type `&mut Store<HostState>`, which does not implement the `Copy` trait
+...
+162 |             .get_memory(store, "memory")
+    |                         ----- value moved here
+163 |             .ok_or_else(|| Error::WasmMemoryAccess("memory export not found".to_string()))?;
+164 |         let data = memory.data(store);
+    |                                ^^^^^ value used here after move
+    |
+help: consider creating a fresh reborrow of `store` here
+    |
+162 |             .get_memory(&mut *store, "memory")
+    |                         ++++++
+
+For more information about this error, try `rustc --explain E0382`.
+error: could not compile `kani-core` (lib) due to 10 previous errors

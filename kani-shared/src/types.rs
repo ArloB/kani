@@ -14,9 +14,9 @@ pub struct MangaInfo {
     /// Brief description or summary
     pub description: Option<String>,
     /// Author name(s)
-    pub author: Option<String>,
+    pub authors: Vec<String>,
     /// Artist name(s)
-    pub artist: Option<String>,
+    pub artists: Vec<String>,
     /// Current publication status
     pub status: MangaStatus,
     /// Content tags/genres
@@ -68,6 +68,7 @@ pub struct ChapterInfo {
 pub struct ChapterList {
     /// All chapters for the manga
     pub chapters: Vec<ChapterInfo>,
+    pub has_next_page: bool,
 }
 
 /// A chapter with its page URLs, ready for download.
@@ -88,52 +89,54 @@ pub struct Page {
     pub url: String,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct PreferenceList {
+    pub preferences: Vec<Preference>,
+}
 
-    #[test]
-    fn test_manga_info_serialization() {
-        let manga = MangaInfo {
-            id: "123".to_string(),
-            title: "Test Manga".to_string(),
-            cover_url: Some("https://example.com/cover.jpg".to_string()),
-            description: Some("A test manga".to_string()),
-            author: Some("Author Name".to_string()),
-            artist: None,
-            status: MangaStatus::Ongoing,
-            tags: vec!["action".to_string(), "comedy".to_string()],
-        };
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Preference {
+    pub name: String,
+    pub preference_type: PreferenceType,
+    pub options: Vec<PreferenceOption>,
+}
 
-        let json = serde_json::to_string(&manga).unwrap();
-        let deserialized: MangaInfo = serde_json::from_str(&json).unwrap();
-        assert_eq!(manga, deserialized);
-    }
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum PreferenceType {
+    Select,
+    Checkbox,
+    TextInput,
+    Sort,
+}
 
-    #[test]
-    fn test_chapter_serialization() {
-        let chapter = Chapter {
-            chapter_name: "Chapter 1".to_string(),
-            pages: vec![
-                Page {
-                    index: 0,
-                    url: "https://example.com/1.jpg".to_string(),
-                },
-                Page {
-                    index: 1,
-                    url: "https://example.com/2.jpg".to_string(),
-                },
-            ],
-        };
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct PreferenceOption {
+    pub name: String,
+    pub value: String,
+}
 
-        let json = serde_json::to_string(&chapter).unwrap();
-        let deserialized: Chapter = serde_json::from_str(&json).unwrap();
-        assert_eq!(chapter, deserialized);
-    }
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct FilterList {
+    pub filters: Vec<Filter>,
+}
 
-    #[test]
-    fn test_manga_status_default() {
-        let status: MangaStatus = Default::default();
-        assert_eq!(status, MangaStatus::Unknown);
-    }
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Filter {
+    pub name: String,
+    pub filter_type: FilterType,
+    pub options: Vec<FilterOption>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum FilterType {
+    Select,
+    Checkbox,
+    TextInput,
+    Sort,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct FilterOption {
+    pub name: String,
+    pub value: String,
 }

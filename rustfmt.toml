@@ -1,0 +1,7 @@
+# rustfmt.toml
+edition = "2024"
+max_width = 100
+
+# 3. Consistency
+newline_style = "Unix"
+tab_spaces = 4

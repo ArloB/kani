@@ -1,6 +1,6 @@
 //! WASM runtime and host ABI for extensions.
 
-mod abi;
+pub mod abi;
 mod memory;
 
 use std::collections::HashMap;
@@ -14,29 +14,43 @@ pub struct ResponseData {
     pub status: u16,
 }
 
+use crate::http::SmartClient;
+
 /// Host state passed to WASM guest via Store.
 /// Manages handles for HTTP requests, responses, and parsed HTML documents.
 pub struct HostState {
-    pub http_client: rquest::Client,
+    pub http_client: SmartClient,
     pub next_request_handle: i32,
     pub next_response_handle: i32,
     pub next_doc_handle: i32,
     pub requests: HashMap<i32, rquest::RequestBuilder>,
     pub responses: HashMap<i32, ResponseData>,
     pub html_docs: HashMap<i32, String>,
+    pub html_lists: HashMap<i32, Vec<String>>,
+    pub last_error: Option<i32>,
 }
 
-impl Default for HostState {
-    fn default() -> Self {
-        Self {
-            http_client: rquest::Client::new(),
+impl HostState {
+    pub fn new(solver_url: Option<String>) -> Result<Self> {
+        let http_client = SmartClient::new(solver_url)?;
+
+        Ok(Self {
+            http_client,
             next_request_handle: 1,
             next_response_handle: 1,
             next_doc_handle: 1,
             requests: HashMap::new(),
             responses: HashMap::new(),
             html_docs: HashMap::new(),
-        }
+            html_lists: HashMap::new(),
+            last_error: None,
+        })
+    }
+}
+
+impl Default for HostState {
+    fn default() -> Self {
+        HostState::new(None).unwrap()
     }
 }
 
