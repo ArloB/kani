@@ -101,25 +101,26 @@ impl AppState {
     }
 
     pub async fn get_popular_manga(&self, id: i64, page: i32) -> Result<String, AppError> {
-        let mut sources = self.sources.lock().await;
-
-        let source = sources
-            .get_mut(&id)
-            .ok_or_else(|| AppError::NotFound(format!("Source {} not found", id)))?;
-
         let linker = self.wasm_runtime.linker();
-        source
-            .call_function_str(linker, "get_popular_manga", vec![Val::I32(page)])
+
+        self.sources
+            .lock()
             .await
+            .get_mut(&id)
+            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+            .call_function_json(linker, "get_popular_manga", vec![Val::I32(page)])
+            .await
+            .map(|v: serde_json::Value| v.to_string())
             .map_err(AppError::CoreError)
     }
 
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn search_manga(&self, id: i64, query: &str, page: i32) -> Result<String, AppError> {
         let mut sources = self.sources.lock().await;
 
         let source = sources
             .get_mut(&id)
-            .ok_or_else(|| AppError::NotFound(format!("Source {} not found", id)))?;
+            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
 
         let linker = self.wasm_runtime.linker();
 
@@ -129,15 +130,15 @@ impl AppState {
             .await
             .map_err(AppError::CoreError)?;
 
-        let result = source
-            .call_function_str(
+        let result: Result<serde_json::Value, _> = source
+            .call_function_json(
                 linker,
                 "search_manga",
                 vec![Val::I32(query_ptr), Val::I32(query_len), Val::I32(page)],
             )
             .await;
 
-        let return_val = result.map_err(AppError::CoreError);
+        let return_val = result.map(|v| v.to_string()).map_err(AppError::CoreError);
 
         if let Err(e) = source.deallocate_memory(query_ptr, query_len).await {
             tracing::error!("Failed to deallocate query string in WASM: {}", e);
@@ -146,12 +147,13 @@ impl AppState {
         return_val
     }
 
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn get_manga_details(&self, id: i64, manga_id: &str) -> Result<String, AppError> {
         let mut sources = self.sources.lock().await;
 
         let source = sources
             .get_mut(&id)
-            .ok_or_else(|| AppError::NotFound(format!("Source {} not found", id)))?;
+            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
 
         let linker = self.wasm_runtime.linker();
 
@@ -160,21 +162,24 @@ impl AppState {
             .await
             .map_err(AppError::CoreError)?;
 
-        let result = source
-            .call_function_str(
+        let result: Result<serde_json::Value, _> = source
+            .call_function_json(
                 linker,
                 "get_manga_details",
                 vec![Val::I32(manga_id_ptr), Val::I32(manga_id_len)],
             )
-            .await?;
+            .await;
+
+        let return_val = result.map(|v| v.to_string()).map_err(AppError::CoreError);
 
         if let Err(e) = source.deallocate_memory(manga_id_ptr, manga_id_len).await {
             tracing::error!("Failed to deallocate query string in WASM: {}", e);
         }
 
-        Ok(result)
+        return_val
     }
 
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn get_chapter_list(
         &self,
         id: i64,
@@ -185,7 +190,7 @@ impl AppState {
 
         let source = sources
             .get_mut(&id)
-            .ok_or_else(|| AppError::NotFound(format!("Source {} not found", id)))?;
+            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
 
         let linker = self.wasm_runtime.linker();
 
@@ -194,8 +199,8 @@ impl AppState {
             .await
             .map_err(AppError::CoreError)?;
 
-        let result = source
-            .call_function_str(
+        let result: Result<serde_json::Value, _> = source
+            .call_function_json(
                 linker,
                 "get_chapter_list",
                 vec![
@@ -204,40 +209,68 @@ impl AppState {
                     Val::I32(page),
                 ],
             )
-            .await?;
+            .await;
+
+        let return_val = result.map(|v| v.to_string()).map_err(AppError::CoreError);
 
         if let Err(e) = source.deallocate_memory(manga_id_ptr, manga_id_len).await {
             tracing::error!("Failed to deallocate query string in WASM: {}", e);
         }
 
-        Ok(result)
+        return_val
     }
 
-    pub async fn start_download(&self, id: i64, chapter_id: &str) -> Result<(), AppError> {
+    #[allow(clippy::significant_drop_tightening)]
+    pub async fn start_download(
+        &self,
+        id: i64,
+        manga_id: &str,
+        chapter_id: &str,
+    ) -> Result<(), AppError> {
         let chapter = {
             let mut sources = self.sources.lock().await;
 
             let source = sources
                 .get_mut(&id)
-                .ok_or_else(|| AppError::NotFound(format!("Source {} not found", id)))?;
+                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
 
             let linker = self.wasm_runtime.linker();
+
+            let (manga_id_ptr, manga_id_len) = source
+                .write_string(linker, manga_id)
+                .await
+                .map_err(AppError::CoreError)?;
 
             let (chapter_id_ptr, chapter_id_len) = source
                 .write_string(linker, chapter_id)
                 .await
                 .map_err(AppError::CoreError)?;
 
-            let pages = source
-                .call_function_str(
+            let chapter_res: Result<Chapter, _> = source
+                .call_function_json(
                     linker,
                     "get_pages",
-                    vec![Val::I32(chapter_id_ptr), Val::I32(chapter_id_len)],
+                    vec![
+                        Val::I32(manga_id_ptr),
+                        Val::I32(manga_id_len),
+                        Val::I32(chapter_id_ptr),
+                        Val::I32(chapter_id_len),
+                    ],
                 )
-                .await
-                .map_err(AppError::CoreError)?;
+                .await;
 
-            serde_json::from_str::<Chapter>(&pages)?
+            if let Err(e) = source.deallocate_memory(manga_id_ptr, manga_id_len).await {
+                tracing::error!("Failed to deallocate manga_id string in WASM: {}", e);
+            }
+
+            if let Err(e) = source
+                .deallocate_memory(chapter_id_ptr, chapter_id_len)
+                .await
+            {
+                tracing::error!("Failed to deallocate chapter_id string in WASM: {}", e);
+            }
+
+            chapter_res.map_err(AppError::CoreError)?
         };
 
         let library_path = self.settings.read().await.library_path.clone();
@@ -254,15 +287,13 @@ impl AppState {
     }
 
     pub async fn get_metadata(&self, id: i64) -> Result<kani_shared::ExtensionMetadata, AppError> {
-        let mut sources = self.sources.lock().await;
-
-        let source = sources
-            .get_mut(&id)
-            .ok_or_else(|| AppError::NotFound(format!("Source {} not found", id)))?;
-
         let linker = self.wasm_runtime.linker();
-
-        let json = source
+        let json = self
+            .sources
+            .lock()
+            .await
+            .get_mut(&id)
+            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
             .call_function_str(linker, "get_metadata", vec![])
             .await?;
 

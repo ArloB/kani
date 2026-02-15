@@ -1,5 +1,6 @@
 use crate::api::{get_chapter_list, get_manga_details};
 use leptos::prelude::*;
+use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 
 #[allow(non_snake_case)]
@@ -16,6 +17,8 @@ pub fn MangaDetails() -> impl IntoView {
         })
     };
     let manga_id = move || params.with(|params| params.get("manga_id").unwrap_or_default());
+
+    let (page, set_page) = signal(1);
 
     let manga = LocalResource::new(move || {
         let sid = source_id();
@@ -38,7 +41,8 @@ pub fn MangaDetails() -> impl IntoView {
     let chapters = LocalResource::new(move || {
         let sid = source_id();
         let mid = manga_id();
-        async move { get_chapter_list(sid, &mid, 1).await } // TODO: Pagination for chapters?
+        let p = page.get();
+        async move { get_chapter_list(sid, &mid, p).await }
     });
 
     view! {
@@ -48,6 +52,7 @@ pub fn MangaDetails() -> impl IntoView {
                     manga.get().map(|res| match res {
                         Ok((info, source)) => view! {
                             <div class="details-header">
+                                <h1>{info.title.clone()}</h1>
                                 <div class="cover">
                                     {match info.cover_url {
                                         Some(url) => view! { <img src=crate::api::proxy_url(&url, &source.base_url) alt=info.title.clone() style="max-width: 300px" /> }.into_any(),
@@ -55,18 +60,53 @@ pub fn MangaDetails() -> impl IntoView {
                                     }}
                                 </div>
                                 <div class="info">
-                                    <h1>{info.title}</h1>
-                                    <p class="author">"Author: " {info.authors.join(", ")}</p>
-                                    <p class="artist">"Artist: " {info.artists.join(", ")}</p>
-                                    <div class="tags">
-                                        <For
-                                            each=move || info.tags.clone()
-                                            key=|tag| tag.clone()
-                                            children=move |tag| view! { <span class="tag">{tag}</span> }
-                                        />
-                                    </div>
-                                    <div class="description">
-                                        <p>{info.description}</p>
+                                    <div class="details">
+                                        <div class="status">
+                                            <p>"Status: "{info.status.to_string()}</p>
+                                        </div>
+                                        <div class="people">
+                                            <div class="authors">
+                                                <p>"Author: "</p>
+                                                <For 
+                                                    each=move || info.authors.clone()
+                                                    key=|author| author.clone()
+                                                    children=move |author| view! {
+                                                        <div class="author">
+                                                            <A href=format!("/search?author={}", author)>{author}</A>
+                                                        </div>
+                                                    }
+                                                />
+                                            </div>
+                                            <div class="artists">
+                                                <p>"Artist: "</p>
+                                                <For 
+                                                    each=move || info.artists.clone()
+                                                    key=|artist| artist.clone()
+                                                    children=move |artist| view! {
+                                                        <div class="artist">
+                                                            <A href=format!("/search?artist={}", artist)>{artist}</A>
+                                                        </div>
+                                                    }
+                                                />
+                                            </div>
+                                        </div>
+                                        <div class="tags">
+                                            <For
+                                                each=move || info.tags.clone()
+                                                key=|tag| tag.clone()
+                                                children=move |tag| view! { 
+                                                    <div class="tag">
+                                                        <A href=format!("/search?tag={}", tag)>{tag}</A>
+                                                    </div>
+                                                }
+                                            />
+                                        </div>
+                                        <button class="add-to-library">
+                                            "Add to Library"
+                                        </button>
+                                        <div class="description">
+                                            <p>{info.description}</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -79,24 +119,62 @@ pub fn MangaDetails() -> impl IntoView {
             <Suspense fallback=move || view! { <p>"Loading chapters..."</p> }>
                 {move || {
                     chapters.get().map(|res| match res {
-                        Ok(list) => view! {
-                            <div class="chapter-list">
+                        Ok(list) => {
+                            let list_chapters = list.clone();
+                            let list_pagination = list.clone();
+                            view! {
+                            <div class="chapter-list-group">
                                 <h2>"Chapters"</h2>
-                                <For
-                                    each=move || list.chapters.clone()
-                                    key=|chapter| chapter.id.clone()
-                                    children=move |chapter| {
-                                        view! {
-                                            <div class="chapter-item">
-                                                 // Link removed as Reader is not implemented
-                                                <span class="chapter-title">{chapter.title}</span>
-                                                <span class="chapter-date">{chapter.date_uploaded.unwrap_or_default()}</span>
-                                            </div>
+                                <div class="chapter-list">
+                                    <For
+                                        each=move || list_chapters.chapters.clone()
+                                        key=|chapter| chapter.id.clone()
+                                        children=move |chapter| {
+                                            view! {
+                                                <div class="chapter-item">
+                                                    <div class="chapter-details">
+                                                        <span class="chapter-title">
+                                                            {{
+                                                                let mut title_str = String::new();
+                                                                if let Some(vol) = &chapter.volume {
+                                                                    title_str.push_str(&format!("Vol. {} ", vol));
+                                                                }
+                                                                title_str.push_str(&format!("Ch. {}", chapter.number));
+                                                                if let Some(title) = &chapter.title
+                                                                    && !title.is_empty() {
+                                                                        title_str.push_str(&format!(" - {}", title));
+                                                                    }
+                                                                title_str
+                                                            }}
+                                                        </span>
+                                                        <span class="chapter-scanlator">{chapter.scanlator.unwrap_or_default()}</span>
+                                                        <span class="chapter-date">{
+                                                            chapter.date_uploaded.map(|epoch| {
+                                                                use chrono::DateTime;
+                                                                DateTime::from_timestamp(epoch, 0)
+                                                                    .map(|dt| dt.format("%b %d, %Y").to_string())
+                                                                    .unwrap_or_default()
+                                                            }).unwrap_or_default()
+                                                        }</span>
+                                                    </div>
+                                                    <div class="chapter-actions">
+                                                        <button class="download-button">"Download"</button>
+                                                    </div>
+                                                </div>
+                                            }
                                         }
-                                    }
-                                />
+                                    />
+                                    <Show when=move || !list_pagination.chapters.is_empty() fallback=move || view! { <p>"No chapters found."</p> }>
+                                        <div class="pagination">
+                                            <button on:click=move |_| set_page.update(|p| *p = (*p - 1).max(1)) disabled=move || page.get() <= 1>"Prev"</button>
+                                            <span>" Page " {page} </span>
+                                            <button on:click=move |_| set_page.update(|p| *p += 1) disabled=move || !list.has_next_page>"Next"</button>
+                                        </div>
+                                    </Show>
+                                </div>
                             </div>
-                        }.into_any(),
+                        }.into_any()
+                    },
                         Err(e) => view! { <p class="error">"Error: " {e.to_string()}</p> }.into_any(),
                     })
                 }}

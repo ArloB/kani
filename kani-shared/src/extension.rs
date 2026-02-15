@@ -77,9 +77,9 @@ pub trait MangaExtension {
     /// Get page URLs for a chapter for downloading.
     ///
     /// # Arguments
+    /// * `manga_id` - The manga's unique identifier
     /// * `chapter_id` - The chapter's unique identifier
-    ///   To change if other extensions need more info
-    fn get_pages(&self, chapter_id: &str) -> ExtensionResult<Chapter>;
+    fn get_pages(&self, manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter>;
 
     // Returns: A JSON schema defining the available filters (Drop-downs, Checkboxes, Text Inputs, Sort options).
     // Host Responsibility: The main app reads this JSON, renders the UI natively, and then serializes the user's selection back into JSON to pass into search_manga

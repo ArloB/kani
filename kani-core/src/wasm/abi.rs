@@ -15,20 +15,11 @@ type ResponseHandle = i32;
 type DocumentHandle = i32;
 
 /// Registers all host ABI functions with the wasmtime linker.
-///
-/// These functions are imported by WASM extensions via `extern "C"` declarations
-/// in `kani-shared/src/host_abi.rs`.
 pub fn register_host_functions(linker: &mut Linker<HostState>) -> Result<()> {
-    // HTTP Request Functions
     register_http_functions(linker)?;
-
-    // HTML Parsing Functions
     register_html_functions(linker)?;
-
-    // Resource Cleanup Functions
     register_cleanup_functions(linker)?;
-
-    // Error Handling Functions
+    register_utility_functions(linker)?;
     linker.func_wrap(
         "env",
         "sys_get_last_error",
@@ -40,7 +31,7 @@ pub fn register_host_functions(linker: &mut Linker<HostState>) -> Result<()> {
 
 /// Register HTTP-related host functions.
 fn register_http_functions(linker: &mut Linker<HostState>) -> Result<()> {
-    // request_create(method: i32, url_ptr: *const u8, url_len: i32) -> RequestHandle
+    // request_create(method: i32, url_ptr: i32, url_len: i32) -> RequestHandle
     linker.func_wrap(
         "env",
         "request_create",
@@ -63,7 +54,6 @@ fn register_http_functions(linker: &mut Linker<HostState>) -> Result<()> {
                 }
             };
 
-            // Convert i32 method to Method enum
             let http_method = match method {
                 0 => rquest::Method::GET,
                 1 => rquest::Method::POST,
@@ -78,7 +68,6 @@ fn register_http_functions(linker: &mut Linker<HostState>) -> Result<()> {
 
             tracing::debug!("Creating request for URL: {}, method: {}", url, http_method);
 
-            // Parse URL string into Url type
             let parsed_url = match url.parse::<rquest::Url>() {
                 Ok(u) => u,
                 Err(e) => {
@@ -100,7 +89,7 @@ fn register_http_functions(linker: &mut Linker<HostState>) -> Result<()> {
         },
     )?;
 
-    // request_set_header(handle: RequestHandle, key_ptr: *const u8, key_len: i32, val_ptr: *const u8, val_len: i32)
+    // request_set_header(handle: RequestHandle, key_ptr: i32, key_len: i32, val_ptr: i32, val_len: i32)
     linker.func_wrap(
         "env",
         "request_set_header",
@@ -224,7 +213,6 @@ fn register_http_functions(linker: &mut Linker<HostState>) -> Result<()> {
     )?;
 
     // response_get_body_len(handle: ResponseHandle) -> i32
-    // Returns the length of the response body, or -1 if not found
     linker.func_wrap(
         "env",
         "response_get_body_len",
@@ -240,7 +228,7 @@ fn register_http_functions(linker: &mut Linker<HostState>) -> Result<()> {
         },
     )?;
 
-    // response_get_body(handle: ResponseHandle, buf_ptr: *mut u8, buf_len: i32) -> i32
+    // response_get_body(handle: ResponseHandle, buf_ptr: i32, buf_len: i32) -> i32
     linker.func_wrap(
         "env",
         "response_get_body",
@@ -263,7 +251,6 @@ fn register_http_functions(linker: &mut Linker<HostState>) -> Result<()> {
                 }
             };
 
-            // Respect the buffer length provided by the caller
             let bytes = body.as_bytes();
             let to_write = if buf_len >= 0 {
                 bytes.len().min(buf_len as usize)
@@ -317,8 +304,7 @@ fn register_http_functions(linker: &mut Linker<HostState>) -> Result<()> {
 
 /// Register HTML parsing host functions.
 fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
-    // html_parse(body_ptr: *const u8, body_len: i32) -> DocumentHandle
-    // Parses a raw HTML string and stores it as a document
+    // html_parse(body_ptr: i32, body_len: i32) -> DocumentHandle
     linker.func_wrap(
         "env",
         "html_parse",
@@ -340,7 +326,7 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
             let handle = state.next_doc_handle;
             state.next_doc_handle += 1;
 
-            tracing::debug!("html_parse called, html: {}, handle {}", html, handle);
+            tracing::debug!("html_parse called on handle {}", handle);
 
             state.html_docs.insert(handle, html);
 
@@ -348,8 +334,7 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
         },
     )?;
 
-    // html_select(handle: DocumentHandle, sel_ptr: *const u8, sel_len: i32) -> ListHandle
-    // Selects elements matching the CSS selector and stores them as a list of HTML strings
+    // html_select(handle: DocumentHandle, sel_ptr: i32, sel_len: i32) -> ListHandle
     linker.func_wrap(
         "env",
         "html_select",
@@ -389,8 +374,12 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
                 }
             };
 
-            let doc = scraper::Html::parse_document(doc_str);
-            let matches: Vec<String> = doc.select(&selector).map(|e| e.html()).collect();
+            let doc = scraper::Html::parse_fragment(doc_str);
+            let matches: Vec<String> = doc
+                .root_element()
+                .select(&selector)
+                .map(|e| e.html())
+                .collect();
 
             let list_handle = state.next_doc_handle;
 
@@ -426,7 +415,6 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
     )?;
 
     // html_list_get(handle: ListHandle, index: i32) -> DocumentHandle
-    // Extracts an item from the list as a new Document (String)
     linker.func_wrap(
         "env",
         "html_list_get",
@@ -465,16 +453,6 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
             doc_handle
         },
     )?;
-
-    // html_attr(handle: DocumentHandle, selector_ptr: i32, selector_len: i32, attr_ptr: i32, attr_len: i32) -> String (via memory write? No, this function signature needs to return string to guest. Usually we return i32 (len) or write to buffer.)
-    // Let's stick to the pattern: return string handle? Or write to buffer?
-    // Let's reuse the response system? No.
-    // Let's use `call_function_str` pattern which expects `(ptr, len)` return OR writes to guest buffer?
-    // The `host_abi.rs` has `get_response_body` (alloc buf).
-    // Let's implement `html_attr` to return a String Handle?
-    // No, that's getting complex.
-    // Let's implement `html_attr` to WRITE to a buffer provided by guest.
-    // `html_attr(handle, sel, attr, buf, buf_len) -> bytes_written`
 
     linker.func_wrap(
         "env",
@@ -515,13 +493,12 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
                 Err(_) => return -2,
             };
 
-            let doc = scraper::Html::parse_document(doc_str);
-            let result_str = match doc.select(&selector).next() {
+            let doc = scraper::Html::parse_fragment(doc_str);
+            let result_str = match doc.root_element().select(&selector).next() {
                 Some(el) => el.value().attr(&attr_name).unwrap_or("").to_string(),
                 None => String::new(),
             };
 
-            // Respect buffer length
             let bytes = result_str.as_bytes();
             let to_write = if buf_len >= 0 {
                 bytes.len().min(buf_len as usize)
@@ -529,7 +506,7 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
                 bytes.len()
             };
 
-            tracing::debug!(
+            tracing::info!(
                 "html_attr called for handle {}, selector: {}, attr: {}, result: {}",
                 handle,
                 selector_str,
@@ -576,13 +553,12 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
                 Err(_) => return -2,
             };
 
-            let doc = scraper::Html::parse_document(doc_str);
-            let result_str = match doc.select(&selector).next() {
+            let doc = scraper::Html::parse_fragment(doc_str);
+            let result_str = match doc.root_element().select(&selector).next() {
                 Some(el) => el.text().collect::<Vec<_>>().join(""),
                 None => String::new(),
             };
 
-            // Respect buffer length
             let bytes = result_str.as_bytes();
             let to_write = if buf_len >= 0 {
                 bytes.len().min(buf_len as usize)
@@ -605,7 +581,6 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
     )?;
 
     // html_inner_html(handle: DocumentHandle, buf_ptr: i32, buf_len: i32) -> i32
-    // Returns the inner HTML of the document (without the root element tag)
     linker.func_wrap(
         "env",
         "html_inner_html",
@@ -627,7 +602,6 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
                 }
             };
 
-            // Parse and get inner HTML
             let fragment = scraper::Html::parse_fragment(&doc_str);
             let result_str = if let Some(root) = fragment.root_element().child_elements().next() {
                 root.inner_html()
@@ -656,7 +630,6 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
     )?;
 
     // html_first(handle: DocumentHandle, sel_ptr: i32, sel_len: i32) -> DocumentHandle
-    // Returns the first element matching selector as a new document (or -1 if not found)
     linker.func_wrap(
         "env",
         "html_first",
@@ -686,10 +659,10 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
                 Err(_) => return -2,
             };
 
-            let doc = scraper::Html::parse_document(&doc_str);
-            let first_html = match doc.select(&selector).next() {
+            let doc = scraper::Html::parse_fragment(&doc_str);
+            let first_html = match doc.root_element().select(&selector).next() {
                 Some(el) => el.html(),
-                None => return -3, // Not found
+                None => return -3,
             };
 
             let state = caller.data_mut();
@@ -710,7 +683,6 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
     )?;
 
     // html_children(handle: DocumentHandle) -> ListHandle
-    // Returns all direct child elements as a list
     linker.func_wrap(
         "env",
         "html_children",
@@ -748,7 +720,6 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
     )?;
 
     // html_outer_html(handle: DocumentHandle, buf_ptr: i32, buf_len: i32) -> i32
-    // Returns the full outer HTML of the document
     linker.func_wrap(
         "env",
         "html_outer_html",
@@ -757,7 +728,6 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
          buf_ptr: i32,
          buf_len: i32|
          -> i32 {
-            tracing::debug!("html_outer_html called for handle {}", handle);
             let memory = caller
                 .get_export("memory")
                 .and_then(|e| e.into_memory())
@@ -794,7 +764,6 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
 /// Register resource cleanup functions to prevent memory leaks.
 fn register_cleanup_functions(linker: &mut Linker<HostState>) -> Result<()> {
     // request_drop(handle: RequestHandle)
-    // Drops a request builder that was created but never sent
     linker.func_wrap(
         "env",
         "request_drop",
@@ -805,7 +774,6 @@ fn register_cleanup_functions(linker: &mut Linker<HostState>) -> Result<()> {
     )?;
 
     // response_drop(handle: ResponseHandle)
-    // Drops a response when the extension is done with it
     linker.func_wrap(
         "env",
         "response_drop",
@@ -816,7 +784,6 @@ fn register_cleanup_functions(linker: &mut Linker<HostState>) -> Result<()> {
     )?;
 
     // document_drop(handle: DocumentHandle)
-    // Drops an HTML document when the extension is done with it
     linker.func_wrap(
         "env",
         "document_drop",
@@ -833,6 +800,71 @@ fn register_cleanup_functions(linker: &mut Linker<HostState>) -> Result<()> {
         |mut caller: Caller<'_, HostState>, handle: i32| {
             tracing::debug!("list_drop called for handle {}", handle);
             caller.data_mut().html_lists.remove(&handle);
+        },
+    )?;
+
+    Ok(())
+}
+
+/// Register utility host functions.
+fn register_utility_functions(linker: &mut Linker<HostState>) -> Result<()> {
+    // date_parse(date_ptr: *const u8, date_len: i32, fmt_ptr: *const u8, fmt_len: i32) -> i64
+    linker.func_wrap(
+        "env",
+        "date_parse",
+        |mut caller: Caller<'_, HostState>,
+         date_ptr: i32,
+         date_len: i32,
+         fmt_ptr: i32,
+         fmt_len: i32|
+         -> i64 {
+            let memory = caller
+                .get_export("memory")
+                .and_then(|e| e.into_memory())
+                .unwrap();
+
+            let date_str =
+                match memory::read_string_from_guest(&caller, &memory, date_ptr, date_len) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!("Failed to read date string from guest memory: {}", e);
+                        caller.data_mut().last_error = Some(1);
+                        return -1;
+                    }
+                };
+
+            let fmt_str = match memory::read_string_from_guest(&caller, &memory, fmt_ptr, fmt_len) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("Failed to read format string from guest memory: {}", e);
+                    caller.data_mut().last_error = Some(1);
+                    return -1;
+                }
+            };
+
+            match chrono::NaiveDateTime::parse_from_str(&date_str, &fmt_str) {
+                Ok(dt) => {
+                    let epoch = dt.and_utc().timestamp();
+                    tracing::debug!(
+                        "date_parse called, date: {}, fmt: {}, epoch: {}",
+                        date_str,
+                        fmt_str,
+                        epoch
+                    );
+                    caller.data_mut().last_error = None;
+                    epoch
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to parse date '{}' with format '{}': {}",
+                        date_str,
+                        fmt_str,
+                        e
+                    );
+                    caller.data_mut().last_error = Some(5);
+                    -1
+                }
+            }
         },
     )?;
 

@@ -83,7 +83,7 @@ impl MangaExtension for Example {
         Ok(chapter_list)
     }
 
-    fn get_pages(&self, _chapter_id: &str) -> ExtensionResult<Chapter> {
+    fn get_pages(&self, _manga_id: &str, _chapter_id: &str) -> ExtensionResult<Chapter> {
         let chapter_info = Chapter {
             chapter_name: "Example".to_string(),
             pages: Vec::new(),
@@ -144,7 +144,8 @@ pub extern "C" fn get_popular_manga(page: i32) -> u64 {
     let ext = get_extension();
     let result = match ext.get_popular_manga(page) {
         Ok(list) => serde_json::to_string(&list).unwrap_or_default(),
-        Err(e) => format!("{{\"error\":\"{}\"}}", e),
+        Err(e) => serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
+            .unwrap_or_default(),
     };
     string_to_ptr_len(&result)
 }
@@ -159,7 +160,8 @@ pub extern "C" fn search_manga(query_ptr: i32, query_len: i32, page: i32) -> u64
     let ext = get_extension();
     let result = match ext.search_manga(&query, page) {
         Ok(list) => serde_json::to_string(&list).unwrap_or_default(),
-        Err(e) => format!("{{\"error\":\"{}\"}}", e),
+        Err(e) => serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
+            .unwrap_or_default(),
     };
     string_to_ptr_len(&result)
 }
@@ -174,7 +176,8 @@ pub extern "C" fn get_manga_details(ptr: i32, len: i32) -> u64 {
     let ext = get_extension();
     let result = match ext.get_manga_details(&manga_id) {
         Ok(info) => serde_json::to_string(&info).unwrap_or_default(),
-        Err(e) => format!("{{\"error\":\"{}\"}}", e),
+        Err(e) => serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
+            .unwrap_or_default(),
     };
     string_to_ptr_len(&result)
 }
@@ -189,23 +192,36 @@ pub extern "C" fn get_chapter_list(ptr: i32, len: i32, page: i32) -> u64 {
     let ext = get_extension();
     let result = match ext.get_chapter_list(&manga_id, page) {
         Ok(list) => serde_json::to_string(&list).unwrap_or_default(),
-        Err(e) => format!("{{\"error\":\"{}\"}}", e),
+        Err(e) => serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
+            .unwrap_or_default(),
     };
     string_to_ptr_len(&result)
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn get_pages(ptr: i32, len: i32) -> u64 {
+pub extern "C" fn get_pages(
+    manga_id_ptr: i32,
+    manga_id_len: i32,
+    chapter_id_ptr: i32,
+    chapter_id_len: i32,
+) -> u64 {
+    let _manga_id = unsafe {
+        let slice = std::slice::from_raw_parts(manga_id_ptr as *const u8, manga_id_len as usize);
+        String::from_utf8_lossy(slice).to_string()
+    };
+
     let chapter_id = unsafe {
-        let slice = std::slice::from_raw_parts(ptr as *const u8, len as usize);
+        let slice =
+            std::slice::from_raw_parts(chapter_id_ptr as *const u8, chapter_id_len as usize);
         String::from_utf8_lossy(slice).to_string()
     };
 
     let ext = get_extension();
 
-    let result = match ext.get_pages(&chapter_id) {
+    let result = match ext.get_pages(&_manga_id, &chapter_id) {
         Ok(chapter) => serde_json::to_string(&chapter).unwrap_or_default(),
-        Err(e) => format!("{{\"error\":\"{}\"}}", e),
+        Err(e) => serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
+            .unwrap_or_default(),
     };
     string_to_ptr_len(&result)
 }

@@ -96,6 +96,11 @@ unsafe extern "C" {
     pub fn list_drop(handle: ListHandle);
 
     pub fn sys_get_last_error() -> i32;
+
+    // --- Utility Functions ---
+
+    /// Parse a date string with the given format and return epoch seconds
+    pub fn date_parse(date_ptr: *const u8, date_len: i32, fmt_ptr: *const u8, fmt_len: i32) -> i64;
 }
 
 // ============================================================
@@ -321,6 +326,32 @@ pub fn outer_html(handle: DocumentHandle) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn outer_html(_handle: DocumentHandle) -> String {
     panic!("outer_html can only be called from WASM context");
+}
+
+// --- Utility Wrappers ---
+
+/// Parse a date string with the given chrono format into epoch seconds.
+/// Returns `None` if parsing fails.
+///
+/// Format specifiers follow chrono's `strftime` syntax, e.g.:
+/// - `"%Y-%m-%d %H:%M:%S"` for `"2025-01-15 12:30:00"`
+/// - `"%b %d, %Y"` for `"Jan 15, 2025"` (time defaults to 00:00:00)
+#[cfg(target_arch = "wasm32")]
+pub fn parse_date(date: &str, fmt: &str) -> Option<i64> {
+    let result = unsafe {
+        date_parse(
+            date.as_ptr(),
+            date.len() as i32,
+            fmt.as_ptr(),
+            fmt.len() as i32,
+        )
+    };
+    if result < 0 { None } else { Some(result) }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn parse_date(_date: &str, _fmt: &str) -> Option<i64> {
+    panic!("parse_date can only be called from WASM context");
 }
 
 // --- Cleanup Wrappers ---
@@ -660,9 +691,9 @@ impl HtmlDocument {
         attr(self.handle, selector, attribute)
     }
 
-    /// Get an attribute from this element directly (use "self" as selector)
+    /// Get an attribute from this element directly
     pub fn get_attr(&self, attribute: &str) -> String {
-        attr(self.handle, ":root", attribute)
+        attr(self.handle, "*", attribute)
     }
 
     /// Get text content from the first element matching the selector
@@ -672,7 +703,7 @@ impl HtmlDocument {
 
     /// Get text content from this element directly
     pub fn get_text(&self) -> String {
-        text(self.handle, ":root")
+        text(self.handle, "*")
     }
 
     /// Get the inner HTML (content without the outer tag)

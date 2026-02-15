@@ -69,7 +69,6 @@ impl WasmRuntime {
         let engine = Engine::new(&config)?;
         let mut linker = Linker::new(&engine);
 
-        // Register skeleton host functions
         abi::register_host_functions(&mut linker)?;
 
         Ok(Self { engine, linker })

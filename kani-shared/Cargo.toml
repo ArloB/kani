@@ -1,5 +1,6 @@
 [package]
 name = "kani-shared"
+description = "Shared types and traits for Kani."
 version = "0.1.0"
 edition = "2024"
 

@@ -1,15 +1,27 @@
 #!/usr/bin/env pwsh
-foreach ($extension in Get-ChildItem ".\kani-extensions" -Directory) {
-    Write-Host "Building $($extension.Name) extension" -ForegroundColor Cyan
-    
-    cargo build --target wasm32-unknown-unknown --release -p $($extension.Name)
+param(
+    [Parameter(Position=0)]
+    [string]$Extension = "",
+
+    [Parameter(Position=1)]
+    [string]$Directory = ".\kani-extensions"
+)
+
+foreach ($ext in Get-ChildItem "$Directory" -Directory) {  
+    if ($Extension -ne "" -and $ext.Name -ne $Extension) {
+        continue
+    }
+
+    Write-Host "Building $($ext.Name) extension" -ForegroundColor Cyan
+
+    cargo build --target wasm32-unknown-unknown --release -p $($ext.Name)
     
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "$($extension.Name) build failed" -ForegroundColor Red
+        Write-Host "$($ext.Name) build failed" -ForegroundColor Red
         exit 1
     }
     
-    Write-Host "$($extension.Name) build successful" -ForegroundColor Green
+    Write-Host "$($ext.Name) build successful" -ForegroundColor Green
 
     $wasmDir = "wasm_sources"
     if (-not (Test-Path $wasmDir)) {
@@ -17,9 +29,9 @@ foreach ($extension in Get-ChildItem ".\kani-extensions" -Directory) {
         Write-Host "Created $wasmDir directory" -ForegroundColor Yellow
     }
 
-    $extensionNameUnderscore = $extension.Name.Replace('-', '_')
-    $source = "target\wasm32-unknown-unknown\release\$($extensionNameUnderscore).wasm"
-    $dest = "$wasmDir\$($extension.Name).wasm"
+    $extNameUnderscore = $ext.Name.Replace('-', '_')
+    $source = "target\wasm32-unknown-unknown\release\$($extNameUnderscore).wasm"
+    $dest = "$wasmDir\$($ext.Name).wasm"
 
     Copy-Item $source $dest -Force
     Write-Host "Copied to $dest" -ForegroundColor Green
@@ -41,20 +53,20 @@ foreach ($extension in Get-ChildItem ".\kani-extensions" -Directory) {
     }
 
     $size = (Get-Item $dest).Length / 1KB
-    Write-Host "Built extension $($extension.Name) with size: $([math]::Round($size, 2)) KB" -ForegroundColor Cyan
+    Write-Host "Built extension $($ext.Name) with size: $([math]::Round($size, 2)) KB" -ForegroundColor Cyan
 }
 
-Write-Host "Building kani-web frontend" -ForegroundColor Cyan
-
-Set-Location "kani-web"
-
-trunk build --release
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "Frontend build successful" -ForegroundColor Green
-} else {
-    Write-Host "Frontend build failed" -ForegroundColor Red
-    exit 1
-}
-
-Set-Location ..
+# Write-Host "Building kani-web frontend" -ForegroundColor Cyan
+# 
+# Set-Location "kani-web"
+# 
+# trunk build --release
+# 
+# if ($LASTEXITCODE -eq 0) {
+#     Write-Host "Frontend build successful" -ForegroundColor Green
+# } else {
+#     Write-Host "Frontend build failed" -ForegroundColor Red
+#     exit 1
+# }
+# 
+# Set-Location ..

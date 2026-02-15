@@ -70,6 +70,7 @@ impl SmartClient {
     pub fn new(solver_url: Option<String>) -> Result<Self> {
         let client = rquest::Client::builder()
             .emulation(rquest_util::Emulation::Chrome130)
+            .redirect(rquest::redirect::Policy::limited(10))
             .build()?;
 
         Ok(Self {
@@ -109,34 +110,33 @@ impl SmartClient {
             // Handle 429 Too Many Requests
             if status == rquest::StatusCode::TOO_MANY_REQUESTS {
                 if attempt < MAX_RETRIES
-                    && let Some(next_req) = request_clone_for_retry {
-                        let delay = if let Some(retry_after) =
-                            resp.headers().get(rquest::header::RETRY_AFTER)
-                        {
-                            retry_after
-                                .to_str()
-                                .ok()
-                                .and_then(|s| s.parse::<u64>().ok())
-                                .map(std::time::Duration::from_secs)
-                                .unwrap_or_else(|| {
-                                    BASE_DELAY * 2u32.pow(attempt)
-                                })
-                        } else {
-                            BASE_DELAY * 2u32.pow(attempt)
-                        };
+                    && let Some(next_req) = request_clone_for_retry
+                {
+                    let delay = if let Some(retry_after) =
+                        resp.headers().get(rquest::header::RETRY_AFTER)
+                    {
+                        retry_after
+                            .to_str()
+                            .ok()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .map(std::time::Duration::from_secs)
+                            .unwrap_or_else(|| BASE_DELAY * 2u32.pow(attempt))
+                    } else {
+                        BASE_DELAY * 2u32.pow(attempt)
+                    };
 
-                        tracing::warn!(
-                            "Received 429 Too Many Requests, retrying in {:?} (attempt {}/{})",
-                            delay,
-                            attempt + 1,
-                            MAX_RETRIES
-                        );
-                        tokio::time::sleep(delay).await;
+                    tracing::warn!(
+                        "Received 429 Too Many Requests, retrying in {:?} (attempt {}/{})",
+                        delay,
+                        attempt + 1,
+                        MAX_RETRIES
+                    );
+                    tokio::time::sleep(delay).await;
 
-                        current_request = next_req;
-                        attempt += 1;
-                        continue;
-                    }
+                    current_request = next_req;
+                    attempt += 1;
+                    continue;
+                }
 
                 return Ok(SmartResponse::Normal(resp));
             }

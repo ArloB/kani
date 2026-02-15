@@ -1,4 +1,4 @@
-//! Server-specific error types with Axum IntoResponse implementation.
+//! Server-specific error types with Axum `IntoResponse` implementation.
 
 use axum::{
     Json,
@@ -47,29 +47,16 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
-            AppError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
-            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
-            AppError::SqlxError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            AppError::CoreError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            AppError::IoError(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("IO error: {}", e),
-            ),
-            AppError::TryFromIntError(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("TryFromIntError: {}", e),
-            ),
-            AppError::MigrationError(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Migration error: {}", e),
-            ),
-            AppError::RequestError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            AppError::LockPoisoned => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Lock poisoned".to_string(),
-            ),
-            AppError::ChannelSendError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
-            AppError::JsonError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            Self::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+            Self::SqlxError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            Self::CoreError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            Self::IoError(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("IO error: {e}")),
+            Self::TryFromIntError(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("TryFromIntError: {e}")),
+            Self::MigrationError(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Migration error: {e}")),
+            Self::RequestError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            Self::LockPoisoned => (StatusCode::INTERNAL_SERVER_ERROR, "Lock poisoned".to_string()),
+            Self::InternalServerError(msg) | Self::ChannelSendError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
+            Self::JsonError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         };
 
         let body = Json(json!({
@@ -82,12 +69,12 @@ impl IntoResponse for AppError {
 
 impl<T> From<std::sync::PoisonError<T>> for AppError {
     fn from(_: std::sync::PoisonError<T>) -> Self {
-        AppError::LockPoisoned
+        Self::LockPoisoned
     }
 }
 
 impl<T> From<tokio::sync::mpsc::error::SendError<T>> for AppError {
     fn from(error: tokio::sync::mpsc::error::SendError<T>) -> Self {
-        AppError::ChannelSendError(error.to_string())
+        Self::ChannelSendError(error.to_string())
     }
 }

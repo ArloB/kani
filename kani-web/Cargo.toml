@@ -11,6 +11,7 @@ leptos = { version = "0.8.15", features = ["csr"] }
 leptos_router = "0.8.11"
 thiserror = "2.0"
 console_error_panic_hook = "0.1.7"
+chrono = { version = "0.4", features = ["wasmbind"] }
 
 # Internal dependencies
 kani-shared = { path = "../kani-shared" }

@@ -24,7 +24,7 @@ pub struct Source {
 }
 
 pub async fn fetch_sources() -> Result<Vec<Source>, ApiError> {
-    Request::get("/sources")
+    Request::get("/api/sources")
         .send()
         .await
         .map_err(|e| ApiError::Network(e.to_string()))?
@@ -34,7 +34,7 @@ pub async fn fetch_sources() -> Result<Vec<Source>, ApiError> {
 }
 
 pub async fn get_popular_manga(source_id: i64, page: i32) -> Result<MangaList, ApiError> {
-    Request::get(&format!("/sources/{}/popular/{}", source_id, page))
+    Request::get(&format!("/api/sources/{}/popular/{}", source_id, page))
         .send()
         .await
         .map_err(|e| ApiError::Network(e.to_string()))?
@@ -44,7 +44,7 @@ pub async fn get_popular_manga(source_id: i64, page: i32) -> Result<MangaList, A
 }
 
 pub async fn search_manga(source_id: i64, query: &str, page: i32) -> Result<MangaList, ApiError> {
-    Request::get(&format!("/sources/{}/search/{}", source_id, page))
+    Request::get(&format!("/api/sources/{}/search/{}", source_id, page))
         .query([("query", query)])
         .send()
         .await
@@ -55,7 +55,7 @@ pub async fn search_manga(source_id: i64, query: &str, page: i32) -> Result<Mang
 }
 
 pub async fn get_manga_details(source_id: i64, manga_id: &str) -> Result<MangaInfo, ApiError> {
-    Request::get(&format!("/sources/{}/details/{}", source_id, manga_id))
+    Request::get(&format!("/api/sources/{}/details/{}", source_id, manga_id))
         .send()
         .await
         .map_err(|e| ApiError::Network(e.to_string()))?
@@ -70,7 +70,7 @@ pub async fn get_chapter_list(
     page: i32,
 ) -> Result<ChapterList, ApiError> {
     Request::get(&format!(
-        "/sources/{}/chapters/{}/{}",
+        "/api/sources/{}/chapters/{}/{}",
         source_id, manga_id, page
     ))
     .send()

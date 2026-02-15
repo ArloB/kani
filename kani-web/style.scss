@@ -7,8 +7,7 @@ body {
 }
 
 .container {
-  max-width: 1200px;
-  margin: 0 auto;
+  margin: auto;
   padding: 20px;
 }
 
@@ -81,4 +80,152 @@ nav a {
 
 .pagination button {
   margin: 0 0.5rem;
+}
+
+.tag {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background-color: #ff6b6b;
+  color: white;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  margin-right: 0.5rem;
+  
+}
+
+.tag a {
+  color: white;
+  text-decoration: none;
+}
+
+.chapter-item {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: transform 0.2s ease-in-out;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chapter-item:hover {
+  transform: translateY(-5px);
+}
+
+.chapter-title {
+  font-size: 1.2rem;
+  margin: 0;
+}
+
+.chapter-date {
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.chapter-list-group {
+  display: flex;
+  flex-direction: column;
+  flex-basis: 60%;
+  height: calc(100vh - 96px);
+  overflow: hidden;
+}
+
+.chapter-list-group h2 {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 1rem;
+}
+
+.chapter-list {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.download-button {
+  background-color: #ff6b6b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.download-button:hover {
+  background-color: #ff4b4b;
+}
+
+.chapter-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.chapter-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chapter-scanlator {
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.authors,
+.artists {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.authors p,
+.artists p {
+  margin: 0;
+}
+
+.author,
+.artist {
+  margin-right: 0.5rem;
+}
+
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.status {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.add-to-library {
+  background-color: #ff6b6b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.manga-details {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+}
+
+.details-header {
+  display: flex;
+  flex-direction: column;
+  flex-basis: 40%;
 }

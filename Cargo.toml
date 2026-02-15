@@ -1,7 +1,13 @@
 [package]
 name = "kani"
+description = "A web server for downloading manga and anime."
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/arlob/kani"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["manga", "anime", "webserver", "api", "wasm"]
+categories = []
 
 [workspace]
 resolver = "3"
@@ -14,7 +20,12 @@ kani-shared = { path = "kani-shared" }
 
 # Web server
 axum = { version = "0.8.8", features = ["multipart"] }
-tower-http = { version = "0.6", features = ["fs"] }
+tower-http = { version = "0.6", features = [
+  "fs",
+  "compression-full",
+  "set-header",
+  "util",
+] }
 
 # Database
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite"] }
@@ -36,6 +47,7 @@ thiserror = "2.0.18"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 rquest-util = "2.2.1"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
 [profile.release]
 opt-level = "z"
@@ -43,3 +55,8 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[lints.clippy]
+unwrap_used = { level = "deny", priority = 1 }
+pedantic = "warn"
+nursery = "warn"

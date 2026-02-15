@@ -1,14 +1,15 @@
 mod error;
+mod etag;
 mod handlers;
 mod models;
 mod state;
 
-use axum::{
-    Router,
-    routing::{get, post},
-};
-use handlers::*;
 use state::AppState;
+
+use tower_http::services::{ServeDir, ServeFile};
+
+use axum::http::{HeaderValue, header};
+use tower_http::set_header::SetResponseHeaderLayer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,40 +29,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut sources = cleanup_state.sources.lock().await;
             for source in sources.values_mut() {
                 match source.maybe_unload() {
-                    Ok(_) => {}
+                    Ok(()) => {}
                     Err(e) => {
-                        tracing::error!("Failed to unload source: {}", e);
+                        tracing::error!("Failed to unload source with error {e}");
                     }
                 }
             }
         }
     });
 
-    let app = Router::new()
-        .route("/image_proxy", get(image_proxy))
-        // Source Routes
-        .route("/sources", get(list_sources).post(add_source))
-        .route(
-            "/sources/{id}",
-            get(get_source).patch(update_source).delete(delete_source),
+    let frontend_dist = "kani-web/dist";
+    let serve_dir = if std::path::Path::new(frontend_dist).exists() {
+        ServeDir::new(frontend_dist).fallback(ServeFile::new("kani-web/dist/index.html"))
+    } else {
+        return Err(format!("Frontend distribution not found at {frontend_dist}").into());
+    };
+
+    let app = axum::Router::new()
+        .nest(
+            "/api",
+            handlers::routes().with_state(state.clone()).layer(
+                SetResponseHeaderLayer::if_not_present(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-cache"),
+                ),
+            ),
         )
-        .route("/sources/{id}/wasm", post(upload_wasm))
-        .route("/sources/{id}/wasm/fetch", post(fetch_wasm))
-        .route("/sources/{id}/popular/{page}", get(get_popular_manga))
-        .route("/sources/{id}/search/{page}", get(search_manga))
-        .route("/sources/{id}/details/{manga_id}", get(get_manga_details))
-        .route(
-            "/sources/{id}/chapters/{manga_id}/{page}",
-            get(get_chapter_list),
-        )
-        .route("/sources/{id}/download/{chapter_id}", post(start_download))
-        .with_state(state.clone());
+        .fallback_service(serve_dir);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8242")
         .await
         .expect("Failed to bind port 8242");
+
     println!("Server running on http://0.0.0.0:8242");
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
 }

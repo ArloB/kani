@@ -100,6 +100,26 @@ impl SourceHost {
         Ok(string)
     }
 
+    pub async fn call_function_json<T>(
+        &mut self,
+        linker: &Linker<HostState>,
+        function_name: &str,
+        args: Vec<wasmtime::Val>,
+    ) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let string = self.call_function_str(linker, function_name, args).await?;
+
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&string)
+            && let Some(error) = json.get("error")
+            && let Some(error_msg) = error.as_str() {
+            return Err(Error::Extension(error_msg.to_string()));
+        }
+
+        Ok(serde_json::from_str(&string)?)
+    }
+
     /// Checks if the module should be unloaded due to inactivity.
     pub fn maybe_unload(&mut self) -> Result<()> {
         if self
@@ -159,8 +179,8 @@ impl SourceHost {
                 .module
                 .as_ref()
                 .ok_or_else(|| Error::Internal("Module not loaded".to_string()))?;
-            let instance = linker.instantiate_async(store, module).await?;
-            self.instance = Some(instance);
+            let instance = linker.instantiate_async(store, module).await.ok();
+            self.instance = instance;
         }
 
         match self.instance.as_ref() {
@@ -266,10 +286,4 @@ impl SourceHost {
 
         Ok((ptr, len))
     }
-}
-
-#[cfg(test)]
-mod tests {
-    // SourceHost tests would require actual WASM modules
-    // These are integration-level tests
 }

@@ -1,21 +1,24 @@
 use axum::{
-    Json,
+    Json, Router,
     extract::{Multipart, Path, Query, State},
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
+    routing::{get, post},
 };
 use serde_json::json;
 
 use crate::{
     error::AppError,
-    models::{
-        CreateSource, FetchWasmRequest, ProxyQuery, SearchMangaRequest, Source, UpdateSource,
-    },
+    etag::{etag_bytes_response, etag_json_response},
+    models::{CreateSource, FetchWasmRequest, SearchMangaRequest, Source, UpdateSource},
     state::AppState,
 };
 use kani_core::sources::SourceHost;
 
-pub async fn list_sources(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
+async fn list_sources(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
     let sources = sqlx::query_as!(
         Source,
         "SELECT id, name, version, base_url FROM sources LIMIT 1000"
@@ -23,10 +26,10 @@ pub async fn list_sources(State(state): State<AppState>) -> Result<impl IntoResp
     .fetch_all(&state.db)
     .await?;
 
-    Ok((StatusCode::OK, Json(sources)))
+    Ok(etag_json_response(&headers, &sources)?)
 }
 
-pub async fn add_source(
+async fn add_source(
     State(state): State<AppState>,
     Json(payload): Json<CreateSource>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -40,7 +43,8 @@ pub async fn add_source(
     Ok((StatusCode::CREATED, Json(json!({ "id": result.id }))))
 }
 
-pub async fn get_source(
+async fn get_source(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -52,10 +56,10 @@ pub async fn get_source(
     .fetch_optional(&state.db)
     .await?;
 
-    Ok((StatusCode::OK, Json(source)))
+    Ok(etag_json_response(&headers, &source)?)
 }
 
-pub async fn update_source(
+async fn update_source(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(payload): Json<UpdateSource>,
@@ -85,7 +89,7 @@ pub async fn update_source(
     Ok((StatusCode::OK, Json(json!({}))))
 }
 
-pub async fn delete_source(
+async fn delete_source(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -103,13 +107,15 @@ pub async fn delete_source(
         )
         .await
         .map_err(AppError::CoreError)?;
+
+        drop(settings);
     }
 
     Ok((StatusCode::OK, Json(json!({}))))
 }
 
 /// Upload a WASM binary via multipart form data
-pub async fn upload_wasm(
+async fn upload_wasm(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     mut multipart: Multipart,
@@ -124,7 +130,7 @@ pub async fn upload_wasm(
     .await?;
 
     if source.is_none() {
-        return Err(AppError::NotFound(format!("Source {} not found", id)));
+        return Err(AppError::NotFound(format!("Source {id} not found")));
     }
 
     // Extract the file from multipart
@@ -132,7 +138,7 @@ pub async fn upload_wasm(
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|e| AppError::InternalServerError(format!("Multipart error: {}", e)))?
+        .map_err(|e| AppError::InternalServerError(format!("Multipart error: {e}")))?
     {
         if field.name() == Some("file") {
             wasm_bytes = Some(
@@ -140,7 +146,7 @@ pub async fn upload_wasm(
                     .bytes()
                     .await
                     .map_err(|e| {
-                        AppError::InternalServerError(format!("Failed to read file: {}", e))
+                        AppError::InternalServerError(format!("Failed to read file: {e}"))
                     })?
                     .to_vec(),
             );
@@ -154,7 +160,7 @@ pub async fn upload_wasm(
     // Save the WASM file
     let name = &source
         .as_ref()
-        .ok_or_else(|| AppError::NotFound(format!("Source {} not found", id)))?
+        .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
         .name;
     let settings = state.settings.read().await;
     let path = kani_core::file_storage::save_wasm(
@@ -182,6 +188,8 @@ pub async fn upload_wasm(
             tracing::error!("Failed to load source {}: {}", name, e);
         }
     }
+
+    drop(settings);
 
     let metadata = state.get_metadata(id).await?;
 
@@ -201,7 +209,7 @@ pub async fn upload_wasm(
 }
 
 /// Fetch a WASM binary from an external URL
-pub async fn fetch_wasm(
+async fn fetch_wasm(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(payload): Json<FetchWasmRequest>,
@@ -216,28 +224,28 @@ pub async fn fetch_wasm(
     .await?;
 
     if source.is_none() {
-        return Err(AppError::NotFound(format!("Source {} not found", id)));
+        return Err(AppError::NotFound(format!("Source {id} not found")));
     }
 
     // Fetch the WASM from the URL
     let client = rquest::Client::builder()
         .build()
-        .map_err(|e| AppError::InternalServerError(format!("Failed to create client: {}", e)))?;
+        .map_err(|e| AppError::InternalServerError(format!("Failed to create client: {e}")))?;
 
     let response = client
         .get(&payload.url)
         .send()
         .await
-        .map_err(|e| AppError::InternalServerError(format!("Failed to fetch: {}", e)))?;
+        .map_err(|e| AppError::InternalServerError(format!("Failed to fetch: {e}")))?;
 
     let bytes = response
         .bytes()
         .await
-        .map_err(|e| AppError::InternalServerError(format!("Failed to read response: {}", e)))?;
+        .map_err(|e| AppError::InternalServerError(format!("Failed to read response: {e}")))?;
 
     // Save the WASM file
     let name = source
-        .ok_or_else(|| AppError::NotFound(format!("Source {} not found", id)))?
+        .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
         .name;
     let settings = state.settings.read().await;
     let path = kani_core::file_storage::save_wasm(
@@ -266,6 +274,8 @@ pub async fn fetch_wasm(
         }
     }
 
+    drop(settings);
+
     let metadata = state.get_metadata(id).await?;
 
     // Update the source with metadata
@@ -283,90 +293,74 @@ pub async fn fetch_wasm(
     ))
 }
 
-pub async fn get_popular_manga(
+async fn get_popular_manga(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path((id, page)): Path<(i64, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
     let result = state.get_popular_manga(id, page).await?;
 
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/json")],
-        result,
-    ))
+    Ok(etag_bytes_response(&headers, &result))
 }
 
-pub async fn search_manga(
+async fn search_manga(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path((id, page)): Path<(i64, i32)>,
     Query(payload): Query<SearchMangaRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let result = state.search_manga(id, &payload.query, page).await?;
 
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/json")],
-        result,
-    ))
+    Ok(etag_bytes_response(&headers, &result))
 }
 
-pub async fn get_manga_details(
+async fn get_manga_details(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     let result = state.get_manga_details(id, &manga_id).await?;
 
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/json")],
-        result,
-    ))
+    Ok(etag_bytes_response(&headers, &result))
 }
 
-pub async fn get_chapter_list(
+async fn get_chapter_list(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Path((id, manga_id, page)): Path<(i64, String, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
     let result = state.get_chapter_list(id, &manga_id, page).await?;
 
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/json")],
-        result,
-    ))
+    Ok(etag_bytes_response(&headers, &result))
 }
 
-pub async fn start_download(
+async fn start_download(
     State(state): State<AppState>,
-    Path((id, chapter_id)): Path<(i64, String)>,
+    Path((id, manga_id, chapter_id)): Path<(i64, String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.start_download(id, &chapter_id).await?;
+    state.start_download(id, &manga_id, &chapter_id).await?;
 
     Ok((StatusCode::OK, Json(json!({}))))
 }
 
-pub async fn image_proxy(
-    State(state): State<AppState>,
-    Query(query): Query<ProxyQuery>,
-) -> Result<impl IntoResponse, AppError> {
-    let response = state
-        .http_client
-        .get(&query.url)
-        .header("Referer", &query.referer)
-        .send()
-        .await?;
-
-    let status = response.status();
-    let content_type = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .cloned()
-        .ok_or_else(|| AppError::InternalServerError("Failed to get content type".to_string()))?;
-
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
-
-    Ok((status, [(header::CONTENT_TYPE, content_type)], bytes))
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/sources", get(list_sources).post(add_source))
+        .route(
+            "/sources/{id}",
+            get(get_source).patch(update_source).delete(delete_source),
+        )
+        .route("/sources/{id}/wasm", post(upload_wasm))
+        .route("/sources/{id}/wasm/fetch", post(fetch_wasm))
+        .route("/sources/{id}/popular/{page}", get(get_popular_manga))
+        .route("/sources/{id}/search/{page}", get(search_manga))
+        .route("/sources/{id}/details/{manga_id}", get(get_manga_details))
+        .route(
+            "/sources/{id}/chapters/{manga_id}/{page}",
+            get(get_chapter_list),
+        )
+        .route(
+            "/sources/{id}/download/{manga_id}/{chapter_id}",
+            post(start_download),
+        )
 }
