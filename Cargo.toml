@@ -50,7 +50,7 @@ rquest-util = "2.2.1"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"

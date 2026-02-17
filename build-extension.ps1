@@ -8,7 +8,7 @@ param(
 )
 
 foreach ($ext in Get-ChildItem "$Directory" -Directory) {  
-    if ($Extension -ne "" -and $ext.Name -ne $Extension) {
+    if ($ext.Name -ne "kani-example" -and $Extension -ne "" -and $ext.Name -ne $Extension) {
         continue
     }
 
@@ -55,18 +55,3 @@ foreach ($ext in Get-ChildItem "$Directory" -Directory) {
     $size = (Get-Item $dest).Length / 1KB
     Write-Host "Built extension $($ext.Name) with size: $([math]::Round($size, 2)) KB" -ForegroundColor Cyan
 }
-
-# Write-Host "Building kani-web frontend" -ForegroundColor Cyan
-# 
-# Set-Location "kani-web"
-# 
-# trunk build --release
-# 
-# if ($LASTEXITCODE -eq 0) {
-#     Write-Host "Frontend build successful" -ForegroundColor Green
-# } else {
-#     Write-Host "Frontend build failed" -ForegroundColor Red
-#     exit 1
-# }
-# 
-# Set-Location ..

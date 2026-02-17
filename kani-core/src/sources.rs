@@ -59,6 +59,39 @@ impl SourceHost {
         Ok(results)
     }
 
+    /// Calls a function that returns a string pointer and length pair.
+    pub async fn call_function_ptr_len(
+        &mut self,
+        linker: &Linker<HostState>,
+        function_name: &str,
+        args: Vec<wasmtime::Val>,
+    ) -> Result<(i32, i32)> {
+        let results = self.call_function(linker, function_name, args).await?;
+
+        if results.len() == 1 {
+            let packed = results[0]
+                .i64()
+                .ok_or_else(|| Error::Internal("Expected i64 return value".to_string()))?
+                as u64;
+            let len = (packed & 0xFFFFFFFF) as i32;
+            let ptr = (packed >> 32) as i32;
+            Ok((ptr, len))
+        } else if results.len() == 2 {
+            let ptr = results[0]
+                .i32()
+                .ok_or_else(|| Error::Internal("Expected i32 return value for ptr".to_string()))?;
+            let len = results[1]
+                .i32()
+                .ok_or_else(|| Error::Internal("Expected i32 return value for len".to_string()))?;
+            Ok((ptr, len))
+        } else {
+            Err(Error::Internal(format!(
+                "Expected 1 or 2 return values for string function, got {}",
+                results.len()
+            )))
+        }
+    }
+
     /// Calls a function that returns a string (ptr, len pair).
     pub async fn call_function_str(
         &mut self,
@@ -66,38 +99,27 @@ impl SourceHost {
         function_name: &str,
         args: Vec<wasmtime::Val>,
     ) -> Result<String> {
-        let results = self.call_function(linker, function_name, args).await?;
-
-        let (ptr, len) = if results.len() == 1 {
-            // Packed u64 (ptr << 32 | len)
-            let packed = results[0]
-                .i64()
-                .ok_or_else(|| Error::Internal("Expected i64 return value".to_string()))?
-                as u64;
-            let len = (packed & 0xFFFFFFFF) as i32;
-            let ptr = (packed >> 32) as i32;
-            (ptr, len)
-        } else if results.len() == 2 {
-            // Two i32s (legacy/standard multi-value)
-            let ptr = results[0]
-                .i32()
-                .ok_or_else(|| Error::Internal("Expected i32 return value for ptr".to_string()))?;
-            let len = results[1]
-                .i32()
-                .ok_or_else(|| Error::Internal("Expected i32 return value for len".to_string()))?;
-            (ptr, len)
-        } else {
-            return Err(Error::Internal(format!(
-                "Expected 1 or 2 return values for string function, got {}",
-                results.len()
-            )));
-        };
-
+        let (ptr, len) = self
+            .call_function_ptr_len(linker, function_name, args)
+            .await?;
         let string = self.read_memory_string(ptr, len)?;
-
         self.deallocate_memory(ptr, len).await?;
-
         Ok(string)
+    }
+
+    /// Calls a function that returns bytes (ptr, len pair).
+    pub async fn call_function_bytes(
+        &mut self,
+        linker: &Linker<HostState>,
+        function_name: &str,
+        args: Vec<wasmtime::Val>,
+    ) -> Result<Vec<u8>> {
+        let (ptr, len) = self
+            .call_function_ptr_len(linker, function_name, args)
+            .await?;
+        let bytes = self.read_memory_bytes(ptr, len)?;
+        self.deallocate_memory(ptr, len).await?;
+        Ok(bytes)
     }
 
     pub async fn call_function_json<T>(
@@ -109,22 +131,25 @@ impl SourceHost {
     where
         T: serde::de::DeserializeOwned,
     {
-        let string = self.call_function_str(linker, function_name, args).await?;
+        let bytes = self
+            .call_function_bytes(linker, function_name, args)
+            .await?;
 
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&string)
+        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes)
             && let Some(error) = json.get("error")
-            && let Some(error_msg) = error.as_str() {
+            && let Some(error_msg) = error.as_str()
+        {
             return Err(Error::Extension(error_msg.to_string()));
         }
 
-        Ok(serde_json::from_str(&string)?)
+        Ok(serde_json::from_slice(&bytes)?)
     }
 
     /// Checks if the module should be unloaded due to inactivity.
     pub fn maybe_unload(&mut self) -> Result<()> {
         if self
             .last_call
-            .is_some_and(|last_call| last_call.elapsed() > Duration::from_secs(60))
+            .is_some_and(|last_call| last_call.elapsed() > Duration::from_secs(300))
         {
             self.instance = None;
             self.last_call = None;
@@ -190,6 +215,11 @@ impl SourceHost {
     }
 
     fn read_memory_string(&mut self, ptr: i32, len: i32) -> Result<String> {
+        let bytes = self.read_memory_bytes(ptr, len)?;
+        String::from_utf8(bytes).map_err(|e| Error::WasmMemoryAccess(e.to_string()))
+    }
+
+    fn read_memory_bytes(&mut self, ptr: i32, len: i32) -> Result<Vec<u8>> {
         let store = self
             .store
             .as_mut()
@@ -201,7 +231,7 @@ impl SourceHost {
             .ok_or_else(|| Error::WasmMemoryAccess("memory export not found".to_string()))?;
         let data = memory.data(&*store);
         let bytes = &data[ptr as usize..ptr as usize + len as usize];
-        String::from_utf8(bytes.to_vec()).map_err(|e| Error::WasmMemoryAccess(e.to_string()))
+        Ok(bytes.to_vec())
     }
 
     pub async fn deallocate_memory(&mut self, ptr: i32, len: i32) -> Result<()> {

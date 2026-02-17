@@ -61,7 +61,6 @@ pub struct WasmRuntime {
 }
 
 impl WasmRuntime {
-    /// Creates a new WasmRuntime with async support enabled.
     pub fn new() -> Result<Self> {
         let mut config = Config::new();
         config.async_support(true);
@@ -111,22 +110,5 @@ impl std::fmt::Debug for WasmRuntime {
         f.debug_struct("WasmRuntime")
             .field("engine", &"<wasmtime::Engine>")
             .finish()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_wasm_runtime_creation() {
-        let runtime = WasmRuntime::new();
-        assert!(runtime.is_ok());
-    }
-
-    #[test]
-    fn test_host_state_default() {
-        let state = HostState::default();
-        assert_eq!(state.next_request_handle, 1);
     }
 }

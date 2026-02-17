@@ -506,7 +506,7 @@ fn register_html_functions(linker: &mut Linker<HostState>) -> Result<()> {
                 bytes.len()
             };
 
-            tracing::info!(
+            tracing::debug!(
                 "html_attr called for handle {}, selector: {}, attr: {}, result: {}",
                 handle,
                 selector_str,
