@@ -1,0 +1,132 @@
+package kani:extension;
+
+// Host provides these (Imports for Guest)
+interface http {
+    enum method { get, post, put, delete }
+
+    record request {
+        method: method,
+        url: string,
+        headers: list<tuple<string, string>>,
+        body: option<list<u8>>,
+    }
+
+    record response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    send: func(req: request) -> result<response, string>;
+}
+
+interface html {
+    type doc-handle = s32;
+    type list-handle = s32;
+
+    parse: func(html: string) -> result<doc-handle, string>;
+    select: func(doc: doc-handle, selector: string) -> result<list-handle, string>;
+    attr: func(doc: doc-handle, selector: string, attr: string) -> result<option<string>, string>;
+    text: func(doc: doc-handle, selector: string) -> result<option<string>, string>;
+
+    drop-doc: func(handle: doc-handle);
+    drop-list: func(handle: list-handle);
+
+    list-len: func(handle: list-handle) -> result<s32, string>;
+    list-get: func(handle: list-handle, index: s32) -> result<doc-handle, string>;
+
+    inner-html: func(doc: doc-handle) -> result<option<string>, string>;
+    outer-html: func(doc: doc-handle) -> result<option<string>, string>;
+    first: func(doc: doc-handle, selector: string) -> result<option<doc-handle>, string>;
+    children: func(doc: doc-handle) -> result<list-handle, string>;
+}
+
+interface utility {
+    date-parse: func(date: string, fmt: string) -> result<s64, string>;
+}
+
+interface types {
+    enum manga-status {
+        ongoing,
+        completed,
+        hiatus,
+        cancelled,
+        unknown
+    }
+
+    record manga-list-item {
+        id: string,
+        title: string,
+        cover-url: option<string>,
+    }
+
+    record manga-list {
+        manga: list<manga-list-item>,
+        has-next-page: bool,
+    }
+
+    record manga-info {
+        id: string,
+        title: string,
+        cover-url: option<string>,
+        description: option<string>,
+        authors: list<string>,
+        artists: list<string>,
+        status: manga-status,
+        tags: list<string>,
+    }
+
+    record chapter-info {
+        id: string,
+        number: f64,
+        title: option<string>,
+        volume: option<s32>,
+        scanlator: option<string>,
+        date-uploaded: option<s64>,
+        language: string,
+    }
+
+    record chapter-list {
+        chapters: list<chapter-info>,
+        has-next-page: bool,
+    }
+
+    record page {
+        index: s32,
+        url: string,
+    }
+
+    record chapter {
+        chapter-name: string,
+        pages: list<page>,
+    }
+
+    record extension-metadata {
+        id: string,
+        name: string,
+        version: string,
+        base-url: string,
+        language: string,
+        nsfw: bool,
+    }
+}
+
+interface manga-provider {
+    use types.{manga-list, manga-info, chapter-list, chapter, extension-metadata};
+
+    get-metadata: func() -> result<extension-metadata, string>;
+
+    get-popular-manga: func(page: s32) -> result<manga-list, string>;
+    search-manga: func(query: string, page: s32) -> result<manga-list, string>;
+    get-manga-details: func(manga-id: string) -> result<manga-info, string>;
+    get-chapter-list: func(manga-id: string, page: s32) -> result<chapter-list, string>;
+    get-pages: func(manga-id: string, chapter-id: string) -> result<chapter, string>;
+}
+
+world kani-extension {
+    import types;
+    import http;
+    import html;
+    import utility;
+    export manga-provider;
+}

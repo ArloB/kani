@@ -51,11 +51,22 @@ impl IntoResponse for AppError {
             Self::SqlxError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::CoreError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::IoError(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("IO error: {e}")),
-            Self::TryFromIntError(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("TryFromIntError: {e}")),
-            Self::MigrationError(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Migration error: {e}")),
+            Self::TryFromIntError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("TryFromIntError: {e}"),
+            ),
+            Self::MigrationError(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Migration error: {e}"),
+            ),
             Self::RequestError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            Self::LockPoisoned => (StatusCode::INTERNAL_SERVER_ERROR, "Lock poisoned".to_string()),
-            Self::InternalServerError(msg) | Self::ChannelSendError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
+            Self::LockPoisoned => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Lock poisoned".to_string(),
+            ),
+            Self::InternalServerError(msg) | Self::ChannelSendError(msg) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
+            }
             Self::JsonError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         };
 

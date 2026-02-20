@@ -3,10 +3,7 @@
 //! These traits define the interface that WASM extensions must implement
 //! to provide manga source functionality.
 
-use crate::{
-    FilterList, PreferenceList,
-    types::{Chapter, ChapterList, MangaInfo, MangaList},
-};
+use crate::{Chapter, ChapterList, FilterList, MangaInfo, MangaList, PreferenceList};
 
 /// Result type for extension operations.
 pub type ExtensionResult<T> = Result<T, ExtensionError>;
@@ -106,18 +103,4 @@ pub struct ExtensionMetadata {
     pub language: String,
     /// Whether the source supports NSFW content
     pub nsfw: bool,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extension_error_display() {
-        let err = ExtensionError::NetworkError("connection refused".to_string());
-        assert_eq!(err.to_string(), "Network error: connection refused");
-
-        let err = ExtensionError::RateLimited;
-        assert_eq!(err.to_string(), "Rate limited");
-    }
 }

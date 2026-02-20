@@ -2,318 +2,124 @@
 
 use crate::error::{Error, Result};
 use crate::wasm::HostState;
-use std::time::{Duration, Instant};
-use wasmtime::{Instance, Linker, Module, Store};
+use std::time::Instant;
+use wasmtime::Store;
+use wasmtime::component::Linker;
 
-/// Hosts a single WASM source extension.
-pub struct SourceHost {
-    store: Option<Store<HostState>>,
-    module: Option<Module>,
-    instance: Option<Instance>,
-    last_call: Option<Instant>,
-    solver_url: Option<String>,
-    source_name: String,
+macro_rules! execute_wasm {
+    ($self:expr, $method:ident $(, $args:expr)*) => {{
+        let bindings = $self
+            .bindings
+            .as_ref()
+            .expect("Bindings should be initialized");
+        let store = $self
+            .store
+            .as_mut()
+            .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
+
+        let provider = bindings.kani_extension_manga_provider();
+        let result = provider.$method(store $(, $args)*)
+            .await
+            .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)))?
+            .map_err(Error::Extension)?;
+
+        $self.last_call = Some(Instant::now());
+        Ok(result)
+    }};
 }
 
-impl SourceHost {
-    pub fn new(solver_url: Option<String>, source_name: &str) -> Self {
+/// Hosts a single WASM source extension.
+/// Hosts a single WASM source extension instance.
+pub struct SourceInstance {
+    store: Option<Store<HostState>>,
+    bindings: Option<crate::wasm::KaniExtension>,
+    last_call: Option<Instant>,
+    solver_url: Option<String>,
+}
+
+impl SourceInstance {
+    pub fn new(solver_url: Option<String>) -> Self {
         Self {
             store: None,
-            module: None,
-            instance: None,
+            bindings: None,
             last_call: None,
             solver_url,
-            source_name: source_name.to_string(),
         }
     }
 
-    /// Calls a function in the WASM module with the given arguments (async version).
-    pub async fn call_function(
+    /// Calls the `get_popular_manga` function in the WASM module.
+    pub async fn get_popular_manga(
         &mut self,
-        linker: &Linker<HostState>,
-        function_name: &str,
-        args: Vec<wasmtime::Val>,
-    ) -> Result<Vec<wasmtime::Val>> {
-        self.ensure_instantiated_async(linker).await?;
-        let store = self
-            .store
-            .as_mut()
-            .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
-        let instance = self
-            .instance
-            .ok_or_else(|| Error::Internal("Instance not loaded".to_string()))?;
-
-        let func = instance
-            .get_func(&mut *store, function_name)
-            .ok_or_else(|| Error::Internal(format!("Function '{}' not found", function_name)))?;
-
-        let func_ty = func.ty(&mut *store);
-        let result_count = func_ty.results().len();
-
-        let mut results = vec![wasmtime::Val::I32(0); result_count];
-
-        func.call_async(&mut *store, &args, &mut results)
-            .await
-            .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)))?;
-
-        Ok(results)
+        page: i32,
+    ) -> Result<crate::wasm::kani::extension::types::MangaList> {
+        execute_wasm!(self, call_get_popular_manga, page)
     }
 
-    /// Calls a function that returns a string pointer and length pair.
-    pub async fn call_function_ptr_len(
+    /// Calls the `search_manga` function in the WASM module.
+    pub async fn search_manga(
         &mut self,
-        linker: &Linker<HostState>,
-        function_name: &str,
-        args: Vec<wasmtime::Val>,
-    ) -> Result<(i32, i32)> {
-        let results = self.call_function(linker, function_name, args).await?;
-
-        if results.len() == 1 {
-            let packed = results[0]
-                .i64()
-                .ok_or_else(|| Error::Internal("Expected i64 return value".to_string()))?
-                as u64;
-            let len = (packed & 0xFFFFFFFF) as i32;
-            let ptr = (packed >> 32) as i32;
-            Ok((ptr, len))
-        } else if results.len() == 2 {
-            let ptr = results[0]
-                .i32()
-                .ok_or_else(|| Error::Internal("Expected i32 return value for ptr".to_string()))?;
-            let len = results[1]
-                .i32()
-                .ok_or_else(|| Error::Internal("Expected i32 return value for len".to_string()))?;
-            Ok((ptr, len))
-        } else {
-            Err(Error::Internal(format!(
-                "Expected 1 or 2 return values for string function, got {}",
-                results.len()
-            )))
-        }
+        query: &str,
+        page: i32,
+    ) -> Result<crate::wasm::kani::extension::types::MangaList> {
+        execute_wasm!(self, call_search_manga, query, page)
     }
 
-    /// Calls a function that returns a string (ptr, len pair).
-    pub async fn call_function_str(
+    /// Calls the `get_manga_details` function in the WASM module.
+    pub async fn get_manga_details(
         &mut self,
-        linker: &Linker<HostState>,
-        function_name: &str,
-        args: Vec<wasmtime::Val>,
-    ) -> Result<String> {
-        let (ptr, len) = self
-            .call_function_ptr_len(linker, function_name, args)
-            .await?;
-        let string = self.read_memory_string(ptr, len)?;
-        self.deallocate_memory(ptr, len).await?;
-        Ok(string)
+        manga_id: &str,
+    ) -> Result<crate::wasm::kani::extension::types::MangaInfo> {
+        execute_wasm!(self, call_get_manga_details, manga_id)
     }
 
-    /// Calls a function that returns bytes (ptr, len pair).
-    pub async fn call_function_bytes(
+    /// Calls the `get_chapter_list` function in the WASM module.
+    pub async fn get_chapter_list(
         &mut self,
-        linker: &Linker<HostState>,
-        function_name: &str,
-        args: Vec<wasmtime::Val>,
-    ) -> Result<Vec<u8>> {
-        let (ptr, len) = self
-            .call_function_ptr_len(linker, function_name, args)
-            .await?;
-        let bytes = self.read_memory_bytes(ptr, len)?;
-        self.deallocate_memory(ptr, len).await?;
-        Ok(bytes)
+        manga_id: &str,
+        page: i32,
+    ) -> Result<crate::wasm::kani::extension::types::ChapterList> {
+        execute_wasm!(self, call_get_chapter_list, manga_id, page)
     }
 
-    pub async fn call_function_json<T>(
+    /// Calls the `get_pages` function in the WASM module.
+    pub async fn get_pages(
         &mut self,
-        linker: &Linker<HostState>,
-        function_name: &str,
-        args: Vec<wasmtime::Val>,
-    ) -> Result<T>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        let bytes = self
-            .call_function_bytes(linker, function_name, args)
-            .await?;
-
-        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes)
-            && let Some(error) = json.get("error")
-            && let Some(error_msg) = error.as_str()
-        {
-            return Err(Error::Extension(error_msg.to_string()));
-        }
-
-        Ok(serde_json::from_slice(&bytes)?)
+        manga_id: &str,
+        chapter_id: &str,
+    ) -> Result<crate::wasm::kani::extension::types::Chapter> {
+        execute_wasm!(self, call_get_pages, manga_id, chapter_id)
     }
 
-    /// Checks if the module should be unloaded due to inactivity.
-    pub fn maybe_unload(&mut self) -> Result<()> {
-        if self
-            .last_call
-            .is_some_and(|last_call| last_call.elapsed() > Duration::from_secs(300))
-        {
-            self.instance = None;
-            self.last_call = None;
-            if let Some(store) = self.store.as_ref() {
-                let engine = store.engine();
-                if let Ok(state) = HostState::new(self.solver_url.clone()) {
-                    self.store = Some(Store::new(engine, state));
-                } else {
-                    self.store = Some(Store::new(engine, HostState::new(self.solver_url.clone())?));
-                }
-            }
-        }
-        Ok(())
+    /// Calls the `get_metadata` function in the WASM module.
+    pub async fn get_metadata(
+        &mut self,
+    ) -> Result<crate::wasm::kani::extension::types::ExtensionMetadata> {
+        execute_wasm!(self, call_get_metadata)
     }
 
-    /// Loads a source from the file system.
+    /// Returns `Some(true)` if this instance has been idle longer than `timeout`,
+    /// `Some(false)` if it is still within the window, or `None` if never called.
+    pub(crate) fn is_idle(&self, timeout: std::time::Duration) -> Option<bool> {
+        self.last_call.map(|t| t.elapsed() > timeout)
+    }
+
+    /// Loads a source from the component.
     pub async fn load(
-        mut self,
+        &mut self,
         engine: &wasmtime::Engine,
-        wasm_storage_path: &std::path::Path,
-    ) -> Result<Self> {
-        let wasm_path = wasm_storage_path.join(format!("{}.wasm", self.source_name));
-        tracing::info!(
-            "Loading source: {} ({})",
-            self.source_name,
-            wasm_path.display()
-        );
+        component: &wasmtime::component::Component,
+        linker: &Linker<HostState>,
+    ) -> Result<()> {
+        let mut store = Store::new(engine, HostState::new(self.solver_url.clone())?);
 
-        let bytes = tokio::fs::read(&wasm_path).await.map_err(Error::Io)?;
+        let bindings = crate::wasm::KaniExtension::instantiate_async(&mut store, component, linker)
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to instantiate: {}", e)))?;
 
-        self.module = Some(Module::new(engine, &bytes)?);
-        self.store = Some(Store::new(engine, HostState::new(self.solver_url.clone())?));
-        self.instance = None;
-
-        Ok(self)
-    }
-
-    /// Returns whether the module is currently loaded.
-    pub fn is_loaded(&self) -> bool {
-        self.instance.is_some()
-    }
-
-    async fn ensure_instantiated_async(&mut self, linker: &Linker<HostState>) -> Result<&Instance> {
+        self.store = Some(store);
+        self.bindings = Some(bindings);
         self.last_call = Some(Instant::now());
 
-        if self.instance.is_none() {
-            let store = self
-                .store
-                .as_mut()
-                .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
-            let module = self
-                .module
-                .as_ref()
-                .ok_or_else(|| Error::Internal("Module not loaded".to_string()))?;
-            let instance = linker.instantiate_async(store, module).await.ok();
-            self.instance = instance;
-        }
-
-        match self.instance.as_ref() {
-            Some(instance) => Ok(instance),
-            None => Err(Error::Internal("Instance not found".to_string())),
-        }
-    }
-
-    fn read_memory_string(&mut self, ptr: i32, len: i32) -> Result<String> {
-        let bytes = self.read_memory_bytes(ptr, len)?;
-        String::from_utf8(bytes).map_err(|e| Error::WasmMemoryAccess(e.to_string()))
-    }
-
-    fn read_memory_bytes(&mut self, ptr: i32, len: i32) -> Result<Vec<u8>> {
-        let store = self
-            .store
-            .as_mut()
-            .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
-        let memory = self
-            .instance
-            .ok_or_else(|| Error::Internal("Instance not loaded".to_string()))?
-            .get_memory(&mut *store, "memory")
-            .ok_or_else(|| Error::WasmMemoryAccess("memory export not found".to_string()))?;
-        let data = memory.data(&*store);
-        let bytes = &data[ptr as usize..ptr as usize + len as usize];
-        Ok(bytes.to_vec())
-    }
-
-    pub async fn deallocate_memory(&mut self, ptr: i32, len: i32) -> Result<()> {
-        let store = self
-            .store
-            .as_mut()
-            .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
-        let instance = self
-            .instance
-            .ok_or_else(|| Error::Internal("Instance not available".to_string()))?;
-
-        let mut dealloc_func = instance.get_func(&mut *store, "deallocate");
-        if dealloc_func.is_none() {
-            dealloc_func = instance.get_func(&mut *store, "free");
-        }
-        if dealloc_func.is_none() {
-            dealloc_func = instance.get_func(&mut *store, "__free");
-        }
-
-        if let Some(func) = dealloc_func {
-            let mut results = vec![];
-            func.call_async(
-                &mut *store,
-                &[wasmtime::Val::I32(ptr), wasmtime::Val::I32(len)],
-                &mut results,
-            )
-            .await
-            .map_err(|e| Error::Internal(format!("Deallocation failed: {}", e)))?;
-        }
-
         Ok(())
-    }
-
-    pub async fn write_string(
-        &mut self,
-        linker: &Linker<HostState>,
-        s: &str,
-    ) -> Result<(i32, i32)> {
-        self.ensure_instantiated_async(linker).await?;
-
-        let bytes = s.as_bytes();
-        let len = bytes.len() as i32;
-
-        let store = self
-            .store
-            .as_mut()
-            .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
-
-        let instance = self
-            .instance
-            .as_ref()
-            .ok_or_else(|| Error::Internal("Instance not available for allocation".to_string()))?;
-
-        let mut alloc_func = instance.get_func(&mut *store, "allocate");
-        if alloc_func.is_none() {
-            alloc_func = instance.get_func(&mut *store, "malloc");
-        }
-        let alloc_func = alloc_func
-            .ok_or_else(|| Error::Internal("Allocation function not found".to_string()))?;
-
-        let mut results = vec![wasmtime::Val::I32(0)];
-        alloc_func
-            .call_async(&mut *store, &[wasmtime::Val::I32(len)], &mut results)
-            .await
-            .map_err(|e| Error::Internal(format!("Allocation failed: {}", e)))?;
-
-        let ptr = results[0]
-            .i32()
-            .ok_or_else(|| Error::Internal("Expected i32 return value from alloc".to_string()))?;
-
-        let memory = self
-            .instance
-            .unwrap()
-            .get_memory(&mut *store, "memory")
-            .ok_or_else(|| Error::WasmMemoryAccess("memory export not found".to_string()))?;
-
-        memory
-            .write(&mut *store, ptr as usize, bytes)
-            .map_err(|e| {
-                Error::WasmMemoryAccess(format!("Failed to write string to memory: {}", e))
-            })?;
-
-        Ok((ptr, len))
     }
 }

@@ -1,13 +1,31 @@
 //! WASM runtime and host ABI for extensions.
 
 pub mod abi;
-mod memory;
 
 use std::collections::HashMap;
 
-use wasmtime::{Config, Engine, Linker, Module, Store};
+use wasmtime::component::{Component, HasSelf, Linker};
+use wasmtime::{Config, Engine, Store};
 
 use crate::error::Result;
+
+pub mod bindings {
+    wasmtime::component::bindgen!({
+        path: "wit/kani.wit",
+        world: "kani-extension",
+        imports: {
+            "kani:extension/http": async,
+        },
+        exports: {
+            default: async
+        },
+        additional_derives: [serde::Serialize, serde::Deserialize]
+    });
+}
+
+pub use bindings::KaniExtension;
+pub use bindings::exports;
+pub use bindings::kani;
 
 pub struct ResponseData {
     pub body: String,
@@ -20,11 +38,7 @@ use crate::http::SmartClient;
 /// Manages handles for HTTP requests, responses, and parsed HTML documents.
 pub struct HostState {
     pub http_client: SmartClient,
-    pub next_request_handle: i32,
-    pub next_response_handle: i32,
     pub next_doc_handle: i32,
-    pub requests: HashMap<i32, rquest::RequestBuilder>,
-    pub responses: HashMap<i32, ResponseData>,
     pub html_docs: HashMap<i32, String>,
     pub html_lists: HashMap<i32, Vec<String>>,
     pub last_error: Option<i32>,
@@ -36,11 +50,7 @@ impl HostState {
 
         Ok(Self {
             http_client,
-            next_request_handle: 1,
-            next_response_handle: 1,
             next_doc_handle: 1,
-            requests: HashMap::new(),
-            responses: HashMap::new(),
             html_docs: HashMap::new(),
             html_lists: HashMap::new(),
             last_error: None,
@@ -64,11 +74,12 @@ impl WasmRuntime {
     pub fn new() -> Result<Self> {
         let mut config = Config::new();
         config.async_support(true);
+        config.wasm_component_model(true);
 
         let engine = Engine::new(&config)?;
         let mut linker = Linker::new(&engine);
 
-        abi::register_host_functions(&mut linker)?;
+        KaniExtension::add_to_linker::<_, HasSelf<HostState>>(&mut linker, |state| state)?;
 
         Ok(Self { engine, linker })
     }
@@ -78,10 +89,10 @@ impl WasmRuntime {
         &self.engine
     }
 
-    /// Compiles a WASM module from bytes.
-    pub fn compile_module(&self, bytes: &[u8]) -> Result<Module> {
-        let module = Module::new(&self.engine, bytes)?;
-        Ok(module)
+    /// Compiles a WASM component from bytes.
+    pub fn compile_component(&self, bytes: &[u8]) -> Result<Component> {
+        let component = Component::new(&self.engine, bytes)?;
+        Ok(component)
     }
 
     /// Creates a new store with fresh host state.
@@ -89,14 +100,14 @@ impl WasmRuntime {
         Store::new(&self.engine, HostState::default())
     }
 
-    /// Instantiates a module in the given store.
+    /// Instantiates a component in the given store.
     pub async fn instantiate(
         &self,
         store: &mut Store<HostState>,
-        module: &Module,
-    ) -> Result<wasmtime::Instance> {
-        let instance = self.linker.instantiate_async(store, module).await?;
-        Ok(instance)
+        component: &Component,
+    ) -> Result<KaniExtension> {
+        let binding = KaniExtension::instantiate_async(store, component, &self.linker).await?;
+        Ok(binding)
     }
 
     /// Returns a reference to the linker.

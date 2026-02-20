@@ -1,6 +1,7 @@
+use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::{
     Chapter, ChapterList, ExtensionMetadata, ExtensionResult, FilterList, MangaExtension,
-    MangaInfo, MangaList, MangaStatus, PreferenceList,
+    MangaInfo, MangaList, MangaStatus, PreferenceList, bindings,
 };
 
 pub struct Example {
@@ -18,7 +19,7 @@ impl Example {
     pub fn new() -> Self {
         Self {
             _base_url: "https://example.com".to_string(),
-            _return_limit: 20,
+            _return_limit: 65,
         }
     }
 
@@ -31,6 +32,42 @@ impl Example {
             language: "multi".to_string(),
             nsfw: false,
         }
+    }
+}
+
+impl Guest for Example {
+    fn get_metadata() -> Result<ExtensionMetadata, String> {
+        Ok(Example::metadata())
+    }
+
+    fn get_popular_manga(page: i32) -> Result<MangaList, String> {
+        get_extension()
+            .get_popular_manga(page)
+            .map_err(|e| e.to_string())
+    }
+
+    fn search_manga(query: String, page: i32) -> Result<MangaList, String> {
+        get_extension()
+            .search_manga(&query, page)
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_manga_details(manga_id: String) -> Result<MangaInfo, String> {
+        get_extension()
+            .get_manga_details(&manga_id)
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_chapter_list(manga_id: String, page: i32) -> Result<ChapterList, String> {
+        get_extension()
+            .get_chapter_list(&manga_id, page)
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_pages(manga_id: String, chapter_id: String) -> Result<Chapter, String> {
+        get_extension()
+            .get_pages(&manga_id, &chapter_id)
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -121,122 +158,4 @@ fn get_extension() -> &'static Example {
     EXTENSION.get_or_init(Example::new)
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn allocate(size: usize) -> *mut u8 {
-    let mut buf = Vec::with_capacity(size);
-    let ptr = buf.as_mut_ptr();
-    std::mem::forget(buf);
-    ptr
-}
-
-#[unsafe(no_mangle)]
-/// # Safety
-///
-/// This function is called by the host to deallocate memory that was allocated by the extension.
-pub unsafe extern "C" fn deallocate(ptr: *mut u8, size: usize) {
-    unsafe {
-        let _ = Vec::from_raw_parts(ptr, 0, size);
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn get_popular_manga(page: i32) -> u64 {
-    let ext = get_extension();
-    let result = match ext.get_popular_manga(page) {
-        Ok(list) => serde_json::to_string(&list).unwrap_or_default(),
-        Err(e) => serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
-            .unwrap_or_default(),
-    };
-    string_to_ptr_len(&result)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn search_manga(query_ptr: i32, query_len: i32, page: i32) -> u64 {
-    let query = unsafe {
-        let slice = std::slice::from_raw_parts(query_ptr as *const u8, query_len as usize);
-        String::from_utf8_lossy(slice).to_string()
-    };
-
-    let ext = get_extension();
-    let result = match ext.search_manga(&query, page) {
-        Ok(list) => serde_json::to_string(&list).unwrap_or_default(),
-        Err(e) => serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
-            .unwrap_or_default(),
-    };
-    string_to_ptr_len(&result)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn get_manga_details(ptr: i32, len: i32) -> u64 {
-    let manga_id = unsafe {
-        let slice = std::slice::from_raw_parts(ptr as *const u8, len as usize);
-        String::from_utf8_lossy(slice).to_string()
-    };
-
-    let ext = get_extension();
-    let result = match ext.get_manga_details(&manga_id) {
-        Ok(info) => serde_json::to_string(&info).unwrap_or_default(),
-        Err(e) => serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
-            .unwrap_or_default(),
-    };
-    string_to_ptr_len(&result)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn get_chapter_list(ptr: i32, len: i32, page: i32) -> u64 {
-    let manga_id = unsafe {
-        let slice = std::slice::from_raw_parts(ptr as *const u8, len as usize);
-        String::from_utf8_lossy(slice).to_string()
-    };
-
-    let ext = get_extension();
-    let result = match ext.get_chapter_list(&manga_id, page) {
-        Ok(list) => serde_json::to_string(&list).unwrap_or_default(),
-        Err(e) => serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
-            .unwrap_or_default(),
-    };
-    string_to_ptr_len(&result)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn get_pages(
-    manga_id_ptr: i32,
-    manga_id_len: i32,
-    chapter_id_ptr: i32,
-    chapter_id_len: i32,
-) -> u64 {
-    let _manga_id = unsafe {
-        let slice = std::slice::from_raw_parts(manga_id_ptr as *const u8, manga_id_len as usize);
-        String::from_utf8_lossy(slice).to_string()
-    };
-
-    let chapter_id = unsafe {
-        let slice =
-            std::slice::from_raw_parts(chapter_id_ptr as *const u8, chapter_id_len as usize);
-        String::from_utf8_lossy(slice).to_string()
-    };
-
-    let ext = get_extension();
-
-    let result = match ext.get_pages(&_manga_id, &chapter_id) {
-        Ok(chapter) => serde_json::to_string(&chapter).unwrap_or_default(),
-        Err(e) => serde_json::to_string(&serde_json::json!({ "error": e.to_string() }))
-            .unwrap_or_default(),
-    };
-    string_to_ptr_len(&result)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn get_metadata() -> u64 {
-    let metadata = Example::metadata();
-    let result = serde_json::to_string(&metadata).unwrap_or_default();
-    string_to_ptr_len(&result)
-}
-
-fn string_to_ptr_len(s: &str) -> u64 {
-    let bytes = s.as_bytes().to_vec();
-    let len = bytes.len() as u32;
-    let ptr = bytes.as_ptr() as u32;
-    std::mem::forget(bytes);
-    ((ptr as u64) << 32) | (len as u64)
-}
+bindings::export!(Example);

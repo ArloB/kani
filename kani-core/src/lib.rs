@@ -7,6 +7,7 @@ pub mod downloader;
 pub mod error;
 pub mod file_storage;
 pub mod http;
+pub mod source_manager;
 pub mod sources;
 pub mod wasm;
 

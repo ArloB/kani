@@ -3,18 +3,19 @@ use std::sync::Arc;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use kani_core::downloader::DownloaderManager;
-use kani_core::sources::SourceHost;
+use kani_core::source_manager::SourceManager;
 use kani_core::wasm::WasmRuntime;
-use kani_core::wasmtime::{self, Val};
 
 use crate::error::AppError;
-use crate::models::{Chapter, Settings, Source};
+use crate::models::{Settings, SharedChapter, Source};
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
     pub wasm_runtime: Arc<WasmRuntime>,
-    pub sources: std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<i64, SourceHost>>>,
+    pub sources: std::sync::Arc<
+        tokio::sync::RwLock<std::collections::HashMap<i64, std::sync::Arc<SourceManager>>>,
+    >,
     pub settings: std::sync::Arc<tokio::sync::RwLock<Settings>>,
     pub downloader: DownloaderManager,
     pub http_client: rquest::Client,
@@ -37,7 +38,6 @@ impl AppState {
             .fetch_one(&pool)
             .await?;
 
-        // Scan for new WASM sources
         let flaresolverr_url = if settings.flaresolverr_url.is_empty() {
             None
         } else {
@@ -48,8 +48,7 @@ impl AppState {
             &pool,
             &settings.wasm_storage_path,
             flaresolverr_url.clone(),
-            wasm_runtime.engine(),
-            wasm_runtime.linker(),
+            &wasm_runtime,
         )
         .await
         {
@@ -70,11 +69,29 @@ impl AppState {
                 Some(settings.flaresolverr_url.clone())
             };
 
-            let source_host = SourceHost::new(solver_url, &source.name)
-                .load(wasm_runtime.engine(), &settings.wasm_storage_path)
-                .await?;
+            let bytes = tokio::fs::read(
+                settings
+                    .wasm_storage_path
+                    .join(format!("{}.wasm", source.name)),
+            )
+            .await
+            .map_err(AppError::IoError)?;
+            let component = wasm_runtime
+                .compile_component(&bytes)
+                .map_err(AppError::CoreError)?;
 
-            sources_map.insert(source.id, source_host);
+            let source_manager = SourceManager::new(
+                wasm_runtime.engine().clone(),
+                component,
+                wasm_runtime.linker().clone(),
+                solver_url,
+                25,
+                1,
+            )
+            .await
+            .map_err(AppError::CoreError)?;
+
+            sources_map.insert(source.id, Arc::new(source_manager));
         }
 
         let downloader = DownloaderManager::new(
@@ -93,7 +110,7 @@ impl AppState {
         Ok(Self {
             db: pool,
             wasm_runtime,
-            sources: std::sync::Arc::new(tokio::sync::Mutex::new(sources_map)),
+            sources: std::sync::Arc::new(tokio::sync::RwLock::new(sources_map)),
             settings: std::sync::Arc::new(tokio::sync::RwLock::new(settings)),
             downloader,
             http_client,
@@ -101,126 +118,121 @@ impl AppState {
     }
 
     pub async fn get_popular_manga(&self, id: i64, page: i32) -> Result<String, AppError> {
-        let linker = self.wasm_runtime.linker();
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+        };
 
-        self.sources
-            .lock()
-            .await
-            .get_mut(&id)
-            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
-            .call_function_json(linker, "get_popular_manga", vec![Val::I32(page)])
-            .await
-            .map(|v: serde_json::Value| v.to_string())
-            .map_err(AppError::CoreError)
+        let result = source_manager
+            .lease_instance()
+            .await?
+            .get_popular_manga(page)
+            .await?;
+
+        serde_json::to_string(&result).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
     }
 
-    #[allow(clippy::significant_drop_tightening)]
     pub async fn search_manga(&self, id: i64, query: &str, page: i32) -> Result<String, AppError> {
-        let mut sources = self.sources.lock().await;
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+        };
 
-        let source = sources
-            .get_mut(&id)
-            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
+        let result = source_manager
+            .lease_instance()
+            .await?
+            .search_manga(query, page)
+            .await?;
 
-        let linker = self.wasm_runtime.linker();
-
-        // Allocate string in WASM memory
-        let (query_ptr, query_len) = source
-            .write_string(linker, query)
-            .await
-            .map_err(AppError::CoreError)?;
-
-        let result: Result<serde_json::Value, _> = source
-            .call_function_json(
-                linker,
-                "search_manga",
-                vec![Val::I32(query_ptr), Val::I32(query_len), Val::I32(page)],
-            )
-            .await;
-
-        let return_val = result.map(|v| v.to_string()).map_err(AppError::CoreError);
-
-        if let Err(e) = source.deallocate_memory(query_ptr, query_len).await {
-            tracing::error!("Failed to deallocate query string in WASM: {}", e);
-        }
-
-        return_val
+        serde_json::to_string(&result).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
     }
 
-    #[allow(clippy::significant_drop_tightening)]
     pub async fn get_manga_details(&self, id: i64, manga_id: &str) -> Result<String, AppError> {
-        let mut sources = self.sources.lock().await;
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+        };
 
-        let source = sources
-            .get_mut(&id)
-            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
+        let result = source_manager
+            .lease_instance()
+            .await?
+            .get_manga_details(manga_id)
+            .await?;
 
-        let linker = self.wasm_runtime.linker();
+        let shared_result = convert_to_shared_manga_info(result);
 
-        let (manga_id_ptr, manga_id_len) = source
-            .write_string(linker, manga_id)
-            .await
-            .map_err(AppError::CoreError)?;
-
-        let result: Result<serde_json::Value, _> = source
-            .call_function_json(
-                linker,
-                "get_manga_details",
-                vec![Val::I32(manga_id_ptr), Val::I32(manga_id_len)],
-            )
-            .await;
-
-        let return_val = result.map(|v| v.to_string()).map_err(AppError::CoreError);
-
-        if let Err(e) = source.deallocate_memory(manga_id_ptr, manga_id_len).await {
-            tracing::error!("Failed to deallocate query string in WASM: {}", e);
-        }
-
-        return_val
+        serde_json::to_string(&shared_result)
+            .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
     }
 
-    #[allow(clippy::significant_drop_tightening)]
-    pub async fn get_chapter_list(
+    pub async fn get_chapter_list(&self, id: i64, manga_id: &str) -> Result<String, AppError> {
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+        };
+
+        let mut all_chapters = Vec::new();
+
+        let mut instance = source_manager.lease_instance().await?;
+
+        let mut page = 1i32;
+
+        loop {
+            let result = instance.get_chapter_list(manga_id, page).await?;
+
+            let has_next_page = result.has_next_page;
+            all_chapters.extend(result.chapters);
+
+            if !has_next_page {
+                break;
+            }
+
+            page += 1;
+        }
+
+        let combined = kani_core::wasm::kani::extension::types::ChapterList {
+            chapters: all_chapters,
+            has_next_page: false,
+        };
+
+        serde_json::to_string(&combined).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+    }
+
+    pub async fn get_chapter_list_paged(
         &self,
         id: i64,
         manga_id: &str,
         page: i32,
     ) -> Result<String, AppError> {
-        let mut sources = self.sources.lock().await;
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+        };
 
-        let source = sources
-            .get_mut(&id)
-            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
+        let result = source_manager
+            .lease_instance()
+            .await?
+            .get_chapter_list(manga_id, page)
+            .await?;
 
-        let linker = self.wasm_runtime.linker();
-
-        let (manga_id_ptr, manga_id_len) = source
-            .write_string(linker, manga_id)
-            .await
-            .map_err(AppError::CoreError)?;
-
-        let result: Result<serde_json::Value, _> = source
-            .call_function_json(
-                linker,
-                "get_chapter_list",
-                vec![
-                    Val::I32(manga_id_ptr),
-                    Val::I32(manga_id_len),
-                    Val::I32(page),
-                ],
-            )
-            .await;
-
-        let return_val = result.map(|v| v.to_string()).map_err(AppError::CoreError);
-
-        if let Err(e) = source.deallocate_memory(manga_id_ptr, manga_id_len).await {
-            tracing::error!("Failed to deallocate query string in WASM: {}", e);
-        }
-
-        return_val
+        serde_json::to_string(&result).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
     }
 
-    #[allow(clippy::significant_drop_tightening)]
     pub async fn start_download(
         &self,
         id: i64,
@@ -228,49 +240,25 @@ impl AppState {
         chapter_id: &str,
     ) -> Result<(), AppError> {
         let chapter = {
-            let mut sources = self.sources.lock().await;
+            let source_manager = {
+                let sources = self.sources.read().await;
 
-            let source = sources
-                .get_mut(&id)
-                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
+                sources
+                    .get(&id)
+                    .cloned()
+                    .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+            };
 
-            let linker = self.wasm_runtime.linker();
+            let chapter_generated = source_manager
+                .lease_instance()
+                .await?
+                .get_pages(manga_id, chapter_id)
+                .await?;
 
-            let (manga_id_ptr, manga_id_len) = source
-                .write_string(linker, manga_id)
-                .await
-                .map_err(AppError::CoreError)?;
-
-            let (chapter_id_ptr, chapter_id_len) = source
-                .write_string(linker, chapter_id)
-                .await
-                .map_err(AppError::CoreError)?;
-
-            let chapter_res: Result<Chapter, _> = source
-                .call_function_json(
-                    linker,
-                    "get_pages",
-                    vec![
-                        Val::I32(manga_id_ptr),
-                        Val::I32(manga_id_len),
-                        Val::I32(chapter_id_ptr),
-                        Val::I32(chapter_id_len),
-                    ],
-                )
-                .await;
-
-            if let Err(e) = source.deallocate_memory(manga_id_ptr, manga_id_len).await {
-                tracing::error!("Failed to deallocate manga_id string in WASM: {}", e);
-            }
-
-            if let Err(e) = source
-                .deallocate_memory(chapter_id_ptr, chapter_id_len)
-                .await
-            {
-                tracing::error!("Failed to deallocate chapter_id string in WASM: {}", e);
-            }
-
-            chapter_res.map_err(AppError::CoreError)?
+            let json = serde_json::to_value(&chapter_generated)
+                .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?;
+            serde_json::from_value::<SharedChapter>(json)
+                .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?
         };
 
         let library_path = self.settings.read().await.library_path.clone();
@@ -286,29 +274,29 @@ impl AppState {
         Ok(())
     }
 
-    pub async fn get_metadata(&self, id: i64) -> Result<kani_shared::ExtensionMetadata, AppError> {
-        let linker = self.wasm_runtime.linker();
-        let json = self
-            .sources
-            .lock()
-            .await
-            .get_mut(&id)
-            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
-            .call_function_str(linker, "get_metadata", vec![])
+    pub async fn get_metadata(&self, id: i64) -> Result<String, AppError> {
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+        };
+
+        let result = source_manager
+            .lease_instance()
+            .await?
+            .get_metadata()
             .await?;
 
-        let metadata: kani_shared::ExtensionMetadata = serde_json::from_str(&json)
-            .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?;
-
-        Ok(metadata)
+        serde_json::to_string(&result).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
     }
 
     async fn scan_and_register_sources(
         db: &SqlitePool,
         wasm_storage_path: &std::path::Path,
         flaresolverr_url: Option<String>,
-        engine: &wasmtime::Engine,
-        linker: &wasmtime::Linker<kani_core::wasm::HostState>,
+        wasm_runtime: &WasmRuntime,
     ) -> Result<(), AppError> {
         tracing::info!(
             "Scanning and registering sources in {:?}",
@@ -331,47 +319,33 @@ impl AppState {
                     .and_then(|s| s.to_str())
                     .ok_or_else(|| AppError::InternalServerError("Invalid filename".to_string()))?;
 
-                // Check if source exists in DB
                 let exists = sqlx::query!("SELECT id FROM sources WHERE name = ?", filename)
                     .fetch_optional(db)
                     .await?
                     .is_some();
 
                 if !exists {
-                    match SourceHost::new(flaresolverr_url.clone(), filename)
-                        .load(engine, wasm_storage_path)
+                    let bytes = tokio::fs::read(&path)
                         .await
+                        .map_err(|e| AppError::CoreError(kani_core::Error::Io(e)))?;
+
+                    let component = wasm_runtime
+                        .compile_component(&bytes)
+                        .map_err(AppError::CoreError)?;
+
+                    let metadata = {
+                        let mut inst =
+                            kani_core::sources::SourceInstance::new(flaresolverr_url.clone());
+                        inst.load(wasm_runtime.engine(), &component, wasm_runtime.linker())
+                            .await
+                            .map_err(AppError::CoreError)?;
+                        inst.get_metadata().await.map_err(AppError::CoreError)?
+                    };
+
+                    match serde_json::to_value(&metadata)
+                        .and_then(serde_json::from_value::<kani_shared::ExtensionMetadata>)
                     {
-                        Ok(mut source_host) => {
-                            let json = match source_host
-                                .call_function_str(linker, "get_metadata", vec![])
-                                .await
-                            {
-                                Ok(j) => j,
-                                Err(e) => {
-                                    tracing::error!(
-                                        "Failed to get metadata for {}: {}",
-                                        filename,
-                                        e
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            let metadata: kani_shared::ExtensionMetadata =
-                                match serde_json::from_str(&json) {
-                                    Ok(m) => m,
-                                    Err(e) => {
-                                        tracing::error!(
-                                            "Failed to parse metadata for {}: {}",
-                                            filename,
-                                            e
-                                        );
-                                        continue;
-                                    }
-                                };
-
-                            // Insert into DB
+                        Ok(metadata) => {
                             if let Err(e) = sqlx::query!(
                                 "INSERT INTO sources (name, version, base_url, enabled) VALUES (?, ?, ?, 1)",
                                 filename,
@@ -387,12 +361,42 @@ impl AppState {
                             }
                         }
                         Err(e) => {
-                            tracing::error!("Failed to load new source {}: {}", filename, e);
+                            tracing::error!(
+                                "Failed to convert metadata for {}: {}",
+                                filename,
+                                e
+                            );
                         }
                     }
                 }
             }
         }
         Ok(())
+    }
+}
+
+fn convert_to_shared_manga_info(
+    info: kani_core::wasm::kani::extension::types::MangaInfo,
+) -> kani_shared::MangaInfo {
+    use kani_core::wasm::kani::extension::types::MangaStatus as CoreMangaStatus;
+    use kani_shared::MangaStatus as SharedMangaStatus;
+
+    let status = match info.status {
+        CoreMangaStatus::Ongoing => SharedMangaStatus::Ongoing,
+        CoreMangaStatus::Completed => SharedMangaStatus::Completed,
+        CoreMangaStatus::Hiatus => SharedMangaStatus::Hiatus,
+        CoreMangaStatus::Cancelled => SharedMangaStatus::Cancelled,
+        CoreMangaStatus::Unknown => SharedMangaStatus::Unknown,
+    };
+
+    kani_shared::MangaInfo {
+        id: info.id,
+        title: info.title,
+        cover_url: info.cover_url,
+        description: info.description,
+        authors: info.authors,
+        artists: info.artists,
+        status,
+        tags: info.tags,
     }
 }

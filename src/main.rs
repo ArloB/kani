@@ -1,15 +1,15 @@
 mod error;
-mod etag;
+
 mod handlers;
 mod models;
 mod state;
 
 use state::AppState;
 
-use tower_http::services::{ServeDir, ServeFile};
-
-use axum::http::{HeaderValue, header};
-use tower_http::set_header::SetResponseHeaderLayer;
+use tower_http::{
+    compression::CompressionLayer,
+    services::{ServeDir, ServeFile},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,16 +24,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cleanup_state = state.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        let idle_timeout = std::time::Duration::from_secs(300); 
         loop {
             interval.tick().await;
-            let mut sources = cleanup_state.sources.lock().await;
-            for source in sources.values_mut() {
-                match source.maybe_unload() {
-                    Ok(()) => {}
-                    Err(e) => {
-                        tracing::error!("Failed to unload source with error {e}");
-                    }
-                }
+            let sources = cleanup_state.sources.read().await;
+            for manager in sources.values() {
+                manager.cleanup(idle_timeout).await;
             }
         }
     });
@@ -48,12 +44,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = axum::Router::new()
         .nest(
             "/api",
-            handlers::routes().with_state(state.clone()).layer(
-                SetResponseHeaderLayer::if_not_present(
-                    header::CACHE_CONTROL,
-                    HeaderValue::from_static("no-cache"),
-                ),
-            ),
+            handlers::routes()
+                .with_state(state.clone())
+                .layer(CompressionLayer::new()),
         )
         .fallback_service(serve_dir);
 

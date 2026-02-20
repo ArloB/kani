@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     extract::{Multipart, Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
 };
@@ -9,16 +9,17 @@ use serde_json::json;
 
 use crate::{
     error::AppError,
-    etag::{etag_bytes_response, etag_json_response},
-    models::{CreateSource, FetchWasmRequest, SearchMangaRequest, Source, UpdateSource},
+    models::{
+        CreateSource, FetchWasmRequest, SaveToLibraryRequest, SearchMangaRequest, Source,
+        UpdateSource,
+    },
     state::AppState,
 };
-use kani_core::sources::SourceHost;
+use kani_core::source_manager::SourceManager;
+use kani_shared::{ChapterList, MangaInfo};
+use std::sync::Arc;
 
-async fn list_sources(
-    headers: HeaderMap,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, AppError> {
+async fn list_sources(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let sources = sqlx::query_as!(
         Source,
         "SELECT id, name, version, base_url FROM sources LIMIT 1000"
@@ -26,7 +27,7 @@ async fn list_sources(
     .fetch_all(&state.db)
     .await?;
 
-    Ok(etag_json_response(&headers, &sources)?)
+    Ok(Json(sources))
 }
 
 async fn add_source(
@@ -44,7 +45,6 @@ async fn add_source(
 }
 
 async fn get_source(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -56,7 +56,7 @@ async fn get_source(
     .fetch_optional(&state.db)
     .await?;
 
-    Ok(etag_json_response(&headers, &source)?)
+    Ok(Json(source))
 }
 
 async fn update_source(
@@ -114,26 +114,107 @@ async fn delete_source(
     Ok((StatusCode::OK, Json(json!({}))))
 }
 
+async fn install_source(
+    state: &AppState,
+    id: i64,
+    current_source: &Source,
+    bytes: &[u8],
+) -> Result<std::path::PathBuf, AppError> {
+    let component = match state.wasm_runtime.compile_component(bytes) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to compile component: {}", e);
+            return Err(AppError::CoreError(e));
+        }
+    };
+
+    let solver_url = Some(state.settings.read().await.flaresolverr_url.clone());
+
+    let metadata = {
+        let mut inst = kani_core::sources::SourceInstance::new(solver_url.clone());
+        inst.load(
+            state.wasm_runtime.engine(),
+            &component,
+            state.wasm_runtime.linker(),
+        )
+        .await
+        .map_err(AppError::CoreError)?;
+        inst.get_metadata().await.map_err(AppError::CoreError)?
+    };
+
+    sqlx::query!(
+        "UPDATE sources SET name = ?, version = ?, base_url = ? WHERE id = ?",
+        metadata.name,
+        metadata.version,
+        metadata.base_url,
+        id
+    )
+    .execute(&state.db)
+    .await?;
+
+    let settings = state.settings.read().await;
+    let storage_path = settings
+        .wasm_storage_path
+        .to_str()
+        .ok_or_else(|| AppError::InternalServerError("Failed to convert path".to_string()))?;
+
+    if current_source.name != metadata.name {
+        tracing::info!(
+            "Source name changed from {} to {}. Deleting old file.",
+            current_source.name,
+            metadata.name
+        );
+
+        let _ = kani_core::file_storage::delete_wasm_file(storage_path, &current_source.name).await;
+    }
+
+    let path = kani_core::file_storage::save_wasm(storage_path, &metadata.name, bytes)
+        .await
+        .map_err(AppError::CoreError)?;
+    drop(settings);
+
+    let source_manager = SourceManager::new(
+        state.wasm_runtime.engine().clone(),
+        component,
+        state.wasm_runtime.linker().clone(),
+        solver_url,
+        25,
+        1,
+    )
+    .await
+    .map_err(AppError::CoreError)?;
+
+    state
+        .sources
+        .write()
+        .await
+        .insert(id, Arc::new(source_manager));
+
+    tracing::info!(
+        "Successfully installed source {}: {} v{}",
+        id,
+        metadata.name,
+        metadata.version
+    );
+
+    Ok(path)
+}
+
 /// Upload a WASM binary via multipart form data
 async fn upload_wasm(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
-    // Verify source exists
     let source = sqlx::query_as!(
         Source,
         "SELECT id, name, version, base_url FROM sources WHERE id = ?",
         id
     )
     .fetch_optional(&state.db)
-    .await?;
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
 
-    if source.is_none() {
-        return Err(AppError::NotFound(format!("Source {id} not found")));
-    }
-
-    // Extract the file from multipart
     let mut wasm_bytes: Option<Vec<u8>> = None;
     while let Some(field) = multipart
         .next_field()
@@ -157,50 +238,7 @@ async fn upload_wasm(
     let bytes = wasm_bytes
         .ok_or_else(|| AppError::InternalServerError("No file field in multipart".to_string()))?;
 
-    // Save the WASM file
-    let name = &source
-        .as_ref()
-        .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
-        .name;
-    let settings = state.settings.read().await;
-    let path = kani_core::file_storage::save_wasm(
-        settings.wasm_storage_path.to_str().ok_or_else(|| {
-            AppError::InternalServerError("Failed to convert path to string".to_string())
-        })?,
-        name,
-        &bytes,
-    )
-    .await
-    .map_err(AppError::CoreError)?;
-
-    match SourceHost::new(
-        Some(state.settings.read().await.flaresolverr_url.clone()),
-        name,
-    )
-    .load(state.wasm_runtime.engine(), &settings.wasm_storage_path)
-    .await
-    {
-        Ok(host) => {
-            state.sources.lock().await.insert(id, host);
-            tracing::info!("Successfully loaded source: {}", name);
-        }
-        Err(e) => {
-            tracing::error!("Failed to load source {}: {}", name, e);
-        }
-    }
-
-    drop(settings);
-
-    let metadata = state.get_metadata(id).await?;
-
-    // Update the source with metadata
-    sqlx::query!(
-        "UPDATE sources SET base_url = ? WHERE id = ?",
-        metadata.base_url,
-        id
-    )
-    .execute(&state.db)
-    .await?;
+    let path = install_source(&state, id, &source, &bytes).await?;
 
     Ok((
         StatusCode::OK,
@@ -214,20 +252,15 @@ async fn fetch_wasm(
     Path(id): Path<i64>,
     Json(payload): Json<FetchWasmRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Verify source exists
     let source = sqlx::query_as!(
         Source,
         "SELECT id, name, version, base_url FROM sources WHERE id = ?",
         id
     )
     .fetch_optional(&state.db)
-    .await?;
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
 
-    if source.is_none() {
-        return Err(AppError::NotFound(format!("Source {id} not found")));
-    }
-
-    // Fetch the WASM from the URL
     let client = rquest::Client::builder()
         .build()
         .map_err(|e| AppError::InternalServerError(format!("Failed to create client: {e}")))?;
@@ -243,49 +276,7 @@ async fn fetch_wasm(
         .await
         .map_err(|e| AppError::InternalServerError(format!("Failed to read response: {e}")))?;
 
-    // Save the WASM file
-    let name = source
-        .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
-        .name;
-    let settings = state.settings.read().await;
-    let path = kani_core::file_storage::save_wasm(
-        settings.wasm_storage_path.to_str().ok_or_else(|| {
-            AppError::InternalServerError("Failed to convert path to string".to_string())
-        })?,
-        &name,
-        &bytes,
-    )
-    .await
-    .map_err(AppError::CoreError)?;
-
-    match SourceHost::new(
-        Some(state.settings.read().await.flaresolverr_url.clone()),
-        &name,
-    )
-    .load(state.wasm_runtime.engine(), &settings.wasm_storage_path)
-    .await
-    {
-        Ok(host) => {
-            state.sources.lock().await.insert(id, host);
-            tracing::info!("Successfully loaded source: {}", name);
-        }
-        Err(e) => {
-            tracing::error!("Failed to load source {}: {}", name, e);
-        }
-    }
-
-    drop(settings);
-
-    let metadata = state.get_metadata(id).await?;
-
-    // Update the source with metadata
-    sqlx::query!(
-        "UPDATE sources SET base_url = ? WHERE id = ?",
-        metadata.base_url,
-        id
-    )
-    .execute(&state.db)
-    .await?;
+    let path = install_source(&state, id, &source, &bytes).await?;
 
     Ok((
         StatusCode::OK,
@@ -294,44 +285,40 @@ async fn fetch_wasm(
 }
 
 async fn get_popular_manga(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path((id, page)): Path<(i64, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
     let result = state.get_popular_manga(id, page).await?;
 
-    Ok(etag_bytes_response(&headers, &result))
+    Ok(result)
 }
 
 async fn search_manga(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path((id, page)): Path<(i64, i32)>,
     Query(payload): Query<SearchMangaRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let result = state.search_manga(id, &payload.query, page).await?;
 
-    Ok(etag_bytes_response(&headers, &result))
+    Ok(result)
 }
 
 async fn get_manga_details(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     let result = state.get_manga_details(id, &manga_id).await?;
 
-    Ok(etag_bytes_response(&headers, &result))
+    Ok(result)
 }
 
 async fn get_chapter_list(
-    headers: HeaderMap,
     State(state): State<AppState>,
     Path((id, manga_id, page)): Path<(i64, String, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let result = state.get_chapter_list(id, &manga_id, page).await?;
+    let result = state.get_chapter_list_paged(id, &manga_id, page).await?;
 
-    Ok(etag_bytes_response(&headers, &result))
+    Ok(result)
 }
 
 async fn start_download(
@@ -343,6 +330,128 @@ async fn start_download(
     Ok((StatusCode::OK, Json(json!({}))))
 }
 
+async fn get_metadata(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    let result = state.get_metadata(id).await?;
+
+    Ok(result)
+}
+
+async fn save_to_library(
+    State(state): State<AppState>,
+    Path((id, manga_id)): Path<(i64, String)>,
+    Json(payload): Json<SaveToLibraryRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let exists = sqlx::query_scalar!("SELECT id FROM manga WHERE source_id = ?", manga_id)
+        .fetch_optional(&state.db)
+        .await?;
+
+    let result = state.get_manga_details(id, &manga_id).await?;
+
+    let manga = serde_json::from_str::<MangaInfo>(&result)
+        .map_err(|e| AppError::InternalServerError(format!("Failed to parse manga: {e}")))?;
+
+    let id = if exists.is_none() {
+        let mut tx = state.db.begin().await?;
+
+        let status: i64 = manga.status.into();
+
+        let result = sqlx::query!(
+            "INSERT INTO manga (source_id, source, name, cover_url, description, status, auto_download, library_path) \
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            manga.id,
+            id,
+            manga.title,
+            manga.cover_url,
+            manga.description,
+            status,
+            payload.auto_download,
+            payload.library_path)
+            .fetch_one(&mut *tx)
+            .await?;
+
+        let manga_row_id = result.id;
+
+        for author in &manga.authors {
+            sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", author)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query!(
+                "INSERT OR IGNORE INTO manga_authors (manga_id, person_id) \
+                SELECT ?, id FROM people WHERE name = ?",
+                manga_row_id,
+                author
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        for artist in &manga.artists {
+            sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", artist)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query!(
+                "INSERT OR IGNORE INTO manga_artists (manga_id, person_id) \
+                SELECT ?, id FROM people WHERE name = ?",
+                manga_row_id,
+                artist
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        for tag in &manga.tags {
+            sqlx::query!("INSERT OR IGNORE INTO tags (name) VALUES (?)", tag)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query!(
+                "INSERT OR IGNORE INTO manga_tags (manga_id, tag_id) \
+                SELECT ?, id FROM tags WHERE name = ?",
+                manga_row_id,
+                tag
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        let chapters = state.get_chapter_list(id, &manga_id).await?;
+
+        let chapter = serde_json::from_str::<ChapterList>(&chapters)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter: {e}")))?;
+
+        for chapter in chapter.chapters {
+            sqlx::query!(
+                "INSERT INTO chapters (manga_id, chapter_id, source_id, name, chapter_number, language, volume, scanlator, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                manga_row_id,
+                chapter.id,
+                id,
+                chapter.title,
+                chapter.number,
+                chapter.language,
+                chapter.volume,
+                chapter.scanlator,
+                chapter.date_uploaded
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        manga_row_id
+    } else if let Some(id) = exists {
+        id
+    } else {
+        return Err(AppError::InternalServerError(
+            "Failed to get manga id".to_string(),
+        ));
+    };
+
+    Ok(Json(json!(id)))
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/sources", get(list_sources).post(add_source))
@@ -350,11 +459,13 @@ pub fn routes() -> Router<AppState> {
             "/sources/{id}",
             get(get_source).patch(update_source).delete(delete_source),
         )
+        .route("/sources/{id}/metadata", get(get_metadata))
         .route("/sources/{id}/wasm", post(upload_wasm))
         .route("/sources/{id}/wasm/fetch", post(fetch_wasm))
         .route("/sources/{id}/popular/{page}", get(get_popular_manga))
         .route("/sources/{id}/search/{page}", get(search_manga))
         .route("/sources/{id}/details/{manga_id}", get(get_manga_details))
+        .route("/sources/{id}/save/{manga_id}", post(save_to_library))
         .route(
             "/sources/{id}/chapters/{manga_id}/{page}",
             get(get_chapter_list),

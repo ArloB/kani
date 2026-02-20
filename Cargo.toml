@@ -28,7 +28,7 @@ tower-http = { version = "0.6", features = [
 ] }
 
 # Database
-sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "chrono"] }
 
 # Async runtime
 tokio = { version = "1.49.0", features = ["full"] }
@@ -48,6 +48,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 rquest-util = "2.2.1"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+chrono = { version = "0.4.43", features = ["serde"] }
 
 [profile.release]
 opt-level = 3

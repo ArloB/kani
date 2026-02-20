@@ -5,14 +5,29 @@
 //! - The MangaExtension trait that all extensions must implement
 //! - Host ABI definitions for WASM-to-host communication
 //! - Error types for extension operations
-//!
-//! This is a lightweight crate with minimal dependencies, designed to be
-//! usable from both WASM and native contexts.
+
+pub mod types;
+pub use types::*;
+
+pub mod bindings {
+    wit_bindgen::generate!({
+        path: "../kani-core/wit/kani.wit",
+        world: "kani-extension",
+        additional_derives: [serde::Serialize, serde::Deserialize],
+        pub_export_macro: true,
+        default_bindings_module: "kani_shared::bindings",
+        with: {
+            "kani:extension/types/manga-status": crate::types::MangaStatus
+        }
+    });
+}
+
+pub use bindings::kani::extension::types::{
+    Chapter, ChapterInfo, ChapterList, ExtensionMetadata, MangaInfo, MangaList, MangaListItem, Page,
+};
+pub use bindings::kani::extension::{html, http, utility};
 
 pub mod extension;
-pub mod host_abi;
-pub mod types;
-
 pub use extension::*;
-pub use host_abi::*;
-pub use types::*;
+
+pub mod host_abi;
