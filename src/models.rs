@@ -52,39 +52,30 @@ pub struct ProxyQuery {
     pub referer: String,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct SaveToLibraryRequest {
-    pub auto_download: bool,
-    pub library_path: String,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
 pub struct Manga {
     pub id: i64,
-    pub source_id: String,
-    pub source: i64,
+    pub source_id: i64,
+    pub source_manga_id: String,
     pub name: String,
-    pub cover_url: String,
-    pub description: String,
+    pub cover_url: Option<String>,
+    pub description: Option<String>,
     #[sqlx(try_from = "i64")]
     pub status: kani_shared::MangaStatus,
-    pub auto_download: bool,
-    pub library_path: String,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
-pub struct Chapter {
-    pub id: i64,
-    pub manga_id: i64,
-    pub chapter_id: String,
-    pub source_id: i64,
-    pub name: Option<String>,
-    pub number: f64,
-    pub volume: Option<i32>,
-    pub language: String,
-    pub scanlator: Option<String>,
-    pub uploaded_at: chrono::NaiveDateTime,
-    pub download_status: i64,
-}
+// #[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
+// pub struct Chapter {
+//     pub id: i64,
+//     pub manga_id: i64,
+//     pub source_chapter_id: String,
+//     pub name: Option<String>,
+//     pub number: f64,
+//     pub volume: Option<i32>,
+//     pub language: String,
+//     pub scanlator: Option<String>,
+//     pub uploaded_at: chrono::NaiveDateTime,
+//     pub download_status: i64,
+// }

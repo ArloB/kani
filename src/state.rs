@@ -233,26 +233,25 @@ impl AppState {
         serde_json::to_string(&result).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
     }
 
-    pub async fn start_download(
-        &self,
-        id: i64,
-        manga_id: &str,
-        chapter_id: &str,
-    ) -> Result<(), AppError> {
+    pub async fn start_download(&self, chapter_id: i64) -> Result<(), AppError> {
+        let record = sqlx::query!("SELECT c.source_chapter_id, c.name, c.chapter_number, c.volume, m.source_id, m.source_manga_id, m.name as manga_name FROM chapters c join manga m on c.manga_id = m.id WHERE c.id = ?", chapter_id)
+            .fetch_optional(&self.db)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("Chapter {chapter_id} not found")))?;
+
         let chapter = {
             let source_manager = {
                 let sources = self.sources.read().await;
 
-                sources
-                    .get(&id)
-                    .cloned()
-                    .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+                sources.get(&record.source_id).cloned().ok_or_else(|| {
+                    AppError::NotFound(format!("Source {} not found", record.source_id))
+                })?
             };
 
             let chapter_generated = source_manager
                 .lease_instance()
                 .await?
-                .get_pages(manga_id, chapter_id)
+                .get_pages(&record.source_manga_id, &record.source_chapter_id)
                 .await?;
 
             let json = serde_json::to_value(&chapter_generated)
@@ -263,11 +262,15 @@ impl AppState {
 
         let library_path = self.settings.read().await.library_path.clone();
 
+        let name = record.volume.map_or_else(
+            || format!("Ch. {}", record.chapter_number),
+            |volume| format!("Vol. {volume} - Ch. {}", record.chapter_number),
+        );
+
+        let path = library_path.join(record.manga_name);
+
         self.downloader
-            .queue_chapter(
-                chapter,
-                library_path.join(/* Library system to be developed */ "test"),
-            )
+            .queue_chapter(chapter, name, path)
             .await
             .map_err(AppError::CoreError)?;
 

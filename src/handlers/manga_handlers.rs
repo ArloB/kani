@@ -2,8 +2,9 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     response::IntoResponse,
-    routing::{delete, get},
+    routing::{delete, get, post},
 };
+use rquest::StatusCode;
 use serde_json::json;
 
 use crate::error::AppError;
@@ -68,9 +69,19 @@ async fn delete_manga(
 //     Ok(Json(chapters))
 // }
 
+async fn start_download(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    state.start_download(id).await?;
+
+    Ok((StatusCode::OK, Json(json!({}))))
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/library/{page}/{order}", get(get_library))
         .route("/manga/{id}", get(get_manga))
         .route("/manga/{id}", delete(delete_manga))
+        .route("/chapter/{id}/download", post(start_download))
 }

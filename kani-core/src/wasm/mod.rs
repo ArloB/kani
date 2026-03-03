@@ -89,6 +89,11 @@ impl WasmRuntime {
         config.async_support(true);
         config.wasm_component_model(true);
 
+        let mut pool = wasmtime::PoolingAllocationConfig::default();
+        pool.total_component_instances(100);
+
+        config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(pool));
+
         let engine = Engine::new(&config)?;
         let mut linker = Linker::new(&engine);
 

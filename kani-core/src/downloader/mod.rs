@@ -14,6 +14,9 @@ use tokio::sync::{Mutex, Notify};
 use crate::error::Result;
 use crate::http::{SmartClient, SmartResponse};
 pub use progress::{DownloadProgress, ProgressEvent};
+use std::io::{Cursor, Write};
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 /// Unique identifier for a queued chapter
 pub type QueueId = u64;
@@ -30,6 +33,7 @@ pub struct QueuedChapter {
 struct DownloadTask {
     id: QueueId,
     chapter: Chapter,
+    name: String,
     save_path: PathBuf,
 }
 
@@ -103,36 +107,30 @@ impl DownloaderManager {
                 let DownloadTask {
                     id: _task_id,
                     chapter,
-                    save_path,
+                    save_path, 
+                    name 
                 } = task;
 
-                let chapter_name = chapter.chapter_name.clone();
-                let chapter_path = save_path.join(&chapter_name);
+                let cbz_path = save_path.join(format!("{}.cbz", name));
 
-                if let Err(e) = tokio::fs::create_dir_all(&chapter_path).await {
-                    tracing::error!(
-                        "Failed to create chapter directory {:?}: {}",
-                        chapter_path,
-                        e
-                    );
-                    Self::on_chapter_failed(&chapter_name, &e.to_string());
+                if let Err(e) = tokio::fs::create_dir_all(&save_path).await {
+                    tracing::error!("Failed to create base directory {:?}: {}", save_path, e);
+                    Self::on_chapter_failed(&name, &e.to_string());
                     continue;
                 }
 
-                Self::on_chapter_started(&chapter_name, chapter.pages.len());
+                Self::on_chapter_started(&name, chapter.pages.len());
 
-                let results: Vec<std::result::Result<(), String>> =
+                let results: Vec<std::result::Result<(String, Vec<u8>), String>> =
                     stream::iter(chapter.pages.into_iter())
                         .map(|page| {
                             let client = client.clone();
-                            let chapter_path = chapter_path.clone();
-                            let chapter_name = chapter_name.clone();
+                            let name = name.clone();
 
                             async move {
                                 let result = Self::download_page_with_retry(
                                     &client,
                                     &page.url,
-                                    chapter_path,
                                     page.index,
                                     max_retries,
                                     initial_retry_delay_ms,
@@ -140,9 +138,9 @@ impl DownloaderManager {
                                 .await;
 
                                 match &result {
-                                    Ok(_) => Self::on_page_completed(&chapter_name, page.index),
+                                    Ok(_) => Self::on_page_completed(&name, page.index),
                                     Err(e) => Self::on_page_failed(
-                                        &chapter_name,
+                                        &name,
                                         page.index,
                                         &e.to_string(),
                                     ),
@@ -155,24 +153,70 @@ impl DownloaderManager {
                         .collect()
                         .await;
 
-                let (successful, failed): (Vec<_>, Vec<_>) =
+                let (mut successful, failed): (Vec<_>, Vec<_>) =
                     results.into_iter().partition(std::result::Result::is_ok);
 
                 if failed.is_empty() {
-                    Self::on_chapter_completed(&chapter_name, successful.len());
+                    successful.sort_by(|a, b| {
+                        let a_val = a.as_ref().unwrap();
+                        let b_val = b.as_ref().unwrap();
+                        a_val.0.cmp(&b_val.0)
+                    });
+
+                    let mut archive = Cursor::new(Vec::new());
+                    {
+                        let mut zip = ZipWriter::new(&mut archive);
+                        let options = SimpleFileOptions::default()
+                            .compression_method(zip::CompressionMethod::Stored);
+
+                        let mut zip_failed = false;
+                        for (filename, bytes) in successful.iter().flatten() {
+                            if let Err(e) = zip.start_file(filename, options) {
+                                tracing::error!("Failed to start file in zip: {}", e);
+                                zip_failed = true;
+                                break;
+                            }
+                            if let Err(e) = zip.write_all(bytes) {
+                                tracing::error!("Failed to write to zip: {}", e);
+                                zip_failed = true;
+                                break;
+                            }
+                        }
+
+                        if !zip_failed && zip.finish().is_err() {
+                            tracing::error!("Failed to finish zip archive");
+                            zip_failed = true;
+                        }
+
+                        if zip_failed {
+                            Self::on_chapter_failed(
+                                &name,
+                                "Failed to assemble zip archive",
+                            );
+                            continue;
+                        }
+                    }
+
+                    if let Err(e) = tokio::fs::write(&cbz_path, archive.into_inner()).await {
+                        tracing::error!("Failed to save .cbz file {:?}: {}", cbz_path, e);
+                        Self::on_chapter_failed(&name, &e.to_string());
+                        continue;
+                    }
+
+                    Self::on_chapter_completed(&name, successful.len());
                     tracing::info!(
-                        "Chapter '{}' completed: {} pages downloaded",
-                        chapter_name,
+                        "Chapter '{}' completed: {} pages downloaded to .cbz",
+                        name,
                         successful.len()
                     );
                 } else {
                     Self::on_chapter_failed(
-                        &chapter_name,
+                        &name,
                         &format!("{} pages failed", failed.len()),
                     );
                     tracing::warn!(
                         "Chapter '{}' completed with errors: {}/{} pages successful",
-                        chapter_name,
+                        name,
                         successful.len(),
                         successful.len() + failed.len()
                     );
@@ -184,13 +228,14 @@ impl DownloaderManager {
     }
 
     /// Queue a chapter for download, returns the queue ID
-    pub async fn queue_chapter(&self, chapter: Chapter, save_path: PathBuf) -> Result<QueueId> {
+    pub async fn queue_chapter(&self, chapter: Chapter, name: String, save_path: PathBuf) -> Result<QueueId> {
         let id = {
             let mut state = self.queue.lock().await;
             let id = state.generate_id();
             state.queue.push_back(DownloadTask {
                 id,
                 chapter,
+                name,
                 save_path,
             });
             id
@@ -210,7 +255,7 @@ impl DownloaderManager {
             .iter()
             .map(|task| QueuedChapter {
                 id: task.id,
-                chapter_name: task.chapter.chapter_name.clone(),
+                chapter_name: task.name.clone(),
                 page_count: task.chapter.pages.len(),
                 save_path: task.save_path.clone(),
             })
@@ -237,17 +282,16 @@ impl DownloaderManager {
     async fn download_page_with_retry(
         client: &SmartClient,
         url: &str,
-        chapter_path: PathBuf,
         page_index: i32,
         max_retries: i64,
         initial_retry_delay_ms: i64,
-    ) -> Result<()> {
+    ) -> Result<(String, Vec<u8>)> {
         let mut attempts = 0;
         let mut delay = Duration::from_millis(initial_retry_delay_ms.try_into()?);
 
         loop {
-            match Self::download_page(client, url, &chapter_path, page_index).await {
-                Ok(_) => return Ok(()),
+            match Self::download_page(client, url, page_index).await {
+                Ok(data) => return Ok(data),
                 Err(e) => {
                     attempts += 1;
                     if attempts >= max_retries {
@@ -278,17 +322,16 @@ impl DownloaderManager {
     async fn download_page(
         client: &SmartClient,
         url: &str,
-        chapter_path: &std::path::Path,
         page: i32,
-    ) -> Result<()> {
+    ) -> Result<(String, Vec<u8>)> {
         let resp = client.get(url).await?;
 
         let extension = Self::get_image_extension(&resp, url);
 
         let body = resp.bytes().await?;
-        tokio::fs::write(chapter_path.join(format!("{}.{}", page, extension)), body).await?;
+        let filename = format!("{:04}.{}", page, extension);
 
-        Ok(())
+        Ok((filename, body.to_vec()))
     }
 
     fn get_image_extension(resp: &SmartResponse, url: &str) -> &'static str {

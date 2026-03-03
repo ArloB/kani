@@ -97,8 +97,7 @@ interface types {
     }
 
     record chapter {
-        chapter-name: string,
-        pages: list<page>,
+        pages: list<page>
     }
 
     record extension-metadata {

@@ -9,10 +9,7 @@ use serde_json::json;
 
 use crate::{
     error::AppError,
-    models::{
-        CreateSource, FetchWasmRequest, SaveToLibraryRequest, SearchMangaRequest, Source,
-        UpdateSource,
-    },
+    models::{CreateSource, FetchWasmRequest, SearchMangaRequest, Source, UpdateSource},
     state::AppState,
 };
 use kani_core::source_manager::SourceManager;
@@ -321,15 +318,6 @@ async fn get_chapter_list(
     Ok(result)
 }
 
-async fn start_download(
-    State(state): State<AppState>,
-    Path((id, manga_id, chapter_id)): Path<(i64, String, String)>,
-) -> Result<impl IntoResponse, AppError> {
-    state.start_download(id, &manga_id, &chapter_id).await?;
-
-    Ok((StatusCode::OK, Json(json!({}))))
-}
-
 async fn get_metadata(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -342,11 +330,14 @@ async fn get_metadata(
 async fn save_to_library(
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
-    Json(payload): Json<SaveToLibraryRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let exists = sqlx::query_scalar!("SELECT id FROM manga WHERE source_id = ?", manga_id)
-        .fetch_optional(&state.db)
-        .await?;
+    let exists: Option<i64> =
+        sqlx::query_scalar("SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?")
+            .bind(&manga_id)
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?
+            .flatten();
 
     let result = state.get_manga_details(id, &manga_id).await?;
     let chapters = state.get_chapter_list(id, &manga_id).await?;
@@ -355,7 +346,7 @@ async fn save_to_library(
         .map_err(|e| AppError::InternalServerError(format!("Failed to parse manga: {e}")))?;
 
     let chapter = serde_json::from_str::<ChapterList>(&chapters)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter: {e}")))?;
+        .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter: {e}")))?;
 
     let id = if exists.is_none() {
         let mut tx = state.db.begin().await?;
@@ -363,18 +354,17 @@ async fn save_to_library(
         let status: i64 = manga.status.into();
 
         let result = sqlx::query!(
-            "INSERT INTO manga (source_id, source, name, cover_url, description, status, auto_download, library_path) \
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO manga (source_manga_id, source_id, name, cover_url, description, status) \
+            VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
             manga.id,
             id,
             manga.title,
             manga.cover_url,
             manga.description,
-            status,
-            payload.auto_download,
-            payload.library_path)
-            .fetch_one(&mut *tx)
-            .await?;
+            status
+        )
+        .fetch_one(&mut *tx)
+        .await?;
 
         let manga_row_id = result.id;
 
@@ -422,10 +412,9 @@ async fn save_to_library(
 
         for chapter in chapter.chapters {
             sqlx::query!(
-                "INSERT INTO chapters (manga_id, chapter_id, source_id, name, chapter_number, language, volume, scanlator, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO chapters (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 manga_row_id,
                 chapter.id,
-                id,
                 chapter.title,
                 chapter.number,
                 chapter.language,
@@ -440,6 +429,7 @@ async fn save_to_library(
         tx.commit().await?;
 
         manga_row_id
+            .ok_or_else(|| AppError::InternalServerError("Failed to get manga id".to_string()))?
     } else if let Some(id) = exists {
         id
     } else {
@@ -468,9 +458,5 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/sources/{id}/chapters/{manga_id}/{page}",
             get(get_chapter_list),
-        )
-        .route(
-            "/sources/{id}/download/{manga_id}/{chapter_id}",
-            post(start_download),
         )
 }

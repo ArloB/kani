@@ -2,20 +2,26 @@ PRAGMA foreign_keys = OFF;
 
 CREATE TABLE manga_new (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_id   TEXT    NOT NULL,
-    source      INTEGER NOT NULL,
+    source_id   INTEGER    NOT NULL,
+    source_manga_id TEXT NOT NULL,
     name        TEXT    NOT NULL,
-    cover_url   TEXT    NOT NULL,
-    description TEXT    NOT NULL,
+    cover_url   TEXT,
+    description TEXT,
     status      INTEGER NOT NULL,
-    auto_download BOOLEAN NOT NULL DEFAULT 0,
-    library_path  TEXT    NOT NULL,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE,
+    UNIQUE (source_id, source_manga_id)
 );
 
-INSERT INTO manga_new (id, source_id, source, name, cover_url, description, status, auto_download, library_path, created_at, updated_at)
-SELECT id, CAST(source_id AS TEXT), source_id, name, cover_url, description, status, auto_download, library_path, created_at, updated_at
+CREATE INDEX idx_manga_name ON manga_new(name);
+
+CREATE INDEX idx_manga_updated ON manga_new(updated_at DESC);
+
+CREATE INDEX idx_manga_source ON manga_new(source_id);
+
+INSERT INTO manga_new (id, source_id, name, cover_url, description, status, created_at, updated_at)
+SELECT id, source_id, name, cover_url, description, status, created_at, updated_at
 FROM manga;
 
 DROP TABLE manga;
