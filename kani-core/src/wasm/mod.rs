@@ -32,6 +32,19 @@ pub struct ResponseData {
     pub status: u16,
 }
 
+pub struct SendHtml(pub scraper::Html);
+unsafe impl Send for SendHtml {}
+
+impl SendHtml {
+    pub fn parse_document(html: &str) -> Self {
+        Self(scraper::Html::parse_document(html))
+    }
+
+    pub fn parse_fragment(html: &str) -> Self {
+        Self(scraper::Html::parse_fragment(html))
+    }
+}
+
 use crate::http::SmartClient;
 
 /// Host state passed to WASM guest via Store.
@@ -39,8 +52,8 @@ use crate::http::SmartClient;
 pub struct HostState {
     pub http_client: SmartClient,
     pub next_doc_handle: i32,
-    pub html_docs: HashMap<i32, String>,
-    pub html_lists: HashMap<i32, Vec<String>>,
+    pub html_docs: HashMap<i32, SendHtml>,
+    pub html_lists: HashMap<i32, Vec<SendHtml>>,
     pub last_error: Option<i32>,
 }
 
