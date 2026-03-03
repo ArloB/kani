@@ -1,10 +1,10 @@
-use crate::api::fetch_sources;
+use crate::server_fns::fetch_sources;
 use leptos::prelude::*;
 use leptos_router::components::A;
 
 #[component]
 pub fn Home() -> impl IntoView {
-    let sources = LocalResource::new(|| async move { fetch_sources().await });
+    let sources = Resource::new(|| (), |_| fetch_sources());
 
     view! {
         <h1>"Sources"</h1>

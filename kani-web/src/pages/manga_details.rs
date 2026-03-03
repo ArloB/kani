@@ -1,4 +1,5 @@
-use crate::api::{get_chapter_list, get_manga_details};
+use crate::server_fns::{fetch_sources, get_chapter_list, get_manga_details, proxy_url, save_to_library};
+use crate::types::ChapterList;
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
@@ -20,97 +21,122 @@ pub fn MangaDetails() -> impl IntoView {
 
     let (page, set_page) = signal(1);
 
-    let manga = LocalResource::new(move || {
-        let sid = source_id();
-        let mid = manga_id();
-        async move {
-            let manga = get_manga_details(sid, &mid).await;
-            let sources = crate::api::fetch_sources().await.unwrap_or_default();
-            let source = sources.iter().find(|s| s.id == sid).cloned();
+    let manga = Resource::new(
+        move || (source_id(), manga_id()),
+        move |(sid, mid)| async move {
+            let manga = get_manga_details(sid, mid.clone()).await;
+            let sources = fetch_sources().await.unwrap_or_default();
+            let source = sources.into_iter().find(|s| s.id == sid);
 
             match (manga, source) {
                 (Ok(m), Some(s)) => Ok((m, s)),
                 (Err(e), _) => Err(e),
-                (_, None) => Err(crate::api::ApiError::NotFound(
-                    "Source not found".to_string(),
+                (_, None) => Err(leptos::server_fn::error::ServerFnError::new(
+                    "Source not found",
                 )),
             }
-        }
-    });
+        },
+    );
 
-    let chapters = LocalResource::new(move || {
-        let sid = source_id();
-        let mid = manga_id();
-        let p = page.get();
-        async move { get_chapter_list(sid, &mid, p).await }
-    });
+    let chapters = Resource::new(
+        move || (source_id(), manga_id(), page.get()),
+        move |(sid, mid, p)| async move { get_chapter_list(sid, mid, p).await },
+    );
+
+    let (library_pending, set_library_pending) = signal(false);
 
     view! {
         <div class="manga-details">
             <Suspense fallback=move || view! { <p>"Loading details..."</p> }>
                 {move || {
                     manga.get().map(|res| match res {
-                        Ok((info, source)) => view! {
-                            <div class="details-header">
-                                <h1>{info.title.clone()}</h1>
-                                <div class="cover">
-                                    {match info.cover_url {
-                                        Some(url) => view! { <img src=crate::api::proxy_url(&url, &source.base_url) alt=info.title.clone() style="max-width: 300px" /> }.into_any(),
-                                        None => view! { <div class="no-cover">"No Cover"</div> }.into_any(),
-                                    }}
-                                </div>
-                                <div class="info">
-                                    <div class="details">
-                                        <div class="status">
-                                            <p>"Status: "{info.status.to_string()}</p>
-                                        </div>
-                                        <div class="people">
-                                            <div class="authors">
-                                                <p>"Author: "</p>
-                                                <For 
-                                                    each=move || info.authors.clone()
-                                                    key=|author| author.clone()
-                                                    children=move |author| view! {
-                                                        <div class="author">
-                                                            <A href=format!("/search?author={}", author)>{author}</A>
+                        Ok((info, source)) => {
+                            let sid = source_id();
+                            let mid = manga_id();
+                            let base_url = source.base_url.clone();
+                            let info_title = info.title.clone();
+                            let info_cover = info.cover_url.clone();
+                            let info_status = info.status.to_string();
+                            let info_authors = info.authors.clone();
+                            let info_artists = info.artists.clone();
+                            let info_tags = info.tags.clone();
+                            let info_description = info.description.clone();
+                            view! {
+                                <div class="details-header">
+                                    <h1>{info.title.clone()}</h1>
+                                    <div class="cover">
+                                        {match info_cover {
+                                            Some(url) => {
+                                                let src = proxy_url(&url, &base_url);
+                                                view! { <img src=src alt=info_title style="max-width: 300px" /> }.into_any()
+                                            },
+                                            None => view! { <div class="no-cover">"No Cover"</div> }.into_any(),
+                                        }}
+                                    </div>
+                                    <div class="info">
+                                        <div class="details">
+                                            <div class="status">
+                                                <p>"Status: " {info_status}</p>
+                                            </div>
+                                            <div class="people">
+                                                <div class="authors">
+                                                    <p>"Author: "</p>
+                                                    <For
+                                                        each=move || info_authors.clone()
+                                                        key=|author: &String| author.clone()
+                                                        children=move |author: String| view! {
+                                                            <div class="author">
+                                                                <A href=format!("/search?author={}", author)>{author}</A>
+                                                            </div>
+                                                        }
+                                                    />
+                                                </div>
+                                                <div class="artists">
+                                                    <p>"Artist: "</p>
+                                                    <For
+                                                        each=move || info_artists.clone()
+                                                        key=|artist: &String| artist.clone()
+                                                        children=move |artist: String| view! {
+                                                            <div class="artist">
+                                                                <A href=format!("/search?artist={}", artist)>{artist}</A>
+                                                            </div>
+                                                        }
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div class="tags">
+                                                <For
+                                                    each=move || info_tags.clone()
+                                                    key=|tag: &String| tag.clone()
+                                                    children=move |tag: String| view! {
+                                                        <div class="tag">
+                                                            <A href=format!("/search?tag={}", tag)>{tag}</A>
                                                         </div>
                                                     }
                                                 />
                                             </div>
-                                            <div class="artists">
-                                                <p>"Artist: "</p>
-                                                <For 
-                                                    each=move || info.artists.clone()
-                                                    key=|artist| artist.clone()
-                                                    children=move |artist| view! {
-                                                        <div class="artist">
-                                                            <A href=format!("/search?artist={}", artist)>{artist}</A>
-                                                        </div>
-                                                    }
-                                                />
-                                            </div>
-                                        </div>
-                                        <div class="tags">
-                                            <For
-                                                each=move || info.tags.clone()
-                                                key=|tag| tag.clone()
-                                                children=move |tag| view! { 
-                                                    <div class="tag">
-                                                        <A href=format!("/search?tag={}", tag)>{tag}</A>
-                                                    </div>
+                                            <button
+                                                class="add-to-library"
+                                                disabled=library_pending
+                                                on:click=move |_| {
+                                                    let m = mid.clone();
+                                                    set_library_pending.set(true);
+                                                    leptos::task::spawn_local(async move {
+                                                        let _ = save_to_library(sid, m).await;
+                                                        set_library_pending.set(false);
+                                                    });
                                                 }
-                                            />
-                                        </div>
-                                        <button class="add-to-library">
-                                            "Add to Library"
-                                        </button>
-                                        <div class="description">
-                                            <p>{info.description}</p>
+                                            >
+                                                {move || if library_pending.get() { "Saving..." } else { "Add to Library" }}
+                                            </button>
+                                            <div class="description">
+                                                <p>{info_description}</p>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        }.into_any(),
+                            }.into_any()
+                        },
                         Err(e) => view! { <p class="error">"Error: " {e.to_string()}</p> }.into_any(),
                     })
                 }}
@@ -118,7 +144,7 @@ pub fn MangaDetails() -> impl IntoView {
 
             <Suspense fallback=move || view! { <p>"Loading chapters..."</p> }>
                 {move || {
-                    chapters.get().map(|res| match res {
+                    chapters.get().map(|res: Result<ChapterList, ServerFnError>| match res {
                         Ok(list) => {
                             let list_chapters = list.clone();
                             let list_pagination = list.clone();
@@ -140,10 +166,11 @@ pub fn MangaDetails() -> impl IntoView {
                                                                     title_str.push_str(&format!("Vol. {} ", vol));
                                                                 }
                                                                 title_str.push_str(&format!("Ch. {}", chapter.number));
-                                                                if let Some(title) = &chapter.title
-                                                                    && !title.is_empty() {
+                                                                if let Some(title) = &chapter.title {
+                                                                    if !title.is_empty() {
                                                                         title_str.push_str(&format!(" - {}", title));
                                                                     }
+                                                                }
                                                                 title_str
                                                             }}
                                                         </span>
@@ -158,7 +185,9 @@ pub fn MangaDetails() -> impl IntoView {
                                                         }</span>
                                                     </div>
                                                     <div class="chapter-actions">
-                                                        <button class="download-button">"Download"</button>
+                                                        <button class="download-button">
+                                                            "Download"
+                                                        </button>
                                                     </div>
                                                 </div>
                                             }

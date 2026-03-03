@@ -30,7 +30,7 @@ impl AppState {
             .connect("sqlite://kani.db?mode=rwc")
             .await?;
 
-        sqlx::migrate!().run(&pool).await?;
+        sqlx::migrate!("../migrations").run(&pool).await?;
 
         let mut sources_map = std::collections::HashMap::new();
 

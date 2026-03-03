@@ -1,4 +1,4 @@
-use crate::api::{get_popular_manga, search_manga};
+use crate::server_fns::{fetch_sources, get_popular_manga, proxy_url, search_manga};
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
@@ -19,29 +19,27 @@ pub fn SourceDetails() -> impl IntoView {
     let (page, set_page) = signal(1);
     let (query, set_query) = signal("".to_string());
 
-    let manga_list = LocalResource::new(move || {
-        let sid = id();
-        let p = page.get();
-        let q = query.get();
-        async move {
-            let sources = crate::api::fetch_sources().await.unwrap_or_default();
-            let source = sources.iter().find(|s| s.id == sid).cloned();
+    let manga_list = Resource::new(
+        move || (id(), page.get(), query.get()),
+        move |(sid, p, q)| async move {
+            let sources = fetch_sources().await.unwrap_or_default();
+            let source = sources.into_iter().find(|s| s.id == sid);
 
             let list = if q.is_empty() {
                 get_popular_manga(sid, p).await
             } else {
-                search_manga(sid, &q, p).await
+                search_manga(sid, q, p).await
             };
 
             match (list, source) {
                 (Ok(l), Some(s)) => Ok((l, s)),
                 (Err(e), _) => Err(e),
-                (_, None) => Err(crate::api::ApiError::NotFound(
-                    "Source not found".to_string(),
+                (_, None) => Err(leptos::server_fn::error::ServerFnError::new(
+                    "Source not found",
                 )),
             }
-        }
-    });
+        },
+    );
 
     let (input_value, set_input_value) = signal("".to_string());
 

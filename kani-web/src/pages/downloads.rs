@@ -1,8 +1,5 @@
-use kani_shared::DownloadProgressEvent;
 use leptos::prelude::*;
 use std::collections::HashMap;
-use wasm_bindgen::prelude::*;
-use web_sys::{EventSource, MessageEvent};
 
 /// Live per-chapter progress tracking for downloads.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,87 +32,95 @@ pub fn DownloadProgress() -> impl IntoView {
     let chapters = RwSignal::new(HashMap::<String, ChapterProgress>::new());
 
     Effect::new(move |_| {
-        let es = match EventSource::new("/api/downloads/progress") {
-            Ok(es) => es,
-            Err(e) => {
-                log::error!("Failed to open EventSource: {:?}", e);
-                return;
-            }
-        };
+        #[cfg(feature = "hydrate")]
+        {
+            use crate::events::DownloadProgressEvent;
 
-        let chapters_signal = chapters;
-        let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |msg: MessageEvent| {
-            let data = match msg.data().as_string() {
-                Some(d) => d,
-                None => return,
-            };
+            use wasm_bindgen::prelude::*;
+            use web_sys::{EventSource, MessageEvent};
 
-            let event: DownloadProgressEvent = match serde_json::from_str(&data) {
-                Ok(e) => e,
+            let es = match EventSource::new("/api/downloads/progress") {
+                Ok(es) => es,
                 Err(e) => {
-                    log::warn!("Failed to parse download event: {e}");
+                    log::error!("Failed to open EventSource: {:?}", e);
                     return;
                 }
             };
 
-            chapters_signal.update(|map| match event {
-                DownloadProgressEvent::ChapterStarted {
-                    chapter_name,
-                    total_pages,
-                } => {
-                    map.insert(
-                        chapter_name.clone(),
-                        ChapterProgress {
-                            name: chapter_name,
-                            total_pages,
-                            completed_pages: 0,
-                            failed_pages: 0,
-                            status: ChapterStatus::InProgress,
-                        },
-                    );
-                }
-                DownloadProgressEvent::PageCompleted { chapter_name, .. } => {
-                    if let Some(c) = map.get_mut(&chapter_name) {
-                        c.completed_pages += 1;
+            let chapters_signal = chapters;
+            let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |msg: MessageEvent| {
+                let data = match msg.data().as_string() {
+                    Some(d) => d,
+                    None => return,
+                };
+
+                let event: DownloadProgressEvent = match serde_json::from_str(&data) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        log::warn!("Failed to parse download event: {e}");
+                        return;
                     }
-                }
-                DownloadProgressEvent::PageFailed { chapter_name, .. } => {
-                    if let Some(c) = map.get_mut(&chapter_name) {
-                        c.failed_pages += 1;
+                };
+
+                chapters_signal.update(|map| match event {
+                    DownloadProgressEvent::ChapterStarted {
+                        chapter_name,
+                        total_pages,
+                    } => {
+                        map.insert(
+                            chapter_name.clone(),
+                            ChapterProgress {
+                                name: chapter_name,
+                                total_pages,
+                                completed_pages: 0,
+                                failed_pages: 0,
+                                status: ChapterStatus::InProgress,
+                            },
+                        );
                     }
-                }
-                DownloadProgressEvent::ChapterCompleted {
-                    chapter_name,
-                    successful_pages,
-                    failed_pages,
-                    ..
-                } => {
-                    if let Some(c) = map.get_mut(&chapter_name) {
-                        c.completed_pages = successful_pages;
-                        c.failed_pages = failed_pages;
-                        c.status = ChapterStatus::Completed;
+                    DownloadProgressEvent::PageCompleted { chapter_name, .. } => {
+                        if let Some(c) = map.get_mut(&chapter_name) {
+                            c.completed_pages += 1;
+                        }
                     }
-                }
-                DownloadProgressEvent::ChapterFailed {
-                    chapter_name,
-                    error,
-                } => {
-                    if let Some(c) = map.get_mut(&chapter_name) {
-                        c.status = ChapterStatus::Failed(error);
+                    DownloadProgressEvent::PageFailed { chapter_name, .. } => {
+                        if let Some(c) = map.get_mut(&chapter_name) {
+                            c.failed_pages += 1;
+                        }
                     }
-                }
+                    DownloadProgressEvent::ChapterCompleted {
+                        chapter_name,
+                        successful_pages,
+                        failed_pages,
+                        ..
+                    } => {
+                        if let Some(c) = map.get_mut(&chapter_name) {
+                            c.completed_pages = successful_pages;
+                            c.failed_pages = failed_pages;
+                            c.status = ChapterStatus::Completed;
+                        }
+                    }
+                    DownloadProgressEvent::ChapterFailed {
+                        chapter_name,
+                        error,
+                    } => {
+                        if let Some(c) = map.get_mut(&chapter_name) {
+                            c.status = ChapterStatus::Failed(error);
+                        }
+                    }
+                });
             });
-        });
 
-        es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-        on_message.forget();
+            es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+            on_message.forget();
 
-        let es_clone = es.clone();
-        on_cleanup(move || {
-            es_clone.close();
-        });
+            let es_clone = es.clone();
+            on_cleanup(move || {
+                es_clone.close();
+            });
 
-        drop(es);
+            drop(es);
+        }
     });
 
     let dismiss = move |name: String| {
@@ -151,8 +156,8 @@ pub fn DownloadProgress() -> impl IntoView {
                                 let is_done = !matches!(chapter.status, ChapterStatus::InProgress);
                                 let bar_class = match &chapter.status {
                                     ChapterStatus::InProgress => "progress-bar progress-bar--active",
-                                    ChapterStatus::Completed => "progress-bar progress-bar--done",
-                                    ChapterStatus::Failed(_) => "progress-bar progress-bar--failed",
+                                    ChapterStatus::Completed  => "progress-bar progress-bar--done",
+                                    ChapterStatus::Failed(_)  => "progress-bar progress-bar--failed",
                                 };
                                 let status_text = match &chapter.status {
                                     ChapterStatus::InProgress => format!(
@@ -160,8 +165,8 @@ pub fn DownloadProgress() -> impl IntoView {
                                         chapter.completed_pages + chapter.failed_pages,
                                         chapter.total_pages
                                     ),
-                                    ChapterStatus::Completed => "Complete".to_string(),
-                                    ChapterStatus::Failed(e) => format!("Failed: {e}"),
+                                    ChapterStatus::Completed  => "Complete".to_string(),
+                                    ChapterStatus::Failed(e)  => format!("Failed: {e}"),
                                 };
                                 view! {
                                     <div class="download-item">
