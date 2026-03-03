@@ -1,7 +1,7 @@
 use crate::error::Result;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use arc_swap::ArcSwap;
 
 const MAX_RETRIES: u32 = 3;
 const BASE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
@@ -62,7 +62,7 @@ impl SmartResponse {
 #[derive(Clone)]
 pub struct SmartClient {
     client: rquest::Client,
-    credentials: Arc<Mutex<CachedCredentials>>,
+    credentials: Arc<ArcSwap<CachedCredentials>>,
     solver_url: Option<String>,
 }
 
@@ -75,7 +75,7 @@ impl SmartClient {
 
         Ok(Self {
             client,
-            credentials: Arc::new(Mutex::new(CachedCredentials::default())),
+            credentials: Arc::new(ArcSwap::from_pointee(CachedCredentials::default())),
             solver_url,
         })
     }
@@ -83,7 +83,7 @@ impl SmartClient {
     pub async fn send_request(&self, request: rquest::Request) -> Result<SmartResponse> {
         let mut request = request;
 
-        let creds = self.credentials.lock().await.clone();
+        let creds = self.credentials.load();
         if !creds.cookies.is_empty() {
             request.headers_mut().insert(
                 rquest::header::COOKIE,
@@ -101,13 +101,11 @@ impl SmartClient {
         let mut attempt = 0;
 
         loop {
-            // Create a clone for potential retries (429 or solver fallback)
             let request_clone_for_retry = current_request.try_clone();
 
             let resp = self.client.execute(current_request).await?;
             let status = resp.status();
 
-            // Handle 429 Too Many Requests
             if status == rquest::StatusCode::TOO_MANY_REQUESTS {
                 if attempt < MAX_RETRIES
                     && let Some(next_req) = request_clone_for_retry
@@ -189,11 +187,12 @@ impl SmartClient {
 
                 let (new_cookies, new_ua) = self.solve_challenge(&url).await?;
 
-                {
-                    let mut creds = self.credentials.lock().await;
-                    creds.cookies = new_cookies.clone();
-                    creds.user_agent = Some(new_ua.clone());
-                }
+                let new_creds = CachedCredentials {
+                    cookies: new_cookies.clone(),
+                    user_agent: Some(new_ua.clone()),
+                };
+
+                self.credentials.store(Arc::new(new_creds));
 
                 if let Some(mut request) = request_clone_for_retry {
                     request.headers_mut().insert(
