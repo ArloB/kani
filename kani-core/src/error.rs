@@ -8,6 +8,9 @@ pub enum Error {
     #[error("Internal error: {0}")]
     Internal(String),
 
+    #[error("Path traversal blocked: {0}")]
+    PathTraversal(String),
+
     #[error("Not found: {0}")]
     NotFound(String),
 

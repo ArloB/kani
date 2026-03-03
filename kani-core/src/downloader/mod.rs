@@ -2,19 +2,18 @@
 
 mod progress;
 
+use crate::error::Result;
+use crate::http::{SmartClient, SmartResponse};
 use futures::stream::{self, StreamExt};
 use kani_shared::Chapter;
+pub use progress::{DownloadProgress, ProgressEvent};
 use std::collections::VecDeque;
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::sync::{Mutex, Notify};
-
-use crate::error::Result;
-use crate::http::{SmartClient, SmartResponse};
-pub use progress::{DownloadProgress, ProgressEvent};
-use std::io::{Cursor, Write};
+use tokio::sync::{Mutex, Notify, oneshot};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
@@ -63,7 +62,7 @@ pub struct DownloaderManager {
 }
 
 impl DownloaderManager {
-    pub fn new(
+    pub async fn new(
         solver_url: &str,
         concurrent_page_downloads: usize,
         _chapter_queue_size: usize, // Reserved for future use (e.g., backpressure limits)
@@ -72,6 +71,7 @@ impl DownloaderManager {
     ) -> Result<Self> {
         let queue = Arc::new(Mutex::new(QueueState::new()));
         let notify = Arc::new(Notify::new());
+        let (tx, rx) = oneshot::channel::<Result<()>>();
 
         let queue_clone = queue.clone();
         let notify_clone = notify.clone();
@@ -83,9 +83,16 @@ impl DownloaderManager {
 
         tokio::spawn(async move {
             let client = match SmartClient::new(solver_url) {
-                Ok(client) => client,
+                Ok(client) => {
+                    let _ = tx.send(Ok(()));
+                    client
+                }
                 Err(e) => {
                     tracing::error!("Failed to create download client: {}", e);
+                    let _ = tx.send(Err(crate::error::Error::Internal(format!(
+                        "Failed to create download client: {}",
+                        e
+                    ))));
                     return;
                 }
             };
@@ -107,8 +114,8 @@ impl DownloaderManager {
                 let DownloadTask {
                     id: _task_id,
                     chapter,
-                    save_path, 
-                    name 
+                    save_path,
+                    name,
                 } = task;
 
                 let cbz_path = save_path.join(format!("{}.cbz", name));
@@ -139,11 +146,9 @@ impl DownloaderManager {
 
                                 match &result {
                                     Ok(_) => Self::on_page_completed(&name, page.index),
-                                    Err(e) => Self::on_page_failed(
-                                        &name,
-                                        page.index,
-                                        &e.to_string(),
-                                    ),
+                                    Err(e) => {
+                                        Self::on_page_failed(&name, page.index, &e.to_string())
+                                    }
                                 }
 
                                 result.map_err(|e| e.to_string())
@@ -189,10 +194,7 @@ impl DownloaderManager {
                         }
 
                         if zip_failed {
-                            Self::on_chapter_failed(
-                                &name,
-                                "Failed to assemble zip archive",
-                            );
+                            Self::on_chapter_failed(&name, "Failed to assemble zip archive");
                             continue;
                         }
                     }
@@ -210,10 +212,7 @@ impl DownloaderManager {
                         successful.len()
                     );
                 } else {
-                    Self::on_chapter_failed(
-                        &name,
-                        &format!("{} pages failed", failed.len()),
-                    );
+                    Self::on_chapter_failed(&name, &format!("{} pages failed", failed.len()));
                     tracing::warn!(
                         "Chapter '{}' completed with errors: {}/{} pages successful",
                         name,
@@ -224,11 +223,22 @@ impl DownloaderManager {
             }
         });
 
+        rx.await.map_err(|_| {
+            crate::error::Error::Internal(
+                "Downloader worker task panicked during initialization".to_string(),
+            )
+        })??;
+
         Ok(Self { queue, notify })
     }
 
     /// Queue a chapter for download, returns the queue ID
-    pub async fn queue_chapter(&self, chapter: Chapter, name: String, save_path: PathBuf) -> Result<QueueId> {
+    pub async fn queue_chapter(
+        &self,
+        chapter: Chapter,
+        name: String,
+        save_path: PathBuf,
+    ) -> Result<QueueId> {
         let id = {
             let mut state = self.queue.lock().await;
             let id = state.generate_id();

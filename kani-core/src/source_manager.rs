@@ -15,6 +15,7 @@ pub struct SourceManager {
     pool: Arc<Mutex<Vec<SourceInstance>>>,
     semaphore: Arc<Semaphore>,
     solver_url: Option<String>,
+    base_url: Option<String>,
     min_idle: usize,
 }
 
@@ -24,6 +25,7 @@ impl SourceManager {
         component: Component,
         linker: Linker<HostState>,
         solver_url: Option<String>,
+        base_url: Option<String>,
         pool_size: usize,
         min_idle: usize,
     ) -> Result<Self> {
@@ -33,7 +35,7 @@ impl SourceManager {
         {
             let mut locked = pool.lock().await;
             for _ in 0..min_idle.min(pool_size) {
-                let mut inst = SourceInstance::new(solver_url.clone());
+                let mut inst = SourceInstance::new(solver_url.clone(), base_url.clone());
                 inst.load(&engine, &component, &linker).await?;
                 locked.push(inst);
             }
@@ -46,6 +48,7 @@ impl SourceManager {
             pool,
             semaphore: Arc::new(Semaphore::new(pool_size)),
             solver_url,
+            base_url,
             min_idle,
         })
     }
@@ -66,7 +69,7 @@ impl SourceManager {
         let instance = match instance {
             Some(inst) => inst,
             None => {
-                let mut inst = SourceInstance::new(self.solver_url.clone());
+                let mut inst = SourceInstance::new(self.solver_url.clone(), self.base_url.clone());
                 inst.load(&self.engine, &self.component, &self.linker)
                     .await?;
                 inst

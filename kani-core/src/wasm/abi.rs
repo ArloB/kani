@@ -6,6 +6,8 @@
 use super::{HostState, SendHtml};
 use crate::wasm::kani::extension::{html, http, types, utility};
 
+const MAX_HTTP_RESPONSE_BYTES: usize = 5 * 1024 * 1024; // 5 MB
+
 impl http::Host for HostState {
     async fn send(&mut self, req: http::Request) -> wasmtime::Result<http::Response, String> {
         let method = match req.method {
@@ -19,6 +21,16 @@ impl http::Host for HostState {
             Ok(u) => u,
             Err(e) => return Err(format!("Invalid URL: {}", e)),
         };
+
+        if let Some(allowed) = &self.allowed_host {
+            let req_host = url.host_str().unwrap_or("");
+            if req_host != allowed {
+                return Err(format!(
+                    "Request blocked: extension may only contact '{}', got '{}'",
+                    allowed, req_host
+                ));
+            }
+        }
 
         let mut builder = self.http_client.inner().request(method, url);
 
@@ -47,8 +59,31 @@ impl http::Host for HostState {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
+        // Check Content-Length header first for early rejection
+        if let Some(cl_str) = response
+            .headers()
+            .get(rquest::header::CONTENT_LENGTH)
+            .and_then(|h| h.to_str().ok())
+            && let Ok(cl) = cl_str.parse::<u64>()
+            && cl > MAX_HTTP_RESPONSE_BYTES as u64
+        {
+            return Err(format!(
+                "Response too large: {} bytes (limit: {} bytes)",
+                cl, MAX_HTTP_RESPONSE_BYTES
+            ));
+        }
+
         let body = match response.bytes().await.map_err(|e| e.to_string()) {
-            Ok(b) => b.to_vec(),
+            Ok(b) => {
+                if b.len() > MAX_HTTP_RESPONSE_BYTES {
+                    return Err(format!(
+                        "Response too large: {} bytes (limit: {} bytes)",
+                        b.len(),
+                        MAX_HTTP_RESPONSE_BYTES
+                    ));
+                }
+                b.to_vec()
+            }
             Err(e) => return Err(e),
         };
 

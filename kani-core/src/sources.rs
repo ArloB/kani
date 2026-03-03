@@ -18,32 +18,34 @@ macro_rules! execute_wasm {
             .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
 
         let provider = bindings.kani_extension_manga_provider();
-        let result = provider.$method(store $(, $args)*)
+        let result = provider.$method(&mut *store $(, $args)*)
             .await
             .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)))?
             .map_err(Error::Extension)?;
 
+        store.data_mut().clear_all();
         $self.last_call = Some(Instant::now());
         Ok(result)
     }};
 }
 
 /// Hosts a single WASM source extension.
-/// Hosts a single WASM source extension instance.
 pub struct SourceInstance {
     store: Option<Store<HostState>>,
     bindings: Option<crate::wasm::KaniExtension>,
     last_call: Option<Instant>,
     solver_url: Option<String>,
+    base_url: Option<String>,
 }
 
 impl SourceInstance {
-    pub fn new(solver_url: Option<String>) -> Self {
+    pub fn new(solver_url: Option<String>, base_url: Option<String>) -> Self {
         Self {
             store: None,
             bindings: None,
             last_call: None,
             solver_url,
+            base_url,
         }
     }
 
@@ -110,7 +112,10 @@ impl SourceInstance {
         component: &wasmtime::component::Component,
         linker: &Linker<HostState>,
     ) -> Result<()> {
-        let mut store = Store::new(engine, HostState::new(self.solver_url.clone())?);
+        let mut store = Store::new(
+            engine,
+            HostState::new(self.solver_url.clone(), self.base_url.clone())?,
+        );
 
         let bindings = crate::wasm::KaniExtension::instantiate_async(&mut store, component, linker)
             .await

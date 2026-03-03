@@ -51,6 +51,7 @@ use crate::http::SmartClient;
 /// Manages handles for HTTP requests, responses, and parsed HTML documents.
 pub struct HostState {
     pub http_client: SmartClient,
+    pub allowed_host: Option<String>,
     pub next_doc_handle: i32,
     pub html_docs: HashMap<i32, SendHtml>,
     pub html_lists: HashMap<i32, Vec<SendHtml>>,
@@ -58,22 +59,35 @@ pub struct HostState {
 }
 
 impl HostState {
-    pub fn new(solver_url: Option<String>) -> Result<Self> {
+    pub fn new(solver_url: Option<String>, allowed_host: Option<String>) -> Result<Self> {
         let http_client = SmartClient::new(solver_url)?;
+
+        let allowed_host = allowed_host.and_then(|raw| {
+            raw.parse::<rquest::Url>()
+                .ok()
+                .and_then(|u| u.host_str().map(|h| h.to_string()))
+        });
 
         Ok(Self {
             http_client,
+            allowed_host,
             next_doc_handle: 1,
             html_docs: HashMap::new(),
             html_lists: HashMap::new(),
             last_error: None,
         })
     }
+
+    pub fn clear_all(&mut self) {
+        self.html_docs.clear();
+        self.html_lists.clear();
+        self.next_doc_handle = 1;
+    }
 }
 
 impl Default for HostState {
     fn default() -> Self {
-        HostState::new(None).unwrap()
+        HostState::new(None, None).unwrap()
     }
 }
 

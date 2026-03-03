@@ -85,6 +85,7 @@ impl AppState {
                 component,
                 wasm_runtime.linker().clone(),
                 solver_url,
+                Some(source.base_url),
                 25,
                 1,
             )
@@ -101,6 +102,7 @@ impl AppState {
             settings.max_retries,
             settings.initial_retry_delay_ms,
         )
+        .await
         .map_err(AppError::CoreError)?;
 
         let http_client = rquest::Client::builder()
@@ -267,7 +269,8 @@ impl AppState {
             |volume| format!("Vol. {volume} - Ch. {}", record.chapter_number),
         );
 
-        let path = library_path.join(record.manga_name);
+        let safe_manga_name = kani_core::sanitize::sanitize_filename(&record.manga_name);
+        let path = library_path.join(safe_manga_name);
 
         self.downloader
             .queue_chapter(chapter, name, path)
@@ -338,7 +341,7 @@ impl AppState {
 
                     let metadata = {
                         let mut inst =
-                            kani_core::sources::SourceInstance::new(flaresolverr_url.clone());
+                            kani_core::sources::SourceInstance::new(flaresolverr_url.clone(), None);
                         inst.load(wasm_runtime.engine(), &component, wasm_runtime.linker())
                             .await
                             .map_err(AppError::CoreError)?;

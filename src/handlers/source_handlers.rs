@@ -65,23 +65,14 @@ async fn update_source(
         return Ok((StatusCode::OK, Json(json!({}))));
     }
 
-    let mut builder = sqlx::QueryBuilder::new("UPDATE sources SET ");
-    let mut separated = builder.separated(", ");
-
-    if let Some(name) = payload.name {
-        separated.push("name = ");
-        separated.push_bind_unseparated(name);
-    }
-
-    if let Some(version) = payload.version {
-        separated.push("version = ");
-        separated.push_bind_unseparated(version);
-    }
-
-    builder.push(" WHERE id = ");
-    builder.push_bind(id);
-
-    builder.build().execute(&state.db).await?;
+    sqlx::query!(
+        "UPDATE sources SET name = COALESCE(?, name), version = COALESCE(?, version) WHERE id = ?",
+        payload.name,
+        payload.version,
+        id
+    )
+    .execute(&state.db)
+    .await?;
 
     Ok((StatusCode::OK, Json(json!({}))))
 }
@@ -128,7 +119,7 @@ async fn install_source(
     let solver_url = Some(state.settings.read().await.flaresolverr_url.clone());
 
     let metadata = {
-        let mut inst = kani_core::sources::SourceInstance::new(solver_url.clone());
+        let mut inst = kani_core::sources::SourceInstance::new(solver_url.clone(), None);
         inst.load(
             state.wasm_runtime.engine(),
             &component,
@@ -175,6 +166,7 @@ async fn install_source(
         component,
         state.wasm_runtime.linker().clone(),
         solver_url,
+        Some(metadata.base_url.clone()),
         25,
         1,
     )
@@ -331,13 +323,14 @@ async fn save_to_library(
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let exists: Option<i64> =
-        sqlx::query_scalar("SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?")
-            .bind(&manga_id)
-            .bind(id)
-            .fetch_optional(&state.db)
-            .await?
-            .flatten();
+    let exists: Option<i64> = sqlx::query_scalar!(
+        "SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?",
+        manga_id,
+        id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .flatten();
 
     let result = state.get_manga_details(id, &manga_id).await?;
     let chapters = state.get_chapter_list(id, &manga_id).await?;
