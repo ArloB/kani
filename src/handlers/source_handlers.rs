@@ -349,9 +349,13 @@ async fn save_to_library(
         .await?;
 
     let result = state.get_manga_details(id, &manga_id).await?;
+    let chapters = state.get_chapter_list(id, &manga_id).await?;
 
     let manga = serde_json::from_str::<MangaInfo>(&result)
         .map_err(|e| AppError::InternalServerError(format!("Failed to parse manga: {e}")))?;
+
+    let chapter = serde_json::from_str::<ChapterList>(&chapters)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter: {e}")))?;
 
     let id = if exists.is_none() {
         let mut tx = state.db.begin().await?;
@@ -415,11 +419,6 @@ async fn save_to_library(
             .execute(&mut *tx)
             .await?;
         }
-
-        let chapters = state.get_chapter_list(id, &manga_id).await?;
-
-        let chapter = serde_json::from_str::<ChapterList>(&chapters)
-            .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter: {e}")))?;
 
         for chapter in chapter.chapters {
             sqlx::query!(
