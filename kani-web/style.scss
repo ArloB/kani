@@ -229,3 +229,118 @@ nav a {
   flex-direction: column;
   flex-basis: 40%;
 }
+
+// ============================================================
+// Download progress overlay
+// ============================================================
+
+.download-progress-overlay {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: 320px;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  z-index: 9999;
+  overflow: hidden;
+  font-size: 0.875rem;
+}
+
+.download-progress-header {
+  background: #ff6b6b;
+  color: white;
+  padding: 0.6rem 1rem;
+  font-weight: bold;
+  letter-spacing: 0.03em;
+}
+
+.download-progress-list {
+  padding: 0.5rem;
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.download-item {
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+
+.download-item-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.download-item-name {
+  flex: 1;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.download-item-status {
+  color: #888;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.download-item-dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #bbb;
+  font-size: 0.9rem;
+  padding: 0;
+  line-height: 1;
+
+  &:hover {
+    color: #555;
+  }
+}
+
+.progress-track {
+  height: 6px;
+  background: #eee;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+
+  &--active {
+    background: #ff6b6b;
+    background: linear-gradient(
+      90deg,
+      #ff6b6b 0%,
+      #ff9494 50%,
+      #ff6b6b 100%
+    );
+    background-size: 200% 100%;
+    animation: progress-shimmer 1.5s infinite linear;
+  }
+
+  &--done {
+    background: #4caf50;
+  }
+
+  &--failed {
+    background: #e53935;
+  }
+}
+
+@keyframes progress-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

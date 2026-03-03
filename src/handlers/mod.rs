@@ -1,3 +1,4 @@
+mod download_handlers;
 mod manga_handlers;
 mod source_handlers;
 
@@ -56,6 +57,7 @@ pub async fn image_proxy(
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/image_proxy", get(image_proxy))
+        .merge(download_handlers::routes())
         .merge(source_handlers::routes())
         .merge(manga_handlers::routes())
 }

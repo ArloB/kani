@@ -6,7 +6,7 @@ use crate::error::Result;
 use crate::http::{SmartClient, SmartResponse};
 use crate::sanitize::sanitize_filename;
 use futures::stream::{self, StreamExt};
-use kani_shared::Chapter;
+use kani_shared::{Chapter, DownloadProgressEvent};
 pub use progress::{DownloadProgress, ProgressEvent};
 use std::collections::VecDeque;
 use std::io::{Cursor, Write};
@@ -14,9 +14,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::sync::{Mutex, Notify, oneshot};
+use tokio::sync::{Mutex, Notify, broadcast, oneshot};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
+
+/// Channel capacity for download progress events.
+/// Slow subscribers will lose events once the buffer fills — that's acceptable for progress UI.
+const PROGRESS_CHANNEL_CAPACITY: usize = 64;
 
 /// Unique identifier for a queued chapter
 pub type QueueId = u64;
@@ -35,6 +39,7 @@ struct DownloadTask {
     chapter: Chapter,
     name: String,
     save_path: PathBuf,
+    comic_info_xml: Option<String>,
 }
 
 /// Shared queue state accessible from both the manager and worker
@@ -60,6 +65,13 @@ impl QueueState {
 pub struct DownloaderManager {
     queue: Arc<Mutex<QueueState>>,
     notify: Arc<Notify>,
+    progress_tx: broadcast::Sender<DownloadProgressEvent>,
+}
+
+impl DownloaderManager {
+    pub fn subscribe(&self) -> broadcast::Receiver<DownloadProgressEvent> {
+        self.progress_tx.subscribe()
+    }
 }
 
 impl DownloaderManager {
@@ -73,9 +85,11 @@ impl DownloaderManager {
         let queue = Arc::new(Mutex::new(QueueState::new()));
         let notify = Arc::new(Notify::new());
         let (tx, rx) = oneshot::channel::<Result<()>>();
+        let (progress_tx, _) = broadcast::channel(PROGRESS_CHANNEL_CAPACITY);
 
         let queue_clone = queue.clone();
         let notify_clone = notify.clone();
+        let progress_tx_clone = progress_tx.clone();
         let solver_url = if solver_url.is_empty() {
             None
         } else {
@@ -112,11 +126,13 @@ impl DownloaderManager {
                 };
 
                 let client = client.clone();
+                let progress_tx = progress_tx_clone.clone();
                 let DownloadTask {
                     id: _task_id,
                     chapter,
                     save_path,
                     name,
+                    comic_info_xml,
                 } = task;
 
                 let safe_name = sanitize_filename(&name);
@@ -125,17 +141,30 @@ impl DownloaderManager {
 
                 if let Err(e) = tokio::fs::create_dir_all(&save_path).await {
                     tracing::error!("Failed to create base directory {:?}: {}", save_path, e);
-                    Self::on_chapter_failed(&name, &e.to_string());
+                    Self::send_event(
+                        &progress_tx,
+                        DownloadProgressEvent::ChapterFailed {
+                            chapter_name: name.clone(),
+                            error: e.to_string(),
+                        },
+                    );
                     continue;
                 }
 
-                Self::on_chapter_started(&name, chapter.pages.len());
+                Self::send_event(
+                    &progress_tx,
+                    DownloadProgressEvent::ChapterStarted {
+                        chapter_name: name.clone(),
+                        total_pages: chapter.pages.len(),
+                    },
+                );
 
                 let results: Vec<std::result::Result<(String, Vec<u8>), String>> =
                     stream::iter(chapter.pages.into_iter())
                         .map(|page| {
                             let client = client.clone();
                             let name = name.clone();
+                            let page_tx = progress_tx.clone();
 
                             async move {
                                 let result = Self::download_page_with_retry(
@@ -148,10 +177,21 @@ impl DownloaderManager {
                                 .await;
 
                                 match &result {
-                                    Ok(_) => Self::on_page_completed(&name, page.index),
-                                    Err(e) => {
-                                        Self::on_page_failed(&name, page.index, &e.to_string())
-                                    }
+                                    Ok(_) => Self::send_event(
+                                        &page_tx,
+                                        DownloadProgressEvent::PageCompleted {
+                                            chapter_name: name.clone(),
+                                            page_index: page.index,
+                                        },
+                                    ),
+                                    Err(e) => Self::send_event(
+                                        &page_tx,
+                                        DownloadProgressEvent::PageFailed {
+                                            chapter_name: name.clone(),
+                                            page_index: page.index,
+                                            error: e.to_string(),
+                                        },
+                                    ),
                                 }
 
                                 result.map_err(|e| e.to_string())
@@ -178,6 +218,12 @@ impl DownloaderManager {
                             .compression_method(zip::CompressionMethod::Stored);
 
                         let mut zip_failed = false;
+
+                        if let Some(ref xml_content) = comic_info_xml
+                            && zip.start_file("ComicInfo.xml", options).is_ok() {
+                                let _ = zip.write_all(xml_content.as_bytes());
+                            }
+
                         for (filename, bytes) in successful.iter().flatten() {
                             if let Err(e) = zip.start_file(filename, options) {
                                 tracing::error!("Failed to start file in zip: {}", e);
@@ -197,25 +243,50 @@ impl DownloaderManager {
                         }
 
                         if zip_failed {
-                            Self::on_chapter_failed(&name, "Failed to assemble zip archive");
+                            Self::send_event(
+                                &progress_tx,
+                                DownloadProgressEvent::ChapterFailed {
+                                    chapter_name: name.clone(),
+                                    error: "Failed to assemble zip archive".to_string(),
+                                },
+                            );
                             continue;
                         }
                     }
 
                     if let Err(e) = tokio::fs::write(&cbz_path, archive.into_inner()).await {
                         tracing::error!("Failed to save .cbz file {:?}: {}", cbz_path, e);
-                        Self::on_chapter_failed(&name, &e.to_string());
+                        Self::send_event(
+                            &progress_tx,
+                            DownloadProgressEvent::ChapterFailed {
+                                chapter_name: name.clone(),
+                                error: e.to_string(),
+                            },
+                        );
                         continue;
                     }
 
-                    Self::on_chapter_completed(&name, successful.len());
+                    Self::send_event(
+                        &progress_tx,
+                        DownloadProgressEvent::ChapterCompleted {
+                            chapter_name: name.clone(),
+                            successful_pages: successful.len(),
+                            failed_pages: 0,
+                        },
+                    );
                     tracing::info!(
                         "Chapter '{}' completed: {} pages downloaded to .cbz",
                         name,
                         successful.len()
                     );
                 } else {
-                    Self::on_chapter_failed(&name, &format!("{} pages failed", failed.len()));
+                    Self::send_event(
+                        &progress_tx,
+                        DownloadProgressEvent::ChapterFailed {
+                            chapter_name: name.clone(),
+                            error: format!("{} pages failed", failed.len()),
+                        },
+                    );
                     tracing::warn!(
                         "Chapter '{}' completed with errors: {}/{} pages successful",
                         name,
@@ -232,7 +303,11 @@ impl DownloaderManager {
             )
         })??;
 
-        Ok(Self { queue, notify })
+        Ok(Self {
+            queue,
+            notify,
+            progress_tx,
+        })
     }
 
     /// Queue a chapter for download, returns the queue ID
@@ -241,6 +316,7 @@ impl DownloaderManager {
         chapter: Chapter,
         name: String,
         save_path: PathBuf,
+        comic_info_xml: Option<String>,
     ) -> Result<QueueId> {
         let id = {
             let mut state = self.queue.lock().await;
@@ -250,6 +326,7 @@ impl DownloaderManager {
                 chapter,
                 name,
                 save_path,
+                comic_info_xml,
             });
             id
         };
@@ -378,26 +455,14 @@ impl DownloaderManager {
     }
 
     // ============================================================
-    // Progress Tracking Skeleton Functions
+    // Internal helpers
     // ============================================================
 
-    fn on_chapter_started(_chapter_name: &str, _total_pages: usize) {
-        // TODO: Emit ProgressEvent::ChapterStarted
-    }
-
-    fn on_chapter_completed(_chapter_name: &str, _pages_downloaded: usize) {
-        // TODO: Emit ProgressEvent::ChapterCompleted
-    }
-
-    fn on_chapter_failed(_chapter_name: &str, _error: &str) {
-        // TODO: Emit ProgressEvent::ChapterFailed
-    }
-
-    fn on_page_completed(_chapter_name: &str, _page_index: i32) {
-        // TODO: Emit ProgressEvent::PageCompleted
-    }
-
-    fn on_page_failed(_chapter_name: &str, _page_index: i32, _error: &str) {
-        // TODO: Emit ProgressEvent::PageFailed
+    /// Send an event on the progress broadcast channel.
+    ///
+    /// A `SendError` simply means no subscribers are currently connected — this is
+    /// perfectly normal and is silently ignored.
+    fn send_event(tx: &broadcast::Sender<DownloadProgressEvent>, event: DownloadProgressEvent) {
+        let _ = tx.send(event);
     }
 }

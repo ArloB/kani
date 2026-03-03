@@ -236,10 +236,25 @@ impl AppState {
     }
 
     pub async fn start_download(&self, chapter_id: i64) -> Result<(), AppError> {
-        let record = sqlx::query!("SELECT c.source_chapter_id, c.name, c.chapter_number, c.volume, m.source_id, m.source_manga_id, m.name as manga_name FROM chapters c join manga m on c.manga_id = m.id WHERE c.id = ?", chapter_id)
+        let record = sqlx::query!("SELECT c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language, m.source_id, m.source_manga_id, m.name as manga_name, m.description, s.base_url FROM chapters c join manga m on c.manga_id = m.id join sources s on m.source_id = s.id WHERE c.id = ?", chapter_id)
             .fetch_optional(&self.db)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("Chapter {chapter_id} not found")))?;
+
+        let authors_record = sqlx::query!("SELECT GROUP_CONCAT(p.name, ', ') as names FROM manga_authors ma JOIN people p ON ma.person_id = p.id WHERE ma.manga_id = (SELECT manga_id FROM chapters WHERE id = ?)", chapter_id)
+            .fetch_one(&self.db)
+            .await?;
+        let authors = authors_record.names;
+
+        let artists_record = sqlx::query!("SELECT GROUP_CONCAT(p.name, ', ') as names FROM manga_artists ma JOIN people p ON ma.person_id = p.id WHERE ma.manga_id = (SELECT manga_id FROM chapters WHERE id = ?)", chapter_id)
+            .fetch_one(&self.db)
+            .await?;
+        let artists = artists_record.names;
+
+        let tags_record = sqlx::query!("SELECT GROUP_CONCAT(t.name, ', ') as names FROM manga_tags mt JOIN tags t ON mt.tag_id = t.id WHERE mt.manga_id = (SELECT manga_id FROM chapters WHERE id = ?)", chapter_id)
+            .fetch_one(&self.db)
+            .await?;
+        let tags = tags_record.names;
 
         let chapter = {
             let source_manager = {
@@ -272,8 +287,27 @@ impl AppState {
         let safe_manga_name = kani_core::sanitize::sanitize_filename(&record.manga_name);
         let path = library_path.join(safe_manga_name);
 
+        let web_url = format!("{}/{}", record.base_url, record.source_manga_id);
+
+        let comic_info = kani_core::comic_info::ComicInfo {
+            xmlns_xsi: "http://www.w3.org/2001/XMLSchema-instance",
+            series: record.manga_name,
+            title: record.name,
+            number: record.chapter_number,
+            volume: record.volume,
+            summary: record.description,
+            language_iso: Some(record.language),
+            writer: authors,
+            penciller: artists,
+            genre: tags,
+            web: Some(web_url),
+        };
+
+        let xml_payload =
+            kani_core::comic_info::build_xml(&comic_info).map_err(AppError::CoreError)?;
+
         self.downloader
-            .queue_chapter(chapter, name, path)
+            .queue_chapter(chapter, name, path, Some(xml_payload))
             .await
             .map_err(AppError::CoreError)?;
 

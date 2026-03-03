@@ -18,3 +18,5 @@ kani-shared = { path = "../kani-shared" }
 console_log = "1.0.0"
 log = "0.4.29"
 urlencoding = "2.1.3"
+web-sys = { version = "0.3.91", features = ["EventSource", "MessageEvent", "EventTarget", "Event", "ErrorEvent"] }
+wasm-bindgen = "0.2.114"

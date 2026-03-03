@@ -1,3 +1,4 @@
+use crate::pages::downloads::DownloadProgress;
 use crate::pages::home::Home;
 use crate::pages::manga_details::MangaDetails;
 use crate::pages::source_details::SourceDetails;
@@ -21,6 +22,7 @@ pub fn App() -> impl IntoView {
                     </Routes>
                 </main>
             </Router>
+            <DownloadProgress/>
         </div>
     }
 }
