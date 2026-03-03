@@ -19,7 +19,6 @@ use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 /// Channel capacity for download progress events.
-/// Slow subscribers will lose events once the buffer fills — that's acceptable for progress UI.
 const PROGRESS_CHANNEL_CAPACITY: usize = 64;
 
 /// Unique identifier for a queued chapter
@@ -113,14 +112,12 @@ impl DownloaderManager {
             };
 
             loop {
-                // Wait for notification or check queue
                 let task = {
                     let mut state = queue_clone.lock().await;
                     state.queue.pop_front()
                 };
 
                 let Some(task) = task else {
-                    // No tasks, wait for notification
                     notify_clone.notified().await;
                     continue;
                 };
@@ -211,47 +208,69 @@ impl DownloaderManager {
                         a_val.0.cmp(&b_val.0)
                     });
 
-                    let mut archive = Cursor::new(Vec::new());
-                    {
-                        let mut zip = ZipWriter::new(&mut archive);
-                        let options = SimpleFileOptions::default()
-                            .compression_method(zip::CompressionMethod::Stored);
-
+                    let successful_len = successful.len();
+                    let (archive, zip_failed) = match tokio::task::spawn_blocking(move || {
+                        let mut archive = Cursor::new(Vec::new());
                         let mut zip_failed = false;
 
-                        if let Some(ref xml_content) = comic_info_xml
-                            && zip.start_file("ComicInfo.xml", options).is_ok() {
+                        {
+                            let mut zip = ZipWriter::new(&mut archive);
+                            let options = SimpleFileOptions::default()
+                                .compression_method(zip::CompressionMethod::Stored);
+
+                            if let Some(ref xml_content) = comic_info_xml
+                                && zip.start_file("ComicInfo.xml", options).is_ok()
+                            {
                                 let _ = zip.write_all(xml_content.as_bytes());
                             }
 
-                        for (filename, bytes) in successful.iter().flatten() {
-                            if let Err(e) = zip.start_file(filename, options) {
-                                tracing::error!("Failed to start file in zip: {}", e);
-                                zip_failed = true;
-                                break;
+                            for (filename, bytes) in successful.iter().flatten() {
+                                if let Err(e) = zip.start_file(filename, options) {
+                                    tracing::error!("Failed to start file in zip: {}", e);
+                                    zip_failed = true;
+                                    break;
+                                }
+                                if let Err(e) = zip.write_all(bytes) {
+                                    tracing::error!("Failed to write to zip: {}", e);
+                                    zip_failed = true;
+                                    break;
+                                }
                             }
-                            if let Err(e) = zip.write_all(bytes) {
-                                tracing::error!("Failed to write to zip: {}", e);
+
+                            if !zip_failed && zip.finish().is_err() {
+                                tracing::error!("Failed to finish zip archive");
                                 zip_failed = true;
-                                break;
                             }
                         }
 
-                        if !zip_failed && zip.finish().is_err() {
-                            tracing::error!("Failed to finish zip archive");
-                            zip_failed = true;
-                        }
-
-                        if zip_failed {
+                        (archive, zip_failed)
+                    })
+                    .await
+                    {
+                        Ok(res) => res,
+                        Err(e) => {
+                            tracing::error!("spawn_blocking failed: {}", e);
                             Self::send_event(
                                 &progress_tx,
                                 DownloadProgressEvent::ChapterFailed {
                                     chapter_name: name.clone(),
-                                    error: "Failed to assemble zip archive".to_string(),
+                                    error: "Failed to assemble zip archive (spawn_blocking failed)"
+                                        .to_string(),
                                 },
                             );
                             continue;
                         }
+                    };
+
+                    if zip_failed {
+                        Self::send_event(
+                            &progress_tx,
+                            DownloadProgressEvent::ChapterFailed {
+                                chapter_name: name.clone(),
+                                error: "Failed to assemble zip archive".to_string(),
+                            },
+                        );
+                        continue;
                     }
 
                     if let Err(e) = tokio::fs::write(&cbz_path, archive.into_inner()).await {
@@ -270,14 +289,14 @@ impl DownloaderManager {
                         &progress_tx,
                         DownloadProgressEvent::ChapterCompleted {
                             chapter_name: name.clone(),
-                            successful_pages: successful.len(),
+                            successful_pages: successful_len,
                             failed_pages: 0,
                         },
                     );
                     tracing::info!(
                         "Chapter '{}' completed: {} pages downloaded to .cbz",
                         name,
-                        successful.len()
+                        successful_len
                     );
                 } else {
                     Self::send_event(
@@ -331,7 +350,6 @@ impl DownloaderManager {
             id
         };
 
-        // Notify the worker that there's a new task
         self.notify.notify_one();
 
         Ok(id)
@@ -459,9 +477,6 @@ impl DownloaderManager {
     // ============================================================
 
     /// Send an event on the progress broadcast channel.
-    ///
-    /// A `SendError` simply means no subscribers are currently connected — this is
-    /// perfectly normal and is silently ignored.
     fn send_event(tx: &broadcast::Sender<DownloadProgressEvent>, event: DownloadProgressEvent) {
         let _ = tx.send(event);
     }
