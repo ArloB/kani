@@ -4,6 +4,7 @@ mod progress;
 
 use crate::error::Result;
 use crate::http::{SmartClient, SmartResponse};
+use crate::sanitize::sanitize_filename;
 use futures::stream::{self, StreamExt};
 use kani_shared::Chapter;
 pub use progress::{DownloadProgress, ProgressEvent};
@@ -118,7 +119,9 @@ impl DownloaderManager {
                     name,
                 } = task;
 
-                let cbz_path = save_path.join(format!("{}.cbz", name));
+                let safe_name = sanitize_filename(&name);
+
+                let cbz_path = save_path.join(format!("{}.cbz", &safe_name));
 
                 if let Err(e) = tokio::fs::create_dir_all(&save_path).await {
                     tracing::error!("Failed to create base directory {:?}: {}", save_path, e);

@@ -15,6 +15,12 @@ pub async fn image_proxy(
     State(state): State<AppState>,
     Query(query): Query<ProxyQuery>,
 ) -> Result<impl IntoResponse, AppError> {
+    if kani_core::network::is_private_host(&query.url) {
+        return Err(AppError::InternalServerError(
+            "Proxy request blocked: target is a private or reserved address".to_string(),
+        ));
+    }
+
     let response = state
         .http_client
         .get(&query.url)
