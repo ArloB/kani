@@ -1,7 +1,7 @@
 PRAGMA foreign_keys = OFF;
 
 CREATE TABLE manga_new (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    id          INTEGER PRIMARY KEY,
     source_id   INTEGER    NOT NULL,
     source_manga_id TEXT NOT NULL,
     name        TEXT    NOT NULL,
@@ -30,7 +30,7 @@ ALTER TABLE manga_new RENAME TO manga;
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS people (
-    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    id   INTEGER PRIMARY KEY,
     name TEXT    NOT NULL UNIQUE
 );
 
