@@ -19,6 +19,7 @@ pub struct AppState {
     pub settings: std::sync::Arc<tokio::sync::RwLock<Settings>>,
     pub downloader: DownloaderManager,
     pub http_client: rquest::Client,
+    pub smart_client: kani_core::http::SmartClient,
 }
 
 impl AppState {
@@ -44,10 +45,12 @@ impl AppState {
             Some(settings.flaresolverr_url.clone())
         };
 
+        let global_smart_client = kani_core::http::SmartClient::new(flaresolverr_url)?;
+
         if let Err(e) = Self::scan_and_register_sources(
             &pool,
             &settings.wasm_storage_path,
-            flaresolverr_url.clone(),
+            global_smart_client.clone(),
             &wasm_runtime,
         )
         .await
@@ -63,12 +66,6 @@ impl AppState {
         .await?;
 
         for source in sources {
-            let solver_url = if settings.flaresolverr_url.is_empty() {
-                None
-            } else {
-                Some(settings.flaresolverr_url.clone())
-            };
-
             let bytes = tokio::fs::read(
                 settings
                     .wasm_storage_path
@@ -84,7 +81,7 @@ impl AppState {
                 wasm_runtime.engine().clone(),
                 component,
                 wasm_runtime.linker().clone(),
-                solver_url,
+                global_smart_client.clone(),
                 Some(source.base_url),
                 25,
                 1,
@@ -116,6 +113,7 @@ impl AppState {
             settings: std::sync::Arc::new(tokio::sync::RwLock::new(settings)),
             downloader,
             http_client,
+            smart_client: global_smart_client,
         })
     }
 
@@ -335,7 +333,7 @@ impl AppState {
     async fn scan_and_register_sources(
         db: &SqlitePool,
         wasm_storage_path: &std::path::Path,
-        flaresolverr_url: Option<String>,
+        smart_client: kani_core::http::SmartClient,
         wasm_runtime: &WasmRuntime,
     ) -> Result<(), AppError> {
         tracing::info!(
@@ -375,7 +373,7 @@ impl AppState {
 
                     let metadata = {
                         let mut inst =
-                            kani_core::sources::SourceInstance::new(flaresolverr_url.clone(), None);
+                            kani_core::sources::SourceInstance::new(smart_client.clone(), None);
                         inst.load(wasm_runtime.engine(), &component, wasm_runtime.linker())
                             .await
                             .map_err(AppError::CoreError)?;

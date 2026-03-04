@@ -239,10 +239,8 @@ async fn install_source(
         }
     };
 
-    let solver_url = Some(state.settings.read().await.flaresolverr_url.clone());
-
     let metadata = {
-        let mut inst = kani_core::sources::SourceInstance::new(solver_url.clone(), None);
+        let mut inst = kani_core::sources::SourceInstance::new(state.smart_client.clone(), None);
         inst.load(
             state.wasm_runtime.engine(),
             &component,
@@ -288,7 +286,7 @@ async fn install_source(
         state.wasm_runtime.engine().clone(),
         component,
         state.wasm_runtime.linker().clone(),
-        solver_url,
+        state.smart_client.clone(),
         Some(metadata.base_url.clone()),
         25,
         1,

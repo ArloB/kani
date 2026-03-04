@@ -75,7 +75,7 @@ pub fn SourceDetails() -> impl IntoView {
                                                 <A href=format!("/source/{}/manga/{}", id(), manga.id)>
                                                     <div class="cover-image">
                                                         {match manga.cover_url {
-                                                            Some(url) => view! { <img src=crate::api::proxy_url(&url, &base_url) alt=manga.title.clone() /> }.into_any(),
+                                                            Some(url) => view! { <img src=proxy_url(&url, &base_url) alt=manga.title.clone() /> }.into_any(),
                                                             None => view! { <div class="no-cover">"No Cover"</div> }.into_any(),
                                                         }}
                                                     </div>

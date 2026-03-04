@@ -34,17 +34,17 @@ pub struct SourceInstance {
     store: Option<Store<HostState>>,
     bindings: Option<crate::wasm::KaniExtension>,
     last_call: Option<Instant>,
-    solver_url: Option<String>,
+    smart_client: crate::http::SmartClient,
     base_url: Option<String>,
 }
 
 impl SourceInstance {
-    pub fn new(solver_url: Option<String>, base_url: Option<String>) -> Self {
+    pub fn new(smart_client: crate::http::SmartClient, base_url: Option<String>) -> Self {
         Self {
             store: None,
             bindings: None,
             last_call: None,
-            solver_url,
+            smart_client,
             base_url,
         }
     }
@@ -114,7 +114,7 @@ impl SourceInstance {
     ) -> Result<()> {
         let mut store = Store::new(
             engine,
-            HostState::new(self.solver_url.clone(), self.base_url.clone())?,
+            HostState::new(self.smart_client.clone(), self.base_url.clone())?,
         );
 
         let bindings = crate::wasm::KaniExtension::instantiate_async(&mut store, component, linker)

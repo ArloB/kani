@@ -1,7 +1,7 @@
 use crate::error::Result;
+use arc_swap::ArcSwap;
 use serde_json::json;
 use std::sync::Arc;
-use arc_swap::ArcSwap;
 
 const MAX_RETRIES: u32 = 3;
 const BASE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
@@ -71,6 +71,8 @@ impl SmartClient {
         let client = rquest::Client::builder()
             .emulation(rquest_util::Emulation::Chrome130)
             .redirect(rquest::redirect::Policy::limited(10))
+            .pool_idle_timeout(std::time::Duration::from_secs(300))
+            .pool_max_idle_per_host(100)
             .build()?;
 
         Ok(Self {

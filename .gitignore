@@ -8,3 +8,4 @@ library
 kani-web/dist
 todo.txt
 changes
+.vscode

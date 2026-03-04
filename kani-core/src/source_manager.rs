@@ -14,7 +14,7 @@ pub struct SourceManager {
     linker: Linker<HostState>,
     pool: Arc<Mutex<Vec<SourceInstance>>>,
     semaphore: Arc<Semaphore>,
-    solver_url: Option<String>,
+    smart_client: crate::http::SmartClient,
     base_url: Option<String>,
     min_idle: usize,
 }
@@ -24,7 +24,7 @@ impl SourceManager {
         engine: wasmtime::Engine,
         component: Component,
         linker: Linker<HostState>,
-        solver_url: Option<String>,
+        smart_client: crate::http::SmartClient,
         base_url: Option<String>,
         pool_size: usize,
         min_idle: usize,
@@ -35,7 +35,7 @@ impl SourceManager {
         {
             let mut locked = pool.lock().await;
             for _ in 0..min_idle.min(pool_size) {
-                let mut inst = SourceInstance::new(solver_url.clone(), base_url.clone());
+                let mut inst = SourceInstance::new(smart_client.clone(), base_url.clone());
                 inst.load(&engine, &component, &linker).await?;
                 locked.push(inst);
             }
@@ -47,7 +47,7 @@ impl SourceManager {
             linker,
             pool,
             semaphore: Arc::new(Semaphore::new(pool_size)),
-            solver_url,
+            smart_client,
             base_url,
             min_idle,
         })
@@ -69,13 +69,13 @@ impl SourceManager {
         let instance = match instance {
             Some(inst) => inst,
             None => {
-                let mut inst = SourceInstance::new(self.solver_url.clone(), self.base_url.clone());
+                let mut inst =
+                    SourceInstance::new(self.smart_client.clone(), self.base_url.clone());
                 inst.load(&self.engine, &self.component, &self.linker)
                     .await?;
                 inst
             }
         };
-
         Ok(OwnedSourceInstance {
             instance: Some(instance),
             pool: self.pool.clone(),

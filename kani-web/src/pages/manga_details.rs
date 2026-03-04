@@ -166,11 +166,10 @@ pub fn MangaDetails() -> impl IntoView {
                                                                     title_str.push_str(&format!("Vol. {} ", vol));
                                                                 }
                                                                 title_str.push_str(&format!("Ch. {}", chapter.number));
-                                                                if let Some(title) = &chapter.title {
-                                                                    if !title.is_empty() {
+                                                                if let Some(title) = &chapter.title
+                                                                    && !title.is_empty() {
                                                                         title_str.push_str(&format!(" - {}", title));
                                                                     }
-                                                                }
                                                                 title_str
                                                             }}
                                                         </span>
