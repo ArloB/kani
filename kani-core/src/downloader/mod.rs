@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::sync::{Mutex, Notify, broadcast, oneshot};
+use tokio::sync::{Mutex, Notify, broadcast};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
@@ -75,7 +75,7 @@ impl DownloaderManager {
 
 impl DownloaderManager {
     pub async fn new(
-        solver_url: &str,
+        smart_client: SmartClient,
         concurrent_page_downloads: usize,
         _chapter_queue_size: usize, // Reserved for future use (e.g., backpressure limits)
         max_retries: i64,
@@ -83,33 +83,14 @@ impl DownloaderManager {
     ) -> Result<Self> {
         let queue = Arc::new(Mutex::new(QueueState::new()));
         let notify = Arc::new(Notify::new());
-        let (tx, rx) = oneshot::channel::<Result<()>>();
         let (progress_tx, _) = broadcast::channel(PROGRESS_CHANNEL_CAPACITY);
 
         let queue_clone = queue.clone();
         let notify_clone = notify.clone();
         let progress_tx_clone = progress_tx.clone();
-        let solver_url = if solver_url.is_empty() {
-            None
-        } else {
-            Some(solver_url.to_string())
-        };
 
         tokio::spawn(async move {
-            let client = match SmartClient::new(solver_url) {
-                Ok(client) => {
-                    let _ = tx.send(Ok(()));
-                    client
-                }
-                Err(e) => {
-                    tracing::error!("Failed to create download client: {}", e);
-                    let _ = tx.send(Err(crate::error::Error::Internal(format!(
-                        "Failed to create download client: {}",
-                        e
-                    ))));
-                    return;
-                }
-            };
+            let client = smart_client;
 
             loop {
                 let task = {
@@ -315,12 +296,6 @@ impl DownloaderManager {
                 }
             }
         });
-
-        rx.await.map_err(|_| {
-            crate::error::Error::Internal(
-                "Downloader worker task panicked during initialization".to_string(),
-            )
-        })??;
 
         Ok(Self {
             queue,

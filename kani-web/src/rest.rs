@@ -92,7 +92,8 @@ pub async fn image_proxy(
     }
 
     let response = state
-        .http_client
+        .smart_client
+        .inner()
         .get(&query.url)
         .header("Referer", &query.referer)
         .send()

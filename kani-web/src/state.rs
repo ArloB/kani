@@ -18,7 +18,6 @@ pub struct AppState {
     >,
     pub settings: std::sync::Arc<tokio::sync::RwLock<Settings>>,
     pub downloader: DownloaderManager,
-    pub http_client: rquest::Client,
     pub smart_client: kani_core::http::SmartClient,
 }
 
@@ -93,7 +92,7 @@ impl AppState {
         }
 
         let downloader = DownloaderManager::new(
-            &settings.flaresolverr_url,
+            global_smart_client.clone(),
             settings.concurrent_page_downloads.try_into()?,
             settings.chapter_queue_size.try_into()?,
             settings.max_retries,
@@ -102,17 +101,12 @@ impl AppState {
         .await
         .map_err(AppError::CoreError)?;
 
-        let http_client = rquest::Client::builder()
-            .emulation(rquest_util::Emulation::Chrome126)
-            .build()?;
-
         Ok(Self {
             db: pool,
             wasm_runtime,
             sources: std::sync::Arc::new(tokio::sync::RwLock::new(sources_map)),
             settings: std::sync::Arc::new(tokio::sync::RwLock::new(settings)),
             downloader,
-            http_client,
             smart_client: global_smart_client,
         })
     }
