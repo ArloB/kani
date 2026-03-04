@@ -8,7 +8,7 @@ use axum::{
         IntoResponse,
         sse::{Event, KeepAlive, Sse},
     },
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use serde_json::json;
 use std::{convert::Infallible, sync::Arc};
@@ -51,6 +51,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/library/{page}/{order}", get(get_library))
         .route("/manga/{id}", get(get_manga).delete(delete_manga))
         .route("/chapter/{id}/download", post(start_download))
+        .route("/chapter/{id}/delete", delete(delete_downloaded))
         .with_state(state)
 }
 
@@ -598,5 +599,13 @@ async fn start_download(
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
     state.start_download(id).await?;
+    Ok((StatusCode::OK, Json(json!({}))))
+}
+
+async fn delete_downloaded(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    state.delete_downloaded(id).await?;
     Ok((StatusCode::OK, Json(json!({}))))
 }

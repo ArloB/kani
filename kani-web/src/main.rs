@@ -10,7 +10,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug")),
         )
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .init();
@@ -37,6 +37,39 @@ async fn main() {
     }
 
     let rest_router = rest::routes(state.clone());
+
+    {
+        let db = state.db.clone();
+        let mut rx = state.downloader.subscribe();
+        tokio::spawn(async move {
+            while let Ok(event) = rx.recv().await {
+                match event {
+                    kani_shared::DownloadProgressEvent::ChapterStarted { chapter_id, .. } => {
+                        let _ = sqlx::query!(
+                            "UPDATE chapters SET download_status = 1 WHERE id = ?",
+                            chapter_id
+                        )
+                        .execute(&db)
+                        .await;
+                    }
+                    kani_shared::DownloadProgressEvent::ChapterCompleted { chapter_id, .. } => {
+                        let _ = sqlx::query!(
+                            "UPDATE chapters SET download_status = 2 WHERE id = ?",
+                            chapter_id
+                        )
+                        .execute(&db)
+                        .await;
+                    }
+                    kani_shared::DownloadProgressEvent::ChapterFailed { error, .. } => {
+                        tracing::error!("Chapter failed to download: {}", error);
+                        // Optional: update to a failed status if needed
+                        // let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id).execute(&db).await;
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
 
     let app = Router::new()
         .leptos_routes_with_context(

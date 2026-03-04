@@ -51,7 +51,7 @@ impl http::Host for HostState {
 
         let ttfb_start = std::time::Instant::now();
 
-        let response = match self.http_client.send_request(request).await {
+        let mut response = match self.http_client.send_request(request).await {
             Ok(res) => res,
             Err(e) => return Err(e.to_string()),
         };
@@ -84,29 +84,16 @@ impl http::Host for HostState {
             ));
         }
 
-        let download_start = std::time::Instant::now();
-
-        let body = match response.bytes().await.map_err(|e| e.to_string()) {
-            Ok(b) => {
-                if b.len() > MAX_HTTP_RESPONSE_BYTES {
-                    return Err(format!(
-                        "Response too large: {} bytes (limit: {} bytes)",
-                        b.len(),
-                        MAX_HTTP_RESPONSE_BYTES
-                    ));
-                }
-                b.to_vec()
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+            if body.len() + chunk.len() > MAX_HTTP_RESPONSE_BYTES {
+                return Err(format!(
+                    "Response too large (streaming): exceeded limit of {} bytes",
+                    MAX_HTTP_RESPONSE_BYTES
+                ));
             }
-            Err(e) => return Err(e),
-        };
-
-        let download_time = download_start.elapsed();
-
-        tracing::info!(
-            download_ms = download_time.as_millis(),
-            bytes_downloaded = body.len(),
-            "Response body fully downloaded"
-        );
+            body.extend_from_slice(&chunk);
+        }
 
         Ok(http::Response {
             status,

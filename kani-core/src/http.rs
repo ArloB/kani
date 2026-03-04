@@ -57,6 +57,19 @@ impl SmartResponse {
             SmartResponse::Buffered { body, .. } => Ok(String::from_utf8_lossy(&body).to_string()),
         }
     }
+
+    pub async fn chunk(&mut self) -> Result<Option<bytes::Bytes>> {
+        match self {
+            SmartResponse::Normal(r) => Ok(r.chunk().await?),
+            SmartResponse::Buffered { body, .. } => {
+                if body.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(std::mem::take(body)))
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone)]

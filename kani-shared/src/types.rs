@@ -112,6 +112,7 @@ impl From<MangaStatus> for i64 {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DownloadProgressEvent {
     ChapterStarted {
+        chapter_id: i64,
         chapter_name: String,
         total_pages: usize,
     },
@@ -128,10 +129,14 @@ pub enum DownloadProgressEvent {
     },
 
     ChapterCompleted {
+        chapter_id: i64,
         chapter_name: String,
         successful_pages: usize,
         failed_pages: usize,
     },
 
-    ChapterFailed { chapter_name: String, error: String },
+    ChapterFailed {
+        chapter_name: String,
+        error: String,
+    },
 }

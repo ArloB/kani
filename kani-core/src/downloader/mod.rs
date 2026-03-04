@@ -5,18 +5,19 @@ mod progress;
 use crate::error::Result;
 use crate::http::{SmartClient, SmartResponse};
 use crate::sanitize::sanitize_filename;
+use async_zip::tokio::write::ZipFileWriter;
+use async_zip::{Compression, ZipEntryBuilder};
 use futures::stream::{self, StreamExt};
 use kani_shared::{Chapter, DownloadProgressEvent};
 pub use progress::{DownloadProgress, ProgressEvent};
 use std::collections::VecDeque;
-use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, Notify, broadcast};
-use zip::ZipWriter;
-use zip::write::SimpleFileOptions;
+use tokio_util::compat::{FuturesAsyncWriteCompatExt, TokioAsyncWriteCompatExt};
 
 /// Channel capacity for download progress events.
 const PROGRESS_CHANNEL_CAPACITY: usize = 64;
@@ -35,6 +36,7 @@ pub struct QueuedChapter {
 
 struct DownloadTask {
     id: QueueId,
+    chapter_id: i64,
     chapter: Chapter,
     name: String,
     save_path: PathBuf,
@@ -107,6 +109,7 @@ impl DownloaderManager {
                 let progress_tx = progress_tx_clone.clone();
                 let DownloadTask {
                     id: _task_id,
+                    chapter_id,
                     chapter,
                     save_path,
                     name,
@@ -116,14 +119,19 @@ impl DownloaderManager {
                 let safe_name = sanitize_filename(&name);
 
                 let cbz_path = save_path.join(format!("{}.cbz", &safe_name));
+                let staging_dir = save_path.join(format!(".tmp_staging_{}", _task_id));
 
-                if let Err(e) = tokio::fs::create_dir_all(&save_path).await {
-                    tracing::error!("Failed to create base directory {:?}: {}", save_path, e);
+                if let Err(e) = tokio::fs::create_dir_all(&staging_dir).await {
+                    tracing::error!(
+                        "Failed to create staging directory {:?}: {}",
+                        staging_dir,
+                        e
+                    );
                     Self::send_event(
                         &progress_tx,
                         DownloadProgressEvent::ChapterFailed {
                             chapter_name: name.clone(),
-                            error: e.to_string(),
+                            error: format!("Failed to create staging directory: {}", e),
                         },
                     );
                     continue;
@@ -132,23 +140,26 @@ impl DownloaderManager {
                 Self::send_event(
                     &progress_tx,
                     DownloadProgressEvent::ChapterStarted {
+                        chapter_id,
                         chapter_name: name.clone(),
                         total_pages: chapter.pages.len(),
                     },
                 );
 
-                let results: Vec<std::result::Result<(String, Vec<u8>), String>> =
+                let results: Vec<std::result::Result<(PathBuf, String), String>> =
                     stream::iter(chapter.pages.into_iter())
                         .map(|page| {
                             let client = client.clone();
                             let name = name.clone();
                             let page_tx = progress_tx.clone();
+                            let staging_dir = staging_dir.clone();
 
                             async move {
                                 let result = Self::download_page_with_retry(
                                     &client,
                                     &page.url,
                                     page.index,
+                                    &staging_dir,
                                     max_retries,
                                     initial_retry_delay_ms,
                                 )
@@ -186,99 +197,45 @@ impl DownloaderManager {
                     successful.sort_by(|a, b| {
                         let a_val = a.as_ref().unwrap();
                         let b_val = b.as_ref().unwrap();
-                        a_val.0.cmp(&b_val.0)
+                        a_val.1.cmp(&b_val.1)
                     });
 
                     let successful_len = successful.len();
-                    let (archive, zip_failed) = match tokio::task::spawn_blocking(move || {
-                        let mut archive = Cursor::new(Vec::new());
-                        let mut zip_failed = false;
 
-                        {
-                            let mut zip = ZipWriter::new(&mut archive);
-                            let options = SimpleFileOptions::default()
-                                .compression_method(zip::CompressionMethod::Stored);
-
-                            if let Some(ref xml_content) = comic_info_xml
-                                && zip.start_file("ComicInfo.xml", options).is_ok()
-                            {
-                                let _ = zip.write_all(xml_content.as_bytes());
-                            }
-
-                            for (filename, bytes) in successful.iter().flatten() {
-                                if let Err(e) = zip.start_file(filename, options) {
-                                    tracing::error!("Failed to start file in zip: {}", e);
-                                    zip_failed = true;
-                                    break;
-                                }
-                                if let Err(e) = zip.write_all(bytes) {
-                                    tracing::error!("Failed to write to zip: {}", e);
-                                    zip_failed = true;
-                                    break;
-                                }
-                            }
-
-                            if !zip_failed && zip.finish().is_err() {
-                                tracing::error!("Failed to finish zip archive");
-                                zip_failed = true;
-                            }
-                        }
-
-                        (archive, zip_failed)
-                    })
+                    match Self::create_cbz(
+                        &cbz_path,
+                        successful.into_iter().map(|res| res.unwrap()).collect(),
+                        &comic_info_xml,
+                    )
                     .await
                     {
-                        Ok(res) => res,
+                        Ok(_) => {
+                            Self::send_event(
+                                &progress_tx,
+                                DownloadProgressEvent::ChapterCompleted {
+                                    chapter_id,
+                                    chapter_name: name.clone(),
+                                    successful_pages: successful_len,
+                                    failed_pages: 0,
+                                },
+                            );
+                            tracing::info!(
+                                "Chapter '{}' completed: {} pages downloaded to .cbz",
+                                name,
+                                successful_len
+                            );
+                        }
                         Err(e) => {
-                            tracing::error!("spawn_blocking failed: {}", e);
+                            tracing::error!("Failed to assemble zip archive: {}", e);
                             Self::send_event(
                                 &progress_tx,
                                 DownloadProgressEvent::ChapterFailed {
                                     chapter_name: name.clone(),
-                                    error: "Failed to assemble zip archive (spawn_blocking failed)"
-                                        .to_string(),
+                                    error: e.to_string(),
                                 },
                             );
-                            continue;
                         }
-                    };
-
-                    if zip_failed {
-                        Self::send_event(
-                            &progress_tx,
-                            DownloadProgressEvent::ChapterFailed {
-                                chapter_name: name.clone(),
-                                error: "Failed to assemble zip archive".to_string(),
-                            },
-                        );
-                        continue;
                     }
-
-                    if let Err(e) = tokio::fs::write(&cbz_path, archive.into_inner()).await {
-                        tracing::error!("Failed to save .cbz file {:?}: {}", cbz_path, e);
-                        Self::send_event(
-                            &progress_tx,
-                            DownloadProgressEvent::ChapterFailed {
-                                chapter_name: name.clone(),
-                                error: e.to_string(),
-                            },
-                        );
-                        continue;
-                    }
-
-                    Self::send_event(
-                        &progress_tx,
-                        DownloadProgressEvent::ChapterCompleted {
-                            chapter_name: name.clone(),
-                            successful_pages: successful_len,
-                            failed_pages: 0,
-                        },
-                    );
-                    tracing::info!(
-                        "Chapter '{}' completed: {} pages downloaded to .cbz",
-                        name,
-                        successful_len
-                    );
                 } else {
                     Self::send_event(
                         &progress_tx,
@@ -294,6 +251,10 @@ impl DownloaderManager {
                         successful.len() + failed.len()
                     );
                 }
+
+                if staging_dir.exists() {
+                    let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+                }
             }
         });
 
@@ -307,6 +268,7 @@ impl DownloaderManager {
     /// Queue a chapter for download, returns the queue ID
     pub async fn queue_chapter(
         &self,
+        chapter_id: i64,
         chapter: Chapter,
         name: String,
         save_path: PathBuf,
@@ -317,6 +279,7 @@ impl DownloaderManager {
             let id = state.generate_id();
             state.queue.push_back(DownloadTask {
                 id,
+                chapter_id,
                 chapter,
                 name,
                 save_path,
@@ -366,14 +329,15 @@ impl DownloaderManager {
         client: &SmartClient,
         url: &str,
         page_index: i32,
+        staging_dir: &std::path::Path,
         max_retries: i64,
         initial_retry_delay_ms: i64,
-    ) -> Result<(String, Vec<u8>)> {
+    ) -> Result<(PathBuf, String)> {
         let mut attempts = 0;
         let mut delay = Duration::from_millis(initial_retry_delay_ms.try_into()?);
 
         loop {
-            match Self::download_page(client, url, page_index).await {
+            match Self::download_page(client, url, page_index, staging_dir).await {
                 Ok(data) => return Ok(data),
                 Err(e) => {
                     attempts += 1;
@@ -406,15 +370,23 @@ impl DownloaderManager {
         client: &SmartClient,
         url: &str,
         page: i32,
-    ) -> Result<(String, Vec<u8>)> {
-        let resp = client.get(url).await?;
+        staging_dir: &std::path::Path,
+    ) -> Result<(PathBuf, String)> {
+        let mut resp = client.get(url).await?;
 
         let extension = Self::get_image_extension(&resp, url);
 
-        let body = resp.bytes().await?;
         let filename = format!("{:04}.{}", page, extension);
+        let tmp_file_path = staging_dir.join(format!("{:04}.tmp", page));
 
-        Ok((filename, body.to_vec()))
+        let mut file = tokio::fs::File::create(&tmp_file_path).await?;
+
+        while let Some(chunk) = resp.chunk().await? {
+            file.write_all(&chunk).await?;
+        }
+        file.flush().await?;
+
+        Ok((tmp_file_path, filename))
     }
 
     fn get_image_extension(resp: &SmartResponse, url: &str) -> &'static str {
@@ -454,5 +426,46 @@ impl DownloaderManager {
     /// Send an event on the progress broadcast channel.
     fn send_event(tx: &broadcast::Sender<DownloadProgressEvent>, event: DownloadProgressEvent) {
         let _ = tx.send(event);
+    }
+
+    async fn create_cbz(
+        cbz_path: &std::path::Path,
+        staged_pages: Vec<(PathBuf, String)>,
+        comic_info_xml: &Option<String>,
+    ) -> Result<()> {
+        let cbz_file = tokio::fs::File::create(cbz_path).await?;
+        let mut zip_writer = ZipFileWriter::new(cbz_file.compat_write());
+
+        if let Some(xml_content) = comic_info_xml {
+            let comic_info_builder =
+                ZipEntryBuilder::new("ComicInfo.xml".into(), Compression::Stored);
+            zip_writer
+                .write_entry_whole(comic_info_builder, xml_content.as_bytes())
+                .await
+                .map_err(|e| crate::error::Error::Other(format!("Zip error: {}", e)))?;
+        }
+
+        for (tmp_path, filename) in staged_pages {
+            let mut tmp_file = tokio::fs::File::open(&tmp_path).await?;
+            let entry_builder = ZipEntryBuilder::new(filename.into(), Compression::Stored);
+            let mut entry_writer = zip_writer
+                .write_entry_stream(entry_builder)
+                .await
+                .map_err(|e| crate::error::Error::Other(format!("Zip error: {}", e)))?;
+
+            tokio::io::copy(&mut tmp_file, &mut (&mut entry_writer).compat_write()).await?;
+
+            entry_writer
+                .close()
+                .await
+                .map_err(|e| crate::error::Error::Other(format!("Zip error: {}", e)))?;
+        }
+
+        zip_writer
+            .close()
+            .await
+            .map_err(|e| crate::error::Error::Other(format!("Zip error: {}", e)))?;
+
+        Ok(())
     }
 }

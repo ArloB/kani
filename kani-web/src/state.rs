@@ -228,10 +228,14 @@ impl AppState {
     }
 
     pub async fn start_download(&self, chapter_id: i64) -> Result<(), AppError> {
-        let record = sqlx::query!("SELECT c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language, m.source_id, m.source_manga_id, m.name as manga_name, m.description, s.base_url FROM chapters c join manga m on c.manga_id = m.id join sources s on m.source_id = s.id WHERE c.id = ?", chapter_id)
+        let record = sqlx::query!("SELECT c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language, c.download_status, m.source_id, m.source_manga_id, m.name as manga_name, m.description, s.base_url FROM chapters c join manga m on c.manga_id = m.id join sources s on m.source_id = s.id WHERE c.id = ?", chapter_id)
             .fetch_optional(&self.db)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("Chapter {chapter_id} not found")))?;
+
+        if record.download_status > 0 {
+            return Err(AppError::InternalServerError(format!("Chapter {} is already downloaded or in progress.", chapter_id)));
+        }
 
         let authors_record = sqlx::query!("SELECT GROUP_CONCAT(p.name, ', ') as names FROM manga_authors ma JOIN people p ON ma.person_id = p.id WHERE ma.manga_id = (SELECT manga_id FROM chapters WHERE id = ?)", chapter_id)
             .fetch_one(&self.db)
@@ -271,10 +275,7 @@ impl AppState {
 
         let library_path = self.settings.read().await.library_path.clone();
 
-        let name = record.volume.map_or_else(
-            || format!("Ch. {}", record.chapter_number),
-            |volume| format!("Vol. {volume} - Ch. {}", record.chapter_number),
-        );
+        let name = chapter_name(record.volume, record.chapter_number);
 
         let safe_manga_name = kani_core::sanitize::sanitize_filename(&record.manga_name);
         let path = library_path.join(safe_manga_name);
@@ -299,9 +300,40 @@ impl AppState {
             kani_core::comic_info::build_xml(&comic_info).map_err(AppError::CoreError)?;
 
         self.downloader
-            .queue_chapter(chapter, name, path, Some(xml_payload))
+            .queue_chapter(chapter_id, chapter, name, path, Some(xml_payload))
             .await
             .map_err(AppError::CoreError)?;
+
+        Ok(())
+    }
+
+    pub async fn delete_downloaded(&self, chapter_id: i64) -> Result<(), AppError> {
+        let record = sqlx::query!("SELECT c.download_status, c.volume, c.chapter_number, m.name as manga_name FROM chapters c join manga m on c.manga_id = m.id WHERE c.id = ?", chapter_id)
+            .fetch_optional(&self.db)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("Chapter {chapter_id} not found")))?;
+
+        if record.download_status != 2 {
+            return Err(AppError::InternalServerError(format!("Chapter {chapter_id} is not downloaded.")));
+        }
+
+        let name = chapter_name(record.volume, record.chapter_number);
+
+        let library_path = self.settings.read().await.library_path.clone();
+        let safe_manga_name = kani_core::sanitize::sanitize_filename(&record.manga_name);
+        let path = library_path.join(safe_manga_name);
+        let cbz_path = path.join(format!("{}.cbz", &name));
+
+        if let Err(e) = tokio::fs::remove_file(&cbz_path).await {
+            tracing::error!("Failed to remove chapter file: {}", e);
+        }
+
+        let _ = sqlx::query!(
+            "UPDATE chapters SET download_status = 0 WHERE id = ?",
+            chapter_id
+        )
+        .execute(&self.db)
+        .await;
 
         Ok(())
     }
@@ -431,4 +463,11 @@ fn convert_to_shared_manga_info(
         status,
         tags: info.tags,
     }
+}
+
+fn chapter_name(volume: Option<i64>, chapter_number: f64) -> String {
+    volume.map_or_else(
+        || format!("Ch. {}", chapter_number),
+        |volume| format!("Vol. {volume} - Ch. {}", chapter_number),
+    )
 }
