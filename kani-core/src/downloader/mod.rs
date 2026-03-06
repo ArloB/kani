@@ -10,7 +10,7 @@ use async_zip::{Compression, ZipEntryBuilder};
 use futures::stream::{self, StreamExt};
 use kani_shared::{Chapter, DownloadProgressEvent};
 pub use progress::{DownloadProgress, ProgressEvent};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -46,6 +46,7 @@ struct DownloadTask {
 /// Shared queue state accessible from both the manager and worker
 struct QueueState {
     queue: VecDeque<DownloadTask>,
+    active_tasks: HashMap<i64, tokio::sync::oneshot::Sender<()>>,
     next_id: AtomicU64,
 }
 
@@ -53,6 +54,7 @@ impl QueueState {
     fn new() -> Self {
         Self {
             queue: VecDeque::new(),
+            active_tasks: HashMap::new(),
             next_id: AtomicU64::new(1),
         }
     }
@@ -130,6 +132,7 @@ impl DownloaderManager {
                     Self::send_event(
                         &progress_tx,
                         DownloadProgressEvent::ChapterFailed {
+                            chapter_id,
                             chapter_name: name.clone(),
                             error: format!("Failed to create staging directory: {}", e),
                         },
@@ -146,69 +149,96 @@ impl DownloaderManager {
                     },
                 );
 
-                let results: Vec<std::result::Result<(PathBuf, String), String>> =
-                    stream::iter(chapter.pages.into_iter())
-                        .map(|page| {
-                            let client = client.clone();
-                            let name = name.clone();
-                            let page_tx = progress_tx.clone();
-                            let staging_dir = staging_dir.clone();
+                let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+                {
+                    let mut state = queue_clone.lock().await;
+                    state.active_tasks.insert(chapter_id, cancel_tx);
+                }
 
-                            async move {
-                                let result = Self::download_page_with_retry(
-                                    &client,
-                                    &page.url,
-                                    page.index,
-                                    &staging_dir,
-                                    max_retries,
-                                    initial_retry_delay_ms,
+                let mut stream = stream::iter(chapter.pages.into_iter())
+                    .map(|page| {
+                        let client = client.clone();
+                        let name = name.clone();
+                        let page_tx = progress_tx.clone();
+                        let staging_dir = staging_dir.clone();
+
+                        async move {
+                            let result = Self::download_page_with_retry(
+                                &client,
+                                &page.url,
+                                page.index,
+                                &staging_dir,
+                                max_retries,
+                                initial_retry_delay_ms,
+                            )
+                            .await;
+
+                            if result.is_ok() {
+                                Self::send_event(
+                                    &page_tx,
+                                    DownloadProgressEvent::PageCompleted {
+                                        chapter_id,
+                                        chapter_name: name.clone(),
+                                        page_index: page.index,
+                                    },
                                 )
-                                .await;
-
-                                match &result {
-                                    Ok(_) => Self::send_event(
-                                        &page_tx,
-                                        DownloadProgressEvent::PageCompleted {
-                                            chapter_name: name.clone(),
-                                            page_index: page.index,
-                                        },
-                                    ),
-                                    Err(e) => Self::send_event(
-                                        &page_tx,
-                                        DownloadProgressEvent::PageFailed {
-                                            chapter_name: name.clone(),
-                                            page_index: page.index,
-                                            error: e.to_string(),
-                                        },
-                                    ),
-                                }
-
-                                result.map_err(|e| e.to_string())
                             }
-                        })
-                        .buffer_unordered(concurrent_page_downloads)
-                        .collect()
-                        .await;
 
-                let (mut successful, failed): (Vec<_>, Vec<_>) =
-                    results.into_iter().partition(std::result::Result::is_ok);
+                            result.map_err(|e| e.to_string())
+                        }
+                    })
+                    .buffer_unordered(concurrent_page_downloads);
 
-                if failed.is_empty() {
-                    successful.sort_by(|a, b| {
-                        let a_val = a.as_ref().unwrap();
-                        let b_val = b.as_ref().unwrap();
-                        a_val.1.cmp(&b_val.1)
-                    });
+                let mut successful = Vec::new();
+                let mut error = None;
+                let mut is_cancelled = false;
+
+                while let Some(result) = tokio::select! {
+                    res = stream.next() => res,
+                    _ = &mut cancel_rx => {
+                        is_cancelled = true;
+                        None
+                    }
+                } {
+                    match result {
+                        Ok(data) => successful.push(data),
+                        Err(e) => {
+                            error = Some(e);
+                            break;
+                        }
+                    }
+                }
+
+                {
+                    let mut state = queue_clone.lock().await;
+                    state.active_tasks.remove(&chapter_id);
+                }
+
+                if is_cancelled {
+                    Self::send_event(
+                        &progress_tx,
+                        DownloadProgressEvent::ChapterCancelled {
+                            chapter_id,
+                            chapter_name: name.clone(),
+                        },
+                    );
+                    tracing::info!("Chapter '{}' cancelled", name);
+                } else if let Some(err_msg) = error {
+                    Self::send_event(
+                        &progress_tx,
+                        DownloadProgressEvent::ChapterFailed {
+                            chapter_id,
+                            chapter_name: name.clone(),
+                            error: format!("Page download failed: {}", err_msg),
+                        },
+                    );
+                    tracing::warn!("Chapter '{}' failed: {}", name, err_msg);
+                } else {
+                    successful.sort_by(|a, b| a.1.cmp(&b.1));
 
                     let successful_len = successful.len();
 
-                    match Self::create_cbz(
-                        &cbz_path,
-                        successful.into_iter().map(|res| res.unwrap()).collect(),
-                        &comic_info_xml,
-                    )
-                    .await
-                    {
+                    match Self::create_cbz(&cbz_path, successful, &comic_info_xml).await {
                         Ok(_) => {
                             Self::send_event(
                                 &progress_tx,
@@ -230,26 +260,13 @@ impl DownloaderManager {
                             Self::send_event(
                                 &progress_tx,
                                 DownloadProgressEvent::ChapterFailed {
+                                    chapter_id,
                                     chapter_name: name.clone(),
                                     error: e.to_string(),
                                 },
                             );
                         }
                     }
-                } else {
-                    Self::send_event(
-                        &progress_tx,
-                        DownloadProgressEvent::ChapterFailed {
-                            chapter_name: name.clone(),
-                            error: format!("{} pages failed", failed.len()),
-                        },
-                    );
-                    tracing::warn!(
-                        "Chapter '{}' completed with errors: {}/{} pages successful",
-                        name,
-                        successful.len(),
-                        successful.len() + failed.len()
-                    );
                 }
 
                 if staging_dir.exists() {
@@ -318,6 +335,30 @@ impl DownloaderManager {
         } else {
             false
         }
+    }
+
+    /// Cancel a chapter download by its `chapter_id` (database ID).
+    /// Returns true if it was removed from the queue or if an active download was aborted.
+    pub async fn cancel_download(&self, chapter_id: i64) -> bool {
+        let mut state = self.queue.lock().await;
+
+        // Remove from pending queue if it's there
+        if let Some(pos) = state
+            .queue
+            .iter()
+            .position(|task| task.chapter_id == chapter_id)
+        {
+            state.queue.remove(pos);
+            return true;
+        }
+
+        // If it's currently active, send the cancel signal
+        if let Some(tx) = state.active_tasks.remove(&chapter_id) {
+            let _ = tx.send(());
+            return true;
+        }
+
+        false
     }
 
     /// Get the number of chapters currently in the queue

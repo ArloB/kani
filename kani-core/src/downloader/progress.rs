@@ -47,32 +47,38 @@ impl DownloadProgress {
 pub enum ProgressEvent {
     /// A chapter download has started
     ChapterStarted {
+        chapter_id: i64,
         chapter_name: String,
         total_pages: usize,
     },
 
     /// A single page was downloaded successfully
     PageCompleted {
+        chapter_id: i64,
         chapter_name: String,
         page_index: i32,
-    },
-
-    /// A single page download failed
-    PageFailed {
-        chapter_name: String,
-        page_index: i32,
-        error: String,
     },
 
     /// A chapter download completed (all pages processed)
     ChapterCompleted {
+        chapter_id: i64,
         chapter_name: String,
         successful_pages: usize,
         failed_pages: usize,
     },
 
     /// A chapter download failed completely (e.g., couldn't create directory)
-    ChapterFailed { chapter_name: String, error: String },
+    ChapterFailed {
+        chapter_id: i64,
+        chapter_name: String,
+        error: String,
+    },
+
+    /// A chapter download was cancelled
+    ChapterCancelled {
+        chapter_id: i64,
+        chapter_name: String,
+    },
 }
 
 #[cfg(test)]
