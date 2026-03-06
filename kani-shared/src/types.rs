@@ -118,14 +118,9 @@ pub enum DownloadProgressEvent {
     },
 
     PageCompleted {
+        chapter_id: i64,
         chapter_name: String,
         page_index: i32,
-    },
-
-    PageFailed {
-        chapter_name: String,
-        page_index: i32,
-        error: String,
     },
 
     ChapterCompleted {
@@ -136,7 +131,13 @@ pub enum DownloadProgressEvent {
     },
 
     ChapterFailed {
+        chapter_id: i64,
         chapter_name: String,
         error: String,
+    },
+
+    ChapterCancelled {
+        chapter_id: i64,
+        chapter_name: String,
     },
 }

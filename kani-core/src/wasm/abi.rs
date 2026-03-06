@@ -108,7 +108,7 @@ impl html::Host for HostState {
         let handle = self.next_doc_handle;
         self.next_doc_handle += 1;
         let parsed_doc = SafeHtml::parse_document(&html);
-        let root_id = parsed_doc.0.tree.root().id();
+        let root_id = parsed_doc.0.root_element().id();
         let parsed = SendHtml(Arc::new(Mutex::new(parsed_doc)));
         self.html_docs.insert(
             handle,
@@ -165,15 +165,20 @@ impl html::Host for HostState {
             Some(s) => s,
             None => return Err("Document not found".to_string()),
         };
-        let selector_obj = match scraper::Selector::parse(&selector) {
-            Ok(s) => s,
-            Err(_) => return Ok(None),
-        };
 
         let doc_lock = doc.doc.lock().unwrap();
         let element = match scraper::ElementRef::wrap(doc_lock.0.tree.get(doc.node_id).unwrap()) {
             Some(el) => el,
             None => return Ok(None),
+        };
+
+        if selector.is_empty() {
+            return Ok(element.value().attr(&attr).map(|s| s.to_string()));
+        }
+
+        let selector_obj = match scraper::Selector::parse(&selector) {
+            Ok(s) => s,
+            Err(_) => return Ok(None),
         };
 
         Ok(element
@@ -191,15 +196,20 @@ impl html::Host for HostState {
             Some(s) => s,
             None => return Err("Document not found".to_string()),
         };
-        let selector_obj = match scraper::Selector::parse(&selector) {
-            Ok(s) => s,
-            Err(_) => return Ok(None),
-        };
 
         let doc_lock = doc.doc.lock().unwrap();
         let element = match scraper::ElementRef::wrap(doc_lock.0.tree.get(doc.node_id).unwrap()) {
             Some(el) => el,
             None => return Ok(None),
+        };
+
+        if selector.is_empty() {
+            return Ok(Some(element.text().collect::<Vec<_>>().join("")));
+        }
+
+        let selector_obj = match scraper::Selector::parse(&selector) {
+            Ok(s) => s,
+            Err(_) => return Ok(None),
         };
 
         Ok(element
