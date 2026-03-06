@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS categories (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
     sort_order INTEGER NOT NULL
 );

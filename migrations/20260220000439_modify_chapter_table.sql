@@ -1,7 +1,7 @@
 PRAGMA foreign_keys = OFF;
 
 CREATE TABLE chapters_new (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY NOT NULL,
     manga_id INTEGER NOT NULL,
     source_chapter_id TEXT NOT NULL,
     name TEXT,
@@ -9,7 +9,7 @@ CREATE TABLE chapters_new (
     language TEXT NOT NULL,
     volume INTEGER,
     scanlator TEXT,
-    uploaded_at DATETIME NOT NULL,
+    uploaded_at DATETIME,
     download_status INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (manga_id) REFERENCES manga(id) ON DELETE CASCADE,
     UNIQUE (manga_id, source_chapter_id)
