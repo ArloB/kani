@@ -1,21 +1,16 @@
 use leptos::prelude::*;
 use std::collections::HashMap;
+use crate::types::LiveChapterStatus;
 
 /// Live per-chapter progress tracking for downloads.
 #[derive(Debug, Clone, PartialEq)]
 struct ChapterProgress {
+    pub id: i64,
     pub name: String,
     pub total_pages: usize,
     pub completed_pages: usize,
     pub failed_pages: usize,
-    pub status: ChapterStatus,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum ChapterStatus {
-    InProgress,
-    Completed,
-    Failed(String),
+    pub status: LiveChapterStatus,
 }
 
 impl ChapterProgress {
@@ -29,7 +24,7 @@ impl ChapterProgress {
 
 #[component]
 pub fn DownloadProgress() -> impl IntoView {
-    let chapters = RwSignal::new(HashMap::<String, ChapterProgress>::new());
+    let chapters = RwSignal::new(HashMap::<i64, ChapterProgress>::new());
 
     Effect::new(move |_| {
         #[cfg(feature = "hydrate")]
@@ -39,7 +34,7 @@ pub fn DownloadProgress() -> impl IntoView {
             use wasm_bindgen::prelude::*;
             use web_sys::{EventSource, MessageEvent};
 
-            let es = match EventSource::new("/api/downloads/progress") {
+            let es = match EventSource::new("/rest/downloads/progress") {
                 Ok(es) => es,
                 Err(e) => {
                     log::error!("Failed to open EventSource: {:?}", e);
@@ -62,53 +57,78 @@ pub fn DownloadProgress() -> impl IntoView {
                     }
                 };
 
+                let maybe_dismiss_id = match &event {
+                    DownloadProgressEvent::ChapterCompleted { chapter_id, .. } => Some(*chapter_id),
+                    DownloadProgressEvent::ChapterFailed { chapter_id, .. } => Some(*chapter_id),
+                    DownloadProgressEvent::ChapterCancelled { chapter_id, .. } => Some(*chapter_id),
+                    _ => None,
+                };
+
                 chapters_signal.update(|map| match event {
                     DownloadProgressEvent::ChapterStarted {
+                        chapter_id,
                         chapter_name,
                         total_pages,
                     } => {
                         map.insert(
-                            chapter_name.clone(),
+                            chapter_id,
                             ChapterProgress {
+                                id: chapter_id,
                                 name: chapter_name,
                                 total_pages,
                                 completed_pages: 0,
                                 failed_pages: 0,
-                                status: ChapterStatus::InProgress,
+                                status: LiveChapterStatus::InProgress,
                             },
                         );
                     }
-                    DownloadProgressEvent::PageCompleted { chapter_name, .. } => {
-                        if let Some(c) = map.get_mut(&chapter_name) {
+                    DownloadProgressEvent::PageCompleted { chapter_id, .. } => {
+                        if let Some(c) = map.get_mut(&chapter_id) {
                             c.completed_pages += 1;
                         }
                     }
-                    DownloadProgressEvent::PageFailed { chapter_name, .. } => {
-                        if let Some(c) = map.get_mut(&chapter_name) {
-                            c.failed_pages += 1;
-                        }
-                    }
                     DownloadProgressEvent::ChapterCompleted {
-                        chapter_name,
+                        chapter_id,
                         successful_pages,
                         failed_pages,
                         ..
                     } => {
-                        if let Some(c) = map.get_mut(&chapter_name) {
+                        if let Some(c) = map.get_mut(&chapter_id) {
                             c.completed_pages = successful_pages;
                             c.failed_pages = failed_pages;
-                            c.status = ChapterStatus::Completed;
+                            c.status = LiveChapterStatus::Completed;
                         }
                     }
                     DownloadProgressEvent::ChapterFailed {
-                        chapter_name,
+                        chapter_id,
                         error,
+                        ..
                     } => {
-                        if let Some(c) = map.get_mut(&chapter_name) {
-                            c.status = ChapterStatus::Failed(error);
+                        if let Some(c) = map.get_mut(&chapter_id) {
+                            c.status = LiveChapterStatus::Failed(error);
+                        }
+                    }
+                    DownloadProgressEvent::ChapterCancelled {
+                        chapter_id,
+                        ..
+                    } => {
+                        if let Some(c) = map.get_mut(&chapter_id) {
+                            c.status = LiveChapterStatus::Cancelled;
                         }
                     }
                 });
+
+                if let Some(id) = maybe_dismiss_id {
+                    let s = chapters_signal;
+                    set_timeout(
+                        move || {
+                            s.update(|m| {
+                                m.remove(&id);
+                            });
+                        },
+                        std::time::Duration::from_secs(5),
+                    );
+                }
             });
 
             es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
@@ -123,9 +143,9 @@ pub fn DownloadProgress() -> impl IntoView {
         }
     });
 
-    let dismiss = move |name: String| {
+    let dismiss = move |id: i64| {
         chapters.update(|map| {
-            map.remove(&name);
+            map.remove(&id);
         });
     };
 
@@ -137,7 +157,7 @@ pub fn DownloadProgress() -> impl IntoView {
             }
 
             let mut entries: Vec<ChapterProgress> = map.into_values().collect();
-            entries.sort_by_key(|c| matches!(c.status, ChapterStatus::InProgress));
+            entries.sort_by_key(|c| matches!(c.status, LiveChapterStatus::InProgress));
             entries.reverse();
 
             view! {
@@ -152,21 +172,25 @@ pub fn DownloadProgress() -> impl IntoView {
                             children=move |chapter| {
                                 let pct = chapter.completion_pct();
                                 let name = chapter.name.clone();
-                                let dismiss_name = name.clone();
-                                let is_done = !matches!(chapter.status, ChapterStatus::InProgress);
+                                let dismiss_id = chapter.id;
+                                let is_done = !matches!(chapter.status, LiveChapterStatus::InProgress);
                                 let bar_class = match &chapter.status {
-                                    ChapterStatus::InProgress => "progress-bar progress-bar--active",
-                                    ChapterStatus::Completed  => "progress-bar progress-bar--done",
-                                    ChapterStatus::Failed(_)  => "progress-bar progress-bar--failed",
-                                };
+                                    LiveChapterStatus::InProgress=>"progress-bar progress-bar--active",
+                                    LiveChapterStatus::Completed=>"progress-bar progress-bar--done",
+                                    LiveChapterStatus::Failed(_)=>"progress-bar progress-bar--failed",
+                                    LiveChapterStatus::Cancelled=>"progress-bar progress-bar--failed",
+                                    LiveChapterStatus::Deleted => todo!(),
+                                                                    };
                                 let status_text = match &chapter.status {
-                                    ChapterStatus::InProgress => format!(
+                                    LiveChapterStatus::InProgress => format!(
                                         "{}/{} pages",
                                         chapter.completed_pages + chapter.failed_pages,
                                         chapter.total_pages
                                     ),
-                                    ChapterStatus::Completed  => "Complete".to_string(),
-                                    ChapterStatus::Failed(e)  => format!("Failed: {e}"),
+                                    LiveChapterStatus::Completed  => "Complete".to_string(),
+                                    LiveChapterStatus::Failed(e)  => format!("Failed: {e}"),
+                                    LiveChapterStatus::Cancelled  => "Cancelled".to_string(),
+                                    LiveChapterStatus::Deleted => todo!(),
                                 };
                                 view! {
                                     <div class="download-item">
@@ -176,7 +200,7 @@ pub fn DownloadProgress() -> impl IntoView {
                                             {is_done.then(|| view! {
                                                 <button
                                                     class="download-item-dismiss"
-                                                    on:click=move |_| dismiss(dismiss_name.clone())
+                                                    on:click=move |_| dismiss(dismiss_id)
                                                 >
                                                     "✕"
                                                 </button>

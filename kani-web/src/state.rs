@@ -299,6 +299,10 @@ impl AppState {
         let xml_payload =
             kani_core::comic_info::build_xml(&comic_info).map_err(AppError::CoreError)?;
 
+        let _ = sqlx::query!("UPDATE chapters SET download_status = 1 WHERE id = ?", chapter_id)
+            .execute(&self.db)
+            .await;
+
         self.downloader
             .queue_chapter(chapter_id, chapter, name, path, Some(xml_payload))
             .await

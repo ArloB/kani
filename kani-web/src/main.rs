@@ -10,7 +10,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .init();
@@ -60,10 +60,16 @@ async fn main() {
                         .execute(&db)
                         .await;
                     }
-                    kani_shared::DownloadProgressEvent::ChapterFailed { error, .. } => {
+                    kani_shared::DownloadProgressEvent::ChapterFailed { chapter_id, error, .. } => {
                         tracing::error!("Chapter failed to download: {}", error);
-                        // Optional: update to a failed status if needed
-                        // let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id).execute(&db).await;
+                        let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
+                            .execute(&db)
+                            .await;
+                    }
+                    kani_shared::DownloadProgressEvent::ChapterCancelled { chapter_id, .. } => {
+                        let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
+                            .execute(&db)
+                            .await;
                     }
                     _ => {}
                 }
@@ -71,7 +77,25 @@ async fn main() {
         });
     }
 
+    let s_get = state.clone();
+    let s_post = state.clone();
+
     let app = Router::new()
+        .route(
+            "/api/{*fn_name}",
+            axum::routing::get(move |req: axum::extract::Request| {
+                leptos_axum::handle_server_fns_with_context(
+                    move || provide_context(s_get.clone()),
+                    req,
+                )
+            })
+            .post(move |req: axum::extract::Request| {
+                leptos_axum::handle_server_fns_with_context(
+                    move || provide_context(s_post.clone()),
+                    req,
+                )
+            }),
+        )
         .leptos_routes_with_context(
             &leptos_options,
             routes,
@@ -87,7 +111,7 @@ async fn main() {
         .fallback(leptos_axum::file_and_error_handler(shell))
         .layer(CompressionLayer::new())
         .with_state(leptos_options)
-        .merge(Router::new().nest("/api", rest_router));
+        .merge(Router::new().nest("/rest", rest_router));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8242")
         .await

@@ -437,8 +437,7 @@ async fn save_to_library(
         id
     )
     .fetch_optional(&state.db)
-    .await?
-    .flatten();
+    .await?;
 
     let result = state.get_manga_details(id, &manga_id).await?;
     let chapters = state.get_chapter_list(id, &manga_id).await?;
@@ -467,9 +466,7 @@ async fn save_to_library(
         .fetch_one(&mut *tx)
         .await?;
 
-        let manga_row_id = result
-            .id
-            .ok_or_else(|| AppError::InternalServerError("Failed to get manga id".to_string()))?;
+        let manga_row_id = result.id;
 
         for author in &manga.authors {
             sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", author)

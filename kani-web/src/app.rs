@@ -1,5 +1,6 @@
 use crate::pages::downloads::DownloadProgress;
 use crate::pages::home::Home;
+use crate::pages::library::Library;
 use crate::pages::manga_details::MangaDetails;
 use crate::pages::source_details::SourceDetails;
 use leptos::prelude::*;
@@ -24,6 +25,8 @@ pub fn App() -> impl IntoView {
                         <Route path=path!("/") view=Home/>
                         <Route path=path!("/source/:id") view=SourceDetails/>
                         <Route path=path!("/source/:id/manga/:manga_id") view=MangaDetails/>
+                        <Route path=path!("/manga/:db_id") view=MangaDetails/>
+                        <Route path=path!("/library") view=Library/>
                     </Routes>
                 </main>
             </Router>

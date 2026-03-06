@@ -49,6 +49,18 @@ impl From<MangaStatus> for i64 {
     }
 }
 
+impl From<i64> for MangaStatus {
+    fn from(status: i64) -> Self {
+        match status {
+            0 => MangaStatus::Ongoing,
+            1 => MangaStatus::Completed,
+            2 => MangaStatus::Hiatus,
+            3 => MangaStatus::Cancelled,
+            _ => MangaStatus::Unknown,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MangaInfo {
     pub id: String,
@@ -65,15 +77,26 @@ pub struct MangaInfo {
 pub struct Chapter {
     pub id: String,
     pub title: Option<String>,
-    pub number: f32,
-    pub volume: Option<f32>,
+    pub number: f64,
+    pub volume: Option<i64>,
     pub language: String,
     pub scanlator: Option<String>,
     pub date_uploaded: Option<i64>,
+    #[serde(default)]
+    pub download_status: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ChapterList {
     pub chapters: Vec<Chapter>,
     pub has_next_page: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiveChapterStatus {
+    InProgress,
+    Completed,
+    Failed(String),
+    Cancelled,
+    Deleted,
 }

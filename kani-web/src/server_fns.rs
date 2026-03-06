@@ -91,8 +91,7 @@ pub async fn save_to_library(source_id: i64, manga_id: String) -> Result<i64, Se
     )
     .fetch_optional(&state.db)
     .await
-    .map_err(to_server_err)?
-    .flatten();
+    .map_err(to_server_err)?;
 
     if let Some(id) = exists {
         return Ok(id);
@@ -131,9 +130,7 @@ pub async fn save_to_library(source_id: i64, manga_id: String) -> Result<i64, Se
     .await
     .map_err(to_server_err)?;
 
-    let manga_row_id = result
-        .id
-        .ok_or_else(|| ServerFnError::new("Failed to get manga id"))?;
+    let manga_row_id = result.id;
 
     for author in &manga.authors {
         sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", author)
@@ -213,6 +210,205 @@ pub async fn start_download(chapter_id: i64) -> Result<(), ServerFnError> {
         .start_download(chapter_id)
         .await
         .map_err(to_server_err)
+}
+
+#[server]
+pub async fn cancel_download(chapter_id: i64) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    
+    state.downloader.cancel_download(chapter_id).await;
+
+    let _ = sqlx::query!(
+        "UPDATE chapters SET download_status = 0 WHERE id = ?",
+        chapter_id
+    )
+    .execute(&state.db)
+    .await
+    .map_err(to_server_err)?;
+
+    Ok(())
+}
+
+#[server]
+pub async fn download_all(manga_id: i64) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+
+    let un_downloaded_chapters = sqlx::query_scalar!(
+        "SELECT id FROM chapters WHERE manga_id = ? AND download_status = 0",
+        manga_id
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(to_server_err)?;
+
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        for chapter_id in un_downloaded_chapters {
+            if let Err(e) = state_clone.start_download(chapter_id).await {
+                tracing::error!("Failed to queue download for chapter {}: {}", chapter_id, e);
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[server]
+pub async fn delete_downloaded(id: i64) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    state
+        .delete_downloaded(id)
+        .await
+        .map_err(to_server_err)
+}
+
+#[server]
+pub async fn check_in_library(source_id: i64, manga_id: String) -> Result<Option<i64>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let exists: Option<i64> = sqlx::query_scalar!(
+        "SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?",
+        manga_id,
+        source_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(to_server_err)?;
+
+    Ok(exists)
+}
+
+#[server]
+pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let manga = sqlx::query_as!(crate::models::Manga, "SELECT * FROM manga WHERE id = ?", id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(to_server_err)?
+        .ok_or_else(|| ServerFnError::new("Manga not found"))?;
+
+    let source = sqlx::query_as!(Source, "SELECT id, name, version, base_url FROM sources WHERE id = ?", manga.source_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(to_server_err)?
+        .ok_or_else(|| ServerFnError::new("Source not found"))?;
+
+    let authors = sqlx::query_scalar!("SELECT p.name FROM people p JOIN manga_authors ma ON p.id = ma.person_id WHERE ma.manga_id = ?", id)
+        .fetch_all(&state.db).await.unwrap_or_default();
+    let artists = sqlx::query_scalar!("SELECT p.name FROM people p JOIN manga_artists ma ON p.id = ma.person_id WHERE ma.manga_id = ?", id)
+        .fetch_all(&state.db).await.unwrap_or_default();
+    let tags = sqlx::query_scalar!("SELECT t.name FROM tags t JOIN manga_tags mt ON t.id = mt.tag_id WHERE mt.manga_id = ?", id)
+        .fetch_all(&state.db).await.unwrap_or_default();
+    
+    let info = MangaInfo {
+        id: manga.source_manga_id,
+        title: manga.name,
+        cover_url: manga.cover_url,
+        description: manga.description,
+        status: crate::types::MangaStatus::from(i64::from(manga.status)),
+        authors,
+        artists,
+        tags,
+    };
+
+    Ok((info, source))
+}
+
+#[server]
+pub async fn get_local_chapter_list(manga_id: i64, page: i32) -> Result<ChapterList, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let limit = 65;
+    let offset = ((page - 1).max(0) * limit) as i64;
+
+    let chapters_db = sqlx::query!(
+        r#"SELECT id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at as "uploaded_at: i64", download_status
+         FROM chapters WHERE manga_id = ?
+         ORDER BY chapter_number DESC
+         LIMIT ? OFFSET ?"#,
+        manga_id, limit, offset
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(to_server_err)?;
+
+    let total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM chapters WHERE manga_id = ?", manga_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(to_server_err)?;
+
+    let chapters = chapters_db.into_iter().map(|c| crate::types::Chapter {
+        id: c.id.to_string(), 
+        title: c.name,
+        number: c.chapter_number,
+        language: c.language,
+        volume: c.volume,
+        scanlator: c.scanlator,
+        date_uploaded: c.uploaded_at,
+        download_status: c.download_status,
+    }).collect();
+
+    Ok(ChapterList {
+        chapters,
+        has_next_page: offset + (limit as i64) < total,
+    })
+}
+
+#[server]
+pub async fn delete_manga(id: i64) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+
+    let manga = sqlx::query!("SELECT name FROM manga WHERE id = ?", id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(to_server_err)?
+        .ok_or_else(|| ServerFnError::new("Manga not found"))?;
+
+    let library_path = state.settings.read().await.library_path.clone();
+    let safe_manga_name = kani_core::sanitize::sanitize_filename(&manga.name);
+    let path = library_path.join(safe_manga_name);
+
+    if path.exists()
+        && let Err(e) = tokio::fs::remove_dir_all(&path).await {
+            tracing::error!("Failed to remove manga directory {:?}: {}", path, e);
+        }
+
+    sqlx::query!("DELETE FROM manga WHERE id = ?", id)
+        .execute(&state.db)
+        .await
+        .map_err(to_server_err)?;
+    Ok(())
+}
+
+#[server]
+pub async fn get_library(page: i32) -> Result<Vec<(crate::types::MangaListItem, String)>, ServerFnError> {
+    /*let order = match order {
+        1 => "id DESC",
+        _ => "id ASC",
+    };*/
+    
+    let state = expect_context::<crate::state::AppState>();
+    let offset = (page - 1).max(0) * 20;
+
+    let records = sqlx::query!(
+        r#"SELECT m.id, m.name, m.cover_url, s.base_url 
+           FROM manga m 
+           JOIN sources s ON m.source_id = s.id 
+           ORDER BY m.id DESC LIMIT 20 OFFSET ?"#,
+        offset
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(to_server_err)?;
+
+    let library = records.into_iter().map(|r| {
+        let item = crate::types::MangaListItem {
+            id: r.id.to_string(),
+            title: r.name,
+            cover_url: r.cover_url,
+        };
+        (item, r.base_url)
+    }).collect();
+
+    Ok(library)
 }
 
 pub fn proxy_url(url: &str, referer: &str) -> String {
