@@ -5,7 +5,16 @@ pub fn sanitize_filename(name: &str) -> String {
     let mut safe_name = String::with_capacity(name.len());
 
     for c in name.chars() {
-        if c == '/' || c == '\\' {
+        if c == '/'
+            || c == '\\'
+            || c == '<'
+            || c == '>'
+            || c == ':'
+            || c == '"'
+            || c == '|'
+            || c == '?'
+            || c == '*'
+        {
             continue;
         }
 

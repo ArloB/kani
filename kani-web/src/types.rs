@@ -96,7 +96,27 @@ pub struct ChapterList {
 pub enum LiveChapterStatus {
     InProgress,
     Completed,
+    CompletedHidden,
     Failed(String),
     Cancelled,
     Deleted,
+}
+
+/// Live per-chapter progress tracking for downloads.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChapterProgress {
+    pub id: i64,
+    pub name: String,
+    pub total_pages: usize,
+    pub completed_pages: usize,
+    pub status: LiveChapterStatus,
+}
+
+impl ChapterProgress {
+    pub fn completion_pct(&self) -> f64 {
+        if self.total_pages == 0 {
+            return 100.0;
+        }
+        (self.completed_pages) as f64 / self.total_pages as f64 * 100.0
+    }
 }

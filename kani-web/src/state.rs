@@ -7,7 +7,7 @@ use kani_core::source_manager::SourceManager;
 use kani_core::wasm::WasmRuntime;
 
 use crate::error::AppError;
-use crate::models::{Settings, SharedChapter, Source};
+use crate::models::{Settings, Source};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -168,40 +168,153 @@ impl AppState {
             .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
     }
 
-    pub async fn get_chapter_list(&self, id: i64, manga_id: &str) -> Result<String, AppError> {
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
-        };
+    pub async fn save_to_library(
+        &self,
+        source_id: i64,
+        manga_id: &str,
+    ) -> Result<i64, AppError> {
+        let exists: Option<i64> = sqlx::query_scalar!(
+            "SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?",
+            manga_id,
+            source_id
+        )
+        .fetch_optional(&self.db)
+        .await?;
 
-        let mut all_chapters = Vec::new();
+        if let Some(id) = exists {
+            return Ok(id);
+        }
 
-        let mut instance = source_manager.lease_instance().await?;
+        let manga: kani_shared::MangaInfo = serde_json::from_str(
+            &self.get_manga_details(source_id, manga_id).await?,
+        )
+        .map_err(|e| AppError::InternalServerError(format!("Failed to parse manga: {}", e)))?;
 
-        let mut page = 1i32;
+        let mut tx = self.db.begin().await?;
+        let status: i64 = manga.status.into();
 
+        let result = sqlx::query!(
+            "INSERT INTO manga (source_manga_id, source_id, name, cover_url, description, status) \
+             VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+            manga.id,
+            source_id,
+            manga.title,
+            manga.cover_url,
+            manga.description,
+            status
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let manga_row_id = result.id;
+
+        for author in &manga.authors {
+            sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", author)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query!(
+                "INSERT OR IGNORE INTO manga_authors (manga_id, person_id) \
+                 SELECT ?, id FROM people WHERE name = ?",
+                manga_row_id,
+                author
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        for artist in &manga.artists {
+            sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", artist)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query!(
+                "INSERT OR IGNORE INTO manga_artists (manga_id, person_id) \
+                 SELECT ?, id FROM people WHERE name = ?",
+                manga_row_id,
+                artist
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        for tag in &manga.tags {
+            sqlx::query!("INSERT OR IGNORE INTO tags (name) VALUES (?)", tag)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query!(
+                "INSERT OR IGNORE INTO manga_tags (manga_id, tag_id) \
+                 SELECT ?, id FROM tags WHERE name = ?",
+                manga_row_id,
+                 tag
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        let bg_self = self.clone();
+        let bg_manga_id = manga_id.to_string();
+        tokio::spawn(async move {
+            bg_self.fetch_and_store_remaining_chapters(source_id, bg_manga_id, manga_row_id, 1).await;
+        });
+
+        Ok(manga_row_id)
+    }
+
+    pub async fn fetch_and_store_remaining_chapters(
+        &self,
+        source_id: i64,
+        manga_id: String,
+        manga_row_id: i64,
+        start_page: i32,
+    ) {
+        let mut page = start_page;
         loop {
-            let result = instance.get_chapter_list(manga_id, page).await?;
+            let res = match self.get_chapter_list_paged(source_id, &manga_id, page).await {
+                Ok(j) => j,
+                Err(e) => {
+                    tracing::error!("Failed to fetch chapter page {} for manga {}: {:?}", page, manga_id, e);
+                    break;
+                }
+            };
 
-            let has_next_page = result.has_next_page;
-            all_chapters.extend(result.chapters);
+            let chapter_list: kani_shared::ChapterList = match serde_json::from_str(&res) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!("Failed to parse chapter list: {:?}", e);
+                    break;
+                }
+            };
 
-            if !has_next_page {
+            if chapter_list.chapters.is_empty() {
                 break;
             }
 
+            let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT OR IGNORE INTO chapters (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at) "
+            );
+
+            query_builder.push_values(chapter_list.chapters, |mut b, chapter| {
+                b.push_bind(manga_row_id)
+                 .push_bind(chapter.id)
+                 .push_bind(chapter.title)
+                 .push_bind(chapter.number)
+                 .push_bind(chapter.language)
+                 .push_bind(chapter.volume)
+                 .push_bind(chapter.scanlator)
+                 .push_bind(chapter.date_uploaded);
+            });
+
+            if let Err(e) = query_builder.build().execute(&self.db).await {
+                tracing::error!("Failed to bulk insert chapters: {:?}", e);
+                break;
+            }
+
+            if !chapter_list.has_next_page {
+                break;
+            }
             page += 1;
         }
-
-        let combined = kani_core::wasm::kani::extension::types::ChapterList {
-            chapters: all_chapters,
-            has_next_page: false,
-        };
-
-        serde_json::to_string(&combined).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
     }
 
     pub async fn get_chapter_list_paged(
@@ -252,30 +365,17 @@ impl AppState {
             .await?;
         let tags = tags_record.names;
 
-        let chapter = {
-            let source_manager = {
-                let sources = self.sources.read().await;
+        let source_manager = {
+            let sources = self.sources.read().await;
 
-                sources.get(&record.source_id).cloned().ok_or_else(|| {
-                    AppError::NotFound(format!("Source {} not found", record.source_id))
-                })?
-            };
-
-            let chapter_generated = source_manager
-                .lease_instance()
-                .await?
-                .get_pages(&record.source_manga_id, &record.source_chapter_id)
-                .await?;
-
-            let json = serde_json::to_value(&chapter_generated)
-                .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?;
-            serde_json::from_value::<SharedChapter>(json)
-                .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?
+            sources.get(&record.source_id).cloned().ok_or_else(|| {
+                AppError::NotFound(format!("Source {} not found", record.source_id))
+            })?
         };
 
         let library_path = self.settings.read().await.library_path.clone();
 
-        let name = chapter_name(record.volume, record.chapter_number);
+        let name = chapter_name(record.volume, record.chapter_number, record.name.clone());
 
         let safe_manga_name = kani_core::sanitize::sanitize_filename(&record.manga_name);
         let path = library_path.join(safe_manga_name);
@@ -304,7 +404,15 @@ impl AppState {
             .await;
 
         self.downloader
-            .queue_chapter(chapter_id, chapter, name, path, Some(xml_payload))
+            .queue_chapter(kani_core::downloader::DownloadTask {
+                chapter_id,
+                source_manager,
+                source_manga_id: record.source_manga_id.clone(),
+                source_chapter_id: record.source_chapter_id.clone(),
+                name,
+                save_path: path,
+                comic_info_xml: Some(xml_payload),
+            })
             .await
             .map_err(AppError::CoreError)?;
 
@@ -312,7 +420,7 @@ impl AppState {
     }
 
     pub async fn delete_downloaded(&self, chapter_id: i64) -> Result<(), AppError> {
-        let record = sqlx::query!("SELECT c.download_status, c.volume, c.chapter_number, m.name as manga_name FROM chapters c join manga m on c.manga_id = m.id WHERE c.id = ?", chapter_id)
+        let record = sqlx::query!("SELECT c.download_status, c.volume, c.chapter_number, c.name as chapter_name, m.name as manga_name FROM chapters c join manga m on c.manga_id = m.id WHERE c.id = ?", chapter_id)
             .fetch_optional(&self.db)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("Chapter {chapter_id} not found")))?;
@@ -321,12 +429,13 @@ impl AppState {
             return Err(AppError::InternalServerError(format!("Chapter {chapter_id} is not downloaded.")));
         }
 
-        let name = chapter_name(record.volume, record.chapter_number);
+        let name = chapter_name(record.volume, record.chapter_number, record.chapter_name);
 
         let library_path = self.settings.read().await.library_path.clone();
         let safe_manga_name = kani_core::sanitize::sanitize_filename(&record.manga_name);
         let path = library_path.join(safe_manga_name);
-        let cbz_path = path.join(format!("{}.cbz", &name));
+        let safe_chapter_name = kani_core::sanitize::sanitize_filename(&name);
+        let cbz_path = path.join(format!("{}.cbz", &safe_chapter_name));
 
         if let Err(e) = tokio::fs::remove_file(&cbz_path).await {
             tracing::error!("Failed to remove chapter file: {}", e);
@@ -469,9 +578,15 @@ fn convert_to_shared_manga_info(
     }
 }
 
-fn chapter_name(volume: Option<i64>, chapter_number: f64) -> String {
-    volume.map_or_else(
-        || format!("Ch. {}", chapter_number),
-        |volume| format!("Vol. {volume} - Ch. {}", chapter_number),
-    )
+fn chapter_name(volume: Option<i64>, chapter_number: f64, title: Option<String>) -> String {
+    let mut name = String::new();
+    if let Some(vol) = volume {
+        name.push_str(&format!("Vol. {vol} "));
+    }
+    name.push_str(&format!("Ch. {chapter_number}"));
+    if let Some(title) = title
+        && !title.is_empty() {
+            name.push_str(&format!(" - {title}"));
+        }
+    name
 }

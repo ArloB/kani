@@ -20,7 +20,6 @@ pub enum DownloadProgressEvent {
         chapter_id: i64,
         chapter_name: String,
         successful_pages: usize,
-        failed_pages: usize,
     },
 
     ChapterFailed {

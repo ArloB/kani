@@ -20,7 +20,7 @@ use crate::{
     state::AppState,
 };
 use kani_core::source_manager::SourceManager;
-use kani_shared::{ChapterList, MangaInfo};
+
 
 pub fn routes(state: AppState) -> Router {
     Router::new()
@@ -431,113 +431,8 @@ async fn save_to_library(
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let exists: Option<i64> = sqlx::query_scalar!(
-        "SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?",
-        manga_id,
-        id
-    )
-    .fetch_optional(&state.db)
-    .await?;
-
-    let result = state.get_manga_details(id, &manga_id).await?;
-    let chapters = state.get_chapter_list(id, &manga_id).await?;
-
-    let manga = serde_json::from_str::<MangaInfo>(&result)
-        .map_err(|e| AppError::InternalServerError(format!("Failed to parse manga: {e}")))?;
-
-    let chapter = serde_json::from_str::<ChapterList>(&chapters)
-        .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter: {e}")))?;
-
-    let id = if exists.is_none() {
-        let mut tx = state.db.begin().await?;
-
-        let status: i64 = manga.status.into();
-
-        let result = sqlx::query!(
-            "INSERT INTO manga (source_manga_id, source_id, name, cover_url, description, status) \
-            VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
-            manga.id,
-            id,
-            manga.title,
-            manga.cover_url,
-            manga.description,
-            status
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-
-        let manga_row_id = result.id;
-
-        for author in &manga.authors {
-            sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", author)
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query!(
-                "INSERT OR IGNORE INTO manga_authors (manga_id, person_id) \
-                SELECT ?, id FROM people WHERE name = ?",
-                manga_row_id,
-                author
-            )
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        for artist in &manga.artists {
-            sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", artist)
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query!(
-                "INSERT OR IGNORE INTO manga_artists (manga_id, person_id) \
-                SELECT ?, id FROM people WHERE name = ?",
-                manga_row_id,
-                artist
-            )
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        for tag in &manga.tags {
-            sqlx::query!("INSERT OR IGNORE INTO tags (name) VALUES (?)", tag)
-                .execute(&mut *tx)
-                .await?;
-            sqlx::query!(
-                "INSERT OR IGNORE INTO manga_tags (manga_id, tag_id) \
-                SELECT ?, id FROM tags WHERE name = ?",
-                manga_row_id,
-                tag
-            )
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        for c in chapter.chapters {
-            sqlx::query!(
-                "INSERT INTO chapters (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                manga_row_id,
-                c.id,
-                c.title,
-                c.number,
-                c.language,
-                c.volume,
-                c.scanlator,
-                c.date_uploaded
-            )
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        tx.commit().await?;
-        manga_row_id
-    } else if let Some(existing_id) = exists {
-        existing_id
-    } else {
-        return Err(AppError::InternalServerError(
-            "Failed to get manga id".to_string(),
-        ));
-    };
-
-    Ok(Json(json!(id)))
+    let manga_row_id = state.save_to_library(id, &manga_id).await?;
+    Ok(Json(json!(manga_row_id)))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

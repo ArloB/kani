@@ -7,13 +7,6 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 
-#[derive(Debug, Clone, PartialEq)]
-struct LiveProgress {
-    pub total_pages: usize,
-    pub completed_pages: usize,
-    pub status: LiveChapterStatus,
-}
-
 #[allow(non_snake_case)]
 #[component]
 pub fn MangaDetails() -> impl IntoView {
@@ -24,91 +17,7 @@ pub fn MangaDetails() -> impl IntoView {
 
     let (page, set_page) = signal(1);
     let (added_db_id, set_added_db_id) = signal::<Option<i64>>(None);
-    let live_progress = RwSignal::new(std::collections::HashMap::<i64, LiveProgress>::new());
-    
-    Effect::new(move |_| {
-        #[cfg(feature = "hydrate")]
-        {
-            use crate::events::DownloadProgressEvent;
-            use wasm_bindgen::prelude::*;
-            use web_sys::{EventSource, MessageEvent};
-
-            let es = match EventSource::new("/rest/downloads/progress") {
-                Ok(es) => es,
-                Err(e) => {
-                    log::error!("Failed to open EventSource: {:?}", e);
-                    return;
-                }
-            };
-
-            let prog_sig = live_progress;
-            let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |msg: MessageEvent| {
-                let data = match msg.data().as_string() {
-                    Some(d) => d,
-                    None => return,
-                };
-                let event: DownloadProgressEvent = match serde_json::from_str(&data) {
-                    Ok(e) => e,
-                    Err(_) => return,
-                };
-
-                prog_sig.update(|map| match event {
-                    DownloadProgressEvent::ChapterStarted { chapter_id, total_pages, .. } => {
-                        map.insert(chapter_id, LiveProgress {
-                            total_pages,
-                            completed_pages: 0,
-                            status: LiveChapterStatus::InProgress,
-                        });
-                    }
-                    DownloadProgressEvent::PageCompleted { chapter_id, .. } => {
-                        if let Some(c) = map.get_mut(&chapter_id) {
-                            c.completed_pages += 1;
-                        }
-                    }
-                    DownloadProgressEvent::ChapterCompleted { chapter_id, successful_pages, .. } => {
-                        if let Some(c) = map.get_mut(&chapter_id) {
-                            c.completed_pages = successful_pages;
-                            c.status = LiveChapterStatus::Completed;
-                        } else {
-                            map.insert(chapter_id, LiveProgress {
-                                total_pages: successful_pages,
-                                completed_pages: successful_pages,
-                                status: LiveChapterStatus::Completed,
-                            });
-                        }
-                    }
-                    DownloadProgressEvent::ChapterFailed { chapter_id, error, .. } => {
-                        if let Some(c) = map.get_mut(&chapter_id) {
-                            c.status = LiveChapterStatus::Failed(error.clone());
-                        } else {
-                            map.insert(chapter_id, LiveProgress {
-                                total_pages: 0,
-                                completed_pages: 0,
-                                status: LiveChapterStatus::Failed(error.clone()),
-                            });
-                        }
-                        
-                        let _ = leptos::task::spawn_local(async move {
-                            // give the UI a moment to show the failed state
-                            use leptos::prelude::set_timeout;
-                            use std::time::Duration;
-                            set_timeout(move || {
-                                prog_sig.update(|m| { m.remove(&chapter_id); });
-                            }, Duration::from_millis(3000));
-                        });
-                    }
-                    DownloadProgressEvent::ChapterCancelled { chapter_id, .. } => {
-                        map.remove(&chapter_id);
-                    }
-                });
-            });
-            es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-            on_message.forget();
-            
-            let es_clone = es.clone();
-            on_cleanup(move || { es_clone.close(); });
-        }
-    });
+    let chapters_progress = expect_context::<RwSignal<std::collections::HashMap<i64, crate::types::ChapterProgress>>>();
     
     let is_local = move || db_id().is_some();
 
@@ -336,13 +245,13 @@ pub fn MangaDetails() -> impl IntoView {
 
                                                                 view! {
                                                                     {move || {
-                                                                        let map = live_progress.get();
+                                                                        let map = chapters_progress.get();
                                                                         let live = map.get(&db_chap_id);
 
                                                                         let status = match live {
                                                                             Some(p) => match &p.status {
                                                                                 LiveChapterStatus::InProgress => 1,
-                                                                                LiveChapterStatus::Completed => 2,
+                                                                                LiveChapterStatus::Completed | LiveChapterStatus::CompletedHidden => 2,
                                                                                 LiveChapterStatus::Failed(_) => 3,
                                                                                 LiveChapterStatus::Cancelled | LiveChapterStatus::Deleted => 0,
                                                                             },
@@ -354,8 +263,10 @@ pub fn MangaDetails() -> impl IntoView {
                                                                                 <button class="delete-button" style="background-color: var(--color-error); color: white;" on:click=move |_| {
                                                                                     leptos::task::spawn_local(async move {
                                                                                         if delete_downloaded(db_chap_id).await.is_ok() {
-                                                                                            live_progress.update(|m| {
-                                                                                                m.insert(db_chap_id, LiveProgress {
+                                                                                            chapters_progress.update(|m| {
+                                                                                                m.insert(db_chap_id, crate::types::ChapterProgress {
+                                                                                                    id: db_chap_id,
+                                                                                                    name: String::new(),
                                                                                                     total_pages: 0,
                                                                                                     completed_pages: 0,
                                                                                                     status: LiveChapterStatus::Deleted,
@@ -381,7 +292,7 @@ pub fn MangaDetails() -> impl IntoView {
                                                                                     <button class="download-button" style="background-color: var(--color-accent); color: var(--color-bg);" on:click=move |_| {
                                                                                         leptos::task::spawn_local(async move {
                                                                                             // Optimistically clear the UI
-                                                                                            live_progress.update(|m| { m.remove(&db_chap_id); });
+                                                                                            chapters_progress.update(|m| { m.remove(&db_chap_id); });
                                                                                             let _ = cancel_download(db_chap_id).await;
                                                                                         });
                                                                                     }>
@@ -390,7 +301,7 @@ pub fn MangaDetails() -> impl IntoView {
                                                                                 }.into_any()
                                                                             },
                                                                             3 => {
-                                                                                let msg = if let Some(LiveProgress { status: LiveChapterStatus::Failed(err), .. }) = live {
+                                                                                let msg = if let Some(crate::types::ChapterProgress { status: LiveChapterStatus::Failed(err), .. }) = live {
                                                                                     format!("Failed: {}", err)
                                                                                 } else {
                                                                                     "Failed".to_string()
@@ -404,8 +315,10 @@ pub fn MangaDetails() -> impl IntoView {
                                                                             _ => view! {
                                                                                 <button class="download-button" on:click=move |_| {
                                                                                     leptos::task::spawn_local(async move {
-                                                                                        live_progress.update(|m| {
-                                                                                            m.insert(db_chap_id, LiveProgress {
+                                                                                        chapters_progress.update(|m| {
+                                                                                            m.insert(db_chap_id, crate::types::ChapterProgress {
+                                                                                                id: db_chap_id,
+                                                                                                name: String::new(),
                                                                                                 total_pages: 0,
                                                                                                 completed_pages: 0,
                                                                                                 status: LiveChapterStatus::InProgress,

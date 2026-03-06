@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use wasmtime::component::{Component, Linker};
 
 use crate::error::{Error, Result};
@@ -12,7 +12,7 @@ pub struct SourceManager {
     engine: wasmtime::Engine,
     component: Component,
     linker: Linker<HostState>,
-    pool: Arc<Mutex<Vec<SourceInstance>>>,
+    pool: Arc<std::sync::Mutex<Vec<SourceInstance>>>,
     semaphore: Arc<Semaphore>,
     smart_client: crate::http::SmartClient,
     base_url: Option<String>,
@@ -29,17 +29,15 @@ impl SourceManager {
         pool_size: usize,
         min_idle: usize,
     ) -> Result<Self> {
-        let pool: Vec<SourceInstance> = Vec::new();
-        let pool = Arc::new(Mutex::new(pool));
+        let mut initial_pool: Vec<SourceInstance> = Vec::new();
 
-        {
-            let mut locked = pool.lock().await;
-            for _ in 0..min_idle.min(pool_size) {
-                let mut inst = SourceInstance::new(smart_client.clone(), base_url.clone());
-                inst.load(&engine, &component, &linker).await?;
-                locked.push(inst);
-            }
+        for _ in 0..min_idle.min(pool_size) {
+            let mut inst = SourceInstance::new(smart_client.clone(), base_url.clone());
+            inst.load(&engine, &component, &linker).await?;
+            initial_pool.push(inst);
         }
+
+        let pool = Arc::new(std::sync::Mutex::new(initial_pool));
 
         Ok(Self {
             engine,
@@ -62,7 +60,7 @@ impl SourceManager {
             .map_err(|e| Error::Internal(format!("Failed to acquire semaphore: {}", e)))?;
 
         let instance = {
-            let mut pool = self.pool.lock().await;
+            let mut pool = self.pool.lock().unwrap();
             pool.pop()
         };
 
@@ -76,6 +74,7 @@ impl SourceManager {
                 inst
             }
         };
+
         Ok(OwnedSourceInstance {
             instance: Some(instance),
             pool: self.pool.clone(),
@@ -83,9 +82,8 @@ impl SourceManager {
         })
     }
 
-    /// Trims idle instances from the pool, always keeping at least `min_idle`.
     pub async fn cleanup(&self, idle_timeout: Duration) {
-        let mut pool = self.pool.lock().await;
+        let mut pool = self.pool.lock().unwrap();
         let min_idle = self.min_idle;
         let mut retained = 0usize;
 
@@ -103,7 +101,7 @@ impl SourceManager {
 /// A wrapper around `SourceInstance` that returns it to the pool when dropped.
 pub struct OwnedSourceInstance {
     instance: Option<SourceInstance>,
-    pool: Arc<Mutex<Vec<SourceInstance>>>,
+    pool: Arc<std::sync::Mutex<Vec<SourceInstance>>>,
     _permit: Option<OwnedSemaphorePermit>,
 }
 
@@ -168,13 +166,9 @@ impl OwnedSourceInstance {
 impl Drop for OwnedSourceInstance {
     fn drop(&mut self) {
         if let Some(instance) = self.instance.take() {
-            let pool = self.pool.clone();
-            let permit = self._permit.take();
-            tokio::spawn(async move {
-                let mut pool = pool.lock().await;
-                pool.push(instance);
-                drop(permit);
-            });
+            let mut pool = self.pool.lock().unwrap();
+            pool.push(instance);
+            drop(self._permit.take());
         }
     }
 }

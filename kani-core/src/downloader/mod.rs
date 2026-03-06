@@ -8,7 +8,7 @@ use crate::sanitize::sanitize_filename;
 use async_zip::tokio::write::ZipFileWriter;
 use async_zip::{Compression, ZipEntryBuilder};
 use futures::stream::{self, StreamExt};
-use kani_shared::{Chapter, DownloadProgressEvent};
+use kani_shared::DownloadProgressEvent;
 pub use progress::{DownloadProgress, ProgressEvent};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -34,18 +34,24 @@ pub struct QueuedChapter {
     pub save_path: PathBuf,
 }
 
-struct DownloadTask {
+pub struct DownloadTask {
+    pub chapter_id: i64,
+    pub source_manager: Arc<crate::source_manager::SourceManager>,
+    pub source_manga_id: String,
+    pub source_chapter_id: String,
+    pub name: String,
+    pub save_path: PathBuf,
+    pub comic_info_xml: Option<String>,
+}
+
+struct QueuedDownloadTask {
     id: QueueId,
-    chapter_id: i64,
-    chapter: Chapter,
-    name: String,
-    save_path: PathBuf,
-    comic_info_xml: Option<String>,
+    task: DownloadTask,
 }
 
 /// Shared queue state accessible from both the manager and worker
 struct QueueState {
-    queue: VecDeque<DownloadTask>,
+    queue: VecDeque<QueuedDownloadTask>,
     active_tasks: HashMap<i64, tokio::sync::oneshot::Sender<()>>,
     next_id: AtomicU64,
 }
@@ -81,7 +87,7 @@ impl DownloaderManager {
     pub async fn new(
         smart_client: SmartClient,
         concurrent_page_downloads: usize,
-        _chapter_queue_size: usize, // Reserved for future use (e.g., backpressure limits)
+        concurrent_chapters: usize,
         max_retries: i64,
         initial_retry_delay_ms: i64,
     ) -> Result<Self> {
@@ -92,186 +98,273 @@ impl DownloaderManager {
         let queue_clone = queue.clone();
         let notify_clone = notify.clone();
         let progress_tx_clone = progress_tx.clone();
+        let chapter_limiter = Arc::new(tokio::sync::Semaphore::new(concurrent_chapters));
 
         tokio::spawn(async move {
-            let client = smart_client;
+            let client_global = smart_client;
 
             loop {
-                let task = {
-                    let mut state = queue_clone.lock().await;
-                    state.queue.pop_front()
-                };
+                let permit = chapter_limiter.clone().acquire_owned().await.unwrap();
 
-                let Some(task) = task else {
+                let task = loop {
+                    let task = {
+                        let mut state = queue_clone.lock().await;
+                        state.queue.pop_front()
+                    };
+
+                    if let Some(t) = task {
+                        break t;
+                    }
                     notify_clone.notified().await;
-                    continue;
                 };
 
-                let client = client.clone();
+                let client = client_global.clone();
                 let progress_tx = progress_tx_clone.clone();
-                let DownloadTask {
-                    id: _task_id,
-                    chapter_id,
-                    chapter,
-                    save_path,
-                    name,
-                    comic_info_xml,
-                } = task;
+                let queue_clone_inner = queue_clone.clone();
 
-                let safe_name = sanitize_filename(&name);
+                tokio::spawn(async move {
+                    let _permit = permit;
 
-                let cbz_path = save_path.join(format!("{}.cbz", &safe_name));
-                let staging_dir = save_path.join(format!(".tmp_staging_{}", _task_id));
+                    let QueuedDownloadTask {
+                        id: _task_id,
+                        task:
+                            DownloadTask {
+                                chapter_id,
+                                source_manager,
+                                source_manga_id,
+                                source_chapter_id,
+                                save_path,
+                                name,
+                                comic_info_xml,
+                            },
+                    } = task;
 
-                if let Err(e) = tokio::fs::create_dir_all(&staging_dir).await {
-                    tracing::error!(
-                        "Failed to create staging directory {:?}: {}",
-                        staging_dir,
-                        e
-                    );
+                    let safe_name = sanitize_filename(&name);
+                    let cbz_path = save_path.join(format!("{}.cbz", &safe_name));
+                    let staging_dir = save_path.join(format!(".tmp_staging_{}", _task_id));
+
+                    if let Err(e) = tokio::fs::create_dir_all(&staging_dir).await {
+                        tracing::error!(
+                            "Failed to create staging directory {:?}: {}",
+                            staging_dir,
+                            e
+                        );
+                        Self::send_event(
+                            &progress_tx,
+                            DownloadProgressEvent::ChapterFailed {
+                                chapter_id,
+                                chapter_name: name.clone(),
+                                error: format!("Failed to create staging directory: {}", e),
+                            },
+                        );
+                        return;
+                    }
+
                     Self::send_event(
                         &progress_tx,
-                        DownloadProgressEvent::ChapterFailed {
+                        DownloadProgressEvent::ChapterStarted {
                             chapter_id,
                             chapter_name: name.clone(),
-                            error: format!("Failed to create staging directory: {}", e),
+                            total_pages: 0,
                         },
                     );
-                    continue;
-                }
 
-                Self::send_event(
-                    &progress_tx,
-                    DownloadProgressEvent::ChapterStarted {
-                        chapter_id,
-                        chapter_name: name.clone(),
-                        total_pages: chapter.pages.len(),
-                    },
-                );
+                    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
 
-                let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
-                {
-                    let mut state = queue_clone.lock().await;
-                    state.active_tasks.insert(chapter_id, cancel_tx);
-                }
+                    {
+                        let mut state = queue_clone_inner.lock().await;
+                        state.active_tasks.insert(chapter_id, cancel_tx);
+                    }
 
-                let mut stream = stream::iter(chapter.pages.into_iter())
-                    .map(|page| {
-                        let client = client.clone();
-                        let name = name.clone();
-                        let page_tx = progress_tx.clone();
-                        let staging_dir = staging_dir.clone();
-
-                        async move {
-                            let result = Self::download_page_with_retry(
-                                &client,
-                                &page.url,
-                                page.index,
-                                &staging_dir,
-                                max_retries,
-                                initial_retry_delay_ms,
-                            )
-                            .await;
-
-                            if result.is_ok() {
-                                Self::send_event(
-                                    &page_tx,
-                                    DownloadProgressEvent::PageCompleted {
-                                        chapter_id,
-                                        chapter_name: name.clone(),
-                                        page_index: page.index,
-                                    },
-                                )
+                    let fetch_fut = async {
+                        match source_manager.lease_instance().await {
+                            Ok(mut instance) => {
+                                instance
+                                    .get_pages(&source_manga_id, &source_chapter_id)
+                                    .await
                             }
-
-                            result.map_err(|e| e.to_string())
+                            Err(e) => Err(crate::error::Error::Internal(format!(
+                                "Failed to lease instance: {}",
+                                e
+                            ))),
                         }
-                    })
-                    .buffer_unordered(concurrent_page_downloads);
+                    };
 
-                let mut successful = Vec::new();
-                let mut error = None;
-                let mut is_cancelled = false;
-
-                while let Some(result) = tokio::select! {
-                    res = stream.next() => res,
-                    _ = &mut cancel_rx => {
-                        is_cancelled = true;
-                        None
-                    }
-                } {
-                    match result {
-                        Ok(data) => successful.push(data),
-                        Err(e) => {
-                            error = Some(e);
-                            break;
+                    let chapter_generated = tokio::select! {
+                        res = fetch_fut => {
+                            match res {
+                                Ok(pages) => Some(pages),
+                                Err(e) => {
+                                    tracing::error!("Failed to get pages: {}", e);
+                                    Self::send_event(
+                                        &progress_tx,
+                                        DownloadProgressEvent::ChapterFailed {
+                                            chapter_id,
+                                            chapter_name: name.clone(),
+                                            error: format!("Failed to fetch pages: {}", e),
+                                        },
+                                    );
+                                    None
+                                }
+                            }
                         }
-                    }
-                }
-
-                {
-                    let mut state = queue_clone.lock().await;
-                    state.active_tasks.remove(&chapter_id);
-                }
-
-                if is_cancelled {
-                    Self::send_event(
-                        &progress_tx,
-                        DownloadProgressEvent::ChapterCancelled {
-                            chapter_id,
-                            chapter_name: name.clone(),
-                        },
-                    );
-                    tracing::info!("Chapter '{}' cancelled", name);
-                } else if let Some(err_msg) = error {
-                    Self::send_event(
-                        &progress_tx,
-                        DownloadProgressEvent::ChapterFailed {
-                            chapter_id,
-                            chapter_name: name.clone(),
-                            error: format!("Page download failed: {}", err_msg),
-                        },
-                    );
-                    tracing::warn!("Chapter '{}' failed: {}", name, err_msg);
-                } else {
-                    successful.sort_by(|a, b| a.1.cmp(&b.1));
-
-                    let successful_len = successful.len();
-
-                    match Self::create_cbz(&cbz_path, successful, &comic_info_xml).await {
-                        Ok(_) => {
+                        _ = &mut cancel_rx => {
                             Self::send_event(
                                 &progress_tx,
-                                DownloadProgressEvent::ChapterCompleted {
+                                DownloadProgressEvent::ChapterCancelled {
                                     chapter_id,
                                     chapter_name: name.clone(),
-                                    successful_pages: successful_len,
-                                    failed_pages: 0,
                                 },
                             );
-                            tracing::info!(
-                                "Chapter '{}' completed: {} pages downloaded to .cbz",
-                                name,
-                                successful_len
-                            );
+                            tracing::info!("Chapter '{}' cancelled during page fetch", name);
+                            None
                         }
-                        Err(e) => {
-                            tracing::error!("Failed to assemble zip archive: {}", e);
+                    };
+
+                    if let Some(chapter_generated) = chapter_generated {
+                        let pages = chapter_generated.pages;
+                        let pages_len = pages.len();
+
+                        Self::send_event(
+                            &progress_tx,
+                            DownloadProgressEvent::ChapterStarted {
+                                chapter_id,
+                                chapter_name: name.clone(),
+                                total_pages: pages_len,
+                            },
+                        );
+
+                        let mut stream = stream::iter(pages.into_iter())
+                            .map(|page| {
+                                let client = client.clone();
+                                let name = name.clone();
+                                let page_tx = progress_tx.clone();
+                                let staging_dir = staging_dir.clone();
+
+                                async move {
+                                    let result = Self::download_page_with_retry(
+                                        &client,
+                                        &page.url,
+                                        page.index,
+                                        &staging_dir,
+                                        max_retries,
+                                        initial_retry_delay_ms,
+                                    )
+                                    .await;
+
+                                    if result.is_ok() {
+                                        Self::send_event(
+                                            &page_tx,
+                                            DownloadProgressEvent::PageCompleted {
+                                                chapter_id,
+                                                chapter_name: name.clone(),
+                                                page_index: page.index,
+                                            },
+                                        )
+                                    }
+
+                                    result.map_err(|e| e.to_string())
+                                }
+                            })
+                            .buffer_unordered(concurrent_page_downloads);
+
+                        let mut successful = Vec::new();
+                        let mut error = None;
+                        let mut is_cancelled = false;
+
+                        while let Some(result) = tokio::select! {
+                            res = stream.next() => res,
+                            _ = &mut cancel_rx => {
+                                is_cancelled = true;
+                                None
+                            }
+                        } {
+                            match result {
+                                Ok(data) => successful.push(data),
+                                Err(e) => {
+                                    error = Some(e);
+                                    break;
+                                }
+                            }
+                        }
+
+                        if is_cancelled {
+                            Self::send_event(
+                                &progress_tx,
+                                DownloadProgressEvent::ChapterCancelled {
+                                    chapter_id,
+                                    chapter_name: name.clone(),
+                                },
+                            );
+                            tracing::info!("Chapter '{}' cancelled", name);
+                        } else if let Some(err_msg) = error {
                             Self::send_event(
                                 &progress_tx,
                                 DownloadProgressEvent::ChapterFailed {
                                     chapter_id,
                                     chapter_name: name.clone(),
-                                    error: e.to_string(),
+                                    error: format!("Page download failed: {}", err_msg),
                                 },
                             );
+                            tracing::warn!("Chapter '{}' failed: {}", name, err_msg);
+                        } else {
+                            successful.sort_by(|a, b| a.1.cmp(&b.1));
+
+                            let successful_len = successful.len();
+
+                            match Self::create_cbz(&cbz_path, successful, &comic_info_xml).await {
+                                Ok(_) => {
+                                    Self::send_event(
+                                        &progress_tx,
+                                        DownloadProgressEvent::ChapterCompleted {
+                                            chapter_id,
+                                            chapter_name: name.clone(),
+                                            successful_pages: successful_len,
+                                            failed_pages: 0,
+                                        },
+                                    );
+                                    tracing::info!("Chapter '{}' downloaded successfully", name);
+                                }
+                                Err(e) => {
+                                    Self::send_event(
+                                        &progress_tx,
+                                        DownloadProgressEvent::ChapterFailed {
+                                            chapter_id,
+                                            chapter_name: name.clone(),
+                                            error: format!("Failed to create CBZ: {}", e),
+                                        },
+                                    );
+                                    tracing::error!("Failed to create CBZ for '{}': {}", name, e);
+                                }
+                            }
                         }
                     }
-                }
 
-                if staging_dir.exists() {
-                    let _ = tokio::fs::remove_dir_all(&staging_dir).await;
-                }
+                    {
+                        let mut state = queue_clone_inner.lock().await;
+                        state.active_tasks.remove(&chapter_id);
+                    }
+
+                    let mut retries = 0;
+                    loop {
+                        match tokio::fs::remove_dir_all(&staging_dir).await {
+                            Ok(_) => break,
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+                            Err(error) => {
+                                retries += 1;
+                                if retries >= 5 {
+                                    tracing::warn!(
+                                        "Failed to clean up staging directory {:?} after 5 attempts: {}",
+                                        staging_dir,
+                                        error
+                                    );
+                                    break;
+                                }
+                                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                            }
+                        }
+                    }
+                });
             }
         });
 
@@ -283,25 +376,11 @@ impl DownloaderManager {
     }
 
     /// Queue a chapter for download, returns the queue ID
-    pub async fn queue_chapter(
-        &self,
-        chapter_id: i64,
-        chapter: Chapter,
-        name: String,
-        save_path: PathBuf,
-        comic_info_xml: Option<String>,
-    ) -> Result<QueueId> {
+    pub async fn queue_chapter(&self, task: DownloadTask) -> Result<QueueId> {
         let id = {
             let mut state = self.queue.lock().await;
             let id = state.generate_id();
-            state.queue.push_back(DownloadTask {
-                id,
-                chapter_id,
-                chapter,
-                name,
-                save_path,
-                comic_info_xml,
-            });
+            state.queue.push_back(QueuedDownloadTask { id, task });
             id
         };
 
@@ -316,11 +395,11 @@ impl DownloaderManager {
         state
             .queue
             .iter()
-            .map(|task| QueuedChapter {
-                id: task.id,
-                chapter_name: task.name.clone(),
-                page_count: task.chapter.pages.len(),
-                save_path: task.save_path.clone(),
+            .map(|queued| QueuedChapter {
+                id: queued.id,
+                chapter_name: queued.task.name.clone(),
+                page_count: 0,
+                save_path: queued.task.save_path.clone(),
             })
             .collect()
     }
@@ -329,7 +408,7 @@ impl DownloaderManager {
     /// Returns true if the chapter was found and removed, false otherwise
     pub async fn remove_from_queue(&self, id: QueueId) -> bool {
         let mut state = self.queue.lock().await;
-        if let Some(pos) = state.queue.iter().position(|task| task.id == id) {
+        if let Some(pos) = state.queue.iter().position(|queued| queued.id == id) {
             state.queue.remove(pos);
             true
         } else {
@@ -346,7 +425,7 @@ impl DownloaderManager {
         if let Some(pos) = state
             .queue
             .iter()
-            .position(|task| task.chapter_id == chapter_id)
+            .position(|queued| queued.task.chapter_id == chapter_id)
         {
             state.queue.remove(pos);
             return true;
