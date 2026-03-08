@@ -47,6 +47,7 @@ pub struct DownloadTask {
 struct QueuedDownloadTask {
     id: QueueId,
     task: DownloadTask,
+    _permit: tokio::sync::OwnedSemaphorePermit
 }
 
 /// Shared queue state accessible from both the manager and worker
@@ -102,7 +103,6 @@ impl DownloaderManager {
         let progress_tx_clone = progress_tx.clone();
         let chapter_limiter = Arc::new(tokio::sync::Semaphore::new(concurrent_chapters));
         let capacity_semaphore = Arc::new(tokio::sync::Semaphore::new(queue_limit));
-        let capacity_semaphore_clone = capacity_semaphore.clone();
 
         tokio::spawn(async move {
             let client_global = smart_client;
@@ -125,10 +125,9 @@ impl DownloaderManager {
                 let client = client_global.clone();
                 let progress_tx = progress_tx_clone.clone();
                 let queue_clone_inner = queue_clone.clone();
-                let capacity_semaphore_worker = capacity_semaphore_clone.clone();
 
                 tokio::spawn(async move {
-                    let _permit = permit;
+                    let _concurrency_permit = permit;
 
                     let QueuedDownloadTask {
                         id: _task_id,
@@ -142,6 +141,7 @@ impl DownloaderManager {
                                 name,
                                 comic_info,
                             },
+                        _permit: _capacity_permit,
                     } = task;
 
                     let safe_name = sanitize_filename(&name);
@@ -369,7 +369,6 @@ impl DownloaderManager {
                             }
                         }
                     }
-                    capacity_semaphore_worker.add_permits(1);
                 });
             }
         });
@@ -384,20 +383,16 @@ impl DownloaderManager {
 
     /// Queue a chapter for download, returns the queue ID
     pub async fn queue_chapter(&self, task: DownloadTask) -> Result<QueueId> {
-        self.capacity_semaphore
-            .acquire()
+        let permit = self.capacity_semaphore
+            .clone()
+            .acquire_owned()
             .await
-            .map_err(|e| {
-                crate::error::Error::Internal(format!(
-                    "Failed to acquire capacity semaphore: {}",
-                    e
-                ))
-            })?
-            .forget();
+            .map_err(|e| crate::error::Error::Internal(e.to_string()))?;
+
         let id = {
             let mut state = self.queue.lock().await;
             let id = state.generate_id();
-            state.queue.push_back(QueuedDownloadTask { id, task });
+            state.queue.push_back(QueuedDownloadTask { id, task, _permit: permit });
             id
         };
 
