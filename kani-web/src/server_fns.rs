@@ -186,10 +186,10 @@ pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source), ServerFnErr
 #[server]
 pub async fn get_local_chapter_list(manga_id: i64, page: i32) -> Result<ChapterList, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
-    let limit = 65;
+    let limit = 66;
     let offset = ((page - 1).max(0) * limit) as i64;
 
-    let chapters_db = sqlx::query!(
+    let mut chapters_db = sqlx::query!(
         r#"SELECT id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at as "uploaded_at: i64", download_status
          FROM chapters WHERE manga_id = ?
          ORDER BY chapter_number DESC, uploaded_at DESC, id DESC
@@ -200,10 +200,11 @@ pub async fn get_local_chapter_list(manga_id: i64, page: i32) -> Result<ChapterL
     .await
     .map_err(to_server_err)?;
 
-    let total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM chapters WHERE manga_id = ?", manga_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(to_server_err)?;
+    let has_next_page = chapters_db.len() == limit as usize;
+
+    if has_next_page {
+        chapters_db.pop();
+    }
 
     let chapters = chapters_db.into_iter().map(|c| crate::types::Chapter {
         id: c.id.to_string(), 
@@ -218,7 +219,7 @@ pub async fn get_local_chapter_list(manga_id: i64, page: i32) -> Result<ChapterL
 
     Ok(ChapterList {
         chapters,
-        has_next_page: offset + (limit as i64) < total,
+        has_next_page,
     })
 }
 
@@ -237,15 +238,17 @@ pub async fn delete_manga(id: i64) -> Result<(), ServerFnError> {
     let safe_manga_name = format!("{} - {}", safe_manga_name_base, id);
     let path = library_path.join(safe_manga_name);
 
-    if path.exists()
-        && let Err(e) = tokio::fs::remove_dir_all(&path).await {
-            tracing::error!("Failed to remove manga directory {:?}: {}", path, e);
-        }
+    match tokio::fs::remove_dir_all(&path).await {
+        Ok(_) => {},
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+        Err(e) => return Err(to_server_err(format!("Failed to remove directory: {}", e))),
+    }
 
     sqlx::query!("DELETE FROM manga WHERE id = ?", id)
         .execute(&state.db)
         .await
         .map_err(to_server_err)?;
+
     Ok(())
 }
 
