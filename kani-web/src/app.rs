@@ -64,6 +64,10 @@ pub fn App() -> impl IntoView {
                                 if total_pages > 0 {
                                     c.total_pages = total_pages;
                                 }
+
+                                if c.name.is_empty() {
+                                    c.name = chapter_name.clone();
+                                }
                             })
                             .or_insert_with(|| crate::types::ChapterProgress {
                                 id: chapter_id,

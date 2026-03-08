@@ -41,7 +41,7 @@ pub struct DownloadTask {
     pub source_chapter_id: String,
     pub name: String,
     pub save_path: PathBuf,
-    pub comic_info_xml: Option<String>,
+    pub comic_info: Option<crate::comic_info::ComicInfo>,
 }
 
 struct QueuedDownloadTask {
@@ -75,6 +75,7 @@ pub struct DownloaderManager {
     queue: Arc<Mutex<QueueState>>,
     notify: Arc<Notify>,
     progress_tx: broadcast::Sender<DownloadProgressEvent>,
+    capacity_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 impl DownloaderManager {
@@ -90,6 +91,7 @@ impl DownloaderManager {
         concurrent_chapters: usize,
         max_retries: i64,
         initial_retry_delay_ms: i64,
+        queue_limit: usize,
     ) -> Result<Self> {
         let queue = Arc::new(Mutex::new(QueueState::new()));
         let notify = Arc::new(Notify::new());
@@ -99,6 +101,8 @@ impl DownloaderManager {
         let notify_clone = notify.clone();
         let progress_tx_clone = progress_tx.clone();
         let chapter_limiter = Arc::new(tokio::sync::Semaphore::new(concurrent_chapters));
+        let capacity_semaphore = Arc::new(tokio::sync::Semaphore::new(queue_limit));
+        let capacity_semaphore_clone = capacity_semaphore.clone();
 
         tokio::spawn(async move {
             let client_global = smart_client;
@@ -121,6 +125,7 @@ impl DownloaderManager {
                 let client = client_global.clone();
                 let progress_tx = progress_tx_clone.clone();
                 let queue_clone_inner = queue_clone.clone();
+                let capacity_semaphore_worker = capacity_semaphore_clone.clone();
 
                 tokio::spawn(async move {
                     let _permit = permit;
@@ -135,7 +140,7 @@ impl DownloaderManager {
                                 source_chapter_id,
                                 save_path,
                                 name,
-                                comic_info_xml,
+                                comic_info,
                             },
                     } = task;
 
@@ -312,7 +317,7 @@ impl DownloaderManager {
 
                             let successful_len = successful.len();
 
-                            match Self::create_cbz(&cbz_path, successful, &comic_info_xml).await {
+                            match Self::create_cbz(&cbz_path, successful, comic_info).await {
                                 Ok(_) => {
                                     Self::send_event(
                                         &progress_tx,
@@ -364,6 +369,7 @@ impl DownloaderManager {
                             }
                         }
                     }
+                    capacity_semaphore_worker.add_permits(1);
                 });
             }
         });
@@ -372,11 +378,22 @@ impl DownloaderManager {
             queue,
             notify,
             progress_tx,
+            capacity_semaphore,
         })
     }
 
     /// Queue a chapter for download, returns the queue ID
     pub async fn queue_chapter(&self, task: DownloadTask) -> Result<QueueId> {
+        self.capacity_semaphore
+            .acquire()
+            .await
+            .map_err(|e| {
+                crate::error::Error::Internal(format!(
+                    "Failed to acquire capacity semaphore: {}",
+                    e
+                ))
+            })?
+            .forget();
         let id = {
             let mut state = self.queue.lock().await;
             let id = state.generate_id();
@@ -551,12 +568,13 @@ impl DownloaderManager {
     async fn create_cbz(
         cbz_path: &std::path::Path,
         staged_pages: Vec<(PathBuf, String)>,
-        comic_info_xml: &Option<String>,
+        comic_info: Option<crate::comic_info::ComicInfo>,
     ) -> Result<()> {
         let cbz_file = tokio::fs::File::create(cbz_path).await?;
         let mut zip_writer = ZipFileWriter::new(cbz_file.compat_write());
 
-        if let Some(xml_content) = comic_info_xml {
+        if let Some(info) = comic_info {
+            let xml_content = crate::comic_info::build_xml(&info)?;
             let comic_info_builder =
                 ZipEntryBuilder::new("ComicInfo.xml".into(), Compression::Stored);
             zip_writer

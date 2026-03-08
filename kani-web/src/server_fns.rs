@@ -113,20 +113,10 @@ pub async fn cancel_download(chapter_id: i64) -> Result<(), ServerFnError> {
 pub async fn download_all(manga_id: i64) -> Result<(), ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
 
-    let un_downloaded_chapters = sqlx::query_scalar!(
-        "SELECT id FROM chapters WHERE manga_id = ? AND download_status = 0",
-        manga_id
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(to_server_err)?;
-
     let state_clone = state.clone();
     tokio::spawn(async move {
-        for chapter_id in un_downloaded_chapters {
-            if let Err(e) = state_clone.start_download(chapter_id).await {
-                tracing::error!("Failed to queue download for chapter {}: {}", chapter_id, e);
-            }
+        if let Err(e) = state_clone.download_all_chapters(manga_id).await {
+            tracing::error!("Failed to queue all downloads for manga {}: {}", manga_id, e);
         }
     });
 
@@ -202,7 +192,7 @@ pub async fn get_local_chapter_list(manga_id: i64, page: i32) -> Result<ChapterL
     let chapters_db = sqlx::query!(
         r#"SELECT id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at as "uploaded_at: i64", download_status
          FROM chapters WHERE manga_id = ?
-         ORDER BY chapter_number DESC
+         ORDER BY chapter_number DESC, uploaded_at DESC, id DESC
          LIMIT ? OFFSET ?"#,
         manga_id, limit, offset
     )
@@ -243,7 +233,8 @@ pub async fn delete_manga(id: i64) -> Result<(), ServerFnError> {
         .ok_or_else(|| ServerFnError::new("Manga not found"))?;
 
     let library_path = state.settings.read().await.library_path.clone();
-    let safe_manga_name = kani_core::sanitize::sanitize_filename(&manga.name);
+    let safe_manga_name_base = kani_core::sanitize::sanitize_filename(&manga.name);
+    let safe_manga_name = format!("{} - {}", safe_manga_name_base, id);
     let path = library_path.join(safe_manga_name);
 
     if path.exists()

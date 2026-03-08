@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug)]
 #[serde(rename = "ComicInfo")]
 pub struct ComicInfo {
     #[serde(rename = "@xmlns:xsi")]

@@ -41,37 +41,71 @@ async fn main() {
     {
         let db = state.db.clone();
         let mut rx = state.downloader.subscribe();
+        let listener_state = state.clone();
         tokio::spawn(async move {
-            while let Ok(event) = rx.recv().await {
-                match event {
-                    kani_shared::DownloadProgressEvent::ChapterStarted { chapter_id, .. } => {
-                        let _ = sqlx::query!(
-                            "UPDATE chapters SET download_status = 1 WHERE id = ?",
-                            chapter_id
-                        )
-                        .execute(&db)
-                        .await;
-                    }
-                    kani_shared::DownloadProgressEvent::ChapterCompleted { chapter_id, .. } => {
-                        let _ = sqlx::query!(
-                            "UPDATE chapters SET download_status = 2 WHERE id = ?",
-                            chapter_id
-                        )
-                        .execute(&db)
-                        .await;
-                    }
-                    kani_shared::DownloadProgressEvent::ChapterFailed { chapter_id, error, .. } => {
-                        tracing::error!("Chapter failed to download: {}", error);
-                        let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
+            loop {
+                match rx.recv().await {
+                    Ok(event) => match event {
+                        kani_shared::DownloadProgressEvent::ChapterStarted { chapter_id, .. } => {
+                            let _ = sqlx::query!(
+                                "UPDATE chapters SET download_status = 1 WHERE id = ?",
+                                chapter_id
+                            )
                             .execute(&db)
                             .await;
-                    }
-                    kani_shared::DownloadProgressEvent::ChapterCancelled { chapter_id, .. } => {
-                        let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
+                        }
+                        kani_shared::DownloadProgressEvent::ChapterCompleted { chapter_id, .. } => {
+                            let _ = sqlx::query!(
+                                "UPDATE chapters SET download_status = 2 WHERE id = ?",
+                                chapter_id
+                            )
                             .execute(&db)
                             .await;
+                        }
+                        kani_shared::DownloadProgressEvent::ChapterFailed { chapter_id, error, .. } => {
+                            tracing::error!("Chapter failed to download: {}", error);
+                            let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
+                                .execute(&db)
+                                .await;
+                        }
+                        kani_shared::DownloadProgressEvent::ChapterCancelled { chapter_id, .. } => {
+                            let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
+                                .execute(&db)
+                                .await;
+                        }
+                        _ => {}
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        tracing::error!("Download progress channel closed.");
+                        break;
                     }
-                    _ => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!("Download progress listener lagged by {} events! Reconciling...", skipped);
+                        let sweep_state = listener_state.clone();
+                        tokio::spawn(async move {
+                            let records = sqlx::query!("SELECT c.id, c.volume, c.chapter_number, c.name, m.id as manga_id, m.name as manga_name FROM chapters c JOIN manga m ON c.manga_id = m.id WHERE c.download_status = 1")
+                                .fetch_all(&sweep_state.db)
+                                .await
+                                .unwrap_or_default();
+                            
+                            let library_path = sweep_state.settings.read().await.library_path.clone();
+                            for record in records {
+                                let safe_manga_name_base = kani_core::sanitize::sanitize_filename(&record.manga_name);
+                                let safe_manga_name = format!("{} - {}", safe_manga_name_base, record.manga_id);
+                                let manga_path = library_path.join(safe_manga_name);
+                                
+                                let chapter_name = kani_web::state::chapter_name(record.volume, record.chapter_number, record.name);
+                                let safe_chapter_name = kani_core::sanitize::sanitize_filename(&chapter_name);
+                                let file_path = manga_path.join(format!("{}.cbz", safe_chapter_name));
+                                
+                                if tokio::fs::try_exists(&file_path).await.unwrap_or(false) {
+                                    let _ = sqlx::query!("UPDATE chapters SET download_status = 2 WHERE id = ?", record.id).execute(&sweep_state.db).await;
+                                } else {
+                                    let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", record.id).execute(&sweep_state.db).await;
+                                }
+                            }
+                        });
+                    }
                 }
             }
         });

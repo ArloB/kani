@@ -97,6 +97,7 @@ impl AppState {
             settings.chapter_queue_size.try_into()?,
             settings.max_retries,
             settings.initial_retry_delay_ms,
+            10000,
         )
         .await
         .map_err(AppError::CoreError)?;
@@ -252,13 +253,57 @@ impl AppState {
 
         tx.commit().await?;
 
-        let bg_self = self.clone();
-        let bg_manga_id = manga_id.to_string();
-        tokio::spawn(async move {
-            bg_self.fetch_and_store_remaining_chapters(source_id, bg_manga_id, manga_row_id, 1).await;
+        let has_next_page = self.fetch_and_store_chapter_page(source_id, manga_id, manga_row_id, 1).await.unwrap_or_else(|e| {
+            tracing::error!("Failed to fetch initial chapters: {}", e);
+            false
         });
 
+        if has_next_page {
+            let bg_self = self.clone();
+            let bg_manga_id = manga_id.to_string();
+            tokio::spawn(async move {
+                bg_self.fetch_and_store_remaining_chapters(source_id, bg_manga_id, manga_row_id, 2).await;
+            });
+        }
+
         Ok(manga_row_id)
+    }
+
+    pub async fn fetch_and_store_chapter_page(
+        &self,
+        source_id: i64,
+        manga_id: &str,
+        manga_row_id: i64,
+        page: i32,
+    ) -> Result<bool, AppError> {
+        let res = self.get_chapter_list_paged(source_id, manga_id, page).await?;
+        let chapter_list: kani_shared::ChapterList = serde_json::from_str(&res)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter list: {}", e)))?;
+
+        if chapter_list.chapters.is_empty() {
+            return Ok(false);
+        }
+
+        for chunk in chapter_list.chapters.chunks(100) {
+            let mut query_builder = sqlx::QueryBuilder::new(
+                "INSERT OR IGNORE INTO chapters (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at) "
+            );
+
+            query_builder.push_values(chunk, |mut b, chapter| {
+                b.push_bind(manga_row_id)
+                 .push_bind(chapter.id.clone())
+                 .push_bind(chapter.title.clone())
+                 .push_bind(chapter.number)
+                 .push_bind(chapter.language.clone())
+                 .push_bind(chapter.volume)
+                 .push_bind(chapter.scanlator.clone())
+                 .push_bind(chapter.date_uploaded);
+            });
+
+            query_builder.build().execute(&self.db).await?;
+        }
+
+        Ok(chapter_list.has_next_page)
     }
 
     pub async fn fetch_and_store_remaining_chapters(
@@ -270,50 +315,18 @@ impl AppState {
     ) {
         let mut page = start_page;
         loop {
-            let res = match self.get_chapter_list_paged(source_id, &manga_id, page).await {
-                Ok(j) => j,
+            match self.fetch_and_store_chapter_page(source_id, &manga_id, manga_row_id, page).await {
+                Ok(has_next_page) => {
+                    if !has_next_page {
+                        break;
+                    }
+                    page += 1;
+                }
                 Err(e) => {
                     tracing::error!("Failed to fetch chapter page {} for manga {}: {:?}", page, manga_id, e);
                     break;
                 }
-            };
-
-            let chapter_list: kani_shared::ChapterList = match serde_json::from_str(&res) {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::error!("Failed to parse chapter list: {:?}", e);
-                    break;
-                }
-            };
-
-            if chapter_list.chapters.is_empty() {
-                break;
             }
-
-            let mut query_builder = sqlx::QueryBuilder::new(
-                "INSERT OR IGNORE INTO chapters (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at) "
-            );
-
-            query_builder.push_values(chapter_list.chapters, |mut b, chapter| {
-                b.push_bind(manga_row_id)
-                 .push_bind(chapter.id)
-                 .push_bind(chapter.title)
-                 .push_bind(chapter.number)
-                 .push_bind(chapter.language)
-                 .push_bind(chapter.volume)
-                 .push_bind(chapter.scanlator)
-                 .push_bind(chapter.date_uploaded);
-            });
-
-            if let Err(e) = query_builder.build().execute(&self.db).await {
-                tracing::error!("Failed to bulk insert chapters: {:?}", e);
-                break;
-            }
-
-            if !chapter_list.has_next_page {
-                break;
-            }
-            page += 1;
         }
     }
 
@@ -341,7 +354,7 @@ impl AppState {
     }
 
     pub async fn start_download(&self, chapter_id: i64) -> Result<(), AppError> {
-        let record = sqlx::query!("SELECT c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language, c.download_status, m.source_id, m.source_manga_id, m.name as manga_name, m.description, s.base_url FROM chapters c join manga m on c.manga_id = m.id join sources s on m.source_id = s.id WHERE c.id = ?", chapter_id)
+        let record = sqlx::query!("SELECT c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language, c.download_status, m.id as manga_id, m.source_id, m.source_manga_id, m.name as manga_name, m.description, s.base_url FROM chapters c join manga m on c.manga_id = m.id join sources s on m.source_id = s.id WHERE c.id = ?", chapter_id)
             .fetch_optional(&self.db)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("Chapter {chapter_id} not found")))?;
@@ -377,7 +390,8 @@ impl AppState {
 
         let name = chapter_name(record.volume, record.chapter_number, record.name.clone());
 
-        let safe_manga_name = kani_core::sanitize::sanitize_filename(&record.manga_name);
+        let safe_manga_name_base = kani_core::sanitize::sanitize_filename(&record.manga_name);
+        let safe_manga_name = format!("{} - {}", safe_manga_name_base, record.manga_id);
         let path = library_path.join(safe_manga_name);
 
         let web_url = format!("{}/{}", record.base_url, record.source_manga_id);
@@ -396,14 +410,11 @@ impl AppState {
             web: Some(web_url),
         };
 
-        let xml_payload =
-            kani_core::comic_info::build_xml(&comic_info).map_err(AppError::CoreError)?;
-
         let _ = sqlx::query!("UPDATE chapters SET download_status = 1 WHERE id = ?", chapter_id)
             .execute(&self.db)
             .await;
 
-        self.downloader
+        if let Err(e) = self.downloader
             .queue_chapter(kani_core::downloader::DownloadTask {
                 chapter_id,
                 source_manager,
@@ -411,16 +422,106 @@ impl AppState {
                 source_chapter_id: record.source_chapter_id.clone(),
                 name,
                 save_path: path,
-                comic_info_xml: Some(xml_payload),
+                comic_info: Some(comic_info),
             })
             .await
-            .map_err(AppError::CoreError)?;
+        {
+            let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
+                .execute(&self.db)
+                .await;
+            return Err(AppError::CoreError(e));
+        }
+
+        Ok(())
+    }
+
+    pub async fn download_all_chapters(&self, manga_row_id: i64) -> Result<(), AppError> {
+        let manga_record = sqlx::query!("SELECT m.id as manga_id, m.source_id, m.source_manga_id, m.name as manga_name, m.description, s.base_url FROM manga m join sources s on m.source_id = s.id WHERE m.id = ?", manga_row_id)
+            .fetch_optional(&self.db)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("Manga {manga_row_id} not found")))?;
+
+        let authors_record = sqlx::query!(r#"SELECT GROUP_CONCAT(p.name, ', ') as "names: Option<String>" FROM manga_authors ma JOIN people p ON ma.person_id = p.id WHERE ma.manga_id = ?"#, manga_row_id)
+            .fetch_one(&self.db)
+            .await?;
+        let authors = authors_record.names.flatten();
+
+        let artists_record = sqlx::query!(r#"SELECT GROUP_CONCAT(p.name, ', ') as "names: Option<String>" FROM manga_artists ma JOIN people p ON ma.person_id = p.id WHERE ma.manga_id = ?"#, manga_row_id)
+            .fetch_one(&self.db)
+            .await?;
+        let artists = artists_record.names.flatten();
+
+        let tags_record = sqlx::query!(r#"SELECT GROUP_CONCAT(t.name, ', ') as "names: Option<String>" FROM manga_tags mt JOIN tags t ON mt.tag_id = t.id WHERE mt.manga_id = ?"#, manga_row_id)
+            .fetch_one(&self.db)
+            .await?;
+        let tags = tags_record.names.flatten();
+
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources.get(&manga_record.source_id).cloned().ok_or_else(|| {
+                AppError::NotFound(format!("Source {} not found", manga_record.source_id))
+            })?
+        };
+
+        let library_path = self.settings.read().await.library_path.clone();
+        let safe_manga_name_base = kani_core::sanitize::sanitize_filename(&manga_record.manga_name);
+        let safe_manga_name = format!("{} - {}", safe_manga_name_base, manga_record.manga_id);
+        let path = library_path.join(safe_manga_name);
+        let web_url = format!("{}/{}", manga_record.base_url, manga_record.source_manga_id);
+
+        let un_downloaded_chapters = sqlx::query!(
+            "SELECT id, source_chapter_id, name, chapter_number, volume, language FROM chapters WHERE manga_id = ? AND download_status = 0",
+            manga_row_id
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        for chapter_record in un_downloaded_chapters {
+            let chapter_id = chapter_record.id;
+            let name = chapter_name(chapter_record.volume, chapter_record.chapter_number, chapter_record.name.clone());
+            
+            let comic_info = kani_core::comic_info::ComicInfo {
+                xmlns_xsi: "http://www.w3.org/2001/XMLSchema-instance",
+                series: manga_record.manga_name.clone(),
+                title: chapter_record.name,
+                number: chapter_record.chapter_number,
+                volume: chapter_record.volume,
+                summary: manga_record.description.clone(),
+                language_iso: Some(chapter_record.language),
+                writer: authors.clone(),
+                penciller: artists.clone(),
+                genre: tags.clone(),
+                web: Some(web_url.clone()),
+            };
+
+            let _ = sqlx::query!("UPDATE chapters SET download_status = 1 WHERE id = ?", chapter_id)
+                .execute(&self.db)
+                .await;
+
+            if let Err(e) = self.downloader
+                .queue_chapter(kani_core::downloader::DownloadTask {
+                    chapter_id,
+                    source_manager: source_manager.clone(),
+                    source_manga_id: manga_record.source_manga_id.clone(),
+                    source_chapter_id: chapter_record.source_chapter_id.clone(),
+                    name,
+                    save_path: path.clone(),
+                    comic_info: Some(comic_info),
+                })
+                .await
+            {
+                let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
+                    .execute(&self.db)
+                    .await;
+                tracing::error!("Failed to queue download for chapter {}: {}", chapter_id, e);
+            }
+        }
 
         Ok(())
     }
 
     pub async fn delete_downloaded(&self, chapter_id: i64) -> Result<(), AppError> {
-        let record = sqlx::query!("SELECT c.download_status, c.volume, c.chapter_number, c.name as chapter_name, m.name as manga_name FROM chapters c join manga m on c.manga_id = m.id WHERE c.id = ?", chapter_id)
+        let record = sqlx::query!("SELECT c.download_status, c.volume, c.chapter_number, c.name as chapter_name, m.id as manga_id, m.name as manga_name FROM chapters c join manga m on c.manga_id = m.id WHERE c.id = ?", chapter_id)
             .fetch_optional(&self.db)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("Chapter {chapter_id} not found")))?;
@@ -432,7 +533,8 @@ impl AppState {
         let name = chapter_name(record.volume, record.chapter_number, record.chapter_name);
 
         let library_path = self.settings.read().await.library_path.clone();
-        let safe_manga_name = kani_core::sanitize::sanitize_filename(&record.manga_name);
+        let safe_manga_name_base = kani_core::sanitize::sanitize_filename(&record.manga_name);
+        let safe_manga_name = format!("{} - {}", safe_manga_name_base, record.manga_id);
         let path = library_path.join(safe_manga_name);
         let safe_chapter_name = kani_core::sanitize::sanitize_filename(&name);
         let cbz_path = path.join(format!("{}.cbz", &safe_chapter_name));
@@ -578,7 +680,7 @@ fn convert_to_shared_manga_info(
     }
 }
 
-fn chapter_name(volume: Option<i64>, chapter_number: f64, title: Option<String>) -> String {
+pub fn chapter_name(volume: Option<i64>, chapter_number: f64, title: Option<String>) -> String {
     let mut name = String::new();
     if let Some(vol) = volume {
         name.push_str(&format!("Vol. {vol} "));
