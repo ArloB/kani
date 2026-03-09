@@ -115,13 +115,14 @@ pub struct WasmRuntime {
 }
 
 impl WasmRuntime {
-    pub fn new() -> Result<Self> {
+    pub fn new(max_instances: u32) -> Result<Self> {
         let mut config = Config::new();
         config.async_support(true);
         config.wasm_component_model(true);
+        config.epoch_interruption(true);
 
         let mut pool = wasmtime::PoolingAllocationConfig::default();
-        pool.total_component_instances(100);
+        pool.total_component_instances(max_instances);
 
         config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(pool));
 

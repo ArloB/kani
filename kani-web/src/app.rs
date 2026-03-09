@@ -31,12 +31,36 @@ pub fn App() -> impl IntoView {
                 }
             };
 
+            let es_for_close = es.clone();
+            let on_close_signal = Closure::<dyn FnMut(MessageEvent)>::new(move |_: MessageEvent| {
+                es_for_close.close();
+            });
+            es.add_event_listener_with_callback("close", on_close_signal.as_ref().unchecked_ref()).ok();
+            on_close_signal.forget();
+
             let chapters_signal = chapters;
             let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |msg: MessageEvent| {
                 let data = match msg.data().as_string() {
                     Some(d) => d,
                     None => return,
                 };
+
+                if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&data)
+                    && raw["type"] == "state_snapshot" {
+                         if let Ok(chapters) = serde_json::from_value::<Vec<crate::types::ActiveDownloadState>>(
+                            raw["chapters"].clone()
+                        ) {
+                            chapters_signal.update(|map| {
+                                map.clear();
+                                for chapter in chapters {
+                                    let id = chapter.chapter_id;
+                                    map.insert(id, chapter.into());
+                                }
+                            });
+                        }
+
+                        return;
+                    }
 
                 let event: DownloadProgressEvent = match serde_json::from_str(&data) {
                     Ok(e) => e,

@@ -2,7 +2,7 @@
 
 use axum::{
     Json, Router,
-    extract::{Multipart, Path, Query, State},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     http::{StatusCode, header},
     response::{
         IntoResponse,
@@ -13,6 +13,7 @@ use axum::{
 use serde_json::json;
 use std::{convert::Infallible, sync::Arc};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+use futures::TryStreamExt;
 
 use crate::{
     error::AppError,
@@ -21,6 +22,7 @@ use crate::{
 };
 use kani_core::source_manager::SourceManager;
 
+const MAX_WASM_BYTES: usize = 10 * 1024 * 1024;
 
 pub fn routes(state: AppState) -> Router {
     Router::new()
@@ -53,6 +55,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/chapter/{id}/download", post(start_download))
         .route("/chapter/{id}/delete", delete(delete_downloaded))
         .with_state(state)
+        .layer(DefaultBodyLimit::max(MAX_WASM_BYTES))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,18 +65,31 @@ pub fn routes(state: AppState) -> Router {
 pub async fn download_progress_sse(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
+    let snapshot    = state.downloader.snapshot().await;
     let rx = state.downloader.subscribe();
 
-    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
-        Ok(event) => {
-            let json = serde_json::to_string(&event).ok()?;
-            Some(Ok::<Event, Infallible>(Event::default().data(json)))
-        }
-        Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
-            tracing::warn!("SSE client lagged, skipped {} download progress events", n);
-            None
+    let snapshot_event = {
+        let json = serde_json::json!({
+            "type": "state_snapshot",
+            "chapters": snapshot
+        }).to_string();
+        Ok::<Event, Infallible>(Event::default().data(json))
+    };
+
+    let live_stream = BroadcastStream::new(rx).filter_map(|result| {
+        match result {
+            Ok(event) => {
+                let json = serde_json::to_string(&event).ok()?;
+                Some(Ok::<Event, Infallible>(Event::default().data(json)))
+            }
+            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
+                tracing::warn!("SSE client lagged by {} events, closing to force reconnect", n);
+                Some(Ok(Event::default().event("close").data("")))
+            }
         }
     });
+
+    let stream = tokio_stream::once(snapshot_event).chain(live_stream);
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
@@ -86,18 +102,15 @@ pub async fn image_proxy(
     State(state): State<AppState>,
     Query(query): Query<ProxyQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    if kani_core::network::is_private_host(&query.url) {
-        return Err(AppError::InternalServerError(
-            "Proxy request blocked: target is a private or reserved address".to_string(),
-        ));
-    }
-
+    let mut headers = rquest::header::HeaderMap::new();
+    headers.insert(
+        rquest::header::REFERER,
+        rquest::header::HeaderValue::from_str(&query.referer)?,
+    );
+    
     let response = state
-        .smart_client
-        .inner()
-        .get(&query.url)
-        .header("Referer", &query.referer)
-        .send()
+        .proxy_client
+        .safe_get(&query.url, Some(headers))
         .await?;
 
     let status = response.status();
@@ -233,13 +246,16 @@ async fn install_source(
     current_source: &Source,
     bytes: &[u8],
 ) -> Result<std::path::PathBuf, AppError> {
-    let component = match state.wasm_runtime.compile_component(bytes) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("Failed to compile component: {}", e);
-            return Err(AppError::CoreError(e));
-        }
-    };
+    let bytes_owned   = bytes.to_vec();
+    let runtime_clone = state.wasm_runtime.clone();
+
+    let component = tokio::task::spawn_blocking(move || {
+        runtime_clone.compile_component(&bytes_owned)
+    })
+    .await
+    .map_err(|e| AppError::InternalServerError(
+        format!("WASM compilation task panicked: {}", e)
+    ))??;
 
     let metadata = {
         let mut inst = kani_core::sources::SourceInstance::new(state.smart_client.clone(), None);
@@ -317,7 +333,7 @@ async fn upload_wasm(
     Path(id): Path<i64>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
-    let source = sqlx::query_as!(
+     let source = sqlx::query_as!(
         Source,
         "SELECT id, name, version, base_url FROM sources WHERE id = ?",
         id
@@ -326,35 +342,25 @@ async fn upload_wasm(
     .await?
     .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
 
-    let mut wasm_bytes: Option<Vec<u8>> = None;
-    while let Some(field) = multipart
+    let field = multipart
         .next_field()
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Multipart error: {e}")))?
-    {
-        if field.name() == Some("file") {
-            wasm_bytes = Some(
-                field
-                    .bytes()
-                    .await
-                    .map_err(|e| {
-                        AppError::InternalServerError(format!("Failed to read file: {e}"))
-                    })?
-                    .to_vec(),
-            );
-            break;
-        }
-    }
+        .await?
+        .ok_or_else(|| AppError::InternalServerError("no file field in upload".into()))?;
 
-    let bytes = wasm_bytes
-        .ok_or_else(|| AppError::InternalServerError("No file field in multipart".to_string()))?;
+    let content_length = field.headers()
+        .get(rquest::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok());
 
-    let path = install_source(&state, id, &source, &bytes).await?;
+    let bytes: bytes::Bytes = kani_core::http::collect_bytes_limited(
+        Box::pin(field.map_err(|e| kani_core::error::Error::Other(e.to_string()))),
+        content_length,
+        MAX_WASM_BYTES,
+    ).await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(json!({ "path": path.to_string_lossy() })),
-    ))
+    let _ = install_source(&state, id, &source, bytes.as_ref()).await?;
+
+    Ok(StatusCode::OK)
 }
 
 async fn fetch_wasm(
@@ -371,27 +377,13 @@ async fn fetch_wasm(
     .await?
     .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
 
-    let client = rquest::Client::builder()
-        .build()
-        .map_err(|e| AppError::InternalServerError(format!("Failed to create client: {e}")))?;
+    let response = state.proxy_client.safe_get(&payload.url, None).await?;
 
-    let response = client
-        .get(&payload.url)
-        .send()
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Failed to fetch: {e}")))?;
+    let bytes = response.bytes_limited(MAX_WASM_BYTES).await?;
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Failed to read response: {e}")))?;
+    let _ = install_source(&state, id, &source, &bytes).await?;
 
-    let path = install_source(&state, id, &source, &bytes).await?;
-
-    Ok((
-        StatusCode::OK,
-        Json(json!({ "path": path.to_string_lossy() })),
-    ))
+    Ok(StatusCode::OK)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

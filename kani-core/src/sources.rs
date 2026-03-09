@@ -18,13 +18,16 @@ macro_rules! execute_wasm {
             .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
 
         let provider = bindings.kani_extension_manga_provider();
-        let result = provider.$method(&mut *store $(, $args)*)
+        let raw_result = provider.$method(&mut *store $(, $args)*)
             .await
-            .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)))?
-            .map_err(Error::Extension)?;
+            .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)));
 
         store.data_mut().clear_all();
         $self.last_call = Some(Instant::now());
+
+        let inner = raw_result?;
+        let result = inner.map_err(Error::Extension)?;
+
         Ok(result)
     }};
 }
@@ -116,6 +119,9 @@ impl SourceInstance {
             engine,
             HostState::new(self.smart_client.clone(), self.base_url.clone())?,
         );
+
+        store.set_epoch_deadline(50);
+        store.epoch_deadline_trap();
 
         let bindings = crate::wasm::KaniExtension::instantiate_async(&mut store, component, linker)
             .await

@@ -3,6 +3,7 @@ wasm_sources
 .sqlx
 .env
 *.db
+*.db*
 Cargo.lock
 library
 kani-web/dist

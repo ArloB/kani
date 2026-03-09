@@ -44,17 +44,10 @@ impl http::Host for HostState {
             builder = builder.body(body);
         }
 
-        let request = match builder.build().map_err(|e| e.to_string()) {
-            Ok(req) => req,
-            Err(e) => return Err(e),
-        };
+        let request = builder.build().map_err(|e| e.to_string())?;
 
         let ttfb_start = std::time::Instant::now();
-
-        let mut response = match self.http_client.send_request(request).await {
-            Ok(res) => res,
-            Err(e) => return Err(e.to_string()),
-        };
+        let response = self.http_client.send_request(request).await.map_err(|e| e.to_string())?;
 
         let ttfb = ttfb_start.elapsed();
         let status = response.status().as_u16();
@@ -70,30 +63,7 @@ impl http::Host for HostState {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        // Check Content-Length header first for early rejection
-        if let Some(cl_str) = response
-            .headers()
-            .get(rquest::header::CONTENT_LENGTH)
-            .and_then(|h| h.to_str().ok())
-            && let Ok(cl) = cl_str.parse::<u64>()
-            && cl > MAX_HTTP_RESPONSE_BYTES as u64
-        {
-            return Err(format!(
-                "Response too large: {} bytes (limit: {} bytes)",
-                cl, MAX_HTTP_RESPONSE_BYTES
-            ));
-        }
-
-        let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-            if body.len() + chunk.len() > MAX_HTTP_RESPONSE_BYTES {
-                return Err(format!(
-                    "Response too large (streaming): exceeded limit of {} bytes",
-                    MAX_HTTP_RESPONSE_BYTES
-                ));
-            }
-            body.extend_from_slice(&chunk);
-        }
+        let body = response.bytes_limited(MAX_HTTP_RESPONSE_BYTES).await.map_err(|e| e.to_string())?.to_vec();
 
         Ok(http::Response {
             status,
@@ -105,11 +75,16 @@ impl http::Host for HostState {
 
 impl html::Host for HostState {
     fn parse(&mut self, html: String) -> wasmtime::Result<html::DocHandle, String> {
+        let parsed_doc = tokio::task::block_in_place(|| {
+            SafeHtml::parse_document(&html)
+        });
+
         let handle = self.next_doc_handle;
-        self.next_doc_handle += 1;
-        let parsed_doc = SafeHtml::parse_document(&html);
         let root_id = parsed_doc.0.root_element().id();
         let parsed = SendHtml(Arc::new(Mutex::new(parsed_doc)));
+
+        self.next_doc_handle += 1;
+        
         self.html_docs.insert(
             handle,
             StoredNode {
@@ -117,6 +92,7 @@ impl html::Host for HostState {
                 node_id: root_id,
             },
         );
+
         Ok(handle)
     }
 

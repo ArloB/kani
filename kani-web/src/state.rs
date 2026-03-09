@@ -19,14 +19,19 @@ pub struct AppState {
     pub settings: std::sync::Arc<tokio::sync::RwLock<Settings>>,
     pub downloader: DownloaderManager,
     pub smart_client: kani_core::http::SmartClient,
+    pub proxy_client: kani_core::http::SmartClient,
 }
 
 impl AppState {
     pub async fn new() -> Result<Self, AppError> {
-        let wasm_runtime = Arc::new(WasmRuntime::new().map_err(AppError::CoreError)?);
-
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(20)
+            .after_connect(|conn, _meta| Box::pin(async move {
+                sqlx::query("PRAGMA journal_mode=WAL;").execute(&mut *conn).await?;
+                sqlx::query("PRAGMA synchronous=NORMAL;").execute(&mut *conn).await?;
+                sqlx::query("PRAGMA busy_timeout=5000;").execute(&mut *conn).await?;
+                Ok(())
+            }))
             .connect("sqlite://kani.db?mode=rwc")
             .await?;
 
@@ -37,6 +42,27 @@ impl AppState {
         let settings = sqlx::query_as!(Settings, "SELECT * FROM settings")
             .fetch_one(&pool)
             .await?;
+        tracing::info!("Settings retrieved");
+
+        let max_wasm_instances = settings.max_wasm_instances as u32;
+        let wasm_runtime = Arc::new(WasmRuntime::new(max_wasm_instances).map_err(AppError::CoreError)?);
+
+        let engine_for_ticker = wasm_runtime.engine().clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(10));
+            loop {
+                interval.tick().await;
+                engine_for_ticker.increment_epoch();
+            }
+        });
+
+        let library_path = std::path::Path::new(&settings.library_path);
+        if library_path.exists() {
+            if let Err(e) = cleanup_staging_dirs(library_path).await {
+                tracing::warn!("Failed to read library path for cleanup: {}", e);
+            }
+            tracing::info!("Library cleanup complete");
+        }
 
         let flaresolverr_url = if settings.flaresolverr_url.is_empty() {
             None
@@ -45,6 +71,7 @@ impl AppState {
         };
 
         let global_smart_client = kani_core::http::SmartClient::new(flaresolverr_url)?;
+        tracing::info!("Smart client created");
 
         if let Err(e) = Self::scan_and_register_sources(
             &pool,
@@ -56,6 +83,7 @@ impl AppState {
         {
             tracing::error!("Failed to scan and register sources: {}", e);
         }
+        tracing::info!("Sources scanned and registered");
 
         let sources = sqlx::query_as!(
             Source,
@@ -90,6 +118,7 @@ impl AppState {
 
             sources_map.insert(source.id, Arc::new(source_manager));
         }
+        tracing::info!("Sources loaded");
 
         let downloader = DownloaderManager::new(
             global_smart_client.clone(),
@@ -101,6 +130,10 @@ impl AppState {
         )
         .await
         .map_err(AppError::CoreError)?;
+        tracing::info!("Downloader manager created");
+
+        let proxy_client = kani_core::http::SmartClient::new_proxy()?;
+        tracing::info!("Proxy client created");
 
         Ok(Self {
             db: pool,
@@ -109,6 +142,7 @@ impl AppState {
             settings: std::sync::Arc::new(tokio::sync::RwLock::new(settings)),
             downloader,
             smart_client: global_smart_client,
+            proxy_client,
         })
     }
 
@@ -691,4 +725,32 @@ pub fn chapter_name(volume: Option<i64>, chapter_number: f64, title: Option<Stri
             name.push_str(&format!(" - {title}"));
         }
     name
+}
+
+async fn cleanup_staging_dirs(library_path: &std::path::Path) -> std::io::Result<()> {
+    let mut manga_dirs = tokio::fs::read_dir(library_path).await?;
+
+    while let Ok(Some(manga_dir)) = manga_dirs.next_entry().await {
+        if !manga_dir.file_type().await?.is_dir() {
+            continue;
+        }
+
+        let Ok(mut inner_entries) = tokio::fs::read_dir(manga_dir.path()).await else { continue };
+
+        while let Ok(Some(entry)) = inner_entries.next_entry().await {
+            let file_name = entry.file_name();
+            let Some(name) = file_name.to_str() else { continue };
+
+            if !entry.file_type().await?.is_dir() || !name.starts_with(".tmp_staging_") {
+                continue;
+            }
+
+            tracing::info!("Removing orphaned directory: {:?}", entry.path());
+            if let Err(e) = tokio::fs::remove_dir_all(entry.path()).await {
+                tracing::warn!("Failed to remove {:?}: {}", entry.path(), e);
+            }
+        }
+    }
+
+    Ok(())
 }

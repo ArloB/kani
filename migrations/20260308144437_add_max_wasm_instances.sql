@@ -1,0 +1,1 @@
+ALTER TABLE settings ADD COLUMN max_wasm_instances INTEGER NOT NULL DEFAULT 1000;

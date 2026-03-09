@@ -1,9 +1,7 @@
 //! Server-specific error types with Axum `IntoResponse` implementation.
 
 use axum::{
-    Json,
-    http::StatusCode,
-    response::{IntoResponse, Response},
+    Json, http::StatusCode, response::{IntoResponse, Response}
 };
 use serde_json::json;
 use thiserror::Error;
@@ -15,6 +13,9 @@ pub enum AppError {
 
     #[error("Not Found: {0}")]
     NotFound(String),
+
+    #[error("Other error: {0}")]
+    Other(String),
 
     #[error("Database error: {0}")]
     SqlxError(#[from] sqlx::Error),
@@ -42,12 +43,19 @@ pub enum AppError {
 
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
+
+    #[error("multipart error: {0}")]
+    MultipartError(#[from] axum::extract::multipart::MultipartError),
+
+    #[error("Invalid Header Value: {0}")]
+    InvalidHeaderValue(#[from] rquest::header::InvalidHeaderValue),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
             Self::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
+            Self::Other(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             Self::SqlxError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::CoreError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::IoError(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("IO error: {e}")),
@@ -68,6 +76,8 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
             }
             Self::JsonError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            Self::MultipartError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            Self::InvalidHeaderValue(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         };
 
         let body = Json(json!({

@@ -41,6 +41,7 @@ chrono = "0.4.43"
 arc-swap = "1.8.2"
 ego-tree = "^0.10.0"
 tokio-util = { version = "0.7.18", features = ["compat"] }
+hickory-resolver = "0.25.2"
 
 
 [dev-dependencies]

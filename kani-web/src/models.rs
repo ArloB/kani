@@ -39,6 +39,7 @@ pub struct Settings {
     pub chapter_queue_size: i64,
     pub max_retries: i64,
     pub initial_retry_delay_ms: i64,
+    pub max_wasm_instances: i64,
 }
 
 #[derive(Deserialize, Debug)]
