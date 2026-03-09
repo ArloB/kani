@@ -95,16 +95,18 @@ pub async fn start_download(chapter_id: i64) -> Result<(), ServerFnError> {
 #[server]
 pub async fn cancel_download(chapter_id: i64) -> Result<(), ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
-    
-    state.downloader.cancel_download(chapter_id).await;
 
-    let _ = sqlx::query!(
-        "UPDATE chapters SET download_status = 0 WHERE id = ?",
-        chapter_id
-    )
-    .execute(&state.db)
-    .await
-    .map_err(to_server_err)?;
+    let was_cancelled = state.downloader.cancel_download(chapter_id).await;
+
+    if was_cancelled {
+        sqlx::query!(
+            "UPDATE chapters SET download_status = 0 WHERE id = ? AND download_status = 1",
+            chapter_id
+        )
+        .execute(&state.db)
+        .await
+        .map_err(to_server_err)?;
+    }
 
     Ok(())
 }
@@ -258,7 +260,7 @@ pub async fn get_library(page: i32) -> Result<Vec<(crate::types::MangaListItem, 
         1 => "id DESC",
         _ => "id ASC",
     };*/
-    
+
     let state = expect_context::<crate::state::AppState>();
     let offset = (page - 1).max(0) * 20;
 
@@ -285,9 +287,12 @@ pub async fn get_library(page: i32) -> Result<Vec<(crate::types::MangaListItem, 
     Ok(library)
 }
 
+/// Builds a proxied image URL. All cover/page images are routed through the
+/// server's REST image proxy so the browser never contacts manga source
+/// domains directly and CORS/hotlink issues are avoided.
 pub fn proxy_url(url: &str, referer: &str) -> String {
     format!(
-        "/api/image_proxy?url={}&referer={}",
+        "/rest/image_proxy?url={}&referer={}",
         urlencoding::encode(url),
         referer
     )

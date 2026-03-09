@@ -6,6 +6,8 @@ use std::time::Instant;
 use wasmtime::Store;
 use wasmtime::component::Linker;
 
+const EPOCH_DEADLINE_TICKS: u64 = 500;
+
 macro_rules! execute_wasm {
     ($self:expr, $method:ident $(, $args:expr)*) => {{
         let bindings = $self
@@ -16,6 +18,8 @@ macro_rules! execute_wasm {
             .store
             .as_mut()
             .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
+
+        store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
 
         let provider = bindings.kani_extension_manga_provider();
         let raw_result = provider.$method(&mut *store $(, $args)*)
@@ -31,6 +35,7 @@ macro_rules! execute_wasm {
         Ok(result)
     }};
 }
+
 
 /// Hosts a single WASM source extension.
 pub struct SourceInstance {
@@ -120,7 +125,7 @@ impl SourceInstance {
             HostState::new(self.smart_client.clone(), self.base_url.clone())?,
         );
 
-        store.set_epoch_deadline(50);
+        store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
         store.epoch_deadline_trap();
 
         let bindings = crate::wasm::KaniExtension::instantiate_async(&mut store, component, linker)

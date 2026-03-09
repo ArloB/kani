@@ -52,7 +52,7 @@ pub struct DownloadTask {
 struct QueuedDownloadTask {
     id: QueueId,
     task: DownloadTask,
-    _permit: tokio::sync::OwnedSemaphorePermit
+    _permit: tokio::sync::OwnedSemaphorePermit,
 }
 
 /// Shared queue state accessible from both the manager and worker
@@ -196,6 +196,18 @@ impl DownloaderManager {
     /// Cancel a chapter download by its `chapter_id` (database ID).
     /// Returns true if it was removed from the queue or if an active download was aborted.
     pub async fn cancel_download(&self, chapter_id: i64) -> bool {
+        {
+            let active = self.active.read().await;
+            if let Some(state) = active.get(&chapter_id) {
+                match state.status {
+                    ActiveDownloadStatus::Completed
+                    | ActiveDownloadStatus::Failed(_)
+                    | ActiveDownloadStatus::Cancelled => return false,
+                    ActiveDownloadStatus::InProgress => {}
+                }
+            }
+        }
+
         let mut state = self.queue.lock().await;
 
         // Remove from pending queue if it's there
@@ -222,7 +234,6 @@ impl DownloaderManager {
         self.queue.lock().await.queue.len()
     }
 
-    
     pub async fn snapshot(&self) -> Vec<ActiveDownloadState> {
         self.active.read().await.values().cloned().collect()
     }
@@ -405,11 +416,12 @@ impl DownloaderManager {
         initial_retry_delay_ms: i64,
     ) {
         loop {
-            let _queue_permit = queue_semaphore
+            let queue_permit = queue_semaphore
                 .clone()
                 .acquire_owned()
                 .await
                 .expect("queue semaphore closed");
+            queue_permit.forget();
 
             let task = queue_state
                 .lock()

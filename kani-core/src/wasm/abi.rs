@@ -75,9 +75,7 @@ impl http::Host for HostState {
 
 impl html::Host for HostState {
     fn parse(&mut self, html: String) -> wasmtime::Result<html::DocHandle, String> {
-        let parsed_doc = tokio::task::block_in_place(|| {
-            SafeHtml::parse_document(&html)
-        });
+        let parsed_doc = SafeHtml::parse_document(&html);
 
         let handle = self.next_doc_handle;
         let root_id = parsed_doc.0.root_element().id();
