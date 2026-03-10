@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use futures::stream::{FuturesUnordered, StreamExt};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use kani_core::downloader::{DownloadTask, DownloaderManager};
@@ -390,13 +391,23 @@ impl AppState {
     // Download chapter(s)
     async fn build_download_task(&self, chapter_id: i64) -> Result<DownloadTask, AppError> {
         let record = sqlx::query!(
-            "SELECT c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language,
-                    m.id as manga_id, m.source_id, m.source_manga_id, m.name as manga_name,
-                    m.description, s.base_url
-             FROM chapters c
-             JOIN manga m ON c.manga_id = m.id
-             JOIN sources s ON m.source_id = s.id
-             WHERE c.id = ?",
+            "SELECT
+                c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language,
+                m.id as manga_id, m.source_id, m.source_manga_id, m.name as manga_name,
+                m.description, s.base_url,
+                (SELECT GROUP_CONCAT(p.name, ', ')
+                FROM manga_authors ma JOIN people p ON ma.person_id = p.id
+                WHERE ma.manga_id = m.id) as authors,
+                (SELECT GROUP_CONCAT(a.name, ', ')
+                FROM manga_artists maa JOIN people a ON maa.person_id = a.id
+                WHERE maa.manga_id = m.id) as artists,
+                (SELECT GROUP_CONCAT(t.name, ', ')
+                FROM manga_tags mt JOIN tags t ON mt.tag_id = t.id
+                WHERE mt.manga_id = m.id) as tags
+            FROM chapters c
+            JOIN manga m ON c.manga_id = m.id
+            JOIN sources s ON m.source_id = s.id
+            WHERE c.id = ?",
             chapter_id
         )
         .fetch_optional(&self.db)
@@ -406,33 +417,6 @@ impl AppState {
                 "Chapter {chapter_id} not found (deleted after claim)"
             ))
         })?;
-
-        let authors: Option<String> = sqlx::query_scalar!(
-            r#"SELECT GROUP_CONCAT(p.name, ', ') as "names: String"
-               FROM manga_authors ma JOIN people p ON ma.person_id = p.id
-               WHERE ma.manga_id = ?"#,
-            record.manga_id
-        )
-        .fetch_one(&self.db)
-        .await?;
-
-        let artists: Option<String> = sqlx::query_scalar!(
-            r#"SELECT GROUP_CONCAT(p.name, ', ') as "names: String"
-               FROM manga_artists ma JOIN people p ON ma.person_id = p.id
-               WHERE ma.manga_id = ?"#,
-            record.manga_id
-        )
-        .fetch_one(&self.db)
-        .await?;
-
-        let tags: Option<String> = sqlx::query_scalar!(
-            r#"SELECT GROUP_CONCAT(t.name, ', ') as "names: String"
-               FROM manga_tags mt JOIN tags t ON mt.tag_id = t.id
-               WHERE mt.manga_id = ?"#,
-            record.manga_id
-        )
-        .fetch_one(&self.db)
-        .await?;
 
         let source_manager = {
             let sources = self.sources.read().await;
@@ -457,9 +441,9 @@ impl AppState {
             volume:       record.volume,
             summary:      record.description,
             language_iso: Some(record.language),
-            writer:       authors,
-            penciller:    artists,
-            genre:        tags,
+            writer:       record.authors,
+            penciller:    record.artists,
+            genre:        record.tags,
             web:          Some(format!("{}/{}", record.base_url, record.source_manga_id)),
         };
 
@@ -533,8 +517,16 @@ impl AppState {
             return Ok(());
         }
 
-        for chapter_id in claimed_ids {
-            if let Err(e) = self.enqueue_claimed_chapter(chapter_id).await {
+        let mut tasks: FuturesUnordered<_> = claimed_ids
+            .into_iter()
+            .map(|chapter_id| {
+                let this = self.clone();
+                async move { (chapter_id, this.enqueue_claimed_chapter(chapter_id).await) }
+            })
+            .collect();
+
+        while let Some((chapter_id, result)) = tasks.next().await {
+            if let Err(e) = result {
                 tracing::error!(
                     "Failed to enqueue chapter {} (manga {}): {}",
                     chapter_id, manga_id, e
