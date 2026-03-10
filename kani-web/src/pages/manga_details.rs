@@ -1,6 +1,6 @@
 use crate::server_fns::{
     cancel_download, check_in_library, delete_downloaded, delete_manga, download_all, fetch_sources, get_chapter_list, get_local_chapter_list,
-    get_local_manga, get_manga_details, proxy_url, save_to_library, start_download,
+    get_local_manga, get_manga_details, proxy_url, save_to_library, download_chapter,
 };
 use crate::types::{ChapterList, LiveChapterStatus};
 use leptos::prelude::*;
@@ -324,7 +324,7 @@ pub fn MangaDetails() -> impl IntoView {
                                                                                                 status: LiveChapterStatus::InProgress,
                                                                                             });
                                                                                         });
-                                                                                        let _ = start_download(db_chap_id).await;
+                                                                                        let _ = download_chapter(db_chap_id).await;
                                                                                     });
                                                                                 }>
                                                                                     "Download"

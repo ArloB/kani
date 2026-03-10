@@ -84,10 +84,10 @@ pub async fn save_to_library(source_id: i64, manga_id: String) -> Result<i64, Se
 }
 
 #[server]
-pub async fn start_download(chapter_id: i64) -> Result<(), ServerFnError> {
+pub async fn download_chapter(chapter_id: i64) -> Result<(), ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
     state
-        .start_download(chapter_id)
+        .download_chapter(chapter_id)
         .await
         .map_err(to_server_err)
 }

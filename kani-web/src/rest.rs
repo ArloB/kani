@@ -65,8 +65,8 @@ pub fn routes(state: AppState) -> Router {
 pub async fn download_progress_sse(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    let snapshot    = state.downloader.snapshot().await;
     let rx = state.downloader.subscribe();
+    let snapshot    = state.downloader.snapshot().await;
 
     let snapshot_event = {
         let json = serde_json::json!({
@@ -482,7 +482,7 @@ async fn start_download(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.start_download(id).await?;
+    state.download_chapter(id).await?;
     Ok((StatusCode::OK, Json(json!({}))))
 }
 
