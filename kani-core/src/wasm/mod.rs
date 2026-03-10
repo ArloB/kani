@@ -3,6 +3,7 @@
 pub mod abi;
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use wasmtime::component::{Component, HasSelf, Linker};
 use wasmtime::{Config, Engine, Store};
@@ -26,16 +27,16 @@ pub mod bindings {
 pub use bindings::KaniExtension;
 pub use bindings::exports;
 pub use bindings::kani;
-
 pub struct ResponseData {
     pub body: String,
     pub status: u16,
 }
 
-pub struct SendHtml(pub scraper::Html);
-unsafe impl Send for SendHtml {}
+pub struct SafeHtml(pub scraper::Html);
+unsafe impl Send for SafeHtml {}
+unsafe impl Sync for SafeHtml {}
 
-impl SendHtml {
+impl SafeHtml {
     pub fn parse_document(html: &str) -> Self {
         Self(scraper::Html::parse_document(html))
     }
@@ -43,6 +44,24 @@ impl SendHtml {
     pub fn parse_fragment(html: &str) -> Self {
         Self(scraper::Html::parse_fragment(html))
     }
+}
+
+pub struct SendHtml(pub Arc<Mutex<SafeHtml>>);
+
+impl SendHtml {
+    pub fn parse_document(html: &str) -> Self {
+        Self(Arc::new(Mutex::new(SafeHtml::parse_document(html))))
+    }
+
+    pub fn parse_fragment(html: &str) -> Self {
+        Self(Arc::new(Mutex::new(SafeHtml::parse_fragment(html))))
+    }
+}
+
+#[derive(Clone)]
+pub struct StoredNode {
+    pub doc: Arc<Mutex<SafeHtml>>,
+    pub node_id: ego_tree::NodeId,
 }
 
 use crate::http::SmartClient;
@@ -53,15 +72,14 @@ pub struct HostState {
     pub http_client: SmartClient,
     pub allowed_host: Option<String>,
     pub next_doc_handle: i32,
-    pub html_docs: HashMap<i32, SendHtml>,
-    pub html_lists: HashMap<i32, Vec<SendHtml>>,
+    pub html_docs: HashMap<i32, StoredNode>,
+    pub html_lists: HashMap<i32, Vec<StoredNode>>,
+    pub selector_cache: HashMap<String, scraper::Selector>,
     pub last_error: Option<i32>,
 }
 
 impl HostState {
-    pub fn new(solver_url: Option<String>, allowed_host: Option<String>) -> Result<Self> {
-        let http_client = SmartClient::new(solver_url)?;
-
+    pub fn new(http_client: SmartClient, allowed_host: Option<String>) -> Result<Self> {
         let allowed_host = allowed_host.and_then(|raw| {
             raw.parse::<rquest::Url>()
                 .ok()
@@ -74,6 +92,7 @@ impl HostState {
             next_doc_handle: 1,
             html_docs: HashMap::new(),
             html_lists: HashMap::new(),
+            selector_cache: HashMap::new(),
             last_error: None,
         })
     }
@@ -82,12 +101,25 @@ impl HostState {
         self.html_docs.clear();
         self.html_lists.clear();
         self.next_doc_handle = 1;
+        // selector_cache is intentionally not cleared: selectors are
+        // document-agnostic and can be reused across calls.
+    }
+
+    /// Returns a reference to the compiled selector, parsing and caching it on
+    /// the first call for a given `selector` string.
+    pub fn get_or_parse_selector(&mut self, selector: &str) -> Result<&scraper::Selector> {
+        if !self.selector_cache.contains_key(selector) {
+            let parsed = scraper::Selector::parse(selector)
+                .map_err(|e| crate::error::Error::Internal(format!("Invalid selector: {:?}", e)))?;
+            self.selector_cache.insert(selector.to_string(), parsed);
+        }
+        Ok(self.selector_cache.get(selector).unwrap())
     }
 }
 
 impl Default for HostState {
     fn default() -> Self {
-        HostState::new(None, None).unwrap()
+        HostState::new(SmartClient::new(None).unwrap(), None).unwrap()
     }
 }
 
@@ -98,13 +130,14 @@ pub struct WasmRuntime {
 }
 
 impl WasmRuntime {
-    pub fn new() -> Result<Self> {
+    pub fn new(max_instances: u32) -> Result<Self> {
         let mut config = Config::new();
         config.async_support(true);
         config.wasm_component_model(true);
+        config.epoch_interruption(true);
 
         let mut pool = wasmtime::PoolingAllocationConfig::default();
-        pool.total_component_instances(100);
+        pool.total_component_instances(max_instances);
 
         config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(pool));
 

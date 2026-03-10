@@ -1,55 +1,6 @@
-[package]
-name = "kani"
-description = "A web server for downloading manga and anime."
-version = "0.1.0"
-edition = "2024"
-repository = "https://github.com/arlob/kani"
-readme = "README.md"
-license = "MIT OR Apache-2.0"
-keywords = ["manga", "anime", "webserver", "api", "wasm"]
-categories = []
-
 [workspace]
 resolver = "3"
 members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web"]
-
-[dependencies]
-# Workspace crates
-kani-core = { path = "kani-core" }
-kani-shared = { path = "kani-shared" }
-
-# Web server
-axum = { version = "0.8.8", features = ["multipart"] }
-tower-http = { version = "0.6", features = [
-  "fs",
-  "compression-full",
-  "set-header",
-  "util",
-] }
-
-# Database
-sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "chrono"] }
-
-# Async runtime
-tokio = { version = "1.49.0", features = ["full"] }
-
-# HTTP client (for handler-level requests)
-rquest = { version = "5.1.0", features = ["json"] }
-
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-
-# Error handling
-thiserror = "2.0.18"
-
-# Logging
-tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-rquest-util = "2.2.1"
-xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
-chrono = { version = "0.4.43", features = ["serde"] }
-tokio-stream = { version = "0.1.18", features = ["sync"] }
 
 [profile.release]
 opt-level = 3
@@ -58,7 +9,12 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
-[lints.clippy]
+[profile.wasm-release]
+inherits = "release"
+opt-level = 'z'
+panic = "abort"
+
+[workspace.lints.clippy]
 unwrap_used = { level = "deny", priority = 1 }
 pedantic = "warn"
 nursery = "warn"

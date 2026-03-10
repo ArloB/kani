@@ -32,12 +32,17 @@ thiserror = "2.0.18"
 
 # Archive handling
 zip = { version = "7.2.0", default-features = false, features = ["deflate"] }
+async_zip = { version = "0.0.18", features = ["tokio"] }
 
 # Logging
 tracing = "0.1.44"
 bytes = "1.11.1"
 chrono = "0.4.43"
 arc-swap = "1.8.2"
+ego-tree = "^0.10.0"
+tokio-util = { version = "0.7.18", features = ["compat"] }
+hickory-resolver = "0.25.2"
+
 
 [dev-dependencies]
 tokio-test = "0.4"

@@ -1,0 +1,495 @@
+//! Plain Axum REST handlers — mounted at /api in main.rs.
+
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
+    http::{StatusCode, header},
+    response::{
+        IntoResponse,
+        sse::{Event, KeepAlive, Sse},
+    },
+    routing::{delete, get, post},
+};
+use serde_json::json;
+use std::{convert::Infallible, sync::Arc};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+use futures::TryStreamExt;
+
+use crate::{
+    error::AppError,
+    models::{CreateSource, FetchWasmRequest, Manga, ProxyQuery, SearchMangaRequest, Source, UpdateSource},
+    state::AppState,
+};
+use kani_core::source_manager::SourceManager;
+
+const MAX_WASM_BYTES: usize = 10 * 1024 * 1024;
+
+pub fn routes(state: AppState) -> Router {
+    Router::new()
+        // Binary response — image proxy
+        .route("/image_proxy", get(image_proxy))
+        // SSE — download progress
+        .route("/downloads/progress", get(download_progress_sse))
+        // Source admin CRUD
+        .route("/sources", get(list_sources).post(add_source))
+        .route(
+            "/sources/{id}",
+            get(get_source).patch(update_source).delete(delete_source),
+        )
+        .route("/sources/{id}/metadata", get(get_metadata))
+        // WASM installation (multipart + URL fetch)
+        .route("/sources/{id}/wasm", post(upload_wasm))
+        .route("/sources/{id}/wasm/fetch", post(fetch_wasm))
+        // Source data endpoints
+        .route("/sources/{id}/popular/{page}", get(get_popular_manga))
+        .route("/sources/{id}/search/{page}", get(search_manga))
+        .route("/sources/{id}/details/{manga_id}", get(get_manga_details))
+        .route("/sources/{id}/save/{manga_id}", post(save_to_library))
+        .route(
+            "/sources/{id}/chapters/{manga_id}/{page}",
+            get(get_chapter_list),
+        )
+        // Library management
+        .route("/library/{page}/{order}", get(get_library))
+        .route("/manga/{id}", get(get_manga).delete(delete_manga))
+        .route("/chapter/{id}/download", post(start_download))
+        .route("/chapter/{id}/delete", delete(delete_downloaded))
+        .with_state(state)
+        .layer(DefaultBodyLimit::max(MAX_WASM_BYTES))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Download progress SSE
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub async fn download_progress_sse(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let rx = state.downloader.subscribe();
+    let snapshot    = state.downloader.snapshot().await;
+
+    let snapshot_event = {
+        let json = serde_json::json!({
+            "type": "state_snapshot",
+            "chapters": snapshot
+        }).to_string();
+        Ok::<Event, Infallible>(Event::default().data(json))
+    };
+
+    let live_stream = BroadcastStream::new(rx).filter_map(|result| {
+        match result {
+            Ok(event) => {
+                let json = serde_json::to_string(&event).ok()?;
+                Some(Ok::<Event, Infallible>(Event::default().data(json)))
+            }
+            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
+                tracing::warn!("SSE client lagged by {} events, closing to force reconnect", n);
+                Some(Ok(Event::default().event("close").data("")))
+            }
+        }
+    });
+
+    let stream = tokio_stream::once(snapshot_event).chain(live_stream);
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Image proxy
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub async fn image_proxy(
+    State(state): State<AppState>,
+    Query(query): Query<ProxyQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let mut headers = rquest::header::HeaderMap::new();
+    headers.insert(
+        rquest::header::REFERER,
+        rquest::header::HeaderValue::from_str(&query.referer)?,
+    );
+    
+    let response = state
+        .proxy_client
+        .safe_get(&query.url, Some(headers))
+        .await?;
+
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .cloned()
+        .ok_or_else(|| AppError::InternalServerError("Failed to get content type".to_string()))?;
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+    Ok((
+        status,
+        [
+            (header::CONTENT_TYPE, content_type),
+            (
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+            ),
+        ],
+        bytes,
+    ))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Source CRUD
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn list_sources(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
+    let sources = sqlx::query_as!(
+        Source,
+        "SELECT id, name, version, base_url FROM sources LIMIT 1000"
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(sources))
+}
+
+async fn add_source(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateSource>,
+) -> Result<impl IntoResponse, AppError> {
+    let result = sqlx::query!(
+        "INSERT INTO sources (name, version) VALUES (?, '0.1') RETURNING id",
+        payload.name
+    )
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok((StatusCode::CREATED, Json(json!({ "id": result.id }))))
+}
+
+async fn get_source(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    let source = sqlx::query_as!(
+        Source,
+        "SELECT id, name, version, base_url FROM sources WHERE id = ?",
+        id
+    )
+    .fetch_optional(&state.db)
+    .await?;
+
+    Ok(Json(source))
+}
+
+async fn update_source(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<UpdateSource>,
+) -> Result<impl IntoResponse, AppError> {
+    if payload.name.is_none() && payload.version.is_none() {
+        return Ok((StatusCode::OK, Json(json!({}))));
+    }
+
+    sqlx::query!(
+        "UPDATE sources SET name = COALESCE(?, name), version = COALESCE(?, version) WHERE id = ?",
+        payload.name,
+        payload.version,
+        id
+    )
+    .execute(&state.db)
+    .await?;
+
+    Ok((StatusCode::OK, Json(json!({}))))
+}
+
+async fn delete_source(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    let result = sqlx::query!("DELETE FROM sources WHERE id = ? RETURNING name", id)
+        .fetch_optional(&state.db)
+        .await?;
+
+    if let Some(row) = result {
+        let settings = state.settings.read().await;
+        kani_core::file_storage::delete_wasm_file(
+            settings.wasm_storage_path.to_str().ok_or_else(|| {
+                AppError::InternalServerError("Failed to convert path to string".to_string())
+            })?,
+            &row.name,
+        )
+        .await
+        .map_err(AppError::CoreError)?;
+
+        drop(settings);
+    }
+
+    Ok((StatusCode::OK, Json(json!({}))))
+}
+
+async fn get_metadata(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    let result = state.get_metadata(id).await?;
+    Ok(result)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WASM installation helper + handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn install_source(
+    state: &AppState,
+    id: i64,
+    current_source: &Source,
+    bytes: &[u8],
+) -> Result<std::path::PathBuf, AppError> {
+    let bytes_owned   = bytes.to_vec();
+    let runtime_clone = state.wasm_runtime.clone();
+
+    let component = tokio::task::spawn_blocking(move || {
+        runtime_clone.compile_component(&bytes_owned)
+    })
+    .await
+    .map_err(|e| AppError::InternalServerError(
+        format!("WASM compilation task panicked: {}", e)
+    ))??;
+
+    let metadata = {
+        let mut inst = kani_core::sources::SourceInstance::new(state.smart_client.clone(), None);
+        inst.load(
+            state.wasm_runtime.engine(),
+            &component,
+            state.wasm_runtime.linker(),
+        )
+        .await
+        .map_err(AppError::CoreError)?;
+        inst.get_metadata().await.map_err(AppError::CoreError)?
+    };
+
+    sqlx::query!(
+        "UPDATE sources SET name = ?, version = ?, base_url = ? WHERE id = ?",
+        metadata.name,
+        metadata.version,
+        metadata.base_url,
+        id
+    )
+    .execute(&state.db)
+    .await?;
+
+    let settings = state.settings.read().await;
+    let storage_path = settings
+        .wasm_storage_path
+        .to_str()
+        .ok_or_else(|| AppError::InternalServerError("Failed to convert path".to_string()))?;
+
+    if current_source.name != metadata.name {
+        tracing::info!(
+            "Source name changed from {} to {}. Deleting old file.",
+            current_source.name,
+            metadata.name
+        );
+        let _ =
+            kani_core::file_storage::delete_wasm_file(storage_path, &current_source.name).await;
+    }
+
+    let path = kani_core::file_storage::save_wasm(storage_path, &metadata.name, bytes)
+        .await
+        .map_err(AppError::CoreError)?;
+    drop(settings);
+
+    let source_manager = SourceManager::new(
+        state.wasm_runtime.engine().clone(),
+        component,
+        state.wasm_runtime.linker().clone(),
+        state.smart_client.clone(),
+        Some(metadata.base_url.clone()),
+        25,
+        1,
+    )
+    .await
+    .map_err(AppError::CoreError)?;
+
+    state
+        .sources
+        .write()
+        .await
+        .insert(id, Arc::new(source_manager));
+
+    tracing::info!(
+        "Successfully installed source {}: {} v{}",
+        id,
+        metadata.name,
+        metadata.version
+    );
+
+    Ok(path)
+}
+
+async fn upload_wasm(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    mut multipart: Multipart,
+) -> Result<impl IntoResponse, AppError> {
+     let source = sqlx::query_as!(
+        Source,
+        "SELECT id, name, version, base_url FROM sources WHERE id = ?",
+        id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
+
+    let field = multipart
+        .next_field()
+        .await?
+        .ok_or_else(|| AppError::InternalServerError("no file field in upload".into()))?;
+
+    let content_length = field.headers()
+        .get(rquest::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+
+    let bytes: bytes::Bytes = kani_core::http::collect_bytes_limited(
+        Box::pin(field.map_err(|e| kani_core::error::Error::Other(e.to_string()))),
+        content_length,
+        MAX_WASM_BYTES,
+    ).await?;
+
+    let _ = install_source(&state, id, &source, bytes.as_ref()).await?;
+
+    Ok(StatusCode::OK)
+}
+
+async fn fetch_wasm(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<FetchWasmRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let source = sqlx::query_as!(
+        Source,
+        "SELECT id, name, version, base_url FROM sources WHERE id = ?",
+        id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
+
+    let response = state.proxy_client.safe_get(&payload.url, None).await?;
+
+    let bytes = response.bytes_limited(MAX_WASM_BYTES).await?;
+
+    let _ = install_source(&state, id, &source, &bytes).await?;
+
+    Ok(StatusCode::OK)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Source data handlers (thin delegation to AppState)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn get_popular_manga(
+    State(state): State<AppState>,
+    Path((id, page)): Path<(i64, i32)>,
+) -> Result<impl IntoResponse, AppError> {
+    state.get_popular_manga(id, page).await
+}
+
+async fn search_manga(
+    State(state): State<AppState>,
+    Path((id, page)): Path<(i64, i32)>,
+    Query(payload): Query<SearchMangaRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    state.search_manga(id, &payload.query, page).await
+}
+
+async fn get_manga_details(
+    State(state): State<AppState>,
+    Path((id, manga_id)): Path<(i64, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    state.get_manga_details(id, &manga_id).await
+}
+
+async fn get_chapter_list(
+    State(state): State<AppState>,
+    Path((id, manga_id, page)): Path<(i64, String, i32)>,
+) -> Result<impl IntoResponse, AppError> {
+    state.get_chapter_list_paged(id, &manga_id, page).await
+}
+
+async fn save_to_library(
+    State(state): State<AppState>,
+    Path((id, manga_id)): Path<(i64, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    let manga_row_id = state.save_to_library(id, &manga_id).await?;
+    Ok(Json(json!(manga_row_id)))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Library management handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn get_library(
+    State(state): State<AppState>,
+    Path((page, order)): Path<(i32, i32)>,
+) -> Result<impl IntoResponse, AppError> {
+    let order = match order {
+        1 => "id DESC",
+        _ => "id ASC",
+    };
+
+    let offset = (page - 1).max(0) * 20;
+
+    let manga = sqlx::query_as!(
+        Manga,
+        "SELECT * FROM manga ORDER BY ? LIMIT ? OFFSET ?",
+        order,
+        20,
+        offset
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(manga))
+}
+
+async fn get_manga(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    let manga = sqlx::query_as!(Manga, "SELECT * FROM manga WHERE id = ?", id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("No manga found with id {id}")))?;
+
+    Ok(Json(manga))
+}
+
+async fn delete_manga(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    sqlx::query!("DELETE FROM manga WHERE id = ?", id)
+        .execute(&state.db)
+        .await?;
+
+    Ok(Json(json!({})))
+}
+
+async fn start_download(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    state.download_chapter(id).await?;
+    Ok((StatusCode::OK, Json(json!({}))))
+}
+
+async fn delete_downloaded(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    state.delete_downloaded(id).await?;
+    Ok((StatusCode::OK, Json(json!({}))))
+}

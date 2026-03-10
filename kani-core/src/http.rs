@@ -1,7 +1,8 @@
-use crate::error::Result;
-use serde_json::json;
-use std::sync::Arc;
+use crate::{error::Result, network::ValidatingResolver};
 use arc_swap::ArcSwap;
+use futures::{TryStream, TryStreamExt};
+use serde_json::json;
+use std::{collections::HashMap, sync::Arc};
 
 const MAX_RETRIES: u32 = 3;
 const BASE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
@@ -57,12 +58,42 @@ impl SmartResponse {
             SmartResponse::Buffered { body, .. } => Ok(String::from_utf8_lossy(&body).to_string()),
         }
     }
+
+    pub async fn chunk(&mut self) -> Result<Option<bytes::Bytes>> {
+        match self {
+            SmartResponse::Normal(r) => Ok(r.chunk().await?),
+            SmartResponse::Buffered { body, .. } => {
+                if body.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(std::mem::take(body)))
+                }
+            }
+        }
+    }
+
+    pub async fn bytes_limited(self, max_bytes: usize) -> Result<bytes::Bytes> {
+        let content_length = self.headers()
+            .get(rquest::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<usize>().ok());
+
+        let stream = Box::pin(futures::stream::unfold(self, |mut resp| async move {
+            match resp.chunk().await {
+                Ok(Some(bytes)) => Some((Ok(bytes), resp)),
+                Ok(None)        => None,
+                Err(e)          => Some((Err(e), resp)),
+            }
+        }));
+
+        collect_bytes_limited(stream, content_length, max_bytes).await
+    }
 }
 
 #[derive(Clone)]
 pub struct SmartClient {
     client: rquest::Client,
-    credentials: Arc<ArcSwap<CachedCredentials>>,
+    credentials: Arc<ArcSwap<HashMap<String, CachedCredentials>>>,
     solver_url: Option<String>,
 }
 
@@ -71,30 +102,52 @@ impl SmartClient {
         let client = rquest::Client::builder()
             .emulation(rquest_util::Emulation::Chrome130)
             .redirect(rquest::redirect::Policy::limited(10))
+            .pool_idle_timeout(std::time::Duration::from_secs(300))
+            .pool_max_idle_per_host(100)
             .build()?;
 
         Ok(Self {
             client,
-            credentials: Arc::new(ArcSwap::from_pointee(CachedCredentials::default())),
+            credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
             solver_url,
+        })
+    }
+
+    pub fn new_proxy() -> Result<Self> {
+        let resolver = ValidatingResolver::new()?;
+        let client = rquest::Client::builder()
+            .emulation(rquest_util::Emulation::Chrome130)
+            .redirect(rquest::redirect::Policy::none())
+            .dns_resolver(Arc::new(resolver))
+            .pool_idle_timeout(std::time::Duration::from_secs(300))
+            .pool_max_idle_per_host(100)
+            .build()?;
+
+        Ok(Self {
+            client,
+            credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
+            solver_url: None,
         })
     }
 
     pub async fn send_request(&self, request: rquest::Request) -> Result<SmartResponse> {
         let mut request = request;
 
-        let creds = self.credentials.load();
-        if !creds.cookies.is_empty() {
-            request.headers_mut().insert(
-                rquest::header::COOKIE,
-                rquest::header::HeaderValue::from_str(&creds.cookies).unwrap(),
-            );
-        }
-        if let Some(ref ua) = creds.user_agent {
-            request.headers_mut().insert(
-                rquest::header::USER_AGENT,
-                rquest::header::HeaderValue::from_str(ua).unwrap(),
-            );
+        let domain = request.url().host_str().unwrap_or("").to_string();
+        let creds_map = self.credentials.load();
+        if let Some(creds) = creds_map.get(&domain) {
+            if !creds.cookies.is_empty() {
+                request.headers_mut().insert(
+                    rquest::header::COOKIE,
+                    rquest::header::HeaderValue::from_str(&creds.cookies).unwrap(),
+                );
+            }
+            if let Some(ref ua) = creds.user_agent {
+                request.headers_mut().insert(
+                    rquest::header::USER_AGENT,
+                    rquest::header::HeaderValue::from_str(ua).unwrap(),
+                );
+            }
         }
 
         let mut current_request = request;
@@ -187,12 +240,7 @@ impl SmartClient {
 
                 let (new_cookies, new_ua) = self.solve_challenge(&url).await?;
 
-                let new_creds = CachedCredentials {
-                    cookies: new_cookies.clone(),
-                    user_agent: Some(new_ua.clone()),
-                };
-
-                self.credentials.store(Arc::new(new_creds));
+                self.store_credentials(&url, &new_cookies, &new_ua);
 
                 if let Some(mut request) = request_clone_for_retry {
                     request.headers_mut().insert(
@@ -217,6 +265,45 @@ impl SmartClient {
     pub async fn get(&self, url: &str) -> Result<SmartResponse> {
         let request = self.client.get(url).build()?;
         self.send_request(request).await
+    }
+
+    pub async fn safe_get(&self, initial_url: &str, headers: Option<rquest::header::HeaderMap>) -> Result<SmartResponse> {
+        const MAX_REDIRECTS: usize = 5;
+
+        let mut builder = self.client.get(initial_url);
+
+        if let Some(headers) = headers {
+            builder = builder.headers(headers);
+        }
+
+        let mut req = builder.build()?;
+
+        for _ in 0..MAX_REDIRECTS {
+            let resp = self.client.execute(req).await?;
+
+            if resp.status().is_redirection() {
+                let location = resp
+                    .headers()
+                    .get("location")
+                    .and_then(|v| v.to_str().ok())
+                    .ok_or_else(|| crate::error::Error::Other("redirect with no Location header".into()))?;
+
+                let next = resp.url()
+                    .join(location)
+                    .map_err(|_| crate::error::Error::Other("invalid redirect URL".into()))?;
+
+                match next.scheme() {
+                    "http" | "https" => {}
+                    s => return Err(crate::error::Error::Other(format!("redirect to forbidden scheme: {}", s))),
+                }
+
+                req = self.client.get(next).build()?;
+            } else {
+                return Ok(SmartResponse::Normal(resp));
+            }
+        }
+
+        Err(crate::error::Error::Other("too many redirects".into()))
     }
 
     pub fn inner(&self) -> &rquest::Client {
@@ -309,4 +396,55 @@ impl SmartClient {
             body: bytes::Bytes::from(html),
         })
     }
+
+    fn store_credentials(&self, url: &str, cookies: &str, user_agent: &str) {
+        let mut creds = (**self.credentials.load()).clone();
+        
+        let domain = url
+            .parse::<rquest::Url>()
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.to_string()))
+            .unwrap_or_else(|| url.to_string());
+
+        creds.insert(domain, CachedCredentials {
+            cookies: cookies.to_string(),
+            user_agent: Some(user_agent.to_string()),
+        });
+
+        self.credentials.store(Arc::new(creds));
+    }
+}
+
+pub async fn collect_bytes_limited<S>(
+    stream: S,
+    content_length_hint: Option<usize>,
+    max_bytes: usize,
+) -> Result<bytes::Bytes>
+where
+    S: TryStream<Ok = bytes::Bytes> + Unpin,
+    S::Error: Into<crate::error::Error>,
+{
+    let mut stream = stream;
+
+    if let Some(len) = content_length_hint
+    && len > max_bytes {
+        return Err(crate::error::Error::Other(
+            format!("Content-Length {} exceeds limit {}", len, max_bytes)
+        ));
+    }
+
+    let mut buf      = bytes::BytesMut::new();
+    let mut received = 0usize;
+
+    while let Some(chunk) = stream.try_next().await.map_err(Into::into)? {
+        received += chunk.len();
+        if received > max_bytes {
+            return Err(crate::error::Error::Other(
+                format!("body exceeded limit of {} bytes mid-stream", max_bytes)
+            ));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+
+    Ok(buf.freeze())
 }

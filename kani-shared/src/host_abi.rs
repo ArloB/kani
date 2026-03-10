@@ -172,7 +172,7 @@ impl HtmlDocument {
 
     /// Get an attribute from this element directly
     pub fn get_attr(&self, attribute: &str) -> String {
-        html::attr(self.handle, "*", attribute)
+        html::attr(self.handle, "", attribute)
             .ok()
             .flatten()
             .unwrap_or_default()
@@ -188,7 +188,7 @@ impl HtmlDocument {
 
     /// Get text content from this element directly
     pub fn get_text(&self) -> String {
-        html::text(self.handle, "*")
+        html::text(self.handle, "")
             .ok()
             .flatten()
             .unwrap_or_default()

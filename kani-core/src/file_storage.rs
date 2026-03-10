@@ -11,7 +11,7 @@ const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6D];
 /// Saves WASM bytes to disk, creating directories as needed.
 /// Returns the full path where the file was saved.
 pub async fn save_wasm(wasm_storage_path: &str, name: &str, bytes: &[u8]) -> Result<PathBuf> {
-    let name = crate::sanitize::sanitize_filename(name);
+    let name = crate::utilities::sanitize_filename(name);
 
     if !validate_wasm_magic(bytes) {
         return Err(Error::InvalidWasm);
@@ -35,7 +35,7 @@ pub async fn save_wasm(wasm_storage_path: &str, name: &str, bytes: &[u8]) -> Res
 
 /// Deletes a WASM file at the given path.
 pub async fn delete_wasm_file(wasm_storage_path: &str, name: &str) -> Result<()> {
-    let name = crate::sanitize::sanitize_filename(name);
+    let name = crate::utilities::sanitize_filename(name);
     let dir = PathBuf::from(wasm_storage_path);
     let filename = format!("{}.wasm", name);
     let path = dir.join(&filename);

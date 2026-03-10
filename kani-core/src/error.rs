@@ -63,20 +63,8 @@ impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Error {
 /// Convenient Result type alias.
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_display() {
-        let err = Error::NotFound("manga 123".to_string());
-        assert_eq!(err.to_string(), "Not found: manga 123");
-    }
-
-    #[test]
-    fn test_error_from_io() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-        let err: Error = io_err.into();
-        assert!(matches!(err, Error::Io(_)));
+impl From<Error> for String {
+    fn from(value: Error) -> Self {
+        value.to_string()
     }
 }

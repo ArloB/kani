@@ -1,195 +1,98 @@
-use kani_shared::DownloadProgressEvent;
 use leptos::prelude::*;
-use std::collections::HashMap;
-use wasm_bindgen::prelude::*;
-use web_sys::{EventSource, MessageEvent};
-
-/// Live per-chapter progress tracking for downloads.
-#[derive(Debug, Clone, PartialEq)]
-struct ChapterProgress {
-    pub name: String,
-    pub total_pages: usize,
-    pub completed_pages: usize,
-    pub failed_pages: usize,
-    pub status: ChapterStatus,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum ChapterStatus {
-    InProgress,
-    Completed,
-    Failed(String),
-}
-
-impl ChapterProgress {
-    fn completion_pct(&self) -> f64 {
-        if self.total_pages == 0 {
-            return 100.0;
-        }
-        (self.completed_pages + self.failed_pages) as f64 / self.total_pages as f64 * 100.0
-    }
-}
+use crate::types::LiveChapterStatus;
 
 #[component]
 pub fn DownloadProgress() -> impl IntoView {
-    let chapters = RwSignal::new(HashMap::<String, ChapterProgress>::new());
+    let chapters = expect_context::<RwSignal<std::collections::HashMap<i64, crate::types::ChapterProgress>>>();
 
-    Effect::new(move |_| {
-        let es = match EventSource::new("/api/downloads/progress") {
-            Ok(es) => es,
-            Err(e) => {
-                log::error!("Failed to open EventSource: {:?}", e);
-                return;
-            }
-        };
-
-        let chapters_signal = chapters;
-        let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |msg: MessageEvent| {
-            let data = match msg.data().as_string() {
-                Some(d) => d,
-                None => return,
-            };
-
-            let event: DownloadProgressEvent = match serde_json::from_str(&data) {
-                Ok(e) => e,
-                Err(e) => {
-                    log::warn!("Failed to parse download event: {e}");
-                    return;
-                }
-            };
-
-            chapters_signal.update(|map| match event {
-                DownloadProgressEvent::ChapterStarted {
-                    chapter_name,
-                    total_pages,
-                } => {
-                    map.insert(
-                        chapter_name.clone(),
-                        ChapterProgress {
-                            name: chapter_name,
-                            total_pages,
-                            completed_pages: 0,
-                            failed_pages: 0,
-                            status: ChapterStatus::InProgress,
-                        },
-                    );
-                }
-                DownloadProgressEvent::PageCompleted { chapter_name, .. } => {
-                    if let Some(c) = map.get_mut(&chapter_name) {
-                        c.completed_pages += 1;
-                    }
-                }
-                DownloadProgressEvent::PageFailed { chapter_name, .. } => {
-                    if let Some(c) = map.get_mut(&chapter_name) {
-                        c.failed_pages += 1;
-                    }
-                }
-                DownloadProgressEvent::ChapterCompleted {
-                    chapter_name,
-                    successful_pages,
-                    failed_pages,
-                    ..
-                } => {
-                    if let Some(c) = map.get_mut(&chapter_name) {
-                        c.completed_pages = successful_pages;
-                        c.failed_pages = failed_pages;
-                        c.status = ChapterStatus::Completed;
-                    }
-                }
-                DownloadProgressEvent::ChapterFailed {
-                    chapter_name,
-                    error,
-                } => {
-                    if let Some(c) = map.get_mut(&chapter_name) {
-                        c.status = ChapterStatus::Failed(error);
-                    }
-                }
-            });
-        });
-
-        es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-        on_message.forget();
-
-        let es_clone = es.clone();
-        on_cleanup(move || {
-            es_clone.close();
-        });
-
-        drop(es);
-    });
-
-    let dismiss = move |name: String| {
+    let dismiss = move |id: i64| {
         chapters.update(|map| {
-            map.remove(&name);
+            map.remove(&id);
         });
     };
 
+    let has_visible = move || chapters.with(|m| m.values().any(|c| !matches!(c.status, LiveChapterStatus::Deleted | LiveChapterStatus::CompletedHidden)));
+
+    let entries = move || {
+        let mut entries: Vec<crate::types::ChapterProgress> = chapters.with(|map| {
+            map.values()
+                .filter(|c| !matches!(c.status, LiveChapterStatus::Deleted | LiveChapterStatus::CompletedHidden))
+                .cloned()
+                .collect()
+        });
+        entries.sort_by_key(|chapter| match chapter.status {
+            LiveChapterStatus::InProgress => 0,
+            _ => 1,
+        });
+        entries
+    };
+
     view! {
-        {move || {
-            let map = chapters.get();
-            if map.is_empty() {
-                return view! { <div></div> }.into_any();
-            }
-
-            let mut entries: Vec<ChapterProgress> = map.into_values().collect();
-            entries.sort_by_key(|c| matches!(c.status, ChapterStatus::InProgress));
-            entries.reverse();
-
-            view! {
-                <div class="download-progress-overlay">
-                    <div class="download-progress-header">
-                        <span class="download-progress-title">"Downloads"</span>
-                    </div>
-                    <div class="download-progress-list">
-                        <For
-                            each=move || entries.clone()
-                            key=|c| c.name.clone()
-                            children=move |chapter| {
-                                let pct = chapter.completion_pct();
-                                let name = chapter.name.clone();
-                                let dismiss_name = name.clone();
-                                let is_done = !matches!(chapter.status, ChapterStatus::InProgress);
-                                let bar_class = match &chapter.status {
-                                    ChapterStatus::InProgress => "progress-bar progress-bar--active",
-                                    ChapterStatus::Completed => "progress-bar progress-bar--done",
-                                    ChapterStatus::Failed(_) => "progress-bar progress-bar--failed",
-                                };
-                                let status_text = match &chapter.status {
-                                    ChapterStatus::InProgress => format!(
-                                        "{}/{} pages",
-                                        chapter.completed_pages + chapter.failed_pages,
-                                        chapter.total_pages
-                                    ),
-                                    ChapterStatus::Completed => "Complete".to_string(),
-                                    ChapterStatus::Failed(e) => format!("Failed: {e}"),
-                                };
-                                view! {
-                                    <div class="download-item">
-                                        <div class="download-item-header">
-                                            <span class="download-item-name">{name}</span>
-                                            <span class="download-item-status">{status_text}</span>
-                                            {is_done.then(|| view! {
-                                                <button
-                                                    class="download-item-dismiss"
-                                                    on:click=move |_| dismiss(dismiss_name.clone())
-                                                >
-                                                    "✕"
-                                                </button>
-                                            })}
-                                        </div>
-                                        <div class="progress-track">
-                                            <div
-                                                class=bar_class
-                                                style=format!("width: {:.1}%", pct)
-                                            ></div>
-                                        </div>
-                                    </div>
-                                }
-                            }
-                        />
-                    </div>
+        <Show
+            when=has_visible
+            fallback=|| view! { <div></div> }
+        >
+            <div class="download-progress-overlay">
+                <div class="download-progress-header">
+                    <span class="download-progress-title">"Downloads"</span>
                 </div>
-            }.into_any()
-        }}
+                <div class="download-progress-list">
+                    <For
+                        each=entries
+                        key=|c| c.id
+                        children=move |chapter| {
+                            let id = chapter.id;
+                            let chapter_sig = Signal::derive(move || {
+                                chapters.with(|m| m.get(&id).cloned().unwrap_or_else(|| chapter.clone()))
+                            });
+
+                            let is_done = move || !matches!(chapter_sig.get().status, LiveChapterStatus::InProgress);
+                            
+                            view! {
+                                <div class="download-item">
+                                    <div class="download-item-header">
+                                        <span class="download-item-name">{move || chapter_sig.get().name}</span>
+                                        <span class="download-item-status">
+                                            {move || {
+                                                let c = chapter_sig.get();
+                                                match c.status {
+                                                    LiveChapterStatus::InProgress => format!("{}/{} pages", c.completed_pages, c.total_pages),
+                                                    LiveChapterStatus::Completed  => "Complete".to_string(),
+                                                    LiveChapterStatus::Failed(e)  => format!("Failed: {}", e),
+                                                    LiveChapterStatus::Cancelled  => "Cancelled".to_string(),
+                                                    _ => "".to_string(),
+                                                }
+                                            }}
+                                        </span>
+                                        <Show when=is_done fallback=|| view! { }>
+                                            <button
+                                                class="download-item-dismiss"
+                                                on:click=move |_| dismiss(id)
+                                            >
+                                                "✕"
+                                            </button>
+                                        </Show>
+                                    </div>
+                                    <div class="progress-track">
+                                        <div
+                                            class=move || {
+                                                match chapter_sig.get().status {
+                                                    LiveChapterStatus::InProgress=>"progress-bar progress-bar--active",
+                                                    LiveChapterStatus::Completed=>"progress-bar progress-bar--done",
+                                                    LiveChapterStatus::Failed(_)=>"progress-bar progress-bar--failed",
+                                                    LiveChapterStatus::Cancelled=>"progress-bar progress-bar--failed",
+                                                    _ => "",
+                                                }
+                                            }
+                                            style=move || format!("width: {:.1}%", chapter_sig.get().completion_pct())
+                                        ></div>
+                                    </div>
+                                </div>
+                            }
+                        }
+                    />
+                </div>
+            </div>
+        </Show>
     }
 }

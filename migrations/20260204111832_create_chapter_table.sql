@@ -1,13 +1,15 @@
 CREATE TABLE IF NOT EXISTS chapters (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    manga_id INTEGER NOT NULL,
-    url TEXT NOT NULL,
-    name TEXT NOT NULL,
-    cover_url TEXT NOT NULL,
+    id INTEGER PRIMARY KEY NOT NULL,
+    manga_id INTEGER NOT NULL REFERENCES manga(id) ON DELETE CASCADE,
+    source_chapter_id TEXT NOT NULL,
+    name TEXT,
     chapter_number REAL NOT NULL,
-    scanlator TEXT NOT NULL,
-    uploaded_at DATETIME NOT NULL,
-    downloaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    download_status INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (manga_id) REFERENCES manga(id)
+    language TEXT NOT NULL,
+    volume INTEGER,
+    scanlator TEXT,
+    uploaded_at DATETIME,
+    download_status INTEGER NOT NULL CHECK (download_status IN (0, 1, 2)) DEFAULT 0,
+    UNIQUE (manga_id, source_chapter_id)
 );
+
+CREATE INDEX idx_chapters_manga_number ON chapters(manga_id, chapter_number DESC);
