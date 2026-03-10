@@ -423,12 +423,16 @@ impl DownloaderManager {
                 .expect("queue semaphore closed");
             queue_permit.forget();
 
-            let task = queue_state
-                .lock()
-                .await
-                .queue
-                .pop_front()
-                .expect("semaphore guarantees an item exists");
+            let (task, cancel_rx) = {
+                let mut state = queue_state.lock().await;
+                let task = state
+                    .queue
+                    .pop_front()
+                    .expect("semaphore guarantees an item exists");
+                let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+                state.active_tasks.insert(task.task.chapter_id, cancel_tx);
+                (task, cancel_rx)
+            };
 
             let concurrency_permit = chapter_limiter
                 .clone()
@@ -436,15 +440,16 @@ impl DownloaderManager {
                 .await
                 .expect("chapter limiter closed");
 
-            let client      = client_global.clone();
-            let tx          = progress_tx.clone();
-            let queue_ref   = queue_state.clone();
-            let active_ref  = active.clone();
+            let client     = client_global.clone();
+            let tx         = progress_tx.clone();
+            let queue_ref  = queue_state.clone();
+            let active_ref = active.clone();
 
             tokio::spawn(async move {
                 let _concurrency_permit = concurrency_permit;
                 Self::process_chapter(
                     task,
+                    cancel_rx,
                     client,
                     tx,
                     queue_ref,
@@ -460,6 +465,7 @@ impl DownloaderManager {
 
     async fn process_chapter(
         task: QueuedDownloadTask,
+        mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
         client: SmartClient,
         progress_tx: broadcast::Sender<DownloadProgressEvent>,
         queue_state: Arc<Mutex<QueueState>>,
@@ -496,11 +502,10 @@ impl DownloaderManager {
                     error: format!("Failed to create staging directory: {}", e),
                 },
             );
+            
+            queue_state.lock().await.active_tasks.remove(&chapter_id);
             return;
         }
-
-        let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
-        queue_state.lock().await.active_tasks.insert(chapter_id, cancel_tx);
 
         let fetch_fut = async {
             match source_manager.lease_instance().await {
