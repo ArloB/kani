@@ -1,3 +1,4 @@
+use std::path;
 use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -36,11 +37,13 @@ impl AppState {
             .connect("sqlite://kani.db?mode=rwc")
             .await?;
 
+        tracing::info!("SQL Pool Created");
+
         sqlx::migrate!("../migrations").run(&pool).await?;
 
         let mut sources_map = std::collections::HashMap::new();
 
-        let settings = sqlx::query_as!(Settings, "SELECT * FROM settings")
+        let settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
@@ -95,9 +98,7 @@ impl AppState {
 
         for source in sources {
             let bytes = tokio::fs::read(
-                settings
-                    .wasm_storage_path
-                    .join(format!("{}.wasm", source.name)),
+                &settings.wasm_storage_path.join(format!("{}.wasm", source.name)),
             )
             .await
             .map_err(AppError::IoError)?;
@@ -246,8 +247,8 @@ impl AppState {
                     .execute(&mut *tx)
                     .await?;
                 sqlx::query!(
-                    "INSERT OR IGNORE INTO manga_authors (manga_id, person_id) \
-                    SELECT ?, id FROM people WHERE name = ?",
+                    "INSERT OR IGNORE INTO manga_people (manga_id, role, person_id) \
+                    SELECT ?, 'author', id FROM people WHERE name = ?",
                     manga_row_id,
                     author
                 )
@@ -260,8 +261,8 @@ impl AppState {
                     .execute(&mut *tx)
                     .await?;
                 sqlx::query!(
-                    "INSERT OR IGNORE INTO manga_artists (manga_id, person_id) \
-                    SELECT ?, id FROM people WHERE name = ?",
+                    "INSERT OR IGNORE INTO manga_people (manga_id, role, person_id) \
+                    SELECT ?, 'artist', id FROM people WHERE name = ?",
                     manga_row_id,
                     artist
                 )
@@ -396,11 +397,11 @@ impl AppState {
                 m.id as manga_id, m.source_id, m.source_manga_id, m.name as manga_name,
                 m.description, s.base_url,
                 (SELECT GROUP_CONCAT(p.name, ', ')
-                FROM manga_authors ma JOIN people p ON ma.person_id = p.id
-                WHERE ma.manga_id = m.id) as authors,
-                (SELECT GROUP_CONCAT(a.name, ', ')
-                FROM manga_artists maa JOIN people a ON maa.person_id = a.id
-                WHERE maa.manga_id = m.id) as artists,
+                FROM manga_people mp JOIN people p ON mp.person_id = p.id
+                WHERE mp.manga_id = m.id and role = 'author') as authors,
+                (SELECT GROUP_CONCAT(p.name, ', ')
+                FROM manga_people mp JOIN people p ON mp.person_id = p.id
+                WHERE mp.manga_id = m.id and role = 'artist') as artists,
                 (SELECT GROUP_CONCAT(t.name, ', ')
                 FROM manga_tags mt JOIN tags t ON mt.tag_id = t.id
                 WHERE mt.manga_id = m.id) as tags
@@ -429,7 +430,7 @@ impl AppState {
         let name = chapter_name(record.volume, record.chapter_number, record.name.clone());
         let save_path = library_path.join(format!(
             "{} - {}",
-            kani_core::sanitize::sanitize_filename(&record.manga_name),
+            kani_core::utilities::sanitize_filename(&record.manga_name),
             record.manga_id
         ));
 
@@ -453,6 +454,7 @@ impl AppState {
             source_manga_id:   record.source_manga_id,
             source_chapter_id: record.source_chapter_id,
             name,
+            library_path,
             save_path,
             comic_info: Some(comic_info),
         })
@@ -550,10 +552,10 @@ impl AppState {
         let name = chapter_name(record.volume, record.chapter_number, record.chapter_name);
 
         let library_path = self.settings.read().await.library_path.clone();
-        let safe_manga_name_base = kani_core::sanitize::sanitize_filename(&record.manga_name);
+        let safe_manga_name_base = kani_core::utilities::sanitize_filename(&record.manga_name);
         let safe_manga_name = format!("{} - {}", safe_manga_name_base, record.manga_id);
         let path = library_path.join(safe_manga_name);
-        let safe_chapter_name = kani_core::sanitize::sanitize_filename(&name);
+        let safe_chapter_name = kani_core::utilities::sanitize_filename(&name);
         let cbz_path = path.join(format!("{}.cbz", &safe_chapter_name));
 
         if let Err(e) = tokio::fs::remove_file(&cbz_path).await {

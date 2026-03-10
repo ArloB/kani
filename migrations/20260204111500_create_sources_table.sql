@@ -2,5 +2,6 @@ CREATE TABLE IF NOT EXISTS sources (
     id INTEGER PRIMARY KEY NOT NULL,
     name TEXT NOT NULL,
     version TEXT NOT NULL,
-    enabled BOOLEAN NOT NULL DEFAULT 0
+    enabled BOOLEAN NOT NULL DEFAULT 0,
+    base_url TEXT NOT NULL DEFAULT ''
 );

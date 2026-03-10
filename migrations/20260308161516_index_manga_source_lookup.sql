@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX IF NOT EXISTS idx_manga_source_lookup ON manga(source_id, source_manga_id);

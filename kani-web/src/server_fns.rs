@@ -164,12 +164,24 @@ pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source), ServerFnErr
         .map_err(to_server_err)?
         .ok_or_else(|| ServerFnError::new("Source not found"))?;
 
-    let authors = sqlx::query_scalar!("SELECT p.name FROM people p JOIN manga_authors ma ON p.id = ma.person_id WHERE ma.manga_id = ?", id)
-        .fetch_all(&state.db).await.unwrap_or_default();
-    let artists = sqlx::query_scalar!("SELECT p.name FROM people p JOIN manga_artists ma ON p.id = ma.person_id WHERE ma.manga_id = ?", id)
-        .fetch_all(&state.db).await.unwrap_or_default();
-    let tags = sqlx::query_scalar!("SELECT t.name FROM tags t JOIN manga_tags mt ON t.id = mt.tag_id WHERE mt.manga_id = ?", id)
-        .fetch_all(&state.db).await.unwrap_or_default();
+    let record = sqlx::query!(r#"SELECT (SELECT json_group_array(p.name)
+                                    FROM manga_people mp JOIN people p ON mp.person_id = p.id
+                                    WHERE mp.manga_id = m.id and role = 'author') as "authors!",
+                                    (SELECT json_group_array(p.name)
+                                    FROM manga_people mp JOIN people p ON mp.person_id = p.id
+                                    WHERE mp.manga_id = m.id and role = 'artist') as "artists!",
+                                    (SELECT json_group_array(t.name)
+                                    FROM manga_tags mt JOIN tags t ON mt.tag_id = t.id
+                                    WHERE mt.manga_id = m.id) as "tags!"
+                                FROM manga m
+                                where m.id = ?"#, id)
+                    .fetch_optional(&state.db)
+                    .await?
+                    .ok_or_else(|| {
+                        crate::error::AppError::NotFound(format!(
+                            "Manga {id} not found"
+                        ))
+                    })?;
     
     let info = MangaInfo {
         id: manga.source_manga_id,
@@ -177,9 +189,9 @@ pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source), ServerFnErr
         cover_url: manga.cover_url,
         description: manga.description,
         status: crate::types::MangaStatus::from(i64::from(manga.status)),
-        authors,
-        artists,
-        tags,
+        authors: serde_json::from_str(&record.authors).unwrap_or_default(),
+        artists: serde_json::from_str(&record.artists).unwrap_or_default(),
+        tags: serde_json::from_str(&record.tags).unwrap_or_default(),
     };
 
     Ok((info, source))
@@ -236,7 +248,7 @@ pub async fn delete_manga(id: i64) -> Result<(), ServerFnError> {
         .ok_or_else(|| ServerFnError::new("Manga not found"))?;
 
     let library_path = state.settings.read().await.library_path.clone();
-    let safe_manga_name_base = kani_core::sanitize::sanitize_filename(&manga.name);
+    let safe_manga_name_base = kani_core::utilities::sanitize_filename(&manga.name);
     let safe_manga_name = format!("{} - {}", safe_manga_name_base, id);
     let path = library_path.join(safe_manga_name);
 
