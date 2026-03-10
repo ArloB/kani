@@ -151,8 +151,20 @@ async fn main() {
         .await
         .expect("Failed to bind port 8242");
 
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl_c");
+        let _ = shutdown_tx.send(true);
+    });
+
     tracing::info!("Server listening on http://0.0.0.0:8242");
-    axum::serve(listener, app).await.expect("Server error");
+    axum::serve(listener, app).with_graceful_shutdown(async move {
+        shutdown_rx.changed().await.ok();
+        sqlx::query!("UPDATE chapters SET download_status = 0 WHERE download_status = 1")
+        .execute(&state.db).await.ok();
+        state.db.close().await;
+    }).await.expect("Server error");
 }
 
 #[cfg(feature = "ssr")]
