@@ -47,7 +47,11 @@ impl http::Host for HostState {
         let request = builder.build().map_err(|e| e.to_string())?;
 
         let ttfb_start = std::time::Instant::now();
-        let response = self.http_client.send_request(request).await.map_err(|e| e.to_string())?;
+        let response = self
+            .http_client
+            .send_request(request)
+            .await
+            .map_err(|e| e.to_string())?;
 
         let ttfb = ttfb_start.elapsed();
         let status = response.status().as_u16();
@@ -63,7 +67,11 @@ impl http::Host for HostState {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        let body = response.bytes_limited(MAX_HTTP_RESPONSE_BYTES).await.map_err(|e| e.to_string())?.to_vec();
+        let body = response
+            .bytes_limited(MAX_HTTP_RESPONSE_BYTES)
+            .await
+            .map_err(|e| e.to_string())?
+            .to_vec();
 
         Ok(http::Response {
             status,
@@ -82,7 +90,7 @@ impl html::Host for HostState {
         let parsed = SendHtml(Arc::new(Mutex::new(parsed_doc)));
 
         self.next_doc_handle += 1;
-        
+
         self.html_docs.insert(
             handle,
             StoredNode {
@@ -100,14 +108,11 @@ impl html::Host for HostState {
         selector: String,
     ) -> wasmtime::Result<html::ListHandle, String> {
         let doc = match self.html_docs.get(&doc) {
-            Some(s) => s,
+            Some(s) => s.clone(),
             None => return Err("Document not found".to_string()),
         };
 
-        let selector_obj = match scraper::Selector::parse(&selector) {
-            Ok(s) => s,
-            Err(e) => return Err(format!("Invalid selector: {:?}", e)),
-        };
+        let selector_obj = self.get_or_parse_selector(&selector)?;
 
         let doc_lock = doc.doc.lock().unwrap();
         let element = match scraper::ElementRef::wrap(doc_lock.0.tree.get(doc.node_id).unwrap()) {
@@ -116,7 +121,7 @@ impl html::Host for HostState {
         };
 
         let matches: Vec<StoredNode> = element
-            .select(&selector_obj)
+            .select(selector_obj)
             .map(|e| StoredNode {
                 doc: doc.doc.clone(),
                 node_id: e.id(),
@@ -136,7 +141,7 @@ impl html::Host for HostState {
         attr: String,
     ) -> wasmtime::Result<Option<String>, String> {
         let doc = match self.html_docs.get(&doc) {
-            Some(s) => s,
+            Some(s) => s.clone(),
             None => return Err("Document not found".to_string()),
         };
 
@@ -150,13 +155,13 @@ impl html::Host for HostState {
             return Ok(element.value().attr(&attr).map(|s| s.to_string()));
         }
 
-        let selector_obj = match scraper::Selector::parse(&selector) {
+        let selector_obj = match self.get_or_parse_selector(&selector) {
             Ok(s) => s,
             Err(_) => return Ok(None),
         };
 
         Ok(element
-            .select(&selector_obj)
+            .select(selector_obj)
             .next()
             .and_then(|el| el.value().attr(&attr).map(|s| s.to_string())))
     }
@@ -167,7 +172,7 @@ impl html::Host for HostState {
         selector: String,
     ) -> wasmtime::Result<Option<String>, String> {
         let doc = match self.html_docs.get(&doc) {
-            Some(s) => s,
+            Some(s) => s.clone(),
             None => return Err("Document not found".to_string()),
         };
 
@@ -181,13 +186,13 @@ impl html::Host for HostState {
             return Ok(Some(element.text().collect::<Vec<_>>().join("")));
         }
 
-        let selector_obj = match scraper::Selector::parse(&selector) {
+        let selector_obj = match self.get_or_parse_selector(&selector) {
             Ok(s) => s,
             Err(_) => return Ok(None),
         };
 
         Ok(element
-            .select(&selector_obj)
+            .select(selector_obj)
             .next()
             .map(|el| el.text().collect::<Vec<_>>().join("")))
     }
@@ -267,7 +272,7 @@ impl html::Host for HostState {
             Some(s) => s.clone(),
             None => return Err("Document not found".to_string()),
         };
-        let selector_obj = match scraper::Selector::parse(&selector) {
+        let selector_obj = match self.get_or_parse_selector(&selector) {
             Ok(s) => s,
             Err(_) => return Ok(None),
         };
@@ -278,7 +283,7 @@ impl html::Host for HostState {
             None => return Ok(None),
         };
 
-        let matched = match element.select(&selector_obj).next() {
+        let matched = match element.select(selector_obj).next() {
             Some(el) => el.id(),
             None => return Ok(None),
         };

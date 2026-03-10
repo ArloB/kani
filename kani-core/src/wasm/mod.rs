@@ -74,6 +74,7 @@ pub struct HostState {
     pub next_doc_handle: i32,
     pub html_docs: HashMap<i32, StoredNode>,
     pub html_lists: HashMap<i32, Vec<StoredNode>>,
+    pub selector_cache: HashMap<String, scraper::Selector>,
     pub last_error: Option<i32>,
 }
 
@@ -91,6 +92,7 @@ impl HostState {
             next_doc_handle: 1,
             html_docs: HashMap::new(),
             html_lists: HashMap::new(),
+            selector_cache: HashMap::new(),
             last_error: None,
         })
     }
@@ -99,6 +101,19 @@ impl HostState {
         self.html_docs.clear();
         self.html_lists.clear();
         self.next_doc_handle = 1;
+        // selector_cache is intentionally not cleared: selectors are
+        // document-agnostic and can be reused across calls.
+    }
+
+    /// Returns a reference to the compiled selector, parsing and caching it on
+    /// the first call for a given `selector` string.
+    pub fn get_or_parse_selector(&mut self, selector: &str) -> Result<&scraper::Selector> {
+        if !self.selector_cache.contains_key(selector) {
+            let parsed = scraper::Selector::parse(selector)
+                .map_err(|e| crate::error::Error::Internal(format!("Invalid selector: {:?}", e)))?;
+            self.selector_cache.insert(selector.to_string(), parsed);
+        }
+        Ok(self.selector_cache.get(selector).unwrap())
     }
 }
 
