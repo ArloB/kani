@@ -2,9 +2,9 @@
 
 mod progress;
 
-use crate::error::Result;
+use crate::error::{self, Result};
 use crate::http::{SmartClient, SmartResponse};
-use crate::sanitize::sanitize_filename;
+use crate::utilities::{assert_within_root, sanitize_filename};
 use async_zip::tokio::write::ZipFileWriter;
 use async_zip::{Compression, ZipEntryBuilder};
 use futures::stream::{self, StreamExt};
@@ -45,6 +45,7 @@ pub struct DownloadTask {
     pub source_manga_id: String,
     pub source_chapter_id: String,
     pub name: String,
+    pub library_path: PathBuf,
     pub save_path: PathBuf,
     pub comic_info: Option<crate::comic_info::ComicInfo>,
 }
@@ -78,11 +79,11 @@ impl QueueState {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ActiveDownloadState {
-    pub chapter_id:      i64,
-    pub chapter_name:    String,
-    pub total_pages:     usize,
+    pub chapter_id: i64,
+    pub chapter_name: String,
+    pub total_pages: usize,
     pub completed_pages: usize,
-    pub status:          ActiveDownloadStatus,
+    pub status: ActiveDownloadStatus,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -118,12 +119,12 @@ impl DownloaderManager {
         initial_retry_delay_ms: i64,
         queue_limit: usize,
     ) -> Result<Self> {
-        let queue              = Arc::new(Mutex::new(QueueState::new()));
-        let (progress_tx, _)   = broadcast::channel(PROGRESS_CHANNEL_CAPACITY);
-        let active             = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        let queue = Arc::new(Mutex::new(QueueState::new()));
+        let (progress_tx, _) = broadcast::channel(PROGRESS_CHANNEL_CAPACITY);
+        let active = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
         let capacity_semaphore = Arc::new(tokio::sync::Semaphore::new(queue_limit));
-        let queue_semaphore    = Arc::new(tokio::sync::Semaphore::new(0)); // starts empty
-        let chapter_limiter    = Arc::new(tokio::sync::Semaphore::new(concurrent_chapters));
+        let queue_semaphore = Arc::new(tokio::sync::Semaphore::new(0)); // starts empty
+        let chapter_limiter = Arc::new(tokio::sync::Semaphore::new(concurrent_chapters));
 
         tokio::spawn(Self::run_worker(
             smart_client,
@@ -148,7 +149,8 @@ impl DownloaderManager {
 
     /// Queue a chapter for download, returns the queue ID
     pub async fn queue_chapter(&self, task: DownloadTask) -> Result<QueueId> {
-        let permit = self.capacity_semaphore
+        let permit = self
+            .capacity_semaphore
             .clone()
             .acquire_owned()
             .await
@@ -157,7 +159,11 @@ impl DownloaderManager {
         let id = {
             let mut state = self.queue.lock().await;
             let id = state.generate_id();
-            state.queue.push_back(QueuedDownloadTask { id, task, _permit: permit });
+            state.queue.push_back(QueuedDownloadTask {
+                id,
+                task,
+                _permit: permit,
+            });
             id
         };
 
@@ -440,14 +446,14 @@ impl DownloaderManager {
                 .await
                 .expect("chapter limiter closed");
 
-            let client     = client_global.clone();
-            let tx         = progress_tx.clone();
-            let queue_ref  = queue_state.clone();
+            let client = client_global.clone();
+            let tx = progress_tx.clone();
+            let queue_ref = queue_state.clone();
             let active_ref = active.clone();
 
             tokio::spawn(async move {
                 let _concurrency_permit = concurrency_permit;
-                Self::process_chapter(
+                let _ = Self::process_chapter(
                     task,
                     cancel_rx,
                     client,
@@ -473,27 +479,39 @@ impl DownloaderManager {
         concurrent_page_downloads: usize,
         max_retries: i64,
         initial_retry_delay_ms: i64,
-    ) {
+    ) -> Result<()> {
         let QueuedDownloadTask {
             id: task_id,
-            task: DownloadTask {
-                chapter_id,
-                source_manager,
-                source_manga_id,
-                source_chapter_id,
-                save_path,
-                name,
-                comic_info,
-            },
+            task:
+                DownloadTask {
+                    chapter_id,
+                    source_manager,
+                    source_manga_id,
+                    source_chapter_id,
+                    save_path,
+                    name,
+                    library_path,
+                    comic_info,
+                },
             _permit: _capacity_permit,
         } = task;
 
-        let safe_name   = sanitize_filename(&name);
-        let cbz_path    = save_path.join(format!("{}.cbz", &safe_name));
-        let staging_dir = save_path.join(format!(".tmp_staging_{}", task_id));
+        let safe_name = sanitize_filename(&name);
+        let cbz_path = assert_within_root(
+            &library_path,
+            &save_path.join(format!("{}.cbz", &safe_name)),
+        )?;
+        let staging_dir = assert_within_root(
+            &library_path,
+            &save_path.join(format!(".tmp_staging_{}", task_id)),
+        )?;
 
         if let Err(e) = tokio::fs::create_dir_all(&staging_dir).await {
-            tracing::error!("Failed to create staging directory {:?}: {}", staging_dir, e);
+            tracing::error!(
+                "Failed to create staging directory {:?}: {}",
+                staging_dir,
+                e
+            );
             Self::send_event(
                 &progress_tx,
                 DownloadProgressEvent::ChapterFailed {
@@ -502,16 +520,21 @@ impl DownloaderManager {
                     error: format!("Failed to create staging directory: {}", e),
                 },
             );
-            
+
             queue_state.lock().await.active_tasks.remove(&chapter_id);
-            return;
+            return Err(error::Error::Io(e));
         }
 
         let fetch_fut = async {
             match source_manager.lease_instance().await {
-                Ok(mut instance) => instance.get_pages(&source_manga_id, &source_chapter_id).await,
-                Err(e) => Err(crate::error::Error::Internal(format!(
-                    "Failed to lease instance: {}", e
+                Ok(mut instance) => {
+                    instance
+                        .get_pages(&source_manga_id, &source_chapter_id)
+                        .await
+                }
+                Err(e) => Err(error::Error::Internal(format!(
+                    "Failed to lease instance: {}",
+                    e
                 ))),
             }
         };
@@ -546,18 +569,21 @@ impl DownloaderManager {
         };
 
         if let Some(chapter_generated) = chapter_generated {
-            let pages     = chapter_generated.pages;
+            let pages = chapter_generated.pages;
             let pages_len = pages.len();
 
             {
                 let mut map = active.write().await;
-                map.insert(chapter_id, ActiveDownloadState {
+                map.insert(
                     chapter_id,
-                    chapter_name: name.clone(),
-                    total_pages: pages_len,
-                    completed_pages: 0,
-                    status: ActiveDownloadStatus::InProgress,
-                });
+                    ActiveDownloadState {
+                        chapter_id,
+                        chapter_name: name.clone(),
+                        total_pages: pages_len,
+                        completed_pages: 0,
+                        status: ActiveDownloadStatus::InProgress,
+                    },
+                );
             }
 
             Self::send_event(
@@ -573,22 +599,28 @@ impl DownloaderManager {
 
             let mut stream = stream::iter(pages.into_iter())
                 .map(|page| {
-                    let client          = client.clone();
-                    let name            = name.clone();
-                    let page_tx         = progress_tx.clone();
-                    let staging_dir     = staging_dir.clone();
+                    let client = client.clone();
+                    let name = name.clone();
+                    let page_tx = progress_tx.clone();
+                    let staging_dir = staging_dir.clone();
                     let active_for_page = active_for_stream.clone();
 
                     async move {
                         let result = Self::download_page_with_retry(
-                            &client, &page.url, page.index, &staging_dir,
-                            max_retries, initial_retry_delay_ms,
-                        ).await;
+                            &client,
+                            &page.url,
+                            page.index,
+                            &staging_dir,
+                            max_retries,
+                            initial_retry_delay_ms,
+                        )
+                        .await;
 
                         if result.is_ok() {
                             Self::update_active(&active_for_page, chapter_id, |s| {
                                 s.completed_pages += 1;
-                            }).await;
+                            })
+                            .await;
                             Self::send_event(
                                 &page_tx,
                                 DownloadProgressEvent::PageCompleted {
@@ -604,8 +636,8 @@ impl DownloaderManager {
                 })
                 .buffer_unordered(concurrent_page_downloads);
 
-            let mut successful   = Vec::new();
-            let mut error        = None;
+            let mut successful = Vec::new();
+            let mut error = None;
             let mut is_cancelled = false;
 
             while let Some(result) = tokio::select! {
@@ -614,14 +646,18 @@ impl DownloaderManager {
             } {
                 match result {
                     Ok(data) => successful.push(data),
-                    Err(e)   => { error = Some(e); break; }
+                    Err(e) => {
+                        error = Some(e);
+                        break;
+                    }
                 }
             }
 
             if is_cancelled {
                 Self::update_active(&active, chapter_id, |s| {
                     s.status = ActiveDownloadStatus::Cancelled;
-                }).await;
+                })
+                .await;
                 Self::send_event(
                     &progress_tx,
                     DownloadProgressEvent::ChapterCancelled {
@@ -633,7 +669,8 @@ impl DownloaderManager {
             } else if let Some(err_msg) = error {
                 Self::update_active(&active, chapter_id, |s| {
                     s.status = ActiveDownloadStatus::Failed(err_msg.clone());
-                }).await;
+                })
+                .await;
                 Self::send_event(
                     &progress_tx,
                     DownloadProgressEvent::ChapterFailed {
@@ -650,7 +687,8 @@ impl DownloaderManager {
                         Self::update_active(&active, chapter_id, |s| {
                             s.status = ActiveDownloadStatus::Completed;
                             s.completed_pages = successful_len;
-                        }).await;
+                        })
+                        .await;
                         Self::send_event(
                             &progress_tx,
                             DownloadProgressEvent::ChapterCompleted {
@@ -665,7 +703,8 @@ impl DownloaderManager {
                         let err_str = e.to_string();
                         Self::update_active(&active, chapter_id, |s| {
                             s.status = ActiveDownloadStatus::Failed(err_str.clone());
-                        }).await;
+                        })
+                        .await;
                         Self::send_event(
                             &progress_tx,
                             DownloadProgressEvent::ChapterFailed {
@@ -684,19 +723,21 @@ impl DownloaderManager {
 
         queue_state.lock().await.active_tasks.remove(&chapter_id);
 
-        let mut delay   = Duration::from_millis(200);
+        let mut delay = Duration::from_millis(200);
         let mut retries = 0u32;
         loop {
             match tokio::fs::remove_dir_all(&staging_dir).await {
-                Ok(_) => break,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+                Ok(_) => return Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
                 Err(e) => {
                     retries += 1;
                     if retries >= 5 {
                         tracing::warn!(
-                            "Failed to clean up staging dir after {} attempts: {}", retries, e
+                            "Failed to clean up staging dir after {} attempts: {}",
+                            retries,
+                            e
                         );
-                        break;
+                        return Err(error::Error::Io(e));
                     }
                     tokio::time::sleep(delay).await;
                     delay *= 2;

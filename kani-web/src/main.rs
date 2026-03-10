@@ -90,12 +90,12 @@ async fn main() {
                             
                             let library_path = sweep_state.settings.read().await.library_path.clone();
                             for record in records {
-                                let safe_manga_name_base = kani_core::sanitize::sanitize_filename(&record.manga_name);
+                                let safe_manga_name_base = kani_core::utilities::sanitize_filename(&record.manga_name);
                                 let safe_manga_name = format!("{} - {}", safe_manga_name_base, record.manga_id);
                                 let manga_path = library_path.join(safe_manga_name);
                                 
                                 let chapter_name = kani_web::state::chapter_name(record.volume, record.chapter_number, record.name);
-                                let safe_chapter_name = kani_core::sanitize::sanitize_filename(&chapter_name);
+                                let safe_chapter_name = kani_core::utilities::sanitize_filename(&chapter_name);
                                 let file_path = manga_path.join(format!("{}.cbz", safe_chapter_name));
                                 
                                 if tokio::fs::try_exists(&file_path).await.unwrap_or(false) {
