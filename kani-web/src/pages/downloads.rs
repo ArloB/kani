@@ -64,7 +64,7 @@ pub fn DownloadProgress() -> impl IntoView {
                                                 }
                                             }}
                                         </span>
-                                        <Show when=is_done fallback=|| view! { }>
+                                        <Show when=is_done fallback=|| ()>
                                             <button
                                                 class="download-item-dismiss"
                                                 on:click=move |_| dismiss(id)

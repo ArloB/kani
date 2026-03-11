@@ -36,6 +36,47 @@ async fn main() {
         });
     }
 
+    {
+        let scan_state = state.clone();
+        tokio::spawn(async move {
+            loop {
+                let interval_mins = scan_state.settings.read().await.scan_interval_minutes;
+                tokio::time::sleep(std::time::Duration::from_secs(interval_mins as u64 * 60)).await;
+                
+                if !scan_state.settings.read().await.auto_scan {
+                    continue;
+                }
+
+                let manga_to_scan: Vec<(i64, bool)> = sqlx::query_as(
+                    "SELECT id, auto_download FROM manga"
+                ).fetch_all(&scan_state.db).await.unwrap_or_default();
+                for (manga_db_id, auto_download) in manga_to_scan {
+                    match scan_state.scan_for_new_chapters(manga_db_id).await {
+                        Ok(new_ids) if !new_ids.is_empty() => {
+                            tracing::info!("Found {} new chapters for manga {}", new_ids.len(), manga_db_id);
+                            if auto_download {
+                                let futures = new_ids.into_iter().map(|new_id| {
+                                    let state = scan_state.clone();
+                                    async move {
+                                        match state.enqueue_claimed_chapter(new_id).await {
+                                            Ok(_) => {
+                                                tracing::info!("Chapter {} enqueued for download", new_id);
+                                            }
+                                            Err(e) => tracing::error!("Failed to enqueue chapter {}: {}", new_id, e),
+                                        }
+                                    }
+                                });
+                                futures::future::join_all(futures).await;
+                            }
+                        }
+                        Err(e) => tracing::error!("Scan failed for manga {}: {}", manga_db_id, e),
+                        _ => {}
+                    }
+                }
+            }
+        });
+    }
+
     let rest_router = rest::routes(state.clone());
 
     {

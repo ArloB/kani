@@ -3,5 +3,6 @@ CREATE TABLE IF NOT EXISTS sources (
     name TEXT NOT NULL,
     version TEXT NOT NULL,
     enabled BOOLEAN NOT NULL DEFAULT 0,
-    base_url TEXT NOT NULL DEFAULT ''
+    base_url TEXT NOT NULL DEFAULT '',
+    favourited BOOLEAN NOT NULL DEFAULT 0
 );

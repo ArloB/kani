@@ -1,6 +1,5 @@
 use crate::server_fns::{
-    cancel_download, check_in_library, delete_downloaded, delete_manga, download_all, fetch_sources, get_chapter_list, get_local_chapter_list,
-    get_local_manga, get_manga_details, proxy_url, save_to_library, download_chapter,
+    cancel_download, check_in_library, delete_downloaded, delete_manga, download_all, download_chapter, fetch_sources, get_chapter_list, get_local_chapter_list, get_local_manga, get_manga_details, proxy_url, refresh_manga, save_to_library, scan_for_new_chapters, toggle_auto_download
 };
 use crate::types::{ChapterList, LiveChapterStatus};
 use leptos::prelude::*;
@@ -25,26 +24,28 @@ pub fn MangaDetails() -> impl IntoView {
         move || (source_id(), manga_id(), db_id()),
         move |(sid, mid, did)| async move {
             if let Some(did) = did {
-                let (info, source) = get_local_manga(did).await?;
-                Ok((info, source, Some(did), true))
+                let (info, source, auto_download, auto_scan) = get_local_manga(did).await?;
+                Ok((info, source, Some(did), true, auto_download, auto_scan))
             } else if let (Some(sid), Some(mid)) = (sid, mid) {
                 let info = get_manga_details(sid, mid.clone()).await?;
                 let sources = fetch_sources().await.unwrap_or_default();
                 let source = sources.into_iter().find(|s| s.id == sid)
                     .ok_or_else(|| ServerFnError::new("Source not found"))?;
                 let existing_db_id = check_in_library(sid, mid).await?;
-                Ok((info, source, existing_db_id, false))
+                Ok((info, source, existing_db_id, false, false, false))
             } else {
                 Err(ServerFnError::new("Invalid route parameters"))
             }
         },
     );
 
+    let (sort_order_sig, set_sort_order) = signal(crate::types::ChapterSortOrder::default());
+
     let chapters = Resource::new(
-        move || (source_id(), manga_id(), db_id(), page.get()),
-        move |(sid, mid, did, p)| async move {
+        move || (source_id(), manga_id(), db_id(), page.get(), sort_order_sig.get()),
+        move |(sid, mid, did, p, sort_order)| async move {
             if let Some(did) = did {
-                get_local_chapter_list(did, p).await
+                get_local_chapter_list(did, p, sort_order).await
             } else if let (Some(sid), Some(mid)) = (sid, mid) {
                 get_chapter_list(sid, mid, p).await
             } else {
@@ -54,13 +55,23 @@ pub fn MangaDetails() -> impl IntoView {
     );
 
     let (library_pending, set_library_pending) = signal(false);
+    let (refreshing, set_refreshing) = signal(false);
+    let (scanning, set_scanning) = signal(false);
+    let (scan_message, set_scan_message) = signal(None::<String>);
+    let (auto_download_sig, set_auto_download) = signal(false);
+
+    Effect::new(move |_| {
+        if let Some(Ok((_, _, _, _, ad, _))) = manga.get() {
+            set_auto_download.set(ad);
+        }
+    });
 
     view! {
         <div class="manga-details">
             <Suspense fallback=move || view! { <p>"Loading details..."</p> }>
                 {move || {
                     manga.get().map(|res| match res {
-                        Ok((info, source, initial_db_id, is_local_route)) => {
+                        Ok((info, source, initial_db_id, is_local_route, _auto_download_init, auto_scan)) => {
                             let current_db_id = move || added_db_id.get().or(initial_db_id);
                             let sid = source.id;
                             let mid = info.id.clone();
@@ -100,7 +111,7 @@ pub fn MangaDetails() -> impl IntoView {
                                                         key=|author: &String| author.clone()
                                                         children=move |author: String| view! {
                                                             <div class="author">
-                                                                <A href=format!("/search?author={}", author)>{author}</A>
+                                                                <A href=format!("/?author={}", author)>{author}</A>
                                                             </div>
                                                         }
                                                     />
@@ -112,7 +123,7 @@ pub fn MangaDetails() -> impl IntoView {
                                                         key=|artist: &String| artist.clone()
                                                         children=move |artist: String| view! {
                                                             <div class="artist">
-                                                                <A href=format!("/search?artist={}", artist)>{artist}</A>
+                                                                <A href=format!("/?artist={}", artist)>{artist}</A>
                                                             </div>
                                                         }
                                                     />
@@ -124,7 +135,7 @@ pub fn MangaDetails() -> impl IntoView {
                                                     key=|tag: &String| tag.clone()
                                                     children=move |tag: String| view! {
                                                         <div class="tag">
-                                                            <A href=format!("/search?tag={}", tag)>{tag}</A>
+                                                            <A href=format!("/?tag={}", tag)>{tag}</A>
                                                         </div>
                                                     }
                                                 />
@@ -148,6 +159,52 @@ pub fn MangaDetails() -> impl IntoView {
                                                                     let _ = download_all(did_val).await;
                                                                 });
                                                             }>"Download All"</button>
+                                                            <button class="refresh-button" disabled=move || refreshing.get() on:click=move |_| {
+                                                                if refreshing.get() { return; }
+                                                                set_refreshing.set(true);
+                                                                leptos::task::spawn_local(async move {
+                                                                    let _ = refresh_manga(did_val).await;
+                                                                    set_refreshing.set(false);
+                                                                });
+                                                            }>{move || if refreshing.get() { "Refreshing..." } else { "Refresh" }}</button>
+                                                            <button class="scan-button" disabled=move || scanning.get() on:click=move |_| {
+                                                                if scanning.get() { return; }
+                                                                set_scanning.set(true);
+                                                                set_scan_message.set(None);
+                                                                leptos::task::spawn_local(async move {
+                                                                    match scan_for_new_chapters(did_val).await {
+                                                                        Ok(cnt) if cnt > 0 => {
+                                                                            set_scan_message.set(Some(format!("Found {} new chapters!", cnt)));
+                                                                            chapters.refetch();
+                                                                        },
+                                                                        Ok(_) => set_scan_message.set(Some("No new chapters found.".to_string())),
+                                                                        Err(e) => set_scan_message.set(Some(format!("Scan failed: {:?}", e))),
+                                                                    }
+                                                                    set_scanning.set(false);
+                                                                });
+                                                            }>{move || if scanning.get() { "Scanning..." } else { "Scan for new chapters" }}</button>
+                                                            {move || scan_message.get().map(|msg| view! { <span class="scan-message" style="margin-left: 10px; font-weight: bold; color: var(--text-color);">{msg}</span> }.into_any())}
+                                                            {move || if auto_scan {
+                                                                view! {
+                                                                    <div class="auto-download-toggle" style="margin-top: 10px;">
+                                                                        <label>
+                                                                            <input type="checkbox"
+                                                                                checked=move || auto_download_sig.get()
+                                                                                on:change=move |ev| {
+                                                                                    let checked = event_target_checked(&ev);
+                                                                                    set_auto_download.set(checked);
+                                                                                    leptos::task::spawn_local(async move {
+                                                                                        let _ = toggle_auto_download(did_val, checked).await;
+                                                                                    });
+                                                                                }
+                                                                            />
+                                                                            " Auto-Download New Chapters"
+                                                                        </label>
+                                                                    </div>
+                                                                }.into_any()
+                                                            } else {
+                                                                view! { <span/> }.into_any()
+                                                            }}
                                                         }.into_any()
                                                     } else if let Some(id) = current_db_id() {
                                                         view! {
@@ -200,7 +257,30 @@ pub fn MangaDetails() -> impl IntoView {
                             let list_pagination = list.clone();
                             view! {
                             <div class="chapter-list-group">
-                                <h2>"Chapters"</h2>
+                                <div class="chapter-list-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
+                                    <h2 style="margin: 0;">"Chapters"</h2>
+                                    <Show when=move || is_local() fallback=|| ()>
+                                        <select
+                                            prop:value=move || sort_order_sig.get().to_select_value()
+                                            on:change=move |ev| {
+                                                let val = event_target_value(&ev);
+                                                set_sort_order.set(crate::types::ChapterSortOrder::from_select_value(&val));
+                                                set_page.set(1);
+                                            }
+                                        >
+                                            <option value="uploaded_desc">"Newest first"</option>
+                                            <option value="uploaded_asc">"Oldest first"</option>
+                                            <option value="chapter_desc">"Ch. # ↓"</option>
+                                            <option value="chapter_asc">"Ch. # ↑"</option>
+                                            <option value="volume_desc">"Volume ↓"</option>
+                                            <option value="volume_asc">"Volume ↑"</option>
+                                            <option value="language_asc">"Language A→Z"</option>
+                                            <option value="language_desc">"Language Z→A"</option>
+                                            <option value="scanlator_asc">"Scanlator A→Z"</option>
+                                            <option value="scanlator_desc">"Scanlator Z→A"</option>
+                                        </select>
+                                    </Show>
+                                </div>
                                 <div class="chapter-list">
                                     <For
                                         each=move || list_chapters.chapters.clone()

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS manga (
     cover_url   TEXT,
     description TEXT,
     status      INTEGER NOT NULL CHECK (status IN (0, 1, 2, 3, 4)),
+    auto_download BOOLEAN NOT NULL DEFAULT 0,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (source_id, source_manga_id)

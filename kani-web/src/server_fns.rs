@@ -1,15 +1,6 @@
-use crate::types::{ChapterList, MangaInfo, MangaList};
+use crate::types::{ChapterList, GlobalSearchResult, LibraryPage, MangaInfo, MangaList, MangaSortOrder, Source};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
-pub struct Source {
-    pub id: i64,
-    pub name: String,
-    pub version: String,
-    pub base_url: String,
-}
 
 #[cfg(feature = "ssr")]
 fn to_server_err(e: impl std::fmt::Display) -> ServerFnError {
@@ -20,7 +11,7 @@ fn to_server_err(e: impl std::fmt::Display) -> ServerFnError {
 pub async fn fetch_sources() -> Result<Vec<Source>, ServerFnError> {
     use crate::state::AppState;
     let state = expect_context::<AppState>();
-    sqlx::query_as!(Source, "SELECT id, name, version, base_url FROM sources LIMIT 1000")
+    sqlx::query_as!(Source, "SELECT * FROM sources LIMIT 1000")
         .fetch_all(&state.db)
         .await
         .map_err(to_server_err)
@@ -150,7 +141,7 @@ pub async fn check_in_library(source_id: i64, manga_id: String) -> Result<Option
 }
 
 #[server]
-pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source), ServerFnError> {
+pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source, bool, bool), ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
     let manga = sqlx::query_as!(crate::models::Manga, "SELECT * FROM manga WHERE id = ?", id)
         .fetch_optional(&state.db)
@@ -158,7 +149,7 @@ pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source), ServerFnErr
         .map_err(to_server_err)?
         .ok_or_else(|| ServerFnError::new("Manga not found"))?;
 
-    let source = sqlx::query_as!(Source, "SELECT id, name, version, base_url FROM sources WHERE id = ?", manga.source_id)
+    let source = sqlx::query_as!(Source, "SELECT * FROM sources WHERE id = ?", manga.source_id)
         .fetch_optional(&state.db)
         .await
         .map_err(to_server_err)?
@@ -194,25 +185,34 @@ pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source), ServerFnErr
         tags: serde_json::from_str(&record.tags).unwrap_or_default(),
     };
 
-    Ok((info, source))
+    let auto_scan = state.settings.read().await.auto_scan;
+
+    Ok((info, source, manga.auto_download, auto_scan))
 }
 
 #[server]
-pub async fn get_local_chapter_list(manga_id: i64, page: i32) -> Result<ChapterList, ServerFnError> {
+pub async fn get_local_chapter_list(manga_id: i64, page: i32, sort_order: crate::types::ChapterSortOrder) -> Result<ChapterList, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
     let limit = 66;
     let offset = ((page - 1).max(0) * limit) as i64;
 
-    let mut chapters_db = sqlx::query!(
-        r#"SELECT id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at as "uploaded_at: i64", download_status
-         FROM chapters WHERE manga_id = ?
-         ORDER BY chapter_number DESC, uploaded_at DESC, id DESC
-         LIMIT ? OFFSET ?"#,
-        manga_id, limit, offset
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(to_server_err)?;
+    let sql = format!(
+        r#"SELECT id, source_chapter_id, name, chapter_number, language,
+                volume, scanlator, uploaded_at, download_status
+        FROM chapters
+        WHERE manga_id = ?
+        ORDER BY {}
+        LIMIT ? OFFSET ?"#,
+        sort_order.to_sql_order()
+    );
+
+    let mut chapters_db = sqlx::query_as::<sqlx::Sqlite, crate::models::Chapter>(&sql)
+        .bind(manga_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&state.db)
+        .await
+        .map_err(to_server_err)?;
 
     let has_next_page = chapters_db.len() == limit as usize;
 
@@ -267,27 +267,77 @@ pub async fn delete_manga(id: i64) -> Result<(), ServerFnError> {
 }
 
 #[server]
-pub async fn get_library(page: i32) -> Result<Vec<(crate::types::MangaListItem, String)>, ServerFnError> {
-    /*let order = match order {
-        1 => "id DESC",
-        _ => "id ASC",
-    };*/
-
+pub async fn get_library(
+    page: i32, 
+    search: Option<String>,
+    status_filter: Option<i64>,
+    tag_filter: Option<i64>,
+    author_filter: Option<i64>,
+    artist_filter: Option<i64>,
+    category_filter: Option<i64>,
+    sort_by: MangaSortOrder
+) -> Result<LibraryPage, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
-    let offset = (page - 1).max(0) * 20;
 
-    let records = sqlx::query!(
-        r#"SELECT m.id, m.name, m.cover_url, s.base_url 
-           FROM manga m 
-           JOIN sources s ON m.source_id = s.id 
-           ORDER BY m.id DESC LIMIT 20 OFFSET ?"#,
-        offset
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(to_server_err)?;
+    const PAGE_SIZE: i32 = 20;
 
-    let library = records.into_iter().map(|r| {
+    let offset = (page - 1).max(0) * PAGE_SIZE;
+
+    let mut qb = sqlx::QueryBuilder::new(
+        "SELECT m.id, m.name, m.cover_url, s.base_url
+         FROM manga m
+         JOIN sources s ON m.source_id = s.id
+         WHERE 1=1"
+    );
+
+    if let Some(search_str) = search {
+        qb.push(" AND LOWER(m.name) LIKE '%' || LOWER(");
+        qb.push_bind(search_str);
+        qb.push(") || '%'");
+    }
+
+    if let Some(status_id) = status_filter {
+        qb.push(" AND m.status = ");
+        qb.push_bind(status_id);
+    }
+
+    if let Some(tag_id) = tag_filter {
+        qb.push(" AND EXISTS (SELECT 1 FROM manga_tags mt WHERE mt.manga_id = m.id AND mt.tag_id = ");
+        qb.push_bind(tag_id);
+        qb.push(")");
+    }
+
+    if let Some(author_id) = author_filter {
+        qb.push(" AND EXISTS (SELECT 1 FROM manga_people mp WHERE mp.manga_id = m.id AND mp.role = 'author' AND mp.person_id = ");
+        qb.push_bind(author_id);
+        qb.push(")");
+    }
+
+    if let Some(artist_id) = artist_filter {
+        qb.push(" AND EXISTS (SELECT 1 FROM manga_people mp WHERE mp.manga_id = m.id AND mp.role = 'artist' AND mp.person_id = ");
+        qb.push_bind(artist_id);
+        qb.push(")");
+    }
+
+    if let Some(cat_str) = category_filter {
+        qb.push(" AND EXISTS (SELECT 1 FROM manga_categories mc WHERE mc.manga_id = m.id AND mc.category_id = ");
+        qb.push_bind(cat_str);
+        qb.push(")");
+    }
+
+    qb.push(format!(" ORDER BY {} LIMIT {} OFFSET ", sort_by.to_sql_order(), PAGE_SIZE + 1));
+    qb.push_bind(offset);
+
+    let mut records = qb
+        .build_query_as::<crate::models::LibraryRow>()
+        .fetch_all(&state.db)
+        .await
+        .map_err(to_server_err)?;
+
+    let has_next_page = records.len() == PAGE_SIZE as usize + 1;
+    records.truncate(PAGE_SIZE as usize);
+
+    let items = records.into_iter().map(|r| {
         let item = crate::types::MangaListItem {
             id: r.id.to_string(),
             title: r.name,
@@ -296,12 +346,135 @@ pub async fn get_library(page: i32) -> Result<Vec<(crate::types::MangaListItem, 
         (item, r.base_url)
     }).collect();
 
-    Ok(library)
+    Ok(LibraryPage {items, has_next_page})
 }
 
-/// Builds a proxied image URL. All cover/page images are routed through the
-/// server's REST image proxy so the browser never contacts manga source
-/// domains directly and CORS/hotlink issues are avoided.
+#[cfg(feature = "ssr")]
+async fn fetch_filter_options(
+    db: &sqlx::SqlitePool,
+    sql: &str,
+) -> Result<Vec<(i64, String)>, ServerFnError> {
+    use crate::models::FilterOptionResult;
+
+    let options = sqlx::query_as::<_, FilterOptionResult>(sql)
+        .fetch_all(db)
+        .await
+        .map_err(to_server_err)?
+        .into_iter()
+        .map(|r| (r.id, r.name))
+        .collect();
+    Ok(options)
+}
+
+#[server]
+pub async fn get_all_tags() -> Result<Vec<(i64, String)>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    fetch_filter_options(&state.db, "SELECT id, name FROM tags ORDER BY name").await
+}
+
+#[server]
+pub async fn get_all_authors() -> Result<Vec<(i64, String)>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    fetch_filter_options(&state.db,
+        "SELECT p.id, p.name FROM people p
+         JOIN manga_people mp ON mp.person_id = p.id
+         WHERE mp.role = 'author'
+         ORDER BY p.name"
+    ).await
+}
+
+#[server]
+pub async fn get_all_artists() -> Result<Vec<(i64, String)>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    fetch_filter_options(&state.db,
+        "SELECT p.id, p.name FROM people p
+         JOIN manga_people mp ON mp.person_id = p.id
+         WHERE mp.role = 'artist'
+         ORDER BY p.name"
+    ).await
+}
+
+#[server]
+pub async fn get_all_categories() -> Result<Vec<(i64, String)>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    fetch_filter_options(&state.db, "SELECT id, name FROM categories ORDER BY sort_order").await
+}
+
+#[server]
+pub async fn refresh_manga(id: i64) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    state.refresh_manga(id).await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn scan_for_new_chapters(id: i64) -> Result<i64, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let new_chapters = state.scan_for_new_chapters(id).await.map_err(to_server_err)?;
+    Ok(new_chapters.len() as i64)
+}
+
+#[server]
+pub async fn toggle_auto_scan() -> Result<bool, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    
+    let new_state = !state.settings.read().await.auto_scan;
+    
+    sqlx::query!(
+        "UPDATE settings SET auto_scan = ? WHERE id = 'singleton'",
+        new_state
+    )
+    .execute(&state.db)
+    .await
+    .map_err(to_server_err)?;
+
+    state.settings.write().await.auto_scan = new_state;
+
+    Ok(new_state)
+}
+
+#[server]
+pub async fn toggle_auto_download(manga_db_id: i64, enabled: bool) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    sqlx::query!(
+        "UPDATE manga SET auto_download = ? WHERE id = ?",
+        enabled, manga_db_id
+    )
+    .execute(&state.db)
+    .await
+    .map_err(to_server_err)?;
+    Ok(())
+}
+
+#[server]
+pub async fn global_search(
+    query: String,
+    scope: crate::types::SearchScope,
+    page: i32,
+) -> Result<Vec<GlobalSearchResult>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    state
+        .global_search(&query, scope, page)
+        .await
+        .map_err(to_server_err)
+}
+
+#[server]
+pub async fn toggle_source_favourite(
+    source_id: i64,
+    favourited: bool,
+) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    sqlx::query!(
+        "UPDATE sources SET favourited = ? WHERE id = ?",
+        favourited,
+        source_id
+    )
+    .execute(&state.db)
+    .await
+    .map(|_| ())
+    .map_err(to_server_err)
+}
+
 pub fn proxy_url(url: &str, referer: &str) -> String {
     format!(
         "/rest/image_proxy?url={}&referer={}",

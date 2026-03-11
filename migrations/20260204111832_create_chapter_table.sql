@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS chapters (
     scanlator TEXT,
     uploaded_at DATETIME,
     download_status INTEGER NOT NULL CHECK (download_status IN (0, 1, 2)) DEFAULT 0,
+    discovered_at DATETIME,
     UNIQUE (manga_id, source_chapter_id)
 );
 

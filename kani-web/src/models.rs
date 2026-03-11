@@ -12,6 +12,8 @@ pub struct Source {
     pub name: String,
     pub version: String,
     pub base_url: String,
+    pub enabled: bool,
+    pub favourited: bool
 }
 
 #[derive(Deserialize, Debug)]
@@ -40,6 +42,8 @@ pub struct Settings {
     pub max_retries: i64,
     pub initial_retry_delay_ms: i64,
     pub max_wasm_instances: i64,
+    pub auto_scan: bool,
+    pub scan_interval_minutes: i64,
 }
 
 #[derive(Deserialize, Debug)]
@@ -61,22 +65,36 @@ pub struct Manga {
     pub name: String,
     pub cover_url: Option<String>,
     pub description: Option<String>,
+    pub auto_download: bool,
     #[sqlx(try_from = "i64")]
     pub status: kani_shared::MangaStatus,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
 
-// #[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
-// pub struct Chapter {
-//     pub id: i64,
-//     pub manga_id: i64,
-//     pub source_chapter_id: String,
-//     pub name: Option<String>,
-//     pub number: f64,
-//     pub volume: Option<i32>,
-//     pub language: String,
-//     pub scanlator: Option<String>,
-//     pub uploaded_at: chrono::NaiveDateTime,
-//     pub download_status: i64,
-// }
+#[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
+pub struct Chapter {
+    pub id: i64,
+    pub source_chapter_id: String,
+    pub name: Option<String>,
+    pub chapter_number: f64,
+    pub volume: Option<i64>,
+    pub language: String,
+    pub scanlator: Option<String>,
+    pub uploaded_at: Option<i64>,
+    pub download_status: i64,
+}
+
+#[derive(Clone, Debug, sqlx::FromRow)]
+pub struct LibraryRow {
+    pub id: i64,
+    pub name: String,
+    pub cover_url: Option<String>,
+    pub base_url: String
+}
+
+#[derive(sqlx::FromRow)]
+pub struct FilterOptionResult {
+    pub id: i64,
+    pub name: String,
+}

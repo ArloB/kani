@@ -3,7 +3,7 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 
 #[component]
-pub fn Home() -> impl IntoView {
+pub fn Sources() -> impl IntoView {
     let sources = Resource::new(|| (), |_| fetch_sources());
 
     view! {

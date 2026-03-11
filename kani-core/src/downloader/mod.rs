@@ -497,6 +497,21 @@ impl DownloaderManager {
         } = task;
 
         let safe_name = sanitize_filename(&name);
+
+        if let Err(e) = tokio::fs::create_dir_all(&save_path).await {
+            tracing::error!("Failed to create save directory {:?}: {}", save_path, e);
+            Self::send_event(
+                &progress_tx,
+                DownloadProgressEvent::ChapterFailed {
+                    chapter_id,
+                    chapter_name: name.clone(),
+                    error: format!("Failed to create save directory: {}", e),
+                },
+            );
+            queue_state.lock().await.active_tasks.remove(&chapter_id);
+            return Err(error::Error::Io(e));
+        }
+
         let cbz_path = assert_within_root(
             &library_path,
             &save_path.join(format!("{}.cbz", &safe_name)),

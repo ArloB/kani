@@ -145,7 +145,7 @@ pub async fn image_proxy(
 async fn list_sources(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let sources = sqlx::query_as!(
         Source,
-        "SELECT id, name, version, base_url FROM sources LIMIT 1000"
+        "SELECT * FROM sources LIMIT 1000"
     )
     .fetch_all(&state.db)
     .await?;
@@ -173,7 +173,7 @@ async fn get_source(
 ) -> Result<impl IntoResponse, AppError> {
     let source = sqlx::query_as!(
         Source,
-        "SELECT id, name, version, base_url FROM sources WHERE id = ?",
+        "SELECT * FROM sources WHERE id = ?",
         id
     )
     .fetch_optional(&state.db)
@@ -335,7 +335,7 @@ async fn upload_wasm(
 ) -> Result<impl IntoResponse, AppError> {
      let source = sqlx::query_as!(
         Source,
-        "SELECT id, name, version, base_url FROM sources WHERE id = ?",
+        "SELECT * FROM sources WHERE id = ?",
         id
     )
     .fetch_optional(&state.db)
@@ -370,7 +370,7 @@ async fn fetch_wasm(
 ) -> Result<impl IntoResponse, AppError> {
     let source = sqlx::query_as!(
         Source,
-        "SELECT id, name, version, base_url FROM sources WHERE id = ?",
+        "SELECT * FROM sources WHERE id = ?",
         id
     )
     .fetch_optional(&state.db)

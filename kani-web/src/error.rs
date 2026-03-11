@@ -6,6 +6,8 @@ use axum::{
 use serde_json::json;
 use thiserror::Error;
 
+pub type Result<T, E = AppError> = std::result::Result<T, E>;
+
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error("Internal Server Error: {0}")]

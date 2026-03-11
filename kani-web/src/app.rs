@@ -1,8 +1,9 @@
 use crate::pages::downloads::DownloadProgress;
-use crate::pages::home::Home;
+use crate::pages::sources::Sources;
 use crate::pages::library::Library;
 use crate::pages::manga_details::MangaDetails;
 use crate::pages::source_details::SourceDetails;
+use crate::pages::global_search::GlobalSearch;
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, Stylesheet, Title};
 use leptos_router::components::{Route, Router, Routes, A};
@@ -172,14 +173,17 @@ pub fn App() -> impl IntoView {
             <Router>
                 <header>
                     <A href="/">"Kani"</A>
+                    <A href="/sources">"Sources"</A>
+                    <A href="/search">"Search"</A>
                 </header>
                 <main class="container">
                     <Routes fallback=|| view! { <h1>"Not Found"</h1> }>
-                        <Route path=path!("/") view=Home/>
+                        <Route path=path!("/") view=Library/>
+                        <Route path=path!("/sources") view=Sources/>
                         <Route path=path!("/source/:id") view=SourceDetails/>
                         <Route path=path!("/source/:id/manga/:manga_id") view=MangaDetails/>
                         <Route path=path!("/manga/:db_id") view=MangaDetails/>
-                        <Route path=path!("/library") view=Library/>
+                        <Route path=path!("/search") view=GlobalSearch/>
                     </Routes>
                 </main>
             </Router>

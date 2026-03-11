@@ -161,3 +161,145 @@ impl From<ActiveDownloadState> for ChapterProgress {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChapterSortOrder {
+    #[default]
+    ChapterDesc,
+    ChapterAsc,
+    UploadedDesc,
+    UploadedAsc,
+    VolumeDesc,
+    VolumeAsc,
+    LanguageAsc,
+    LanguageDesc,
+    ScanlatorAsc,
+    ScanlatorDesc,
+}
+
+impl ChapterSortOrder {
+    pub fn to_sql_order(&self) -> &'static str {
+        match self {
+            Self::ChapterDesc   => "chapter_number DESC, id DESC",
+            Self::ChapterAsc    => "chapter_number ASC, id ASC",
+            Self::UploadedDesc  => "uploaded_at DESC, chapter_number DESC",
+            Self::UploadedAsc   => "uploaded_at ASC, chapter_number ASC",
+            Self::VolumeDesc    => "volume DESC NULLS LAST, chapter_number DESC",
+            Self::VolumeAsc     => "volume ASC NULLS FIRST, chapter_number ASC",
+            Self::LanguageAsc   => "language ASC NULLS LAST, chapter_number DESC",
+            Self::LanguageDesc  => "language DESC NULLS LAST, chapter_number DESC",
+            Self::ScanlatorAsc  => "scanlator ASC NULLS LAST, chapter_number DESC",
+            Self::ScanlatorDesc => "scanlator DESC NULLS LAST, chapter_number DESC",
+        }
+    }
+
+    pub fn to_select_value(&self) -> &'static str {
+        match self {
+            Self::ChapterDesc   => "chapter_desc",
+            Self::ChapterAsc    => "chapter_asc",
+            Self::UploadedDesc  => "uploaded_desc",
+            Self::UploadedAsc   => "uploaded_asc",
+            Self::VolumeDesc    => "volume_desc",
+            Self::VolumeAsc     => "volume_asc",
+            Self::LanguageAsc   => "language_asc",
+            Self::LanguageDesc  => "language_desc",
+            Self::ScanlatorAsc  => "scanlator_asc",
+            Self::ScanlatorDesc => "scanlator_desc",
+        }
+    }
+
+    pub fn from_select_value(s: &str) -> Self {
+        match s {
+            "chapter_asc"    => Self::ChapterAsc,
+            "uploaded_desc"  => Self::UploadedDesc,
+            "uploaded_asc"   => Self::UploadedAsc,
+            "volume_desc"    => Self::VolumeDesc,
+            "volume_asc"     => Self::VolumeAsc,
+            "language_asc"   => Self::LanguageAsc,
+            "language_desc"  => Self::LanguageDesc,
+            "scanlator_asc"  => Self::ScanlatorAsc,
+            "scanlator_desc" => Self::ScanlatorDesc,
+            _                => Self::ChapterDesc,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MangaSortOrder {
+    #[default]
+    NameDesc,
+    NameAsc,
+    UpdatedDesc,
+    UpdatedAsc,
+    AddedDesc,
+    AddedAsc,
+}
+
+impl MangaSortOrder {
+    pub fn to_sql_order(&self) -> &'static str {
+        match self {
+            Self::NameDesc    => "m.name DESC, m.id DESC",
+            Self::NameAsc     => "m.name ASC, m.id ASC",
+            Self::UpdatedDesc => "m.updated_at DESC, m.name ASC",
+            Self::UpdatedAsc  => "m.updated_at ASC, m.name ASC",
+            Self::AddedDesc   => "m.created_at DESC, m.name ASC",
+            Self::AddedAsc    => "m.created_at ASC, m.name ASC"
+        }
+    }
+
+    pub fn to_select_value(&self) -> &'static str {
+        match self {
+            Self::NameDesc    => "name_desc",
+            Self::NameAsc     => "name_asc",
+            Self::UpdatedDesc => "updated_desc",
+            Self::UpdatedAsc  => "updated_asc",
+            Self::AddedDesc   => "added_desc",
+            Self::AddedAsc    => "added_asc"
+        }
+    }
+
+    pub fn from_select_value(s: &str) -> Self {
+        match s {
+            "name_desc"    => Self::NameDesc,
+            "name_asc"     => Self::NameAsc,
+            "updated_desc" => Self::UpdatedDesc,
+            "updated_asc"  => Self::UpdatedAsc,
+            "added_desc"   => Self::AddedDesc,
+            "added_asc"    => Self::AddedAsc,
+            _              => Self::NameAsc
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct LibraryPage {
+    pub items: Vec<(crate::types::MangaListItem, String)>,
+    pub has_next_page: bool
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
+pub struct Source {
+    pub id: i64,
+    pub name: String,
+    pub version: String,
+    pub base_url: String,
+    pub enabled: bool,
+    pub favourited: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct GlobalSearchResult {
+    pub source_id: i64,
+    pub source_name: String,
+    pub manga: Vec<MangaListItem>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum SearchScope {
+    FavouritedOnly,
+    AllEnabled,
+    Sources(Vec<i64>),
+}

@@ -1,15 +1,17 @@
-use std::path;
 use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
+use indexmap::IndexMap;
+use kani_shared::MangaInfo;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use kani_core::downloader::{DownloadTask, DownloaderManager};
 use kani_core::source_manager::SourceManager;
 use kani_core::wasm::WasmRuntime;
 
-use crate::error::AppError;
+use crate::error::{Result, AppError};
 use crate::models::{Settings, Source};
+use crate::types::{GlobalSearchResult, MangaList, SearchScope};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -43,7 +45,7 @@ impl AppState {
 
         let mut sources_map = std::collections::HashMap::new();
 
-        let settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances FROM settings")
+        let settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
@@ -91,7 +93,7 @@ impl AppState {
 
         let sources = sqlx::query_as!(
             Source,
-            "SELECT id, name, version, base_url FROM sources WHERE enabled = 1"
+            "SELECT * FROM sources WHERE enabled = 1"
         )
         .fetch_all(&pool)
         .await?;
@@ -125,10 +127,10 @@ impl AppState {
         let downloader = DownloaderManager::new(
             global_smart_client.clone(),
             settings.concurrent_page_downloads.try_into()?,
-            settings.chapter_queue_size.try_into()?,
+            2, // TODO: Make this configurable
             settings.max_retries,
             settings.initial_retry_delay_ms,
-            10000,
+            settings.chapter_queue_size.try_into()?,
         )
         .await
         .map_err(AppError::CoreError)?;
@@ -205,6 +207,52 @@ impl AppState {
             .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
     }
 
+    async fn sync_manga_metadata(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, manga_row_id: i64, manga: &kani_shared::MangaInfo) -> Result<()> {
+        for author in &manga.authors {
+            sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", author)
+                .execute(&mut **tx)
+                .await?;
+            sqlx::query!(
+                "INSERT OR IGNORE INTO manga_people (manga_id, role, person_id) \
+                SELECT ?, 'author', id FROM people WHERE name = ?",
+                manga_row_id,
+                author
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        for artist in &manga.artists {
+            sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", artist)
+                .execute(&mut **tx)
+                .await?;
+            sqlx::query!(
+                "INSERT OR IGNORE INTO manga_people (manga_id, role, person_id) \
+                SELECT ?, 'artist', id FROM people WHERE name = ?",
+                manga_row_id,
+                artist
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        for tag in &manga.tags {
+            sqlx::query!("INSERT OR IGNORE INTO tags (name) VALUES (?)", tag)
+                .execute(&mut **tx)
+                .await?;
+            sqlx::query!(
+                "INSERT OR IGNORE INTO manga_tags (manga_id, tag_id) \
+                SELECT ?, id FROM tags WHERE name = ?",
+                manga_row_id,
+                tag
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn save_to_library(
         &self,
         source_id: i64,
@@ -242,47 +290,7 @@ impl AppState {
         .await?;
 
         if we_inserted {
-            for author in &manga.authors {
-                sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", author)
-                    .execute(&mut *tx)
-                    .await?;
-                sqlx::query!(
-                    "INSERT OR IGNORE INTO manga_people (manga_id, role, person_id) \
-                    SELECT ?, 'author', id FROM people WHERE name = ?",
-                    manga_row_id,
-                    author
-                )
-                .execute(&mut *tx)
-                .await?;
-            }
-
-            for artist in &manga.artists {
-                sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", artist)
-                    .execute(&mut *tx)
-                    .await?;
-                sqlx::query!(
-                    "INSERT OR IGNORE INTO manga_people (manga_id, role, person_id) \
-                    SELECT ?, 'artist', id FROM people WHERE name = ?",
-                    manga_row_id,
-                    artist
-                )
-                .execute(&mut *tx)
-                .await?;
-            }
-
-            for tag in &manga.tags {
-                sqlx::query!("INSERT OR IGNORE INTO tags (name) VALUES (?)", tag)
-                    .execute(&mut *tx)
-                    .await?;
-                sqlx::query!(
-                    "INSERT OR IGNORE INTO manga_tags (manga_id, tag_id) \
-                    SELECT ?, id FROM tags WHERE name = ?",
-                    manga_row_id,
-                    tag
-                )
-                .execute(&mut *tx)
-                .await?;
-            }
+            Self::sync_manga_metadata(&mut tx, manga_row_id, &manga).await?;
         }
 
         tx.commit().await?;
@@ -389,8 +397,142 @@ impl AppState {
         serde_json::to_string(&result).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
     }
 
+    pub async fn refresh_manga(&self, manga_row_id: i64) -> Result<()> {
+        let ids = sqlx::query!(
+            "SELECT source_id, source_manga_id FROM manga WHERE id = ?",
+            manga_row_id
+        )
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("Manga {manga_row_id} not found")))?;
+
+        let manga_info_raw = self.get_manga_details(ids.source_id, &ids.source_manga_id).await?;
+        let manga_info: MangaInfo = serde_json::from_str(&manga_info_raw)
+            .map_err(|e| AppError::InternalServerError(format!("Failed to parse manga: {}", e)))?;
+
+        let mut tx = self.db.begin().await?;
+        let status = manga_info.status as i64;
+
+        sqlx::query!(
+            "UPDATE manga SET name = ?, cover_url = ?, description = ?, status = ? WHERE id = ?",
+            manga_info.title,
+            manga_info.cover_url,
+            manga_info.description,
+            status,
+            manga_row_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query!(
+            "DELETE FROM manga_people WHERE manga_id = ?",
+            manga_row_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query!(
+            "DELETE FROM manga_tags WHERE manga_id = ?",
+            manga_row_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        Self::sync_manga_metadata(&mut tx, manga_row_id, &manga_info).await?;
+
+        tx.commit().await?;
+
+        let has_next_page = self.fetch_and_store_chapter_page(ids.source_id, &ids.source_manga_id, manga_row_id, 1).await.unwrap_or_else(|e| {
+            tracing::error!("Failed to fetch initial chapters during refresh: {}", e);
+            false
+        });
+
+        if has_next_page {
+            let bg_self = self.clone();
+            let bg_manga_id = ids.source_manga_id.clone();
+            tokio::spawn(async move {
+                bg_self.fetch_and_store_remaining_chapters(ids.source_id, bg_manga_id, manga_row_id, 2).await;
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn insert_chapters_batch(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        manga_row_id: i64,
+        chapters: &[kani_shared::ChapterInfo],
+    ) -> Result<Vec<i64>> {
+        let mut ids = Vec::new();
+        for chunk in chapters.chunks(100) {
+            let mut qb = sqlx::QueryBuilder::new(
+                "INSERT OR IGNORE INTO chapters \
+                (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at) "
+            );
+            qb.push_values(chunk, |mut b, ch| {
+                b.push_bind(manga_row_id)
+                .push_bind(ch.id.clone())
+                .push_bind(ch.title.clone())
+                .push_bind(ch.number)
+                .push_bind(ch.language.clone())
+                .push_bind(ch.volume)
+                .push_bind(ch.scanlator.clone())
+                .push_bind(ch.date_uploaded);
+            });
+            qb.push(" RETURNING id");
+            let mut rows: Vec<i64> = qb.build_query_scalar().fetch_all(&mut **tx).await?;
+            ids.append(&mut rows);
+        }
+        Ok(ids)
+    }
+
+    pub async fn scan_for_new_chapters(&self, manga_row_id: i64) -> Result<Vec<i64>> {
+        let ids = sqlx::query!(
+            "SELECT source_id, source_manga_id FROM manga WHERE id = ?",
+            manga_row_id
+        )
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("Manga {manga_row_id} not found")))?;
+
+        let mut tx = self.db.begin().await?;
+        let mut new_chapter_ids = Vec::new();
+        let mut page = 1;
+
+        loop {
+            let res = self.get_chapter_list_paged(ids.source_id, &ids.source_manga_id, page).await?;
+            let chapter_list: kani_shared::ChapterList = serde_json::from_str(&res)
+                .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter list: {}", e)))?;
+
+            if chapter_list.chapters.is_empty() {
+                break;
+            }
+
+            let mut page_new_ids = Vec::new();
+            for chunk in chapter_list.chapters.chunks(100) {
+                let ids = self.insert_chapters_batch(&mut tx, manga_row_id, chunk).await?;
+                page_new_ids.extend(ids);
+            }
+
+            let new_on_page = page_new_ids.len();
+            new_chapter_ids.extend(page_new_ids);
+
+            // Note: The assumption here is that pages are ordered newest-first, so hitting
+            // a page with no new chapters means all earlier pages are already stored.
+            if new_on_page == 0 || !chapter_list.has_next_page {
+                break;
+            }
+
+            page += 1;
+        }
+
+        tx.commit().await?;
+        Ok(new_chapter_ids)
+    }
+
     // Download chapter(s)
-    async fn build_download_task(&self, chapter_id: i64) -> Result<DownloadTask, AppError> {
+    pub async fn build_download_task(&self, chapter_id: i64) -> Result<DownloadTask, AppError> {
         let record = sqlx::query!(
             "SELECT
                 c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language,
@@ -460,7 +602,7 @@ impl AppState {
         })
     }
 
-    async fn enqueue_claimed_chapter(&self, chapter_id: i64) -> Result<(), AppError> {
+    pub async fn enqueue_claimed_chapter(&self, chapter_id: i64) -> Result<(), AppError> {
         let result = async {
             let task = self.build_download_task(chapter_id).await?;
             self.downloader
@@ -588,6 +730,80 @@ impl AppState {
             .await?;
 
         serde_json::to_string(&result).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+    }
+
+    pub async fn global_search(
+        &self,
+        query: &str,
+        scope: SearchScope,
+        page: i32,
+    ) -> Result<Vec<GlobalSearchResult>, AppError> {
+        let favourited_only = matches!(scope, SearchScope::FavouritedOnly) as i64;
+
+        let ids_to_search: IndexMap<i64, String> = sqlx::query!(
+            "SELECT id, name FROM sources WHERE enabled = 1 AND (favourited = 1 OR ? = 0)",
+            favourited_only
+        )
+        .fetch_all(&self.db)
+        .await?
+        .into_iter()
+        .filter(|r| match &scope {
+            SearchScope::Sources(ids) => ids.contains(&r.id),
+            _ => true,
+        })
+        .map(|r| (r.id, r.name))
+        .collect();
+
+        let tasks: Vec<_> = ids_to_search
+            .iter()
+            .map(|(&source_id, source_name)| {
+                let state = self.clone();
+                let q = query.to_string();
+                let source_name = source_name.clone();
+
+                tokio::spawn(async move {
+                    let result = state.search_manga(source_id, &q, page).await;
+                    (source_id, source_name, result)
+                })
+            })
+            .collect();
+
+        let outcomes = futures::future::join_all(tasks).await;
+
+        let mut per_source_results: Vec<GlobalSearchResult> = Vec::new();
+
+        for outcome in outcomes {
+            match outcome {
+                Ok((source_id, source_name, Ok(json))) => {
+                    match serde_json::from_str::<MangaList>(&json) {
+                        Ok(manga_list) => {
+                            per_source_results.push(GlobalSearchResult {
+                                source_id,
+                                source_name,
+                                manga: manga_list.manga,
+                            });
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to parse results for source {source_id}: {e}");
+                            return Err(AppError::CoreError(kani_core::Error::Json(e)));
+                        }
+                    }
+                }
+                Ok((source_id, _, Err(e))) => {
+                    tracing::warn!("Search failed for source {source_id}: {e}");
+                    per_source_results.push(GlobalSearchResult {
+                        source_id,
+                        source_name: ids_to_search.get(&source_id).cloned().unwrap_or_default(),
+                        manga: vec![],
+                    });
+                }
+                Err(join_err) => {
+                    tracing::error!("Task panicked: {join_err}");
+                }
+            }
+        }
+
+        Ok(per_source_results)
     }
 
     async fn scan_and_register_sources(
