@@ -55,18 +55,35 @@ async fn main() {
                         Ok(new_ids) if !new_ids.is_empty() => {
                             tracing::info!("Found {} new chapters for manga {}", new_ids.len(), manga_db_id);
                             if auto_download {
-                                let futures = new_ids.into_iter().map(|new_id| {
-                                    let state = scan_state.clone();
-                                    async move {
-                                        match state.enqueue_claimed_chapter(new_id).await {
-                                            Ok(_) => {
-                                                tracing::info!("Chapter {} enqueued for download", new_id);
+                                let filtered_ids = scan_state
+                                    .filter_chapters_by_rules(manga_db_id, new_ids.clone())
+                                    .await;
+
+                                if filtered_ids.is_empty() {
+                                    tracing::info!(
+                                        "All new chapters for manga {} filtered out by download rules",
+                                        manga_db_id
+                                    );
+                                } else {
+                                    tracing::info!(
+                                        "{} new chapters passed download rules for manga {}",
+                                        filtered_ids.len(), manga_db_id
+                                    );
+
+                                    let futures = new_ids.into_iter().map(|new_id| {
+                                        let state = scan_state.clone();
+                                        async move {
+                                            match state.enqueue_claimed_chapter(new_id).await {
+                                                Ok(_) => {
+                                                    tracing::info!("Chapter {} enqueued for download", new_id);
+                                                }
+                                                Err(e) => tracing::error!("Failed to enqueue chapter {}: {}", new_id, e),
                                             }
-                                            Err(e) => tracing::error!("Failed to enqueue chapter {}: {}", new_id, e),
                                         }
-                                    }
-                                });
-                                futures::future::join_all(futures).await;
+                                    });
+                                    
+                                    futures::future::join_all(futures).await;
+                                }
                             }
                         }
                         Err(e) => tracing::error!("Scan failed for manga {}: {}", manga_db_id, e),

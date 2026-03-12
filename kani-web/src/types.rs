@@ -275,7 +275,7 @@ impl MangaSortOrder {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct LibraryPage {
-    pub items: Vec<(crate::types::MangaListItem, String)>,
+    pub items: Vec<(MangaListItem, String)>,
     pub has_next_page: bool
 }
 
@@ -302,4 +302,75 @@ pub enum SearchScope {
     FavouritedOnly,
     AllEnabled,
     Sources(Vec<i64>),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
+pub struct ChapterFilterRow {
+    pub id: i64,
+    pub scanlator: Option<String>,
+    pub language: String,
+    pub name: Option<String>
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum DownloadRuleKind {
+    ScanlatorInclude(String),
+    ScanlatorExclude(String),
+    LanguageInclude(String),
+    LanguageExclude(String),
+    TitleContains(String),
+    TitleExcludes(String),
+}
+
+impl DownloadRuleKind {
+    fn matches(&self, chapter: &ChapterFilterRow) -> bool {
+        match self {
+            Self::ScanlatorInclude(v) | Self::ScanlatorExclude(v) =>
+                chapter.scanlator.as_deref().unwrap_or("").eq_ignore_ascii_case(v),
+            Self::LanguageInclude(v)  | Self::LanguageExclude(v) =>
+                chapter.language.eq_ignore_ascii_case(v),
+            Self::TitleContains(v)    | Self::TitleExcludes(v) =>
+                chapter.name.as_deref().unwrap_or("").to_lowercase()
+                    .contains(&v.to_lowercase()),
+        }
+    }
+
+    pub fn is_include(&self) -> bool {
+        matches!(self,
+            Self::ScanlatorInclude(_) |
+            Self::LanguageInclude(_)  |
+            Self::TitleContains(_)
+        )
+    }
+
+    pub fn axis(&self) -> u8 {
+        match self {
+            Self::ScanlatorInclude(_) | Self::ScanlatorExclude(_) => 0,
+            Self::LanguageInclude(_)  | Self::LanguageExclude(_)  => 1,
+            Self::TitleContains(_)    | Self::TitleExcludes(_)    => 2,
+        }
+    }
+
+    pub fn passes(&self, chapter: &ChapterFilterRow) -> bool {
+        self.matches(chapter) == self.is_include()
+    }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            DownloadRuleKind::ScanlatorInclude(v) => format!("Scanlator includes {v}"),
+            DownloadRuleKind::ScanlatorExclude(v) => format!("Scanlator excludes {v}"),
+            DownloadRuleKind::LanguageInclude(v)  => format!("Language includes {v}"),
+            DownloadRuleKind::LanguageExclude(v)  => format!("Language excludes {v}"),
+            DownloadRuleKind::TitleContains(v)    => format!("Title contains {v}"),
+            DownloadRuleKind::TitleExcludes(v)    => format!("Title excludes {v}"),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DownloadRule {
+    pub id:       i64,
+    pub manga_id: i64,
+    pub kind:     DownloadRuleKind,
 }

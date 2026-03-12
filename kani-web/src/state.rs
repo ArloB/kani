@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -10,8 +11,9 @@ use kani_core::source_manager::SourceManager;
 use kani_core::wasm::WasmRuntime;
 
 use crate::error::{Result, AppError};
-use crate::models::{Settings, Source};
-use crate::types::{GlobalSearchResult, MangaList, SearchScope};
+use crate::events::RefreshProgressEvent;
+use crate::models::{DownloadRuleRow, Settings, Source};
+use crate::types::{ChapterFilterRow, DownloadRule, DownloadRuleKind, GlobalSearchResult, MangaList, SearchScope};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -24,6 +26,8 @@ pub struct AppState {
     pub downloader: DownloaderManager,
     pub smart_client: kani_core::http::SmartClient,
     pub proxy_client: kani_core::http::SmartClient,
+    pub refresh_tx: tokio::sync::broadcast::Sender<RefreshProgressEvent>,
+    pub refresh_task: Arc<tokio::sync::Mutex<Option<tokio::task::AbortHandle>>>
 }
 
 impl AppState {
@@ -139,6 +143,9 @@ impl AppState {
         let proxy_client = kani_core::http::SmartClient::new_proxy()?;
         tracing::info!("Proxy client created");
 
+        let (refresh_tx, _) = tokio::sync::broadcast::channel(256);
+        let refresh_task = Arc::new(tokio::sync::Mutex::new(None));
+
         Ok(Self {
             db: pool,
             wasm_runtime,
@@ -147,6 +154,8 @@ impl AppState {
             downloader,
             smart_client: global_smart_client,
             proxy_client,
+            refresh_tx,
+            refresh_task,
         })
     }
 
@@ -485,6 +494,89 @@ impl AppState {
             ids.append(&mut rows);
         }
         Ok(ids)
+    }
+
+    fn build_chapter_predicate(
+        &self,
+        rules: Vec<DownloadRuleKind>,
+    ) -> impl Fn(&ChapterFilterRow) -> bool {
+        move |chapter| {
+            for axis in 0u8..3 {
+                let axis_rules: Vec<_> = rules.iter()
+                    .filter(|r| r.axis() == axis)
+                    .collect();
+
+                if axis_rules.is_empty() { continue; }
+
+                let includes: Vec<_> = axis_rules.iter().filter(|r| r.is_include()).collect();
+                let excludes: Vec<_> = axis_rules.iter().filter(|r| !r.is_include()).collect();
+
+                if !includes.is_empty() && !includes.iter().any(|r| r.passes(chapter)) {
+                    return false;
+                }
+                if !excludes.iter().all(|r| r.passes(chapter)) {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+
+    pub async fn filter_chapters_by_rules(
+        &self,
+        manga_id: i64,
+        candidate_ids: Vec<i64>,
+    ) -> Vec<i64> {
+        let raw_rules: Vec<DownloadRuleRow> =
+            sqlx::query_as!(
+                DownloadRuleRow,
+                "SELECT id, manga_id, rule_type, value
+                FROM download_rules
+                WHERE manga_id = ?",
+                manga_id
+            )
+            .fetch_all(&self.db)
+            .await
+            .unwrap_or_default();
+
+        if raw_rules.is_empty() {
+            return candidate_ids;
+        }
+
+        if candidate_ids.is_empty() {
+            return vec![];
+        }
+
+        let rules: Vec<DownloadRule> = raw_rules
+            .into_iter()
+            .filter_map(|row| DownloadRule::try_from(row).ok())
+            .collect();
+
+        let predicate = self.build_chapter_predicate(rules.into_iter().map(|dr| dr.kind).collect());
+
+        let chapter_map: HashMap<i64, ChapterFilterRow> = {
+            let mut qb = sqlx::QueryBuilder::new(
+                "SELECT id, scanlator, language, name FROM chapters WHERE id IN ("
+            );
+            let mut sep = qb.separated(", ");
+            for id in &candidate_ids {
+                sep.push_bind(id);
+            }
+            qb.push(")");
+
+            qb.build_query_as::<ChapterFilterRow>()
+                .fetch_all(&self.db)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|row| (row.id, row))
+                .collect::<HashMap<_, _>>()
+        };
+
+        candidate_ids
+            .into_iter()
+            .filter(|id| chapter_map.get(id).map(&predicate).unwrap_or(false))
+            .collect()
     }
 
     pub async fn scan_for_new_chapters(&self, manga_row_id: i64) -> Result<Vec<i64>> {
@@ -886,6 +978,77 @@ impl AppState {
             }
         }
         Ok(())
+    }
+
+    pub async fn start_refresh_all(&self) -> Result<(), AppError> {
+        let mut task_guard = self.refresh_task.lock().await;
+
+        if let Some(handle) = &*task_guard
+            && !handle.is_finished() {
+                return Err(AppError::InternalServerError("Refresh already in progress".into()));
+            }
+
+        let ids: Vec<(i64, String)> = sqlx::query!(
+            "SELECT id, name FROM manga ORDER BY id"
+        )
+        .fetch_all(&self.db)
+        .await?
+        .into_iter()
+        .map(|r| (r.id, r.name))
+        .collect();
+
+        let total = ids.len();
+        let state = self.clone();
+
+        let handle = tokio::spawn(async move {
+            let _ = state.refresh_tx.send(RefreshProgressEvent::Started { total });
+
+            let mut futures = FuturesUnordered::new();
+            for (id, name) in ids {
+                let s = state.clone();
+                let n = name.clone();
+                futures.push(async move {
+                    let success = s.refresh_manga(id).await.is_ok();
+                    (id, n, success)
+                });
+            }
+
+            let mut completed = 0usize;
+            let mut failed = 0usize;
+
+            while let Some((manga_id, manga_name, success)) = futures.next().await {
+                completed += 1;
+                if !success { failed += 1; }
+
+                let _ = state.refresh_tx.send(RefreshProgressEvent::MangaRefreshed {
+                    manga_id,
+                    manga_name,
+                    completed,
+                    total,
+                    success,
+                });
+            }
+
+            let _ = state.refresh_tx.send(RefreshProgressEvent::Completed { total, failed });
+
+            *state.refresh_task.lock().await = None;
+        })
+        .abort_handle();
+
+        *task_guard = Some(handle);
+        Ok(())
+    }
+
+    pub fn subscribe_refresh(&self) -> tokio::sync::broadcast::Receiver<RefreshProgressEvent> {
+        self.refresh_tx.subscribe()
+    }
+
+    pub async fn is_refreshing(&self) -> bool {
+        self.refresh_task
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|h| !h.is_finished())
     }
 }
 

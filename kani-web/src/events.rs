@@ -33,3 +33,17 @@ pub enum DownloadProgressEvent {
         chapter_name: String,
     },
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RefreshProgressEvent {
+    Started { total: usize },
+    MangaRefreshed {
+        manga_id: i64,
+        manga_name: String,
+        completed: usize,
+        total: usize,
+        success: bool,
+    },
+    Completed { total: usize, failed: usize },
+}

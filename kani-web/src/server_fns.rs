@@ -1,6 +1,5 @@
-use crate::types::{ChapterList, GlobalSearchResult, LibraryPage, MangaInfo, MangaList, MangaSortOrder, Source};
+use crate::{models::DownloadRuleRow, types::{ChapterList, DownloadRule, DownloadRuleKind, GlobalSearchResult, LibraryPage, MangaInfo, MangaList, MangaSortOrder, Source}};
 use leptos::prelude::*;
-use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "ssr")]
 fn to_server_err(e: impl std::fmt::Display) -> ServerFnError {
@@ -473,6 +472,86 @@ pub async fn toggle_source_favourite(
     .await
     .map(|_| ())
     .map_err(to_server_err)
+}
+
+#[server]
+pub async fn start_refresh_all() -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    state.start_refresh_all().await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn is_refreshing() -> Result<bool, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    Ok(state.is_refreshing().await)
+}
+
+#[server]
+pub async fn get_download_rules(
+    manga_db_id: i64,
+) -> Result<Vec<DownloadRule>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+
+    sqlx::query_as!(
+        DownloadRuleRow,
+        "SELECT id, manga_id, rule_type, value
+         FROM download_rules
+         WHERE manga_id = ?
+         ORDER BY id ASC",
+        manga_db_id
+    )
+        .fetch_all(&state.db)
+        .await
+        .map_err(to_server_err)
+        .map(|rows| rows
+            .into_iter()
+            .filter_map(|row| DownloadRule::try_from(row).ok())
+            .collect())
+}
+
+#[server]
+pub async fn add_download_rule(
+    manga_db_id: i64,
+    kind: DownloadRuleKind,
+) -> Result<i64, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+
+    let (rule_type, value) = match &kind {
+        DownloadRuleKind::ScanlatorInclude(v) => ("scanlator_include", v),
+        DownloadRuleKind::ScanlatorExclude(v) => ("scanlator_exclude", v),
+        DownloadRuleKind::LanguageInclude(v)  => ("language_include",  v),
+        DownloadRuleKind::LanguageExclude(v)  => ("language_exclude",  v),
+        DownloadRuleKind::TitleContains(v)    => ("title_contains",    v),
+        DownloadRuleKind::TitleExcludes(v)    => ("title_excludes",    v),
+    };
+
+    if value.trim().is_empty() {
+        return Err(ServerFnError::new("Rule value cannot be empty"));
+    }
+
+    sqlx::query_scalar!(
+        "INSERT INTO download_rules (manga_id, rule_type, value)
+         VALUES (?, ?, ?)
+         RETURNING id",
+        manga_db_id, rule_type, value
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(to_server_err)
+}
+
+#[server]
+pub async fn remove_download_rule(
+    rule_id: i64,
+) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+
+    sqlx::query!("DELETE FROM download_rules WHERE id = ?", rule_id)
+        .execute(&state.db)
+        .await
+        .map_err(to_server_err)?;
+
+    Ok(())
 }
 
 pub fn proxy_url(url: &str, referer: &str) -> String {

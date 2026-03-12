@@ -54,6 +54,9 @@ pub fn routes(state: AppState) -> Router {
         .route("/manga/{id}", get(get_manga).delete(delete_manga))
         .route("/chapter/{id}/download", post(start_download))
         .route("/chapter/{id}/delete", delete(delete_downloaded))
+        // Events
+        .route("/refresh/progress", get(refresh_progress_sse))
+        .route("/refresh/start", post(start_refresh_all_rest))
         .with_state(state)
         .layer(DefaultBodyLimit::max(MAX_WASM_BYTES))
 }
@@ -492,4 +495,46 @@ async fn delete_downloaded(
 ) -> Result<impl IntoResponse, AppError> {
     state.delete_downloaded(id).await?;
     Ok((StatusCode::OK, Json(json!({}))))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Refresh progress SSE
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub async fn refresh_progress_sse(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let snapshot_event = {
+        let is_running = state.is_refreshing().await;
+        let json = serde_json::json!({
+            "type": "state_snapshot",
+            "is_refreshing": is_running,
+        }).to_string();
+        Ok::<Event, Infallible>(Event::default().data(json))
+    };
+
+    let rx = state.subscribe_refresh();
+
+    let live_stream = BroadcastStream::new(rx).filter_map(|result| {
+        match result {
+            Ok(event) => {
+                let json = serde_json::to_string(&event).ok()?;
+                Some(Ok::<Event, Infallible>(Event::default().data(json)))
+            }
+            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
+                tracing::warn!("Refresh SSE client lagged by {} events", n);
+                Some(Ok(Event::default().event("close").data("")))
+            }
+        }
+    });
+
+    let stream = tokio_stream::once(snapshot_event).chain(live_stream);
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+pub async fn start_refresh_all_rest(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    state.start_refresh_all().await?;
+    Ok(StatusCode::ACCEPTED)
 }

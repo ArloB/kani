@@ -98,3 +98,32 @@ pub struct FilterOptionResult {
     pub id: i64,
     pub name: String,
 }
+
+#[cfg(feature = "ssr")]
+#[derive(sqlx::FromRow)]
+pub struct DownloadRuleRow {
+    pub id:        i64,
+    pub manga_id:  i64,
+    pub rule_type: String,
+    pub value:     String,
+}
+
+#[cfg(feature = "ssr")]
+impl TryFrom<DownloadRuleRow> for crate::types::DownloadRule {
+    type Error = String;
+
+    fn try_from(row: DownloadRuleRow) -> Result<Self, Self::Error> {
+        use crate::types::DownloadRuleKind;
+
+        let kind = match row.rule_type.as_str() {
+            "scanlator_include" => DownloadRuleKind::ScanlatorInclude(row.value),
+            "scanlator_exclude" => DownloadRuleKind::ScanlatorExclude(row.value),
+            "language_include"  => DownloadRuleKind::LanguageInclude(row.value),
+            "language_exclude"  => DownloadRuleKind::LanguageExclude(row.value),
+            "title_contains"    => DownloadRuleKind::TitleContains(row.value),
+            "title_excludes"    => DownloadRuleKind::TitleExcludes(row.value),
+            other => return Err(format!("Unknown rule_type in DB: {}", other)),
+        };
+        Ok(crate::types::DownloadRule { id: row.id, manga_id: row.manga_id, kind })
+    }
+}
