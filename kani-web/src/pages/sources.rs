@@ -13,7 +13,7 @@ pub fn Sources() -> impl IntoView {
                 {move || {
                     sources.get().map(|res| match res {
                         Ok(sources) => view! {
-                            <div class="sources-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem;">
+                            <div class="sources-grid">
                                 <For
                                     each=move || sources.clone()
                                     key=|source| source.id

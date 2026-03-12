@@ -1,4 +1,4 @@
-use crate::{server_fns::{get_all_artists, get_all_authors, get_all_categories, get_all_tags, get_library, proxy_url}, types::MangaSortOrder};
+use crate::{server_fns::{get_all_artists, get_all_authors, get_all_categories, get_all_tags, get_library, proxy_url, start_refresh_all}, types::MangaSortOrder};
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_query_map};
 
@@ -73,9 +73,152 @@ pub fn Library() -> impl IntoView {
     sync_filter!(all_authors, author_from_url, set_author_filter);
     sync_filter!(all_artists, artist_from_url, set_artist_filter);
 
+    #[derive(Clone, PartialEq)]
+    enum RefreshState {
+        Idle,
+        Running { completed: usize, total: usize },
+        Done { total: usize, failed: usize },
+    }
+
+    let (refresh_state, set_refresh_state) = signal(RefreshState::Idle);
+
+    Effect::new(move |_| {
+        #[cfg(feature = "hydrate")]
+        {
+            use wasm_bindgen::prelude::*;
+            use web_sys::{EventSource, MessageEvent};
+
+            let es = match EventSource::new("/rest/refresh/progress") {
+                Ok(es) => es,
+                Err(_) => return,
+            };
+
+            let es_for_close = es.clone();
+            let on_close = Closure::<dyn FnMut(MessageEvent)>::new(
+                move |_: MessageEvent| { es_for_close.close(); }
+            );
+            es.add_event_listener_with_callback(
+                "close", on_close.as_ref().unchecked_ref()
+            ).ok();
+            on_close.forget();
+
+            let on_message = Closure::<dyn FnMut(MessageEvent)>::new(
+                move |msg: MessageEvent| {
+                    use crate::events::RefreshProgressEvent;
+
+                    let data = match msg.data().as_string() {
+                        Some(d) => d,
+                        None => return,
+                    };
+
+                    if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&data)
+                        && raw["type"] == "state_snapshot" {
+                            if raw["is_refreshing"].as_bool().unwrap_or(false) {
+                                set_refresh_state.set(RefreshState::Running {
+                                    completed: 0,
+                                    total: 0,
+                                });
+                            }
+                            return;
+                        }
+
+                    let event: RefreshProgressEvent = match serde_json::from_str(&data) {
+                        Ok(e) => e,
+                        Err(_) => return,
+                    };
+
+                    match event {
+                        RefreshProgressEvent::Started { total } => {
+                            set_refresh_state.set(RefreshState::Running {
+                                completed: 0,
+                                total,
+                            });
+                        }
+                        RefreshProgressEvent::MangaRefreshed { completed, total, .. } => {
+                            set_refresh_state.set(RefreshState::Running { completed, total });
+                        }
+                        RefreshProgressEvent::Completed { total, failed } => {
+                            set_refresh_state.set(RefreshState::Done { total, failed });
+                            library.refetch();
+                            set_timeout(
+                                move || set_refresh_state.set(RefreshState::Idle),
+                                std::time::Duration::from_secs(5),
+                            );
+                        }
+                    }
+                }
+            );
+
+            es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+            on_message.forget();
+
+            let es_clone = es.clone();
+            on_cleanup(move || es_clone.close());
+            drop(es);
+        }
+    });
+
+    let is_running = move || matches!(refresh_state.get(), RefreshState::Running { .. });
+
     view! {
         <div class="library-page">
-            <h1>"My Library"</h1>
+            <div class="library-header">
+                <h1>"My Library"</h1>
+                <div class="library-header__actions">
+                    {move || match refresh_state.get() {
+                        RefreshState::Running { completed, total } if total > 0 => {
+                            let pct = (completed as f64 / total as f64 * 100.0) as u32;
+                            view! {
+                                <div class="refresh-progress">
+                                    <div class="refresh-progress__track">
+                                        <div
+                                            class="refresh-progress__bar"
+                                            style=format!("width: {}%", pct)
+                                        ></div>
+                                    </div>
+                                </div>
+                            }.into_any()
+                        }
+
+                        RefreshState::Running { .. } => view! {
+                            <div class="refresh-progress">
+                                <div class="refresh-progress__track">
+                                    <div class="refresh-progress__bar refresh-progress__bar--indeterminate"></div>
+                                </div>
+                            </div>
+                        }.into_any(),
+                        RefreshState::Done { total, failed } => view! {
+                            <span class="refresh-message">
+                                {if failed == 0 {
+                                    format!("Refreshed {} manga.", total)
+                                } else {
+                                    format!("Done — {} failed.", failed)
+                                }}
+                            </span>
+                        }.into_any(),
+                        RefreshState::Idle => ().into_any(),
+                    }}
+
+                    <button
+                        class="refresh-button"
+                        disabled=is_running
+                        on:click=move |_| {
+                            leptos::task::spawn_local(async move {
+                                let _ = start_refresh_all().await;
+                            });
+                        }
+                    >
+                        {move || match refresh_state.get() {
+                            RefreshState::Idle => "↻ Refresh All".to_string(),
+                            RefreshState::Running { completed, total } if total > 0 =>
+                                format!("Refreshing... {}/{}", completed, total),
+                            RefreshState::Running { .. } =>
+                                "Refreshing...".to_string(),
+                            RefreshState::Done { .. } => "↻ Refresh All".to_string(),
+                        }}
+                    </button>
+                </div>
+            </div>
             <Suspense fallback=move || view! { <p>"Loading library..."</p> }>
                 {move || library.get().map(|res| match res {
                     Ok(library) => {

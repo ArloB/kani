@@ -1,343 +1,1236 @@
-body {
-  font-family: sans-serif;
+// ============================================================
+// Kani Manga Reader — Main Stylesheet
+// ============================================================
+// Organisation:
+//   1. Design tokens
+//   2. Reset & base
+//   3. Layout (app shell, header, nav)
+//   4. Shared components
+//      a. Manga grid & card
+//      b. Pagination
+//      c. Chips & filter bar
+//      d. Tags
+//      e. Form controls (input, select, button variants)
+//      f. Feedback states (spinner, error, empty)
+//      g. Sticky sub-header
+//   5. Page — Sources
+//   6. Page — Source Details
+//   7. Page — Library
+//   8. Page — Manga Details
+//   9. Page — Global Search
+//  10. Download progress overlay
+//  11. Animations
+// ============================================================
+
+
+// ── 1. Design Tokens ────────────────────────────────────────
+
+:root {
+  // Palette
+  --clr-bg:           #0f0f17;
+  --clr-surface:      #18181f;
+  --clr-surface-2:    #22222d;
+  --clr-surface-3:    #2b2b38;
+  --clr-border:       #2e2e3d;
+  --clr-border-subtle:#222230;
+
+  --clr-accent:       #e8545a;
+  --clr-accent-dim:   rgba(232, 84, 90, 0.15);
+  --clr-accent-hover: #cf3d43;
+
+  --clr-text:         #ddddf0;
+  --clr-text-muted:   #7878a0;
+  --clr-text-faint:   #484868;
+
+  --clr-success:      #4caf79;
+  --clr-warn:         #e8a954;
+  --clr-danger:       #e85454;
+
+  // Typography
+  --font-body:   'DM Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono:   'DM Mono', 'Fira Code', ui-monospace, monospace;
+
+  --text-xs:   0.72rem;
+  --text-sm:   0.85rem;
+  --text-base: 1rem;
+  --text-lg:   1.15rem;
+  --text-xl:   1.35rem;
+  --text-2xl:  1.75rem;
+  --text-3xl:  2.2rem;
+
+  // Spacing
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.25rem;
+  --sp-6: 1.5rem;
+  --sp-8: 2rem;
+  --sp-10: 2.5rem;
+  --sp-12: 3rem;
+
+  // Shape
+  --radius-sm:  4px;
+  --radius-md:  8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
+  --radius-full: 9999px;
+
+  // Shadows
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:  0 4px 12px rgba(0,0,0,0.5);
+  --shadow-lg:  0 8px 32px rgba(0,0,0,0.6);
+  --shadow-card: 0 2px 8px rgba(0,0,0,0.45);
+
+  // Layout
+  --header-h:    56px;
+  --page-max-w:  1400px;
+  --page-pad:    var(--sp-6);
+  --grid-min-w:  140px;
+}
+
+
+// ── 2. Reset & Base ─────────────────────────────────────────
+
+*, *::before, *::after {
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
-  background-color: #f5f5f5;
-  color: #333;
 }
 
-.container {
-  margin: auto;
-  padding: 20px;
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
 }
 
-header {
-  background-color: #ff6b6b;
-  color: white;
-  padding: 1rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  background-color: var(--clr-bg);
+  color: var(--clr-text);
+  line-height: 1.6;
+  min-height: 100vh;
 }
 
-header a {
-  color: white;
+a {
+  color: inherit;
   text-decoration: none;
-  font-weight: bold;
-  font-size: 1.2rem;
 }
 
-nav a {
-  margin-left: 1rem;
+button {
+  font-family: inherit;
+  cursor: pointer;
 }
 
-.source-card {
-  background: white;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+img {
+  display: block;
+  max-width: 100%;
 }
+
+h1, h2, h3, h4 {
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+h1 { font-size: var(--text-2xl); }
+h2 { font-size: var(--text-xl); }
+h3 { font-size: var(--text-lg); }
+
+
+// ── 3. App Shell ─────────────────────────────────────────────
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+// Global nav header
+header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--header-h);
+  background: var(--clr-surface);
+  border-bottom: 1px solid var(--clr-border);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: 0 var(--page-pad);
+  box-shadow: 0 1px 0 var(--clr-border-subtle);
+
+  // Brand link
+  a:first-child {
+    font-size: var(--text-xl);
+    font-weight: 800;
+    color: var(--clr-accent);
+    letter-spacing: -0.02em;
+    flex-shrink: 0;
+  }
+
+  // Nav links
+  a:not(:first-child) {
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--clr-text-muted);
+    padding: var(--sp-1) var(--sp-3);
+    border-radius: var(--radius-sm);
+    transition: color 0.15s, background 0.15s;
+
+    &:hover {
+      color: var(--clr-text);
+      background: var(--clr-surface-2);
+    }
+  }
+}
+
+// Page content wrapper
+main.container {
+  flex: 1;
+  max-width: var(--page-max-w);
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--sp-8) var(--page-pad);
+}
+
+
+// ── 4a. Manga Grid & Card ────────────────────────────────────
 
 .manga-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(20%, 1fr));
-  gap: 1rem;
-  margin-top: 1rem;
-  margin-bottom: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-w), 1fr));
+  gap: var(--sp-5);
 }
 
 .manga-card {
-  background: white;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   cursor: pointer;
-  transition: transform 0.2s ease-in-out;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+
+    .cover img {
+      transform: scale(1.04);
+    }
+  }
+
+  // When the card wraps an <A>, the link fills the card
+  a {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    color: inherit;
+  }
+
+  // Cover image container — keeps 2:3 aspect ratio
+  .cover,
+  .cover-image {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--clr-surface-3);
+    box-shadow: var(--shadow-card);
+    flex-shrink: 0;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.3s ease;
+    }
+  }
+
+  // Title below cover
+  h3,
+  .title,
+  > a > p,
+  > p {
+    margin-top: var(--sp-2);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--clr-text);
+    text-align: center;
+    line-height: 1.35;
+    padding: 0 var(--sp-1);
+
+    // Clamp to 2 lines
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
-.manga-card:hover {
-  transform: translateY(-5px);
-}
-
-.manga-card img {
+// Placeholder when no cover art is available
+.no-cover {
   width: 100%;
-  aspect-ratio: 2/3;
-  object-fit: cover;
+  height: 100%;
+  background: var(--clr-surface-3);
+  color: var(--clr-text-faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
-.manga-card h3 {
-  padding: 0.5rem;
-  font-size: 1rem;
-  margin: 0;
-}
+
+// ── 4b. Pagination ───────────────────────────────────────────
 
 .pagination {
   display: flex;
+  align-items: center;
   justify-content: center;
-  margin-top: 1rem;
+  gap: var(--sp-3);
+  margin-top: var(--sp-10);
+
+  span {
+    font-size: var(--text-sm);
+    color: var(--clr-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  button {
+    padding: var(--sp-2) var(--sp-5);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--clr-border);
+    background: var(--clr-surface-2);
+    color: var(--clr-text);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+
+    &:hover:not(:disabled) {
+      background: var(--clr-accent);
+      border-color: var(--clr-accent);
+      color: #fff;
+    }
+
+    &:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+  }
 }
 
-.pagination button {
-  margin: 0 0.5rem;
+
+// ── 4c. Chips & Filter Bar ───────────────────────────────────
+
+// A row of filter chips (used on global search & source-details)
+.source-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-6);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-4);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--clr-border);
+  background: var(--clr-surface-2);
+  color: var(--clr-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  user-select: none;
+
+  &:hover {
+    background: var(--clr-surface-3);
+    color: var(--clr-text);
+    border-color: var(--clr-text-faint);
+  }
+
+  &--active {
+    background: var(--clr-accent-dim);
+    border-color: var(--clr-accent);
+    color: var(--clr-accent);
+
+    &:hover {
+      background: rgba(232, 84, 90, 0.22);
+    }
+  }
+}
+
+// Star toggle inside a chip
+.star {
+  font-size: var(--text-base);
+  line-height: 1;
+  color: var(--clr-text-faint);
+  transition: color 0.15s, transform 0.15s;
+
+  &:hover {
+    color: var(--clr-warn);
+    transform: scale(1.2);
+  }
+
+  &--on {
+    color: var(--clr-warn);
+  }
+}
+
+
+// ── 4d. Tags ─────────────────────────────────────────────────
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
 }
 
 .tag {
   display: inline-block;
-  padding: 0.25rem 0.5rem;
-  background-color: #ff6b6b;
-  color: white;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  margin-right: 0.5rem;
-  
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--clr-surface-3);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--clr-text-muted);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+
+  a {
+    color: inherit;
+  }
+
+  &:hover {
+    background: var(--clr-accent-dim);
+    border-color: var(--clr-accent);
+    color: var(--clr-accent);
+  }
 }
 
-.tag a {
-  color: white;
-  text-decoration: none;
+
+// ── 4e. Form Controls ────────────────────────────────────────
+
+// Shared input/select base styles
+%control-base {
+  background: var(--clr-surface-2);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-sm);
+  color: var(--clr-text);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  padding: var(--sp-2) var(--sp-3);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+
+  &::placeholder {
+    color: var(--clr-text-faint);
+  }
+
+  &:focus {
+    border-color: var(--clr-accent);
+    box-shadow: 0 0 0 2px var(--clr-accent-dim);
+  }
 }
 
-.chapter-item {
-  background: white;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+input[type="text"],
+input[type="search"] {
+  @extend %control-base;
+  width: 100%;
+}
+
+select {
+  @extend %control-base;
   cursor: pointer;
-  transition: transform 0.2s ease-in-out;
-  display: flex;
-  justify-content: space-between;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%237878a0' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--sp-3) center;
+  padding-right: var(--sp-8);
+
+  option {
+    background: var(--clr-surface-2);
+    color: var(--clr-text);
+  }
+}
+
+// Primary action button (accent fill)
+%btn-primary {
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-5);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--clr-accent);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+
+  &:hover { background: var(--clr-accent-hover); }
+  &:active { transform: scale(0.97); }
+  &:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 
-.chapter-item:hover {
-  transform: translateY(-5px);
+// Ghost button (border only)
+%btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-5);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--clr-text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+
+  &:hover {
+    background: var(--clr-surface-3);
+    color: var(--clr-text);
+    border-color: var(--clr-text-faint);
+  }
 }
 
-.chapter-title {
-  font-size: 1.2rem;
-  margin: 0;
+// Danger button
+%btn-danger {
+  @extend %btn-primary;
+  background: var(--clr-danger);
+  &:hover { background: darken(#e85454, 10%); }
 }
 
-.chapter-date {
-  font-size: 0.8rem;
-  margin: 0;
+// Concrete button classes used in the templates
+.add-to-library      { @extend %btn-primary; }
+.download-all-button { @extend %btn-primary; }
+.go-to-library-button { @extend %btn-ghost; }
+.migrate-button      { @extend %btn-ghost; }
+.remove-button       { @extend %btn-danger; }
+
+// Secondary async-action buttons — ghost style with a muted disabled/loading state
+.refresh-button,
+.scan-button {
+  @extend %btn-ghost;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    // Subtle pulse to signal work is in progress
+    animation: btn-pulse 1.2s ease-in-out infinite;
+  }
 }
 
-.chapter-list-group {
+@keyframes btn-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 0.25; }
+}
+
+// Chapter-level download button — three visual states via BEM modifiers.
+// The width on .progress-bar children uses an unavoidable inline style because
+// it is set to a dynamic runtime value (completion percentage).
+.delete-button {
+  @extend %btn-danger;
+}
+
+.download-button {
+  @extend %btn-primary;
+
+  // In-progress state: accent-coloured background, acts as a cancel trigger
+  &--active {
+    background: var(--clr-accent);
+    color: #fff;
+    opacity: 0.85;
+
+    &:hover { background: var(--clr-accent-hover); opacity: 1; }
+  }
+
+  // Failed state: danger colour, non-interactive
+  &--failed {
+    background: var(--clr-danger);
+    color: #fff;
+    opacity: 0.7;
+    cursor: not-allowed;
+
+    &:disabled { opacity: 0.7; }
+  }
+}
+
+
+// ── 4f. Feedback States ──────────────────────────────────────
+
+.spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-12) 0;
+  color: var(--clr-text-muted);
+  font-size: var(--text-sm);
+  gap: var(--sp-3);
+
+  &::before {
+    content: '';
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--clr-border);
+    border-top-color: var(--clr-accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+}
+
+p.error,
+.error {
+  color: var(--clr-danger);
+  font-size: var(--text-sm);
+  padding: var(--sp-4);
+  background: rgba(232, 84, 84, 0.08);
+  border: 1px solid rgba(232, 84, 84, 0.25);
+  border-radius: var(--radius-md);
+}
+
+p.empty,
+.empty {
+  color: var(--clr-text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+  padding: var(--sp-12) 0;
+}
+
+
+// ── 4g. Sticky Sub-Header ────────────────────────────────────
+
+// Used inside source-details — a secondary sticky bar below the app header
+.sticky-header {
+  position: sticky;
+  top: var(--header-h);
+  z-index: 90;
+  background: var(--clr-bg);
+  border-bottom: 1px solid var(--clr-border);
+  padding: var(--sp-3) 0 var(--sp-4);
+  margin-bottom: var(--sp-6);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+
+  h2 {
+    margin: 0;
+    font-size: var(--text-xl);
+    flex-shrink: 0;
+  }
+
+  form {
+    display: flex;
+    gap: var(--sp-2);
+    flex: 1;
+    min-width: 200px;
+
+    input {
+      flex: 1;
+    }
+
+    button[type="submit"] {
+      @extend %btn-primary;
+      flex-shrink: 0;
+    }
+  }
+}
+
+
+// ── 5. Page — Sources ────────────────────────────────────────
+
+.source-list {
+  h1 {
+    margin-bottom: var(--sp-6);
+  }
+}
+
+.sources-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-4);
+}
+
+.source-card {
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-5);
   display: flex;
   flex-direction: column;
-  flex-basis: 60%;
-  height: calc(100vh - 96px);
+  gap: var(--sp-3);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+
+  &:hover {
+    border-color: var(--clr-accent);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+
+  h3 {
+    font-size: var(--text-base);
+    font-weight: 700;
+    color: var(--clr-text);
+  }
+
+  p {
+    font-size: var(--text-sm);
+    color: var(--clr-text-muted);
+  }
+
+  a {
+    @extend %btn-primary;
+    align-self: flex-start;
+    margin-top: auto;
+    padding: var(--sp-1) var(--sp-4);
+    font-size: var(--text-xs);
+  }
+}
+
+
+// ── 6. Page — Source Details ─────────────────────────────────
+
+.source-details {
+  // sticky-header handles the search bar at top
+  // manga-grid & pagination below are shared components
+}
+
+
+// ── 7. Page — Library ────────────────────────────────────────
+
+.library-page {
+  h1 {
+    margin-bottom: var(--sp-6);
+    font-size: var(--text-3xl);
+    letter-spacing: -0.03em;
+  }
+}
+
+.library-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-6);
+  padding: var(--sp-4);
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-lg);
+
+  // Text search takes available space
+  input[type="text"] {
+    flex: 1 1 200px;
+    min-width: 0;
+  }
+
+  // Selects are fixed-width
+  select {
+    flex: 0 1 auto;
+    min-width: 140px;
+  }
+}
+
+.library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-6);
+
+  h1 { margin-bottom: 0; }
+}
+
+.library-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-shrink: 0;
+}
+
+.refresh-message {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--clr-text-muted);
+}
+
+.refresh-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 160px;
+}
+
+.refresh-progress__track {
+  flex: 1;
+  height: 4px;
+  background: var(--clr-surface-3);
+  border-radius: var(--radius-full);
   overflow: hidden;
 }
 
-.chapter-list-group h2 {
+.refresh-progress__bar {
+  height: 100%;
+  background: var(--clr-accent);
+  border-radius: var(--radius-full);
+  transition: width 0.4s ease;
+
+  &--indeterminate {
+    width: 40% !important;
+    animation: refresh-sweep 1.4s ease-in-out infinite;
+  }
+}
+
+// ── 8. Page — Manga Details ──────────────────────────────────
+
+.manga-details {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: var(--sp-8);
+  align-items: start;
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+// Left column: cover + metadata. Width is controlled by the 1fr grid column.
+.details-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+
+  // Cover image in the details view is larger than in grid
+  .cover {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+    background: var(--clr-surface-3);
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  }
+
+  @media (max-width: 768px) {
+    flex-direction: row;
+
+    .cover {
+      width: 120px;
+      flex-shrink: 0;
+    }
+  }
+}
+
+// Right column: metadata + chapter list
+.info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  font-size: var(--text-sm);
+}
+
+.status p {
+  color: var(--clr-text-muted);
+
+  strong {
+    color: var(--clr-text);
+  }
+}
+
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.authors,
+.artists {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+
+  p {
+    color: var(--clr-text-muted);
+    font-size: var(--text-sm);
+    margin-right: var(--sp-1);
+    flex-shrink: 0;
+  }
+}
+
+.author,
+.artist {
+  font-size: var(--text-sm);
+  color: var(--clr-accent);
+  transition: opacity 0.15s;
+
+  &:hover { opacity: 0.75; }
+}
+
+// Library action buttons group
+.library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+// Auto-download toggle row — replaces style="margin-top: 10px"
+.auto-download-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--clr-text-muted);
+
+  input[type="checkbox"] {
+    accent-color: var(--clr-accent);
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+  }
+
+  label { cursor: pointer; }
+}
+
+// Replaces style="margin-left: 10px; font-weight: bold; color: var(--text-color)"
+.scan-message {
+  display: inline-block;
+  margin-left: var(--sp-3);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--clr-success);
+}
+
+// Chapter list panel. Width is controlled by the 2fr grid column.
+.chapter-list-group {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--header-h) - var(--sp-8));
+  overflow: hidden;
+}
+
+// Header row inside chapter-list-group: "Chapters" title + sort select
+.chapter-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
   flex-shrink: 0;
-  margin: 0;
-  padding: 1rem;
+  padding-bottom: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--clr-border);
+
+  h2 {
+    margin: 0;
+    font-size: var(--text-lg);
+  }
+
+  select {
+    flex-shrink: 0;
+    min-width: 160px;
+  }
 }
 
 .chapter-list {
   overflow-y: auto;
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+
+  // Scrollbar styling
+  &::-webkit-scrollbar { width: 5px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb {
+    background: var(--clr-border);
+    border-radius: var(--radius-full);
+  }
 }
 
-.download-button {
-  background-color: #ff6b6b;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 0.5rem 1rem;
+.chapter-item {
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-3);
+  transition: border-color 0.15s, background 0.15s;
   cursor: pointer;
-  transition: background-color 0.2s ease-in-out;
-}
 
-.download-button:hover {
-  background-color: #ff4b4b;
+  &:hover {
+    background: var(--clr-surface-2);
+    border-color: var(--clr-text-faint);
+  }
 }
 
 .chapter-details {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: var(--sp-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.chapter-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--clr-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chapter-scanlator {
+  font-size: var(--text-xs);
+  color: var(--clr-text-muted);
+  font-family: var(--font-mono);
+}
+
+.chapter-date {
+  font-size: var(--text-xs);
+  color: var(--clr-text-faint);
+  font-family: var(--font-mono);
 }
 
 .chapter-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--sp-2);
+  flex-shrink: 0;
 }
 
-.chapter-scanlator {
-  font-size: 0.8rem;
-  margin: 0;
-}
 
-.authors,
-.artists {
+// ── 9. Page — Global Search ──────────────────────────────────
+
+// No max-width here — the page fills the full .container width.
+.global-search-page {}
+
+// Search input bar — prominent, full-width
+.search-bar {
   display: flex;
-  gap: 0.5rem;
+  align-items: center;
+  gap: var(--sp-3);
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-5);
+  transition: border-color 0.15s, box-shadow 0.15s;
+
+  &:focus-within {
+    border-color: var(--clr-accent);
+    box-shadow: 0 0 0 3px var(--clr-accent-dim);
+  }
+
+  input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    font-size: var(--text-lg);
+    color: var(--clr-text);
+    outline: none;
+
+    &::placeholder { color: var(--clr-text-faint); }
+  }
 }
 
-.authors p,
-.artists p {
-  margin: 0;
+.search-icon {
+  font-size: var(--text-lg);
+  flex-shrink: 0;
+  line-height: 1;
+  color: var(--clr-text-muted);
 }
 
-.author,
-.artist {
-  margin-right: 0.5rem;
-}
-
-.people {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.status {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.details {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.add-to-library {
-  background-color: #ff6b6b;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  transition: background-color 0.2s ease-in-out;
-}
-
-.manga-details {
-  display: flex;
-  flex-direction: row;
-  gap: 1rem;
-}
-
-.details-header {
+// Results grouped by source
+.search-results {
   display: flex;
   flex-direction: column;
-  flex-basis: 40%;
+  gap: var(--sp-10);
 }
 
-// ============================================================
-// Download progress overlay
-// ============================================================
+.source-section {
+  // nothing special — children handle layout
+}
+
+.source-section__header {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--clr-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--text-xs);
+  margin-bottom: var(--sp-4);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--clr-border);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+
+  // Decorative accent line before the label
+  &::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 14px;
+    background: var(--clr-accent);
+    border-radius: var(--radius-full);
+  }
+}
+
+.source-section__empty {
+  font-size: var(--text-sm);
+  color: var(--clr-text-faint);
+  padding: var(--sp-4) 0;
+}
+
+
+// ── 10. Download Progress Overlay ───────────────────────────
 
 .download-progress-overlay {
   position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
+  bottom: var(--sp-6);
+  right: var(--sp-6);
   width: 320px;
-  background: white;
-  border-radius: 10px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   z-index: 9999;
   overflow: hidden;
-  font-size: 0.875rem;
+  font-size: var(--text-sm);
 }
 
 .download-progress-header {
-  background: #ff6b6b;
-  color: white;
-  padding: 0.6rem 1rem;
-  font-weight: bold;
+  background: var(--clr-accent);
+  color: #fff;
+  padding: var(--sp-2) var(--sp-4);
+  font-weight: 700;
+  font-size: var(--text-sm);
   letter-spacing: 0.03em;
 }
 
+.download-progress-title {
+  // inline within header
+}
+
 .download-progress-list {
-  padding: 0.5rem;
+  padding: var(--sp-3);
   max-height: 320px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--sp-2);
+
+  &::-webkit-scrollbar { width: 4px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb {
+    background: var(--clr-border);
+    border-radius: var(--radius-full);
+  }
 }
 
 .download-item {
-  background: #fafafa;
-  border: 1px solid #eee;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
+  background: var(--clr-surface-2);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-3);
 }
 
 .download-item-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.35rem;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
 }
 
 .download-item-name {
   flex: 1;
   font-weight: 600;
+  font-size: var(--text-xs);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 180px;
+  color: var(--clr-text);
 }
 
 .download-item-status {
-  color: #888;
-  font-size: 0.78rem;
+  color: var(--clr-text-muted);
+  font-size: var(--text-xs);
   white-space: nowrap;
+  font-family: var(--font-mono);
 }
 
 .download-item-dismiss {
   background: none;
   border: none;
   cursor: pointer;
-  color: #bbb;
-  font-size: 0.9rem;
+  color: var(--clr-text-faint);
+  font-size: var(--text-base);
   padding: 0;
   line-height: 1;
+  transition: color 0.15s;
 
-  &:hover {
-    color: #555;
-  }
+  &:hover { color: var(--clr-text); }
 }
 
 .progress-track {
-  height: 6px;
-  background: #eee;
-  border-radius: 3px;
+  height: 4px;
+  background: var(--clr-surface-3);
+  border-radius: var(--radius-full);
   overflow: hidden;
 }
 
 .progress-bar {
   height: 100%;
-  border-radius: 3px;
+  border-radius: var(--radius-full);
   transition: width 0.3s ease;
 
   &--active {
-    background: #ff6b6b;
     background: linear-gradient(
       90deg,
-      #ff6b6b 0%,
-      #ff9494 50%,
-      #ff6b6b 100%
+      var(--clr-accent) 0%,
+      #f08080 50%,
+      var(--clr-accent) 100%
     );
     background-size: 200% 100%;
     animation: progress-shimmer 1.5s infinite linear;
   }
 
-  &--done {
-    background: #4caf50;
-  }
+  &--done    { background: var(--clr-success); }
+  &--failed  { background: var(--clr-danger); }
+}
 
-  &--failed {
-    background: #e53935;
-  }
+
+// ── 11. Animations ───────────────────────────────────────────
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 @keyframes progress-shimmer {
@@ -345,105 +1238,7 @@ nav a {
   100% { background-position: -200% 0; }
 }
 
-// Library Page Styles
-.library-page {
-  padding: 2rem;
-  max-width: 1200px;
-  margin: 0 auto;
-
-  h1 {
-    margin-bottom: 2rem;
-    font-size: 2rem;
-  }
-
-  .manga-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 1.5rem;
-  }
-
-  .manga-card {
-    display: flex;
-    flex-direction: column;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-    border-radius: 8px;
-
-    &:hover {
-      transform: translateY(-4px);
-    }
-
-    a {
-      text-decoration: none;
-      color: inherit;
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
-
-    .cover {
-      width: 100%;
-      aspect-ratio: 2 / 3;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-
-      img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-      }
-
-      .no-cover {
-        width: 100%;
-        height: 100%;
-        background-color: #2a2a2a;
-        color: #888;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: bold;
-      }
-    }
-
-    .title {
-      margin-top: 0.75rem;
-      font-weight: 600;
-      font-size: 0.95rem;
-      text-align: center;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-  }
-
-  .pagination {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
-    margin-top: 3rem;
-
-    button {
-      padding: 0.5rem 1rem;
-      border-radius: 4px;
-      border: none;
-      background-color: #007bff;
-      color: white;
-      cursor: pointer;
-      font-weight: bold;
-      transition: background-color 0.2s;
-
-      &:hover:not(:disabled) {
-        background-color: #0056b3;
-      }
-
-      &:disabled {
-        background-color: #ccc;
-        cursor: not-allowed;
-      }
-    }
-  }
+@keyframes refresh-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
 }

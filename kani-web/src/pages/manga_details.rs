@@ -1,5 +1,8 @@
 use crate::server_fns::{
-    cancel_download, check_in_library, delete_downloaded, delete_manga, download_all, download_chapter, fetch_sources, get_chapter_list, get_local_chapter_list, get_local_manga, get_manga_details, proxy_url, refresh_manga, save_to_library, scan_for_new_chapters, toggle_auto_download
+    cancel_download, check_in_library, delete_downloaded, delete_manga, download_all, 
+    download_chapter, fetch_sources, get_chapter_list, get_local_chapter_list, get_local_manga,
+    get_manga_details, proxy_url, refresh_manga, save_to_library, scan_for_new_chapters, 
+    toggle_auto_download
 };
 use crate::types::{ChapterList, LiveChapterStatus};
 use leptos::prelude::*;
@@ -10,12 +13,22 @@ use leptos_router::hooks::use_params_map;
 #[component]
 pub fn MangaDetails() -> impl IntoView {
     let params = use_params_map();
+
     let source_id = move || params.with(|p| p.get("id").unwrap_or_default().parse::<i64>().ok());
     let manga_id = move || params.with(|p| p.get("manga_id"));
     let db_id = move || params.with(|p| p.get("db_id").unwrap_or_default().parse::<i64>().ok());
 
     let (page, set_page) = signal(1);
     let (added_db_id, set_added_db_id) = signal::<Option<i64>>(None);
+
+    let (sort_order_sig, set_sort_order) = signal(crate::types::ChapterSortOrder::default());
+
+    let (library_pending, set_library_pending) = signal(false);
+    let (refreshing, set_refreshing) = signal(false);
+    let (scanning, set_scanning) = signal(false);
+    let (scan_message, set_scan_message) = signal(None::<String>);
+    let (auto_download_sig, set_auto_download) = signal(false);
+    
     let chapters_progress = expect_context::<RwSignal<std::collections::HashMap<i64, crate::types::ChapterProgress>>>();
     
     let is_local = move || db_id().is_some();
@@ -39,8 +52,6 @@ pub fn MangaDetails() -> impl IntoView {
         },
     );
 
-    let (sort_order_sig, set_sort_order) = signal(crate::types::ChapterSortOrder::default());
-
     let chapters = Resource::new(
         move || (source_id(), manga_id(), db_id(), page.get(), sort_order_sig.get()),
         move |(sid, mid, did, p, sort_order)| async move {
@@ -53,12 +64,6 @@ pub fn MangaDetails() -> impl IntoView {
             }
         },
     );
-
-    let (library_pending, set_library_pending) = signal(false);
-    let (refreshing, set_refreshing) = signal(false);
-    let (scanning, set_scanning) = signal(false);
-    let (scan_message, set_scan_message) = signal(None::<String>);
-    let (auto_download_sig, set_auto_download) = signal(false);
 
     Effect::new(move |_| {
         if let Some(Ok((_, _, _, _, ad, _))) = manga.get() {
@@ -93,7 +98,7 @@ pub fn MangaDetails() -> impl IntoView {
                                         {match info_cover {
                                             Some(url) => {
                                                 let src = proxy_url(&url, &base_url);
-                                                view! { <img src=src alt=info_title style="max-width: 300px" /> }.into_any()
+                                                view! { <img src=src alt=info_title /> }.into_any()
                                             },
                                             None => view! { <div class="no-cover">"No Cover"</div> }.into_any(),
                                         }}
@@ -183,10 +188,10 @@ pub fn MangaDetails() -> impl IntoView {
                                                                     set_scanning.set(false);
                                                                 });
                                                             }>{move || if scanning.get() { "Scanning..." } else { "Scan for new chapters" }}</button>
-                                                            {move || scan_message.get().map(|msg| view! { <span class="scan-message" style="margin-left: 10px; font-weight: bold; color: var(--text-color);">{msg}</span> }.into_any())}
+                                                            {move || scan_message.get().map(|msg| view! { <span class="scan-message">{msg}</span> }.into_any())}
                                                             {move || if auto_scan {
                                                                 view! {
-                                                                    <div class="auto-download-toggle" style="margin-top: 10px;">
+                                                                    <div class="auto-download-toggle">
                                                                         <label>
                                                                             <input type="checkbox"
                                                                                 checked=move || auto_download_sig.get()
@@ -257,8 +262,8 @@ pub fn MangaDetails() -> impl IntoView {
                             let list_pagination = list.clone();
                             view! {
                             <div class="chapter-list-group">
-                                <div class="chapter-list-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
-                                    <h2 style="margin: 0;">"Chapters"</h2>
+                                <div class="chapter-list-header">
+                                    <h2>"Chapters"</h2>
                                     <Show when=move || is_local() fallback=|| ()>
                                         <select
                                             prop:value=move || sort_order_sig.get().to_select_value()
@@ -340,7 +345,7 @@ pub fn MangaDetails() -> impl IntoView {
 
                                                                         match status {
                                                                             2 => view! {
-                                                                                <button class="delete-button" style="background-color: var(--color-error); color: white;" on:click=move |_| {
+                                                                                <button class="delete-button" on:click=move |_| {
                                                                                     leptos::task::spawn_local(async move {
                                                                                         if delete_downloaded(db_chap_id).await.is_ok() {
                                                                                             chapters_progress.update(|m| {
@@ -369,9 +374,8 @@ pub fn MangaDetails() -> impl IntoView {
                                                                                     "Downloading...".to_string()
                                                                                 };
                                                                                 view! {
-                                                                                    <button class="download-button" style="background-color: var(--color-accent); color: var(--color-bg);" on:click=move |_| {
+                                                                                    <button class="download-button download-button--active" on:click=move |_| {
                                                                                         leptos::task::spawn_local(async move {
-                                                                                            // Optimistically clear the UI
                                                                                             chapters_progress.update(|m| { m.remove(&db_chap_id); });
                                                                                             let _ = cancel_download(db_chap_id).await;
                                                                                         });
@@ -387,7 +391,7 @@ pub fn MangaDetails() -> impl IntoView {
                                                                                     "Failed".to_string()
                                                                                 };
                                                                                 view! {
-                                                                                    <button class="download-button" disabled=true style="background-color: var(--color-error); color: white;">
+                                                                                    <button class="download-button download-button--failed" disabled=true>
                                                                                         {msg}
                                                                                     </button>
                                                                                 }.into_any()
