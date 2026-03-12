@@ -4,3 +4,5 @@ pub mod library;
 pub mod manga_details;
 pub mod source_details;
 pub mod global_search;
+pub mod settings;
+pub mod recent_updates;

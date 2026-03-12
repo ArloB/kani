@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS settings (
     initial_retry_delay_ms INTEGER NOT NULL DEFAULT 100,
     max_wasm_instances INTEGER NOT NULL DEFAULT 1000,
     auto_scan BOOLEAN NOT NULL DEFAULT 0,
-    scan_interval_minutes INTEGER NOT NULL DEFAULT 60
+    scan_interval_minutes INTEGER NOT NULL DEFAULT 60,
+    concurrent_manga_downloads INTEGER NOT NULL DEFAULT 2
 );
 
 INSERT INTO settings DEFAULT VALUES;

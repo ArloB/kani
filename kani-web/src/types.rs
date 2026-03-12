@@ -355,15 +355,17 @@ impl DownloadRuleKind {
     pub fn passes(&self, chapter: &ChapterFilterRow) -> bool {
         self.matches(chapter) == self.is_include()
     }
+}
 
-    pub fn to_string(&self) -> String {
+impl std::fmt::Display for DownloadRuleKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DownloadRuleKind::ScanlatorInclude(v) => format!("Scanlator includes {v}"),
-            DownloadRuleKind::ScanlatorExclude(v) => format!("Scanlator excludes {v}"),
-            DownloadRuleKind::LanguageInclude(v)  => format!("Language includes {v}"),
-            DownloadRuleKind::LanguageExclude(v)  => format!("Language excludes {v}"),
-            DownloadRuleKind::TitleContains(v)    => format!("Title contains {v}"),
-            DownloadRuleKind::TitleExcludes(v)    => format!("Title excludes {v}"),
+            DownloadRuleKind::ScanlatorInclude(v) => write!(f, "Scanlator includes {v}"),
+            DownloadRuleKind::ScanlatorExclude(v) => write!(f, "Scanlator excludes {v}"),
+            DownloadRuleKind::LanguageInclude(v)  => write!(f, "Language includes {v}"),
+            DownloadRuleKind::LanguageExclude(v)  => write!(f, "Language excludes {v}"),
+            DownloadRuleKind::TitleContains(v)    => write!(f, "Title contains {v}"),
+            DownloadRuleKind::TitleExcludes(v)    => write!(f, "Title excludes {v}"),
         }
     }
 }
@@ -373,4 +375,37 @@ pub struct DownloadRule {
     pub id:       i64,
     pub manga_id: i64,
     pub kind:     DownloadRuleKind,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Category {
+    pub id:         i64,
+    pub name:       String,
+    pub sort_order: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AppSettings {
+    pub flaresolverr_url:           String,
+    pub library_path:               String,
+    pub concurrent_page_downloads:  i64,
+    pub concurrent_manga_downloads: i64,
+    pub chapter_queue_size:         i64,
+    pub max_retries:                i64,
+    pub initial_retry_delay_ms:     i64,
+    pub max_wasm_instances:         i64,
+    pub auto_scan:                  bool,
+    pub scan_interval_minutes:      i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct RecentUpdate {
+    pub manga_id: i64,
+    pub manga_name: String,
+    pub cover_url: Option<String>,
+    pub base_url: String,
+    pub chapter_id: i64,
+    pub chapter_number: f64,
+    pub chapter_name: Option<String>,
+    pub discovered_at: std::option::Option<chrono::NaiveDateTime>,
 }

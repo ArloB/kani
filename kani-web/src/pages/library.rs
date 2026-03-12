@@ -1,4 +1,4 @@
-use crate::{server_fns::{get_all_artists, get_all_authors, get_all_categories, get_all_tags, get_library, proxy_url, start_refresh_all}, types::MangaSortOrder};
+use crate::{server_fns::{get_all_artists, get_all_authors, get_all_tags, get_categories, get_library, proxy_url, start_refresh_all}, types::{Category, MangaSortOrder}};
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_query_map};
 
@@ -31,7 +31,7 @@ pub fn Library() -> impl IntoView {
     let all_tags = Resource::new(|| (), |_| get_all_tags());
     let all_authors = Resource::new(|| (), |_| get_all_authors());
     let all_artists = Resource::new(|| (), |_| get_all_artists());
-    let all_categories = Resource::new(|| (), |_| get_all_categories());
+    let all_categories = Resource::new(|| (), |_| get_categories());
 
     let library = Resource::new(
         move || (
@@ -226,6 +226,50 @@ pub fn Library() -> impl IntoView {
                             view! { <p>"Your library is empty. Go add some manga!"</p> }.into_any()
                         } else {                            
                             view! {
+                                <Suspense fallback=|| ()>
+                                    {move || {
+                                        let cats = all_categories.get()
+                                            .and_then(|r| r.ok())
+                                            .unwrap_or_default();
+
+                                        if cats.is_empty() {
+                                            return ().into_any();
+                                        }
+
+                                        view! {
+                                            <div class="category-tabs">
+                                                <button
+                                                    class=move || if category_filter.get().is_none() {
+                                                        "category-tab category-tab--active"
+                                                    } else { "category-tab" }
+                                                    on:click=move |_| {
+                                                        set_category_filter.set(None);
+                                                        set_page.set(1);
+                                                    }
+                                                >"All"</button>
+                                                <For
+                                                    each=move || cats.clone()
+                                                    key=|c: &Category| c.id
+                                                    children=move |cat| {
+                                                        let cat_id = cat.id;
+                                                        view! {
+                                                            <button
+                                                                class=move || if category_filter.get() == Some(cat_id) {
+                                                                    "category-tab category-tab--active"
+                                                                } else { "category-tab" }
+                                                                on:click=move |_| {
+                                                                    set_category_filter.set(Some(cat_id));
+                                                                    set_page.set(1);
+                                                                }
+                                                            >{cat.name.clone()}</button>
+                                                        }
+                                                    }
+                                                />
+                                            </div>
+                                        }.into_any()
+                                    }}
+                                </Suspense>
+
                                 <div class="library-controls">
                                     <input
                                         type="text"
@@ -327,31 +371,6 @@ pub fn Library() -> impl IntoView {
                                             }
                                         />
                                     </datalist>
-
-                                    <Suspense fallback=|| ()>
-                                        {move || all_categories.get().map(|tags| {
-                                            let tags = tags.unwrap_or_default();
-                                            view! {
-                                                <select
-                                                    prop:value=move || category_filter.get().map(|id| id.to_string()).unwrap_or_default()
-                                                    on:change=move |ev| {
-                                                        let val = event_target_value(&ev);
-                                                        set_category_filter.set(val.parse::<i64>().ok());
-                                                        set_page.set(1);
-                                                    }
-                                                >
-                                                    <option value="">"All Categories"</option>
-                                                    <For
-                                                        each=move || tags.clone()
-                                                        key=|t| t.0
-                                                        children=move |tag| view! {
-                                                            <option value=tag.0.to_string()>{tag.1.clone()}</option>
-                                                        }
-                                                    />
-                                                </select>
-                                            }
-                                        })}
-                                    </Suspense>
 
                                     <select on:change=move |ev| {
                                         set_sort_order.set(MangaSortOrder::from_select_value(&event_target_value(&ev)));

@@ -49,7 +49,7 @@ impl AppState {
 
         let mut sources_map = std::collections::HashMap::new();
 
-        let settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes FROM settings")
+        let settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, concurrent_manga_downloads FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
@@ -131,7 +131,7 @@ impl AppState {
         let downloader = DownloaderManager::new(
             global_smart_client.clone(),
             settings.concurrent_page_downloads.try_into()?,
-            2, // TODO: Make this configurable
+            settings.concurrent_manga_downloads.try_into()?,
             settings.max_retries,
             settings.initial_retry_delay_ms,
             settings.chapter_queue_size.try_into()?,
@@ -339,18 +339,19 @@ impl AppState {
 
         for chunk in chapter_list.chapters.chunks(100) {
             let mut query_builder = sqlx::QueryBuilder::new(
-                "INSERT OR IGNORE INTO chapters (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at) "
+                "INSERT OR IGNORE INTO chapters (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at, discovered_at) "
             );
 
             query_builder.push_values(chunk, |mut b, chapter| {
                 b.push_bind(manga_row_id)
-                 .push_bind(chapter.id.clone())
-                 .push_bind(chapter.title.clone())
-                 .push_bind(chapter.number)
-                 .push_bind(chapter.language.clone())
-                 .push_bind(chapter.volume)
-                 .push_bind(chapter.scanlator.clone())
-                 .push_bind(chapter.date_uploaded);
+                    .push_bind(chapter.id.clone())
+                    .push_bind(chapter.title.clone())
+                    .push_bind(chapter.number)
+                    .push_bind(chapter.language.clone())
+                    .push_bind(chapter.volume)
+                    .push_bind(chapter.scanlator.clone())
+                    .push_bind(chapter.date_uploaded);
+                b.push("CURRENT_TIMESTAMP");
             });
 
             query_builder.build().execute(&self.db).await?;
@@ -477,17 +478,18 @@ impl AppState {
         for chunk in chapters.chunks(100) {
             let mut qb = sqlx::QueryBuilder::new(
                 "INSERT OR IGNORE INTO chapters \
-                (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at) "
+                (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at, discovered_at) "
             );
             qb.push_values(chunk, |mut b, ch| {
                 b.push_bind(manga_row_id)
-                .push_bind(ch.id.clone())
-                .push_bind(ch.title.clone())
-                .push_bind(ch.number)
-                .push_bind(ch.language.clone())
-                .push_bind(ch.volume)
-                .push_bind(ch.scanlator.clone())
-                .push_bind(ch.date_uploaded);
+                    .push_bind(ch.id.clone())
+                    .push_bind(ch.title.clone())
+                    .push_bind(ch.number)
+                    .push_bind(ch.language.clone())
+                    .push_bind(ch.volume)
+                    .push_bind(ch.scanlator.clone())
+                    .push_bind(ch.date_uploaded);
+                b.push("CURRENT_TIMESTAMP");
             });
             qb.push(" RETURNING id");
             let mut rows: Vec<i64> = qb.build_query_scalar().fetch_all(&mut **tx).await?;

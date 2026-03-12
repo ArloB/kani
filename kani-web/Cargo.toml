@@ -58,6 +58,7 @@ bytes = "1.11.1"
 futures = "0.3.32"
 gloo-timers = { version = "0.3.0", features = ["futures"] }
 indexmap = "2.13.0"
+ordered-float = "5.1.0"
 
 [features]
 hydrate = [

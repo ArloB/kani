@@ -1,4 +1,4 @@
-use crate::{models::DownloadRuleRow, types::{ChapterList, DownloadRule, DownloadRuleKind, GlobalSearchResult, LibraryPage, MangaInfo, MangaList, MangaSortOrder, Source}};
+use crate::types::{AppSettings, Category, ChapterList, DownloadRule, DownloadRuleKind, GlobalSearchResult, LibraryPage, MangaInfo, MangaList, MangaSortOrder, RecentUpdate, Source};
 use leptos::prelude::*;
 
 #[cfg(feature = "ssr")]
@@ -394,12 +394,6 @@ pub async fn get_all_artists() -> Result<Vec<(i64, String)>, ServerFnError> {
 }
 
 #[server]
-pub async fn get_all_categories() -> Result<Vec<(i64, String)>, ServerFnError> {
-    let state = expect_context::<crate::state::AppState>();
-    fetch_filter_options(&state.db, "SELECT id, name FROM categories ORDER BY sort_order").await
-}
-
-#[server]
 pub async fn refresh_manga(id: i64) -> Result<(), ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
     state.refresh_manga(id).await.map_err(to_server_err)
@@ -490,6 +484,8 @@ pub async fn is_refreshing() -> Result<bool, ServerFnError> {
 pub async fn get_download_rules(
     manga_db_id: i64,
 ) -> Result<Vec<DownloadRule>, ServerFnError> {
+    use crate::models::DownloadRuleRow;
+
     let state = expect_context::<crate::state::AppState>();
 
     sqlx::query_as!(
@@ -552,6 +548,214 @@ pub async fn remove_download_rule(
         .map_err(to_server_err)?;
 
     Ok(())
+}
+
+#[server]
+pub async fn get_categories() -> Result<Vec<Category>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    sqlx::query_as!(
+        Category,
+        "SELECT id, name, sort_order FROM categories ORDER BY sort_order ASC, name ASC"
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(to_server_err)
+}
+
+#[server]
+pub async fn create_category(name: String, sort_order: i64) -> Result<i64, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(ServerFnError::new("Category name cannot be empty"));
+    }
+    sqlx::query_scalar!(
+        "INSERT INTO categories (name, sort_order) VALUES (?, ?) RETURNING id",
+        name, sort_order
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(to_server_err)
+}
+
+#[server]
+pub async fn rename_category(category_id: i64, name: String) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(ServerFnError::new("Category name cannot be empty"));
+    }
+    sqlx::query!(
+        "UPDATE categories SET name = ? WHERE id = ?",
+        name, category_id
+    )
+    .execute(&state.db)
+    .await
+    .map_err(to_server_err)
+    .map(|_| ())
+}
+
+#[server]
+pub async fn delete_category(category_id: i64) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    sqlx::query!("DELETE FROM categories WHERE id = ?", category_id)
+        .execute(&state.db)
+        .await
+        .map_err(to_server_err)
+        .map(|_| ())
+}
+
+#[server]
+pub async fn reorder_categories(ordered_ids: Vec<i64>) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let mut tx = state.db.begin().await.map_err(to_server_err)?;
+    for (idx, id) in ordered_ids.into_iter().enumerate() {
+        let order = idx as i64;
+        sqlx::query!("UPDATE categories SET sort_order = ? WHERE id = ?", order, id)
+            .execute(&mut *tx)
+            .await
+            .map_err(to_server_err)?;
+    }
+    tx.commit().await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn get_manga_categories(manga_db_id: i64) -> Result<Vec<Category>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    sqlx::query_as!(
+        Category,
+        "SELECT c.id, c.name, c.sort_order
+         FROM categories c
+         JOIN manga_categories mc ON mc.category_id = c.id
+         WHERE mc.manga_id = ?
+         ORDER BY c.sort_order ASC, c.name ASC",
+        manga_db_id
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(to_server_err)
+}
+
+#[server]
+pub async fn set_manga_categories(
+    manga_db_id: i64,
+    category_ids: Vec<i64>,
+) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let mut tx = state.db.begin().await.map_err(to_server_err)?;
+
+    sqlx::query!("DELETE FROM manga_categories WHERE manga_id = ?", manga_db_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(to_server_err)?;
+
+    for cat_id in category_ids {
+        sqlx::query!(
+            "INSERT OR IGNORE INTO manga_categories (manga_id, category_id) VALUES (?, ?)",
+            manga_db_id, cat_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(to_server_err)?;
+    }
+
+    tx.commit().await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn get_settings() -> Result<AppSettings, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let s = state.settings.read().await;
+    Ok(AppSettings {
+        flaresolverr_url:           s.flaresolverr_url.clone(),
+        library_path:               s.library_path.to_string_lossy().into_owned(),
+        concurrent_page_downloads:  s.concurrent_page_downloads,
+        concurrent_manga_downloads: s.concurrent_manga_downloads,
+        chapter_queue_size:         s.chapter_queue_size,
+        max_retries:                s.max_retries,
+        initial_retry_delay_ms:     s.initial_retry_delay_ms,
+        max_wasm_instances:         s.max_wasm_instances,
+        auto_scan:                  s.auto_scan,
+        scan_interval_minutes:      s.scan_interval_minutes,
+    })
+}
+
+#[server]
+pub async fn update_settings(settings: AppSettings) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+
+    if settings.concurrent_page_downloads < 1 || settings.concurrent_page_downloads > 32 {
+        return Err(ServerFnError::new("concurrent_page_downloads must be 1–32"));
+    }
+    if settings.concurrent_manga_downloads < 1 || settings.concurrent_manga_downloads > 16 {
+        return Err(ServerFnError::new("concurrent_manga_downloads must be 1–16"));
+    }
+    if settings.scan_interval_minutes < 5 {
+        return Err(ServerFnError::new("scan_interval_minutes must be at least 5"));
+    }
+
+    sqlx::query!(
+        "UPDATE settings SET
+            flaresolverr_url           = ?,
+            library_path               = ?,
+            concurrent_page_downloads  = ?,
+            concurrent_manga_downloads = ?,
+            chapter_queue_size         = ?,
+            max_retries                = ?,
+            initial_retry_delay_ms     = ?,
+            max_wasm_instances         = ?,
+            auto_scan                  = ?,
+            scan_interval_minutes      = ?
+         WHERE id = 'singleton'",
+        settings.flaresolverr_url,
+        settings.library_path,
+        settings.concurrent_page_downloads,
+        settings.concurrent_manga_downloads,
+        settings.chapter_queue_size,
+        settings.max_retries,
+        settings.initial_retry_delay_ms,
+        settings.max_wasm_instances,
+        settings.auto_scan,
+        settings.scan_interval_minutes,
+    )
+    .execute(&state.db)
+    .await
+    .map_err(to_server_err)?;
+
+    {
+        let mut s = state.settings.write().await;
+        s.flaresolverr_url          = settings.flaresolverr_url;
+        s.library_path              = settings.library_path.into();
+        s.concurrent_page_downloads = settings.concurrent_page_downloads;
+        s.concurrent_manga_downloads = settings.concurrent_manga_downloads;
+        s.chapter_queue_size        = settings.chapter_queue_size;
+        s.max_retries               = settings.max_retries;
+        s.initial_retry_delay_ms    = settings.initial_retry_delay_ms;
+        s.max_wasm_instances        = settings.max_wasm_instances;
+        s.auto_scan                 = settings.auto_scan;
+        s.scan_interval_minutes     = settings.scan_interval_minutes;
+    }
+
+    Ok(())
+}
+
+#[server]
+pub async fn get_recent_updates(page: i32) -> Result<Vec<RecentUpdate>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+
+    sqlx::query_as!(RecentUpdate, 
+        "SELECT m.id as manga_id, m.name as manga_name, m.cover_url, s.base_url,
+            c.id as chapter_id, c.chapter_number, c.name as chapter_name, c.discovered_at
+        FROM chapters c
+        JOIN manga m ON c.manga_id = m.id
+        JOIN sources s ON m.source_id = s.id
+        WHERE c.discovered_at IS NOT NULL
+        ORDER BY c.discovered_at DESC
+        LIMIT 50 OFFSET ?", 
+    page)
+        .fetch_all(&state.db)
+        .await
+        .map_err(to_server_err)
 }
 
 pub fn proxy_url(url: &str, referer: &str) -> String {

@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-// Re-export shared types for convenience
 pub use kani_shared::Chapter as SharedChapter;
 use sqlx::types::chrono;
 
@@ -34,16 +33,17 @@ pub struct FetchWasmRequest {
 
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub struct Settings {
-    pub flaresolverr_url: String,
-    pub library_path: std::path::PathBuf,
-    pub wasm_storage_path: std::path::PathBuf,
-    pub concurrent_page_downloads: i64,
-    pub chapter_queue_size: i64,
-    pub max_retries: i64,
-    pub initial_retry_delay_ms: i64,
-    pub max_wasm_instances: i64,
-    pub auto_scan: bool,
-    pub scan_interval_minutes: i64,
+    pub flaresolverr_url:           String,
+    pub library_path:               std::path::PathBuf,
+    pub wasm_storage_path:          std::path::PathBuf,
+    pub concurrent_page_downloads:  i64,
+    pub concurrent_manga_downloads: i64,
+    pub chapter_queue_size:         i64,
+    pub max_retries:                i64,
+    pub initial_retry_delay_ms:     i64,
+    pub max_wasm_instances:         i64,
+    pub auto_scan:                  bool,
+    pub scan_interval_minutes:      i64,
 }
 
 #[derive(Deserialize, Debug)]
