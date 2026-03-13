@@ -11,7 +11,7 @@ use kani_core::source_manager::SourceManager;
 use kani_core::wasm::WasmRuntime;
 
 use crate::error::{Result, AppError};
-use crate::events::RefreshProgressEvent;
+use crate::events::{AppEvent, RefreshProgressEvent};
 use crate::models::{DownloadRuleRow, Settings, Source};
 use crate::types::{ChapterFilterRow, DownloadRule, DownloadRuleKind, GlobalSearchResult, MangaList, SearchScope};
 
@@ -26,7 +26,7 @@ pub struct AppState {
     pub downloader: DownloaderManager,
     pub smart_client: kani_core::http::SmartClient,
     pub proxy_client: kani_core::http::SmartClient,
-    pub refresh_tx: tokio::sync::broadcast::Sender<RefreshProgressEvent>,
+    pub refresh_tx: tokio::sync::broadcast::Sender<AppEvent>,
     pub refresh_task: Arc<tokio::sync::Mutex<Option<tokio::task::AbortHandle>>>
 }
 
@@ -533,52 +533,106 @@ impl AppState {
             sqlx::query_as!(
                 DownloadRuleRow,
                 "SELECT id, manga_id, rule_type, value
-                FROM download_rules
-                WHERE manga_id = ?",
+                 FROM download_rules
+                 WHERE manga_id = ?",
                 manga_id
             )
             .fetch_all(&self.db)
             .await
             .unwrap_or_default();
 
-        if raw_rules.is_empty() {
-            return candidate_ids;
-        }
+        let ids_after_rules = if raw_rules.is_empty() {
+            candidate_ids.clone()
+        } else {
+            if candidate_ids.is_empty() { return vec![]; }
 
-        if candidate_ids.is_empty() {
-            return vec![];
-        }
+            let rules: Vec<DownloadRule> = raw_rules
+                .into_iter()
+                .filter_map(|row| DownloadRule::try_from(row).ok())
+                .collect();
 
-        let rules: Vec<DownloadRule> = raw_rules
+            let predicate = self.build_chapter_predicate(
+                rules.into_iter().map(|dr| dr.kind).collect(),
+            );
+
+            let chapter_map: HashMap<i64, ChapterFilterRow> = {
+                let mut qb = sqlx::QueryBuilder::new(
+                    "SELECT id, scanlator, language, name FROM chapters WHERE id IN ("
+                );
+                let mut sep = qb.separated(", ");
+                for id in &candidate_ids { sep.push_bind(id); }
+                qb.push(")");
+                qb.build_query_as::<ChapterFilterRow>()
+                    .fetch_all(&self.db)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|row| (row.id, row))
+                    .collect()
+            };
+
+            candidate_ids
+                .iter()
+                .copied()
+                .filter(|id| chapter_map.get(id).map(&predicate).unwrap_or(false))
+                .collect()
+        };
+
+        let prefs: HashMap<String, i64> =
+            sqlx::query!(
+                "SELECT scanlator, priority FROM scanlator_preferences WHERE manga_id = ?",
+                manga_id
+            )
+            .fetch_all(&self.db)
+            .await
+            .unwrap_or_default()
             .into_iter()
-            .filter_map(|row| DownloadRule::try_from(row).ok())
+            .map(|r| (r.scanlator, r.priority))
             .collect();
 
-        let predicate = self.build_chapter_predicate(rules.into_iter().map(|dr| dr.kind).collect());
+        if prefs.is_empty() {
+            return ids_after_rules;
+        }
 
-        let chapter_map: HashMap<i64, ChapterFilterRow> = {
+        if ids_after_rules.is_empty() { return vec![]; }
+
+        struct ChapRow { id: i64, chapter_number: f64, scanlator: Option<String> }
+
+        let rows: Vec<ChapRow> = {
             let mut qb = sqlx::QueryBuilder::new(
-                "SELECT id, scanlator, language, name FROM chapters WHERE id IN ("
+                "SELECT id, chapter_number, scanlator FROM chapters WHERE id IN ("
             );
             let mut sep = qb.separated(", ");
-            for id in &candidate_ids {
-                sep.push_bind(id);
-            }
+            for id in &ids_after_rules { sep.push_bind(id); }
             qb.push(")");
-
-            qb.build_query_as::<ChapterFilterRow>()
+            qb.build_query_as::<(i64, f64, Option<String>)>()
                 .fetch_all(&self.db)
                 .await
                 .unwrap_or_default()
                 .into_iter()
-                .map(|row| (row.id, row))
-                .collect::<HashMap<_, _>>()
+                .map(|(id, chapter_number, scanlator)| ChapRow { id, chapter_number, scanlator })
+                .collect()
         };
 
-        candidate_ids
-            .into_iter()
-            .filter(|id| chapter_map.get(id).map(&predicate).unwrap_or(false))
-            .collect()
+        let mut best: HashMap<ordered_float::OrderedFloat<f64>, (i64, i64)> = HashMap::new();
+
+        for row in &rows {
+            let prio = row.scanlator.as_deref()
+                .and_then(|s| prefs.get(s).copied())
+                .unwrap_or(-1);
+            let key = ordered_float::OrderedFloat(row.chapter_number);
+            best.entry(key)
+                .and_modify(|(existing_id, existing_prio)| {
+                    if prio > *existing_prio {
+                        *existing_id = row.id;
+                        *existing_prio = prio;
+                    }
+                })
+                .or_insert((row.id, prio));
+        }
+
+        let winner_ids: std::collections::HashSet<i64> = best.values().map(|(id, _)| *id).collect();
+        ids_after_rules.into_iter().filter(|id| winner_ids.contains(id)).collect()
     }
 
     pub async fn scan_for_new_chapters(&self, manga_row_id: i64) -> Result<Vec<i64>> {
@@ -622,6 +676,23 @@ impl AppState {
         }
 
         tx.commit().await?;
+
+        if !new_chapter_ids.is_empty() {
+            let manga_name = sqlx::query_scalar!(
+                "SELECT name FROM manga WHERE id = ?", manga_row_id
+            )
+            .fetch_optional(&self.db)
+            .await
+            .unwrap_or(None)
+            .unwrap_or_default();
+
+            let _ = self.refresh_tx.send(crate::events::AppEvent::NewChapters {
+                manga_id:   manga_row_id,
+                manga_name,
+                count:      new_chapter_ids.len(),
+            });
+        }
+
         Ok(new_chapter_ids)
     }
 
@@ -1003,7 +1074,7 @@ impl AppState {
         let state = self.clone();
 
         let handle = tokio::spawn(async move {
-            let _ = state.refresh_tx.send(RefreshProgressEvent::Started { total });
+            let _ = state.refresh_tx.send(AppEvent::Refresh(RefreshProgressEvent::Started { total }));
 
             let mut futures = FuturesUnordered::new();
             for (id, name) in ids {
@@ -1022,16 +1093,16 @@ impl AppState {
                 completed += 1;
                 if !success { failed += 1; }
 
-                let _ = state.refresh_tx.send(RefreshProgressEvent::MangaRefreshed {
+                let _ = state.refresh_tx.send(AppEvent::Refresh(RefreshProgressEvent::MangaRefreshed {
                     manga_id,
                     manga_name,
                     completed,
                     total,
                     success,
-                });
+                }));
             }
 
-            let _ = state.refresh_tx.send(RefreshProgressEvent::Completed { total, failed });
+            let _ = state.refresh_tx.send(AppEvent::Refresh(RefreshProgressEvent::Completed { total, failed }));
 
             *state.refresh_task.lock().await = None;
         })
@@ -1041,7 +1112,7 @@ impl AppState {
         Ok(())
     }
 
-    pub fn subscribe_refresh(&self) -> tokio::sync::broadcast::Receiver<RefreshProgressEvent> {
+    pub fn subscribe_refresh(&self) -> tokio::sync::broadcast::Receiver<AppEvent> {
         self.refresh_tx.subscribe()
     }
 

@@ -1,12 +1,21 @@
 use crate::{
     server_fns::{
-        create_category, delete_category, fetch_sources,
-        get_categories, get_settings, rename_category, reorder_categories,
-        update_settings,
+        create_category, delete_category, fetch_sources, get_categories, get_settings, rename_category, reorder_categories, toggle_source_enabled, toggle_source_favourite, update_settings
     },
     types::{AppSettings, Category, Source},
 };
 use leptos::{either::Either, prelude::*};
+
+fn set_restart_flag(set_restart_needed: WriteSignal<bool>) {
+    set_restart_needed.set(true);
+    #[cfg(feature = "hydrate")]
+    {
+        use web_sys::window;
+        if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
+            let _ = storage.set_item("kani_restart_needed", "1");
+        }
+    }
+}
 
 #[component]
 pub fn Settings() -> impl IntoView {
@@ -16,13 +25,21 @@ pub fn Settings() -> impl IntoView {
     let (cats_open,     set_cats_open)     = signal(true);
     let (advanced_open, set_advanced_open) = signal(false);
 
-    let settings_res  = Resource::new(|| (), |_| get_settings());
-    let sources_res   = Resource::new(|| (), |_| fetch_sources());
-    let categories_res = Resource::new(|| (), |_| get_categories());
+
 
     let (settings_draft, set_settings_draft) = signal(Option::<AppSettings>::None);
     let (save_pending,   set_save_pending)   = signal(false);
     let (save_msg,       set_save_msg)       = signal(Option::<Result<(), String>>::None);
+
+    let (new_cat_name,  set_new_cat_name)  = signal(String::new());
+    let (cat_error,     set_cat_error)     = signal(Option::<String>::None);
+    let (editing_cat,   set_editing_cat)   = signal(Option::<(i64, String)>::None);
+
+    let (restart_needed, set_restart_needed) = signal(false);
+
+    let settings_res  = Resource::new(|| (), |_| get_settings());
+    let sources_res   = Resource::new(|| (), |_| fetch_sources());
+    let categories_res = Resource::new(|| (), |_| get_categories());
 
     Effect::new(move |_| {
         if let Some(Ok(s)) = settings_res.get() {
@@ -30,12 +47,38 @@ pub fn Settings() -> impl IntoView {
         }
     });
 
-    let (new_cat_name,  set_new_cat_name)  = signal(String::new());
-    let (cat_error,     set_cat_error)     = signal(Option::<String>::None);
-    let (editing_cat,   set_editing_cat)   = signal(Option::<(i64, String)>::None);
+    Effect::new(move |_| {
+      #[cfg(feature = "hydrate")]
+      {
+          use web_sys::window;
+          if let Some(storage) = window().and_then(|w| w.local_storage().ok().flatten())
+              && storage.get_item("kani_restart_needed").ok().flatten().as_deref() == Some("1") {
+                  set_restart_needed.set(true);
+              }
+      }
+    });
+
+    Effect::new(move |_| {
+      if settings_res.get().is_some() {
+        set_restart_needed.set(false);
+        #[cfg(feature = "hydrate")]
+        {
+            use web_sys::window;
+            if let Some(storage) = window().and_then(|w| w.local_storage().ok().flatten()) {
+                let _ = storage.remove_item("kani_restart_needed");
+            }
+        }
+      }
+    });
 
     view! {
         <div class="settings-page">
+            <Show when=move || restart_needed.get() fallback=|| ()>
+                <div class="restart-banner">
+                    <span class="restart-banner__icon">"⚠"</span>
+                    <span>"Some settings require a server restart to take effect."</span>
+                </div>
+            </Show>
             <h1>"Settings"</h1>
             <section class="settings-section">
                 <button
@@ -449,9 +492,11 @@ pub fn Settings() -> impl IntoView {
 
                                 <div class="settings-field">
                                     <label class="settings-field__label">"Library path"</label>
-                                    <p class="settings-field__hint settings-field__hint--warn">
-                                        "Changing this requires a server restart and will not move existing files."
-                                    </p>
+                                    <div class="settings-field settings-field--needs-restart">
+                                      <p class="settings-field__hint settings-field__hint--warn">
+                                          "Changing this requires a server restart and will not move existing files."
+                                      </p>
+                                    </div>
                                     <input
                                         type="text"
                                         prop:value=draft.library_path.clone()
@@ -467,9 +512,11 @@ pub fn Settings() -> impl IntoView {
                                     <label class="settings-field__label" for="mwi">
                                         "Max WASM instances"
                                     </label>
-                                    <p class="settings-field__hint settings-field__hint--warn">
-                                        "Requires server restart."
-                                    </p>
+                                    <div class="settings-field settings-field--needs-restart">
+                                      <p class="settings-field__hint settings-field__hint--warn">
+                                          "Requires server restart."
+                                      </p>
+                                    </div>
                                     <input id="mwi" type="number" min="1" max="10000"
                                         prop:value=draft.max_wasm_instances.to_string()
                                         on:change=move |ev| {
@@ -516,12 +563,49 @@ pub fn Settings() -> impl IntoView {
 
 #[component]
 fn SourceSettingsCard(source: Source) -> impl IntoView {
+    let (enabled, set_enabled) = signal(source.enabled);
+    let (starred, set_starred) = signal(source.favourited);
+    let sid = source.id;
+
     view! {
-        <div class="source-settings-card">
+        <div class="source-settings-card" class:source-settings-card--disabled=move || !enabled.get()>
             <div class="source-settings-card__header">
                 <div class="source-settings-card__meta">
                     <span class="source-settings-card__name">{source.name.clone()}</span>
                     <span class="source-settings-card__version">{source.version.clone()}</span>
+                </div>
+                <div class="source-settings-card__actions">
+                    <label class="star-checkbox" title="Favourite">
+                        <input
+                            type="checkbox"
+                            checked=move || starred.get()
+                            on:change=move |ev| {
+                                let val = event_target_checked(&ev);
+                                set_starred.set(val);
+                                leptos::task::spawn_local(async move {
+                                    let _ = toggle_source_favourite(sid, val).await;
+                                });
+                            }
+                        />
+                        <span class="star-checkbox__icon">
+                            {move || if starred.get() { "★" } else { "☆" }}
+                        </span>
+                    </label>
+
+                    <label class="toggle-label" title="Enable source">
+                        <input
+                            type="checkbox"
+                            checked=move || enabled.get()
+                            on:change=move |ev| {
+                                let val = event_target_checked(&ev);
+                                set_enabled.set(val);
+                                leptos::task::spawn_local(async move {
+                                    let _ = toggle_source_enabled(sid, val).await;
+                                });
+                            }
+                        />
+                        {move || if enabled.get() { " On" } else { " Off" }}
+                    </label>
                 </div>
             </div>
             <p class="source-settings-card__placeholder">

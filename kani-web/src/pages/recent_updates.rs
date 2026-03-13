@@ -2,7 +2,6 @@ use crate::server_fns::{download_chapter, get_recent_updates, proxy_url};
 use crate::types::{LiveChapterStatus, RecentUpdate};
 use leptos::prelude::*;
 use leptos_router::components::A;
-use std::collections::LinkedList;
 
 // Group the flat list by manga_id while preserving first-seen order.
 fn group_by_manga(updates: Vec<RecentUpdate>) -> Vec<(i64, String, Option<String>, String, Vec<RecentUpdate>)> {

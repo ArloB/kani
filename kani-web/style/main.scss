@@ -27,36 +27,36 @@
 
 :root {
   // Palette
-  --clr-bg:           #0f0f17;
-  --clr-surface:      #18181f;
-  --clr-surface-2:    #22222d;
-  --clr-surface-3:    #2b2b38;
-  --clr-border:       #2e2e3d;
-  --clr-border-subtle:#222230;
+  --clr-bg: #0f0f17;
+  --clr-surface: #18181f;
+  --clr-surface-2: #22222d;
+  --clr-surface-3: #2b2b38;
+  --clr-border: #2e2e3d;
+  --clr-border-subtle: #222230;
 
-  --clr-accent:       #e8545a;
-  --clr-accent-dim:   rgba(232, 84, 90, 0.15);
+  --clr-accent: #e8545a;
+  --clr-accent-dim: rgba(232, 84, 90, 0.15);
   --clr-accent-hover: #cf3d43;
 
-  --clr-text:         #ddddf0;
-  --clr-text-muted:   #7878a0;
-  --clr-text-faint:   #484868;
+  --clr-text: #ddddf0;
+  --clr-text-muted: #7878a0;
+  --clr-text-faint: #484868;
 
-  --clr-success:      #4caf79;
-  --clr-warn:         #e8a954;
-  --clr-danger:       #e85454;
+  --clr-success: #4caf79;
+  --clr-warn: #e8a954;
+  --clr-danger: #e85454;
 
   // Typography
-  --font-body:   'DM Sans', 'Segoe UI', system-ui, sans-serif;
-  --font-mono:   'DM Mono', 'Fira Code', ui-monospace, monospace;
+  --font-body: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'DM Mono', 'Fira Code', ui-monospace, monospace;
 
-  --text-xs:   0.72rem;
-  --text-sm:   0.85rem;
+  --text-xs: 0.72rem;
+  --text-sm: 0.85rem;
   --text-base: 1rem;
-  --text-lg:   1.15rem;
-  --text-xl:   1.35rem;
-  --text-2xl:  1.75rem;
-  --text-3xl:  2.2rem;
+  --text-lg: 1.15rem;
+  --text-xl: 1.35rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.2rem;
 
   // Spacing
   --sp-1: 0.25rem;
@@ -70,29 +70,31 @@
   --sp-12: 3rem;
 
   // Shape
-  --radius-sm:  4px;
-  --radius-md:  8px;
-  --radius-lg:  12px;
-  --radius-xl:  16px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   --radius-full: 9999px;
 
   // Shadows
-  --shadow-sm:  0 1px 3px rgba(0,0,0,0.4);
-  --shadow-md:  0 4px 12px rgba(0,0,0,0.5);
-  --shadow-lg:  0 8px 32px rgba(0,0,0,0.6);
-  --shadow-card: 0 2px 8px rgba(0,0,0,0.45);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.45);
 
   // Layout
-  --header-h:    56px;
-  --page-max-w:  1400px;
-  --page-pad:    var(--sp-6);
-  --grid-min-w:  140px;
+  --header-h: 56px;
+  --page-max-w: 1400px;
+  --page-pad: var(--sp-6);
+  --grid-min-w: 140px;
 }
 
 
 // ── 2. Reset & Base ─────────────────────────────────────────
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -127,14 +129,25 @@ img {
   max-width: 100%;
 }
 
-h1, h2, h3, h4 {
+h1,
+h2,
+h3,
+h4 {
   line-height: 1.25;
   font-weight: 700;
 }
 
-h1 { font-size: var(--text-2xl); }
-h2 { font-size: var(--text-xl); }
-h3 { font-size: var(--text-lg); }
+h1 {
+  font-size: var(--text-2xl);
+}
+
+h2 {
+  font-size: var(--text-xl);
+}
+
+h3 {
+  font-size: var(--text-lg);
+}
 
 
 // ── 3. App Shell ─────────────────────────────────────────────
@@ -247,8 +260,8 @@ main.container {
   // Title below cover
   h3,
   .title,
-  > a > p,
-  > p {
+  >a>p,
+  >p {
     margin-top: var(--sp-2);
     font-size: var(--text-sm);
     font-weight: 600;
@@ -489,9 +502,18 @@ select {
   cursor: pointer;
   transition: background 0.15s, transform 0.1s;
 
-  &:hover { background: var(--clr-accent-hover); }
-  &:active { transform: scale(0.97); }
-  &:disabled { opacity: 0.4; cursor: not-allowed; }
+  &:hover {
+    background: var(--clr-accent-hover);
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
 }
 
 // Ghost button (border only)
@@ -521,15 +543,32 @@ select {
 %btn-danger {
   @extend %btn-primary;
   background: var(--clr-danger);
-  &:hover { background: darken(#e85454, 10%); }
+
+  &:hover {
+    background: darken(#e85454, 10%);
+  }
 }
 
 // Concrete button classes used in the templates
-.add-to-library      { @extend %btn-primary; }
-.download-all-button { @extend %btn-primary; }
-.go-to-library-button { @extend %btn-ghost; }
-.migrate-button      { @extend %btn-ghost; }
-.remove-button       { @extend %btn-danger; }
+.add-to-library {
+  @extend %btn-primary;
+}
+
+.download-all-button {
+  @extend %btn-primary;
+}
+
+.go-to-library-button {
+  @extend %btn-ghost;
+}
+
+.migrate-button {
+  @extend %btn-ghost;
+}
+
+.remove-button {
+  @extend %btn-danger;
+}
 
 // Secondary async-action buttons — ghost style with a muted disabled/loading state
 .refresh-button,
@@ -545,8 +584,15 @@ select {
 }
 
 @keyframes btn-pulse {
-  0%, 100% { opacity: 0.5; }
-  50%       { opacity: 0.25; }
+
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+
+  50% {
+    opacity: 0.25;
+  }
 }
 
 // Chapter-level download button — three visual states via BEM modifiers.
@@ -565,7 +611,10 @@ select {
     color: #fff;
     opacity: 0.85;
 
-    &:hover { background: var(--clr-accent-hover); opacity: 1; }
+    &:hover {
+      background: var(--clr-accent-hover);
+      opacity: 1;
+    }
   }
 
   // Failed state: danger colour, non-interactive
@@ -575,7 +624,9 @@ select {
     opacity: 0.7;
     cursor: not-allowed;
 
-    &:disabled { opacity: 0.7; }
+    &:disabled {
+      opacity: 0.7;
+    }
   }
 }
 
@@ -762,7 +813,9 @@ p.empty,
   gap: var(--sp-4);
   margin-bottom: var(--sp-6);
 
-  h1 { margin-bottom: 0; }
+  h1 {
+    margin-bottom: 0;
+  }
 }
 
 .library-header__actions {
@@ -900,8 +953,14 @@ main.container:has(.manga-details) {
   overflow-y: auto;
   padding-right: var(--sp-2);
 
-  &::-webkit-scrollbar { width: 4px; }
-  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
   &::-webkit-scrollbar-thumb {
     background: var(--clr-border);
     border-radius: var(--radius-full);
@@ -926,7 +985,10 @@ main.container:has(.manga-details) {
 
 .status p {
   color: var(--clr-text-muted);
-  strong { color: var(--clr-text); }
+
+  strong {
+    color: var(--clr-text);
+  }
 }
 
 .people {
@@ -955,7 +1017,10 @@ main.container:has(.manga-details) {
   font-size: var(--text-sm);
   color: var(--clr-accent);
   transition: opacity 0.15s;
-  &:hover { opacity: 0.75; }
+
+  &:hover {
+    opacity: 0.75;
+  }
 }
 
 // Description — sits between people and tags for natural reading flow
@@ -963,7 +1028,10 @@ main.container:has(.manga-details) {
   font-size: var(--text-sm);
   line-height: 1.75;
   color: var(--clr-text-muted);
-  p { margin: 0; }
+
+  p {
+    margin: 0;
+  }
 }
 
 .library-actions {
@@ -988,7 +1056,10 @@ main.container:has(.manga-details) {
     height: 15px;
     cursor: pointer;
   }
-  label { cursor: pointer; }
+
+  label {
+    cursor: pointer;
+  }
 }
 
 .scan-message {
@@ -1021,8 +1092,15 @@ main.container:has(.manga-details) {
   margin-bottom: var(--sp-3);
   border-bottom: 1px solid var(--clr-border);
 
-  h2 { margin: 0; font-size: var(--text-lg); }
-  select { flex-shrink: 0; min-width: 160px; }
+  h2 {
+    margin: 0;
+    font-size: var(--text-lg);
+  }
+
+  select {
+    flex-shrink: 0;
+    min-width: 160px;
+  }
 }
 
 .chapter-list {
@@ -1033,8 +1111,14 @@ main.container:has(.manga-details) {
   flex-direction: column;
   gap: var(--sp-2);
 
-  &::-webkit-scrollbar { width: 5px; }
-  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar {
+    width: 5px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
   &::-webkit-scrollbar-thumb {
     background: var(--clr-border);
     border-radius: var(--radius-full);
@@ -1095,7 +1179,7 @@ main.container:has(.manga-details) {
   white-space: nowrap;
 
   // Separator dot — only shown when a scanlator string is non-empty
-  &:not(:empty) + .chapter-date::before {
+  &:not(:empty)+.chapter-date::before {
     content: '\00B7';
     margin-right: var(--sp-2);
     color: var(--clr-text-faint);
@@ -1121,20 +1205,23 @@ main.container:has(.manga-details) {
 
 // Shared shimmer base — extend onto skeleton placeholder elements
 %skeleton-base {
-  background: linear-gradient(
-    90deg,
-    var(--clr-surface-2) 25%,
-    var(--clr-surface-3) 50%,
-    var(--clr-surface-2) 75%
-  );
+  background: linear-gradient(90deg,
+      var(--clr-surface-2) 25%,
+      var(--clr-surface-3) 50%,
+      var(--clr-surface-2) 75%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.6s ease-in-out infinite;
   border-radius: var(--radius-sm);
 }
 
 @keyframes skeleton-shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .manga-skeleton {
@@ -1180,11 +1267,25 @@ main.container:has(.manga-details) {
     height: 0.8rem;
     @extend %skeleton-base;
 
-    &--xs    { width: 25%; }
-    &--short { width: 38%; }
-    &--mid   { width: 58%; }
-    &--long  { width: 78%; }
-    &--full  { width: 100%; }
+    &--xs {
+      width: 25%;
+    }
+
+    &--short {
+      width: 38%;
+    }
+
+    &--mid {
+      width: 58%;
+    }
+
+    &--long {
+      width: 78%;
+    }
+
+    &--full {
+      width: 100%;
+    }
   }
 
   &__chapters {
@@ -1261,7 +1362,9 @@ main.container:has(.manga-details) {
   transition: color 0.15s;
   flex-shrink: 0;
 
-  &:hover { color: var(--clr-danger); }
+  &:hover {
+    color: var(--clr-danger);
+  }
 }
 
 .rule-add-row {
@@ -1269,11 +1372,22 @@ main.container:has(.manga-details) {
   gap: var(--sp-2);
   flex-wrap: wrap;
 
-  select    { flex: 1 1 180px; min-width: 0; }
-  input     { flex: 1 1 120px; min-width: 0; }
+  select {
+    flex: 1 1 180px;
+    min-width: 0;
+  }
+
+  input {
+    flex: 1 1 120px;
+    min-width: 0;
+  }
 }
 
-.rule-add-btn { @extend %btn-ghost; flex-shrink: 0; font-size: var(--text-xs); }
+.rule-add-btn {
+  @extend %btn-ghost;
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+}
 
 .category-selector {
   display: flex;
@@ -1335,7 +1449,9 @@ main.container:has(.manga-details) {
     color: var(--clr-text);
     outline: none;
 
-    &::placeholder { color: var(--clr-text-faint); }
+    &::placeholder {
+      color: var(--clr-text-faint);
+    }
   }
 }
 
@@ -1426,8 +1542,14 @@ main.container:has(.manga-details) {
   flex-direction: column;
   gap: var(--sp-2);
 
-  &::-webkit-scrollbar { width: 4px; }
-  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
   &::-webkit-scrollbar-thumb {
     background: var(--clr-border);
     border-radius: var(--radius-full);
@@ -1475,7 +1597,9 @@ main.container:has(.manga-details) {
   line-height: 1;
   transition: color 0.15s;
 
-  &:hover { color: var(--clr-text); }
+  &:hover {
+    color: var(--clr-text);
+  }
 }
 
 .progress-track {
@@ -1491,35 +1615,50 @@ main.container:has(.manga-details) {
   transition: width 0.3s ease;
 
   &--active {
-    background: linear-gradient(
-      90deg,
-      var(--clr-accent) 0%,
-      #f08080 50%,
-      var(--clr-accent) 100%
-    );
+    background: linear-gradient(90deg,
+        var(--clr-accent) 0%,
+        #f08080 50%,
+        var(--clr-accent) 100%);
     background-size: 200% 100%;
     animation: progress-shimmer 1.5s infinite linear;
   }
 
-  &--done    { background: var(--clr-success); }
-  &--failed  { background: var(--clr-danger); }
+  &--done {
+    background: var(--clr-success);
+  }
+
+  &--failed {
+    background: var(--clr-danger);
+  }
 }
 
 
 // ── 11. Animations ───────────────────────────────────────────
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes progress-shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 @keyframes refresh-sweep {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(350%); }
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(350%);
+  }
 }
 
 // ── 12. Page — Settings ──────────────────────────────────────────────────────
@@ -1555,7 +1694,9 @@ main.container:has(.manga-details) {
   cursor: pointer;
   transition: background 0.15s;
 
-  &:hover { background: var(--clr-surface-2); }
+  &:hover {
+    background: var(--clr-surface-2);
+  }
 }
 
 .settings-section__title {
@@ -1606,7 +1747,9 @@ main.container:has(.manga-details) {
   color: var(--clr-text-muted);
   line-height: 1.4;
 
-  &--warn { color: var(--clr-warn); }
+  &--warn {
+    color: var(--clr-warn);
+  }
 }
 
 .toggle-label {
@@ -1636,7 +1779,9 @@ main.container:has(.manga-details) {
   border-top: 1px solid var(--clr-border);
 }
 
-.settings-save-btn { @extend %btn-primary; }
+.settings-save-btn {
+  @extend %btn-primary;
+}
 
 .settings-save-ok {
   font-size: var(--text-sm);
@@ -1657,7 +1802,9 @@ main.container:has(.manga-details) {
   overflow: hidden;
   transition: border-color 0.15s;
 
-  &:hover { border-color: var(--clr-text-faint); }
+  &:hover {
+    border-color: var(--clr-text-faint);
+  }
 }
 
 .source-settings-card__header {
@@ -1733,20 +1880,40 @@ main.container:has(.manga-details) {
   flex-shrink: 0;
 }
 
-.category-manage-item__edit   { @extend %btn-ghost;   font-size: var(--text-xs); }
-.category-manage-item__save   { @extend %btn-primary;  font-size: var(--text-xs); }
-.category-manage-item__cancel { @extend %btn-ghost;   font-size: var(--text-xs); }
-.category-manage-item__delete { @extend %btn-danger;  font-size: var(--text-xs); }
+.category-manage-item__edit {
+  @extend %btn-ghost;
+  font-size: var(--text-xs);
+}
+
+.category-manage-item__save {
+  @extend %btn-primary;
+  font-size: var(--text-xs);
+}
+
+.category-manage-item__cancel {
+  @extend %btn-ghost;
+  font-size: var(--text-xs);
+}
+
+.category-manage-item__delete {
+  @extend %btn-danger;
+  font-size: var(--text-xs);
+}
 
 .category-add-row {
   display: flex;
   gap: var(--sp-2);
   margin-top: var(--sp-2);
 
-  input { flex: 1; }
+  input {
+    flex: 1;
+  }
 }
 
-.category-add-btn { @extend %btn-primary; flex-shrink: 0; }
+.category-add-btn {
+  @extend %btn-primary;
+  flex-shrink: 0;
+}
 
 // ── 13. Modal System ─────────────────────────────────────────
 
@@ -1825,8 +1992,14 @@ main.container:has(.manga-details) {
   flex-direction: column;
   gap: var(--sp-5);
 
-  &::-webkit-scrollbar { width: 5px; }
-  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar {
+    width: 5px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
   &::-webkit-scrollbar-thumb {
     background: var(--clr-border);
     border-radius: var(--radius-full);
@@ -1871,8 +2044,15 @@ main.container:has(.manga-details) {
 }
 
 @keyframes modal-fade-in {
-  from { opacity: 0; transform: scale(0.97); }
-  to   { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 // ── 14. Migration Dialog ──────────────────────────────────────
@@ -1964,20 +2144,31 @@ main.container:has(.manga-details) {
   }
 
   &--warn {
-    .label { color: var(--clr-warn); }
-    .value { color: var(--clr-warn); }
+    .label {
+      color: var(--clr-warn);
+    }
+
+    .value {
+      color: var(--clr-warn);
+    }
   }
 
   &--positive {
-    .value { color: var(--clr-success); }
+    .value {
+      color: var(--clr-success);
+    }
   }
 }
 
 // Confirm migration primary action
-.migration-confirm-btn { @extend %btn-primary; }
+.migration-confirm-btn {
+  @extend %btn-primary;
+}
 
 // Cancel link-style button
-.migration-cancel-btn  { @extend %btn-ghost; }
+.migration-cancel-btn {
+  @extend %btn-ghost;
+}
 
 // Result summary panel
 .migration-result {
@@ -2029,7 +2220,9 @@ main.container:has(.manga-details) {
   overflow: hidden;
   transition: border-color 0.15s;
 
-  &:hover { border-color: var(--clr-text-faint); }
+  &:hover {
+    border-color: var(--clr-text-faint);
+  }
 }
 
 .update-group__header {
@@ -2044,14 +2237,16 @@ main.container:has(.manga-details) {
     color: inherit;
     transition: color 0.15s;
 
-    &:hover { color: var(--clr-accent); }
+    &:hover {
+      color: var(--clr-accent);
+    }
   }
 }
 
 // Small thumbnail used in the grouped header
 .update-group__thumb {
   width: 40px;
-  height: 56px;          // 2:3 ratio
+  height: 56px; // 2:3 ratio
   border-radius: var(--radius-sm);
   overflow: hidden;
   flex-shrink: 0;
@@ -2093,8 +2288,13 @@ main.container:has(.manga-details) {
   border-bottom: 1px solid var(--clr-border-subtle);
   transition: background 0.1s;
 
-  &:last-child { border-bottom: none; }
-  &:hover { background: var(--clr-surface-2); }
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--clr-surface-2);
+  }
 }
 
 .update-chapter-item__label {
@@ -2121,4 +2321,222 @@ main.container:has(.manga-details) {
   font-size: var(--text-sm);
   flex-shrink: 0;
   min-width: 2rem;
+}
+
+// ── 16. Shared — Collapsible Panel ───────────────────────────
+// Reused for Scanlator Preferences and any future collapsible info sections.
+
+.collapsible-panel {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--clr-border-subtle);
+}
+
+.collapsible-panel__toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: none;
+  padding: var(--sp-2) 0;
+  cursor: pointer;
+  color: var(--clr-text-muted);
+  transition: color 0.15s;
+
+  &:hover { color: var(--clr-text); }
+}
+
+.collapsible-panel__label {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.collapsible-panel__chevron {
+  font-size: var(--text-sm);
+}
+
+.collapsible-panel__body {
+  padding-top: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.collapsible-panel__hint {
+  font-size: var(--text-xs);
+  color: var(--clr-text-faint);
+  line-height: 1.5;
+}
+
+// Scanlator preference list (shares some classes with rule-list)
+.scanlator-pref-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.scanlator-pref-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--clr-surface-3);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+}
+
+.scanlator-pref-item__name {
+  @extend .rule-list__label;
+  font-style: normal;
+}
+
+.scanlator-pref-item__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+// Compact priority number input
+.scanlator-pref-item__priority {
+  width: 60px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: var(--sp-1) var(--sp-2);
+}
+
+// ── 17. Settings — Restart banner, star checkbox, card disabled state ────
+
+// Sticky banner shown when pending restart changes exist
+.restart-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: rgba(232, 169, 84, 0.12);
+  border: 1px solid var(--clr-warn);
+  border-radius: var(--radius-md);
+  color: var(--clr-warn);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  margin-bottom: var(--sp-6);
+  position: sticky;
+  top: calc(var(--header-h) + var(--sp-2));
+  z-index: 80;
+}
+
+.restart-banner__icon {
+  font-size: var(--text-lg);
+  flex-shrink: 0;
+}
+
+// Fields that need a restart get a left-border accent
+.settings-field--needs-restart {
+  border-left: 3px solid var(--clr-warn);
+  padding-left: var(--sp-3);
+}
+
+// Restart button (danger-adjacent but distinct)
+.restart-btn {
+  @extend %btn-ghost;
+  border-color: var(--clr-warn);
+  color: var(--clr-warn);
+
+  &:hover {
+    background: rgba(232, 169, 84, 0.12);
+    color: var(--clr-warn);
+    border-color: var(--clr-warn);
+  }
+}
+
+// Source card controls area
+.source-settings-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-shrink: 0;
+}
+
+// Disabled source card (greyed out)
+.source-settings-card--disabled {
+  opacity: 0.5;
+
+  .source-settings-card__name,
+  .source-settings-card__version {
+    text-decoration: line-through;
+    color: var(--clr-text-faint);
+  }
+}
+
+// Star checkbox — hidden native input, visible star icon
+.star-checkbox {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+
+  input[type="checkbox"] {
+    // Visually hidden but accessible
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.star-checkbox__icon {
+  font-size: var(--text-lg);
+  line-height: 1;
+  color: var(--clr-text-faint);
+  transition: color 0.15s, transform 0.15s;
+
+  &:hover {
+    color: var(--clr-warn);
+    transform: scale(1.2);
+  }
+}
+
+// When the hidden checkbox is checked, the adjacent icon turns gold
+.star-checkbox input:checked ~ .star-checkbox__icon {
+  color: var(--clr-warn);
+}
+
+// ── 18. Header — Scan notification badge ─────────────────────
+
+.scan-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-3);
+  margin-left: auto;            // push to the right end of the header
+  background: var(--clr-accent-dim);
+  border: 1px solid var(--clr-accent);
+  border-radius: var(--radius-full);
+  color: var(--clr-accent);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+  animation: badge-pulse 2s ease-in-out infinite;
+
+  &:hover {
+    background: rgba(232, 84, 90, 0.25);
+  }
+}
+
+.scan-badge__count {
+  font-family: var(--font-mono);
+}
+
+@keyframes badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--clr-accent-dim); }
+  50%       { box-shadow: 0 0 0 4px transparent; }
 }

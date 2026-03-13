@@ -190,22 +190,31 @@ pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source, bool, bool),
 }
 
 #[server]
-pub async fn get_local_chapter_list(manga_id: i64, page: i32, sort_order: crate::types::ChapterSortOrder) -> Result<ChapterList, ServerFnError> {
+pub async fn get_local_chapter_list(
+    manga_id: i64,
+    page: i32,
+    sort_order: crate::types::ChapterSortOrder,
+) -> Result<ChapterList, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
-    let limit = 66;
-    let offset = ((page - 1).max(0) * limit) as i64;
+    let limit = 66i64;
+    let offset = ((page - 1).max(0) as i64) * limit;
 
     let sql = format!(
-        r#"SELECT id, source_chapter_id, name, chapter_number, language,
-                volume, scanlator, uploaded_at, download_status
-        FROM chapters
-        WHERE manga_id = ?
-        ORDER BY {}
-        LIMIT ? OFFSET ?"#,
+        r#"SELECT c.id, c.source_chapter_id, c.name, c.chapter_number, c.language,
+                  c.volume, c.scanlator, c.uploaded_at, c.download_status
+           FROM chapters c
+           LEFT JOIN scanlator_preferences sp
+               ON sp.manga_id = c.manga_id
+               AND sp.scanlator = c.scanlator
+               AND sp.manga_id = ?
+           WHERE c.manga_id = ?
+           ORDER BY {}, COALESCE(sp.priority, -1) DESC
+           LIMIT ? OFFSET ?"#,
         sort_order.to_sql_order()
     );
 
     let mut chapters_db = sqlx::query_as::<sqlx::Sqlite, crate::models::Chapter>(&sql)
+        .bind(manga_id)
         .bind(manga_id)
         .bind(limit)
         .bind(offset)
@@ -214,13 +223,10 @@ pub async fn get_local_chapter_list(manga_id: i64, page: i32, sort_order: crate:
         .map_err(to_server_err)?;
 
     let has_next_page = chapters_db.len() == limit as usize;
-
-    if has_next_page {
-        chapters_db.pop();
-    }
+    if has_next_page { chapters_db.pop(); }
 
     let chapters = chapters_db.into_iter().map(|c| crate::types::Chapter {
-        id: c.id.to_string(), 
+        id: c.id.to_string(),
         title: c.name,
         number: c.chapter_number,
         language: c.language,
@@ -230,10 +236,7 @@ pub async fn get_local_chapter_list(manga_id: i64, page: i32, sort_order: crate:
         download_status: c.download_status,
     }).collect();
 
-    Ok(ChapterList {
-        chapters,
-        has_next_page,
-    })
+    Ok(ChapterList { chapters, has_next_page })
 }
 
 #[server]
@@ -551,6 +554,55 @@ pub async fn remove_download_rule(
 }
 
 #[server]
+pub async fn get_scanlator_preferences(
+    manga_db_id: i64,
+) -> Result<Vec<crate::types::ScanlatorPreference>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    sqlx::query_as!(
+        crate::types::ScanlatorPreference,
+        "SELECT id, manga_id, scanlator, priority
+         FROM scanlator_preferences
+         WHERE manga_id = ?
+         ORDER BY priority DESC",
+        manga_db_id
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(to_server_err)
+}
+
+#[server]
+pub async fn set_scanlator_preference(
+    manga_db_id: i64,
+    scanlator: String,
+    priority: i64,
+) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    sqlx::query!(
+        "INSERT INTO scanlator_preferences (manga_id, scanlator, priority)
+         VALUES (?, ?, ?)
+         ON CONFLICT (manga_id, scanlator) DO UPDATE SET priority = excluded.priority",
+        manga_db_id,
+        scanlator,
+        priority
+    )
+    .execute(&state.db)
+    .await
+    .map_err(to_server_err)?;
+    Ok(())
+}
+
+#[server]
+pub async fn remove_scanlator_preference(pref_id: i64) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    sqlx::query!("DELETE FROM scanlator_preferences WHERE id = ?", pref_id)
+        .execute(&state.db)
+        .await
+        .map_err(to_server_err)?;
+    Ok(())
+}
+
+#[server]
 pub async fn get_categories() -> Result<Vec<Category>, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
     sqlx::query_as!(
@@ -756,6 +808,22 @@ pub async fn get_recent_updates(page: i32) -> Result<Vec<RecentUpdate>, ServerFn
         .fetch_all(&state.db)
         .await
         .map_err(to_server_err)
+}
+
+#[server]
+pub async fn toggle_source_enabled(
+    source_id: i64,
+    enabled: bool,
+) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    sqlx::query!(
+        "UPDATE sources SET enabled = ? WHERE id = ?",
+        enabled, source_id
+    )
+    .execute(&state.db)
+    .await
+    .map(|_| ())
+    .map_err(to_server_err)
 }
 
 pub fn proxy_url(url: &str, referer: &str) -> String {

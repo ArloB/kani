@@ -42,6 +42,11 @@ tokio-stream = { version = "0.1", features = ["sync"], optional = true }
 kani-core = { path = "../kani-core", optional = true }
 kani-shared = { path = "../kani-shared", optional = true }
 
+bytes = { version = "1.11.1", optional = true }
+futures = { version = "0.3.32", optional = true }
+indexmap = { version = "2.13.0", optional = true }
+ordered-float = { version = "5.1.0", optional = true }
+
 # ── Hydrate-only (browser WASM) ──────────────────────────────────────────
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
@@ -53,12 +58,11 @@ web-sys = { version = "0.3", features = [
   "EventTarget",
   "Event",
   "ErrorEvent",
+  "Window",
+  "Storage",
 ], optional = true }
-bytes = "1.11.1"
-futures = "0.3.32"
 gloo-timers = { version = "0.3.0", features = ["futures"] }
-indexmap = "2.13.0"
-ordered-float = "5.1.0"
+
 
 [features]
 hydrate = [
@@ -86,6 +90,10 @@ ssr = [
   "dep:tokio-stream",
   "dep:kani-core",
   "dep:kani-shared",
+  "dep:bytes",
+  "dep:futures",
+  "dep:indexmap",
+  "dep:ordered-float",
 ]
 
 [package.metadata.leptos]

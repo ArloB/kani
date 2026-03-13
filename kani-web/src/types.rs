@@ -181,16 +181,16 @@ pub enum ChapterSortOrder {
 impl ChapterSortOrder {
     pub fn to_sql_order(&self) -> &'static str {
         match self {
-            Self::ChapterDesc   => "chapter_number DESC, id DESC",
-            Self::ChapterAsc    => "chapter_number ASC, id ASC",
-            Self::UploadedDesc  => "uploaded_at DESC, chapter_number DESC",
-            Self::UploadedAsc   => "uploaded_at ASC, chapter_number ASC",
-            Self::VolumeDesc    => "volume DESC NULLS LAST, chapter_number DESC",
-            Self::VolumeAsc     => "volume ASC NULLS FIRST, chapter_number ASC",
-            Self::LanguageAsc   => "language ASC NULLS LAST, chapter_number DESC",
-            Self::LanguageDesc  => "language DESC NULLS LAST, chapter_number DESC",
-            Self::ScanlatorAsc  => "scanlator ASC NULLS LAST, chapter_number DESC",
-            Self::ScanlatorDesc => "scanlator DESC NULLS LAST, chapter_number DESC",
+            Self::ChapterDesc   => "c.chapter_number DESC, c.id DESC",
+            Self::ChapterAsc    => "c.chapter_number ASC, c.id ASC",
+            Self::UploadedDesc  => "c.uploaded_at DESC, c.chapter_number DESC",
+            Self::UploadedAsc   => "c.uploaded_at ASC, c.chapter_number ASC",
+            Self::VolumeDesc    => "c.volume DESC NULLS LAST, c.chapter_number DESC",
+            Self::VolumeAsc     => "c.volume ASC NULLS FIRST, c.chapter_number ASC",
+            Self::LanguageAsc   => "c.language ASC NULLS LAST, c.chapter_number DESC",
+            Self::LanguageDesc  => "c.language DESC NULLS LAST, c.chapter_number DESC",
+            Self::ScanlatorAsc  => "c.scanlator ASC NULLS LAST, c.chapter_number DESC",
+            Self::ScanlatorDesc => "c.scanlator DESC NULLS LAST, c.chapter_number DESC",
         }
     }
 
@@ -378,6 +378,15 @@ pub struct DownloadRule {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
+pub struct ScanlatorPreference {
+    pub id:        i64,
+    pub manga_id:  i64,
+    pub scanlator: String,
+    pub priority:  i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Category {
     pub id:         i64,
     pub name:       String,
@@ -408,4 +417,11 @@ pub struct RecentUpdate {
     pub chapter_number: f64,
     pub chapter_name: Option<String>,
     pub discovered_at: std::option::Option<chrono::NaiveDateTime>,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum RefreshState {
+    Idle,
+    Running { completed: usize, total: usize },
+    Done { total: usize, failed: usize },
 }

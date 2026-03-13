@@ -127,3 +127,11 @@ impl TryFrom<DownloadRuleRow> for crate::types::DownloadRule {
         Ok(crate::types::DownloadRule { id: row.id, manga_id: row.manga_id, kind })
     }
 }
+
+#[derive(sqlx::FromRow)]
+pub struct ScanlatorPrefRow {
+    pub id:        i64,
+    pub manga_id:  i64,
+    pub scanlator: String,
+    pub priority:  i64,
+}

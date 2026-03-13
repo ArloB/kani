@@ -1,11 +1,12 @@
 use crate::server_fns::{
-    cancel_download, check_in_library, delete_downloaded, delete_manga, download_all,
-    download_chapter, fetch_sources, get_chapter_list, get_local_chapter_list, get_local_manga,
-    get_manga_details, proxy_url, refresh_manga, save_to_library, scan_for_new_chapters,
-    toggle_auto_download, get_categories, get_manga_categories, set_manga_categories,
-    get_download_rules, add_download_rule, remove_download_rule
+    add_download_rule, cancel_download, check_in_library, delete_downloaded, delete_manga,
+    download_all, download_chapter, fetch_sources, get_categories, get_chapter_list,
+    get_download_rules, get_local_chapter_list, get_local_manga, get_manga_categories,
+    get_manga_details, get_scanlator_preferences, proxy_url, refresh_manga, remove_download_rule,
+    remove_scanlator_preference, save_to_library, scan_for_new_chapters, set_manga_categories,
+    set_scanlator_preference, toggle_auto_download,
 };
-use crate::types::{ChapterList, LiveChapterStatus, Category, DownloadRule, DownloadRuleKind};
+use crate::types::{Category, DownloadRule, DownloadRuleKind, LiveChapterStatus};
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
@@ -31,6 +32,8 @@ pub fn MangaDetails() -> impl IntoView {
     let (new_rule_type, set_new_rule_type)   = signal("scanlator_include".to_string());
     let (new_rule_value, set_new_rule_value) = signal(String::new());
     let (rule_error, set_rule_error)         = signal(Option::<String>::None);
+    let (download_rules_open, set_download_rules_open) = signal(false);
+    let (scanlator_prefs_open, set_scanlator_prefs_open) = signal(false);
 
     let chapters_progress = expect_context::<RwSignal<std::collections::HashMap<i64, crate::types::ChapterProgress>>>();
 
@@ -74,6 +77,7 @@ pub fn MangaDetails() -> impl IntoView {
     let categories_resource  = Resource::new(|| (), move |_| get_categories());
     let manga_cats_resource  = Resource::new(did_signal, get_manga_categories);
     let rules_resource       = Resource::new(did_signal, get_download_rules);
+    let scanlator_prefs_resource = Resource::new(did_signal, get_scanlator_preferences);
 
     Effect::new(move |_| {
         if let Some(Ok((_, _, _, _, ad, _))) = manga.get() {
@@ -388,86 +392,237 @@ pub fn MangaDetails() -> impl IntoView {
 
                                         // ── Download rules (local manga only) ─────────────
                                         <Show when=move || is_local_route fallback=|| ()>
-                                            <div class="download-rules-panel">
-                                                <p class="download-rules-panel__label">"Download Rules"</p>
-                                                <Suspense fallback=|| ()>
-                                                    {move || {
-                                                        let rules: Vec<DownloadRule> = rules_resource.get()
-                                                            .and_then(|r| r.ok())
-                                                            .unwrap_or_default();
-                                                        view! {
-                                                            <ul class="rule-list">
-                                                                <For
-                                                                    each=move || rules.clone()
-                                                                    key=|r: &DownloadRule| r.id
-                                                                    children=move |rule| {
-                                                                        let rule_id = rule.id;
-                                                                        view! {
-                                                                            <li class="rule-list__item">
-                                                                                <span class="rule-list__label">{rule.kind.to_string()}</span>
-                                                                                <button
-                                                                                    class="rule-list__remove"
-                                                                                    title="Remove rule"
-                                                                                    on:click=move |_| {
-                                                                                        leptos::task::spawn_local(async move {
-                                                                                            let _ = remove_download_rule(rule_id).await;
+                                            <div class="collapsible-panel">
+                                                <button
+                                                    class="collapsible-panel__toggle"
+                                                    on:click=move |_| set_download_rules_open.update(|v| *v = !*v)
+                                                >
+                                                    <span class="collapsible-panel__label">"Download Rules"</span>
+                                                    <span class="collapsible-panel__chevron">
+                                                        {move || if download_rules_open.get() { "▾" } else { "▸" }}
+                                                    </span>
+                                                </button>
+
+                                                <Show when=move || download_rules_open.get() fallback=|| ()>
+                                                    <div class="collapsible-panel__body">
+                                                        <p class="collapsible-panel__hint">
+                                                            "Filter which chapters are automatically downloaded based on scanlator, language, or title."
+                                                        </p>
+                                                        <Suspense fallback=|| ()>
+                                                            {move || {
+                                                                let rules: Vec<DownloadRule> = rules_resource.get()
+                                                                    .and_then(|r| r.ok())
+                                                                    .unwrap_or_default();
+                                                                view! {
+                                                                    <ul class="rule-list">
+                                                                        <For
+                                                                            each=move || rules.clone()
+                                                                            key=|r: &DownloadRule| r.id
+                                                                            children=move |rule| {
+                                                                                let rule_id = rule.id;
+                                                                                view! {
+                                                                                    <li class="rule-list__item">
+                                                                                        <span class="rule-list__label">{rule.kind.to_string()}</span>
+                                                                                        <button
+                                                                                            class="rule-list__remove"
+                                                                                            title="Remove rule"
+                                                                                            on:click=move |_| {
+                                                                                                leptos::task::spawn_local(async move {
+                                                                                                    let _ = remove_download_rule(rule_id).await;
+                                                                                                    rules_resource.refetch();
+                                                                                                });
+                                                                                            }
+                                                                                        >"×"</button>
+                                                                                    </li>
+                                                                                }
+                                                                            }
+                                                                        />
+                                                                    </ul>
+                                                                    <div class="rule-add-row">
+                                                                        <select
+                                                                            on:change=move |ev| set_new_rule_type.set(event_target_value(&ev))
+                                                                        >
+                                                                            <option value="scanlator_include">"Scanlator — include"</option>
+                                                                            <option value="scanlator_exclude">"Scanlator — exclude"</option>
+                                                                            <option value="language_include">"Language — include"</option>
+                                                                            <option value="language_exclude">"Language — exclude"</option>
+                                                                            <option value="title_contains">"Title — contains"</option>
+                                                                            <option value="title_excludes">"Title — excludes"</option>
+                                                                        </select>
+                                                                        <input
+                                                                            type="text"
+                                                                            placeholder="Value…"
+                                                                            prop:value=move || new_rule_value.get()
+                                                                            on:input=move |ev| set_new_rule_value.set(event_target_value(&ev))
+                                                                        />
+                                                                        <button
+                                                                            class="rule-add-btn"
+                                                                            on:click=move |_| {
+                                                                                let val  = new_rule_value.get_untracked();
+                                                                                let kind = match new_rule_type.get_untracked().as_str() {
+                                                                                    "scanlator_include" => DownloadRuleKind::ScanlatorInclude(val),
+                                                                                    "scanlator_exclude" => DownloadRuleKind::ScanlatorExclude(val),
+                                                                                    "language_include"  => DownloadRuleKind::LanguageInclude(val),
+                                                                                    "language_exclude"  => DownloadRuleKind::LanguageExclude(val),
+                                                                                    "title_contains"    => DownloadRuleKind::TitleContains(val),
+                                                                                    _                   => DownloadRuleKind::TitleExcludes(val),
+                                                                                };
+                                                                                leptos::task::spawn_local(async move {
+                                                                                    match add_download_rule(did_val, kind).await {
+                                                                                        Ok(_) => {
+                                                                                            set_new_rule_value.set(String::new());
+                                                                                            set_rule_error.set(None);
                                                                                             rules_resource.refetch();
-                                                                                        });
+                                                                                        }
+                                                                                        Err(e) => set_rule_error.set(Some(e.to_string())),
                                                                                     }
-                                                                                >"×"</button>
-                                                                            </li>
+                                                                                });
+                                                                            }
+                                                                        >"+ Add Rule"</button>
+                                                                    </div>
+                                                                    {move || rule_error.get().map(|e| view! {
+                                                                        <p class="error">{e}</p>
+                                                                    })}
+                                                                }
+                                                            }}
+                                                        </Suspense>
+                                                    </div>
+                                                </Show>
+                                            </div>
+                                        </Show>
+
+                                        // ── Scanlator preferences (local manga only) ────────
+                                        <Show when=move || is_local_route fallback=|| ()>
+                                            <div class="collapsible-panel">
+                                                <button
+                                                    class="collapsible-panel__toggle"
+                                                    on:click=move |_| set_scanlator_prefs_open.update(|v| *v = !*v)
+                                                >
+                                                    <span class="collapsible-panel__label">"Scanlator Preferences"</span>
+                                                    <span class="collapsible-panel__chevron">
+                                                        {move || if scanlator_prefs_open.get() { "▾" } else { "▸" }}
+                                                    </span>
+                                                </button>
+
+                                                <Show when=move || scanlator_prefs_open.get() fallback=|| ()>
+                                                    <div class="collapsible-panel__body">
+                                                        <p class="collapsible-panel__hint">
+                                                            "Set priority for scanlation groups. When the same chapter number "
+                                                            "is uploaded by multiple groups, the highest-priority group is "
+                                                            "shown first and auto-downloaded."
+                                                        </p>
+
+                                                        <Suspense fallback=|| ()>
+                                                            {move || {
+                                                                // Derive known scanlators from the loaded chapter list
+                                                                let known_scanlators: Vec<String> = chapters.get()
+                                                                    .and_then(|r| r.ok())
+                                                                    .map(|cl| {
+                                                                        let mut seen = std::collections::HashSet::new();
+                                                                        cl.chapters.into_iter()
+                                                                            .filter_map(|c| c.scanlator)
+                                                                            .filter(|s| !s.is_empty() && seen.insert(s.clone()))
+                                                                            .collect()
+                                                                    })
+                                                                    .unwrap_or_default();
+
+                                                                let prefs = scanlator_prefs_resource.get()
+                                                                    .and_then(|r| r.ok())
+                                                                    .unwrap_or_default();
+
+                                                                // Calculate "unset" scanlators before moving prefs into the For closure
+                                                                let already_set: std::collections::HashSet<String> = prefs.iter()
+                                                                    .map(|p| p.scanlator.clone())
+                                                                    .collect();
+                                                                let unset: Vec<String> = known_scanlators.into_iter()
+                                                                    .filter(|s| !already_set.contains(s))
+                                                                    .collect();
+
+                                                                view! {
+                                                                    <ul class="scanlator-pref-list">
+                                                                        <For
+                                                                            each=move || prefs.clone()
+                                                                            key=|p| p.id
+                                                                            children=move |pref| {
+                                                                                let pref_id = pref.id;
+                                                                                let (local_prio, set_local_prio) = signal(pref.priority);
+                                                                                view! {
+                                                                                    <li class="scanlator-pref-item">
+                                                                                        <span class="scanlator-pref-item__name">
+                                                                                            {pref.scanlator.clone()}
+                                                                                        </span>
+                                                                                        <div class="scanlator-pref-item__controls">
+                                                                                            <input
+                                                                                                type="number"
+                                                                                                class="scanlator-pref-item__priority"
+                                                                                                min="-100"
+                                                                                                max="100"
+                                                                                                prop:value=move || local_prio.get().to_string()
+                                                                                                on:change=move |ev| {
+                                                                                                    if let Ok(v) = event_target_value(&ev).parse::<i64>() {
+                                                                                                        set_local_prio.set(v);
+                                                                                                        let scanlator = pref.scanlator.clone();
+                                                                                                        leptos::task::spawn_local(async move {
+                                                                                                            let _ = set_scanlator_preference(did_val, scanlator, v).await;
+                                                                                                            scanlator_prefs_resource.refetch();
+                                                                                                        });
+                                                                                                    }
+                                                                                                }
+                                                                                            />
+                                                                                            <button
+                                                                                                class="rule-list__remove"
+                                                                                                title="Remove preference"
+                                                                                                on:click=move |_| {
+                                                                                                    leptos::task::spawn_local(async move {
+                                                                                                        let _ = remove_scanlator_preference(pref_id).await;
+                                                                                                        scanlator_prefs_resource.refetch();
+                                                                                                    });
+                                                                                                }
+                                                                                            >"×"</button>
+                                                                                        </div>
+                                                                                    </li>
+                                                                                }
+                                                                            }
+                                                                        />
+                                                                    </ul>
+
+                                                                    // "Add preference" for scanlators not yet in the list
+                                                                    {
+                                                                        if unset.is_empty() {
+                                                                            view! { <span></span> }.into_any()
+                                                                        } else {
+                                                                            let (sel, set_sel) = signal(unset.first().cloned().unwrap_or_default());
+                                                                            let unset_clone = unset.clone();
+                                                                            view! {
+                                                                                <div class="rule-add-row">
+                                                                                    <select on:change=move |ev| set_sel.set(event_target_value(&ev))>
+                                                                                        <For
+                                                                                            each=move || unset_clone.clone()
+                                                                                            key=|s| s.clone()
+                                                                                            children=|s| view! {
+                                                                                                <option value=s.clone()>{s.clone()}</option>
+                                                                                            }
+                                                                                        />
+                                                                                    </select>
+                                                                                    <button
+                                                                                        class="rule-add-btn"
+                                                                                        on:click=move |_| {
+                                                                                            let scanlator = sel.get_untracked();
+                                                                                            leptos::task::spawn_local(async move {
+                                                                                                let _ = set_scanlator_preference(did_val, scanlator, 0).await;
+                                                                                                scanlator_prefs_resource.refetch();
+                                                                                            });
+                                                                                        }
+                                                                                    >"+ Add preference"</button>
+                                                                                </div>
+                                                                            }.into_any()
                                                                         }
                                                                     }
-                                                                />
-                                                            </ul>
-                                                            <div class="rule-add-row">
-                                                                <select
-                                                                    on:change=move |ev| set_new_rule_type.set(event_target_value(&ev))
-                                                                >
-                                                                    <option value="scanlator_include">"Scanlator — include"</option>
-                                                                    <option value="scanlator_exclude">"Scanlator — exclude"</option>
-                                                                    <option value="language_include">"Language — include"</option>
-                                                                    <option value="language_exclude">"Language — exclude"</option>
-                                                                    <option value="title_contains">"Title — contains"</option>
-                                                                    <option value="title_excludes">"Title — excludes"</option>
-                                                                </select>
-                                                                <input
-                                                                    type="text"
-                                                                    placeholder="Value…"
-                                                                    prop:value=move || new_rule_value.get()
-                                                                    on:input=move |ev| set_new_rule_value.set(event_target_value(&ev))
-                                                                />
-                                                                <button
-                                                                    class="rule-add-btn"
-                                                                    on:click=move |_| {
-                                                                        let val  = new_rule_value.get_untracked();
-                                                                        let kind = match new_rule_type.get_untracked().as_str() {
-                                                                            "scanlator_include" => DownloadRuleKind::ScanlatorInclude(val),
-                                                                            "scanlator_exclude" => DownloadRuleKind::ScanlatorExclude(val),
-                                                                            "language_include"  => DownloadRuleKind::LanguageInclude(val),
-                                                                            "language_exclude"  => DownloadRuleKind::LanguageExclude(val),
-                                                                            "title_contains"    => DownloadRuleKind::TitleContains(val),
-                                                                            _                   => DownloadRuleKind::TitleExcludes(val),
-                                                                        };
-                                                                        leptos::task::spawn_local(async move {
-                                                                            match add_download_rule(did_val, kind).await {
-                                                                                Ok(_) => {
-                                                                                    set_new_rule_value.set(String::new());
-                                                                                    set_rule_error.set(None);
-                                                                                    rules_resource.refetch();
-                                                                                }
-                                                                                Err(e) => set_rule_error.set(Some(e.to_string())),
-                                                                            }
-                                                                        });
-                                                                    }
-                                                                >"+ Add Rule"</button>
-                                                            </div>
-                                                            {move || rule_error.get().map(|e| view! {
-                                                                <p class="error">{e}</p>
-                                                            })}
-                                                        }
-                                                    }}
-                                                </Suspense>
+                                                                }
+                                                            }}
+                                                        </Suspense>
+                                                    </div>
+                                                </Show>
                                             </div>
                                         </Show>
 

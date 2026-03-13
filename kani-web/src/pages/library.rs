@@ -1,4 +1,8 @@
-use crate::{server_fns::{get_all_artists, get_all_authors, get_all_tags, get_categories, get_library, proxy_url, start_refresh_all}, types::{Category, MangaSortOrder}};
+use crate::{
+    server_fns::{get_all_artists, get_all_authors, get_all_tags, get_categories, 
+        get_library, proxy_url, start_refresh_all}, 
+    types::{Category, MangaSortOrder, RefreshState}
+};
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_query_map};
 
@@ -33,6 +37,9 @@ pub fn Library() -> impl IntoView {
     let all_artists = Resource::new(|| (), |_| get_all_artists());
     let all_categories = Resource::new(|| (), |_| get_categories());
 
+    let refresh_state = expect_context::<RwSignal<crate::types::RefreshState>>();
+    let library_invalidation = expect_context::<RwSignal<u32>>();
+
     let library = Resource::new(
         move || (
             page.get(),
@@ -43,8 +50,9 @@ pub fn Library() -> impl IntoView {
             artist_filter.get(),
             category_filter.get(),
             sort_order.get(),
+            library_invalidation.get(),
         ),
-        move |(p, search, status, tag, author, artist, category, sort)| async move {
+        move |(p, search, status, tag, author, artist, category, sort, _)| async move {
             get_library(p, search, status, tag, author, artist, category, sort).await
         },
     );
@@ -72,91 +80,6 @@ pub fn Library() -> impl IntoView {
     sync_filter!(all_tags, tag_from_url, set_tag_filter);
     sync_filter!(all_authors, author_from_url, set_author_filter);
     sync_filter!(all_artists, artist_from_url, set_artist_filter);
-
-    #[derive(Clone, PartialEq)]
-    enum RefreshState {
-        Idle,
-        Running { completed: usize, total: usize },
-        Done { total: usize, failed: usize },
-    }
-
-    let (refresh_state, set_refresh_state) = signal(RefreshState::Idle);
-
-    Effect::new(move |_| {
-        #[cfg(feature = "hydrate")]
-        {
-            use wasm_bindgen::prelude::*;
-            use web_sys::{EventSource, MessageEvent};
-
-            let es = match EventSource::new("/rest/refresh/progress") {
-                Ok(es) => es,
-                Err(_) => return,
-            };
-
-            let es_for_close = es.clone();
-            let on_close = Closure::<dyn FnMut(MessageEvent)>::new(
-                move |_: MessageEvent| { es_for_close.close(); }
-            );
-            es.add_event_listener_with_callback(
-                "close", on_close.as_ref().unchecked_ref()
-            ).ok();
-            on_close.forget();
-
-            let on_message = Closure::<dyn FnMut(MessageEvent)>::new(
-                move |msg: MessageEvent| {
-                    use crate::events::RefreshProgressEvent;
-
-                    let data = match msg.data().as_string() {
-                        Some(d) => d,
-                        None => return,
-                    };
-
-                    if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&data)
-                        && raw["type"] == "state_snapshot" {
-                            if raw["is_refreshing"].as_bool().unwrap_or(false) {
-                                set_refresh_state.set(RefreshState::Running {
-                                    completed: 0,
-                                    total: 0,
-                                });
-                            }
-                            return;
-                        }
-
-                    let event: RefreshProgressEvent = match serde_json::from_str(&data) {
-                        Ok(e) => e,
-                        Err(_) => return,
-                    };
-
-                    match event {
-                        RefreshProgressEvent::Started { total } => {
-                            set_refresh_state.set(RefreshState::Running {
-                                completed: 0,
-                                total,
-                            });
-                        }
-                        RefreshProgressEvent::MangaRefreshed { completed, total, .. } => {
-                            set_refresh_state.set(RefreshState::Running { completed, total });
-                        }
-                        RefreshProgressEvent::Completed { total, failed } => {
-                            set_refresh_state.set(RefreshState::Done { total, failed });
-                            library.refetch();
-                            set_timeout(
-                                move || set_refresh_state.set(RefreshState::Idle),
-                                std::time::Duration::from_secs(5),
-                            );
-                        }
-                    }
-                }
-            );
-
-            es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-            on_message.forget();
-
-            let es_clone = es.clone();
-            on_cleanup(move || es_clone.close());
-            drop(es);
-        }
-    });
 
     let is_running = move || matches!(refresh_state.get(), RefreshState::Running { .. });
 
