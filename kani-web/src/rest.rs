@@ -13,8 +13,8 @@ use futures::TryStreamExt;
 
 use crate::{
     error::AppError,
-    models::{CreateSource, FetchWasmRequest, Manga, ProxyQuery, SearchMangaRequest, Source, UpdateSource},
-    state::AppState,
+    models::{CreateSource, FetchWasmRequest, Manga, ProxyQuery, SearchMangaRequest, UpdateSource},
+    state::AppState, types::Source,
 };
 use kani_core::source_manager::SourceManager;
 
@@ -258,14 +258,7 @@ async fn get_source(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let source = sqlx::query_as!(
-        Source,
-        "SELECT * FROM sources WHERE id = ?",
-        id
-    )
-    .fetch_optional(&state.db)
-    .await?;
-
+    let source = state.get_source(id).await?;
     Ok(Json(source))
 }
 

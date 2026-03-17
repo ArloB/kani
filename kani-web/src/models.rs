@@ -5,16 +5,6 @@ use serde::{Deserialize, Serialize};
 pub use kani_shared::Chapter as SharedChapter;
 use sqlx::types::chrono;
 
-#[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
-pub struct Source {
-    pub id: i64,
-    pub name: String,
-    pub version: String,
-    pub base_url: String,
-    pub enabled: bool,
-    pub favourited: bool
-}
-
 #[derive(Deserialize, Debug)]
 pub struct CreateSource {
     pub name: String,
@@ -127,12 +117,4 @@ impl TryFrom<DownloadRuleRow> for crate::types::DownloadRule {
         };
         Ok(crate::types::DownloadRule { id: row.id, manga_id: row.manga_id, kind })
     }
-}
-
-#[derive(sqlx::FromRow)]
-pub struct ScanlatorPrefRow {
-    pub id:        i64,
-    pub manga_id:  i64,
-    pub scanlator: String,
-    pub priority:  i64,
 }

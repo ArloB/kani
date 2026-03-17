@@ -32,6 +32,12 @@ pub enum DownloadProgressEvent {
         chapter_id: i64,
         chapter_name: String,
     },
+
+    ChapterDeferred {
+        chapter_id: i64,
+        chapter_name: String,
+        reason: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

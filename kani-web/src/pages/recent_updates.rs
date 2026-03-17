@@ -1,3 +1,4 @@
+use crate::pages::components::pagination::Pagination;
 use crate::server_fns::{download_chapter, get_recent_updates};
 use crate::types::{LiveChapterStatus, RecentUpdateItem};
 use leptos::prelude::*;
@@ -54,7 +55,6 @@ pub fn RecentUpdates() -> impl IntoView {
                         <p class="empty">"No recent updates yet. Add manga to your library and scan for chapters."</p>
                     }.into_any(),
                     Ok(list) => {
-                        let has_more = list.has_next_page;
                         let groups = group_by_manga(list.recent_updates);
                         view! {
                             <div class="update-group-list">
@@ -149,17 +149,7 @@ pub fn RecentUpdates() -> impl IntoView {
                                 />
                             </div>
 
-                            <div class="pagination">
-                                <button
-                                    on:click=move |_| set_page.update(|p| *p = (*p - 1).max(1))
-                                    disabled=move || page.get() <= 1
-                                >"Prev"</button>
-                                <span>"Page " {page}</span>
-                                <button
-                                    on:click=move |_| set_page.update(|p| *p += 1)
-                                    disabled=move || !has_more
-                                >"Next"</button>
-                            </div>
+                            <Pagination page set_page has_next=Signal::derive(move || list.has_next_page) />
                         }.into_any()
                     }
                 })}

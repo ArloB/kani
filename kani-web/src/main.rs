@@ -126,7 +126,8 @@ async fn main() {
                                 .execute(&db)
                                 .await;
                         }
-                        kani_shared::DownloadProgressEvent::ChapterCancelled { chapter_id, .. } => {
+                        kani_shared::DownloadProgressEvent::ChapterCancelled { chapter_id, .. }
+                        | kani_shared::DownloadProgressEvent::ChapterDeferred { chapter_id, .. } => {
                             let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
                                 .execute(&db)
                                 .await;

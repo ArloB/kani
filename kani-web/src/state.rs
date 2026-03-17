@@ -13,8 +13,8 @@ use kani_core::wasm::WasmRuntime;
 
 use crate::error::{Result, AppError};
 use crate::events::{AppEvent, RefreshProgressEvent};
-use crate::models::{DownloadRuleRow, Settings, Source};
-use crate::types::{ChapterFilterRow, DownloadRule, DownloadRuleKind, GlobalSearchResult, MangaList, SearchScope};
+use crate::models::{DownloadRuleRow, Settings};
+use crate::types::{ChapterFilterRow, DownloadRule, DownloadRuleKind, GlobalSearchResult, MangaList, SearchScope, Source};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -1047,6 +1047,7 @@ impl AppState {
                             per_source_results.push(GlobalSearchResult {
                                 source_id,
                                 source_name,
+                                has_next_page: manga_list.has_next_page,
                                 manga: manga_list.manga,
                             });
                         }
@@ -1061,6 +1062,7 @@ impl AppState {
                     per_source_results.push(GlobalSearchResult {
                         source_id,
                         source_name: ids_to_search.get(&source_id).cloned().unwrap_or_default(),
+                        has_next_page: false,
                         manga: vec![],
                     });
                 }
@@ -1294,6 +1296,19 @@ impl AppState {
         .await?;
 
         Ok(())
+    }
+
+    pub async fn get_source(&self, id: i64) -> Result<Source, AppError> {
+        let source = sqlx::query_as!(
+            Source,
+            "SELECT * FROM sources WHERE id = ?",
+            id
+        )
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Source not found".into()))?;
+
+        Ok(source)
     }
 }
 

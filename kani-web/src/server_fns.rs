@@ -1,4 +1,7 @@
-use crate::types::{AppSettings, Category, ChapterList, DownloadRule, DownloadRuleKind, GlobalSearchResult, LibraryPage, MangaInfo, MangaList, MangaSortOrder, RecentUpdate, RecentUpdateItem, Source};
+use crate::types::{
+    AppSettings, Category, ChapterList, DownloadRule, DownloadRuleKind, GlobalSearchResult, LibraryPage, MangaInfo, 
+    MangaList, MangaSortOrder, RecentUpdate, RecentUpdateItem, Source
+};
 use leptos::prelude::*;
 
 #[cfg(feature = "ssr")]
@@ -16,16 +19,22 @@ pub async fn fetch_sources() -> Result<Vec<Source>, ServerFnError> {
         .map_err(to_server_err)
 }
 
-#[server]
-pub async fn get_popular_manga(source_id: i64, page: i32) -> Result<MangaList, ServerFnError> {
-    let state = expect_context::<crate::state::AppState>();
+#[cfg(feature = "ssr")]
+async fn get_source_base_url(db: &sqlx::SqlitePool, source_id: i64) -> Result<String, ServerFnError> {
     let base_url = {
         sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
-            .fetch_optional(&state.db)
+            .fetch_optional(db)
             .await
             .map_err(to_server_err)?
             .unwrap_or_default()
     };
+    Ok(base_url)
+}
+
+#[server]
+pub async fn get_popular_manga(source_id: i64, page: i32) -> Result<MangaList, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let base_url = get_source_base_url(&state.db, source_id).await?;
 
     let json = state
         .get_popular_manga(source_id, page)
@@ -49,13 +58,7 @@ pub async fn search_manga(
     page: i32,
 ) -> Result<MangaList, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
-    let base_url = {
-        sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(to_server_err)?
-            .unwrap_or_default()
-    };
+    let base_url = get_source_base_url(&state.db, source_id).await?;
 
     let json = state
         .search_manga(source_id, &query, page)
@@ -78,13 +81,7 @@ pub async fn get_manga_details(
     manga_id: String,
 ) -> Result<MangaInfo, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
-    let base_url = {
-        sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(to_server_err)?
-            .unwrap_or_default()
-    };
+    let base_url = get_source_base_url(&state.db, source_id).await?;
 
     let json = state
         .get_manga_details(source_id, &manga_id)
@@ -918,10 +915,10 @@ pub async fn update_settings(settings: AppSettings) -> Result<(), ServerFnError>
 pub async fn get_recent_updates(page: i32) -> Result<RecentUpdate, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
 
-    let offset = (page - 1) * 50 + 1;
+    let offset = (page - 1) * 50;
 
     let raw_updates = sqlx::query_as!(RecentUpdateItem, 
-        "SELECT m.id as manga_id, m.name as manga_name, m.cover_url, s.base_url,
+        "SELECT m.id as manga_id, m.name as manga_name, m.cover_url, m.local_cover_path, s.base_url,
             c.id as chapter_id, c.chapter_number, c.name as chapter_name, c.discovered_at
         FROM chapters c
         JOIN manga m ON c.manga_id = m.id
@@ -935,14 +932,18 @@ pub async fn get_recent_updates(page: i32) -> Result<RecentUpdate, ServerFnError
         .map_err(to_server_err)?;
 
     let mut recent_updates: Vec<RecentUpdateItem> = raw_updates
-        .into_iter()
-        .map(|mut u| {
-            if let Some(ref url) = u.cover_url.clone() {
-                u.cover_url = Some(sign_image_url(url, &u.base_url, &state));
-            }
-            u
-        })
-        .collect();
+    .into_iter()
+    .map(|mut u| {
+        u.cover_url = if u.local_cover_path.is_some() {
+            Some(format!("/rest/manga/{}/cover", u.manga_id))
+        } else if let Some(ref url) = u.cover_url.clone() {
+            Some(sign_image_url(url, &u.base_url, &state))
+        } else {
+            None
+        };
+        u
+    })
+    .collect();
 
     let has_next_page = recent_updates.len() > 50;
     if has_next_page { recent_updates.truncate(50); }
@@ -963,6 +964,12 @@ pub async fn toggle_source_enabled(
     .await
     .map(|_| ())
     .map_err(to_server_err)
+}
+
+#[server]
+pub async fn get_source(id: i64) -> Result<Source, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    state.get_source(id).await.map_err(to_server_err)
 }
 
 #[cfg(feature = "ssr")]

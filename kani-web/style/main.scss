@@ -239,8 +239,7 @@ main.container {
   }
 
   // Cover image container — keeps 2:3 aspect ratio
-  .cover,
-  .cover-image {
+  .cover {
     width: 100%;
     aspect-ratio: 2 / 3;
     border-radius: var(--radius-md);
@@ -1400,21 +1399,12 @@ main.container:has(.manga-details) {
   border-top: 1px solid var(--clr-border-subtle);
 }
 
-.category-selector__label {
-  font-size: var(--text-xs);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--clr-text-muted);
-}
-
 .category-selector__empty {
   font-size: var(--text-xs);
   color: var(--clr-text-faint);
 }
 
-// chip-group: wrapping row of chip buttons — reuses .chip and .chip--active
-.chip-group {
+.category-selector__chips {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
@@ -1469,6 +1459,26 @@ main.container:has(.manga-details) {
   display: flex;
   flex-direction: column;
   gap: var(--sp-10);
+}
+
+.manga-scroll-row {
+  display: flex;
+  flex-direction: row;
+  gap: var(--sp-3);
+  overflow-x: auto;
+  padding-bottom: var(--sp-3);
+
+  .manga-card {
+    flex: 0 0 var(--grid-min-w);
+    width: var(--grid-min-w);
+  }
+
+  &::-webkit-scrollbar { height: 4px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb {
+    background: var(--clr-border);
+    border-radius: var(--radius-full);
+  }
 }
 
 .source-section {

@@ -296,6 +296,7 @@ pub struct Source {
 pub struct GlobalSearchResult {
     pub source_id: i64,
     pub source_name: String,
+    pub has_next_page: bool,
     pub manga: Vec<MangaListItem>,
 }
 
@@ -420,6 +421,8 @@ pub struct RecentUpdateItem {
     pub manga_id: i64,
     pub manga_name: String,
     pub cover_url: Option<String>,
+    #[serde(skip)]
+    pub local_cover_path: Option<String>,
     pub base_url: String,
     pub chapter_id: i64,
     pub chapter_number: f64,

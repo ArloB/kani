@@ -75,7 +75,7 @@ impl SourceManager {
                     .map_err(|e| {
                         let msg = e.to_string();
                         if msg.contains("maximum concurrent component instance limit") {
-                            Error::Internal("Global WASM instance pool exhausted — increase max_wasm_instances in settings".to_string())
+                            Error::PoolExhausted
                         } else {
                             e
                         }

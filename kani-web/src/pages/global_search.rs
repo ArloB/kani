@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::{server_fns::{fetch_sources, global_search}, types::SearchScope};
+use crate::{pages::components::{collapsible_panel::CollapsiblePanel, cover_image::CoverImage, pagination::Pagination}, server_fns::{fetch_sources, global_search}, types::SearchScope};
 use leptos_router::{components::A};
 
 #[component]
@@ -130,78 +130,76 @@ pub fn GlobalSearch() -> impl IntoView {
                       view! { <p class="empty">"No results found."</p> }.into_any()
                   }
 
-                  Ok(results) => view! {
-                      <div class="search-results">
-                          <For
-                              each=move || results.clone()
-                              key=|r| r.source_id
-                              children=move |result| {
-                                  let source_id = result.source_id;
-                                  view! {
-                                      <section class="source-section">
-                                          <h3 class="source-section__header">
-                                              {result.source_name.clone()}
-                                          </h3>
+                  Ok(results) => {
+                    let has_next = {
+                        let results = results.clone();
+                        Signal::derive(move || results.iter().any(|r| r.has_next_page))
+                    };
 
-                                          {if result.manga.is_empty() {
-                                              view! {
-                                                  <p class="source-section__empty">
-                                                      "No results from this source."
-                                                  </p>
-                                              }.into_any()
-                                          } else {
-                                              view! {
-                                                  <div class="manga-grid">
-                                                      <For
-                                                          each=move || result.manga.clone()
-                                                          key=|m| m.id.clone()
-                                                          children=move |manga| {
-                                                              let href = format!(
-                                                                  "/source/{}/manga/{}",
-                                                                  source_id, manga.id
-                                                              );
-                                                              let cover = manga.cover_url.clone();
-                                                              view! {
-                                                                  <A href=href>
-                                                                      <div class="manga-card">
-                                                                          {match cover {
-                                                                              Some(url) => view! {
-                                                                                  <img src=url alt=manga.title.clone() />
-                                                                              }.into_any(),
-                                                                              None => view! {
-                                                                                  <div class="no-cover">"No Cover"</div>
-                                                                              }.into_any(),
-                                                                          }}
-                                                                          <p>{manga.title.clone()}</p>
-                                                                      </div>
-                                                                  </A>
-                                                              }
-                                                          }
-                                                      />
-                                                  </div>
-                                              }.into_any()
-                                          }}
-                                      </section>
-                                  }
-                              }
-                          />
+                    view! {
+                        <div class="search-results">
+                            <For
+                                each=move || results.clone()
+                                key=|r| r.source_id
+                                children=move |result| {
+                                    let source_id = result.source_id;
+                                    let count = result.manga.len();
+                                    let label = if result.manga.is_empty() {
+                                        result.source_name.clone()
+                                    } else {
+                                        format!(
+                                            "{} ({}{}", result.source_name, count,
+                                            if result.has_next_page { "+)" } else { ")" }
+                                        )
+                                    };
+                                    let manga = result.manga.clone();
+                                    let is_empty = manga.is_empty();
 
-                          <div class="pagination">
-                              {move || (page.get() > 1).then(|| view! {
-                                  <button on:click=move |_| set_page.update(|p| *p -= 1)>
-                                      "← Previous"
-                                  </button>
-                              })}
-                              <span>"Page " {page}</span>
-                              <button on:click=move |_| set_page.update(|p| *p += 1)>
-                                  "Load more →"
-                              </button>
-                          </div>
-                      </div>
-                  }.into_any()
+                                    view! {
+                                        <CollapsiblePanel label=label open=true>
+                                            {if is_empty {
+                                                view! {
+                                                    <p class="source-section__empty">
+                                                        "No results."
+                                                    </p>
+                                                }.into_any()
+                                            } else {
+                                                let manga = manga.clone();
+                                                view! {
+                                                    <div class="manga-scroll-row">
+                                                        <For
+                                                            each=move || manga.clone()
+                                                            key=|m| m.id.clone()
+                                                            children=move |manga| {
+                                                                let href = format!(
+                                                                    "/source/{}/manga/{}",
+                                                                    source_id, manga.id
+                                                                );
+                                                                view! {
+                                                                    <A href=href attr:class="manga-card">
+                                                                        <CoverImage
+                                                                            url=manga.cover_url.clone()
+                                                                            alt=manga.title.clone()
+                                                                        />
+                                                                        <p>{manga.title.clone()}</p>
+                                                                    </A>
+                                                                }
+                                                            }
+                                                        />
+                                                    </div>
+                                                }.into_any()
+                                            }}
+                                        </CollapsiblePanel>
+                                    }
+                                }
+                            />
+
+                            <Pagination page set_page has_next=has_next/>
+                        </div>
+                    }.into_any()
+                  }
               })}
           </Suspense>
-
       </div>
-  }
+    }
 }

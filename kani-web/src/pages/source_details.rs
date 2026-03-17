@@ -1,4 +1,6 @@
-use crate::server_fns::{fetch_sources, get_popular_manga, search_manga};
+use crate::pages::components::cover_image::CoverImage;
+use crate::pages::components::pagination::Pagination;
+use crate::server_fns::{get_popular_manga, get_source, search_manga};
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
@@ -19,24 +21,15 @@ pub fn SourceDetails() -> impl IntoView {
     let (page, set_page) = signal(1);
     let (query, set_query) = signal("".to_string());
 
+    let source = Resource::new(id, move |sid| async move { get_source(sid).await });
+
     let manga_list = Resource::new(
         move || (id(), page.get(), query.get()),
         move |(sid, p, q)| async move {
-            let sources = fetch_sources().await.unwrap_or_default();
-            let source = sources.into_iter().find(|s| s.id == sid);
-
-            let list = if q.is_empty() {
+            if q.is_empty() {
                 get_popular_manga(sid, p).await
             } else {
                 search_manga(sid, q, p).await
-            };
-
-            match (list, source) {
-                (Ok(l), Some(s)) => Ok((l, s)),
-                (Err(e), _) => Err(e),
-                (_, None) => Err(leptos::server_fn::error::ServerFnError::new(
-                    "Source not found",
-                )),
             }
         },
     );
@@ -46,7 +39,14 @@ pub fn SourceDetails() -> impl IntoView {
     view! {
         <div class="source-details">
             <header class="sticky-header">
-                <h2>"Source " {id}</h2>
+                <h2>
+                    <Suspense fallback=move || view! { "Source " {id} }>
+                        {move || source.get().map(|res| match res {
+                            Ok(s) => s.name.clone().into_any(),
+                            Err(_) => view! { "Source " {id} }.into_any(),
+                        })}
+                    </Suspense>
+                </h2>
                 <form on:submit=move |ev| { ev.prevent_default(); set_query.set(input_value.get()); set_page.set(1); }>
                     <input
                         type="text"
@@ -61,7 +61,7 @@ pub fn SourceDetails() -> impl IntoView {
             <Suspense fallback=move || view! { <p>"Loading manga..."</p> }>
                 {move || {
                     manga_list.get().map(|res| match res {
-                        Ok((list, source)) => {
+                        Ok(list) => {
                             view! {
                             <div class="manga-grid">
                                 <For
@@ -71,12 +71,7 @@ pub fn SourceDetails() -> impl IntoView {
                                         view! {
                                             <div class="manga-card">
                                                 <A href=format!("/source/{}/manga/{}", id(), manga.id)>
-                                                    <div class="cover-image">
-                                                        {match manga.cover_url {
-                                                            Some(url) => view! { <img src=url alt=manga.title.clone() /> }.into_any(),
-                                                            None => view! { <div class="no-cover">"No Cover"</div> }.into_any(),
-                                                        }}
-                                                    </div>
+                                                    <CoverImage url=manga.cover_url alt=manga.title.clone() />
                                                     <h3>{manga.title}</h3>
                                                 </A>
                                             </div>
@@ -84,11 +79,7 @@ pub fn SourceDetails() -> impl IntoView {
                                     }
                                 />
                             </div>
-                            <div class="pagination">
-                                <button on:click=move |_| set_page.update(|p| *p = (*p - 1).max(1)) disabled=move || page.get() <= 1>"Prev"</button>
-                                <span>" Page " {page} </span>
-                                <button on:click=move |_| set_page.update(|p| *p += 1) disabled=move || !list.has_next_page>"Next"</button>
-                            </div>
+                            <Pagination page set_page has_next=Signal::derive(move || list.has_next_page) />
                         }.into_any()
                         },
                         Err(e) => view! { <p class="error">"Error: " {e.to_string()}</p> }.into_any(),

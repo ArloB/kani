@@ -6,3 +6,4 @@ pub mod source_details;
 pub mod global_search;
 pub mod settings;
 pub mod recent_updates;
+pub mod components;

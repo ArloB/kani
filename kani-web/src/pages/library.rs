@@ -1,10 +1,28 @@
 use crate::{
-    server_fns::{get_all_artists, get_all_authors, get_all_tags, get_categories, 
-        get_library, start_refresh_all}, 
-    types::{Category, MangaSortOrder, RefreshState}
+    pages::components::{cover_image::CoverImage, pagination::Pagination}, server_fns::{get_all_artists, get_all_authors, get_all_tags, get_categories, 
+        get_library, start_refresh_all}, types::{Category, MangaSortOrder, RefreshState}
 };
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_query_map};
+
+#[cfg(feature = "ssr")]
+use leptos::server_fn::error::ServerFnError;
+
+fn sync_filter_from_url(
+    resource: Resource<Result<Vec<(i64, String)>, ServerFnError>>,
+    url_getter: impl Fn() -> Option<String> + 'static,
+    setter: WriteSignal<Option<i64>>,
+) {
+    Effect::new(move |_| {
+        if let Some(Ok(items)) = resource.get()
+            && let Some(name) = url_getter() {
+                let matched_id = items.iter()
+                    .find(|(_, n)| n.eq_ignore_ascii_case(&name))
+                    .map(|(id, _)| *id);
+                setter.set(matched_id);
+            }
+    });
+}
 
 #[component]
 pub fn Library() -> impl IntoView {
@@ -56,23 +74,9 @@ pub fn Library() -> impl IntoView {
     let artist_from_url = move || query.with(|q| q.get("artist").as_deref().map(str::to_string));
     let tag_from_url    = move || query.with(|q| q.get("tag").as_deref().map(str::to_string));
 
-    macro_rules! sync_filter {
-        ($resource:expr, $url_getter:expr, $signal_setter:expr) => {
-            Effect::new(move |_| {
-                if let Some(Ok(items)) = $resource.get()
-                    && let Some(name) = $url_getter() {
-                        let matched_id = items.iter()
-                            .find(|(_, n)| n.eq_ignore_ascii_case(&name))
-                            .map(|(id, _)| *id);
-                        $signal_setter.set(matched_id);
-                }
-            });
-        };
-    }
-
-    sync_filter!(all_tags, tag_from_url, set_tag_filter);
-    sync_filter!(all_authors, author_from_url, set_author_filter);
-    sync_filter!(all_artists, artist_from_url, set_artist_filter);
+    sync_filter_from_url(all_tags, tag_from_url, set_tag_filter);
+    sync_filter_from_url(all_authors, author_from_url, set_author_filter);
+    sync_filter_from_url(all_artists, artist_from_url, set_artist_filter);
 
     let is_running = move || matches!(refresh_state.get(), RefreshState::Running { .. });
 
@@ -235,7 +239,6 @@ pub fn Library() -> impl IntoView {
                                         })}
                                     </Suspense>
 
-                                    // Todo: Implement autocomplete
                                     <input
                                         type="text"
                                         list="author-options"
@@ -308,14 +311,7 @@ pub fn Library() -> impl IntoView {
                                         children=move |manga| view! {
                                             <div class="manga-card">
                                                 <A href=format!("/manga/{}", manga.id)>
-                                                    <div class="cover">
-                                                        {match manga.cover_url {
-                                                            Some(url) => {
-                                                                view! { <img src=url alt=manga.title.clone() /> }.into_any()
-                                                            },
-                                                            None => view! { <div class="no-cover">"No Cover"</div> }.into_any(),
-                                                        }}
-                                                    </div>
+                                                    <CoverImage url=manga.cover_url alt=manga.title.clone() />
                                                     <div class="title">{manga.title}</div>
                                                 </A>
                                             </div>
@@ -323,11 +319,7 @@ pub fn Library() -> impl IntoView {
                                     />
                                 </div>
                                 
-                                <div class="pagination">
-                                    <button on:click=move |_| set_page.update(|p| *p = (*p - 1).max(1)) disabled=move || page.get() <= 1>"Prev"</button>
-                                    <span>" Page " {page} </span>
-                                    <button on:click=move |_| set_page.update(|p| *p += 1) disabled=move || !library.has_next_page>"Next"</button>
-                                </div>
+                                <Pagination page set_page has_next=Signal::derive(move || library.has_next_page) />
                             }.into_any()
                         }
                     },

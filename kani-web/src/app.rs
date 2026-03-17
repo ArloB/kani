@@ -22,10 +22,9 @@ pub struct ScanNotification {
 fn ScanBadge() -> impl IntoView {
     let notifications = expect_context::<RwSignal<Vec<ScanNotification>>>();
     let total = move || notifications.with(|v| v.iter().map(|n| n.count).sum::<usize>());
-    let has_notifs = total() > 0;
 
     view! {
-        <Show when=move || has_notifs fallback=|| ()>
+        <Show when=move || ! notifications.with(|v| v.is_empty()) fallback=|| ()>
             <button
                 class="scan-badge"
                 title="New chapters found — click to dismiss"
@@ -245,6 +244,11 @@ pub fn App() -> impl IntoView {
                                 } => {
                                     if let Some(c) = map.get_mut(&chapter_id) {
                                         c.status = LiveChapterStatus::Cancelled;
+                                    }
+                                }
+                                DownloadProgressEvent::ChapterDeferred { chapter_id, reason, .. } => {
+                                    if let Some(c) = map.get_mut(&chapter_id) {
+                                        c.status = LiveChapterStatus::Failed(reason);
                                     }
                                 }
                             });

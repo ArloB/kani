@@ -1,7 +1,5 @@
 //! Download manager for queuing and processing chapter downloads.
 
-mod progress;
-
 use crate::error::{self, Result};
 use crate::http::{SmartClient, SmartResponse};
 use crate::utilities::{assert_within_root, sanitize_filename};
@@ -9,7 +7,6 @@ use async_zip::tokio::write::ZipFileWriter;
 use async_zip::{Compression, ZipEntryBuilder};
 use futures::stream::{self, StreamExt};
 use kani_shared::DownloadProgressEvent;
-pub use progress::{DownloadProgress, ProgressEvent};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -542,21 +539,26 @@ impl DownloaderManager {
 
         let fetch_fut = async {
             match source_manager.lease_instance().await {
-                Ok(mut instance) => {
-                    instance
-                        .get_pages(&source_manga_id, &source_chapter_id)
-                        .await
-                }
-                Err(e) => Err(error::Error::Internal(format!(
-                    "Failed to lease instance: {}",
-                    e
-                ))),
+                Ok(mut instance) => instance.get_pages(&source_manga_id, &source_chapter_id).await,
+                Err(e) => Err(e),
             }
         };
 
         let chapter_generated = tokio::select! {
             res = fetch_fut => match res {
                 Ok(pages) => Some(pages),
+                Err(crate::error::Error::PoolExhausted) => {
+                    tracing::warn!("Chapter '{}' download deferred: WASM pool exhausted", name);
+                    Self::send_event(
+                        &progress_tx,
+                        DownloadProgressEvent::ChapterDeferred {
+                            chapter_id,
+                            chapter_name: name.clone(),
+                            reason: "Server busy — please retry download".to_string(),
+                        },
+                    );
+                    return Ok(());
+                }
                 Err(e) => {
                     tracing::error!("Failed to get pages: {}", e);
                     Self::send_event(

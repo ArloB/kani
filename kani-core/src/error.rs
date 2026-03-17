@@ -44,6 +44,9 @@ pub enum Error {
     #[error("Extension error: {0}")]
     Extension(String),
 
+    #[error("WASM instance pool exhausted — increase max_wasm_instances in settings")]
+    PoolExhausted,
+
     #[error("{0}")]
     Other(String),
 }
