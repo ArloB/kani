@@ -1,6 +1,6 @@
 //! Sanitization utilities for untrusted input.
-use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
+use std::path::{Path, PathBuf};
 
 /// Sanitizes a string to be used as a safe filename or directory name.
 pub fn sanitize_filename(name: &str) -> String {
@@ -45,7 +45,8 @@ pub fn assert_within_root(root: &Path, target: &Path) -> Result<PathBuf> {
         let parent = target
             .parent()
             .ok_or_else(|| Error::Internal("path has no parent".to_string()))?;
-        let canonical_parent = parent.canonicalize()
+        let canonical_parent = parent
+            .canonicalize()
             .map_err(|_| Error::Internal("parent directory does not exist".to_string()))?;
         let file_name = target
             .file_name()

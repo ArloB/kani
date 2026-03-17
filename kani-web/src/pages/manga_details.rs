@@ -2,7 +2,7 @@ use crate::server_fns::{
     add_download_rule, cancel_download, check_in_library, delete_downloaded, delete_manga,
     download_all, download_chapter, fetch_sources, get_categories, get_chapter_list,
     get_download_rules, get_local_chapter_list, get_local_manga, get_manga_categories,
-    get_manga_details, get_scanlator_preferences, proxy_url, refresh_manga, remove_download_rule,
+    get_manga_details, get_scanlator_preferences, refresh_manga, remove_download_rule,
     remove_scanlator_preference, save_to_library, scan_for_new_chapters, set_manga_categories,
     set_scanlator_preference, toggle_auto_download,
 };
@@ -71,8 +71,6 @@ pub fn MangaDetails() -> impl IntoView {
         },
     );
 
-    // Library-only secondary resources — live at component level so they don't
-    // recreate on every manga render. Keyed on db_id so they refetch on navigation.
     let did_signal        = move || db_id().unwrap_or_default();
     let categories_resource  = Resource::new(|| (), move |_| get_categories());
     let manga_cats_resource  = Resource::new(did_signal, get_manga_categories);
@@ -87,9 +85,7 @@ pub fn MangaDetails() -> impl IntoView {
 
     view! {
         <div class="manga-details">
-            // 1. Wrap the resource reads in Suspense
             <Suspense fallback=move || view! {
-                // 2. Move your skeleton loader here!
                 <div class="manga-skeleton">
                     <div class="manga-skeleton__hero">
                         <div class="manga-skeleton__cover"></div>
@@ -116,22 +112,16 @@ pub fn MangaDetails() -> impl IntoView {
                 </div>
             }>
                 {move || {
-                    // 3. The match no longer needs to handle None manually.
-                    // If either resource is None, Suspense intercepts it and shows the fallback.
                     match (manga.get(), chapters.get()) {
-
-                        // ── Manga load error ──────────────────────────────────────────
                         (Some(Err(e)), _) => view! {
                             <p class="error">"Error loading manga: " {e.to_string()}</p>
                         }.into_any(),
 
-                        // ── Both resources ready ──────────────────────────────────────
                         (Some(Ok((info, source, initial_db_id, is_local_route, _auto_download_init, auto_scan))),
                          Some(chapter_result)) => {
                             let current_db_id    = move || added_db_id.get().or(initial_db_id);
                             let sid              = source.id;
                             let mid              = info.id.clone();
-                            let base_url         = source.base_url.clone();
                             let info_title       = info.title.clone();
                             let info_cover       = info.cover_url.clone();
                             let info_status      = info.status.to_string();
@@ -139,17 +129,15 @@ pub fn MangaDetails() -> impl IntoView {
                             let info_artists     = info.artists.clone();
                             let info_tags        = info.tags.clone();
                             let info_description = info.description.clone();
+                            let info_description_html = info.description_html.clone();
                             let did_val          = db_id().unwrap_or_default();
 
                             view! {
-                                // ── Hero row: cover + scrollable metadata ─────────────────
                                 <div class="manga-hero">
-
                                     <div class="manga-hero__cover">
                                         {match info_cover {
                                             Some(url) => {
-                                                let src = proxy_url(&url, &base_url);
-                                                view! { <img src=src alt=info_title /> }.into_any()
+                                                view! { <img src=url alt=info_title /> }.into_any()
                                             }
                                             None => view! {
                                                 <div class="no-cover">"No Cover"</div>
@@ -160,7 +148,6 @@ pub fn MangaDetails() -> impl IntoView {
                                     <div class="manga-hero__meta">
                                         <h1>{info.title.clone()}</h1>
 
-                                        // Status + authors/artists
                                         <div class="details">
                                             <div class="status">
                                                 <p>"Status: " {info_status}</p>
@@ -193,12 +180,12 @@ pub fn MangaDetails() -> impl IntoView {
                                             </div>
                                         </div>
 
-                                        // Description — now adjacent to authors, easy to read
-                                        <div class="description">
-                                            <p>{info_description}</p>
-                                        </div>
+                                        <div class="description"
+                                            inner_html=info_description_html
+                                                .or(info_description.map(|d| format!("<p>{d}</p>")))
+                                                .unwrap_or_default()
+                                        />
 
-                                        // Genre / tag chips
                                         <div class="tags">
                                             <For
                                                 each=move || info_tags.clone()
@@ -211,7 +198,6 @@ pub fn MangaDetails() -> impl IntoView {
                                             />
                                         </div>
 
-                                        // Library action buttons
                                         <div class="library-actions">
                                             {move || {
                                                 if is_local_route {
@@ -322,7 +308,6 @@ pub fn MangaDetails() -> impl IntoView {
                                             }}
                                         </div>
 
-                                        // ── Category chips (local manga only) ─────────────
                                         <Show when=move || is_local_route fallback=|| ()>
                                             <div class="category-selector">
                                                 <p class="category-selector__label">"Categories"</p>
@@ -390,7 +375,6 @@ pub fn MangaDetails() -> impl IntoView {
                                             </div>
                                         </Show>
 
-                                        // ── Download rules (local manga only) ─────────────
                                         <Show when=move || is_local_route fallback=|| ()>
                                             <div class="collapsible-panel">
                                                 <button
@@ -491,7 +475,6 @@ pub fn MangaDetails() -> impl IntoView {
                                             </div>
                                         </Show>
 
-                                        // ── Scanlator preferences (local manga only) ────────
                                         <Show when=move || is_local_route fallback=|| ()>
                                             <div class="collapsible-panel">
                                                 <button
@@ -586,7 +569,6 @@ pub fn MangaDetails() -> impl IntoView {
                                                                         />
                                                                     </ul>
 
-                                                                    // "Add preference" for scanlators not yet in the list
                                                                     {
                                                                         if unset.is_empty() {
                                                                             view! { <span></span> }.into_any()
@@ -626,10 +608,9 @@ pub fn MangaDetails() -> impl IntoView {
                                             </div>
                                         </Show>
 
-                                    </div> // end .manga-hero__meta
-                                </div> // end .manga-hero
+                                    </div>
+                                </div>
 
-                                // ── Chapter list panel ────────────────────────────────────
                                 <div class="chapter-list-group">
                                     <div class="chapter-list-header">
                                         <h2>"Chapters"</h2>
@@ -835,8 +816,8 @@ pub fn MangaDetails() -> impl IntoView {
                                                 }.into_any()
                                             }
                                         }}
-                                    </div> // end .chapter-list
-                                </div> // end .chapter-list-group
+                                    </div>
+                                </div>
                             }.into_any()
                         },
                         _ => ().into_any()

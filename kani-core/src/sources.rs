@@ -10,32 +10,35 @@ const EPOCH_DEADLINE_TICKS: u64 = 500;
 
 macro_rules! execute_wasm {
     ($self:expr, $method:ident $(, $args:expr)*) => {{
-        let bindings = $self
-            .bindings
-            .as_ref()
-            .expect("Bindings should be initialized");
-        let store = $self
-            .store
-            .as_mut()
+        let bindings = $self.bindings.as_ref().expect("Bindings should be initialized");
+        let store = $self.store.as_mut()
             .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
 
-        store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
+        $self.in_flight = true;
 
+        store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
         let provider = bindings.kani_extension_manga_provider();
         let raw_result = provider.$method(&mut *store $(, $args)*)
             .await
             .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)));
 
+        if let Err(Error::Internal(ref msg)) = raw_result {
+            if msg.contains("deadlock detected") || msg.contains("event loop cannot make further progress") {
+                tracing::error!("WASM deadlock detected, poisoning instance");
+                $self.poisoned = true;
+                $self.in_flight = false;
+                return Err(Error::Internal("WASM instance deadlocked and has been discarded".to_string()));
+            }
+        }
+
         store.data_mut().clear_all();
         $self.last_call = Some(Instant::now());
-
+        $self.in_flight = false;
         let inner = raw_result?;
         let result = inner.map_err(Error::Extension)?;
-
         Ok(result)
     }};
 }
-
 
 /// Hosts a single WASM source extension.
 pub struct SourceInstance {
@@ -44,6 +47,8 @@ pub struct SourceInstance {
     last_call: Option<Instant>,
     smart_client: crate::http::SmartClient,
     base_url: Option<String>,
+    pub poisoned: bool,
+    pub in_flight: bool,
 }
 
 impl SourceInstance {
@@ -54,6 +59,8 @@ impl SourceInstance {
             last_call: None,
             smart_client,
             base_url,
+            poisoned: false,
+            in_flight: false,
         }
     }
 

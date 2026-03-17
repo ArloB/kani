@@ -1,6 +1,6 @@
 use crate::{
     server_fns::{get_all_artists, get_all_authors, get_all_tags, get_categories, 
-        get_library, proxy_url, start_refresh_all}, 
+        get_library, start_refresh_all}, 
     types::{Category, MangaSortOrder, RefreshState}
 };
 use leptos::prelude::*;
@@ -9,18 +9,8 @@ use leptos_router::{components::A, hooks::use_query_map};
 #[component]
 pub fn Library() -> impl IntoView {
     let (raw_search, set_raw_search) = signal(String::new());
-    let (debounced_search, set_debounced_search) = signal(Option::<String>::None);
-
-    Effect::new(move |_| {
-        let val = raw_search.get();
-        leptos::task::spawn_local(async move {
-            gloo_timers::future::TimeoutFuture::new(300).await;
-            if raw_search.get_untracked() == val {
-                let search = if val.is_empty() { None } else { Some(val) };
-                set_debounced_search.set(search);
-            }
-        });
-    });
+    
+    let debounced_search = crate::utils::use_debounced_signal(raw_search, 300);
 
     let (status_filter, set_status_filter) = signal(Option::<i64>::None);
     let (tag_filter, set_tag_filter) = signal(Option::<i64>::None);
@@ -43,7 +33,10 @@ pub fn Library() -> impl IntoView {
     let library = Resource::new(
         move || (
             page.get(),
-            debounced_search.get(),
+            {
+                let s = debounced_search.get();
+                if s.is_empty() { None } else { Some(s) }
+            },
             status_filter.get(),
             tag_filter.get(),
             author_filter.get(),
@@ -311,15 +304,14 @@ pub fn Library() -> impl IntoView {
                                 <div class="manga-grid">
                                     <For
                                         each=move || library.items.clone()
-                                        key=|(m, _)| m.id.clone()
-                                        children=move |(manga, base_url)| view! {
+                                        key=|m| m.id.clone()
+                                        children=move |manga| view! {
                                             <div class="manga-card">
                                                 <A href=format!("/manga/{}", manga.id)>
                                                     <div class="cover">
                                                         {match manga.cover_url {
                                                             Some(url) => {
-                                                                let src = proxy_url(&url, &base_url);
-                                                                view! { <img src=src alt=manga.title.clone() /> }.into_any()
+                                                                view! { <img src=url alt=manga.title.clone() /> }.into_any()
                                                             },
                                                             None => view! { <div class="no-cover">"No Cover"</div> }.into_any(),
                                                         }}

@@ -1,13 +1,14 @@
-use crate::server_fns::{download_chapter, get_recent_updates, proxy_url};
-use crate::types::{LiveChapterStatus, RecentUpdate};
+use crate::server_fns::{download_chapter, get_recent_updates};
+use crate::types::{LiveChapterStatus, RecentUpdateItem};
 use leptos::prelude::*;
 use leptos_router::components::A;
 
+type GroupedUpdates = Vec<(i64, String, Option<String>, Vec<RecentUpdateItem>)>;
+
 // Group the flat list by manga_id while preserving first-seen order.
-fn group_by_manga(updates: Vec<RecentUpdate>) -> Vec<(i64, String, Option<String>, String, Vec<RecentUpdate>)> {
-    // (manga_id, manga_name, cover_url, base_url, chapters)
+fn group_by_manga(updates: Vec<RecentUpdateItem>) -> GroupedUpdates {
     let mut seen: std::collections::HashMap<i64, usize> = Default::default();
-    let mut groups: Vec<(i64, String, Option<String>, String, Vec<RecentUpdate>)> = Vec::new();
+    let mut groups: GroupedUpdates = Vec::new();
 
     for update in updates {
         let idx = if let Some(&i) = seen.get(&update.manga_id) {
@@ -19,12 +20,11 @@ fn group_by_manga(updates: Vec<RecentUpdate>) -> Vec<(i64, String, Option<String
                 update.manga_id,
                 update.manga_name.clone(),
                 update.cover_url.clone(),
-                update.base_url.clone(),
                 Vec::new(),
             ));
             i
         };
-        groups[idx].4.push(update);
+        groups[idx].3.push(update);
     }
     groups
 }
@@ -50,28 +50,24 @@ pub fn RecentUpdates() -> impl IntoView {
             <Suspense fallback=move || view! { <p class="spinner">"Loading…"</p> }>
                 {move || updates.get().map(|res| match res {
                     Err(e) => view! { <p class="error">"Error: "{e.to_string()}</p> }.into_any(),
-                    Ok(list) if list.is_empty() => view! {
+                    Ok(list) if list.recent_updates.is_empty() => view! {
                         <p class="empty">"No recent updates yet. Add manga to your library and scan for chapters."</p>
                     }.into_any(),
                     Ok(list) => {
-                        let has_more = list.len() >= 50;
-                        let groups = group_by_manga(list);
+                        let has_more = list.has_next_page;
+                        let groups = group_by_manga(list.recent_updates);
                         view! {
                             <div class="update-group-list">
                                 <For
                                     each=move || groups.clone()
                                     key=|(manga_id, ..)| *manga_id
-                                    children=move |(manga_id, manga_name, cover_url, base_url, chapters)| {
-                                        let cover_src = cover_url
-                                            .as_deref()
-                                            .map(|u| proxy_url(u, &base_url));
-
+                                    children=move |(manga_id, manga_name, cover_url, chapters)| {
                                         view! {
                                             <div class="update-group">
                                                 <div class="update-group__header">
                                                     <A href=format!("/manga/{}", manga_id)>
                                                         <div class="update-group__thumb">
-                                                            {match cover_src {
+                                                            {match cover_url {
                                                                 Some(src) => view! {
                                                                     <img src=src alt=manga_name.clone() />
                                                                 }.into_any(),

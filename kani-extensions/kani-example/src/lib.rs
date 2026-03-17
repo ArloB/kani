@@ -121,9 +121,7 @@ impl MangaExtension for Example {
     }
 
     fn get_pages(&self, _manga_id: &str, _chapter_id: &str) -> ExtensionResult<Chapter> {
-        let chapter_info = Chapter {
-            pages: Vec::new()
-        };
+        let chapter_info = Chapter { pages: Vec::new() };
 
         Ok(chapter_info)
     }

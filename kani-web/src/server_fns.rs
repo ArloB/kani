@@ -1,4 +1,4 @@
-use crate::types::{AppSettings, Category, ChapterList, DownloadRule, DownloadRuleKind, GlobalSearchResult, LibraryPage, MangaInfo, MangaList, MangaSortOrder, RecentUpdate, Source};
+use crate::types::{AppSettings, Category, ChapterList, DownloadRule, DownloadRuleKind, GlobalSearchResult, LibraryPage, MangaInfo, MangaList, MangaSortOrder, RecentUpdate, RecentUpdateItem, Source};
 use leptos::prelude::*;
 
 #[cfg(feature = "ssr")]
@@ -19,11 +19,27 @@ pub async fn fetch_sources() -> Result<Vec<Source>, ServerFnError> {
 #[server]
 pub async fn get_popular_manga(source_id: i64, page: i32) -> Result<MangaList, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
+    let base_url = {
+        sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(to_server_err)?
+            .unwrap_or_default()
+    };
+
     let json = state
         .get_popular_manga(source_id, page)
         .await
         .map_err(to_server_err)?;
-    serde_json::from_str(&json).map_err(to_server_err)
+    let mut list: MangaList = serde_json::from_str(&json).map_err(to_server_err)?;
+
+    for item in &mut list.manga {
+        if let Some(ref url) = item.cover_url.clone() {
+            item.cover_url = Some(sign_image_url(url, &base_url, &state));
+        }
+    }
+
+    Ok(list)
 }
 
 #[server]
@@ -33,11 +49,27 @@ pub async fn search_manga(
     page: i32,
 ) -> Result<MangaList, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
+    let base_url = {
+        sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(to_server_err)?
+            .unwrap_or_default()
+    };
+
     let json = state
         .search_manga(source_id, &query, page)
         .await
         .map_err(to_server_err)?;
-    serde_json::from_str(&json).map_err(to_server_err)
+    let mut list: MangaList = serde_json::from_str(&json).map_err(to_server_err)?;
+
+    for item in &mut list.manga {
+        if let Some(ref url) = item.cover_url.clone() {
+            item.cover_url = Some(sign_image_url(url, &base_url, &state));
+        }
+    }
+
+    Ok(list)
 }
 
 #[server]
@@ -46,11 +78,24 @@ pub async fn get_manga_details(
     manga_id: String,
 ) -> Result<MangaInfo, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
+    let base_url = {
+        sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(to_server_err)?
+            .unwrap_or_default()
+    };
+
     let json = state
         .get_manga_details(source_id, &manga_id)
         .await
         .map_err(to_server_err)?;
-    serde_json::from_str(&json).map_err(to_server_err)
+    let mut info: MangaInfo = serde_json::from_str(&json).map_err(to_server_err)?;
+
+    info.cover_url = info.cover_url.map(|url| sign_image_url(&url, &base_url, &state));
+    info.description_html = info.description.as_deref().map(crate::markdown::render_description);
+
+    Ok(info)
 }
 
 #[server]
@@ -65,6 +110,34 @@ pub async fn get_chapter_list(
         .await
         .map_err(to_server_err)?;
     serde_json::from_str(&json).map_err(to_server_err)
+}
+
+#[server]
+pub async fn get_pages(
+    source_id: i64,
+    manga_id: String,
+    chapter_id: String,
+) -> Result<crate::types::ChapterContents, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let base_url = {
+        sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(to_server_err)?
+            .unwrap_or_default()
+    };
+
+    let json = state
+        .get_pages(source_id, &manga_id, &chapter_id)
+        .await
+        .map_err(to_server_err)?;
+    let mut chapter: crate::types::ChapterContents = serde_json::from_str(&json).map_err(to_server_err)?;
+
+    for page in &mut chapter.pages {
+        page.url = sign_image_url(&page.url, &base_url, &state);
+    }
+    
+    Ok(chapter)
 }
 
 #[server]
@@ -172,12 +245,21 @@ pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source, bool, bool),
                             "Manga {id} not found"
                         ))
                     })?;
+
+    let description_html = manga.description.as_ref().map(|d| crate::markdown::render_description(d));
     
+    let cover_url = if manga.local_cover_path.is_some() {
+        Some(format!("/rest/manga/{}/cover", id))
+    } else {
+        manga.cover_url.map(|url| sign_image_url(&url, &source.base_url, &state))
+    };
+
     let info = MangaInfo {
         id: manga.source_manga_id,
         title: manga.name,
-        cover_url: manga.cover_url,
+        cover_url,
         description: manga.description,
+        description_html,
         status: crate::types::MangaStatus::from(i64::from(manga.status)),
         authors: serde_json::from_str(&record.authors).unwrap_or_default(),
         artists: serde_json::from_str(&record.artists).unwrap_or_default(),
@@ -286,7 +368,7 @@ pub async fn get_library(
     let offset = (page - 1).max(0) * PAGE_SIZE;
 
     let mut qb = sqlx::QueryBuilder::new(
-        "SELECT m.id, m.name, m.cover_url, s.base_url
+        "SELECT m.id, m.name, m.cover_url, m.local_cover_path, s.base_url
          FROM manga m
          JOIN sources s ON m.source_id = s.id
          WHERE 1=1"
@@ -340,12 +422,17 @@ pub async fn get_library(
     records.truncate(PAGE_SIZE as usize);
 
     let items = records.into_iter().map(|r| {
-        let item = crate::types::MangaListItem {
+        let cover_url = if r.local_cover_path.is_some() {
+            Some(format!("/rest/manga/{}/cover", r.id))
+        } else {
+            r.cover_url.map(|url| sign_image_url(&url, &r.base_url, &state))
+        };
+
+        crate::types::MangaListItem {
             id: r.id.to_string(),
             title: r.name,
-            cover_url: r.cover_url,
-        };
-        (item, r.base_url)
+            cover_url,
+        }
     }).collect();
 
     Ok(LibraryPage {items, has_next_page})
@@ -448,10 +535,46 @@ pub async fn global_search(
     page: i32,
 ) -> Result<Vec<GlobalSearchResult>, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
-    state
+
+    let mut list = state
         .global_search(&query, scope, page)
         .await
-        .map_err(to_server_err)
+        .map_err(to_server_err)?;
+
+    let source_ids: Vec<i64> = list
+        .iter()
+        .map(|item| item.source_id)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let source_ids_json = serde_json::to_string(&source_ids).unwrap_or_default();
+
+    let base_urls: std::collections::HashMap<i64, String> = sqlx::query!(
+        "SELECT id, base_url FROM sources WHERE id IN (SELECT value FROM json_each(?))",
+        source_ids_json
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(to_server_err)?
+    .into_iter()
+    .map(|r| (r.id, r.base_url))
+    .collect();
+
+    for result in &mut list {
+        let referer = base_urls
+            .get(&result.source_id)
+            .map(String::as_str)
+            .unwrap_or("");
+        
+        for item in &mut result.manga {
+            if let Some(ref url) = item.cover_url.clone() {
+                item.cover_url = Some(sign_image_url(url, referer, &state));
+            }
+        }
+    }
+
+    Ok(list)
 }
 
 #[server]
@@ -792,10 +915,12 @@ pub async fn update_settings(settings: AppSettings) -> Result<(), ServerFnError>
 }
 
 #[server]
-pub async fn get_recent_updates(page: i32) -> Result<Vec<RecentUpdate>, ServerFnError> {
+pub async fn get_recent_updates(page: i32) -> Result<RecentUpdate, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
 
-    sqlx::query_as!(RecentUpdate, 
+    let offset = (page - 1) * 50 + 1;
+
+    let raw_updates = sqlx::query_as!(RecentUpdateItem, 
         "SELECT m.id as manga_id, m.name as manga_name, m.cover_url, s.base_url,
             c.id as chapter_id, c.chapter_number, c.name as chapter_name, c.discovered_at
         FROM chapters c
@@ -803,11 +928,25 @@ pub async fn get_recent_updates(page: i32) -> Result<Vec<RecentUpdate>, ServerFn
         JOIN sources s ON m.source_id = s.id
         WHERE c.discovered_at IS NOT NULL
         ORDER BY c.discovered_at DESC
-        LIMIT 50 OFFSET ?", 
-    page)
+        LIMIT 51 OFFSET ?", 
+    offset)
         .fetch_all(&state.db)
         .await
-        .map_err(to_server_err)
+        .map_err(to_server_err)?;
+
+    let mut recent_updates: Vec<RecentUpdateItem> = raw_updates
+        .into_iter()
+        .map(|mut u| {
+            if let Some(ref url) = u.cover_url.clone() {
+                u.cover_url = Some(sign_image_url(url, &u.base_url, &state));
+            }
+            u
+        })
+        .collect();
+
+    let has_next_page = recent_updates.len() > 50;
+    if has_next_page { recent_updates.truncate(50); }
+    Ok(RecentUpdate { recent_updates, has_next_page })
 }
 
 #[server]
@@ -826,10 +965,7 @@ pub async fn toggle_source_enabled(
     .map_err(to_server_err)
 }
 
-pub fn proxy_url(url: &str, referer: &str) -> String {
-    format!(
-        "/rest/image_proxy?url={}&referer={}",
-        urlencoding::encode(url),
-        referer
-    )
+#[cfg(feature = "ssr")]
+fn sign_image_url(url: &str, referer: &str, state: &crate::state::AppState) -> String {
+    crate::proxy::make_proxy_url(url, referer, &state.proxy_secret)
 }

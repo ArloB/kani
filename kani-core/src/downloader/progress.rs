@@ -56,7 +56,7 @@ pub enum ProgressEvent {
     ChapterCompleted {
         chapter_id: i64,
         chapter_name: String,
-        successful_pages: usize
+        successful_pages: usize,
     },
 
     /// A chapter download failed completely (e.g., couldn't create directory)

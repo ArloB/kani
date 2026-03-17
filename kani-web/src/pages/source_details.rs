@@ -1,4 +1,4 @@
-use crate::server_fns::{fetch_sources, get_popular_manga, proxy_url, search_manga};
+use crate::server_fns::{fetch_sources, get_popular_manga, search_manga};
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
@@ -62,20 +62,18 @@ pub fn SourceDetails() -> impl IntoView {
                 {move || {
                     manga_list.get().map(|res| match res {
                         Ok((list, source)) => {
-                            let base_url = source.base_url.clone();
                             view! {
                             <div class="manga-grid">
                                 <For
                                     each=move || list.manga.clone()
                                     key=|manga| manga.id.clone()
                                     children=move |manga| {
-                                        let base_url = base_url.clone();
                                         view! {
                                             <div class="manga-card">
                                                 <A href=format!("/source/{}/manga/{}", id(), manga.id)>
                                                     <div class="cover-image">
                                                         {match manga.cover_url {
-                                                            Some(url) => view! { <img src=proxy_url(&url, &base_url) alt=manga.title.clone() /> }.into_any(),
+                                                            Some(url) => view! { <img src=url alt=manga.title.clone() /> }.into_any(),
                                                             None => view! { <div class="no-cover">"No Cover"</div> }.into_any(),
                                                         }}
                                                     </div>

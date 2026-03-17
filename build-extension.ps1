@@ -14,7 +14,7 @@ foreach ($ext in Get-ChildItem "$Directory" -Directory) {
 
     Write-Host "Building $($ext.Name) extension" -ForegroundColor Cyan
 
-    cargo build --target wasm32-unknown-unknown --release -p $($ext.Name)
+    cargo build --target wasm32-unknown-unknown --profile wasm-release -p $($ext.Name)
     
     if ($LASTEXITCODE -ne 0) {
         Write-Host "$($ext.Name) build failed" -ForegroundColor Red
@@ -30,7 +30,7 @@ foreach ($ext in Get-ChildItem "$Directory" -Directory) {
     }
 
     $extNameUnderscore = $ext.Name.Replace('-', '_')
-    $source = "target\wasm32-unknown-unknown\release\$($extNameUnderscore).wasm"
+    $source = "target\wasm32-unknown-unknown\wasm-release\$($extNameUnderscore).wasm"
     $dest = "$wasmDir\$($ext.Name).wasm"
 
     Copy-Item $source $dest -Force

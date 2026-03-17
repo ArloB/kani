@@ -53,8 +53,7 @@ pub struct SearchMangaRequest {
 
 #[derive(Deserialize, Debug)]
 pub struct ProxyQuery {
-    pub url: String,
-    pub referer: String,
+    pub token: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
@@ -64,6 +63,7 @@ pub struct Manga {
     pub source_manga_id: String,
     pub name: String,
     pub cover_url: Option<String>,
+    pub local_cover_path: Option<String>,
     pub description: Option<String>,
     pub auto_download: bool,
     #[sqlx(try_from = "i64")]
@@ -90,6 +90,7 @@ pub struct LibraryRow {
     pub id: i64,
     pub name: String,
     pub cover_url: Option<String>,
+    pub local_cover_path: Option<String>,
     pub base_url: String
 }
 

@@ -93,7 +93,6 @@ pub fn App() -> impl IntoView {
                 }
             };
 
-            // Close the stream when the server sends an explicit "close" event
             let es_for_close = es.clone();
             let on_close_signal =
                 Closure::<dyn FnMut(MessageEvent)>::new(move |_: MessageEvent| {
@@ -114,7 +113,6 @@ pub fn App() -> impl IntoView {
                         None => return,
                     };
 
-                    // ── Live events ──────────────────────────────────────────
                     let event: IncomingEvent = match serde_json::from_str(&data) {
                         Ok(e) => e,
                         Err(e) => {
@@ -140,7 +138,6 @@ pub fn App() -> impl IntoView {
                             }
                         }
 
-                        // ── Scan notification ────────────────────────────────
                         IncomingEvent::NewChapters { manga_id, manga_name, count } => {
                             scan_notifications.update(|v| {
                                 if let Some(n) =
@@ -157,7 +154,6 @@ pub fn App() -> impl IntoView {
                             });
                         }
 
-                        // ── Refresh progress ───────
                         IncomingEvent::Refresh(event) => {
                             use crate::events::RefreshProgressEvent;
                             match event {
@@ -181,7 +177,6 @@ pub fn App() -> impl IntoView {
                             }
                         }
 
-                        // ── Download progress ────────────────────────────────
                         IncomingEvent::Download(download_event) => {
                             let maybe_dismiss_id = match &download_event {
                                 DownloadProgressEvent::ChapterCompleted {

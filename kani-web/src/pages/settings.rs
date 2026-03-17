@@ -8,13 +8,7 @@ use leptos::{either::Either, prelude::*};
 
 fn set_restart_flag(set_restart_needed: WriteSignal<bool>) {
     set_restart_needed.set(true);
-    #[cfg(feature = "hydrate")]
-    {
-        use web_sys::window;
-        if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
-            let _ = storage.set_item("kani_restart_needed", "1");
-        }
-    }
+    crate::utils::set_local_flag("kani_restart_needed", true);
 }
 
 #[component]
@@ -48,26 +42,15 @@ pub fn Settings() -> impl IntoView {
     });
 
     Effect::new(move |_| {
-      #[cfg(feature = "hydrate")]
-      {
-          use web_sys::window;
-          if let Some(storage) = window().and_then(|w| w.local_storage().ok().flatten())
-              && storage.get_item("kani_restart_needed").ok().flatten().as_deref() == Some("1") {
-                  set_restart_needed.set(true);
-              }
-      }
+        if crate::utils::get_local_flag("kani_restart_needed") {
+            set_restart_needed.set(true);
+        }
     });
 
     Effect::new(move |_| {
       if settings_res.get().is_some() {
         set_restart_needed.set(false);
-        #[cfg(feature = "hydrate")]
-        {
-            use web_sys::window;
-            if let Some(storage) = window().and_then(|w| w.local_storage().ok().flatten()) {
-                let _ = storage.remove_item("kani_restart_needed");
-            }
-        }
+        crate::utils::set_local_flag("kani_restart_needed", false);
       }
     });
 

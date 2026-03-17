@@ -45,6 +45,23 @@ interface utility {
     date-parse: func(date: string, fmt: string) -> result<s64, string>;
 }
 
+interface json {
+    type json-handle = s32;
+
+    parse: func(data: list<u8>) -> result<json-handle, string>;
+
+    get-str:   func(handle: json-handle, ptr: string) -> result<option<string>, string>;
+    get-i64:   func(handle: json-handle, ptr: string) -> result<option<s64>, string>;
+    get-f64:   func(handle: json-handle, ptr: string) -> result<option<f64>, string>;
+    get-bool:  func(handle: json-handle, ptr: string) -> result<option<bool>, string>;
+
+    array-len: func(handle: json-handle, ptr: string) -> result<option<s32>, string>;
+
+    array-get: func(handle: json-handle, ptr: string, index: s32) -> result<json-handle, string>;
+
+    drop-json: func(handle: json-handle);
+}
+
 interface types {
     enum manga-status {
         ongoing,
@@ -127,5 +144,6 @@ world kani-extension {
     import http;
     import html;
     import utility;
+    import json;
     export manga-provider;
 }

@@ -1,26 +1,23 @@
 use leptos::prelude::*;
-use leptos::web_sys;
 
-use crate::{server_fns::{fetch_sources, global_search, toggle_source_favourite}, types::SearchScope};
+use crate::{server_fns::{fetch_sources, global_search}, types::SearchScope};
 use leptos_router::{components::A};
 
 #[component]
 pub fn GlobalSearch() -> impl IntoView {
     let (raw_input, set_raw_input) = signal(String::new());
-    let (committed_query, set_committed_query) = signal(String::new());
     let (page, set_page) = signal(1i32);
 
     let (scope, set_scope) = signal(SearchScope::AllEnabled);
 
-    Effect::new(move |_| {
-        let val = raw_input.get();
-        leptos::task::spawn_local(async move {
-            gloo_timers::future::TimeoutFuture::new(300).await;
-            if raw_input.get_untracked() == val {
-                set_committed_query.set(val);
-                set_page.set(1);
-            }
-        });
+    let committed_query = crate::utils::use_debounced_signal(raw_input, 300);
+
+    Effect::new(move |prev: Option<String>| {
+        let val = committed_query.get();
+        if prev.is_some() {
+            set_page.set(1);
+        }
+        val
     });
 
     let sources = Resource::new(|| (), |_| fetch_sources());
@@ -37,8 +34,6 @@ pub fn GlobalSearch() -> impl IntoView {
 
     view! {
       <div class="global-search-page">
-
-          // ── Search bar ──────────────────────────────────────────────────
           <div class="search-bar">
               <span class="search-icon">"🔍"</span>
               <input
@@ -50,7 +45,6 @@ pub fn GlobalSearch() -> impl IntoView {
               />
           </div>
 
-          // ── Scope + source filter chips ─────────────────────────────────
           <div class="source-filters">
 
               <button
@@ -105,19 +99,6 @@ pub fn GlobalSearch() -> impl IntoView {
                                       });
                                   };
 
-                                  let (is_fav, set_is_fav) = signal(source.favourited);
-
-                                  let toggle_fav = move |ev: web_sys::MouseEvent| {
-                                      ev.stop_propagation();
-                                      let new_val = !is_fav.get();
-                                      set_is_fav.set(new_val);
-                                      leptos::task::spawn_local(async move {
-                                          if toggle_source_favourite(source_id, new_val).await.is_err() {
-                                              set_is_fav.set(!new_val);
-                                          }
-                                      });
-                                  };
-
                                   view! {
                                       <button
                                           class=move || {
@@ -130,12 +111,6 @@ pub fn GlobalSearch() -> impl IntoView {
                                           on:click=toggle_source
                                       >
                                           {source.name.clone()}
-                                          <span
-                                              class=move || if is_fav.get() { "star star--on" } else { "star" }
-                                              on:click=toggle_fav
-                                          >
-                                              {move || if is_fav.get() { "★" } else { "☆" }}
-                                          </span>
                                       </button>
                                   }
                               }
@@ -143,10 +118,8 @@ pub fn GlobalSearch() -> impl IntoView {
                       }
                   })}
               </Suspense>
-
           </div>
 
-          // ── Results ─────────────────────────────────────────────────────
           <Suspense fallback=move || view! { <div class="spinner">"Searching..."</div> }>
               {move || search_results.get().map(|res| match res {
                   Err(e) => view! {
@@ -213,7 +186,6 @@ pub fn GlobalSearch() -> impl IntoView {
                               }
                           />
 
-                          // ── Pagination ──────────────────────────────────
                           <div class="pagination">
                               {move || (page.get() > 1).then(|| view! {
                                   <button on:click=move |_| set_page.update(|p| *p -= 1)>

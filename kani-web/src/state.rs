@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use dashmap::DashMap;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexMap;
 use kani_shared::MangaInfo;
@@ -27,7 +28,10 @@ pub struct AppState {
     pub smart_client: kani_core::http::SmartClient,
     pub proxy_client: kani_core::http::SmartClient,
     pub refresh_tx: tokio::sync::broadcast::Sender<AppEvent>,
-    pub refresh_task: Arc<tokio::sync::Mutex<Option<tokio::task::AbortHandle>>>
+    pub refresh_task: Arc<tokio::sync::Mutex<Option<tokio::task::AbortHandle>>>,
+    pub cache: crate::cache::RequestCache,
+    pub proxy_secret: Arc<[u8; 32]>,
+    pub proxy_semaphores: Arc<DashMap<String, Arc<tokio::sync::Semaphore>>>,
 }
 
 impl AppState {
@@ -146,6 +150,12 @@ impl AppState {
         let (refresh_tx, _) = tokio::sync::broadcast::channel(256);
         let refresh_task = Arc::new(tokio::sync::Mutex::new(None));
 
+        let cache = crate::cache::RequestCache::new();
+
+        let proxy_secret = Arc::new(crate::proxy::load_or_generate_secret());
+
+        let proxy_semaphores = Arc::new(DashMap::new());
+
         Ok(Self {
             db: pool,
             wasm_runtime,
@@ -156,25 +166,30 @@ impl AppState {
             proxy_client,
             refresh_tx,
             refresh_task,
+            cache,
+            proxy_secret,
+            proxy_semaphores,
         })
     }
 
     pub async fn get_popular_manga(&self, id: i64, page: i32) -> Result<String, AppError> {
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
-        };
+        let sources = self.sources.clone();
 
-        let result = source_manager
-            .lease_instance()
-            .await?
-            .get_popular_manga(page)
-            .await?;
-
-        serde_json::to_string(&result).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+        self.cache
+            .get_or_fetch_popular_manga(id, page, async move {
+                let source_manager = {
+                    let sources = sources.read().await;
+                    sources.get(&id).cloned()
+                        .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+                };
+                let result = source_manager
+                    .lease_instance().await?
+                    .get_popular_manga(page).await?;
+                serde_json::to_string(&result)
+                    .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+            })
+            .await
+            .map_err(unwrap_cache_err)
     }
 
     pub async fn search_manga(&self, id: i64, query: &str, page: i32) -> Result<String, AppError> {
@@ -196,24 +211,24 @@ impl AppState {
     }
 
     pub async fn get_manga_details(&self, id: i64, manga_id: &str) -> Result<String, AppError> {
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
-        };
+        let sources    = self.sources.clone();
+        let manga_id_s = manga_id.to_string();
 
-        let result = source_manager
-            .lease_instance()
-            .await?
-            .get_manga_details(manga_id)
-            .await?;
-
-        let shared_result = convert_to_shared_manga_info(result);
-
-        serde_json::to_string(&shared_result)
-            .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+        self.cache
+            .get_or_fetch_manga_details(id, manga_id, async move {
+                let source_manager = {
+                    let sources = sources.read().await;
+                    sources.get(&id).cloned()
+                        .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+                };
+                let result = source_manager
+                    .lease_instance().await?
+                    .get_manga_details(&manga_id_s).await?;
+                serde_json::to_string(&convert_to_shared_manga_info(result))
+                    .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+            })
+            .await
+            .map_err(unwrap_cache_err)
     }
 
     async fn sync_manga_metadata(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, manga_row_id: i64, manga: &kani_shared::MangaInfo) -> Result<()> {
@@ -267,10 +282,17 @@ impl AppState {
         source_id: i64,
         manga_id: &str,
     ) -> Result<i64, AppError> {
-        let manga: kani_shared::MangaInfo = serde_json::from_str(
-            &self.get_manga_details(source_id, manga_id).await?,
-        )
-        .map_err(|e| AppError::InternalServerError(format!("Failed to parse manga: {}", e)))?;
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources.get(&source_id).cloned()
+                .ok_or_else(|| AppError::NotFound(format!("Source {source_id} not found")))?
+        };
+
+        let result = source_manager
+            .lease_instance().await?
+            .get_manga_details(manga_id).await?;
+
+        let manga = convert_to_shared_manga_info(result);
 
         let mut tx = self.db.begin().await?;
         let status: i64 = manga.status.into();
@@ -305,6 +327,20 @@ impl AppState {
         tx.commit().await?;
 
         if we_inserted {
+            if let Some(ref url) = manga.cover_url {
+                let base_url = sqlx::query_scalar!(
+                    "SELECT base_url FROM sources WHERE id = ?", source_id
+                )
+                .fetch_optional(&self.db).await?.unwrap_or_default();
+
+                if let Err(e) = self.download_and_store_cover(manga_row_id, url, &base_url).await {
+                    tracing::warn!(
+                        "Failed to download cover for manga {}: {} — library entry still saved",
+                        manga_row_id, e
+                    );
+                }
+            }
+
             let has_next_page = self.fetch_and_store_chapter_page(source_id, manga_id, manga_row_id, 1).await.unwrap_or_else(|e| {
                 tracing::error!("Failed to fetch initial chapters: {}", e);
                 false
@@ -329,8 +365,17 @@ impl AppState {
         manga_row_id: i64,
         page: i32,
     ) -> Result<bool, AppError> {
-        let res = self.get_chapter_list_paged(source_id, manga_id, page).await?;
-        let chapter_list: kani_shared::ChapterList = serde_json::from_str(&res)
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources.get(&source_id).cloned()
+                .ok_or_else(|| AppError::NotFound(format!("Source {} not found", source_id)))?
+        };
+        let res = source_manager
+            .lease_instance().await?
+            .get_chapter_list(manga_id, page).await?;
+        let json = serde_json::to_string(&res)
+            .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?;
+        let chapter_list: kani_shared::ChapterList = serde_json::from_str(&json)
             .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter list: {}", e)))?;
 
         if chapter_list.chapters.is_empty() {
@@ -384,32 +429,65 @@ impl AppState {
         }
     }
 
+    pub async fn get_pages(
+        &self,
+        id: i64,
+        manga_id: &str,
+        chapter_id: &str,
+    ) -> Result<String, AppError> {
+        let sources      = self.sources.clone();
+        let manga_id_s   = manga_id.to_string();
+        let chapter_id_s = chapter_id.to_string();
+
+        self.cache
+            .get_or_fetch_pages(id, manga_id, chapter_id, async move {
+                let source_manager = {
+                    let sources = sources.read().await;
+                    sources.get(&id).cloned()
+                        .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+                };
+                let result = source_manager
+                    .lease_instance().await?
+                    .get_pages(&manga_id_s, &chapter_id_s).await?;
+                serde_json::to_string(&result)
+                    .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+            })
+            .await
+            .map_err(unwrap_cache_err)
+    }
+
     pub async fn get_chapter_list_paged(
         &self,
         id: i64,
         manga_id: &str,
         page: i32,
     ) -> Result<String, AppError> {
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
-        };
+        let sources    = self.sources.clone();
+        let manga_id_s = manga_id.to_string();
 
-        let result = source_manager
-            .lease_instance()
-            .await?
-            .get_chapter_list(manga_id, page)
-            .await?;
-
-        serde_json::to_string(&result).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+        self.cache
+            .get_or_fetch_chapter_list(id, manga_id, page, async move {
+                let source_manager = {
+                    let sources = sources.read().await;
+                    sources.get(&id).cloned()
+                        .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+                };
+                let result = source_manager
+                    .lease_instance().await?
+                    .get_chapter_list(&manga_id_s, page).await?;
+                serde_json::to_string(&result)
+                    .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+            })
+            .await
+            .map_err(unwrap_cache_err)
     }
 
     pub async fn refresh_manga(&self, manga_row_id: i64) -> Result<()> {
         let ids = sqlx::query!(
-            "SELECT source_id, source_manga_id FROM manga WHERE id = ?",
+            "SELECT source_id, source_manga_id, s.base_url as base_url
+            FROM manga m
+            JOIN sources s ON m.source_id = s.id
+            WHERE m.id = ?",
             manga_row_id
         )
         .fetch_optional(&self.db)
@@ -452,10 +530,20 @@ impl AppState {
 
         tx.commit().await?;
 
+        if let Some(ref url) = manga_info.cover_url
+        && let Err(e) = self.download_and_store_cover(manga_row_id, url, &ids.base_url).await {
+            tracing::warn!(
+                "Failed to refresh cover for manga {}: {}",
+                manga_row_id, e
+            );
+        }
+
         let has_next_page = self.fetch_and_store_chapter_page(ids.source_id, &ids.source_manga_id, manga_row_id, 1).await.unwrap_or_else(|e| {
             tracing::error!("Failed to fetch initial chapters during refresh: {}", e);
             false
         });
+
+        self.cache.invalidate_chapter_list_for_manga(ids.source_id, &ids.source_manga_id).await;
 
         if has_next_page {
             let bg_self = self.clone();
@@ -648,9 +736,19 @@ impl AppState {
         let mut new_chapter_ids = Vec::new();
         let mut page = 1;
 
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources.get(&ids.source_id).cloned()
+                .ok_or_else(|| AppError::NotFound(format!("Source {} not found", ids.source_id)))?
+        };
+
         loop {
-            let res = self.get_chapter_list_paged(ids.source_id, &ids.source_manga_id, page).await?;
-            let chapter_list: kani_shared::ChapterList = serde_json::from_str(&res)
+            let res = source_manager
+                .lease_instance().await?
+                .get_chapter_list(&ids.source_manga_id, page).await?;
+            let json = serde_json::to_string(&res)
+                .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?;
+            let chapter_list: kani_shared::ChapterList = serde_json::from_str(&json)
                 .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter list: {}", e)))?;
 
             if chapter_list.chapters.is_empty() {
@@ -678,6 +776,10 @@ impl AppState {
         tx.commit().await?;
 
         if !new_chapter_ids.is_empty() {
+            self.cache
+                .invalidate_chapter_list_for_manga(ids.source_id, &ids.source_manga_id)
+                .await;
+
             let manga_name = sqlx::query_scalar!(
                 "SELECT name FROM manga WHERE id = ?", manga_row_id
             )
@@ -1123,6 +1225,76 @@ impl AppState {
             .as_ref()
             .is_some_and(|h| !h.is_finished())
     }
+
+    async fn download_and_store_cover(
+        &self,
+        manga_row_id: i64,
+        cover_url: &str,
+        base_url: &str,
+    ) -> Result<(), AppError> {
+        let library_path = self.settings.read().await.library_path.clone();
+        let covers_dir   = library_path.join("covers");
+        tokio::fs::create_dir_all(&covers_dir).await
+            .map_err(AppError::IoError)?;
+
+        let mut headers = rquest::header::HeaderMap::new();
+        if let Ok(v) = rquest::header::HeaderValue::from_str(base_url) {
+            headers.insert(rquest::header::REFERER, v);
+        }
+
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.proxy_client.safe_get(cover_url, Some(headers)),
+        )
+        .await
+        .map_err(|_| AppError::Other("Cover download timed out".into()))??;
+
+        if !response.status().is_success() {
+            return Err(AppError::Other(format!(
+                "Cover download returned {}",
+                response.status().as_u16()
+            )));
+        }
+
+        let content_type = response
+            .headers()
+            .get(rquest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("image/jpeg")
+            .to_string();
+
+        if !content_type.starts_with("image/") {
+            return Err(AppError::Other(format!(
+                "Expected image for cover, got Content-Type: {}",
+                content_type
+            )));
+        }
+
+        let ext = ext_for_content_type(&content_type);
+
+        const MAX_COVER_BYTES: usize = 10 * 1024 * 1024;
+        let bytes = response
+            .bytes_limited(MAX_COVER_BYTES)
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+        let filename    = format!("{}.{}", manga_row_id, ext);
+        let cover_path  = covers_dir.join(&filename);
+        let relative    = format!("covers/{}", filename);
+
+        tokio::fs::write(&cover_path, &bytes).await
+            .map_err(AppError::IoError)?;
+
+        sqlx::query!(
+            "UPDATE manga SET local_cover_path = ? WHERE id = ?",
+            relative,
+            manga_row_id
+        )
+        .execute(&self.db)
+        .await?;
+
+        Ok(())
+    }
 }
 
 fn convert_to_shared_manga_info(
@@ -1190,4 +1362,19 @@ async fn cleanup_staging_dirs(library_path: &std::path::Path) -> std::io::Result
     }
 
     Ok(())
+}
+
+fn unwrap_cache_err(e: Arc<AppError>) -> AppError {
+    match Arc::try_unwrap(e) {
+        Ok(err) => err,
+        Err(arc) => AppError::InternalServerError(arc.to_string()),
+    }
+}
+
+fn ext_for_content_type(ct: &str) -> &'static str {
+    if ct.contains("jpeg") || ct.contains("jpg") { "jpg"  }
+    else if ct.contains("png")                   { "png"  }
+    else if ct.contains("webp")                  { "webp" }
+    else if ct.contains("gif")                   { "gif"  }
+    else                                         { "jpg"  }
 }

@@ -1026,12 +1026,14 @@ main.container:has(.manga-details) {
 // Description — sits between people and tags for natural reading flow
 .description {
   font-size: var(--text-sm);
-  line-height: 1.75;
   color: var(--clr-text-muted);
+  line-height: 1.7;
 
-  p {
-    margin: 0;
-  }
+  p + p { margin-top: var(--sp-3); }
+  strong { color: var(--clr-text); font-weight: 600; }
+  em { font-style: italic; }
+  hr { border: none; border-top: 1px solid var(--clr-border); margin: var(--sp-3) 0; }
+  a { color: var(--clr-accent); text-decoration: underline; }
 }
 
 .library-actions {

@@ -73,7 +73,8 @@ impl SmartResponse {
     }
 
     pub async fn bytes_limited(self, max_bytes: usize) -> Result<bytes::Bytes> {
-        let content_length = self.headers()
+        let content_length = self
+            .headers()
             .get(rquest::header::CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse::<usize>().ok());
@@ -81,8 +82,8 @@ impl SmartResponse {
         let stream = Box::pin(futures::stream::unfold(self, |mut resp| async move {
             match resp.chunk().await {
                 Ok(Some(bytes)) => Some((Ok(bytes), resp)),
-                Ok(None)        => None,
-                Err(e)          => Some((Err(e), resp)),
+                Ok(None) => None,
+                Err(e) => Some((Err(e), resp)),
             }
         }));
 
@@ -267,7 +268,11 @@ impl SmartClient {
         self.send_request(request).await
     }
 
-    pub async fn safe_get(&self, initial_url: &str, headers: Option<rquest::header::HeaderMap>) -> Result<SmartResponse> {
+    pub async fn safe_get(
+        &self,
+        initial_url: &str,
+        headers: Option<rquest::header::HeaderMap>,
+    ) -> Result<SmartResponse> {
         const MAX_REDIRECTS: usize = 5;
 
         let mut builder = self.client.get(initial_url);
@@ -286,15 +291,23 @@ impl SmartClient {
                     .headers()
                     .get("location")
                     .and_then(|v| v.to_str().ok())
-                    .ok_or_else(|| crate::error::Error::Other("redirect with no Location header".into()))?;
+                    .ok_or_else(|| {
+                        crate::error::Error::Other("redirect with no Location header".into())
+                    })?;
 
-                let next = resp.url()
+                let next = resp
+                    .url()
                     .join(location)
                     .map_err(|_| crate::error::Error::Other("invalid redirect URL".into()))?;
 
                 match next.scheme() {
                     "http" | "https" => {}
-                    s => return Err(crate::error::Error::Other(format!("redirect to forbidden scheme: {}", s))),
+                    s => {
+                        return Err(crate::error::Error::Other(format!(
+                            "redirect to forbidden scheme: {}",
+                            s
+                        )));
+                    }
                 }
 
                 req = self.client.get(next).build()?;
@@ -399,17 +412,20 @@ impl SmartClient {
 
     fn store_credentials(&self, url: &str, cookies: &str, user_agent: &str) {
         let mut creds = (**self.credentials.load()).clone();
-        
+
         let domain = url
             .parse::<rquest::Url>()
             .ok()
             .and_then(|u| u.host_str().map(|h| h.to_string()))
             .unwrap_or_else(|| url.to_string());
 
-        creds.insert(domain, CachedCredentials {
-            cookies: cookies.to_string(),
-            user_agent: Some(user_agent.to_string()),
-        });
+        creds.insert(
+            domain,
+            CachedCredentials {
+                cookies: cookies.to_string(),
+                user_agent: Some(user_agent.to_string()),
+            },
+        );
 
         self.credentials.store(Arc::new(creds));
     }
@@ -427,21 +443,24 @@ where
     let mut stream = stream;
 
     if let Some(len) = content_length_hint
-    && len > max_bytes {
-        return Err(crate::error::Error::Other(
-            format!("Content-Length {} exceeds limit {}", len, max_bytes)
-        ));
+        && len > max_bytes
+    {
+        return Err(crate::error::Error::Other(format!(
+            "Content-Length {} exceeds limit {}",
+            len, max_bytes
+        )));
     }
 
-    let mut buf      = bytes::BytesMut::new();
+    let mut buf = bytes::BytesMut::new();
     let mut received = 0usize;
 
     while let Some(chunk) = stream.try_next().await.map_err(Into::into)? {
         received += chunk.len();
         if received > max_bytes {
-            return Err(crate::error::Error::Other(
-                format!("body exceeded limit of {} bytes mid-stream", max_bytes)
-            ));
+            return Err(crate::error::Error::Other(format!(
+                "body exceeded limit of {} bytes mid-stream",
+                max_bytes
+            )));
         }
         buf.extend_from_slice(&chunk);
     }

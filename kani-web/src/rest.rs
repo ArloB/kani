@@ -1,14 +1,10 @@
 //! Plain Axum REST handlers — mounted at /api in main.rs.
 
 use axum::{
-    Json, Router,
-    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
-    http::{StatusCode, header},
-    response::{
+    Json, Router, body::Body, extract::{DefaultBodyLimit, Multipart, Path, Query, State}, http::{HeaderMap, StatusCode, header}, response::{
         IntoResponse,
         sse::{Event, KeepAlive, Sse},
-    },
-    routing::{delete, get, post},
+    }, routing::{delete, get, post}
 };
 use serde_json::json;
 use std::{convert::Infallible, sync::Arc};
@@ -49,9 +45,14 @@ pub fn routes(state: AppState) -> Router {
             "/sources/{id}/chapters/{manga_id}/{page}",
             get(get_chapter_list),
         )
+        .route(
+            "/sources/{id}/pages/{manga_id}/{chapter_id}",
+            get(get_pages),
+        )
         // Library management
         .route("/library/{page}/{order}", get(get_library))
         .route("/manga/{id}", get(get_manga).delete(delete_manga))
+        .route("/manga/{id}/cover", get(serve_manga_cover))
         .route("/chapter/{id}/download", post(start_download))
         .route("/chapter/{id}/delete", delete(delete_downloaded))
         // Events
@@ -60,10 +61,6 @@ pub fn routes(state: AppState) -> Router {
         .with_state(state)
         .layer(DefaultBodyLimit::max(MAX_WASM_BYTES))
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Download progress SSE
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub async fn download_progress_sse(
     State(state): State<AppState>,
@@ -97,53 +94,140 @@ pub async fn download_progress_sse(
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Image proxy
-// ─────────────────────────────────────────────────────────────────────────────
+const PER_HOST_CONCURRENCY: usize = 5;
+
+fn host_semaphore(
+    map: &dashmap::DashMap<String, Arc<tokio::sync::Semaphore>>,
+    host: &str,
+) -> Arc<tokio::sync::Semaphore> {
+    map.entry(host.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(PER_HOST_CONCURRENCY)))
+        .clone()
+}
 
 pub async fn image_proxy(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<ProxyQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut headers = rquest::header::HeaderMap::new();
-    headers.insert(
-        rquest::header::REFERER,
-        rquest::header::HeaderValue::from_str(&query.referer)?,
-    );
-    
-    let response = state
-        .proxy_client
-        .safe_get(&query.url, Some(headers))
-        .await?;
+    let (url, referer) = crate::proxy::unseal_proxy_token(
+        &query.token,
+        &state.proxy_secret,
+    )
+    .ok_or_else(|| AppError::Other("Invalid or expired proxy token".into()))?;
 
-    let status = response.status();
+    let etag = crate::proxy::compute_etag(&url, &referer, &state.proxy_secret);
+
+    if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH)
+    && if_none_match.as_bytes() == etag.as_bytes() {
+        return Ok((
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::CACHE_CONTROL, header::HeaderValue::from_static(
+                    "public, max-age=31536000, immutable",
+                )),
+                (header::ETAG, header::HeaderValue::from_str(&etag)
+                    .map_err(|e| AppError::InternalServerError(e.to_string()))?),
+            ],
+            Body::empty(),
+        ).into_response());
+    }
+
+    let host = rquest::Url::parse(&url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .unwrap_or_else(|| url.clone());
+
+    let semaphore = host_semaphore(&state.proxy_semaphores, &host);
+    let _permit = semaphore
+        .acquire_owned()
+        .await
+        .map_err(|_| AppError::InternalServerError("Semaphore closed".into()))?;
+
+    let mut req_headers = rquest::header::HeaderMap::new();
+    req_headers.insert(
+        rquest::header::REFERER,
+        rquest::header::HeaderValue::from_str(&referer)
+            .map_err(AppError::InvalidHeaderValue)?,
+    );
+
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        state.proxy_client.safe_get(&url, Some(req_headers)),
+    )
+    .await
+    .map_err(|_| AppError::Other("Upstream image fetch timed out".into()))??;
+
+    if !response.status().is_success() {
+        tracing::warn!("Upstream returned {} for proxied request", response.status().as_u16());
+        return Err(AppError::Other(format!(
+            "Upstream returned {}",
+            response.status().as_u16()
+        )));
+    }
+
     let content_type = response
         .headers()
-        .get(header::CONTENT_TYPE)
+        .get(rquest::header::CONTENT_TYPE)
         .cloned()
-        .ok_or_else(|| AppError::InternalServerError("Failed to get content type".to_string()))?;
+        .ok_or_else(|| AppError::InternalServerError(
+            "Upstream response missing Content-Type".into(),
+        ))?;
 
-    let bytes = response
-        .bytes()
-        .await
+    let ct_str = content_type.to_str().unwrap_or("");
+    if !ct_str.starts_with("image/") {
+        tracing::warn!("Upstream proxy returned non-image Content-Type: {}", ct_str);
+        return Err(AppError::Other(format!(
+            "Expected image, upstream returned Content-Type: {}",
+            ct_str
+        )));
+    }
+
+    let ct_value = header::HeaderValue::from_bytes(content_type.as_bytes())
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+    let etag_value = header::HeaderValue::from_str(&etag)
         .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 
-    Ok((
-        status,
-        [
-            (header::CONTENT_TYPE, content_type),
-            (
-                header::CACHE_CONTROL,
-                header::HeaderValue::from_static("public, max-age=31536000, immutable"),
-            ),
-        ],
-        bytes,
-    ))
-}
+    const MAX_IMAGE_BYTES: usize = 50 * 1024 * 1024;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Source CRUD
-// ─────────────────────────────────────────────────────────────────────────────
+    let stream = futures::stream::unfold(
+        (response, 0usize, Some(_permit)),
+        move |(mut resp, received, permit)| async move {
+            match resp.chunk().await {
+                Ok(Some(chunk)) => {
+                    let new_total = received + chunk.len();
+                    if new_total > MAX_IMAGE_BYTES {
+                        tracing::warn!(
+                            "Upstream image exceeded {} byte limit, aborting stream",
+                            MAX_IMAGE_BYTES
+                        );
+                        None
+                    } else {
+                        Some((Ok(chunk), (resp, new_total, permit)))
+                    }
+                }
+                Ok(None) => None,
+                Err(e) => Some((
+                    Err(std::io::Error::other(e.to_string())),
+                    (resp, received, permit),
+                )),
+            }
+        },
+    );
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, ct_value),
+            (header::ETAG, etag_value),
+            (header::CACHE_CONTROL, header::HeaderValue::from_static(
+                "public, max-age=31536000, immutable",
+            )),
+            (header::X_CONTENT_TYPE_OPTIONS, header::HeaderValue::from_static("nosniff")),
+        ],
+        Body::from_stream(stream),
+    ).into_response())
+}
 
 async fn list_sources(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     let sources = sqlx::query_as!(
@@ -239,10 +323,6 @@ async fn get_metadata(
     Ok(result)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// WASM installation helper + handlers
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn install_source(
     state: &AppState,
     id: i64,
@@ -321,6 +401,8 @@ async fn install_source(
         .await
         .insert(id, Arc::new(source_manager));
 
+    state.cache.invalidate_source(id).await;
+
     tracing::info!(
         "Successfully installed source {}: {} v{}",
         id,
@@ -389,10 +471,6 @@ async fn fetch_wasm(
     Ok(StatusCode::OK)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Source data handlers (thin delegation to AppState)
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn get_popular_manga(
     State(state): State<AppState>,
     Path((id, page)): Path<(i64, i32)>,
@@ -422,6 +500,13 @@ async fn get_chapter_list(
     state.get_chapter_list_paged(id, &manga_id, page).await
 }
 
+async fn get_pages(
+    State(state): State<AppState>,
+    Path((id, manga_id, chapter_id)): Path<(i64, String, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    state.get_pages(id, &manga_id, &chapter_id).await
+}
+
 async fn save_to_library(
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
@@ -429,10 +514,6 @@ async fn save_to_library(
     let manga_row_id = state.save_to_library(id, &manga_id).await?;
     Ok(Json(json!(manga_row_id)))
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Library management handlers
-// ─────────────────────────────────────────────────────────────────────────────
 
 async fn get_library(
     State(state): State<AppState>,
@@ -497,9 +578,76 @@ async fn delete_downloaded(
     Ok((StatusCode::OK, Json(json!({}))))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Combined SSE
-// ─────────────────────────────────────────────────────────────────────────────
+async fn serve_manga_cover(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let record = sqlx::query!(
+        "SELECT local_cover_path FROM manga WHERE id = ?", id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("Manga {id} not found")))?;
+
+    let relative = record.local_cover_path
+        .ok_or_else(|| AppError::NotFound("No local cover for this manga".into()))?;
+
+    let library_path = state.settings.read().await.library_path.clone();
+    let full_path    = library_path.join(&relative);
+
+    let metadata = tokio::fs::metadata(&full_path).await
+        .map_err(|_| AppError::NotFound("Cover file not found on disk".into()))?;
+
+    let mtime = metadata.modified()
+        .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis())
+        .unwrap_or(0);
+    let etag = format!("\"{}\"", mtime);
+
+    if let Some(inm) = headers.get(header::IF_NONE_MATCH)
+    && inm.as_bytes() == etag.as_bytes() {
+        return Ok((
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::CACHE_CONTROL, header::HeaderValue::from_static(
+                    "public, max-age=31536000, immutable",
+                )),
+                (header::ETAG, header::HeaderValue::from_str(&etag)
+                    .map_err(|e| AppError::InternalServerError(e.to_string()))?),
+            ],
+            axum::body::Body::empty(),
+        ).into_response());
+    }
+
+    let ext = full_path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpg");
+    let content_type = match ext {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png"          => "image/png",
+        "webp"         => "image/webp",
+        "gif"          => "image/gif",
+        _              => "image/jpeg",
+    };
+
+    let bytes = tokio::fs::read(&full_path).await
+        .map_err(AppError::IoError)?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE,           header::HeaderValue::from_static(content_type)),
+            (header::ETAG,                   header::HeaderValue::from_str(&etag)
+                .map_err(|e| AppError::InternalServerError(e.to_string()))?),
+            (header::CONTENT_LENGTH,         header::HeaderValue::from(bytes.len())),
+            (header::CACHE_CONTROL,          header::HeaderValue::from_static(
+                "public, max-age=31536000, immutable",
+            )),
+            (header::X_CONTENT_TYPE_OPTIONS, header::HeaderValue::from_static("nosniff")),
+        ],
+        axum::body::Body::from(bytes),
+    ).into_response())
+}
 
 pub async fn combined_sse(
     State(state): State<AppState>,

@@ -59,10 +59,11 @@ impl SourceManager {
             .await
             .map_err(|e| Error::Internal(format!("Failed to acquire semaphore: {}", e)))?;
 
-        let instance = {
-            let mut pool = self.pool.lock().unwrap();
-            pool.pop()
-        };
+        let instance = if let Ok(mut pool) = self.pool.lock() {
+            Ok(pool.pop())
+        } else {
+            Err(Error::Internal("Failed to acquire pool lock".to_string()))
+        }?;
 
         let instance = match instance {
             Some(inst) => inst,
@@ -70,7 +71,15 @@ impl SourceManager {
                 let mut inst =
                     SourceInstance::new(self.smart_client.clone(), self.base_url.clone());
                 inst.load(&self.engine, &self.component, &self.linker)
-                    .await?;
+                    .await
+                    .map_err(|e| {
+                        let msg = e.to_string();
+                        if msg.contains("maximum concurrent component instance limit") {
+                            Error::Internal("Global WASM instance pool exhausted — increase max_wasm_instances in settings".to_string())
+                        } else {
+                            e
+                        }
+                    })?;
                 inst
             }
         };
@@ -166,9 +175,17 @@ impl OwnedSourceInstance {
 impl Drop for OwnedSourceInstance {
     fn drop(&mut self) {
         if let Some(instance) = self.instance.take() {
-            let mut pool = self.pool.lock().unwrap();
-            pool.push(instance);
-            drop(self._permit.take());
+            if instance.poisoned || instance.in_flight {
+                tracing::debug!(
+                    "Discarding dirty WASM instance (poisoned={}, in_flight={})",
+                    instance.poisoned,
+                    instance.in_flight
+                );
+            } else if let Ok(mut pool) = self.pool.lock() {
+                pool.push(instance);
+            }
         }
+
+        drop(self._permit.take());
     }
 }

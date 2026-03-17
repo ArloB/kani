@@ -1,8 +1,9 @@
 pub mod app;
-pub mod events; // DownloadProgressEvent mirror — no kani-shared dep, safe for both targets
+pub mod events;
 pub mod pages;
-pub mod server_fns; // replaces api.rs
-pub mod types;     // browser-safe mirrors of kani_shared types
+pub mod server_fns;
+pub mod types;
+pub mod utils;
 
 #[cfg(feature = "ssr")]
 pub mod error;
@@ -12,8 +13,13 @@ pub mod models;
 pub mod rest;
 #[cfg(feature = "ssr")]
 pub mod state;
+#[cfg(feature = "ssr")]
+pub mod cache;
+#[cfg(feature = "ssr")] 
+pub mod proxy;
+#[cfg(feature = "ssr")]
+pub mod markdown;
 
-/// WASM entry point — only compiled for the `hydrate` browser bundle.
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn hydrate() {

@@ -9,9 +9,9 @@ pub mod error;
 pub mod file_storage;
 pub mod http;
 pub mod network;
-pub mod utilities;
 pub mod source_manager;
 pub mod sources;
+pub mod utilities;
 pub mod wasm;
 
 pub use error::Error;

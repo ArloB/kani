@@ -74,6 +74,7 @@ pub struct HostState {
     pub next_doc_handle: i32,
     pub html_docs: HashMap<i32, StoredNode>,
     pub html_lists: HashMap<i32, Vec<StoredNode>>,
+    pub json_docs: HashMap<i32, serde_json::Value>,
     pub selector_cache: HashMap<String, scraper::Selector>,
     pub last_error: Option<i32>,
 }
@@ -92,6 +93,7 @@ impl HostState {
             next_doc_handle: 1,
             html_docs: HashMap::new(),
             html_lists: HashMap::new(),
+            json_docs: HashMap::new(),
             selector_cache: HashMap::new(),
             last_error: None,
         })
@@ -100,9 +102,8 @@ impl HostState {
     pub fn clear_all(&mut self) {
         self.html_docs.clear();
         self.html_lists.clear();
+        self.json_docs.clear();
         self.next_doc_handle = 1;
-        // selector_cache is intentionally not cleared: selectors are
-        // document-agnostic and can be reused across calls.
     }
 
     /// Returns a reference to the compiled selector, parsing and caching it on

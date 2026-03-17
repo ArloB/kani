@@ -3,7 +3,7 @@
 //! This module provides a high-level API for extensions to interact with the host,
 //! wrapping the low-level `wit-bindgen` generated code.
 
-use crate::bindings::kani::extension::{html, http, utility};
+use crate::bindings::kani::extension::{html, http, json, utility};
 
 // Re-export common types
 pub use http::Method as HttpMethod;
@@ -85,6 +85,18 @@ impl HttpRequest {
             Ok(res) => Ok(res),
             Err(e) => Err(crate::ExtensionError::NetworkError(e)),
         }
+    }
+
+    pub fn send_json_handle(self) -> Result<JsonHandle, crate::ExtensionError> {
+        let res = self.send()?;
+
+        if res.body.is_empty() {
+            return Err(crate::ExtensionError::NetworkError(
+                "Empty response".to_string(),
+            ));
+        }
+
+        JsonHandle::parse(&res.body)
     }
 }
 
@@ -249,5 +261,72 @@ pub fn parse_date(date: &str, fmt: &str) -> Option<i64> {
     match result {
         Ok(t) if t >= 0 => Some(t),
         _ => None,
+    }
+}
+
+// ============================================================
+// JSON API
+// ============================================================
+
+/// RAII wrapper around a JSON handle. Automatically drops the host-side
+/// Value when this goes out of scope.
+pub struct JsonHandle {
+    handle: json::JsonHandle,
+}
+
+impl JsonHandle {
+    /// Parse raw response bytes into a host-side JSON value.
+    pub fn parse(data: &[u8]) -> Result<Self, crate::ExtensionError> {
+        let handle = json::parse(data).map_err(crate::ExtensionError::ParseError)?;
+        Ok(Self { handle })
+    }
+
+    /// Get a string at the given JSON Pointer path.
+    pub fn get_str(&self, ptr: &str) -> Option<String> {
+        json::get_str(self.handle, ptr).ok().flatten()
+    }
+
+    /// Get a required string, returning ParseError if absent.
+    pub fn require_str(&self, ptr: &str) -> Result<String, crate::ExtensionError> {
+        self.get_str(ptr).ok_or_else(|| {
+            crate::ExtensionError::ParseError(format!("Missing required field: {}", ptr))
+        })
+    }
+
+    pub fn get_i64(&self, ptr: &str) -> Option<i64> {
+        json::get_i64(self.handle, ptr).ok().flatten()
+    }
+
+    pub fn get_f64(&self, ptr: &str) -> Option<f64> {
+        json::get_f64(self.handle, ptr).ok().flatten()
+    }
+
+    pub fn get_bool(&self, ptr: &str) -> Option<bool> {
+        json::get_bool(self.handle, ptr).ok().flatten()
+    }
+
+    /// Returns the length of an array at the given path.
+    pub fn array_len(&self, ptr: &str) -> Option<i32> {
+        json::array_len(self.handle, ptr).ok().flatten()
+    }
+
+    /// Returns a child handle for the element at ptr[index].
+    pub fn array_get(&self, ptr: &str, index: i32) -> Result<JsonHandle, crate::ExtensionError> {
+        let child =
+            json::array_get(self.handle, ptr, index).map_err(crate::ExtensionError::ParseError)?;
+        Ok(JsonHandle { handle: child })
+    }
+
+    /// Iterate over all elements of an array at the given path.
+    pub fn array_iter(&self, ptr: &str) -> impl Iterator<Item = JsonHandle> + '_ {
+        let len = self.array_len(ptr).unwrap_or(0);
+        let ptr = ptr.to_string();
+        (0..len).filter_map(move |i| self.array_get(&ptr, i).ok())
+    }
+}
+
+impl Drop for JsonHandle {
+    fn drop(&mut self) {
+        json::drop_json(self.handle);
     }
 }

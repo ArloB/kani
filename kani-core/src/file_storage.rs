@@ -25,7 +25,9 @@ pub async fn save_wasm(wasm_storage_path: &str, name: &str, bytes: &[u8]) -> Res
 
     let canonical_dir = dir.canonicalize()?;
 
-    if let Some(parent) = path.parent() && parent.canonicalize()? != canonical_dir {
+    if let Some(parent) = path.parent()
+        && parent.canonicalize()? != canonical_dir
+    {
         return Err(Error::PathTraversal(name));
     }
 
@@ -43,7 +45,9 @@ pub async fn delete_wasm_file(wasm_storage_path: &str, name: &str) -> Result<()>
     if path.exists() {
         let canonical_dir = dir.canonicalize()?;
 
-        if let Some(parent) = path.parent() && parent.canonicalize()? != canonical_dir {
+        if let Some(parent) = path.parent()
+            && parent.canonicalize()? != canonical_dir
+        {
             return Err(Error::PathTraversal(name));
         }
 

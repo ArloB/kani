@@ -67,6 +67,8 @@ pub struct MangaInfo {
     pub title: String,
     pub cover_url: Option<String>,
     pub description: Option<String>,
+    #[serde(default)]
+    pub description_html: Option<String>,
     pub authors: Vec<String>,
     pub artists: Vec<String>,
     pub status: MangaStatus,
@@ -275,7 +277,7 @@ impl MangaSortOrder {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct LibraryPage {
-    pub items: Vec<(MangaListItem, String)>,
+    pub items: Vec<MangaListItem>,
     pub has_next_page: bool
 }
 
@@ -409,6 +411,12 @@ pub struct AppSettings {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct RecentUpdate {
+    pub recent_updates: Vec<RecentUpdateItem>,
+    pub has_next_page: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct RecentUpdateItem {
     pub manga_id: i64,
     pub manga_name: String,
     pub cover_url: Option<String>,
@@ -424,4 +432,15 @@ pub enum RefreshState {
     Idle,
     Running { completed: usize, total: usize },
     Done { total: usize, failed: usize },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct ChapterContents {
+    pub pages: Vec<Page>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Page {
+    pub index: i64,
+    pub url: String,
 }
