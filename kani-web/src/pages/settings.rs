@@ -7,6 +7,7 @@ use crate::{
 };
 use leptos::{either::Either, prelude::*};
 
+#[allow(dead_code)]
 fn set_restart_flag(set_restart_needed: WriteSignal<bool>) {
     set_restart_needed.set(true);
     crate::utils::set_local_flag("kani_restart_needed", true);

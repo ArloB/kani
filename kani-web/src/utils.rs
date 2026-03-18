@@ -8,8 +8,11 @@ pub async fn sleep_ms(ms: u32) {
     #[cfg(feature = "hydrate")]
     gloo_timers::future::TimeoutFuture::new(ms).await;
 
-    #[cfg(not(feature = "hydrate"))]
+    #[cfg(feature = "ssr")]
     tokio::time::sleep(std::time::Duration::from_millis(ms as u64)).await;
+
+    #[cfg(not(any(feature = "hydrate", feature = "ssr")))]
+    let _ = ms;
 }
 
 /// Returns a debounced version of `source` that only updates after `delay_ms`
