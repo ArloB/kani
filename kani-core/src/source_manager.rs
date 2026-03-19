@@ -16,7 +16,9 @@ pub struct SourceManager {
     semaphore: Arc<Semaphore>,
     smart_client: crate::http::SmartClient,
     base_url: Option<String>,
+    unrestricted_http: bool,
     min_idle: usize,
+    preferences: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
 }
 
 impl SourceManager {
@@ -26,18 +28,21 @@ impl SourceManager {
         linker: Linker<HostState>,
         smart_client: crate::http::SmartClient,
         base_url: Option<String>,
+        unrestricted_http: bool,
         pool_size: usize,
         min_idle: usize,
+        preferences: std::collections::HashMap<String, String>,
     ) -> Result<Self> {
         let mut initial_pool: Vec<SourceInstance> = Vec::new();
 
         for _ in 0..min_idle.min(pool_size) {
-            let mut inst = SourceInstance::new(smart_client.clone(), base_url.clone());
+            let mut inst = SourceInstance::new(smart_client.clone(), base_url.clone(), unrestricted_http);
             inst.load(&engine, &component, &linker).await?;
             initial_pool.push(inst);
         }
 
         let pool = Arc::new(std::sync::Mutex::new(initial_pool));
+        let preferences = Arc::new(std::sync::RwLock::new(preferences));
 
         Ok(Self {
             engine,
@@ -47,8 +52,16 @@ impl SourceManager {
             semaphore: Arc::new(Semaphore::new(pool_size)),
             smart_client,
             base_url,
+            unrestricted_http,
             min_idle,
+            preferences,
         })
+    }
+
+    pub fn update_preferences(&self, prefs: std::collections::HashMap<String, String>) {
+        if let Ok(mut lock) = self.preferences.write() {
+            *lock = prefs;
+        }
     }
 
     pub async fn lease_instance(&self) -> Result<OwnedSourceInstance> {
@@ -68,8 +81,11 @@ impl SourceManager {
         let instance = match instance {
             Some(inst) => inst,
             None => {
-                let mut inst =
-                    SourceInstance::new(self.smart_client.clone(), self.base_url.clone());
+                let mut inst = SourceInstance::new(
+                    self.smart_client.clone(),
+                    self.base_url.clone(),
+                    self.unrestricted_http,
+                );
                 inst.load(&self.engine, &self.component, &self.linker)
                     .await
                     .map_err(|e| {
@@ -84,11 +100,17 @@ impl SourceManager {
             }
         };
 
-        Ok(OwnedSourceInstance {
+        let mut owned = OwnedSourceInstance {
             instance: Some(instance),
             pool: self.pool.clone(),
             _permit: Some(permit),
-        })
+        };
+
+        if let Ok(prefs) = self.preferences.read() {
+            owned.set_preference_map(prefs.clone());
+        }
+
+        Ok(owned)
     }
 
     pub async fn cleanup(&self, idle_timeout: Duration) {
@@ -169,6 +191,19 @@ impl OwnedSourceInstance {
     ) -> Result<crate::wasm::kani::extension::types::ExtensionMetadata> {
         let instance = self.instance.as_mut().expect("Instance should be present");
         instance.get_metadata().await
+    }
+
+    pub fn set_preference_map(
+        &mut self,
+        prefs: std::collections::HashMap<String, String>,
+    ) {
+        self.instance.as_mut().unwrap().set_preference_map(prefs);
+    }
+
+    pub async fn get_preferences(
+        &mut self,
+    ) -> Result<Vec<crate::wasm::kani::extension::types::PreferenceDescriptor>> {
+        self.instance.as_mut().unwrap().get_preferences().await
     }
 }
 

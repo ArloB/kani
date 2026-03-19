@@ -27,6 +27,7 @@ pub mod bindings {
 pub use bindings::KaniExtension;
 pub use bindings::exports;
 pub use bindings::kani;
+
 pub struct ResponseData {
     pub body: String,
     pub status: u16,
@@ -64,28 +65,47 @@ pub struct StoredNode {
     pub node_id: ego_tree::NodeId,
 }
 
+#[derive(Debug, Clone)]
+pub enum AllowedHost {
+    Restricted(String),
+    Unrestricted,
+    MetadataOnly,
+}
+
 use crate::http::SmartClient;
 
 /// Host state passed to WASM guest via Store.
 /// Manages handles for HTTP requests, responses, and parsed HTML documents.
 pub struct HostState {
     pub http_client: SmartClient,
-    pub allowed_host: Option<String>,
+    pub allowed_host: AllowedHost,
     pub next_doc_handle: i32,
     pub html_docs: HashMap<i32, StoredNode>,
     pub html_lists: HashMap<i32, Vec<StoredNode>>,
     pub json_docs: HashMap<i32, serde_json::Value>,
     pub selector_cache: HashMap<String, scraper::Selector>,
     pub last_error: Option<i32>,
+    pub preferences: std::collections::HashMap<String, String>,
 }
 
 impl HostState {
-    pub fn new(http_client: SmartClient, allowed_host: Option<String>) -> Result<Self> {
-        let allowed_host = allowed_host.and_then(|raw| {
-            raw.parse::<rquest::Url>()
-                .ok()
-                .and_then(|u| u.host_str().map(|h| h.to_string()))
-        });
+    pub fn new(http_client: SmartClient, allowed_host: AllowedHost) -> Result<Self> {
+        let allowed_host = match allowed_host {
+            AllowedHost::Restricted(raw) => {
+                let host = raw
+                    .parse::<rquest::Url>()
+                    .ok()
+                    .and_then(|u| u.host_str().map(|h| h.to_string()))
+                    .ok_or_else(|| {
+                        crate::error::Error::Internal(format!(
+                            "Cannot derive hostname from base_url '{}' for HTTP restriction",
+                            raw
+                        ))
+                    })?;
+                AllowedHost::Restricted(host)
+            }
+            other => other,
+        };
 
         Ok(Self {
             http_client,
@@ -96,6 +116,7 @@ impl HostState {
             json_docs: HashMap::new(),
             selector_cache: HashMap::new(),
             last_error: None,
+            preferences: HashMap::new(),
         })
     }
 
@@ -120,7 +141,7 @@ impl HostState {
 
 impl Default for HostState {
     fn default() -> Self {
-        HostState::new(SmartClient::new(None).unwrap(), None).unwrap()
+        HostState::new(SmartClient::new(None).unwrap(), AllowedHost::MetadataOnly).unwrap()
     }
 }
 

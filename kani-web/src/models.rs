@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use kani_shared::Chapter as SharedChapter;
 use sqlx::types::chrono;
 
 #[derive(Deserialize, Debug)]
@@ -116,5 +115,62 @@ impl TryFrom<DownloadRuleRow> for crate::types::DownloadRule {
             other => return Err(format!("Unknown rule_type in DB: {}", other)),
         };
         Ok(crate::types::DownloadRule { id: row.id, manga_id: row.manga_id, kind })
+    }
+}
+
+mod pref_conversions {
+    use crate::types::{PreferenceDescriptor, PreferenceKind, SelectOption};
+    use kani_core::wasm::kani::extension::types as wit;
+
+    impl From<wit::SelectOption> for SelectOption {
+        fn from(o: wit::SelectOption) -> Self {
+            Self { label: o.label, value: o.value }
+        }
+    }
+
+    impl From<wit::PreferenceKind> for PreferenceKind {
+        fn from(k: wit::PreferenceKind) -> Self {
+            match k {
+                wit::PreferenceKind::TextInput(p) => Self::TextInput {
+                    placeholder: p.placeholder,
+                    default_value: p.default_value,
+                    is_secret: p.is_secret,
+                },
+                wit::PreferenceKind::Checkbox(p) => Self::Checkbox {
+                    default_value: p.default_value,
+                },
+                wit::PreferenceKind::Select(p) => Self::Select {
+                    options: p.options.into_iter().map(Into::into).collect(),
+                    default_value: p.default_value,
+                },
+                wit::PreferenceKind::MultiSelect(p) => Self::MultiSelect {
+                    options: p.options.into_iter().map(Into::into).collect(),
+                    default_values: p.default_value,
+                },
+                wit::PreferenceKind::Number(p) => Self::Number {
+                    min: p.min, max: p.max, step: p.step,
+                    default_value: p.default_value,
+                },
+                wit::PreferenceKind::MultiValueList(p) => Self::MultiValueList {
+                    placeholder: p.placeholder,
+                    item_label: p.item_label,
+                    default_values: p.default_value,
+                },
+                wit::PreferenceKind::Label(p) => Self::Label { text: p.text },
+            }
+        }
+    }
+
+    impl From<wit::PreferenceDescriptor> for PreferenceDescriptor {
+        fn from(d: wit::PreferenceDescriptor) -> Self {
+            Self {
+                key: d.key,
+                title: d.title,
+                description: d.description,
+                kind: d.kind.into(),
+                group: d.group,
+                requires_key: d.requires_key,
+            }
+        }
     }
 }

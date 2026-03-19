@@ -22,9 +22,7 @@ pub mod bindings {
     });
 }
 
-pub use bindings::kani::extension::types::{
-    Chapter, ChapterInfo, ChapterList, ExtensionMetadata, MangaInfo, MangaList, MangaListItem, Page,
-};
+pub use bindings::kani::extension::types as wit_types;
 pub use bindings::kani::extension::{html, http, utility};
 
 pub mod extension;

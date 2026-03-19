@@ -334,7 +334,7 @@ async fn install_source(
     ))??;
 
     let metadata = {
-        let mut inst = kani_core::sources::SourceInstance::new(state.smart_client.clone(), None);
+        let mut inst = kani_core::sources::SourceInstance::new(state.smart_client.clone(), None, false);
         inst.load(
             state.wasm_runtime.engine(),
             &component,
@@ -346,10 +346,11 @@ async fn install_source(
     };
 
     sqlx::query!(
-        "UPDATE sources SET name = ?, version = ?, base_url = ? WHERE id = ?",
+        "UPDATE sources SET name = ?, version = ?, base_url = ?, unrestricted_http = ? WHERE id = ?",
         metadata.name,
         metadata.version,
         metadata.base_url,
+        metadata.unrestricted_http,
         id
     )
     .execute(&state.db)
@@ -382,8 +383,10 @@ async fn install_source(
         state.wasm_runtime.linker().clone(),
         state.smart_client.clone(),
         Some(metadata.base_url.clone()),
+        metadata.unrestricted_http,
         25,
         1,
+        state.load_pref_map(id).await.unwrap_or_default(),
     )
     .await
     .map_err(AppError::CoreError)?;

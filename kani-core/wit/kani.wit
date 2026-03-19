@@ -56,8 +56,10 @@ interface json {
     get-bool:  func(handle: json-handle, ptr: string) -> result<option<bool>, string>;
 
     array-len: func(handle: json-handle, ptr: string) -> result<option<s32>, string>;
-
     array-get: func(handle: json-handle, ptr: string, index: s32) -> result<json-handle, string>;
+
+    object-keys: func(handle: json-handle, ptr: string) -> result<list<string>, string>;
+    object-get:  func(handle: json-handle, ptr: string, key: string) -> result<option<json-handle>, string>;
 
     drop-json: func(handle: json-handle);
 }
@@ -124,11 +126,77 @@ interface types {
         base-url: string,
         language: string,
         nsfw: bool,
+        unrestricted-http: bool,
+    }
+
+    variant preference-kind {
+        text-input(text-input-pref),
+        checkbox(checkbox-pref),
+        select(select-pref),
+        multi-select(multi-select-pref),
+        number(number-input-pref),
+        multi-value-list(multi-value-list-pref),
+        label(label-pref),
+    }
+
+    record text-input-pref {
+        placeholder: option<string>,
+        default-value: option<string>,
+        is-secret: bool,
+    }
+
+    record checkbox-pref {
+        default-value: bool,
+    }
+
+    record select-option {
+        label: string,
+        value: string,
+    }
+
+    record multi-select-pref {
+        options: list<select-option>,
+        default-value: list<string>,
+    }
+
+    record number-input-pref {
+        default-value: option<f64>,
+        min: option<f64>,
+        max: option<f64>,
+        step: option<f64>,
+    }
+
+    record select-pref {
+        options: list<select-option>,
+        default-value: option<string>,
+    }
+
+    record multi-value-list-pref {
+        placeholder: option<string>,
+        item-label: option<string>,
+        default-value: list<string>,
+    }
+
+    record label-pref {
+        text: string,
+    }
+
+    record preference-descriptor {
+        key: string,
+        title: string,
+        description: option<string>,
+        kind: preference-kind,
+        group: option<string>,
+        requires-key: option<string>,
     }
 }
 
+interface prefs {
+    get-value: func(key: string) -> option<string>;
+}
+
 interface manga-provider {
-    use types.{manga-list, manga-info, chapter-list, chapter, extension-metadata};
+    use types.{manga-list, manga-info, chapter-list, chapter, extension-metadata, preference-descriptor};
 
     get-metadata: func() -> result<extension-metadata, string>;
 
@@ -137,6 +205,8 @@ interface manga-provider {
     get-manga-details: func(manga-id: string) -> result<manga-info, string>;
     get-chapter-list: func(manga-id: string, page: s32) -> result<chapter-list, string>;
     get-pages: func(manga-id: string, chapter-id: string) -> result<chapter, string>;
+
+    get-preferences: func() -> result<list<preference-descriptor>, string>;
 }
 
 world kani-extension {
@@ -145,5 +215,6 @@ world kani-extension {
     import html;
     import utility;
     import json;
+    import prefs;
     export manga-provider;
 }

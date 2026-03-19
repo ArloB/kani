@@ -1,6 +1,6 @@
 use crate::types::{
     AppSettings, Category, ChapterList, DownloadRule, DownloadRuleKind, GlobalSearchResult, LibraryPage, MangaInfo, 
-    MangaList, MangaSortOrder, RecentUpdate, RecentUpdateItem, Source
+    MangaList, MangaSortOrder, RecentUpdate, Source
 };
 use leptos::prelude::*;
 
@@ -917,7 +917,7 @@ pub async fn get_recent_updates(page: i32) -> Result<RecentUpdate, ServerFnError
 
     let offset = (page - 1) * 50;
 
-    let raw_updates = sqlx::query_as!(RecentUpdateItem, 
+    let raw_updates = sqlx::query_as!(crate::types::RecentUpdateItem, 
         "SELECT m.id as manga_id, m.name as manga_name, m.cover_url, m.local_cover_path, s.base_url,
             c.id as chapter_id, c.chapter_number, c.name as chapter_name, c.discovered_at
         FROM chapters c
@@ -931,7 +931,7 @@ pub async fn get_recent_updates(page: i32) -> Result<RecentUpdate, ServerFnError
         .await
         .map_err(to_server_err)?;
 
-    let mut recent_updates: Vec<RecentUpdateItem> = raw_updates
+    let mut recent_updates: Vec<crate::types::RecentUpdateItem> = raw_updates
     .into_iter()
     .map(|mut u| {
         u.cover_url = if u.local_cover_path.is_some() {
@@ -970,6 +970,126 @@ pub async fn toggle_source_enabled(
 pub async fn get_source(id: i64) -> Result<Source, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
     state.get_source(id).await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn get_source_preference_schema(
+    source_id: i64,
+) -> Result<Vec<crate::types::PreferenceDescriptor>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+
+    state.cache.get_or_fetch_preference_schema(source_id, async move {
+        let sources = state.sources.read().await;
+        let mgr = sources
+            .get(&source_id)
+            .ok_or_else(|| ServerFnError::new("Source not found"))?;
+
+        let mut inst = mgr.lease_instance().await.map_err(to_server_err)?;
+        let raw = inst.get_preferences().await.map_err(to_server_err)?;
+
+        Ok::<_, ServerFnError>(raw.into_iter().map(Into::into).collect())
+    }).await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn get_source_preferences(
+    source_id: i64,
+) -> Result<Vec<(String, String)>, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let rows = sqlx::query!(
+        "SELECT key, value FROM source_preferences WHERE source_id = ?",
+        source_id
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(to_server_err)?;
+    Ok(rows.into_iter().map(|r| (r.key, r.value)).collect())
+}
+
+#[server]
+pub async fn set_source_preference(
+    source_id: i64,
+    key: String,
+    value: String,
+) -> Result<(), ServerFnError> {
+    serde_json::from_str::<serde_json::Value>(&value)
+        .map_err(|_| ServerFnError::new("Preference value must be valid JSON"))?;
+
+    let state = expect_context::<crate::state::AppState>();
+    state.set_preference(source_id, &key, &value).await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn append_preference_list_item(
+    source_id: i64,
+    key: String,
+    item: String,
+) -> Result<(), ServerFnError> {
+    if item.trim().is_empty() {
+        return Err(ServerFnError::new("Item cannot be empty"));
+    }
+
+    let state = expect_context::<crate::state::AppState>();
+
+    let row = state.get_preference(source_id, &key).await.map_err(to_server_err)?;
+
+    let mut list: Vec<String> = row
+        .as_deref()
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or_default();
+
+    if !list.contains(&item) {
+        list.push(item);
+    }
+
+    let encoded = serde_json::to_string(&list).unwrap();
+    state.set_preference(source_id, &key, &encoded).await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn remove_preference_list_item(
+    source_id: i64,
+    key: String,
+    item: String,
+) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    let row = state.get_preference(source_id, &key).await.map_err(to_server_err)?;
+
+    let mut list: Vec<String> = row
+        .as_deref()
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or_default();
+
+    list.retain(|x| x != &item);
+
+    let encoded = serde_json::to_string(&list).unwrap();
+    state.set_preference(source_id, &key, &encoded).await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn toggle_preference_select_item(
+    source_id: i64,
+    key: String,
+    item: String,
+    selected: bool,
+) -> Result<(), ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+
+    let current = state.get_preference(source_id, &key).await.map_err(to_server_err)?;
+
+    let mut list: Vec<String> = current
+        .as_deref()
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or_default();
+
+    if selected {
+        if !list.contains(&item) { list.push(item); }
+    } else {
+        list.retain(|x| x != &item);
+    }
+
+    let encoded = serde_json::to_string(&list).unwrap();
+    state.set_preference(source_id, &key, &encoded).await.map_err(to_server_err)
 }
 
 #[cfg(feature = "ssr")]

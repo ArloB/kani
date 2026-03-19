@@ -4,7 +4,7 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexMap;
-use kani_shared::MangaInfo;
+use kani_shared::wit_types;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use kani_core::downloader::{DownloadTask, DownloaderManager};
@@ -116,14 +116,18 @@ impl AppState {
                 .compile_component(&bytes)
                 .map_err(AppError::CoreError)?;
 
+            let prefs = Self::load_pref_map_static(&pool, source.id).await?;
+
             let source_manager = SourceManager::new(
                 wasm_runtime.engine().clone(),
                 component,
                 wasm_runtime.linker().clone(),
                 global_smart_client.clone(),
                 Some(source.base_url),
+                source.unrestricted_http,
                 25,
                 1,
+                prefs,
             )
             .await
             .map_err(AppError::CoreError)?;
@@ -231,7 +235,7 @@ impl AppState {
             .map_err(unwrap_cache_err)
     }
 
-    async fn sync_manga_metadata(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, manga_row_id: i64, manga: &kani_shared::MangaInfo) -> Result<()> {
+    async fn sync_manga_metadata(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, manga_row_id: i64, manga: &wit_types::MangaInfo) -> Result<()> {
         for author in &manga.authors {
             sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", author)
                 .execute(&mut **tx)
@@ -375,7 +379,7 @@ impl AppState {
             .get_chapter_list(manga_id, page).await?;
         let json = serde_json::to_string(&res)
             .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?;
-        let chapter_list: kani_shared::ChapterList = serde_json::from_str(&json)
+        let chapter_list: wit_types::ChapterList = serde_json::from_str(&json)
             .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter list: {}", e)))?;
 
         if chapter_list.chapters.is_empty() {
@@ -495,7 +499,7 @@ impl AppState {
         .ok_or_else(|| AppError::NotFound(format!("Manga {manga_row_id} not found")))?;
 
         let manga_info_raw = self.get_manga_details(ids.source_id, &ids.source_manga_id).await?;
-        let manga_info: MangaInfo = serde_json::from_str(&manga_info_raw)
+        let manga_info: wit_types::MangaInfo = serde_json::from_str(&manga_info_raw)
             .map_err(|e| AppError::InternalServerError(format!("Failed to parse manga: {}", e)))?;
 
         let mut tx = self.db.begin().await?;
@@ -560,7 +564,7 @@ impl AppState {
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         manga_row_id: i64,
-        chapters: &[kani_shared::ChapterInfo],
+        chapters: &[wit_types::ChapterInfo],
     ) -> Result<Vec<i64>> {
         let mut ids = Vec::new();
         for chunk in chapters.chunks(100) {
@@ -748,7 +752,7 @@ impl AppState {
                 .get_chapter_list(&ids.source_manga_id, page).await?;
             let json = serde_json::to_string(&res)
                 .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?;
-            let chapter_list: kani_shared::ChapterList = serde_json::from_str(&json)
+            let chapter_list: wit_types::ChapterList = serde_json::from_str(&json)
                 .map_err(|e| AppError::InternalServerError(format!("Failed to parse chapter list: {}", e)))?;
 
             if chapter_list.chapters.is_empty() {
@@ -1118,7 +1122,7 @@ impl AppState {
 
                     let metadata = {
                         let mut inst =
-                            kani_core::sources::SourceInstance::new(smart_client.clone(), None);
+                            kani_core::sources::SourceInstance::new(smart_client.clone(), None, false);
                         inst.load(wasm_runtime.engine(), &component, wasm_runtime.linker())
                             .await
                             .map_err(AppError::CoreError)?;
@@ -1129,19 +1133,22 @@ impl AppState {
                         .and_then(serde_json::from_value::<kani_shared::ExtensionMetadata>)
                     {
                         Ok(metadata) => {
-                            if let Err(e) = sqlx::query!(
-                                "INSERT INTO sources (name, version, base_url, enabled) VALUES (?, ?, ?, 1)",
+                            let initially_enabled = if metadata.unrestricted_http { 0i64 } else { 1i64 };
+
+                            sqlx::query!(
+                                "INSERT INTO sources (name, version, base_url, enabled, unrestricted_http)
+                                VALUES (?, ?, ?, ?, ?)",
                                 filename,
                                 metadata.version,
-                                metadata.base_url
+                                metadata.base_url,
+                                initially_enabled,
+                                metadata.unrestricted_http,
                             )
                             .execute(db)
                             .await
-                            {
-                                tracing::error!("Failed to register source {}: {}", filename, e);
-                            } else {
-                                tracing::info!("Registered new source: {}", filename);
-                            }
+                            .map_err(AppError::SqlxError)?;
+
+                            tracing::info!("Registered new source: {}", filename);
                         }
                         Err(e) => {
                             tracing::error!(
@@ -1310,11 +1317,51 @@ impl AppState {
 
         Ok(source)
     }
+
+    pub async fn get_preference(&self, source_id: i64, key: &str) -> Result<Option<String>, AppError> {
+        sqlx::query_scalar!("SELECT value FROM source_preferences WHERE source_id = ? AND key = ?", source_id, key)
+            .fetch_optional(&self.db).await.map_err(Into::into)
+    }
+
+    pub async fn set_preference(&self, source_id: i64, key: &str, value: &str) -> Result<(), AppError> {
+        sqlx::query!("INSERT INTO source_preferences (source_id, key, value) VALUES (?, ?, ?) ON CONFLICT (source_id, key) DO UPDATE SET value = excluded.value", source_id, key, value)
+            .execute(&self.db).await?;
+        self.reload_preferences(source_id).await
+    }
+
+    pub async fn reload_preferences(&self, source_id: i64) -> Result<(), AppError> {
+        let prefs = self.load_pref_map(source_id).await?;
+        if let Some(mgr) = self.sources.read().await.get(&source_id) {
+            mgr.update_preferences(prefs);
+        }
+        Ok(())
+    }
+
+
+    pub async fn load_pref_map(&self, source_id: i64) -> Result<HashMap<String, String>, AppError> {
+        Self::load_pref_map_static(&self.db, source_id).await
+    }
+
+    async fn load_pref_map_static(db: &sqlx::Pool<sqlx::Sqlite>, source_id: i64) -> Result<HashMap<String, String>, AppError> {
+        let raw = sqlx::query!(
+            "SELECT key, value FROM source_preferences WHERE source_id = ?",
+            source_id
+        )
+        .fetch_all(db)
+        .await?;
+
+        let mut map = HashMap::new();
+        for row in raw {
+            map.insert(row.key, row.value);
+        }
+
+        Ok(map)
+    }
 }
 
 fn convert_to_shared_manga_info(
     info: kani_core::wasm::kani::extension::types::MangaInfo,
-) -> kani_shared::MangaInfo {
+) -> wit_types::MangaInfo {
     use kani_core::wasm::kani::extension::types::MangaStatus as CoreMangaStatus;
     use kani_shared::MangaStatus as SharedMangaStatus;
 
@@ -1326,7 +1373,7 @@ fn convert_to_shared_manga_info(
         CoreMangaStatus::Unknown => SharedMangaStatus::Unknown,
     };
 
-    kani_shared::MangaInfo {
+    wit_types::MangaInfo {
         id: info.id,
         title: info.title,
         cover_url: info.cover_url,
@@ -1379,7 +1426,7 @@ async fn cleanup_staging_dirs(library_path: &std::path::Path) -> std::io::Result
     Ok(())
 }
 
-fn unwrap_cache_err(e: Arc<AppError>) -> AppError {
+pub(crate) fn unwrap_cache_err(e: Arc<AppError>) -> AppError {
     match Arc::try_unwrap(e) {
         Ok(err) => err,
         Err(arc) => AppError::InternalServerError(arc.to_string()),

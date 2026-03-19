@@ -2552,3 +2552,389 @@ main.container:has(.manga-details) {
   0%, 100% { box-shadow: 0 0 0 0 var(--clr-accent-dim); }
   50%       { box-shadow: 0 0 0 4px transparent; }
 }
+
+// ── 19. Source Preference Rows ────────────────────────────────────────────
+
+// Body container inside a source settings card
+.source-pref-body {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--clr-border);
+}
+
+// Optional group section (when `group` is Some)
+.source-pref-group {
+  display: flex;
+  flex-direction: column;
+
+  & + & {
+    border-top: 1px solid var(--clr-border-subtle);
+  }
+}
+
+.source-pref-group__label {
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--clr-text-faint);
+  background: var(--clr-surface);
+  border-bottom: 1px solid var(--clr-border-subtle);
+}
+
+// One preference row — meta left, control right
+.pref-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--clr-border-subtle);
+  transition: background 0.1s;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.015);
+  }
+
+  // Label-only rows span full width and are styled differently
+  &--label {
+    padding: var(--sp-2) var(--sp-4);
+    font-size: var(--text-xs);
+    color: var(--clr-text-muted);
+    background: none;
+    &:hover { background: none; }
+  }
+}
+
+// Left side: title + description
+.pref-row__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.pref-row__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--clr-text);
+  cursor: default;
+}
+
+.pref-row__desc {
+  font-size: var(--text-xs);
+  color: var(--clr-text-muted);
+  line-height: 1.45;
+}
+
+.pref-row__label-text {
+  font-size: var(--text-xs);
+  color: var(--clr-text-muted);
+  line-height: 1.5;
+  flex: 1;
+}
+
+// Right side: the control widget
+.pref-row__control {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 52%;         // prevent wide inputs from dominating
+}
+
+// ── TextInput ────────────────────────────────────────────────
+
+.pref-row__text-row {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.pref-row__text-input {
+  min-width: 180px;
+  font-size: var(--text-xs);
+}
+
+.pref-row__save-btn {
+  @extend %btn-ghost;
+  font-size: var(--text-xs);
+  padding: var(--sp-1) var(--sp-3);
+  flex-shrink: 0;
+}
+
+// ── Checkbox ─────────────────────────────────────────────────
+
+.pref-row__checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+// Hide the native checkbox; the track pseudo-element replaces it visually
+.pref-row__checkbox {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+// Pill-shaped toggle track
+.pref-row__checkbox-track {
+  display: block;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--clr-surface-3);
+  border: 1px solid var(--clr-border);
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--clr-text-muted);
+    transition: transform 0.2s, background 0.2s;
+  }
+}
+
+.pref-row__checkbox:checked ~ .pref-row__checkbox-track {
+  background: var(--clr-accent-dim);
+  border-color: var(--clr-accent);
+
+  &::after {
+    transform: translateX(16px);
+    background: var(--clr-accent);
+  }
+}
+
+// ── Number ───────────────────────────────────────────────────
+
+.pref-row__number-row {
+  display: flex;
+  align-items: center;
+}
+
+.pref-row__number-input {
+  width: 100px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: right;
+}
+
+// ── Select ───────────────────────────────────────────────────
+
+.pref-row__select {
+  min-width: 140px;
+  font-size: var(--text-xs);
+}
+
+// ── MultiSelect ──────────────────────────────────────────────
+
+.pref-row__multiselect {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 160px;
+}
+
+.pref-row__multiselect-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  transition: background 0.1s;
+
+  &:hover { background: var(--clr-surface-3); }
+
+  input[type="checkbox"] {
+    accent-color: var(--clr-accent);
+    cursor: pointer;
+  }
+}
+
+// ── MultiValueList ───────────────────────────────────────────
+
+.pref-row__mvl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 220px;
+}
+
+.pref-row__mvl-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.pref-row__mvl-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--clr-surface-3);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+}
+
+.pref-row__mvl-item-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--clr-text);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+
+.pref-row__mvl-remove {
+  background: none;
+  border: none;
+  color: var(--clr-text-faint);
+  font-size: var(--text-base);
+  line-height: 1;
+  padding: 0 var(--sp-1);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s;
+
+  &:hover { color: var(--clr-danger); }
+}
+
+.pref-row__mvl-add {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.pref-row__mvl-input {
+  flex: 1;
+  font-size: var(--text-xs);
+  min-width: 0;
+}
+
+.pref-row__mvl-add-btn {
+  @extend %btn-ghost;
+  font-size: var(--text-xs);
+  padding: var(--sp-1) var(--sp-3);
+  flex-shrink: 0;
+  white-space: nowrap;
+
+  &:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+}
+
+// Loading skeleton inside a source card
+.source-settings-card__loading {
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--text-xs);
+  color: var(--clr-text-faint);
+  font-style: italic;
+  border-top: 1px solid var(--clr-border);
+}
+
+// ── Source card — unsafe extension indicators ─────────────────────────────
+
+// Amber left-border accent on the whole card when unrestricted_http is set
+.source-settings-card--unsafe {
+  border-left: 3px solid var(--clr-warn);
+}
+
+// Name row wraps name + badge horizontally
+.source-settings-card__name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+// The persistent ⚠ Unrestricted badge
+.source-unsafe-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  background: rgba(232, 169, 84, 0.12);
+  border: 1px solid var(--clr-warn);
+  border-radius: var(--radius-full);
+  color: var(--clr-warn);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: help;            // signals the title tooltip is meaningful
+  flex-shrink: 0;
+}
+
+// Inline confirmation strip
+.source-unsafe-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: rgba(232, 169, 84, 0.07);
+  border-top: 1px solid var(--clr-warn);
+  border-bottom: 1px solid var(--clr-border);
+  animation: fade-in 0.15s ease;
+}
+
+.source-unsafe-confirm__text {
+  font-size: var(--text-xs);
+  color: var(--clr-warn);
+  line-height: 1.5;
+}
+
+.source-unsafe-confirm__actions {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+
+.source-unsafe-confirm__cancel {
+  @extend %btn-ghost;
+  font-size: var(--text-xs);
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.source-unsafe-confirm__accept {
+  @extend %btn-ghost;
+  font-size: var(--text-xs);
+  padding: var(--sp-1) var(--sp-3);
+  border-color: var(--clr-warn);
+  color: var(--clr-warn);
+
+  &:hover {
+    background: rgba(232, 169, 84, 0.12);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

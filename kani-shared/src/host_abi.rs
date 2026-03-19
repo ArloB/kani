@@ -323,10 +323,65 @@ impl JsonHandle {
         let ptr = ptr.to_string();
         (0..len).filter_map(move |i| self.array_get(&ptr, i).ok())
     }
+
+    pub fn object_keys(&self, ptr: &str) -> Vec<String> {
+        json::object_keys(self.handle, ptr)
+            .ok()
+            .unwrap_or_default()
+    }
+
+    /// Returns a child handle for the value at object[key] under `ptr`.
+    /// Returns `None` if the key doesn't exist or `ptr` is not an object.
+    pub fn object_get(&self, ptr: &str, key: &str) -> Option<JsonHandle> {
+        json::object_get(self.handle, ptr, key)
+            .ok()
+            .flatten()
+            .map(|h| JsonHandle { handle: h })
+    }
+
+    /// Iterate over all (key, value) pairs of a JSON object at `ptr`.
+    pub fn object_iter<'a>(&'a self, ptr: &'a str) -> impl Iterator<Item = (String, JsonHandle)> + 'a {
+        self.object_keys(ptr)
+            .into_iter()
+            .filter_map(move |k| {
+                // By using the same 'a, we guarantee ptr lives as long as the iterator
+                self.object_get(ptr, &k).map(|v| (k, v))
+            })
+    }
+
+    // Add as a free function (outside JsonHandle):
+
+    /// Read a preference the host has stored for this extension.
+    /// Returns `None` if the key has never been set.
+    pub fn get_preference_value(key: &str) -> Option<String> {
+        crate::bindings::kani::extension::prefs::get_value(key)
+    }
+
+    /// Parse a `MultiValueList` preference into `Vec<String>`.
+    /// Returns an empty vec if unset or unparseable.
+    pub fn get_preference_list(key: &str) -> Vec<String> {
+        get_preference_value(key)
+            .and_then(|v| serde_json::from_str::<Vec<String>>(&v).ok())
+            .unwrap_or_default()
+}
 }
 
 impl Drop for JsonHandle {
     fn drop(&mut self) {
         json::drop_json(self.handle);
     }
+}
+
+// ============================================================
+// Prefs API
+// ============================================================
+
+pub fn get_preference_value(key: &str) -> Option<String> {
+    crate::bindings::kani::extension::prefs::get_value(key)
+}
+
+pub fn get_preference_list(key: &str) -> Vec<String> {
+    get_preference_value(key)
+        .and_then(|v| serde_json::from_str::<Vec<String>>(&v).ok())
+        .unwrap_or_default()
 }

@@ -1,7 +1,7 @@
 //! Source host management for WASM extensions.
 
 use crate::error::{Error, Result};
-use crate::wasm::HostState;
+use crate::wasm::{AllowedHost, HostState};
 use std::time::Instant;
 use wasmtime::Store;
 use wasmtime::component::Linker;
@@ -47,18 +47,20 @@ pub struct SourceInstance {
     last_call: Option<Instant>,
     smart_client: crate::http::SmartClient,
     base_url: Option<String>,
+    unrestricted_http: bool,
     pub poisoned: bool,
     pub in_flight: bool,
 }
 
 impl SourceInstance {
-    pub fn new(smart_client: crate::http::SmartClient, base_url: Option<String>) -> Self {
+    pub fn new(smart_client: crate::http::SmartClient, base_url: Option<String>, unrestricted_http: bool) -> Self {
         Self {
             store: None,
             bindings: None,
             last_call: None,
             smart_client,
             base_url,
+            unrestricted_http,
             poisoned: false,
             in_flight: false,
         }
@@ -127,9 +129,15 @@ impl SourceInstance {
         component: &wasmtime::component::Component,
         linker: &Linker<HostState>,
     ) -> Result<()> {
+        let allowed_host = match (self.base_url.as_deref(), self.unrestricted_http) {
+            (_, true)        => AllowedHost::Unrestricted,
+            (Some(url), false) => AllowedHost::Restricted(url.to_string()),
+            (None, false)    => AllowedHost::MetadataOnly,
+        };
+
         let mut store = Store::new(
             engine,
-            HostState::new(self.smart_client.clone(), self.base_url.clone())?,
+            HostState::new(self.smart_client.clone(), allowed_host)?,
         );
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
@@ -144,5 +152,23 @@ impl SourceInstance {
         self.last_call = Some(Instant::now());
 
         Ok(())
+    }
+
+    /// Injects current preference values into the store so the extension
+    /// can read them via the `prefs` host import.
+    pub fn set_preference_map(
+        &mut self,
+        prefs: std::collections::HashMap<String, String>,
+    ) {
+        if let Some(store) = &mut self.store {
+            store.data_mut().preferences = prefs;
+        }
+    }
+
+    /// Calls get-preferences on the WASM module, returning the schema.
+    pub async fn get_preferences(
+        &mut self,
+    ) -> Result<Vec<crate::wasm::kani::extension::types::PreferenceDescriptor>> {
+        execute_wasm!(self, call_get_preferences)
     }
 }

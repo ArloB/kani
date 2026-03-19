@@ -3,7 +3,10 @@
 //! These traits define the interface that WASM extensions must implement
 //! to provide manga source functionality.
 
-use crate::{Chapter, ChapterList, FilterList, MangaInfo, MangaList, PreferenceList};
+use crate::{
+    wit_types::{Chapter, ChapterList,MangaInfo, MangaList},
+    FilterList, PreferenceList
+};
 
 /// Result type for extension operations.
 pub type ExtensionResult<T> = Result<T, ExtensionError>;
@@ -84,8 +87,6 @@ pub trait MangaExtension {
 
     // Purpose: Allow the user to set login credentials or domain overrides. The extension should expose a definition of what settings it needs, and the host handles storage.
     fn get_preferences(&self) -> ExtensionResult<PreferenceList>;
-
-    fn set_preferences(&self, json_ptr: i32) -> ExtensionResult<()>;
 }
 
 /// Metadata about a source extension.
@@ -103,4 +104,6 @@ pub struct ExtensionMetadata {
     pub language: String,
     /// Whether the source supports NSFW content
     pub nsfw: bool,
+    /// Whether the source has unrestricted HTTP access (unsafe)
+    pub unrestricted_http: bool,
 }

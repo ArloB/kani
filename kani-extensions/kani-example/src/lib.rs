@@ -1,8 +1,16 @@
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
+// use kani_shared::host_abi::{HttpRequest, JsonHandle};
 use kani_shared::{
-    Chapter, ChapterList, ExtensionMetadata, ExtensionResult, FilterList, MangaExtension,
-    MangaInfo, MangaList, MangaStatus, PreferenceList, bindings,
+    ExtensionResult, FilterList, MangaExtension, 
+    MangaStatus, PreferenceList, bindings, wit_types
 };
+use wit_types::{
+    Chapter, ChapterList, ExtensionMetadata, MangaInfo, MangaList
+};
+
+#[cfg(target_family = "wasm")]
+#[global_allocator]
+static ALLOCATOR: talc::TalckWasm = unsafe { talc::TalckWasm::new_global() };
 
 pub struct Example {
     _base_url: String,
@@ -31,6 +39,7 @@ impl Example {
             base_url: "https://example.com".to_string(),
             language: "multi".to_string(),
             nsfw: false,
+            unrestricted_http: false,
         }
     }
 }
@@ -67,6 +76,12 @@ impl Guest for Example {
     fn get_pages(manga_id: String, chapter_id: String) -> Result<Chapter, String> {
         get_extension()
             .get_pages(&manga_id, &chapter_id)
+            .map_err(|e| e.to_string())
+    }
+    fn get_preferences() -> Result<Vec<wit_types::PreferenceDescriptor>, String> {
+        get_extension()
+            .get_preferences()
+            .map(|pl| pl.preferences.into_iter().map(Into::into).collect())
             .map_err(|e| e.to_string())
     }
 }
@@ -131,13 +146,7 @@ impl MangaExtension for Example {
     }
 
     fn get_preferences(&self) -> ExtensionResult<PreferenceList> {
-        Ok(PreferenceList {
-            preferences: vec![],
-        })
-    }
-
-    fn set_preferences(&self, _json_ptr: i32) -> ExtensionResult<()> {
-        Ok(())
+        Ok(PreferenceList { preferences: vec![] })
     }
 }
 

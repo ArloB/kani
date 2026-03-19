@@ -1,9 +1,12 @@
 use crate::{
-    server_fns::{
-        create_category, delete_category, fetch_sources, get_categories, get_settings, rename_category, reorder_categories, toggle_source_enabled, toggle_source_favourite, update_settings
+    pages::components::{
+        collapsible_panel::{CollapsiblePanel, CollapsibleVariant},
+        source_settings_card::SourceSettingsCard,
     },
-    types::{AppSettings, Category, Source},
-    pages::components::collapsible_panel::{CollapsiblePanel, CollapsibleVariant},
+    server_fns::{
+        create_category, delete_category, fetch_sources, get_categories, get_settings, 
+        rename_category, reorder_categories, update_settings
+    }, types::{AppSettings, Category, Source}
 };
 use leptos::{either::Either, prelude::*};
 
@@ -464,60 +467,6 @@ pub fn Settings() -> impl IntoView {
                     {move || if save_pending.get() { "Saving…" } else { "Save Settings" }}
                 </button>
             </div>
-        </div>
-    }
-}
-
-#[component]
-fn SourceSettingsCard(source: Source) -> impl IntoView {
-    let (enabled, set_enabled) = signal(source.enabled);
-    let (starred, set_starred) = signal(source.favourited);
-    let sid = source.id;
-
-    view! {
-        <div class="source-settings-card" class:source-settings-card--disabled=move || !enabled.get()>
-            <div class="source-settings-card__header">
-                <div class="source-settings-card__meta">
-                    <span class="source-settings-card__name">{source.name.clone()}</span>
-                    <span class="source-settings-card__version">{source.version.clone()}</span>
-                </div>
-                <div class="source-settings-card__actions">
-                    <label class="star-checkbox" title="Favourite">
-                        <input
-                            type="checkbox"
-                            checked=move || starred.get()
-                            on:change=move |ev| {
-                                let val = event_target_checked(&ev);
-                                set_starred.set(val);
-                                leptos::task::spawn_local(async move {
-                                    let _ = toggle_source_favourite(sid, val).await;
-                                });
-                            }
-                        />
-                        <span class="star-checkbox__icon">
-                            {move || if starred.get() { "★" } else { "☆" }}
-                        </span>
-                    </label>
-
-                    <label class="toggle-label" title="Enable source">
-                        <input
-                            type="checkbox"
-                            checked=move || enabled.get()
-                            on:change=move |ev| {
-                                let val = event_target_checked(&ev);
-                                set_enabled.set(val);
-                                leptos::task::spawn_local(async move {
-                                    let _ = toggle_source_enabled(sid, val).await;
-                                });
-                            }
-                        />
-                        {move || if enabled.get() { " On" } else { " Off" }}
-                    </label>
-                </div>
-            </div>
-            <p class="source-settings-card__placeholder">
-                "Source-specific preferences will appear here."
-            </p>
         </div>
     }
 }

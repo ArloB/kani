@@ -290,6 +290,7 @@ pub struct Source {
     pub base_url: String,
     pub enabled: bool,
     pub favourited: bool,
+    pub unrestricted_http: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -446,4 +447,58 @@ pub struct ChapterContents {
 pub struct Page {
     pub index: i64,
     pub url: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct SelectOption {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PreferenceKind {
+    TextInput {
+        placeholder: Option<String>,
+        default_value: Option<String>,
+        #[serde(default)]
+        is_secret: bool,
+    },
+    Checkbox {
+        default_value: bool,
+    },
+    Select {
+        options: Vec<SelectOption>,
+        default_value: Option<String>,
+    },
+    MultiSelect {
+        options: Vec<SelectOption>,
+        #[serde(default)]
+        default_values: Vec<String>,
+    },
+    Number {
+        min: Option<f64>,
+        max: Option<f64>,
+        step: Option<f64>,
+        default_value: Option<f64>,
+    },
+    MultiValueList {
+        placeholder: Option<String>,
+        item_label: Option<String>,
+        #[serde(default)]
+        default_values: Vec<String>,
+    },
+    Label {
+        text: String,
+    },
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct PreferenceDescriptor {
+    pub key: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub kind: PreferenceKind,
+    pub group: Option<String>,
+    pub requires_key: Option<String>,
 }
