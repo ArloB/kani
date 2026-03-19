@@ -16,6 +16,7 @@ pub fn SourceSettingsCard(source: Source) -> impl IntoView {
     let (enabled, set_enabled) = signal(source.enabled);
     let (starred, set_starred) = signal(source.favourited);
     let (confirming, set_confirming) = signal(false);
+    let (modal_open, set_modal_open) = signal(false);
 
     let schema_res = Resource::new(move || sid, get_source_preference_schema);
     let values_res = Resource::new(move || sid, get_source_preferences);
@@ -37,6 +38,12 @@ pub fn SourceSettingsCard(source: Source) -> impl IntoView {
             leptos::task::spawn_local(async move {
                 let _ = toggle_source_enabled(sid, val).await;
             });
+        }
+    };
+
+    let close_on_escape = move |ev: web_sys::KeyboardEvent| {
+        if ev.key() == "Escape" {
+            set_modal_open.set(false);
         }
     };
 
@@ -63,6 +70,27 @@ pub fn SourceSettingsCard(source: Source) -> impl IntoView {
                     <span class="source-settings-card__version">{source.version.clone()}</span>
                 </div>
                 <div class="source-settings-card__actions">
+                    <Suspense fallback=|| ()>
+                        {move || {
+                            let has_prefs = schema_res.get()
+                                .and_then(|r| r.ok())
+                                .map(|s| !s.is_empty())
+                                .unwrap_or(false);
+                            if has_prefs {
+                                view! {
+                                    <button
+                                        class="source-settings-card__configure-btn"
+                                        title="Configure source"
+                                        on:click=move |_| set_modal_open.set(true)
+                                    >
+                                        "⚙"
+                                    </button>
+                                }.into_any()
+                            } else {
+                                view! { <span></span> }.into_any()
+                            }
+                        }}
+                    </Suspense>
                     <label class="star-checkbox" title="Favourite">
                         <input
                             type="checkbox"
@@ -118,70 +146,113 @@ pub fn SourceSettingsCard(source: Source) -> impl IntoView {
                     </div>
                 </div>
             </Show>
+        </div>
 
-            <Suspense fallback=|| view! {
-                <p class="source-settings-card__loading">"Loading…"</p>
-            }>
-                {move || {
-                    let schema = schema_res.get()
-                        .and_then(|r| r.ok())
-                        .unwrap_or_default();
-
-                    if schema.is_empty() {
-                        return view! {
-                            <p class="source-settings-card__placeholder">
-                                "No configurable options."
-                            </p>
-                        }.into_any();
+        <Show when=move || modal_open.get()>
+            <div
+                class="modal-overlay"
+                on:click=move |ev| {
+                    if ev.target() == ev.current_target() {
+                        set_modal_open.set(false);
                     }
+                }
+                on:keydown=close_on_escape
+            >
+                <div class="modal modal--wide" role="dialog" aria-modal="true">
+                    <div class="modal-header">
+                        <h2>
+                            {source.name.clone()}
+                            " — Settings"
+                        </h2>
+                        <button
+                            class="modal-close"
+                            aria-label="Close"
+                            on:click=move |_| set_modal_open.set(false)
+                        >
+                            "×"
+                        </button>
+                    </div>
 
-                    let mut groups: Vec<(Option<String>, Vec<PreferenceDescriptor>)> = Vec::new();
-                    for desc in schema {
-                        let g = desc.group.clone();
-                        if let Some(entry) = groups.iter_mut().find(|(k, _)| k == &g) {
-                            entry.1.push(desc);
-                        } else {
-                            groups.push((g, vec![desc]));
-                        }
-                    }
+                    <div class="modal-body">
+                        <Show when=move || is_unsafe>
+                            <div class="modal-notice modal-notice--warn">
+                                "⚠ This extension has unrestricted network access and \
+                                 can contact any server."
+                            </div>
+                        </Show>
 
-                    view! {
-                        <div class="source-pref-body">
-                            <For
-                                each=move || groups.clone()
-                                key=|(group_name, _)| group_name.clone().unwrap_or_default()
-                                children=move |(group_name, descriptors)| {
-                                    view! {
-                                        <div class="source-pref-group">
-                                            {group_name.map(|name| view! {
-                                                <p class="source-pref-group__label">{name}</p>
-                                            })}
-                                            <For
-                                                each=move || descriptors.clone()
-                                                key=|d| d.key.clone()
-                                                children=move |desc| {
-                                                    let current = live_values.get()
-                                                        .get(&desc.key)
-                                                        .cloned()
-                                                        .unwrap_or_default();
-                                                    view! {
-                                                        <PreferenceRow
-                                                            source_id=sid
-                                                            descriptor=desc
-                                                            current_value=current
-                                                            live_values=live_values
-                                                        />
-                                                    }
-                                                }
-                                            />
-                                        </div>
+                        <Suspense fallback=|| view! {
+                            <p class="source-settings-card__loading">"Loading preferences…"</p>
+                        }>
+                            {move || {
+                                let schema = schema_res.get()
+                                    .and_then(|r| r.ok())
+                                    .unwrap_or_default();
+
+                                if schema.is_empty() {
+                                    return view! {
+                                        <p class="source-settings-card__placeholder">
+                                            "No configurable options."
+                                        </p>
+                                    }.into_any();
+                                }
+
+                                let mut groups: Vec<(Option<String>, Vec<PreferenceDescriptor>)> =
+                                    Vec::new();
+                                for desc in schema {
+                                    let g = desc.group.clone();
+                                    if let Some(entry) = groups.iter_mut().find(|(k, _)| k == &g) {
+                                        entry.1.push(desc);
+                                    } else {
+                                        groups.push((g, vec![desc]));
                                     }
                                 }
-                            />
-                        </div>
-                    }.into_any()
-                }}
-            </Suspense>
-        </div>
+
+                                view! {
+                                    <div class="source-pref-body">
+                                        <For
+                                            each=move || groups.clone()
+                                            key=|(group_name, _)| {
+                                                group_name.clone().unwrap_or_default()
+                                            }
+                                            children=move |(group_name, descriptors)| {
+                                                view! {
+                                                    <div class="source-pref-group">
+                                                        {group_name.map(|name| view! {
+                                                            <p class="source-pref-group__label">
+                                                                {name}
+                                                            </p>
+                                                        })}
+                                                        <For
+                                                            each=move || descriptors.clone()
+                                                            key=|d| d.key.clone()
+                                                            children=move |desc| {
+                                                                let current = live_values
+                                                                    .get()
+                                                                    .get(&desc.key)
+                                                                    .cloned()
+                                                                    .unwrap_or_default();
+                                                                view! {
+                                                                    <PreferenceRow
+                                                                        source_id=sid
+                                                                        descriptor=desc
+                                                                        current_value=current
+                                                                        live_values=live_values
+                                                                    />
+                                                                }
+                                                            }
+                                                        />
+                                                    </div>
+                                                }
+                                            }
+                                        />
+                                    </div>
+                                }.into_any()
+                            }}
+                        </Suspense>
+                    </div>
+                </div>
+            </div>
+        </Show>
     }
 }

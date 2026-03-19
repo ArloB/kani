@@ -694,20 +694,13 @@ p.empty,
     flex-shrink: 0;
   }
 
-  form {
+  .search-row {
     display: flex;
     gap: var(--sp-2);
     flex: 1;
     min-width: 200px;
 
-    input {
-      flex: 1;
-    }
-
-    button[type="submit"] {
-      @extend %btn-primary;
-      flex-shrink: 0;
-    }
+    input { flex: 1; }
   }
 }
 
@@ -1225,19 +1218,17 @@ main.container:has(.manga-details) {
   }
 }
 
-.manga-skeleton {
-  display: contents; // lets children participate in .manga-details flex layout
-
-  &__hero {
-    display: flex;
-    gap: var(--sp-6);
-    flex-shrink: 0;
-  }
+.skeleton-manga-hero {
+  display: flex;
+  gap: var(--sp-6);
+  flex-shrink: 0;
+  max-height: 44vh;
+  min-height: 0;
 
   &__cover {
     width: 180px;
-    aspect-ratio: 2 / 3;
     flex-shrink: 0;
+    aspect-ratio: 2 / 3;
     border-radius: var(--radius-lg);
     @extend %skeleton-base;
   }
@@ -1249,60 +1240,20 @@ main.container:has(.manga-details) {
     flex-direction: column;
     gap: var(--sp-4);
     padding-top: var(--sp-2);
+    overflow: hidden;
   }
 
   &__title {
     height: 2rem;
     width: 55%;
-    @extend %skeleton-base;
     border-radius: var(--radius-md);
+    @extend %skeleton-base;
   }
 
   &__lines {
     display: flex;
     flex-direction: column;
     gap: var(--sp-2);
-  }
-
-  &__line {
-    height: 0.8rem;
-    @extend %skeleton-base;
-
-    &--xs {
-      width: 25%;
-    }
-
-    &--short {
-      width: 38%;
-    }
-
-    &--mid {
-      width: 58%;
-    }
-
-    &--long {
-      width: 78%;
-    }
-
-    &--full {
-      width: 100%;
-    }
-  }
-
-  &__chapters {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--sp-2);
-    overflow: hidden; // prevent skeleton from growing the page
-  }
-
-  &__chapter-row {
-    height: 3.75rem;
-    flex-shrink: 0;
-    @extend %skeleton-base;
-    border-radius: var(--radius-md);
   }
 }
 
@@ -1855,6 +1806,25 @@ main.container:has(.manga-details) {
   color: var(--clr-text-faint);
   border-top: 1px solid var(--clr-border);
   font-style: italic;
+}
+
+.source-settings-card__configure-btn {
+  background: none;
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-sm);
+  color: var(--clr-text-muted);
+  font-size: var(--text-base);
+  line-height: 1;
+  padding: var(--sp-1) var(--sp-2);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  flex-shrink: 0;
+
+  &:hover {
+    color: var(--clr-text);
+    border-color: var(--clr-text-faint);
+    background: var(--clr-surface-3);
+  }
 }
 
 .category-manage-list {
@@ -2937,4 +2907,189 @@ main.container:has(.manga-details) {
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+// ── 20. Shared loading primitives ─────────────────────────────────────────────
+
+// Thin indeterminate progress bar — sits above content during refetch.
+// Use when existing content is still visible (stale state).
+.page-loading-bar {
+  height: 3px;
+  width: 100%;
+  background: var(--clr-surface-3);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  margin-bottom: var(--sp-4);
+  
+  &__fill {
+    height: 100%;
+    width: 0;
+    background: var(--clr-accent);
+    border-radius: var(--radius-full);
+    transition: none;
+  }
+
+  &--active &__fill {
+    width: 40%;
+    animation: refresh-sweep 1.4s ease-in-out infinite;
+  }
+}
+
+// Applied to existing content while a background refetch is in progress
+.content--stale {
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+// ── Skeleton card — used wherever manga grid cards appear ─────────────────
+
+.skeleton-manga-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-w), 1fr));
+  gap: var(--sp-5);
+}
+
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+
+  &__cover {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    border-radius: var(--radius-md);
+    @extend %skeleton-base;
+  }
+
+  &__title {
+    height: 0.85rem;
+    border-radius: var(--radius-sm);
+    @extend %skeleton-base;
+
+    &--short { width: 65%; }
+    &--long  { width: 90%; }
+  }
+}
+
+// ── Skeleton list row — used for chapter lists, update lists, etc. ────────
+
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.skeleton-row {
+  height: 3.75rem;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  @extend %skeleton-base;
+
+  &--sm  { height: 2.5rem; }
+  &--lg  { height: 5rem; }
+  &--xs  { height: 1.5rem; }
+}
+
+// ── Skeleton source card ──────────────────────────────────────────────────
+
+.skeleton-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--sp-4);
+}
+
+.skeleton-source-card {
+  border-radius: var(--radius-lg);
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+
+  &__name  { height: 1rem;   width: 55%; border-radius: var(--radius-sm); @extend %skeleton-base; }
+  &__meta  { height: 0.72rem; width: 35%; border-radius: var(--radius-sm); @extend %skeleton-base; }
+  &__btn   { height: 2rem;   width: 80px; border-radius: var(--radius-sm); margin-top: auto; @extend %skeleton-base; }
+}
+
+// ── Skeleton update group ─────────────────────────────────────────────────
+
+.skeleton-update-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.skeleton-update-group {
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--clr-surface-2);
+    border-bottom: 1px solid var(--clr-border);
+  }
+
+  &__thumb {
+    width: 40px;
+    height: 56px;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+    @extend %skeleton-base;
+  }
+
+  &__title {
+    height: 1rem;
+    width: 45%;
+    border-radius: var(--radius-sm);
+    @extend %skeleton-base;
+  }
+
+  &__rows {
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__row {
+    height: 2.25rem;
+    margin: var(--sp-2) var(--sp-4);
+    border-radius: var(--radius-sm);
+    @extend %skeleton-base;
+  }
+}
+
+// ── Skeleton settings source card ─────────────────────────────────────────
+
+.skeleton-settings-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--sp-4);
+}
+
+.skeleton-settings-source-card {
+  background: var(--clr-surface-2);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+
+  &__meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    flex: 1;
+  }
+
+  &__name    { height: 0.9rem; width: 50%; border-radius: var(--radius-sm); @extend %skeleton-base; }
+  &__version { height: 0.7rem; width: 28%; border-radius: var(--radius-sm); @extend %skeleton-base; }
+  &__toggle  { height: 1.5rem; width: 48px; border-radius: var(--radius-full); @extend %skeleton-base; }
 }

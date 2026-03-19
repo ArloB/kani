@@ -80,13 +80,13 @@ impl From<PreferenceKind> for wit_types::PreferenceKind {
             PreferenceKind::MultiSelect { options, default_values } =>
                 Self::MultiSelect(wit_types::MultiSelectPref {
                     options: options.into_iter().map(Into::into).collect(),
-                    default_value: default_values,
+                    default_values,
                 }),
             PreferenceKind::Number { min, max, step, default_value } =>
                 Self::Number(wit_types::NumberInputPref { min, max, step, default_value }),
             PreferenceKind::MultiValueList { placeholder, item_label, default_values } =>
                 Self::MultiValueList(wit_types::MultiValueListPref {
-                    placeholder, item_label, default_value: default_values,
+                    placeholder, item_label, default_values,
                 }),
             PreferenceKind::Label { text } =>
                 Self::Label(wit_types::LabelPref { text }),

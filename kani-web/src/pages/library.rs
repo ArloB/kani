@@ -1,6 +1,10 @@
 use crate::{
-    pages::components::{cover_image::CoverImage, pagination::Pagination}, server_fns::{get_all_artists, get_all_authors, get_all_tags, get_categories, 
-        get_library, start_refresh_all}, types::{Category, MangaSortOrder, RefreshState}
+    pages::components::{cover_image::CoverImage, pagination::Pagination},
+    server_fns::{
+        get_all_artists, get_all_authors, get_all_tags, get_categories,
+        get_library, start_refresh_all,
+    },
+    types::{Category, MangaSortOrder, RefreshState},
 };
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_query_map};
@@ -15,46 +19,56 @@ fn sync_filter_from_url(
 ) {
     Effect::new(move |_| {
         if let Some(Ok(items)) = resource.get()
-            && let Some(name) = url_getter() {
-                let matched_id = items.iter()
-                    .find(|(_, n)| n.eq_ignore_ascii_case(&name))
-                    .map(|(id, _)| *id);
-                setter.set(matched_id);
-            }
+            && let Some(name) = url_getter()
+        {
+            let matched_id = items
+                .iter()
+                .find(|(_, n)| n.eq_ignore_ascii_case(&name))
+                .map(|(id, _)| *id);
+            setter.set(matched_id);
+        }
     });
+}
+
+fn skeleton_library_grid() -> impl IntoView {
+    view! {
+        <div class="skeleton-manga-grid">
+            {(0..20).map(|_| view! {
+                <div class="skeleton-card">
+                    <div class="skeleton-card__cover"></div>
+                    <div class="skeleton-card__title skeleton-card__title--long"></div>
+                    <div class="skeleton-card__title skeleton-card__title--short"></div>
+                </div>
+            }).collect::<Vec<_>>()}
+        </div>
+    }
 }
 
 #[component]
 pub fn Library() -> impl IntoView {
     let (raw_search, set_raw_search) = signal(String::new());
-    
     let debounced_search = crate::utils::use_debounced_signal(raw_search, 300);
 
-    let (status_filter, set_status_filter) = signal(Option::<i64>::None);
-    let (tag_filter, set_tag_filter) = signal(Option::<i64>::None);
-    let (author_filter, set_author_filter) = signal(Option::<i64>::None);
-    let (artist_filter, set_artist_filter) = signal(Option::<i64>::None);
+    let (status_filter, set_status_filter)     = signal(Option::<i64>::None);
+    let (tag_filter, set_tag_filter)           = signal(Option::<i64>::None);
+    let (author_filter, set_author_filter)     = signal(Option::<i64>::None);
+    let (artist_filter, set_artist_filter)     = signal(Option::<i64>::None);
     let (category_filter, set_category_filter) = signal(Option::<i64>::None);
-    
-    let (sort_order, set_sort_order) = signal(MangaSortOrder::default());
-    
-    let (page, set_page) = signal(1i32);
+    let (sort_order, set_sort_order)           = signal(MangaSortOrder::default());
+    let (page, set_page)                       = signal(1i32);
 
-    let all_tags = Resource::new(|| (), |_| get_all_tags());
-    let all_authors = Resource::new(|| (), |_| get_all_authors());
-    let all_artists = Resource::new(|| (), |_| get_all_artists());
+    let all_tags       = Resource::new(|| (), |_| get_all_tags());
+    let all_authors    = Resource::new(|| (), |_| get_all_authors());
+    let all_artists    = Resource::new(|| (), |_| get_all_artists());
     let all_categories = Resource::new(|| (), |_| get_categories());
 
-    let refresh_state = expect_context::<RwSignal<crate::types::RefreshState>>();
+    let refresh_state        = expect_context::<RwSignal<RefreshState>>();
     let library_invalidation = expect_context::<RwSignal<u32>>();
 
     let library = Resource::new(
         move || (
             page.get(),
-            {
-                let s = debounced_search.get();
-                if s.is_empty() { None } else { Some(s) }
-            },
+            { let s = debounced_search.get(); if s.is_empty() { None } else { Some(s) } },
             status_filter.get(),
             tag_filter.get(),
             author_filter.get(),
@@ -68,13 +82,14 @@ pub fn Library() -> impl IntoView {
         },
     );
 
-    let query = use_query_map();
+    let (is_pending, set_pending) = signal(false);
 
+    let query           = use_query_map();
     let author_from_url = move || query.with(|q| q.get("author").as_deref().map(str::to_string));
     let artist_from_url = move || query.with(|q| q.get("artist").as_deref().map(str::to_string));
     let tag_from_url    = move || query.with(|q| q.get("tag").as_deref().map(str::to_string));
 
-    sync_filter_from_url(all_tags, tag_from_url, set_tag_filter);
+    sync_filter_from_url(all_tags,    tag_from_url,    set_tag_filter);
     sync_filter_from_url(all_authors, author_from_url, set_author_filter);
     sync_filter_from_url(all_artists, artist_from_url, set_artist_filter);
 
@@ -99,11 +114,11 @@ pub fn Library() -> impl IntoView {
                                 </div>
                             }.into_any()
                         }
-
                         RefreshState::Running { .. } => view! {
                             <div class="refresh-progress">
                                 <div class="refresh-progress__track">
-                                    <div class="refresh-progress__bar refresh-progress__bar--indeterminate"></div>
+                                    <div class="refresh-progress__bar refresh-progress__bar--indeterminate">
+                                    </div>
                                 </div>
                             </div>
                         }.into_any(),
@@ -118,7 +133,6 @@ pub fn Library() -> impl IntoView {
                         }.into_any(),
                         RefreshState::Idle => ().into_any(),
                     }}
-
                     <button
                         class="refresh-button"
                         disabled=is_running
@@ -132,200 +146,226 @@ pub fn Library() -> impl IntoView {
                             RefreshState::Idle => "↻ Refresh All".to_string(),
                             RefreshState::Running { completed, total } if total > 0 =>
                                 format!("Refreshing... {}/{}", completed, total),
-                            RefreshState::Running { .. } =>
-                                "Refreshing...".to_string(),
+                            RefreshState::Running { .. } => "Refreshing...".to_string(),
                             RefreshState::Done { .. } => "↻ Refresh All".to_string(),
                         }}
                     </button>
                 </div>
             </div>
-            <Suspense fallback=move || view! { <p>"Loading library..."</p> }>
-                {move || library.get().map(|res| match res {
-                    Ok(library) => {
-                        if library.items.is_empty() {
-                            view! { <p>"Your library is empty. Go add some manga!"</p> }.into_any()
-                        } else {                            
-                            view! {
-                                <Suspense fallback=|| ()>
-                                    {move || {
-                                        let cats = all_categories.get()
-                                            .and_then(|r| r.ok())
-                                            .unwrap_or_default();
 
-                                        if cats.is_empty() {
-                                            return ().into_any();
-                                        }
+            // Category tabs — own Suspense, no stale-while-reloading needed here
+            <Suspense fallback=|| ()>
+                {move || {
+                    let cats = all_categories.get()
+                        .and_then(|r| r.ok())
+                        .unwrap_or_default();
 
-                                        view! {
-                                            <div class="category-tabs">
-                                                <button
-                                                    class=move || if category_filter.get().is_none() {
-                                                        "category-tab category-tab--active"
-                                                    } else { "category-tab" }
-                                                    on:click=move |_| {
-                                                        set_category_filter.set(None);
-                                                        set_page.set(1);
-                                                    }
-                                                >"All"</button>
-                                                <For
-                                                    each=move || cats.clone()
-                                                    key=|c: &Category| c.id
-                                                    children=move |cat| {
-                                                        let cat_id = cat.id;
-                                                        view! {
-                                                            <button
-                                                                class=move || if category_filter.get() == Some(cat_id) {
-                                                                    "category-tab category-tab--active"
-                                                                } else { "category-tab" }
-                                                                on:click=move |_| {
-                                                                    set_category_filter.set(Some(cat_id));
-                                                                    set_page.set(1);
-                                                                }
-                                                            >{cat.name.clone()}</button>
-                                                        }
-                                                    }
-                                                />
-                                            </div>
-                                        }.into_any()
-                                    }}
-                                </Suspense>
+                    if cats.is_empty() {
+                        return ().into_any();
+                    }
 
-                                <div class="library-controls">
-                                    <input
-                                        type="text"
-                                        placeholder="Search library..."
-                                        prop:value=move || raw_search.get()
-                                        on:input=move |ev| {
-                                            set_raw_search.set(event_target_value(&ev));
-                                            set_page.set(1);
-                                        }
-                                    />
-
-                                    <select on:change=move |ev| {
-                                        let val = event_target_value(&ev);
-                                        set_status_filter.set(val.parse::<i64>().ok());
-                                        set_page.set(1);
-                                    }>
-                                        <option value="">"All Statuses"</option>
-                                        <option value="0">"Ongoing"</option>
-                                        <option value="1">"Completed"</option>
-                                        <option value="2">"Hiatus"</option>
-                                        <option value="3">"Cancelled"</option>
-                                        <option value="4">"Unknown"</option>
-                                    </select>
-
-                                    <Suspense fallback=|| ()>
-                                        {move || all_tags.get().map(|tags| {
-                                            let tags = tags.unwrap_or_default();
-                                            view! {
-                                                <select
-                                                    prop:value=move || tag_filter.get().map(|id| id.to_string()).unwrap_or_default()
-                                                    on:change=move |ev| {
-                                                        let val = event_target_value(&ev);
-                                                        set_tag_filter.set(val.parse::<i64>().ok());
-                                                        set_page.set(1);
-                                                    }
-                                                >
-                                                    <option value="">"All Tags"</option>
-                                                    <For
-                                                        each=move || tags.clone()
-                                                        key=|t| t.0
-                                                        children=move |tag| view! {
-                                                            <option value=tag.0.to_string()>{tag.1.clone()}</option>
-                                                        }
-                                                    />
-                                                </select>
+                    view! {
+                        <div class="category-tabs">
+                            <button
+                                class=move || if category_filter.get().is_none() {
+                                    "category-tab category-tab--active"
+                                } else { "category-tab" }
+                                on:click=move |_| {
+                                    set_category_filter.set(None);
+                                    set_page.set(1);
+                                }
+                            >
+                                "All"
+                            </button>
+                            <For
+                                each=move || cats.clone()
+                                key=|c: &Category| c.id
+                                children=move |cat| {
+                                    let cat_id = cat.id;
+                                    view! {
+                                        <button
+                                            class=move || if category_filter.get() == Some(cat_id) {
+                                                "category-tab category-tab--active"
+                                            } else { "category-tab" }
+                                            on:click=move |_| {
+                                                set_category_filter.set(Some(cat_id));
+                                                set_page.set(1);
                                             }
-                                        })}
-                                    </Suspense>
-
-                                    <input
-                                        type="text"
-                                        list="author-options"
-                                        placeholder="Search authors..."
-                                        on:change=move |ev| {
-                                            let name = event_target_value(&ev);
-                                            let matched_id = all_authors.get()
-                                                .and_then(|r| r.ok())
-                                                .unwrap_or_default()
-                                                .into_iter()
-                                                .find(|(_, n)| n.eq_ignore_ascii_case(&name))
-                                                .map(|(id, _)| id);
-                                            set_author_filter.set(matched_id);
-                                            set_page.set(1);
-                                        }
-                                    />
-                                    <datalist id="author-options">
-                                        <For
-                                            each=move || all_authors.get().and_then(|r| r.ok()).unwrap_or_default()
-                                            key=|(id, _)| *id
-                                            children=|(_, name)| view! {
-                                                <option value=name.clone()/>
-                                            }
-                                        />
-                                    </datalist>
-
-                                    <input
-                                        type="text"
-                                        list="artist-options"
-                                        placeholder="Search artists..."
-                                        on:change=move |ev| {
-                                            let name = event_target_value(&ev);
-                                            let matched_id = all_artists.get()
-                                                .and_then(|r| r.ok())
-                                                .unwrap_or_default()
-                                                .into_iter()
-                                                .find(|(_, n)| n.eq_ignore_ascii_case(&name))
-                                                .map(|(id, _)| id);
-                                            set_artist_filter.set(matched_id);
-                                            set_page.set(1);
-                                        }
-                                    />
-                                    <datalist id="artist-options">
-                                        <For
-                                            each=move || all_artists.get().and_then(|r| r.ok()).unwrap_or_default()
-                                            key=|(id, _)| *id
-                                            children=|(_, name)| view! {
-                                                <option value=name.clone()/>
-                                            }
-                                        />
-                                    </datalist>
-
-                                    <select on:change=move |ev| {
-                                        set_sort_order.set(MangaSortOrder::from_select_value(&event_target_value(&ev)));
-                                        set_page.set(1);
-                                    }>
-                                        <option value="updated_desc">"Recently Updated ↓"</option>
-                                        <option value="updated_asc">"Recently Updated ↑"</option>
-                                        <option value="added_desc">"Recently Added ↓"</option>
-                                        <option value="added_asc">"Recently Added ↑"</option>
-                                        <option value="name_asc">"Name A-Z"</option>
-                                        <option value="name_desc">"Name Z-A"</option>
-                                    </select>
-                                </div>
-
-                                <div class="manga-grid">
-                                    <For
-                                        each=move || library.items.clone()
-                                        key=|m| m.id.clone()
-                                        children=move |manga| view! {
-                                            <div class="manga-card">
-                                                <A href=format!("/manga/{}", manga.id)>
-                                                    <CoverImage url=manga.cover_url alt=manga.title.clone() />
-                                                    <div class="title">{manga.title}</div>
-                                                </A>
-                                            </div>
-                                        }
-                                    />
-                                </div>
-                                
-                                <Pagination page set_page has_next=Signal::derive(move || library.has_next_page) />
-                            }.into_any()
-                        }
-                    },
-                    Err(e) => view! { <p class="error">"Error: " {e.to_string()}</p> }.into_any()
-                })}
+                                        >
+                                            {cat.name.clone()}
+                                        </button>
+                                    }
+                                }
+                            />
+                        </div>
+                    }.into_any()
+                }}
             </Suspense>
+
+            // Filter / sort controls — pure local state, no resource reads
+            <div class="library-controls">
+                <input
+                    type="text"
+                    placeholder="Search library..."
+                    prop:value=move || raw_search.get()
+                    on:input=move |ev| {
+                        set_raw_search.set(event_target_value(&ev));
+                        set_page.set(1);
+                    }
+                />
+
+                <select on:change=move |ev| {
+                    let val = event_target_value(&ev);
+                    set_status_filter.set(val.parse::<i64>().ok());
+                    set_page.set(1);
+                }>
+                    <option value="">"All Statuses"</option>
+                    <option value="0">"Ongoing"</option>
+                    <option value="1">"Completed"</option>
+                    <option value="2">"Hiatus"</option>
+                    <option value="3">"Cancelled"</option>
+                    <option value="4">"Unknown"</option>
+                </select>
+
+                <Suspense fallback=|| ()>
+                    {move || all_tags.get().map(|tags| {
+                        let tags = tags.unwrap_or_default();
+                        view! {
+                            <select
+                                prop:value=move || tag_filter.get()
+                                    .map(|id| id.to_string())
+                                    .unwrap_or_default()
+                                on:change=move |ev| {
+                                    let val = event_target_value(&ev);
+                                    set_tag_filter.set(val.parse::<i64>().ok());
+                                    set_page.set(1);
+                                }
+                            >
+                                <option value="">"All Tags"</option>
+                                <For
+                                    each=move || tags.clone()
+                                    key=|t| t.0
+                                    children=move |tag| view! {
+                                        <option value=tag.0.to_string()>{tag.1.clone()}</option>
+                                    }
+                                />
+                            </select>
+                        }
+                    })}
+                </Suspense>
+
+                <input
+                    type="text"
+                    list="author-options"
+                    placeholder="Search authors..."
+                    on:change=move |ev| {
+                        let name = event_target_value(&ev);
+                        let matched = all_authors.get()
+                            .and_then(|r| r.ok())
+                            .unwrap_or_default()
+                            .into_iter()
+                            .find(|(_, n)| n.eq_ignore_ascii_case(&name))
+                            .map(|(id, _)| id);
+                        set_author_filter.set(matched);
+                        set_page.set(1);
+                    }
+                />
+                <Suspense fallback=|| ()>
+                    <datalist id="author-options">
+                        <For
+                            each=move || all_authors.get().and_then(|r| r.ok()).unwrap_or_default()
+                            key=|(id, _)| *id
+                            children=|(_, name)| view! { <option value=name.clone()/> }
+                        />
+                    </datalist>
+                </Suspense>
+
+                <input
+                    type="text"
+                    list="artist-options"
+                    placeholder="Search artists..."
+                    on:change=move |ev| {
+                        let name = event_target_value(&ev);
+                        let matched = all_artists.get()
+                            .and_then(|r| r.ok())
+                            .unwrap_or_default()
+                            .into_iter()
+                            .find(|(_, n)| n.eq_ignore_ascii_case(&name))
+                            .map(|(id, _)| id);
+                        set_artist_filter.set(matched);
+                        set_page.set(1);
+                    }
+                />
+                <Suspense fallback=|| ()>
+                    <datalist id="artist-options">
+                        <For
+                            each=move || all_artists.get().and_then(|r| r.ok()).unwrap_or_default()
+                            key=|(id, _)| *id
+                            children=|(_, name)| view! { <option value=name.clone()/> }
+                        />
+                    </datalist>
+                </Suspense>
+
+                <select on:change=move |ev| {
+                    set_sort_order.set(
+                        MangaSortOrder::from_select_value(&event_target_value(&ev))
+                    );
+                    set_page.set(1);
+                }>
+                    <option value="updated_desc">"Recently Updated ↓"</option>
+                    <option value="updated_asc">"Recently Updated ↑"</option>
+                    <option value="added_desc">"Recently Added ↓"</option>
+                    <option value="added_asc">"Recently Added ↑"</option>
+                    <option value="name_asc">"Name A-Z"</option>
+                    <option value="name_desc">"Name Z-A"</option>
+                </select>
+            </div>
+
+            <div class="page-loading-bar" class:page-loading-bar--active=move || is_pending.get()>
+                <div class="page-loading-bar__fill"></div>
+            </div>
+
+            <Transition fallback=skeleton_library_grid set_pending>
+                {move || library.get().map(|res| match res {
+                    Err(e) => view! {
+                        <p class="error">"Error: " {e.to_string()}</p>
+                    }.into_any(),
+                    Ok(page_data) if page_data.items.is_empty() => view! {
+                        <p class="empty">"No manga found. Try adjusting your filters."</p>
+                    }.into_any(),
+                    Ok(page_data) => {
+                        let items    = page_data.items.clone();
+                        let has_next = page_data.has_next_page;
+                        view! {
+                            <div
+                                class="manga-grid"
+                                class:content--stale=move || is_pending.get()
+                            >
+                                <For
+                                    each=move || items.clone()
+                                    key=|m| m.id.clone()
+                                    children=move |manga| view! {
+                                        <div class="manga-card">
+                                            <A href=format!("/manga/{}", manga.id)>
+                                                <CoverImage
+                                                    url=manga.cover_url
+                                                    alt=manga.title.clone()
+                                                />
+                                                <div class="title">{manga.title}</div>
+                                            </A>
+                                        </div>
+                                    }
+                                />
+                            </div>
+                            <Pagination
+                                page
+                                set_page
+                                has_next=Signal::derive(move || has_next)
+                            />
+                        }.into_any()
+                    }
+                })}
+            </Transition>
         </div>
     }
 }

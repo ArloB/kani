@@ -8,7 +8,5 @@ pub fn render_description(raw: &str) -> String {
     let mut html_output = String::with_capacity(raw.len() * 2);
     html::push_html(&mut html_output, parser);
 
-    tracing::info!("pre-ammonia: {}", html_output);
-
     ammonia::clean(&html_output)
 }

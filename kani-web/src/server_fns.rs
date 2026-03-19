@@ -197,9 +197,12 @@ pub async fn delete_downloaded(id: i64) -> Result<(), ServerFnError> {
 #[server]
 pub async fn check_in_library(source_id: i64, manga_id: String) -> Result<Option<i64>, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
+
+    let decoded_manga_id = crate::utils::decode_manga_id(&manga_id);
+
     let exists: Option<i64> = sqlx::query_scalar!(
         "SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?",
-        manga_id,
+        decoded_manga_id,
         source_id
     )
     .fetch_optional(&state.db)
@@ -978,17 +981,51 @@ pub async fn get_source_preference_schema(
 ) -> Result<Vec<crate::types::PreferenceDescriptor>, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
 
-    state.cache.get_or_fetch_preference_schema(source_id, async move {
-        let sources = state.sources.read().await;
-        let mgr = sources
-            .get(&source_id)
+    if let Some(cached) = state.cache.get_preference_schema(source_id) {
+        return Ok(cached);
+    }
+
+    let raw = {
+        let mgr = {
+            let sources = state.sources.read().await;
+            sources.get(&source_id).cloned()
+        };
+
+        if let Some(mgr) = mgr {
+            let mut inst = mgr.lease_instance().await.map_err(to_server_err)?;
+            inst.get_preferences().await.map_err(to_server_err)?
+        } else {
+            let source_name = sqlx::query_scalar!(
+                "SELECT name FROM sources WHERE id = ?",
+                source_id
+            )
+            .fetch_optional(&state.db)
+            .await
+            .map_err(to_server_err)?
             .ok_or_else(|| ServerFnError::new("Source not found"))?;
 
-        let mut inst = mgr.lease_instance().await.map_err(to_server_err)?;
-        let raw = inst.get_preferences().await.map_err(to_server_err)?;
+            let wasm_path = {
+                let settings = state.settings.read().await;
+                settings.wasm_storage_path.join(format!("{}.wasm", source_name))
+            };
 
-        Ok::<_, ServerFnError>(raw.into_iter().map(Into::into).collect())
-    }).await.map_err(to_server_err)
+            let bytes = tokio::fs::read(&wasm_path).await
+                .map_err(|e| ServerFnError::new(format!("Could not read WASM file: {e}")))?;
+            let component = state.wasm_runtime.compile_component(&bytes)
+                .map_err(to_server_err)?;
+            let mut inst = kani_core::sources::SourceInstance::new(
+                state.smart_client.clone(), None, false
+            );
+            inst.load(
+                state.wasm_runtime.engine(), &component, state.wasm_runtime.linker()
+            ).await.map_err(to_server_err)?;
+            inst.get_preferences().await.map_err(to_server_err)?
+        }
+    };
+
+    let schema: Vec<_> = raw.into_iter().map(Into::into).collect();
+    state.cache.insert_preference_schema(source_id, schema.clone());
+    Ok(schema)
 }
 
 #[server]

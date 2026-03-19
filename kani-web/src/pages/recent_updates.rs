@@ -6,7 +6,6 @@ use leptos_router::components::A;
 
 type GroupedUpdates = Vec<(i64, String, Option<String>, Vec<RecentUpdateItem>)>;
 
-// Group the flat list by manga_id while preserving first-seen order.
 fn group_by_manga(updates: Vec<RecentUpdateItem>) -> GroupedUpdates {
     let mut seen: std::collections::HashMap<i64, usize> = Default::default();
     let mut groups: GroupedUpdates = Vec::new();
@@ -30,6 +29,26 @@ fn group_by_manga(updates: Vec<RecentUpdateItem>) -> GroupedUpdates {
     groups
 }
 
+fn skeleton_update_list() -> impl IntoView {
+    view! {
+        <div class="skeleton-update-list">
+            {(0..4).map(|_| view! {
+                <div class="skeleton-update-group">
+                    <div class="skeleton-update-group__header">
+                        <div class="skeleton-update-group__thumb"></div>
+                        <div class="skeleton-update-group__title"></div>
+                    </div>
+                    <div class="skeleton-update-group__rows">
+                        {(0..3).map(|_| view! {
+                            <div class="skeleton-row skeleton-row--sm"></div>
+                        }).collect::<Vec<_>>()}
+                    </div>
+                </div>
+            }).collect::<Vec<_>>()}
+        </div>
+    }
+}
+
 #[component]
 pub fn RecentUpdates() -> impl IntoView {
     let (page, set_page) = signal(1i32);
@@ -42,22 +61,36 @@ pub fn RecentUpdates() -> impl IntoView {
         |p| async move { get_recent_updates(p).await },
     );
 
+    let (is_pending, set_pending) = signal(false);
+
     view! {
         <div class="recent-updates-page">
             <div class="page-header">
                 <h1>"Recent Updates"</h1>
             </div>
 
-            <Suspense fallback=move || view! { <p class="spinner">"Loading…"</p> }>
+            <div class="page-loading-bar" class:page-loading-bar--active=move || is_pending.get()>
+                <div class="page-loading-bar__fill"></div>
+            </div>
+
+            <Transition fallback=skeleton_update_list set_pending>
                 {move || updates.get().map(|res| match res {
-                    Err(e) => view! { <p class="error">"Error: "{e.to_string()}</p> }.into_any(),
+                    Err(e) => view! {
+                        <p class="error">"Error: " {e.to_string()}</p>
+                    }.into_any(),
                     Ok(list) if list.recent_updates.is_empty() => view! {
-                        <p class="empty">"No recent updates yet. Add manga to your library and scan for chapters."</p>
+                        <p class="empty">
+                            "No recent updates yet. Add manga to your library and scan for chapters."
+                        </p>
                     }.into_any(),
                     Ok(list) => {
-                        let groups = group_by_manga(list.recent_updates);
+                        let groups   = group_by_manga(list.recent_updates);
+                        let has_next = list.has_next_page;
                         view! {
-                            <div class="update-group-list">
+                            <div
+                                class="update-group-list"
+                                class:content--stale=move || is_pending.get()
+                            >
                                 <For
                                     each=move || groups.clone()
                                     key=|(manga_id, ..)| *manga_id
@@ -76,7 +109,9 @@ pub fn RecentUpdates() -> impl IntoView {
                                                                 }.into_any(),
                                                             }}
                                                         </div>
-                                                        <span class="update-group__title">{manga_name.clone()}</span>
+                                                        <span class="update-group__title">
+                                                            {manga_name.clone()}
+                                                        </span>
                                                     </A>
                                                 </div>
 
@@ -101,8 +136,12 @@ pub fn RecentUpdates() -> impl IntoView {
 
                                                             view! {
                                                                 <li class="update-chapter-item">
-                                                                    <span class="update-chapter-item__label">{label}</span>
-                                                                    <span class="update-chapter-item__date">{date_str}</span>
+                                                                    <span class="update-chapter-item__label">
+                                                                        {label}
+                                                                    </span>
+                                                                    <span class="update-chapter-item__date">
+                                                                        {date_str}
+                                                                    </span>
                                                                     {move || {
                                                                         let map = chapters_progress.get();
                                                                         let live = map.get(&chapter_id);
@@ -149,11 +188,15 @@ pub fn RecentUpdates() -> impl IntoView {
                                 />
                             </div>
 
-                            <Pagination page set_page has_next=Signal::derive(move || list.has_next_page) />
+                            <Pagination
+                                page
+                                set_page
+                                has_next=Signal::derive(move || has_next)
+                            />
                         }.into_any()
                     }
                 })}
-            </Suspense>
+            </Transition>
         </div>
     }
 }

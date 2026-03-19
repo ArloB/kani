@@ -79,27 +79,30 @@ pub fn MangaDetails() -> impl IntoView {
     view! {
         <div class="manga-details">
             <Suspense fallback=move || view! {
-                <div class="manga-skeleton">
-                    <div class="manga-skeleton__hero">
-                        <div class="manga-skeleton__cover"></div>
-                        <div class="manga-skeleton__meta">
-                            <div class="manga-skeleton__title"></div>
-                            <div class="manga-skeleton__lines">
-                                <div class="manga-skeleton__line manga-skeleton__line--xs"></div>
-                                <div class="manga-skeleton__line manga-skeleton__line--short"></div>
-                                <div class="manga-skeleton__line manga-skeleton__line--short"></div>
-                            </div>
-                            <div class="manga-skeleton__lines">
-                                <div class="manga-skeleton__line manga-skeleton__line--full"></div>
-                                <div class="manga-skeleton__line manga-skeleton__line--full"></div>
-                                <div class="manga-skeleton__line manga-skeleton__line--long"></div>
-                                <div class="manga-skeleton__line manga-skeleton__line--mid"></div>
-                            </div>
+                <div class="skeleton-manga-hero">
+                    <div class="skeleton-manga-hero__cover"></div>
+                    <div class="skeleton-manga-hero__meta">
+                        <div class="skeleton-manga-hero__title"></div>
+                        <div class="skeleton-manga-hero__lines">
+                            <div class="skeleton-row skeleton-row--xs" style="width: 20%"></div>
+                            <div class="skeleton-row skeleton-row--xs" style="width: 35%"></div>
+                        </div>
+                        <div class="skeleton-manga-hero__lines">
+                            <div class="skeleton-row skeleton-row--xs" style="width: 100%"></div>
+                            <div class="skeleton-row skeleton-row--xs" style="width: 100%"></div>
+                            <div class="skeleton-row skeleton-row--xs" style="width: 75%"></div>
+                            <div class="skeleton-row skeleton-row--xs" style="width: 55%"></div>
                         </div>
                     </div>
-                    <div class="manga-skeleton__chapters">
+                </div>
+
+                <div class="chapter-list-group">
+                    <div class="skeleton-manga-hero__lines" style="margin-bottom: var(--sp-3)">
+                        <div class="skeleton-row skeleton-row--xs" style="width: 100px"></div>
+                    </div>
+                    <div class="skeleton-list">
                         {(0..7).map(|_| view! {
-                            <div class="manga-skeleton__chapter-row"></div>
+                            <div class="skeleton-row"></div>
                         }).collect::<Vec<_>>()}
                     </div>
                 </div>

@@ -61,55 +61,74 @@ pub fn Settings() -> impl IntoView {
             </Show>
             <h1>"Settings"</h1>
             <CollapsiblePanel label="Scan Settings".to_string() open=true variant=CollapsibleVariant::Section>
-                {move || settings_draft.get().map(|draft| view! {
-                    <div class="settings-field">
-                        <label class="settings-field__label">"Auto-scan for new chapters"</label>
-                        <p class="settings-field__hint">
-                            "Automatically check for new chapters on a timer."
-                        </p>
-                        <label class="toggle-label">
+                {move || match settings_draft.get() {
+                    None => view! {
+                        <div class="settings-grid">
+                            <div class="skeleton-row skeleton-row--xs" style="width: 60%"></div>
+                            <div class="skeleton-row skeleton-row--xs" style="width: 40%"></div>
+                        </div>
+                    }.into_any(),
+                    Some(draft) => view! {
+                        <div class="settings-field">
+                            <label class="settings-field__label">"Auto-scan for new chapters"</label>
+                            <p class="settings-field__hint">
+                                "Automatically check for new chapters on a timer."
+                            </p>
+                            <label class="toggle-label">
+                                <input
+                                    type="checkbox"
+                                    checked=draft.auto_scan
+                                    on:change=move |ev| {
+                                        let checked = event_target_checked(&ev);
+                                        set_settings_draft.update(|s| {
+                                            if let Some(s) = s { s.auto_scan = checked; }
+                                        });
+                                    }
+                                />
+                                {if draft.auto_scan { " Enabled" } else { " Disabled" }}
+                            </label>
+                        </div>
+
+                        <div class="settings-field">
+                            <label class="settings-field__label"
+                                for="scan-interval"
+                            >"Scan interval (minutes)"</label>
+                            <p class="settings-field__hint">
+                                "Minimum 5. Changes take effect after saving."
+                            </p>
                             <input
-                                type="checkbox"
-                                checked=draft.auto_scan
+                                id="scan-interval"
+                                type="number"
+                                min="5"
+                                max="10080"
+                                prop:value=draft.scan_interval_minutes.to_string()
                                 on:change=move |ev| {
-                                    let checked = event_target_checked(&ev);
-                                    set_settings_draft.update(|s| {
-                                        if let Some(s) = s { s.auto_scan = checked; }
-                                    });
+                                    if let Ok(v) = event_target_value(&ev).parse::<i64>() {
+                                        set_settings_draft.update(|s| {
+                                            if let Some(s) = s { s.scan_interval_minutes = v; }
+                                        });
+                                    }
                                 }
                             />
-                            {if draft.auto_scan { " Enabled" } else { " Disabled" }}
-                        </label>
-                    </div>
-
-                    <div class="settings-field">
-                        <label class="settings-field__label"
-                            for="scan-interval"
-                        >"Scan interval (minutes)"</label>
-                        <p class="settings-field__hint">
-                            "Minimum 5. Changes take effect after saving."
-                        </p>
-                        <input
-                            id="scan-interval"
-                            type="number"
-                            min="5"
-                            max="10080"
-                            prop:value=draft.scan_interval_minutes.to_string()
-                            on:change=move |ev| {
-                                if let Ok(v) = event_target_value(&ev).parse::<i64>() {
-                                    set_settings_draft.update(|s| {
-                                        if let Some(s) = s { s.scan_interval_minutes = v; }
-                                    });
-                                }
-                            }
-                        />
-                    </div>
-                })}
+                        </div>
+                    }.into_any()
+                }}
             </CollapsiblePanel>
 
             <CollapsiblePanel label="Download Settings".to_string() open=true variant=CollapsibleVariant::Section>
-                {move || settings_draft.get().map(|draft| {
-                    view! {
+                {move || match settings_draft.get() {
+                    None => view! {
+                        <div class="settings-grid">
+                            {(0..5).map(|_| view! {
+                                <div style="display: flex; flex-direction: column; gap: var(--sp-2)">
+                                    <div class="skeleton-row skeleton-row--xs" style="width: 70%"></div>
+                                    <div class="skeleton-row skeleton-row--xs" style="width: 50%"></div>
+                                    <div class="skeleton-row skeleton-row--xs" style="width: 100%"></div>
+                                </div>
+                            }).collect::<Vec<_>>()}
+                        </div>
+                    }.into_any(),
+                    Some(draft) => view! {
                         <div class="settings-grid">
                             <div class="settings-field">
                                 <label class="settings-field__label" for="cpd">
@@ -206,25 +225,29 @@ pub fn Settings() -> impl IntoView {
                                 />
                             </div>
                         </div>
-                    }
-                })}
+                    }.into_any()
+                }}
             </CollapsiblePanel>
 
             <CollapsiblePanel label="Source Settings".to_string() open=true variant=CollapsibleVariant::Section>
-                <Suspense fallback=move || view! { <p class="spinner">"Loading sources…"</p> }>
+                <Suspense fallback=move || view! {
+                    <div class="skeleton-settings-source-grid">
+                        {(0..4).map(|_| view! {
+                            <div class="skeleton-settings-source-card"></div>
+                        }).collect::<Vec<_>>()}
+                    </div>
+                }>
                     {move || {
                         let sources = sources_res.get()
                             .and_then(|r| r.ok())
                             .unwrap_or_default();
-
+ 
                         view! {
                             <div class="source-settings-grid">
                                 <For
                                     each=move || sources.clone()
                                     key=|s: &Source| s.id
-                                    children=move |source| {
-                                        view! { <SourceSettingsCard source=source /> }
-                                    }
+                                    children=move |source| view! { <SourceSettingsCard source=source /> }
                                 />
                             </div>
                         }
@@ -233,32 +256,38 @@ pub fn Settings() -> impl IntoView {
             </CollapsiblePanel>
 
             <CollapsiblePanel label="Category Settings".to_string() open=true variant=CollapsibleVariant::Section>
-                <Suspense fallback=move || view! { <p class="spinner">"Loading…"</p> }>
+                <Suspense fallback=move || view! {
+                    <div class="skeleton-list">
+                        {(0..3).map(|_| view! {
+                            <div class="skeleton-row"></div>
+                        }).collect::<Vec<_>>()}
+                    </div>
+                }>
                     {move || {
                         let cats = categories_res.get()
                             .and_then(|r| r.ok())
                             .unwrap_or_default();
-
+ 
                         view! {
                             <ul class="category-manage-list">
                                 <For
                                     each=move || cats.clone()
                                     key=|c: &Category| c.id
                                     children=move |cat| {
-                                        let cat_id = cat.id;
+                                        let cat_id   = cat.id;
                                         let cat_name = cat.name.clone();
-
+ 
                                         let is_editing = Signal::derive(move || {
                                             editing_cat.get().as_ref().map(|(id, _)| *id) == Some(cat_id)
                                         });
-
+ 
                                         view! {
                                             <li class="category-manage-item">
                                                 {move || {
-                                                    let name_for_input = cat_name.clone();
+                                                    let name_for_input   = cat_name.clone();
                                                     let name_for_display = cat_name.clone();
-                                                    let name_for_edit = cat_name.clone();
-
+                                                    let name_for_edit    = cat_name.clone();
+ 
                                                     if is_editing.get() {
                                                         Either::Left(view! {
                                                             <>
@@ -299,7 +328,9 @@ pub fn Settings() -> impl IntoView {
                                                     } else {
                                                         Either::Right(view! {
                                                             <>
-                                                                <span class="category-manage-item__name">{name_for_display}</span>
+                                                                <span class="category-manage-item__name">
+                                                                    {name_for_display}
+                                                                </span>
                                                                 <div class="category-manage-item__actions">
                                                                     <button
                                                                         class="category-manage-item__edit"
@@ -317,13 +348,13 @@ pub fn Settings() -> impl IntoView {
                                                                                             .get_untracked()
                                                                                             .and_then(|r| r.ok())
                                                                                             .unwrap_or_default();
-
+ 
                                                                                         let remaining: Vec<i64> = current_cats
                                                                                             .iter()
                                                                                             .filter(|c| c.id != cat_id)
                                                                                             .map(|c| c.id)
                                                                                             .collect();
-
+ 
                                                                                         let _ = reorder_categories(remaining).await;
                                                                                         categories_res.refetch();
                                                                                     }
@@ -342,11 +373,11 @@ pub fn Settings() -> impl IntoView {
                                     }
                                 />
                             </ul>
-
+ 
                             {move || cat_error.get().map(|e| view! {
                                 <p class="error">{e}</p>
                             })}
-
+ 
                             <div class="category-add-row">
                                 <input
                                     type="text"
@@ -381,67 +412,79 @@ pub fn Settings() -> impl IntoView {
             </CollapsiblePanel>
 
             <CollapsiblePanel label="Advanced Settings".to_string() open=false variant=CollapsibleVariant::Section>
-                {move || settings_draft.get().map(|draft| view! {
-                    <div class="settings-grid">
-                        <div class="settings-field">
-                            <label class="settings-field__label" for="fsr-url">
-                                "FlareSolverr URL"
-                            </label>
-                            <p class="settings-field__hint">
-                                "Used to bypass Cloudflare protection. Leave empty to disable."
-                            </p>
-                            <input
-                                id="fsr-url"
-                                type="text"
-                                prop:value=draft.flaresolverr_url.clone()
-                                on:change=move |ev| {
-                                    set_settings_draft.update(|s| {
-                                        if let Some(s) = s { s.flaresolverr_url = event_target_value(&ev); }
-                                    });
-                                }
-                            />
+                {move || match settings_draft.get() {
+                    None => view! {
+                        <div class="settings-grid">
+                            {(0..3).map(|_| view! {
+                                <div style="display: flex; flex-direction: column; gap: var(--sp-2)">
+                                    <div class="skeleton-row skeleton-row--xs" style="width: 50%"></div>
+                                    <div class="skeleton-row skeleton-row--xs" style="width: 100%"></div>
+                                </div>
+                            }).collect::<Vec<_>>()}
                         </div>
-
-                        <div class="settings-field">
-                            <label class="settings-field__label">"Library path"</label>
-                            <div class="settings-field settings-field--needs-restart">
-                                <p class="settings-field__hint settings-field__hint--warn">
-                                    "Changing this requires a server restart and will not move existing files."
+                    }.into_any(),
+                    Some(draft) => view! {
+                        <div class="settings-grid">
+                            <div class="settings-field">
+                                <label class="settings-field__label" for="fsr-url">
+                                    "FlareSolverr URL"
+                                </label>
+                                <p class="settings-field__hint">
+                                    "Used to bypass Cloudflare protection. Leave empty to disable."
                                 </p>
-                            </div>
-                            <input
-                                type="text"
-                                prop:value=draft.library_path.clone()
-                                on:change=move |ev| {
-                                    set_settings_draft.update(|s| {
-                                        if let Some(s) = s { s.library_path = event_target_value(&ev); }
-                                    });
-                                }
-                            />
-                        </div>
-
-                        <div class="settings-field">
-                            <label class="settings-field__label" for="mwi">
-                                "Max WASM instances"
-                            </label>
-                            <div class="settings-field settings-field--needs-restart">
-                                <p class="settings-field__hint settings-field__hint--warn">
-                                    "Requires server restart."
-                                </p>
-                            </div>
-                            <input id="mwi" type="number" min="1" max="10000"
-                                prop:value=draft.max_wasm_instances.to_string()
-                                on:change=move |ev| {
-                                    if let Ok(v) = event_target_value(&ev).parse::<i64>() {
+                                <input
+                                    id="fsr-url"
+                                    type="text"
+                                    prop:value=draft.flaresolverr_url.clone()
+                                    on:change=move |ev| {
                                         set_settings_draft.update(|s| {
-                                            if let Some(s) = s { s.max_wasm_instances = v; }
+                                            if let Some(s) = s { s.flaresolverr_url = event_target_value(&ev); }
                                         });
                                     }
-                                }
-                            />
+                                />
+                            </div>
+
+                            <div class="settings-field">
+                                <label class="settings-field__label">"Library path"</label>
+                                <div class="settings-field settings-field--needs-restart">
+                                    <p class="settings-field__hint settings-field__hint--warn">
+                                        "Changing this requires a server restart and will not move existing files."
+                                    </p>
+                                </div>
+                                <input
+                                    type="text"
+                                    prop:value=draft.library_path.clone()
+                                    on:change=move |ev| {
+                                        set_settings_draft.update(|s| {
+                                            if let Some(s) = s { s.library_path = event_target_value(&ev); }
+                                        });
+                                    }
+                                />
+                            </div>
+
+                            <div class="settings-field">
+                                <label class="settings-field__label" for="mwi">
+                                    "Max WASM instances"
+                                </label>
+                                <div class="settings-field settings-field--needs-restart">
+                                    <p class="settings-field__hint settings-field__hint--warn">
+                                        "Requires server restart."
+                                    </p>
+                                </div>
+                                <input id="mwi" type="number" min="1" max="10000"
+                                    prop:value=draft.max_wasm_instances.to_string()
+                                    on:change=move |ev| {
+                                        if let Ok(v) = event_target_value(&ev).parse::<i64>() {
+                                            set_settings_draft.update(|s| {
+                                                if let Some(s) = s { s.max_wasm_instances = v; }
+                                            });
+                                        }
+                                    }
+                                />
+                            </div>
                         </div>
-                    </div>
-                })}
+                    }.into_any()
+                }}
             </CollapsiblePanel>
 
             <div class="settings-save-row">

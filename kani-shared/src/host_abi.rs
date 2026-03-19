@@ -348,22 +348,6 @@ impl JsonHandle {
                 self.object_get(ptr, &k).map(|v| (k, v))
             })
     }
-
-    // Add as a free function (outside JsonHandle):
-
-    /// Read a preference the host has stored for this extension.
-    /// Returns `None` if the key has never been set.
-    pub fn get_preference_value(key: &str) -> Option<String> {
-        crate::bindings::kani::extension::prefs::get_value(key)
-    }
-
-    /// Parse a `MultiValueList` preference into `Vec<String>`.
-    /// Returns an empty vec if unset or unparseable.
-    pub fn get_preference_list(key: &str) -> Vec<String> {
-        get_preference_value(key)
-            .and_then(|v| serde_json::from_str::<Vec<String>>(&v).ok())
-            .unwrap_or_default()
-}
 }
 
 impl Drop for JsonHandle {

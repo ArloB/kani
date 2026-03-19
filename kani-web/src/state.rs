@@ -87,11 +87,14 @@ impl AppState {
         let global_smart_client = kani_core::http::SmartClient::new(flaresolverr_url)?;
         tracing::info!("Smart client created");
 
+        let cache = crate::cache::RequestCache::new();
+
         if let Err(e) = Self::scan_and_register_sources(
             &pool,
             &settings.wasm_storage_path,
             global_smart_client.clone(),
             &wasm_runtime,
+            &cache.preference_schema,
         )
         .await
         {
@@ -154,7 +157,7 @@ impl AppState {
         let (refresh_tx, _) = tokio::sync::broadcast::channel(256);
         let refresh_task = Arc::new(tokio::sync::Mutex::new(None));
 
-        let cache = crate::cache::RequestCache::new();
+        
 
         let proxy_secret = Arc::new(crate::proxy::load_or_generate_secret());
 
@@ -216,10 +219,10 @@ impl AppState {
 
     pub async fn get_manga_details(&self, id: i64, manga_id: &str) -> Result<String, AppError> {
         let sources    = self.sources.clone();
-        let manga_id_s = manga_id.to_string();
+        let manga_id_d = crate::utils::decode_manga_id(manga_id);
 
         self.cache
-            .get_or_fetch_manga_details(id, manga_id, async move {
+            .get_or_fetch_manga_details(id, &manga_id_d.clone(), async move {
                 let source_manager = {
                     let sources = sources.read().await;
                     sources.get(&id).cloned()
@@ -227,7 +230,7 @@ impl AppState {
                 };
                 let result = source_manager
                     .lease_instance().await?
-                    .get_manga_details(&manga_id_s).await?;
+                    .get_manga_details(&manga_id_d).await?;
                 serde_json::to_string(&convert_to_shared_manga_info(result))
                     .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
             })
@@ -301,10 +304,12 @@ impl AppState {
         let mut tx = self.db.begin().await?;
         let status: i64 = manga.status.into();
 
+        let decoded_manga_id = crate::utils::decode_manga_id(&manga.id);
+
         let insert_result = sqlx::query!(
             "INSERT OR IGNORE INTO manga (source_manga_id, source_id, name, cover_url, description, status) \
              VALUES (?, ?, ?, ?, ?, ?)",
-            manga.id,
+            decoded_manga_id,
             source_id,
             manga.title,
             manga.cover_url,
@@ -318,7 +323,7 @@ impl AppState {
 
         let manga_row_id: i64 = sqlx::query_scalar!(
             "SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?",
-            manga.id,
+            decoded_manga_id,
             source_id
         )
         .fetch_one(&mut *tx)
@@ -393,7 +398,7 @@ impl AppState {
 
             query_builder.push_values(chunk, |mut b, chapter| {
                 b.push_bind(manga_row_id)
-                    .push_bind(chapter.id.clone())
+                    .push_bind(crate::utils::decode_manga_id(&chapter.id))
                     .push_bind(chapter.title.clone())
                     .push_bind(chapter.number)
                     .push_bind(chapter.language.clone())
@@ -440,11 +445,11 @@ impl AppState {
         chapter_id: &str,
     ) -> Result<String, AppError> {
         let sources      = self.sources.clone();
-        let manga_id_s   = manga_id.to_string();
-        let chapter_id_s = chapter_id.to_string();
+        let manga_id_d   = crate::utils::decode_manga_id(manga_id);
+        let chapter_id_d = crate::utils::decode_manga_id(chapter_id);
 
         self.cache
-            .get_or_fetch_pages(id, manga_id, chapter_id, async move {
+            .get_or_fetch_pages(id, &manga_id_d.clone(), &chapter_id_d.clone(), async move {
                 let source_manager = {
                     let sources = sources.read().await;
                     sources.get(&id).cloned()
@@ -452,7 +457,7 @@ impl AppState {
                 };
                 let result = source_manager
                     .lease_instance().await?
-                    .get_pages(&manga_id_s, &chapter_id_s).await?;
+                    .get_pages(&manga_id_d, &chapter_id_d).await?;
                 serde_json::to_string(&result)
                     .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
             })
@@ -467,10 +472,10 @@ impl AppState {
         page: i32,
     ) -> Result<String, AppError> {
         let sources    = self.sources.clone();
-        let manga_id_s = manga_id.to_string();
+        let manga_id_d = crate::utils::decode_manga_id(manga_id);
 
         self.cache
-            .get_or_fetch_chapter_list(id, manga_id, page, async move {
+            .get_or_fetch_chapter_list(id, &manga_id_d.clone(), page, async move {
                 let source_manager = {
                     let sources = sources.read().await;
                     sources.get(&id).cloned()
@@ -478,7 +483,7 @@ impl AppState {
                 };
                 let result = source_manager
                     .lease_instance().await?
-                    .get_chapter_list(&manga_id_s, page).await?;
+                    .get_chapter_list(&manga_id_d, page).await?;
                 serde_json::to_string(&result)
                     .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
             })
@@ -574,7 +579,7 @@ impl AppState {
             );
             qb.push_values(chunk, |mut b, ch| {
                 b.push_bind(manga_row_id)
-                    .push_bind(ch.id.clone())
+                    .push_bind(crate::utils::decode_manga_id(&ch.id))
                     .push_bind(ch.title.clone())
                     .push_bind(ch.number)
                     .push_bind(ch.language.clone())
@@ -1084,6 +1089,7 @@ impl AppState {
         wasm_storage_path: &std::path::Path,
         smart_client: kani_core::http::SmartClient,
         wasm_runtime: &WasmRuntime,
+        preference_schemas: &DashMap<i64, Vec<crate::types::PreferenceDescriptor>>,
     ) -> Result<(), AppError> {
         tracing::info!(
             "Scanning and registering sources in {:?}",
@@ -1120,13 +1126,17 @@ impl AppState {
                         .compile_component(&bytes)
                         .map_err(AppError::CoreError)?;
 
-                    let metadata = {
-                        let mut inst =
-                            kani_core::sources::SourceInstance::new(smart_client.clone(), None, false);
+                    let (metadata, schema) = {
+                        let mut inst = kani_core::sources::SourceInstance::new(
+                            smart_client.clone(), None, false
+                        );
                         inst.load(wasm_runtime.engine(), &component, wasm_runtime.linker())
                             .await
                             .map_err(AppError::CoreError)?;
-                        inst.get_metadata().await.map_err(AppError::CoreError)?
+
+                        let meta = inst.get_metadata().await.map_err(AppError::CoreError)?;
+                        let schema = inst.get_preferences().await.ok();
+                        (meta, schema)
                     };
 
                     match serde_json::to_value(&metadata)
@@ -1135,18 +1145,21 @@ impl AppState {
                         Ok(metadata) => {
                             let initially_enabled = if metadata.unrestricted_http { 0i64 } else { 1i64 };
 
-                            sqlx::query!(
+                            let result = sqlx::query!(
                                 "INSERT INTO sources (name, version, base_url, enabled, unrestricted_http)
                                 VALUES (?, ?, ?, ?, ?)",
-                                filename,
-                                metadata.version,
-                                metadata.base_url,
-                                initially_enabled,
-                                metadata.unrestricted_http,
+                                filename, metadata.version, metadata.base_url,
+                                initially_enabled, metadata.unrestricted_http,
                             )
                             .execute(db)
                             .await
                             .map_err(AppError::SqlxError)?;
+
+                            if let Some(raw_schema) = schema {
+                                let id = result.last_insert_rowid();
+                                let converted: Vec<_> = raw_schema.into_iter().map(Into::into).collect();
+                                preference_schemas.insert(id, converted);
+                            }
 
                             tracing::info!("Registered new source: {}", filename);
                         }

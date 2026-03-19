@@ -156,7 +156,7 @@ interface types {
 
     record multi-select-pref {
         options: list<select-option>,
-        default-value: list<string>,
+        default-values: list<string>,
     }
 
     record number-input-pref {
@@ -174,7 +174,7 @@ interface types {
     record multi-value-list-pref {
         placeholder: option<string>,
         item-label: option<string>,
-        default-value: list<string>,
+        default-values: list<string>,
     }
 
     record label-pref {

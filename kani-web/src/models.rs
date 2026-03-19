@@ -145,7 +145,7 @@ mod pref_conversions {
                 },
                 wit::PreferenceKind::MultiSelect(p) => Self::MultiSelect {
                     options: p.options.into_iter().map(Into::into).collect(),
-                    default_values: p.default_value,
+                    default_values: p.default_values,
                 },
                 wit::PreferenceKind::Number(p) => Self::Number {
                     min: p.min, max: p.max, step: p.step,
@@ -154,7 +154,7 @@ mod pref_conversions {
                 wit::PreferenceKind::MultiValueList(p) => Self::MultiValueList {
                     placeholder: p.placeholder,
                     item_label: p.item_label,
-                    default_values: p.default_value,
+                    default_values: p.default_values,
                 },
                 wit::PreferenceKind::Label(p) => Self::Label { text: p.text },
             }

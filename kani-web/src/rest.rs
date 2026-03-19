@@ -298,11 +298,11 @@ async fn delete_source(
                 AppError::InternalServerError("Failed to convert path to string".to_string())
             })?,
             &row.name,
-        )
-        .await
-        .map_err(AppError::CoreError)?;
+        ).await.map_err(AppError::CoreError)?;
 
         drop(settings);
+
+        state.cache.invalidate_source(id);
     }
 
     Ok((StatusCode::OK, Json(json!({}))))
@@ -333,16 +333,15 @@ async fn install_source(
         format!("WASM compilation task panicked: {}", e)
     ))??;
 
-    let metadata = {
-        let mut inst = kani_core::sources::SourceInstance::new(state.smart_client.clone(), None, false);
-        inst.load(
-            state.wasm_runtime.engine(),
-            &component,
-            state.wasm_runtime.linker(),
-        )
-        .await
-        .map_err(AppError::CoreError)?;
-        inst.get_metadata().await.map_err(AppError::CoreError)?
+    let (metadata, raw_schema) = {
+        let mut inst = kani_core::sources::SourceInstance::new(
+            state.smart_client.clone(), None, false
+        );
+        inst.load(state.wasm_runtime.engine(), &component, state.wasm_runtime.linker())
+            .await.map_err(AppError::CoreError)?;
+        let meta = inst.get_metadata().await.map_err(AppError::CoreError)?;
+        let schema = inst.get_preferences().await.ok();
+        (meta, schema)
     };
 
     sqlx::query!(
@@ -397,7 +396,12 @@ async fn install_source(
         .await
         .insert(id, Arc::new(source_manager));
 
-    state.cache.invalidate_source(id).await;
+    if let Some(raw) = raw_schema {
+        let schema: Vec<_> = raw.into_iter().map(Into::into).collect();
+        state.cache.insert_preference_schema(id, schema);
+    }
+
+    state.cache.invalidate_source(id);
 
     tracing::info!(
         "Successfully installed source {}: {} v{}",

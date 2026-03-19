@@ -29,3 +29,6 @@ pub mod extension;
 pub use extension::*;
 
 pub mod host_abi;
+
+pub mod encoding;
+pub use encoding::{encode_manga_id, decode_manga_id};
