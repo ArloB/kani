@@ -284,7 +284,7 @@ pub async fn get_local_chapter_list(
 
     let sql = format!(
         r#"SELECT c.id, c.source_chapter_id, c.name, c.chapter_number, c.language,
-                  c.volume, c.scanlator, c.uploaded_at, c.download_status
+                  c.volume, c.scanlator, c.uploaded_at, c.download_status, c.is_orphaned
            FROM chapters c
            LEFT JOIN scanlator_preferences sp
                ON sp.manga_id = c.manga_id
@@ -317,6 +317,7 @@ pub async fn get_local_chapter_list(
         scanlator: c.scanlator,
         date_uploaded: c.uploaded_at,
         download_status: c.download_status,
+        is_orphaned: c.is_orphaned,
     }).collect();
 
     Ok(ChapterList { chapters, has_next_page })
@@ -1157,10 +1158,11 @@ pub async fn migrate_manga(
     manga_db_id: i64,
     target_source_id: i64,
     target_source_manga_id: String,
+    keep_orphaned_downloads: bool,
 ) -> Result<MigrationResult, ServerFnError> {
     let state = expect_context::<crate::state::AppState>();
     state
-        .migrate_manga(manga_db_id, target_source_id, target_source_manga_id)
+        .migrate_manga(manga_db_id, target_source_id, target_source_manga_id, keep_orphaned_downloads)
         .await
         .map_err(to_server_err)
 }

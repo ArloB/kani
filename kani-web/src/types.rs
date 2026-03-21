@@ -86,6 +86,8 @@ pub struct Chapter {
     pub date_uploaded: Option<i64>,
     #[serde(default)]
     pub download_status: i64,
+    #[serde(default)]
+    pub is_orphaned: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -508,6 +510,7 @@ pub struct MigrationResult {
     pub chapters_matched: usize,
     pub chapters_orphaned: usize,
     pub chapters_new: usize,
+    pub chapters_kept: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

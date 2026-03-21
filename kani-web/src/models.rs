@@ -70,6 +70,7 @@ pub struct Chapter {
     pub scanlator: Option<String>,
     pub uploaded_at: Option<i64>,
     pub download_status: i64,
+    pub is_orphaned: bool,
 }
 
 #[derive(Clone, Debug, sqlx::FromRow)]

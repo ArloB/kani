@@ -977,7 +977,7 @@ impl AppState {
     }
 
     pub async fn delete_downloaded(&self, chapter_id: i64) -> Result<(), AppError> {
-        let record = sqlx::query!("SELECT c.download_status, c.volume, c.chapter_number, c.name as chapter_name, m.id as manga_id, m.name as manga_name FROM chapters c join manga m on c.manga_id = m.id WHERE c.id = ?", chapter_id)
+        let record = sqlx::query!("SELECT c.download_status, c.volume, c.chapter_number, c.name as chapter_name, c.is_orphaned, m.id as manga_id, m.name as manga_name FROM chapters c join manga m on c.manga_id = m.id WHERE c.id = ?", chapter_id)
             .fetch_optional(&self.db)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("Chapter {chapter_id} not found")))?;
@@ -999,12 +999,18 @@ impl AppState {
             tracing::error!("Failed to remove chapter file: {}", e);
         }
 
-        let _ = sqlx::query!(
-            "UPDATE chapters SET download_status = 0 WHERE id = ?",
-            chapter_id
-        )
-        .execute(&self.db)
-        .await;
+        if record.is_orphaned {
+            let _ = sqlx::query!("DELETE FROM chapters WHERE id = ?", chapter_id)
+                .execute(&self.db)
+                .await;
+        } else {
+            let _ = sqlx::query!(
+                "UPDATE chapters SET download_status = 0 WHERE id = ?",
+                chapter_id
+            )
+            .execute(&self.db)
+            .await;
+        }
 
         Ok(())
     }
@@ -1505,6 +1511,7 @@ impl AppState {
         manga_db_id: i64,
         target_source_id: i64,
         target_source_manga_id: String,
+        keep_orphaned_downloads: bool,
     ) -> Result<MigrationResult, AppError> {
         let old_manga = sqlx::query!("SELECT name FROM manga WHERE id = ?", manga_db_id)
             .fetch_optional(&self.db)
@@ -1539,27 +1546,35 @@ impl AppState {
             manga_db_id
         );
 
-        for orphan_id in &downloaded_orphan_ids {
-            let ch = sqlx::query!(
-                "SELECT name, chapter_number, volume FROM chapters WHERE id = ?",
-                orphan_id
-            )
-            .fetch_optional(&self.db)
-            .await?;
+        let non_downloaded_orphan_ids: Vec<i64> = orphaned_ids
+            .iter()
+            .copied()
+            .filter(|id| !downloaded_orphan_ids.contains(id))
+            .collect();
 
-            if let Some(ch) = ch {
-                let ch_name  = chapter_name(ch.volume, ch.chapter_number, ch.name);
-                let cbz_path = library_path
-                    .join(&old_dir_name)
-                    .join(format!(
-                        "{}.cbz",
-                        kani_core::utilities::sanitize_filename(&ch_name)
-                    ));
-                if cbz_path.exists()
-                && let Err(e) = tokio::fs::remove_file(&cbz_path).await {
-                    tracing::warn!(
-                        "Failed to delete orphaned CBZ {:?}: {}", cbz_path, e
-                    );
+        if !keep_orphaned_downloads {
+            for orphan_id in &downloaded_orphan_ids {
+                let ch = sqlx::query!(
+                    "SELECT name, chapter_number, volume FROM chapters WHERE id = ?",
+                    orphan_id
+                )
+                .fetch_optional(&self.db)
+                .await?;
+
+                if let Some(ch) = ch {
+                    let ch_name  = chapter_name(ch.volume, ch.chapter_number, ch.name);
+                    let cbz_path = library_path
+                        .join(&old_dir_name)
+                        .join(format!(
+                            "{}.cbz",
+                            kani_core::utilities::sanitize_filename(&ch_name)
+                        ));
+                    if cbz_path.exists()
+                    && let Err(e) = tokio::fs::remove_file(&cbz_path).await {
+                        tracing::warn!(
+                            "Failed to delete orphaned CBZ {:?}: {}", cbz_path, e
+                        );
+                    }
                 }
             }
         }
@@ -1595,11 +1610,24 @@ impl AppState {
             .execute(&mut *tx)
             .await?;
         }
+        if keep_orphaned_downloads {
+            for orphan_id in &downloaded_orphan_ids {
+                sqlx::query!("UPDATE chapters SET is_orphaned = 1 WHERE id = ?", orphan_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
 
-        for orphan_id in &orphaned_ids {
-            sqlx::query!("DELETE FROM chapters WHERE id = ?", orphan_id)
-                .execute(&mut *tx)
-                .await?;
+            for orphan_id in &non_downloaded_orphan_ids {
+                sqlx::query!("DELETE FROM chapters WHERE id = ?", orphan_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        } else {
+            for orphan_id in &orphaned_ids {
+                sqlx::query!("DELETE FROM chapters WHERE id = ?", orphan_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
 
         for ch in &unmatched_new {
@@ -1638,10 +1666,18 @@ impl AppState {
             }
         }
 
+        let kept_count    = if keep_orphaned_downloads { downloaded_orphan_ids.len() } else { 0 };
+        let removed_count = if keep_orphaned_downloads {
+            non_downloaded_orphan_ids.len()
+        } else {
+            orphaned_ids.len()
+        };
+
         Ok(MigrationResult {
             chapters_matched:  matched.len(),
-            chapters_orphaned: orphaned_ids.len(),
+            chapters_orphaned: removed_count,
             chapters_new:      new_count,
+            chapters_kept:     kept_count,
         })
     }
 }

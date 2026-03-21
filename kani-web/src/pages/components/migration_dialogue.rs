@@ -28,6 +28,8 @@ pub fn MigrationDialogue(
     let set_step = set_migration_step;
     let set_err  = set_mig_error;
 
+    let (keep_orphaned, set_keep_orphaned) = signal(true);
+
     view! {
         <Show when=move || migration_step.get() != MigrationStep::Closed fallback=|| ()>
             <div
@@ -214,9 +216,18 @@ pub fn MigrationDialogue(
                                     {if at_risk > 0 {
                                         view! {
                                             <div class="modal-notice modal-notice--warn">
-                                                "Some orphaned chapters have already been downloaded. "
-                                                "Their CBZ files will be permanently deleted when you confirm."
+                                                "Some downloaded chapters don't exist on the new source and would normally be permanently deleted."
                                             </div>
+                                            <label class="toggle-label migration-keep-orphaned">
+                                                <input
+                                                    type="checkbox"
+                                                    checked=move || keep_orphaned.get()
+                                                    on:change=move |ev| {
+                                                        set_keep_orphaned.set(event_target_checked(&ev))
+                                                    }
+                                                />
+                                                " Keep these downloaded chapters (shown as Orphaned in the chapter list)"
+                                            </label>
                                         }.into_any()
                                     } else {
                                         view! { <span/> }.into_any()
@@ -251,6 +262,16 @@ pub fn MigrationDialogue(
                                             <span class="label">"Chapters removed"</span>
                                             <span class="value">{result.chapters_orphaned}</span>
                                         </div>
+                                        {if result.chapters_kept > 0 {
+                                            view! {
+                                                <div class="migration-stat-row migration-stat-row--warn">
+                                                    <span class="label">"Chapters kept (orphaned)"</span>
+                                                    <span class="value">{result.chapters_kept}</span>
+                                                </div>
+                                            }.into_any()
+                                        } else {
+                                            view! { <span/> }.into_any()
+                                        }}
                                     </div>
                                 </div>
                             }.into_any(),
@@ -297,9 +318,10 @@ pub fn MigrationDialogue(
                                         on:click=move |_| {
                                             let mid     = mid.clone();
                                             let on_done = on_complete;
+                                            let keep    = keep_orphaned.get_untracked();
                                             set_step.set(MigrationStep::Confirming);
                                             spawn_local(async move {
-                                                match migrate_manga_fn(db_id, target_sid, mid).await {
+                                                match migrate_manga_fn(db_id, target_sid, mid, keep).await {
                                                     Ok(res) => {
                                                         on_done.run(());
                                                         set_step.set(MigrationStep::Done(res));

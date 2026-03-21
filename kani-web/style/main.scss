@@ -1140,6 +1140,31 @@ main.container:has(.manga-details) {
   }
 }
 
+.chapter-item--orphaned {
+  border-left-color: var(--clr-warn);
+
+  .chapter-title {
+    color: var(--clr-text-muted);
+  }
+}
+
+// Small inline badge shown in .chapter-meta for orphaned chapters.
+.chapter-orphaned-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-full);
+  background: rgba(232, 169, 84, 0.12);
+  border: 1px solid var(--clr-warn);
+  color: var(--clr-warn);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 // Left: title + meta row — takes all available space
 .chapter-details {
   flex: 1;
@@ -1147,6 +1172,12 @@ main.container:has(.manga-details) {
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+}
+
+.chapter-title-container {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
 }
 
 .chapter-title {
@@ -2202,6 +2233,10 @@ main.container:has(.manga-details) {
   &:nth-child(1) { width: 100%; }
   &:nth-child(2) { width: 88%;  }
   &:nth-child(3) { width: 76%;  }
+}
+
+.migration-keep-orphaned {
+  margin-top: var(--sp-2);
 }
 
 // ── 15. Page — Recent Updates ────────────────────────────────

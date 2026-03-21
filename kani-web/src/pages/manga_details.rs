@@ -651,22 +651,31 @@ pub fn MangaDetails() -> impl IntoView {
                                                         children=move |chapter| {
                                                             let chap_id_str      = chapter.id.clone();
                                                             view! {
-                                                                <div class="chapter-item">
+                                                                <div class=if chapter.is_orphaned { "chapter-item chapter-item--orphaned" } else { "chapter-item" }>
                                                                     <div class="chapter-details">
-                                                                        <span class="chapter-title">
-                                                                            {{
-                                                                                let mut title_str = String::new();
-                                                                                if let Some(vol) = &chapter.volume {
-                                                                                    title_str.push_str(&format!("Vol. {} ", vol));
-                                                                                }
-                                                                                title_str.push_str(&format!("Ch. {}", chapter.number));
-                                                                                if let Some(title) = &chapter.title
-                                                                                    && !title.is_empty() {
-                                                                                        title_str.push_str(&format!(" - {}", title));
+                                                                        <div class="chapter-title-container">
+                                                                            <span class="chapter-title">
+                                                                                {{
+                                                                                    let mut title_str = String::new();
+                                                                                    if let Some(vol) = &chapter.volume {
+                                                                                        title_str.push_str(&format!("Vol. {} ", vol));
                                                                                     }
-                                                                                title_str
+                                                                                    title_str.push_str(&format!("Ch. {}", chapter.number));
+                                                                                    if let Some(title) = &chapter.title
+                                                                                        && !title.is_empty() {
+                                                                                            title_str.push_str(&format!(" - {}", title));
+                                                                                        }
+                                                                                    title_str
+                                                                                }}
+                                                                            </span>
+                                                                            {if chapter.is_orphaned {
+                                                                                view! {
+                                                                                    <span class="chapter-orphaned-badge">"Orphaned"</span>
+                                                                                }.into_any()
+                                                                            } else {
+                                                                                view! { <span/> }.into_any()
                                                                             }}
-                                                                        </span>
+                                                                        </div>
                                                                         <div class="chapter-meta">
                                                                             <span class="chapter-scanlator">{chapter.scanlator.unwrap_or_default()}</span>
                                                                             <span class="chapter-date">
@@ -713,15 +722,19 @@ pub fn MangaDetails() -> impl IntoView {
                                                                                                 <button class="delete-button" on:click=move |_| {
                                                                                                     leptos::task::spawn_local(async move {
                                                                                                         if delete_downloaded(db_chap_id).await.is_ok() {
-                                                                                                            chapters_progress.update(|m| {
-                                                                                                                m.insert(db_chap_id, crate::types::ChapterProgress {
-                                                                                                                    id: db_chap_id,
-                                                                                                                    name: String::new(),
-                                                                                                                    total_pages: 0,
-                                                                                                                    completed_pages: 0,
-                                                                                                                    status: LiveChapterStatus::Deleted,
+                                                                                                            if chapter.is_orphaned {
+                                                                                                                chapters.refetch();
+                                                                                                            } else {
+                                                                                                                chapters_progress.update(|m| {
+                                                                                                                    m.insert(db_chap_id, crate::types::ChapterProgress {
+                                                                                                                        id: db_chap_id,
+                                                                                                                        name: String::new(),
+                                                                                                                        total_pages: 0,
+                                                                                                                        completed_pages: 0,
+                                                                                                                        status: LiveChapterStatus::Deleted,
+                                                                                                                    });
                                                                                                                 });
-                                                                                                            });
+                                                                                                            }
                                                                                                         }
                                                                                                     });
                                                                                                 }>"Delete"</button>
@@ -766,25 +779,29 @@ pub fn MangaDetails() -> impl IntoView {
                                                                                                 }.into_any()
                                                                                             }
 
-                                                                                            _ => view! {
-                                                                                                <button
-                                                                                                    class="download-button"
-                                                                                                    on:click=move |_| {
-                                                                                                        leptos::task::spawn_local(async move {
-                                                                                                            chapters_progress.update(|m| {
-                                                                                                                m.insert(db_chap_id, crate::types::ChapterProgress {
-                                                                                                                    id: db_chap_id,
-                                                                                                                    name: String::new(),
-                                                                                                                    total_pages: 0,
-                                                                                                                    completed_pages: 0,
-                                                                                                                    status: LiveChapterStatus::InProgress,
+                                                                                            _ => if chapter.is_orphaned {
+                                                                                                view! { <span/> }.into_any()
+                                                                                            } else {
+                                                                                                view! {
+                                                                                                    <button
+                                                                                                        class="download-button"
+                                                                                                        on:click=move |_| {
+                                                                                                            leptos::task::spawn_local(async move {
+                                                                                                                chapters_progress.update(|m| {
+                                                                                                                    m.insert(db_chap_id, crate::types::ChapterProgress {
+                                                                                                                        id: db_chap_id,
+                                                                                                                        name: String::new(),
+                                                                                                                        total_pages: 0,
+                                                                                                                        completed_pages: 0,
+                                                                                                                        status: LiveChapterStatus::InProgress,
+                                                                                                                    });
                                                                                                                 });
+                                                                                                                let _ = download_chapter(db_chap_id).await;
                                                                                                             });
-                                                                                                            let _ = download_chapter(db_chap_id).await;
-                                                                                                        });
-                                                                                                    }
-                                                                                                >"Download"</button>
-                                                                                            }.into_any()
+                                                                                                        }
+                                                                                                    >"Download"</button>
+                                                                                                }.into_any()
+                                                                                            }
                                                                                         }
                                                                                     }}
                                                                                 }
