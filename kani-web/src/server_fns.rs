@@ -917,7 +917,9 @@ pub async fn update_settings(settings: AppSettings) -> Result<(), ServerFnError>
     } else {
         Some(settings.flaresolverr_url)
     };
-    state.smart_client.update_solver_url(new_solver);
+
+    state.smart_client.update_solver_url(new_solver.clone());
+    state.proxy_client.update_solver_url(new_solver);
 
     Ok(())
 }

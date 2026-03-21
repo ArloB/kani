@@ -2167,6 +2167,43 @@ main.container:has(.manga-details) {
   }
 }
 
+.manga-card--current {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.migration-skeleton__line {
+  @extend %skeleton-base;
+  border-radius: var(--radius-sm);
+ 
+  // Title placeholder — mirrors the <strong> element height
+  &--title {
+    height: 0.95rem;
+    width: 72%;
+    margin-bottom: var(--sp-1);
+  }
+ 
+  // Sub-label placeholder — mirrors the <span> element height
+  &--sub {
+    height: 0.75rem;
+    width: 44%;
+  }
+}
+ 
+// Skeleton rows used inside .migration-stats while loading.
+// Three rows with staggered widths so they don't look like a
+// solid block.
+.migration-skeleton__stat {
+  @extend %skeleton-base;
+  height: 1.15rem;
+  border-radius: var(--radius-sm);
+ 
+  &:nth-child(1) { width: 100%; }
+  &:nth-child(2) { width: 88%;  }
+  &:nth-child(3) { width: 76%;  }
+}
+
 // ── 15. Page — Recent Updates ────────────────────────────────
 
 .recent-updates-page {
@@ -3092,4 +3129,129 @@ main.container:has(.manga-details) {
   &__name    { height: 0.9rem; width: 50%; border-radius: var(--radius-sm); @extend %skeleton-base; }
   &__version { height: 0.7rem; width: 28%; border-radius: var(--radius-sm); @extend %skeleton-base; }
   &__toggle  { height: 1.5rem; width: 48px; border-radius: var(--radius-full); @extend %skeleton-base; }
+}
+
+// ── 21. Combobox ───────────────────────────────────────────────────────────
+
+.combobox {
+  position: relative;
+  width: 100%;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+// ── Input row ──────────────────────────────────────────────────────────────
+
+.combobox__field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.combobox__input {
+  @extend %control-base;
+  width: 100%;
+  padding-right: var(--sp-10);
+  cursor: text;
+ 
+  .combobox--open & {
+    border-color: var(--clr-accent);
+    box-shadow: 0 0 0 2px var(--clr-accent-dim);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+}
+
+// ×  clear button
+.combobox__clear {
+  position: absolute;
+  right: var(--sp-6);
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--clr-text-muted);
+  font-size: var(--text-base);
+  line-height: 1;
+  padding: 0 var(--sp-1);
+  cursor: pointer;
+  transition: color 0.12s;
+  z-index: 1;
+ 
+  &:hover {
+    color: var(--clr-text);
+  }
+}
+
+// ▾  chevron indicator
+.combobox__chevron {
+  position: absolute;
+  right: var(--sp-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--clr-text-muted);
+  font-size: 10px;
+  pointer-events: none;
+  transition: transform 0.15s;
+ 
+  .combobox--open & {
+    transform: translateY(-50%) rotate(180deg);
+  }
+}
+
+// ── Dropdown ───────────────────────────────────────────────────────────────
+
+.combobox__dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: var(--clr-surface-2);
+  border: 1px solid var(--clr-accent);
+  border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+ 
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+ 
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+ 
+  &::-webkit-scrollbar-thumb {
+    background: var(--clr-border);
+    border-radius: var(--radius-full);
+  }
+}
+
+// ── Option rows ────────────────────────────────────────────────────────────
+
+.combobox__option {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--clr-text);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.08s, color 0.08s;
+  box-sizing: border-box;
+ 
+  &:hover,
+  &--highlighted {
+    background: var(--clr-surface-3);
+    color: var(--clr-text);
+  }
+ 
+  &--highlighted {
+    background: var(--clr-accent-dim);
+    color: var(--clr-accent);
+  }
 }

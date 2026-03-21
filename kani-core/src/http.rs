@@ -95,7 +95,8 @@ impl SmartResponse {
 pub struct SmartClient {
     client: rquest::Client,
     credentials: Arc<ArcSwap<HashMap<String, CachedCredentials>>>,
-    solver_url: Option<String>,
+    solver_url: Arc<ArcSwap<Option<String>>>,
+    solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl SmartClient {
@@ -110,11 +111,12 @@ impl SmartClient {
         Ok(Self {
             client,
             credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
-            solver_url,
+            solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
+            solving: Arc::new(dashmap::DashMap::new()),
         })
     }
 
-    pub fn new_proxy() -> Result<Self> {
+    pub fn new_proxy(solver_url: Option<String>) -> Result<Self> {
         let resolver = ValidatingResolver::new()?;
         let client = rquest::Client::builder()
             .emulation(rquest_util::Emulation::Chrome130)
@@ -127,7 +129,8 @@ impl SmartClient {
         Ok(Self {
             client,
             credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
-            solver_url: None,
+            solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
+            solving: Arc::new(dashmap::DashMap::new()),
         })
     }
 
@@ -137,17 +140,14 @@ impl SmartClient {
         let domain = request.url().host_str().unwrap_or("").to_string();
         let creds_map = self.credentials.load();
         if let Some(creds) = creds_map.get(&domain) {
-            if !creds.cookies.is_empty() {
-                request.headers_mut().insert(
-                    rquest::header::COOKIE,
-                    rquest::header::HeaderValue::from_str(&creds.cookies).unwrap(),
-                );
+            if let Ok(val) = rquest::header::HeaderValue::from_str(&creds.cookies) {
+                request.headers_mut().insert(rquest::header::COOKIE, val);
+            } else {
+                tracing::warn!("Stored cookies for {} contained invalid header characters, skipping", domain);
             }
-            if let Some(ref ua) = creds.user_agent {
-                request.headers_mut().insert(
-                    rquest::header::USER_AGENT,
-                    rquest::header::HeaderValue::from_str(ua).unwrap(),
-                );
+            if let Some(ref ua) = creds.user_agent
+            && let Ok(val) = rquest::header::HeaderValue::from_str(ua) {
+                request.headers_mut().insert(rquest::header::USER_AGENT, val);
             }
         }
 
@@ -213,11 +213,12 @@ impl SmartClient {
                         || body_lower.contains("enable javascript");
 
                     if is_challenge
-                        && self.solver_url.is_some()
+                        && self.solver_url.load().is_some()
                         && request_clone_for_retry.is_some()
                     {
                         let url_str = url.as_str().to_string();
-                        let resp = self.get_rendered_page(&url_str).await?;
+                        let domain = url.host_str().unwrap_or("").to_string();
+                        let resp = self.get_rendered_page_once(&url_str, &domain).await?;
                         return Ok(resp);
                     } else {
                         return Ok(SmartResponse::Buffered {
@@ -234,25 +235,23 @@ impl SmartClient {
 
             if (status == rquest::StatusCode::FORBIDDEN
                 || status == rquest::StatusCode::SERVICE_UNAVAILABLE)
-                && self.solver_url.is_some()
+                && self.solver_url.load().is_some()
                 && request_clone_for_retry.is_some()
             {
                 let url = resp.url().as_str().to_string();
 
-                let (new_cookies, new_ua) = self.solve_challenge(&url).await?;
+                let (new_cookies, new_ua) = self.solve_challenge_once(&url, &domain).await?;
 
                 self.store_credentials(&url, &new_cookies, &new_ua);
 
                 if let Some(mut request) = request_clone_for_retry {
-                    request.headers_mut().insert(
-                        rquest::header::COOKIE,
-                        rquest::header::HeaderValue::from_str(&new_cookies).unwrap(),
-                    );
+                    if let Ok(val) = rquest::header::HeaderValue::from_str(&new_cookies) {
+                        request.headers_mut().insert(rquest::header::COOKIE, val);
+                    }
 
-                    request.headers_mut().insert(
-                        rquest::header::USER_AGENT,
-                        rquest::header::HeaderValue::from_str(&new_ua).unwrap(),
-                    );
+                    if let Ok(val) = rquest::header::HeaderValue::from_str(&new_ua) {
+                        request.headers_mut().insert(rquest::header::USER_AGENT, val);
+                    }
 
                     let resp = self.client.execute(request).await?;
                     return Ok(SmartResponse::Normal(resp));
@@ -275,15 +274,20 @@ impl SmartClient {
     ) -> Result<SmartResponse> {
         const MAX_REDIRECTS: usize = 5;
 
-        let mut builder = self.client.get(initial_url);
-
-        if let Some(headers) = headers {
-            builder = builder.headers(headers);
-        }
-
-        let mut req = builder.build()?;
+        let mut current_url = initial_url.to_string();
+        let mut solver_headers = rquest::header::HeaderMap::new();
+        let mut solved = false;
 
         for _ in 0..MAX_REDIRECTS {
+            let mut req_builder = self.client.get(&current_url);
+            if current_url == initial_url && let Some(ref h) = headers {
+                req_builder = req_builder.headers(h.clone());
+            }
+            if !solver_headers.is_empty() {
+                req_builder = req_builder.headers(solver_headers.clone());
+            }
+            let req = req_builder.build()?;
+
             let resp = self.client.execute(req).await?;
 
             if resp.status().is_redirection() {
@@ -298,25 +302,46 @@ impl SmartClient {
                 let next = resp
                     .url()
                     .join(location)
-                    .map_err(|_| crate::error::Error::Other("invalid redirect URL".into()))?;
+                    .map_err(|e| crate::error::Error::Other(
+                        format!("invalid redirect URL '{}': {}", location, e)
+                    ))?;
 
                 match next.scheme() {
                     "http" | "https" => {}
-                    s => {
-                        return Err(crate::error::Error::Other(format!(
-                            "redirect to forbidden scheme: {}",
-                            s
-                        )));
-                    }
+                    s => return Err(crate::error::Error::Other(format!(
+                        "redirect to forbidden scheme: {}", s
+                    ))),
                 }
 
-                req = self.client.get(next).build()?;
+                current_url = next.to_string();
+
+            } else if (resp.status() == rquest::StatusCode::FORBIDDEN
+                || resp.status() == rquest::StatusCode::SERVICE_UNAVAILABLE)
+                && !solved
+                && self.solver_url.load().is_some()
+            {
+                let url = resp.url().as_str().to_string();
+                let domain = resp.url().host_str().unwrap_or("").to_string();
+                let (cookies, ua) = self.solve_challenge_once(&url, &domain).await?;
+
+                if let Ok(val) = rquest::header::HeaderValue::from_str(&cookies) {
+                    solver_headers.insert(rquest::header::COOKIE, val);
+                }
+                if let Ok(val) = rquest::header::HeaderValue::from_str(&ua) {
+                    solver_headers.insert(rquest::header::USER_AGENT, val);
+                }
+
+                solved = true;
+
             } else {
                 return Ok(SmartResponse::Normal(resp));
             }
         }
 
-        Err(crate::error::Error::Other("too many redirects".into()))
+        Err(crate::error::Error::Other(format!(
+            "too many redirects following '{}'",
+            initial_url
+        )))
     }
 
     pub fn inner(&self) -> &rquest::Client {
@@ -324,10 +349,8 @@ impl SmartClient {
     }
 
     async fn solve_challenge(&self, url: &str) -> Result<(String, String)> {
-        let solver_url = self
-            .solver_url
-            .as_ref()
-            .ok_or_else(|| crate::error::Error::Other("No solver URL configured".into()))?;
+        let guard = self.solver_url.load();
+        let solver_url = guard.as_deref().ok_or_else(|| crate::error::Error::Other("No solver URL configured".into()))?;
 
         let client = rquest::Client::new();
 
@@ -337,14 +360,30 @@ impl SmartClient {
           "maxTimeout": 60000
         });
 
-        let response: serde_json::Value = client
+        let response = client
             .post(solver_url)
             .header("Content-Type", "application/json")
             .body(body.to_string())
             .send()
-            .await?
-            .json()
             .await?;
+
+        if !response.status().is_success() {
+            return Err(crate::error::Error::Other(format!(
+                "FlareSolverr returned HTTP {}: check your solver URL is correct (should end in /v1)",
+                response.status()
+            )));
+        }
+
+        let response: serde_json::Value = response.json().await?;
+
+        let status = response["status"].as_str().unwrap_or("");
+        if status != "ok" {
+            return Err(crate::error::Error::Other(format!(
+                "FlareSolverr challenge failed with status '{}': {}",
+                status,
+                response["message"].as_str().unwrap_or("no message")
+            )));
+        }
 
         let ua = response["solution"]["userAgent"]
             .as_str()
@@ -368,11 +407,31 @@ impl SmartClient {
         Ok((cookies, ua))
     }
 
+    async fn solve_challenge_once(&self, url: &str, domain: &str) -> Result<(String, String)> {
+        let mutex = self.solving
+            .entry(domain.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone();
+
+        let _guard = mutex.lock().await;
+
+        let creds = self.credentials.load();
+        if let Some(c) = creds.get(domain)
+            && !c.cookies.is_empty()
+        {
+            tracing::debug!("Challenge for {} already solved by another request, reusing cookies", domain);
+            return Ok((c.cookies.clone(), c.user_agent.clone().unwrap_or_default()));
+        }
+
+        tracing::info!("Solving challenge for domain {}", domain);
+        let (cookies, ua) = self.solve_challenge(url).await?;
+        self.store_credentials(url, &cookies, &ua);
+        Ok((cookies, ua))
+    }
+
     async fn get_rendered_page(&self, url: &str) -> Result<SmartResponse> {
-        let solver_url = self
-            .solver_url
-            .as_ref()
-            .ok_or_else(|| crate::error::Error::Other("No solver URL configured".into()))?;
+        let guard = self.solver_url.load();
+        let solver_url = guard.as_deref().ok_or_else(|| crate::error::Error::Other("No solver URL configured".into()))?;
 
         let client = rquest::Client::new();
 
@@ -382,14 +441,30 @@ impl SmartClient {
           "maxTimeout": 60000
         });
 
-        let response: serde_json::Value = client
+        let response = client
             .post(solver_url)
             .header("Content-Type", "application/json")
             .body(body.to_string())
             .send()
-            .await?
-            .json()
             .await?;
+
+        if !response.status().is_success() {
+            return Err(crate::error::Error::Other(format!(
+                "FlareSolverr returned HTTP {}: check your solver URL is correct (should end in /v1)",
+                response.status()
+            )));
+        }
+
+        let response: serde_json::Value = response.json().await?;
+
+        let status = response["status"].as_str().unwrap_or("");
+        if status != "ok" {
+            return Err(crate::error::Error::Other(format!(
+                "FlareSolverr challenge failed with status '{}': {}",
+                status,
+                response["message"].as_str().unwrap_or("no message")
+            )));
+        }
 
         let html = response["solution"]["response"]
             .as_str()
@@ -410,14 +485,57 @@ impl SmartClient {
         })
     }
 
+    async fn get_rendered_page_once(&self, url: &str, domain: &str) -> Result<SmartResponse> {
+        let mutex = self.solving
+            .entry(domain.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone();
+
+        let _guard = mutex.lock().await;
+
+        let creds = self.credentials.load();
+        if let Some(c) = creds.get(domain)
+            && !c.cookies.is_empty()
+        {
+            tracing::debug!("Challenge for {} already solved, retrying with stored credentials", domain);
+            let mut builder = self.client.get(url);
+            if let Ok(val) = rquest::header::HeaderValue::from_str(&c.cookies) {
+                builder = builder.header(rquest::header::COOKIE, val);
+            }
+
+            if let Some(ref ua) = c.user_agent
+            && let Ok(val) = rquest::header::HeaderValue::from_str(ua) {
+                builder = builder.header(rquest::header::USER_AGENT, val);
+            }
+
+            let request = builder.build().map_err(|e| crate::error::Error::Other(e.to_string()))?;
+            let resp = self.client.execute(request).await?;
+            return Ok(SmartResponse::Normal(resp));
+        }
+
+        tracing::info!("Solving HTML challenge for domain {}", domain);
+        let result = self.get_rendered_page(url).await?;
+
+        if let Ok((cookies, ua)) = self.solve_challenge(url).await {
+            self.store_credentials(url, &cookies, &ua);
+        }
+
+        Ok(result)
+    }
+
     fn store_credentials(&self, url: &str, cookies: &str, user_agent: &str) {
         let mut creds = (**self.credentials.load()).clone();
 
-        let domain = url
-            .parse::<rquest::Url>()
+        let domain = match url.parse::<rquest::Url>()
             .ok()
             .and_then(|u| u.host_str().map(|h| h.to_string()))
-            .unwrap_or_else(|| url.to_string());
+        {
+            Some(d) => d,
+            None => {
+                tracing::warn!("store_credentials: could not extract domain from '{}', credentials will not be applied", url);
+                return;
+            }
+        };
 
         creds.insert(
             domain,
@@ -428,6 +546,10 @@ impl SmartClient {
         );
 
         self.credentials.store(Arc::new(creds));
+    }
+
+    pub fn update_solver_url(&self, url: Option<String>) {
+        self.solver_url.store(Arc::new(url));
     }
 }
 

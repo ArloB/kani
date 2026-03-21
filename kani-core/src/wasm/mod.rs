@@ -86,6 +86,9 @@ pub struct HostState {
     pub selector_cache: HashMap<String, scraper::Selector>,
     pub last_error: Option<i32>,
     pub preferences: std::collections::HashMap<String, String>,
+    pub call_started_at: std::time::Instant,
+    pub io_count: u32,
+    pub last_io_at: Option<std::time::Instant>,
 }
 
 impl HostState {
@@ -117,6 +120,9 @@ impl HostState {
             selector_cache: HashMap::new(),
             last_error: None,
             preferences: HashMap::new(),
+            call_started_at: std::time::Instant::now(),
+            io_count: 0,
+            last_io_at: None,
         })
     }
 

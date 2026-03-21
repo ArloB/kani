@@ -71,6 +71,7 @@ web-sys = { version = "0.3", features = [
   "Storage",
 ], optional = true }
 gloo-timers = { version = "0.3.0", features = ["futures"], optional = true }
+# axum-login = "0.18.0"
 
 [features]
 hydrate = [

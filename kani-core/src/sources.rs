@@ -10,9 +10,17 @@ const EPOCH_DEADLINE_TICKS: u64 = 500;
 
 macro_rules! execute_wasm {
     ($self:expr, $method:ident $(, $args:expr)*) => {{
-        let bindings = $self.bindings.as_ref().expect("Bindings should be initialized");
         let store = $self.store.as_mut()
             .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
+
+        {
+            let data = store.data_mut();
+            data.call_started_at = std::time::Instant::now();
+            data.io_count = 0;
+            data.last_io_at = None;
+        }
+
+        let bindings = $self.bindings.as_ref().expect("Bindings should be initialized");
 
         $self.in_flight = true;
 
@@ -141,7 +149,18 @@ impl SourceInstance {
         );
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
-        store.epoch_deadline_trap();
+        store.epoch_deadline_callback(|mut ctx| {
+            let data = ctx.data_mut();
+            if data.last_io_at
+                .map(|t| t.elapsed().as_millis() < (EPOCH_DEADLINE_TICKS * 10) as u128)
+                .unwrap_or(false)
+            {
+                data.last_io_at = None;
+                Ok(wasmtime::UpdateDeadline::Continue(EPOCH_DEADLINE_TICKS))
+            } else {
+                Err(Error::Internal("WASM computation deadline exceeded".to_string()).into())
+            }
+        });
 
         let bindings = crate::wasm::KaniExtension::instantiate_async(&mut store, component, linker)
             .await

@@ -372,7 +372,9 @@ impl DownloaderManager {
             }
         }
 
-        if let Some(ext) = url.rsplit('.').next() {
+        let clean_url = url.split('?').next().unwrap_or(url);
+
+        if let Some(ext) = clean_url.rsplit('.').next() {
             match ext.to_lowercase().as_str() {
                 "jpg" | "jpeg" => return "jpg",
                 "png" => return "png",

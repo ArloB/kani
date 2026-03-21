@@ -98,7 +98,7 @@ impl AppState {
             Some(settings.flaresolverr_url.clone())
         };
 
-        let global_smart_client = kani_core::http::SmartClient::new(flaresolverr_url)?;
+        let global_smart_client = kani_core::http::SmartClient::new(flaresolverr_url.clone())?;
         tracing::info!("Smart client created");
 
         let cache = crate::cache::RequestCache::new();
@@ -165,7 +165,7 @@ impl AppState {
         .map_err(AppError::CoreError)?;
         tracing::info!("Downloader manager created");
 
-        let proxy_client = kani_core::http::SmartClient::new_proxy()?;
+        let proxy_client = kani_core::http::SmartClient::new_proxy(flaresolverr_url)?;
         tracing::info!("Proxy client created");
 
         let (refresh_tx, _) = tokio::sync::broadcast::channel(256);

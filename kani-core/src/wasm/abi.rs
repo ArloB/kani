@@ -12,6 +12,16 @@ const MAX_HTTP_RESPONSE_BYTES: usize = 5 * 1024 * 1024; // 5 MB
 impl http::Host for HostState {
     #[tracing::instrument(skip(self, req), fields(method = ?req.method, url = %req.url))]
     async fn send(&mut self, req: http::Request) -> wasmtime::Result<http::Response, String> {
+        self.io_count += 1;
+
+        if self.io_count > 32 {
+            return Err("Extension exceeded maximum HTTP request count".into());
+        }
+
+        if self.call_started_at.elapsed().as_secs() > 120 {
+            return Err("Extension exceeded maximum wall time".into());
+        }
+
         let method = match req.method {
             http::Method::Get => rquest::Method::GET,
             http::Method::Post => rquest::Method::POST,
@@ -38,7 +48,7 @@ impl http::Host for HostState {
             AllowedHost::MetadataOnly => {
                 return Err(
                     "HTTP requests are not permitted on metadata-only instances. \
-                     This is a bug in the extension or host setup."
+                    This is a bug in the extension or host setup."
                         .to_string(),
                 );
             }
@@ -57,37 +67,47 @@ impl http::Host for HostState {
         let request = builder.build().map_err(|e| e.to_string())?;
 
         let ttfb_start = std::time::Instant::now();
-        let response = self
-            .http_client
-            .send_request(request)
-            .await
-            .map_err(|e| e.to_string())?;
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(90),
+            self.http_client.send_request(request),
+        )
+        .await;
 
         let ttfb = ttfb_start.elapsed();
-        let status = response.status().as_u16();
 
-        tracing::info!(
-            ttfb_ms = ttfb.as_millis(),
-            status_code = status,
-            "Connection established and headers received"
-        );
-        let headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
+        self.last_io_at = Some(std::time::Instant::now());
 
-        let body = response
-            .bytes_limited(MAX_HTTP_RESPONSE_BYTES)
-            .await
-            .map_err(|e| e.to_string())?
-            .to_vec();
+        match result {
+            Ok(Ok(response)) => {
+                let status = response.status().as_u16();
 
-        Ok(http::Response {
-            status,
-            headers,
-            body,
-        })
+                tracing::info!(
+                    ttfb_ms = ttfb.as_millis(),
+                    status_code = status,
+                    "Connection established and headers received"
+                );
+                let headers: Vec<(String, String)> = response
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                    .collect();
+
+                let body = response
+                    .bytes_limited(MAX_HTTP_RESPONSE_BYTES)
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .to_vec();
+
+                Ok(http::Response {
+                    status,
+                    headers,
+                    body,
+                })
+            }
+            Ok(Err(e)) => return Err(e.to_string()),
+            Err(_) => return Err("HTTP request timed out after 90 seconds".into()),
+        }
     }
 }
 
