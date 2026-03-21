@@ -4,16 +4,37 @@ use crate::{
         source_settings_card::SourceSettingsCard,
     },
     server_fns::{
-        create_category, delete_category, fetch_sources, get_categories, get_settings, 
-        rename_category, reorder_categories, update_settings
+        create_category, delete_category, fetch_sources, get_boot_id, get_categories, 
+        get_settings, rename_category, reorder_categories, update_settings
     }, types::{AppSettings, Category, Source}
 };
 use leptos::{either::Either, prelude::*};
 
-#[allow(dead_code)]
-fn set_restart_flag(set_restart_needed: WriteSignal<bool>) {
-    set_restart_needed.set(true);
+fn add_restart_field(
+    set_restart_needed: WriteSignal<bool>,
+    pending_fields: RwSignal<std::collections::HashSet<String>>,
+    label: &str,
+    boot_id: &str,
+) {
+    let mut fields = pending_fields.get_untracked();
+    fields.insert(label.to_string());
+    let json = serde_json::to_string(&fields.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    crate::utils::set_local_string("kani_restart_fields", &json);
+    crate::utils::set_local_string("kani_restart_boot_id", boot_id);
     crate::utils::set_local_flag("kani_restart_needed", true);
+    pending_fields.set(fields);
+    set_restart_needed.set(true);
+}
+
+fn clear_restart_state(
+    set_restart_needed: WriteSignal<bool>,
+    pending_fields: RwSignal<std::collections::HashSet<String>>,
+) {
+    set_restart_needed.set(false);
+    pending_fields.set(Default::default());
+    crate::utils::set_local_flag("kani_restart_needed", false);
+    crate::utils::set_local_string("kani_restart_fields", "[]");
 }
 
 #[component]
@@ -31,24 +52,31 @@ pub fn Settings() -> impl IntoView {
     let settings_res  = Resource::new(|| (), |_| get_settings());
     let sources_res   = Resource::new(|| (), |_| fetch_sources());
     let categories_res = Resource::new(|| (), |_| get_categories());
+    let boot_id_res = Resource::new(|| (), |_| get_boot_id());
+
+    let pending_fields = RwSignal::new(std::collections::HashSet::<String>::new());
 
     Effect::new(move |_| {
         if let Some(Ok(s)) = settings_res.get() {
             set_settings_draft.set(Some(s));
         }
-    });
+    });    
 
     Effect::new(move |_| {
-        if crate::utils::get_local_flag("kani_restart_needed") {
-            set_restart_needed.set(true);
+        if let Some(Ok(current_id)) = boot_id_res.get() {
+            if crate::utils::get_local_flag("kani_restart_needed") {
+                let stored_id = crate::utils::get_local_string("kani_restart_boot_id");
+                if stored_id != current_id {
+                    clear_restart_state(set_restart_needed, pending_fields);
+                } else {
+                    let json = crate::utils::get_local_string("kani_restart_fields");
+                    let fields: std::collections::HashSet<String> =
+                        serde_json::from_str(&json).unwrap_or_default();
+                    pending_fields.set(fields);
+                    set_restart_needed.set(true);
+                }
+            }
         }
-    });
-
-    Effect::new(move |_| {
-      if settings_res.get().is_some() {
-        set_restart_needed.set(false);
-        crate::utils::set_local_flag("kani_restart_needed", false);
-      }
     });
 
     view! {
@@ -56,7 +84,15 @@ pub fn Settings() -> impl IntoView {
             <Show when=move || restart_needed.get() fallback=|| ()>
                 <div class="restart-banner">
                     <span class="restart-banner__icon">"⚠"</span>
-                    <span>"Some settings require a server restart to take effect."</span>
+                    <span>
+                        "Restart required for: "
+                        {move || {
+                            let mut fields: Vec<String> =
+                                pending_fields.get().into_iter().collect();
+                            fields.sort();
+                            fields.join(", ")
+                        }}
+                    </span>
                 </div>
             </Show>
             <h1>"Settings"</h1>
@@ -455,6 +491,8 @@ pub fn Settings() -> impl IntoView {
                                     type="text"
                                     prop:value=draft.library_path.clone()
                                     on:change=move |ev| {
+                                        let id = boot_id_res.get().and_then(|r| r.ok()).unwrap_or_default();
+                                        add_restart_field(set_restart_needed, pending_fields, "Library path", &id);
                                         set_settings_draft.update(|s| {
                                             if let Some(s) = s { s.library_path = event_target_value(&ev); }
                                         });
@@ -474,6 +512,8 @@ pub fn Settings() -> impl IntoView {
                                 <input id="mwi" type="number" min="1" max="10000"
                                     prop:value=draft.max_wasm_instances.to_string()
                                     on:change=move |ev| {
+                                        let id = boot_id_res.get().and_then(|r| r.ok()).unwrap_or_default();
+                                        add_restart_field(set_restart_needed, pending_fields, "Max WASM instances", &id);
                                         if let Ok(v) = event_target_value(&ev).parse::<i64>() {
                                             set_settings_draft.update(|s| {
                                                 if let Some(s) = s { s.max_wasm_instances = v; }

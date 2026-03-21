@@ -84,3 +84,33 @@ pub fn decode_manga_id(encoded: &str) -> String {
         .and_then(|b| String::from_utf8(b).ok())
         .unwrap_or_else(|| encoded.to_string())
 }
+
+pub fn set_local_string(key: &str, value: &str) {
+    #[cfg(feature = "hydrate")]
+    {
+        use leptos::web_sys::window;
+        if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
+            let _ = storage.set_item(key, value);
+        }
+    }
+    #[cfg(not(feature = "hydrate"))]
+    let _ = (key, value);
+}
+
+pub fn get_local_string(key: &str) -> String {
+    #[cfg(feature = "hydrate")]
+    {
+        use leptos::web_sys::window;
+        window()
+            .and_then(|w| w.local_storage().ok())
+            .flatten()
+            .and_then(|s| s.get_item(key).ok())
+            .flatten()
+            .unwrap_or_default()
+    }
+    #[cfg(not(feature = "hydrate"))]
+    {
+        let _ = key;
+        String::new()
+    }
+}

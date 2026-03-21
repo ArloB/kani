@@ -51,6 +51,9 @@ pub enum AppError {
 
     #[error("Invalid Header Value: {0}")]
     InvalidHeaderValue(#[from] rquest::header::InvalidHeaderValue),
+
+    #[error("Conflict: {0}")]
+    Conflict(String),
 }
 
 impl IntoResponse for AppError {
@@ -80,6 +83,7 @@ impl IntoResponse for AppError {
             Self::JsonError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::MultipartError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::InvalidHeaderValue(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            Self::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
         };
 
         let body = Json(json!({

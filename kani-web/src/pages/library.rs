@@ -1,5 +1,5 @@
 use crate::{
-    pages::components::{cover_image::CoverImage, pagination::Pagination},
+    pages::components::{cover_image::CoverImage, pagination::Pagination, combobox::Combobox},
     server_fns::{
         get_all_artists, get_all_authors, get_all_tags, get_categories,
         get_library, start_refresh_all,
@@ -19,8 +19,7 @@ fn sync_filter_from_url(
 ) {
     Effect::new(move |_| {
         if let Some(Ok(items)) = resource.get()
-            && let Some(name) = url_getter()
-        {
+        && let Some(name) = untrack(&url_getter) {
             let matched_id = items
                 .iter()
                 .find(|(_, n)| n.eq_ignore_ascii_case(&name))
@@ -153,7 +152,6 @@ pub fn Library() -> impl IntoView {
                 </div>
             </div>
 
-            // Category tabs — own Suspense, no stale-while-reloading needed here
             <Suspense fallback=|| ()>
                 {move || {
                     let cats = all_categories.get()
@@ -202,7 +200,6 @@ pub fn Library() -> impl IntoView {
                 }}
             </Suspense>
 
-            // Filter / sort controls — pure local state, no resource reads
             <div class="library-controls">
                 <input
                     type="text"
@@ -254,57 +251,29 @@ pub fn Library() -> impl IntoView {
                     })}
                 </Suspense>
 
-                <input
-                    type="text"
-                    list="author-options"
-                    placeholder="Search authors..."
-                    on:change=move |ev| {
-                        let name = event_target_value(&ev);
-                        let matched = all_authors.get()
-                            .and_then(|r| r.ok())
-                            .unwrap_or_default()
-                            .into_iter()
-                            .find(|(_, n)| n.eq_ignore_ascii_case(&name))
-                            .map(|(id, _)| id);
-                        set_author_filter.set(matched);
+                <Combobox
+                    options=Signal::derive(move || {
+                        all_authors.get().and_then(|r| r.ok()).unwrap_or_default()
+                    })
+                    value=Signal::derive(move || author_filter.get())
+                    on_change=move |id| {
+                        set_author_filter.set(id);
                         set_page.set(1);
                     }
+                    placeholder="Search authors…"
                 />
-                <Suspense fallback=|| ()>
-                    <datalist id="author-options">
-                        <For
-                            each=move || all_authors.get().and_then(|r| r.ok()).unwrap_or_default()
-                            key=|(id, _)| *id
-                            children=|(_, name)| view! { <option value=name.clone()/> }
-                        />
-                    </datalist>
-                </Suspense>
 
-                <input
-                    type="text"
-                    list="artist-options"
-                    placeholder="Search artists..."
-                    on:change=move |ev| {
-                        let name = event_target_value(&ev);
-                        let matched = all_artists.get()
-                            .and_then(|r| r.ok())
-                            .unwrap_or_default()
-                            .into_iter()
-                            .find(|(_, n)| n.eq_ignore_ascii_case(&name))
-                            .map(|(id, _)| id);
-                        set_artist_filter.set(matched);
+                <Combobox
+                    options=Signal::derive(move || {
+                        all_artists.get().and_then(|r| r.ok()).unwrap_or_default()
+                    })
+                    value=Signal::derive(move || artist_filter.get())
+                    on_change=move |id| {
+                        set_artist_filter.set(id);
                         set_page.set(1);
                     }
+                    placeholder="Search artists…"
                 />
-                <Suspense fallback=|| ()>
-                    <datalist id="artist-options">
-                        <For
-                            each=move || all_artists.get().and_then(|r| r.ok()).unwrap_or_default()
-                            key=|(id, _)| *id
-                            children=|(_, name)| view! { <option value=name.clone()/> }
-                        />
-                    </datalist>
-                </Suspense>
 
                 <select on:change=move |ev| {
                     set_sort_order.set(
@@ -325,6 +294,7 @@ pub fn Library() -> impl IntoView {
                 <div class="page-loading-bar__fill"></div>
             </div>
 
+            // RESTORED: `set_pending` captures the loading state from inside the transition boundaries
             <Transition fallback=skeleton_library_grid set_pending>
                 {move || library.get().map(|res| match res {
                     Err(e) => view! {

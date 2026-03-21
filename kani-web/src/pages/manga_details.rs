@@ -1,9 +1,17 @@
 use crate::pages::components::collapsible_panel::CollapsiblePanel;
 use crate::pages::components::pagination::Pagination;
+use crate::pages::components::migration_dialogue::MigrationDialogue;
 use crate::server_fns::{
-    add_download_rule, cancel_download, check_in_library, delete_downloaded, delete_manga, download_all, download_chapter, get_categories, get_chapter_list, get_download_rules, get_local_chapter_list, get_local_manga, get_manga_categories, get_manga_details, get_scanlator_preferences, get_source, refresh_manga, remove_download_rule, remove_scanlator_preference, save_to_library, scan_for_new_chapters, set_manga_categories, set_scanlator_preference, toggle_auto_download
+    add_download_rule, cancel_download, check_in_library, delete_downloaded, delete_manga, 
+    download_all, download_chapter, get_categories, get_chapter_list, get_download_rules, 
+    get_local_chapter_list, get_local_manga, get_manga_categories, get_manga_details, 
+    get_scanlator_preferences, get_source, refresh_manga, remove_download_rule, 
+    remove_scanlator_preference, save_to_library, scan_for_new_chapters, set_manga_categories, 
+    set_scanlator_preference, toggle_auto_download, global_search,
 };
-use crate::types::{Category, DownloadRule, DownloadRuleKind, LiveChapterStatus};
+use crate::types::{
+    Category, DownloadRule, DownloadRuleKind, LiveChapterStatus, MigrationStep, SearchScope
+};
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
@@ -29,6 +37,10 @@ pub fn MangaDetails() -> impl IntoView {
     let (new_rule_type, set_new_rule_type)   = signal("scanlator_include".to_string());
     let (new_rule_value, set_new_rule_value) = signal(String::new());
     let (rule_error, set_rule_error)         = signal(Option::<String>::None);
+    let (migration_step, set_migration_step) = signal(MigrationStep::Closed);
+    let (mig_scope, set_mig_scope)           = signal(SearchScope::FavouritedOnly);
+    let (mig_query, set_mig_query)           = signal(String::new());
+    let (mig_error, set_mig_error)           = signal(Option::<String>::None);  
 
     let chapters_progress = expect_context::<RwSignal<std::collections::HashMap<i64, crate::types::ChapterProgress>>>();
 
@@ -61,6 +73,18 @@ pub fn MangaDetails() -> impl IntoView {
             } else {
                 Err(ServerFnError::new("Invalid route parameters"))
             }
+        },
+    );
+
+    let mig_query_debounced = crate::utils::use_debounced_signal(mig_query, 400);
+
+    let migration_search_results = Resource::new(
+        move || (mig_scope.get(), mig_query_debounced.get()),
+        move |(scope, q)| async move {
+            if q.is_empty() {
+                return Ok(vec![]);
+            }
+            global_search(q, scope, 1).await
         },
     );
 
@@ -119,6 +143,7 @@ pub fn MangaDetails() -> impl IntoView {
                             let sid              = source.id;
                             let mid              = info.id.clone();
                             let info_title       = info.title.clone();
+                            let migrate_title    = info_title.clone();
                             let info_cover       = info.cover_url.clone();
                             let info_status      = info.status.to_string();
                             let info_authors     = info.authors.clone();
@@ -196,9 +221,16 @@ pub fn MangaDetails() -> impl IntoView {
 
                                         <div class="library-actions">
                                             {move || {
+                                                let migrate_title = migrate_title.clone();
                                                 if is_local_route {
                                                     view! {
-                                                        <button class="migrate-button">"Migrate"</button>
+                                                        <button class="migrate-button" on:click=move |_| {
+                                                            set_mig_query.set(migrate_title.clone());
+                                                            set_mig_error.set(None);
+                                                            set_migration_step.set(MigrationStep::Search);
+                                                        }>
+                                                            "Migrate"
+                                                        </button>
                                                         <button class="remove-button" on:click=move |_| {
                                                             leptos::task::spawn_local(async move {
                                                                 if delete_manga(did_val).await.is_ok() {
@@ -772,6 +804,25 @@ pub fn MangaDetails() -> impl IntoView {
                                         }}
                                     </div>
                                 </div>
+                                <MigrationDialogue
+                                    db_id=did_val
+                                    current_source_id=sid
+                                    current_source_name=source.name.clone()
+                                    current_title=info.title.clone()
+                                    migration_step=migration_step
+                                    set_migration_step=set_migration_step
+                                    mig_scope=mig_scope
+                                    set_mig_scope=set_mig_scope
+                                    mig_query=mig_query
+                                    set_mig_query=set_mig_query
+                                    mig_error=mig_error
+                                    set_mig_error=set_mig_error
+                                    search_resource=migration_search_results
+                                    on_complete=Callback::new(move |_| {
+                                        manga.refetch();
+                                        chapters.refetch();
+                                    })
+                                />
                             }.into_any()
                         },
                         _ => ().into_any()
@@ -779,5 +830,6 @@ pub fn MangaDetails() -> impl IntoView {
                 }}
             </Suspense>
         </div>
+        
     }
 }

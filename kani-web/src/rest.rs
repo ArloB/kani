@@ -153,10 +153,30 @@ pub async fn image_proxy(
 
     let response = tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        state.proxy_client.safe_get(&url, Some(req_headers)),
+        state.proxy_client.safe_get(&url, Some(req_headers.clone())),
     )
     .await
     .map_err(|_| AppError::Other("Upstream image fetch timed out".into()))??;
+
+    let response = if response.status() == rquest::StatusCode::FORBIDDEN
+        || response.status() == rquest::StatusCode::SERVICE_UNAVAILABLE
+    {
+        let request = state.smart_client
+            .inner()
+            .get(&url)
+            .headers(req_headers)
+            .build()
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(90),
+            state.smart_client.send_request(request),
+        )
+        .await
+        .map_err(|_| AppError::Other("Upstream image fetch timed out after solver".into()))??
+    } else {
+        response
+    };
 
     if !response.status().is_success() {
         tracing::warn!("Upstream returned {} for proxied request", response.status().as_u16());

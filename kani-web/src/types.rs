@@ -502,3 +502,30 @@ pub struct PreferenceDescriptor {
     pub group: Option<String>,
     pub requires_key: Option<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct MigrationResult {
+    pub chapters_matched: usize,
+    pub chapters_orphaned: usize,
+    pub chapters_new: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct MigrationPreview {
+    pub target_title: String,
+    pub target_cover_url: Option<String>,
+    pub chapters_matched: usize,
+    pub chapters_orphaned: usize,
+    pub chapters_new: usize,
+    pub downloaded_chapters_at_risk: usize,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum MigrationStep {
+    Closed,
+    Search,
+    Previewing,
+    Preview(MigrationPreview, i64, String),
+    Confirming,
+    Done(MigrationResult),
+}

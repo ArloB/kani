@@ -1,6 +1,7 @@
 use crate::types::{
-    AppSettings, Category, ChapterList, DownloadRule, DownloadRuleKind, GlobalSearchResult, LibraryPage, MangaInfo, 
-    MangaList, MangaSortOrder, RecentUpdate, Source
+    AppSettings, Category, ChapterList, DownloadRule, DownloadRuleKind, 
+    GlobalSearchResult, LibraryPage, MangaInfo, MangaList, MangaSortOrder, 
+    MigrationPreview, MigrationResult, RecentUpdate, Source
 };
 use leptos::prelude::*;
 
@@ -899,7 +900,7 @@ pub async fn update_settings(settings: AppSettings) -> Result<(), ServerFnError>
 
     {
         let mut s = state.settings.write().await;
-        s.flaresolverr_url          = settings.flaresolverr_url;
+        s.flaresolverr_url          = settings.flaresolverr_url.clone();
         s.library_path              = settings.library_path.into();
         s.concurrent_page_downloads = settings.concurrent_page_downloads;
         s.concurrent_manga_downloads = settings.concurrent_manga_downloads;
@@ -910,6 +911,13 @@ pub async fn update_settings(settings: AppSettings) -> Result<(), ServerFnError>
         s.auto_scan                 = settings.auto_scan;
         s.scan_interval_minutes     = settings.scan_interval_minutes;
     }
+
+    let new_solver = if settings.flaresolverr_url.is_empty() {
+        None
+    } else {
+        Some(settings.flaresolverr_url)
+    };
+    state.smart_client.update_solver_url(new_solver);
 
     Ok(())
 }
@@ -1127,6 +1135,38 @@ pub async fn toggle_preference_select_item(
 
     let encoded = serde_json::to_string(&list).unwrap();
     state.set_preference(source_id, &key, &encoded).await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn preview_migration(
+    manga_db_id: i64,
+    target_source_id: i64,
+    target_source_manga_id: String,
+) -> Result<MigrationPreview, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    state
+        .preview_migration(manga_db_id, target_source_id, target_source_manga_id)
+        .await
+        .map_err(to_server_err)
+}
+
+#[server]
+pub async fn migrate_manga(
+    manga_db_id: i64,
+    target_source_id: i64,
+    target_source_manga_id: String,
+) -> Result<MigrationResult, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    state
+        .migrate_manga(manga_db_id, target_source_id, target_source_manga_id)
+        .await
+        .map_err(to_server_err)
+}
+
+#[server]
+pub async fn get_boot_id() -> Result<String, ServerFnError> {
+    let state = expect_context::<crate::state::AppState>();
+    Ok(state.boot_id.clone())
 }
 
 #[cfg(feature = "ssr")]
