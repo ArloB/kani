@@ -3255,3 +3255,131 @@ main.container:has(.manga-details) {
     color: var(--clr-accent);
   }
 }
+
+
+// ── 21. Page — Login ──────────────────────────────────────────────────────────
+
+// Full-viewport centred layout — completely independent of the main app shell.
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--clr-bg);
+  padding: var(--sp-4);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-xl);
+  padding: var(--sp-10) var(--sp-8);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
+.login-brand__icon {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.login-brand__title {
+  font-size: var(--text-3xl);
+  font-weight: 800;
+  color: var(--clr-accent);
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.login-subtitle {
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--clr-text-muted);
+  margin-top: calc(-1 * var(--sp-3));
+}
+
+.login-error {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  background: rgba(232, 84, 84, 0.08);
+  border: 1px solid rgba(232, 84, 84, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--clr-danger);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.login-error__icon {
+  flex-shrink: 0;
+  font-size: var(--text-base);
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.login-field__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--clr-text-muted);
+}
+
+.login-field__input {
+  @extend %control-base;
+  width: 100%;
+  font-size: var(--text-base);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.login-btn {
+  @extend %btn-primary;
+  width: 100%;
+  padding: var(--sp-3);
+  font-size: var(--text-base);
+  margin-top: var(--sp-2);
+  letter-spacing: 0.01em;
+}
+
+// ── Nav — logout button ───────────────────────────────────────────────────────
+
+// The logout form sits inline in the header without extra visual weight.
+.logout-form {
+  margin-left: auto;  // push to far right
+  display: inline-flex;
+}
+
+.logout-btn {
+  @extend %btn-ghost;
+  font-size: var(--text-sm);
+  padding: var(--sp-1) var(--sp-3);
+  border-color: transparent;
+  color: var(--clr-text-muted);
+
+  &:hover {
+    color: var(--clr-danger);
+    border-color: var(--clr-danger);
+    background: rgba(232, 84, 84, 0.06);
+  }
+}

@@ -1171,6 +1171,73 @@ pub async fn get_boot_id() -> Result<String, ServerFnError> {
     Ok(state.boot_id.clone())
 }
 
+#[server]
+pub async fn get_current_user() -> Result<Option<crate::types::AuthenticatedUser>, ServerFnError> {
+    use crate::auth::AuthSession;
+    use leptos_axum::extract;
+
+    let auth: AuthSession = extract().await.map_err(to_server_err)?;
+
+    Ok(auth.user.map(|u| crate::types::AuthenticatedUser {
+        id:       u.id,
+        username: u.username,
+        email:    u.email,
+        roles:    u.roles,
+    }))
+}
+
+/// Changes the current user's password.
+#[server]
+pub async fn change_password(
+    current_password: String,
+    new_password:     String,
+) -> Result<(), ServerFnError> {
+    use crate::auth::{AuthBackend, AuthSession};
+    use crate::state::AppState;
+    use leptos_axum::extract;
+    use axum_login::AuthnBackend;
+
+    let auth: AuthSession = extract().await.map_err(to_server_err)?;
+    let user = auth.user.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    if new_password.len() < 8 {
+        return Err(ServerFnError::new("New password must be at least 8 characters"));
+    }
+
+    let state   = expect_context::<AppState>();
+    let backend = AuthBackend::new(state.db.clone());
+
+    let verified = backend
+        .authenticate(crate::auth::Credentials {
+            username: user.username.clone(),
+            password: current_password,
+        })
+        .await
+        .map_err(to_server_err)?;
+
+    if verified.is_none() {
+        return Err(ServerFnError::new("Current password is incorrect"));
+    }
+
+    backend.change_password(user.id, &new_password).await.map_err(to_server_err)
+}
+
+/// Terminates all active sessions for the current user without changing
+/// their password — useful as a "log out everywhere" action.
+#[server]
+pub async fn logout_everywhere() -> Result<(), ServerFnError> {
+    use crate::auth::{AuthBackend, AuthSession};
+    use crate::state::AppState;
+    use leptos_axum::extract;
+
+    let auth: AuthSession = extract().await.map_err(to_server_err)?;
+    let user = auth.user.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+
+    let state   = expect_context::<AppState>();
+    let backend = AuthBackend::new(state.db.clone());
+    backend.cycle_change_id(user.id).await.map_err(to_server_err)
+}
+
 #[cfg(feature = "ssr")]
 fn sign_image_url(url: &str, referer: &str, state: &crate::state::AppState) -> String {
     crate::proxy::make_proxy_url(url, referer, &state.proxy_secret)

@@ -7,3 +7,4 @@ pub mod global_search;
 pub mod settings;
 pub mod recent_updates;
 pub mod components;
+pub mod login;

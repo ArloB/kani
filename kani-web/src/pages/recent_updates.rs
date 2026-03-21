@@ -3,6 +3,7 @@ use crate::server_fns::{download_chapter, get_recent_updates};
 use crate::types::{LiveChapterStatus, RecentUpdateItem};
 use leptos::prelude::*;
 use leptos_router::components::A;
+use time::macros::format_description;
 
 type GroupedUpdates = Vec<(i64, String, Option<String>, Vec<RecentUpdateItem>)>;
 
@@ -62,6 +63,8 @@ pub fn RecentUpdates() -> impl IntoView {
     );
 
     let (is_pending, set_pending) = signal(false);
+
+    let fmt = format_description!("[month repr:short] [day], [year]");
 
     view! {
         <div class="recent-updates-page">
@@ -131,8 +134,7 @@ pub fn RecentUpdates() -> impl IntoView {
                                                                 s
                                                             };
                                                             let date_str = ch.discovered_at
-                                                                .map(|dt| dt.format("%b %d, %Y").to_string())
-                                                                .unwrap_or_default();
+                                                                .map(|dt| dt.format(fmt).unwrap_or_default());
 
                                                             view! {
                                                                 <li class="update-chapter-item">

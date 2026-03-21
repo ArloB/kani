@@ -2,7 +2,12 @@
 #[tokio::main]
 async fn main() {
     use axum::Router;
-    use kani_web::{app::App, rest, state::AppState};
+    use axum_login::{
+        AuthManagerLayerBuilder,
+        tower_sessions::{SessionManagerLayer, cookie::SameSite},
+    };
+    use tower_sessions_sqlx_store::SqliteStore;
+    use kani_web::{app::App, rest, state::AppState, auth::{AuthBackend}};
     use leptos::prelude::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
     use tower_http::compression::CompressionLayer;
@@ -20,6 +25,22 @@ async fn main() {
     let routes = generate_route_list(App);
 
     let state = AppState::new().await.expect("Failed to initialise AppState");
+
+    let session_store = SqliteStore::new(state.db.clone());
+    session_store.migrate().await.unwrap();
+
+    // TODO: Set `with_secure(true)` when running behind HTTPS
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_secure(false)
+        .with_http_only(true)
+        .with_same_site(SameSite::Lax);
+
+    let auth_backend = AuthBackend::new(state.db.clone());
+    let auth_layer = AuthManagerLayerBuilder::new(auth_backend.clone(), session_layer).build();
+
+    if let Err(e) = ensure_default_user(&auth_backend).await {
+        tracing::error!("Failed to ensure default user: {}", e);
+    }
 
     {
         let cleanup_state = state.clone();
@@ -42,7 +63,7 @@ async fn main() {
             loop {
                 let interval_mins = scan_state.settings.read().await.scan_interval_minutes;
                 tokio::time::sleep(std::time::Duration::from_secs(interval_mins as u64 * 60)).await;
-                
+
                 if !scan_state.settings.read().await.auto_scan {
                     continue;
                 }
@@ -81,7 +102,7 @@ async fn main() {
                                             }
                                         }
                                     });
-                                    
+
                                     futures::future::join_all(futures).await;
                                 }
                             }
@@ -146,17 +167,17 @@ async fn main() {
                                 .fetch_all(&sweep_state.db)
                                 .await
                                 .unwrap_or_default();
-                            
+
                             let library_path = sweep_state.settings.read().await.library_path.clone();
                             for record in records {
                                 let safe_manga_name_base = kani_core::utilities::sanitize_filename(&record.manga_name);
                                 let safe_manga_name = format!("{} - {}", safe_manga_name_base, record.manga_id);
                                 let manga_path = library_path.join(safe_manga_name);
-                                
+
                                 let chapter_name = kani_web::state::chapter_name(record.volume, record.chapter_number, record.name);
                                 let safe_chapter_name = kani_core::utilities::sanitize_filename(&chapter_name);
                                 let file_path = manga_path.join(format!("{}.cbz", safe_chapter_name));
-                                
+
                                 if tokio::fs::try_exists(&file_path).await.unwrap_or(false) {
                                     let _ = sqlx::query!("UPDATE chapters SET download_status = 2 WHERE id = ?", record.id).execute(&sweep_state.db).await;
                                 } else {
@@ -202,9 +223,11 @@ async fn main() {
             },
         )
         .fallback(leptos_axum::file_and_error_handler(shell))
-        .layer(CompressionLayer::new())
         .with_state(leptos_options)
-        .merge(Router::new().nest("/rest", rest_router));
+        .merge(Router::new().nest("/rest", rest_router))
+        .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
+        .layer(auth_layer)
+        .layer(CompressionLayer::new());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8242")
         .await
@@ -221,10 +244,54 @@ async fn main() {
     axum::serve(listener, app).with_graceful_shutdown(async move {
         shutdown_rx.changed().await.ok();
         sqlx::query!("UPDATE chapters SET download_status = 0 WHERE download_status = 1")
-        .execute(&state.db).await.ok();
+            .execute(&state.db).await.ok();
         state.db.close().await;
     }).await.expect("Server error");
 }
+
+fn write_admin_file(user: &kani_web::types::User, password: &str) -> Result<(), kani_web::error::AppError> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let path = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".kani_admin_password");
+
+    let content = format!("Username: {}\nEmail: {}\nPassword: {}", user.username, user.email, password);
+
+    let mut options = OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+
+    options.open(&path)
+        .and_then(|mut f| f.write_all(content.as_bytes()))
+        .inspect(|_| tracing::info!("No users found - admin password written to: {}\n\nPlease change this password immediately after logging in!\n\n", path.display()))
+        .map_err(|e| {
+            tracing::error!("Failed to write admin password to {:?}: {}", path, e);
+            kani_web::error::AppError::InternalServerError(e.to_string())
+        })
+}
+
+#[cfg(feature = "ssr")]
+async fn ensure_default_user(backend: &kani_web::auth::AuthBackend) -> Result<(), kani_web::error::AppError> {
+    if backend.user_count().await? == 0 {
+        use argon2::password_hash::rand_core::{OsRng, RngCore};
+        
+        let mut bytes = [0u8; 12];
+        OsRng.fill_bytes(&mut bytes);
+        let password = hex::encode(bytes);
+
+        let user = backend.create_user("admin", "admin@localhost", &password).await?;
+        write_admin_file(&user, &password)?;
+        backend.grant_role(user.id, "admin", None).await?;
+    }
+
+    Ok(())
+}
+
 
 #[cfg(feature = "ssr")]
 fn shell(options: leptos::prelude::LeptosOptions) -> impl leptos::IntoView {

@@ -1,8 +1,13 @@
-//! Plain Axum REST handlers — mounted at /api in main.rs.
+//! Plain Axum REST handlers — mounted at /rest in main.rs.
 
 use axum::{
-    Json, Router, body::Body, extract::{DefaultBodyLimit, Multipart, Path, Query, State}, http::{HeaderMap, StatusCode, header}, response::{
+    Json, Router, Form,
+    body::Body, 
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State}, 
+    http::{HeaderMap, StatusCode, header},
+    response::{
         IntoResponse,
+        Redirect,
         sse::{Event, KeepAlive, Sse},
     }, routing::{delete, get, post}
 };
@@ -12,9 +17,11 @@ use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use futures::TryStreamExt;
 
 use crate::{
+    auth::{AuthSession, Credentials},
     error::AppError,
     models::{CreateSource, FetchWasmRequest, Manga, ProxyQuery, SearchMangaRequest, UpdateSource},
-    state::AppState, types::Source,
+    state::AppState,
+    types::{LoginForm, Source},
 };
 use kani_core::source_manager::SourceManager;
 
@@ -22,6 +29,10 @@ const MAX_WASM_BYTES: usize = 10 * 1024 * 1024;
 
 pub fn routes(state: AppState) -> Router {
     Router::new()
+        // Auth routes (always public — excluded from auth_guard)
+        .route("/auth/login",  post(auth_login))
+        .route("/auth/logout", post(auth_logout))
+        .route("/auth/me",     get(auth_me))
         // Binary response — image proxy
         .route("/image_proxy", get(image_proxy))
         // SSE — download progress
@@ -60,6 +71,54 @@ pub fn routes(state: AppState) -> Router {
         .route("/refresh/start", post(start_refresh_all_rest))
         .with_state(state)
         .layer(DefaultBodyLimit::max(MAX_WASM_BYTES))
+}
+
+
+
+async fn auth_login(
+    mut auth: AuthSession,
+    Form(form): Form<LoginForm>,
+) -> impl IntoResponse {
+    let creds = Credentials {
+        username: form.username,
+        password: form.password,
+    };
+    match auth.authenticate(creds).await {
+        Ok(Some(user)) => match auth.login(&user).await {
+            Ok(_) => Redirect::to("/").into_response(),
+            Err(e) => {
+                tracing::error!("Session login error: {}", e);
+                Redirect::to("/login?error=server").into_response()
+            }
+        },
+        Ok(None) => Redirect::to("/login?error=invalid").into_response(),
+        Err(e) => {
+            tracing::error!("Auth backend error: {}", e);
+            Redirect::to("/login?error=server").into_response()
+        }
+    }
+}
+
+async fn auth_logout(mut auth: AuthSession) -> impl IntoResponse {
+    if let Err(e) = auth.logout().await {
+        tracing::error!("Logout error: {}", e);
+    }
+    Redirect::to("/login")
+}
+
+async fn auth_me(auth: AuthSession) -> impl IntoResponse {
+    match auth.user {
+        Some(user) => Json(json!({
+            "id": user.id,
+            "username": user.username,
+        }))
+        .into_response(),
+        None => (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "Not authenticated" })),
+        )
+            .into_response(),
+    }
 }
 
 pub async fn download_progress_sse(
@@ -152,8 +211,8 @@ pub async fn image_proxy(
     );
 
     let response = tokio::time::timeout(
-        std::time::Duration::from_secs(90),
-        state.proxy_client.safe_get(&url, Some(req_headers.clone())),
+        std::time::Duration::from_secs(35),
+        state.proxy_client.safe_get(&url, Some(req_headers)),
     )
     .await
     .map_err(|_| AppError::Other("Upstream image fetch timed out".into()))??;

@@ -428,7 +428,7 @@ pub struct RecentUpdateItem {
     pub chapter_id: i64,
     pub chapter_number: f64,
     pub chapter_name: Option<String>,
-    pub discovered_at: std::option::Option<chrono::NaiveDateTime>,
+    pub discovered_at: std::option::Option<time::OffsetDateTime>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -529,3 +529,29 @@ pub enum MigrationStep {
     Confirming,
     Done(MigrationResult),
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct AuthenticatedUser {
+    pub id:       i64,
+    pub username: String,
+    pub email:    String,
+    pub roles:    Vec<String>,
+}
+
+impl AuthenticatedUser {
+    pub fn has_role(&self, slug: &str) -> bool {
+        self.roles.iter().any(|r| r == slug)
+    }
+    pub fn is_admin(&self) -> bool {
+        self.has_role("admin")
+    }
+}
+
+#[derive(Deserialize)]
+pub struct LoginForm {
+    pub username: String,
+    pub password: String,
+}
+
+#[cfg(feature = "ssr")]
+pub use crate::auth::User;

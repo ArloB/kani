@@ -54,6 +54,12 @@ pub enum AppError {
 
     #[error("Conflict: {0}")]
     Conflict(String),
+
+    #[error("Password hash error: {0}")]
+    HashError(#[from] argon2::password_hash::Error),
+
+    #[error("Password error: {0}")]
+    PasswordError(String),
 }
 
 impl IntoResponse for AppError {
@@ -84,6 +90,8 @@ impl IntoResponse for AppError {
             Self::MultipartError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::InvalidHeaderValue(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
+            Self::HashError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            Self::PasswordError(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
         };
 
         let body = Json(json!({

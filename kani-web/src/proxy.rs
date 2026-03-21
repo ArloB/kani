@@ -39,7 +39,7 @@ pub fn load_or_generate_secret() -> [u8; 32] {
 
 /// Seal a (url, referer) pair into an opaque, time-limited token.
 pub fn seal_proxy_token(url: &str, referer: &str, secret: &[u8; 32]) -> String {
-    let expiry = chrono::Utc::now().timestamp() + TOKEN_TTL_SECS;
+    let expiry = time::OffsetDateTime::now_utc().unix_timestamp() + TOKEN_TTL_SECS;
     let plaintext = format!("{}|{}|{}", url, referer, expiry);
 
     let nonce_bytes: [u8; NONCE_LEN] = rand::random();
@@ -78,7 +78,7 @@ pub fn unseal_proxy_token(token: &str, secret: &[u8; 32]) -> Option<(String, Str
     let referer = tail[..sep].to_string();
     let expiry: i64 = tail[sep + 1..].parse().ok()?;
 
-    if chrono::Utc::now().timestamp() > expiry {
+    if time::OffsetDateTime::now_utc().unix_timestamp() > expiry {
         return None;
     }
 

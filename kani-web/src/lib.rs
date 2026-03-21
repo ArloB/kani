@@ -19,6 +19,8 @@ pub mod cache;
 pub mod proxy;
 #[cfg(feature = "ssr")]
 pub mod markdown;
+#[cfg(feature = "ssr")]
+pub mod auth;
 
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen::prelude::wasm_bindgen]

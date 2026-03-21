@@ -15,6 +15,7 @@ use crate::types::{
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
+use time::macros::format_description;
 
 #[allow(non_snake_case)]
 #[component]
@@ -99,6 +100,8 @@ pub fn MangaDetails() -> impl IntoView {
             set_auto_download.set(ad);
         }
     });
+
+    let fmt = format_description!("[month repr:short] [day], [year]");
 
     view! {
         <div class="manga-details">
@@ -668,10 +671,9 @@ pub fn MangaDetails() -> impl IntoView {
                                                                             <span class="chapter-scanlator">{chapter.scanlator.unwrap_or_default()}</span>
                                                                             <span class="chapter-date">
                                                                                 {chapter.date_uploaded.map(|epoch| {
-                                                                                    use chrono::DateTime;
-                                                                                    DateTime::from_timestamp(epoch, 0)
-                                                                                        .map(|dt| dt.format("%b %d, %Y").to_string())
-                                                                                        .unwrap_or_default()
+                                                                                    time::OffsetDateTime::from_unix_timestamp(epoch)
+                                                                                        .ok()
+                                                                                        .map(|dt| dt.format(fmt).unwrap_or_default())
                                                                                 }).unwrap_or_default()}
                                                                             </span>
                                                                         </div>

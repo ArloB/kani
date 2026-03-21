@@ -6,9 +6,11 @@ use crate::pages::manga_details::MangaDetails;
 use crate::pages::source_details::SourceDetails;
 use crate::pages::global_search::GlobalSearch;
 use crate::pages::recent_updates::RecentUpdates;
+use crate::pages::login::Login;
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, Stylesheet, Title};
 use leptos_router::components::{Route, Router, Routes, A};
+use leptos_router::hooks::use_location;
 use leptos_router::path;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +36,34 @@ fn ScanBadge() -> impl IntoView {
                 <span class="scan-badge__count">{move || total()}</span>
                 " new"
             </button>
+        </Show>
+    }
+}
+
+#[component]
+fn Nav() -> impl IntoView {
+    let location = use_location();
+    let is_login = move || location.pathname.get() == "/login";
+
+    view! {
+        <Show when=move || !is_login() fallback=|| ()>
+            <header>
+                <A href="/">"Kani"</A>
+                <A href="/sources">"Sources"</A>
+                <A href="/search">"Search"</A>
+                <A href="/settings">"Settings"</A>
+                <A href="/updates">"Recent Updates"</A>
+                <ScanBadge/>
+                <form
+                    method="post"
+                    action="/rest/auth/logout"
+                    class="logout-form"
+                >
+                    <button type="submit" class="logout-btn" title="Sign out">
+                        "Sign out"
+                    </button>
+                </form>
+            </header>
         </Show>
     }
 }
@@ -295,16 +325,10 @@ pub fn App() -> impl IntoView {
         <Title text="Kani Manga Reader"/>
         <div id="root">
             <Router>
-                <header>
-                    <A href="/">"Kani"</A>
-                    <A href="/sources">"Sources"</A>
-                    <A href="/search">"Search"</A>
-                    <A href="/settings">"Settings"</A>
-                    <A href="/updates">"Recent Updates"</A>
-                    <ScanBadge/>
-                </header>
+                <Nav/>
                 <main class="container">
                     <Routes fallback=|| view! { <h1>"Not Found"</h1> }>
+                        <Route path=path!("/login") view=Login/>
                         <Route path=path!("/") view=Library/>
                         <Route path=path!("/sources") view=Sources/>
                         <Route path=path!("/source/:id") view=SourceDetails/>

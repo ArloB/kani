@@ -2,8 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use sqlx::types::chrono;
-
 #[derive(Deserialize, Debug)]
 pub struct CreateSource {
     pub name: String,
@@ -57,8 +55,8 @@ pub struct Manga {
     pub auto_download: bool,
     #[sqlx(try_from = "i64")]
     pub status: kani_shared::MangaStatus,
-    pub created_at: chrono::NaiveDateTime,
-    pub updated_at: chrono::NaiveDateTime,
+    pub created_at: time::OffsetDateTime,
+    pub updated_at: time::OffsetDateTime,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
