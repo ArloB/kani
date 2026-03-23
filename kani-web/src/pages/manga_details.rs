@@ -1,6 +1,7 @@
 use crate::pages::components::collapsible_panel::CollapsiblePanel;
 use crate::pages::components::pagination::Pagination;
 use crate::pages::components::migration_dialogue::MigrationDialogue;
+use crate::pages::components::permission_handlers::PermissionGate;
 use crate::server_fns::{
     add_download_rule, cancel_download, check_in_library, delete_downloaded, delete_manga, 
     download_all, download_chapter, get_categories, get_chapter_list, get_download_rules, 
@@ -226,84 +227,97 @@ pub fn MangaDetails() -> impl IntoView {
                                             {move || {
                                                 let migrate_title = migrate_title.clone();
                                                 if is_local_route {
+                                                    let migrate_title = StoredValue::new(migrate_title);
                                                     view! {
-                                                        <button class="migrate-button" on:click=move |_| {
-                                                            set_mig_query.set(migrate_title.clone());
-                                                            set_mig_error.set(None);
-                                                            set_migration_step.set(MigrationStep::Search);
-                                                        }>
-                                                            "Migrate"
-                                                        </button>
-                                                        <button class="remove-button" on:click=move |_| {
-                                                            leptos::task::spawn_local(async move {
-                                                                if delete_manga(did_val).await.is_ok() {
-                                                                    let navigate = leptos_router::hooks::use_navigate();
-                                                                    navigate("/", Default::default());
-                                                                }
-                                                            });
-                                                        }>"Remove from library"</button>
-                                                        <button class="download-all-button" on:click=move |_| {
-                                                            leptos::task::spawn_local(async move {
-                                                                let _ = download_all(did_val).await;
-                                                            });
-                                                        }>"Download All"</button>
-                                                        <button
-                                                            class="refresh-button"
-                                                            disabled=move || refreshing.get()
-                                                            on:click=move |_| {
-                                                                if refreshing.get() { return; }
-                                                                set_refreshing.set(true);
+                                                        <PermissionGate permission="library:manage">
+                                                            <button class="migrate-button" on:click=move |_| {
+                                                                set_mig_query.set(migrate_title.get_value());
+                                                                set_mig_error.set(None);
+                                                                set_migration_step.set(MigrationStep::Search);
+                                                            }>
+                                                                "Migrate"
+                                                            </button>
+                                                        </PermissionGate>
+                                                        <PermissionGate permission="library:delete">
+                                                            <button class="remove-button" on:click=move |_| {
                                                                 leptos::task::spawn_local(async move {
-                                                                    let _ = refresh_manga(did_val).await;
-                                                                    set_refreshing.set(false);
-                                                                });
-                                                            }
-                                                        >
-                                                            {move || if refreshing.get() { "Refreshing..." } else { "Refresh" }}
-                                                        </button>
-                                                        <button
-                                                            class="scan-button"
-                                                            disabled=move || scanning.get()
-                                                            on:click=move |_| {
-                                                                if scanning.get() { return; }
-                                                                set_scanning.set(true);
-                                                                set_scan_message.set(None);
-                                                                leptos::task::spawn_local(async move {
-                                                                    match scan_for_new_chapters(did_val).await {
-                                                                        Ok(cnt) if cnt > 0 => {
-                                                                            set_scan_message.set(Some(format!("Found {} new chapters!", cnt)));
-                                                                            chapters.refetch();
-                                                                        }
-                                                                        Ok(_) => set_scan_message.set(Some("No new chapters found.".to_string())),
-                                                                        Err(e) => set_scan_message.set(Some(format!("Scan failed: {:?}", e))),
+                                                                    if delete_manga(did_val).await.is_ok() {
+                                                                        let navigate = leptos_router::hooks::use_navigate();
+                                                                        navigate("/", Default::default());
                                                                     }
-                                                                    set_scanning.set(false);
                                                                 });
-                                                            }
-                                                        >
-                                                            {move || if scanning.get() { "Scanning..." } else { "Scan for new chapters" }}
-                                                        </button>
+                                                            }>"Remove from library"</button>
+                                                        </PermissionGate>
+                                                        <PermissionGate permission="chapter:download">
+                                                            <button class="download-all-button" on:click=move |_| {
+                                                                leptos::task::spawn_local(async move {
+                                                                    let _ = download_all(did_val).await;
+                                                                });
+                                                            }>"Download All"</button>
+                                                        </PermissionGate>
+                                                        <PermissionGate permission="library:refresh">
+                                                            <button
+                                                                class="refresh-button"
+                                                                disabled=move || refreshing.get()
+                                                                on:click=move |_| {
+                                                                    if refreshing.get() { return; }
+                                                                    set_refreshing.set(true);
+                                                                    leptos::task::spawn_local(async move {
+                                                                        let _ = refresh_manga(did_val).await;
+                                                                        set_refreshing.set(false);
+                                                                    });
+                                                                }
+                                                            >
+                                                                {move || if refreshing.get() { "Refreshing..." } else { "Refresh" }}
+                                                            </button>
+                                                        </PermissionGate>
+                                                        <PermissionGate permission="library:refresh">
+                                                            <button
+                                                                class="scan-button"
+                                                                disabled=move || scanning.get()
+                                                                on:click=move |_| {
+                                                                    if scanning.get() { return; }
+                                                                    set_scanning.set(true);
+                                                                    set_scan_message.set(None);
+                                                                    leptos::task::spawn_local(async move {
+                                                                        match scan_for_new_chapters(did_val).await {
+                                                                            Ok(cnt) if cnt > 0 => {
+                                                                                set_scan_message.set(Some(format!("Found {} new chapters!", cnt)));
+                                                                                chapters.refetch();
+                                                                            }
+                                                                            Ok(_) => set_scan_message.set(Some("No new chapters found.".to_string())),
+                                                                            Err(e) => set_scan_message.set(Some(format!("Scan failed: {:?}", e))),
+                                                                        }
+                                                                        set_scanning.set(false);
+                                                                    });
+                                                                }
+                                                            >
+                                                                {move || if scanning.get() { "Scanning..." } else { "Scan for new chapters" }}
+                                                            </button>
+                                                        </PermissionGate>
                                                         {move || scan_message.get().map(|msg| view! {
                                                             <span class="scan-message">{msg}</span>
                                                         }.into_any())}
                                                         {move || if auto_scan {
                                                             view! {
-                                                                <div class="auto-download-toggle">
-                                                                    <label>
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            checked=move || auto_download_sig.get()
-                                                                            on:change=move |ev| {
-                                                                                let checked = event_target_checked(&ev);
-                                                                                set_auto_download.set(checked);
-                                                                                leptos::task::spawn_local(async move {
-                                                                                    let _ = toggle_auto_download(did_val, checked).await;
-                                                                                });
-                                                                            }
-                                                                        />
-                                                                        " Auto-Download New Chapters"
-                                                                    </label>
-                                                                </div>
+                                                                <PermissionGate permission="library:manage">
+                                                                    <div class="auto-download-toggle">
+                                                                        <label>
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked=move || auto_download_sig.get()
+                                                                                on:change=move |ev| {
+                                                                                    let checked = event_target_checked(&ev);
+                                                                                    set_auto_download.set(checked);
+                                                                                    leptos::task::spawn_local(async move {
+                                                                                        let _ = toggle_auto_download(did_val, checked).await;
+                                                                                    });
+                                                                                }
+                                                                            />
+                                                                            " Auto-Download New Chapters"
+                                                                        </label>
+                                                                    </div>
+                                                                </PermissionGate>
                                                             }.into_any()
                                                         } else {
                                                             view! { <span/> }.into_any()
@@ -316,29 +330,32 @@ pub fn MangaDetails() -> impl IntoView {
                                                         </A>
                                                     }.into_any()
                                                 } else {
-                                                    let m_clone = mid.clone();
+                                                    let m_sv = StoredValue::new(mid.clone());
                                                     view! {
-                                                        <button
-                                                            class="add-to-library"
-                                                            disabled=library_pending
-                                                            on:click=move |_| {
-                                                                let m = m_clone.clone();
-                                                                set_library_pending.set(true);
-                                                                leptos::task::spawn_local(async move {
-                                                                    if let Ok(new_id) = save_to_library(sid, m).await {
-                                                                        set_added_db_id.set(Some(new_id));
-                                                                    }
-                                                                    set_library_pending.set(false);
-                                                                });
-                                                            }
-                                                        >
-                                                            {move || if library_pending.get() { "Saving..." } else { "Add to Library" }}
-                                                        </button>
+                                                        <PermissionGate permission="library:add">
+                                                            <button
+                                                                class="add-to-library"
+                                                                disabled=library_pending
+                                                                on:click=move |_| {
+                                                                    let m = m_sv.get_value();
+                                                                    set_library_pending.set(true);
+                                                                    leptos::task::spawn_local(async move {
+                                                                        if let Ok(new_id) = save_to_library(sid, m).await {
+                                                                            set_added_db_id.set(Some(new_id));
+                                                                        }
+                                                                        set_library_pending.set(false);
+                                                                    });
+                                                                }
+                                                            >
+                                                                {move || if library_pending.get() { "Saving..." } else { "Add to Library" }}
+                                                            </button>
+                                                        </PermissionGate>
                                                     }.into_any()
                                                 }
                                             }}
                                         </div>
 
+                                        <PermissionGate permission="library:manage">
                                         <Show when=move || is_local_route fallback=|| ()>
                                             <CollapsiblePanel label="Categories".to_string()>
                                                 <Suspense fallback=|| ()>
@@ -404,7 +421,9 @@ pub fn MangaDetails() -> impl IntoView {
                                                 </Suspense>
                                             </CollapsiblePanel>
                                         </Show>
+                                        </PermissionGate>
 
+                                        <PermissionGate permission="library:manage">
                                         <Show when=move || is_local_route fallback=|| ()>
                                             <CollapsiblePanel label="Download Rules".to_string()>
                                                 <p class="collapsible-panel__hint">
@@ -490,7 +509,9 @@ pub fn MangaDetails() -> impl IntoView {
                                                 </Suspense>
                                             </CollapsiblePanel>
                                         </Show>
+                                        </PermissionGate>
 
+                                        <PermissionGate permission="library:manage">
                                         <Show when=move || is_local_route fallback=|| ()>
                                             <CollapsiblePanel label="Scanlator Preferences".to_string()>
                                                 <p class="collapsible-panel__hint">
@@ -607,12 +628,14 @@ pub fn MangaDetails() -> impl IntoView {
                                                 </Suspense>
                                             </CollapsiblePanel>
                                         </Show>
+                                        </PermissionGate>
                                     </div>
                                 </div>
 
                                 <div class="chapter-list-group">
                                     <div class="chapter-list-header">
                                         <h2>"Chapters"</h2>
+                                        <PermissionGate permission="library:manage">
                                         <Show when=move || is_local() fallback=|| ()>
                                             <select
                                                 prop:value=move || sort_order_sig.get().to_select_value()
@@ -634,6 +657,7 @@ pub fn MangaDetails() -> impl IntoView {
                                                 <option value="scanlator_desc">"Scanlator Z→A"</option>
                                             </select>
                                         </Show>
+                                        </PermissionGate>
                                     </div>
 
                                     <div class="chapter-list">
@@ -719,29 +743,31 @@ pub fn MangaDetails() -> impl IntoView {
 
                                                                                         match status {
                                                                                             2 => view! {
-                                                                                                <button class="delete-button" on:click=move |_| {
-                                                                                                    leptos::task::spawn_local(async move {
-                                                                                                        if delete_downloaded(db_chap_id).await.is_ok() {
-                                                                                                            if chapter.is_orphaned {
-                                                                                                                chapters.refetch();
-                                                                                                            } else {
-                                                                                                                chapters_progress.update(|m| {
-                                                                                                                    m.insert(db_chap_id, crate::types::ChapterProgress {
-                                                                                                                        id: db_chap_id,
-                                                                                                                        name: String::new(),
-                                                                                                                        total_pages: 0,
-                                                                                                                        completed_pages: 0,
-                                                                                                                        status: LiveChapterStatus::Deleted,
+                                                                                                <PermissionGate permission="chapter:delete">
+                                                                                                    <button class="delete-button" on:click=move |_| {
+                                                                                                        leptos::task::spawn_local(async move {
+                                                                                                            if delete_downloaded(db_chap_id).await.is_ok() {
+                                                                                                                if chapter.is_orphaned {
+                                                                                                                    chapters.refetch();
+                                                                                                                } else {
+                                                                                                                    chapters_progress.update(|m| {
+                                                                                                                        m.insert(db_chap_id, crate::types::ChapterProgress {
+                                                                                                                            id: db_chap_id,
+                                                                                                                            name: String::new(),
+                                                                                                                            total_pages: 0,
+                                                                                                                            completed_pages: 0,
+                                                                                                                            status: LiveChapterStatus::Deleted,
+                                                                                                                        });
                                                                                                                     });
-                                                                                                                });
+                                                                                                                }
                                                                                                             }
-                                                                                                        }
-                                                                                                    });
-                                                                                                }>"Delete"</button>
+                                                                                                        });
+                                                                                                    }>"Delete"</button>
+                                                                                                </PermissionGate>
                                                                                             }.into_any(),
 
                                                                                             1 => {
-                                                                                                let text = if let Some(p) = live {
+                                                                                                let text = StoredValue::new(if let Some(p) = live {
                                                                                                     if p.total_pages > 0 {
                                                                                                         format!("Downloading... ({}/{})", p.completed_pages, p.total_pages)
                                                                                                     } else {
@@ -749,17 +775,19 @@ pub fn MangaDetails() -> impl IntoView {
                                                                                                     }
                                                                                                 } else {
                                                                                                     "Downloading...".to_string()
-                                                                                                };
+                                                                                                });
                                                                                                 view! {
-                                                                                                    <button
-                                                                                                        class="download-button download-button--active"
-                                                                                                        on:click=move |_| {
-                                                                                                            leptos::task::spawn_local(async move {
-                                                                                                                chapters_progress.update(|m| { m.remove(&db_chap_id); });
-                                                                                                                let _ = cancel_download(db_chap_id).await;
-                                                                                                            });
-                                                                                                        }
-                                                                                                    >{text}</button>
+                                                                                                    <PermissionGate permission="chapter:download">
+                                                                                                        <button
+                                                                                                            class="download-button download-button--active"
+                                                                                                            on:click=move |_| {
+                                                                                                                leptos::task::spawn_local(async move {
+                                                                                                                    chapters_progress.update(|m| { m.remove(&db_chap_id); });
+                                                                                                                    let _ = cancel_download(db_chap_id).await;
+                                                                                                                });
+                                                                                                            }
+                                                                                                        >{text.get_value()}</button>
+                                                                                                    </PermissionGate>
                                                                                                 }.into_any()
                                                                                             }
 
@@ -783,23 +811,25 @@ pub fn MangaDetails() -> impl IntoView {
                                                                                                 view! { <span/> }.into_any()
                                                                                             } else {
                                                                                                 view! {
-                                                                                                    <button
-                                                                                                        class="download-button"
-                                                                                                        on:click=move |_| {
-                                                                                                            leptos::task::spawn_local(async move {
-                                                                                                                chapters_progress.update(|m| {
-                                                                                                                    m.insert(db_chap_id, crate::types::ChapterProgress {
-                                                                                                                        id: db_chap_id,
-                                                                                                                        name: String::new(),
-                                                                                                                        total_pages: 0,
-                                                                                                                        completed_pages: 0,
-                                                                                                                        status: LiveChapterStatus::InProgress,
+                                                                                                    <PermissionGate permission="chapter:download">
+                                                                                                        <button
+                                                                                                            class="download-button"
+                                                                                                            on:click=move |_| {
+                                                                                                                leptos::task::spawn_local(async move {
+                                                                                                                    chapters_progress.update(|m| {
+                                                                                                                        m.insert(db_chap_id, crate::types::ChapterProgress {
+                                                                                                                            id: db_chap_id,
+                                                                                                                            name: String::new(),
+                                                                                                                            total_pages: 0,
+                                                                                                                            completed_pages: 0,
+                                                                                                                            status: LiveChapterStatus::InProgress,
+                                                                                                                        });
                                                                                                                     });
+                                                                                                                    let _ = download_chapter(db_chap_id).await;
                                                                                                                 });
-                                                                                                                let _ = download_chapter(db_chap_id).await;
-                                                                                                            });
-                                                                                                        }
-                                                                                                    >"Download"</button>
+                                                                                                            }
+                                                                                                        >"Download"</button>
+                                                                                                    </PermissionGate>
                                                                                                 }.into_any()
                                                                                             }
                                                                                         }

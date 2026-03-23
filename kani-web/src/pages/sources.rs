@@ -1,12 +1,16 @@
 use leptos::{prelude::*, either::Either};
 use leptos_router::components::A;
-use crate::server_fns::fetch_sources;
+use crate::{
+  server_fns::fetch_sources,
+  pages::components::permission_handlers::RequirePermission,
+};
 
 #[component]
 pub fn Sources() -> impl IntoView {
     let sources = Resource::new(|| (), |_| fetch_sources());
 
     view! {
+      <RequirePermission permission="source:browse">
         <h1>"Sources"</h1>
         <div class="source-list">
             <Suspense fallback=move || view! { 
@@ -58,5 +62,6 @@ pub fn Sources() -> impl IntoView {
                 }}
             </Suspense>
         </div>
+      </RequirePermission>
     }
 }

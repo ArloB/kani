@@ -114,3 +114,42 @@ pub fn get_local_string(key: &str) -> String {
         String::new()
     }
 }
+
+pub fn use_permission_state(permission: Option<&'static str>) -> Signal<crate::types::PermissionState> {
+    let parsed = permission.map(|s| s.parse::<crate::permissions::Permission>());
+    let permissions = expect_context::<Resource<
+        Result<std::collections::HashSet<crate::permissions::Permission>, ServerFnError>
+    >>();
+
+    Signal::derive(move || {
+        if let Some(Err(ref e)) = parsed {
+            #[cfg(debug_assertions)]
+            panic!("Invalid permission string: {e}");
+            #[cfg(not(debug_assertions))]
+            {
+                tracing::error!("Invalid permission string: {e}");
+                return PermissionState::Denied;
+            }
+        }
+
+        let perm = parsed.as_ref().and_then(|r| r.as_ref().ok().copied());
+
+        match permissions.get() {
+            None           => crate::types::PermissionState::Loading,
+            Some(Err(_))   => crate::types::PermissionState::Denied,
+            Some(Ok(set))  => match perm {
+                None       => crate::types::PermissionState::Granted,
+                Some(p)    => if set.contains(&p) {
+                    crate::types::PermissionState::Granted
+                } else {
+                    crate::types::PermissionState::Denied
+                },
+            },
+        }
+    })
+}
+
+pub fn use_permission(permission: Option<&'static str>) -> Signal<bool> {
+    let state = use_permission_state(permission);
+    Signal::derive(move || state.get() == crate::types::PermissionState::Granted)
+}

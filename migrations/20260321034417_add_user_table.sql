@@ -15,9 +15,9 @@ CREATE TABLE IF NOT EXISTS roles (
     description TEXT
 );
 
-INSERT OR IGNORE INTO roles (slug, description) VALUES
-    ('admin', 'Full access to all resources'),
-    ('user',  'Standard authenticated user');
+INSERT OR IGNORE INTO roles (slug, parent, description) VALUES
+    ('user',  NULL,   'Standard authenticated user'),
+    ('admin', 'user', 'Full access to all resources');
 
 CREATE TABLE IF NOT EXISTS user_roles (
     user_id    INTEGER  NOT NULL REFERENCES users(id)   ON DELETE CASCADE,

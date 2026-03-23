@@ -1,5 +1,8 @@
-use crate::pages::components::cover_image::CoverImage;
-use crate::pages::components::pagination::Pagination;
+use crate::pages::components::{
+  cover_image::CoverImage, 
+  pagination::Pagination,
+  permission_handlers::RequirePermission,
+};
 use crate::server_fns::{get_popular_manga, get_source, search_manga};
 use leptos::prelude::*;
 use leptos_router::components::A;
@@ -35,11 +38,8 @@ pub fn SourceDetails() -> impl IntoView {
     let (page, set_page)               = signal(1i32);
     let (input_value, set_input_value) = signal(String::new());
 
-    // Debounce the raw input — the resource key tracks this directly so no
-    // intermediate `query` signal or Effect needed.
     let debounced_query = crate::utils::use_debounced_signal(input_value, 600);
 
-    // Reset to page 1 whenever the search query changes (but not on mount).
     Effect::new(move |prev: Option<String>| {
         let q = debounced_query.get();
         if prev.is_some() {
@@ -64,6 +64,7 @@ pub fn SourceDetails() -> impl IntoView {
     let (is_pending, set_pending) = signal(false);
 
     view! {
+      <RequirePermission permission="source:browse">
         <div class="source-details">
             <header class="sticky-header">
                 <h2>
@@ -128,5 +129,6 @@ pub fn SourceDetails() -> impl IntoView {
                 })}
             </Transition>
         </div>
+      </RequirePermission>
     }
 }

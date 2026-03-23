@@ -7,6 +7,8 @@ use crate::pages::source_details::SourceDetails;
 use crate::pages::global_search::GlobalSearch;
 use crate::pages::recent_updates::RecentUpdates;
 use crate::pages::login::Login;
+use crate::pages::components::permission_handlers::PermissionGate;
+use crate::server_fns::get_my_permissions;
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, Stylesheet, Title};
 use leptos_router::components::{Route, Router, Routes, A};
@@ -49,10 +51,18 @@ fn Nav() -> impl IntoView {
         <Show when=move || !is_login() fallback=|| ()>
             <header>
                 <A href="/">"Kani"</A>
-                <A href="/sources">"Sources"</A>
-                <A href="/search">"Search"</A>
-                <A href="/settings">"Settings"</A>
-                <A href="/updates">"Recent Updates"</A>
+                <PermissionGate permission="source:browse">
+                    <A href="/sources">"Sources"</A>
+                </PermissionGate>
+                <PermissionGate permission="source:browse">
+                    <A href="/search">"Search"</A>
+                </PermissionGate>
+                <PermissionGate permission="settings:view">
+                    <A href="/settings">"Settings"</A>
+                </PermissionGate>
+                <PermissionGate permission="library:view">
+                    <A href="/updates">"Recent Updates"</A>
+                </PermissionGate>
                 <ScanBadge/>
                 <form
                     method="post"
@@ -85,6 +95,9 @@ pub fn App() -> impl IntoView {
 
     let library_invalidation = RwSignal::new(0u32);
     provide_context(library_invalidation);
+
+    let permissions = Resource::new(|| (), |_| get_my_permissions());
+    provide_context(permissions);
 
     Effect::new(move |_| {
         #[cfg(feature = "hydrate")]

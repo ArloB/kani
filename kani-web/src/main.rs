@@ -249,6 +249,7 @@ async fn main() {
     }).await.expect("Server error");
 }
 
+#[cfg(feature = "ssr")]
 fn write_admin_file(user: &kani_web::types::User, password: &str) -> Result<(), kani_web::error::AppError> {
     use std::fs::OpenOptions;
     use std::io::Write;

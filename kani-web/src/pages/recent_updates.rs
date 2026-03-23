@@ -1,4 +1,5 @@
 use crate::pages::components::pagination::Pagination;
+use crate::pages::components::permission_handlers::PermissionGate;
 use crate::server_fns::{download_chapter, get_recent_updates};
 use crate::types::{LiveChapterStatus, RecentUpdateItem};
 use leptos::prelude::*;
@@ -152,31 +153,33 @@ pub fn RecentUpdates() -> impl IntoView {
                                                                         }).unwrap_or(false);
 
                                                                         view! {
-                                                                            <button
-                                                                                class=move || if is_active {
-                                                                                    "download-button download-button--active update-chapter-item__download"
-                                                                                } else {
-                                                                                    "download-button update-chapter-item__download"
-                                                                                }
-                                                                                title="Download chapter"
-                                                                                disabled=is_active
-                                                                                on:click=move |_| {
-                                                                                    chapters_progress.update(|m| {
-                                                                                        m.insert(chapter_id, crate::types::ChapterProgress {
-                                                                                            id: chapter_id,
-                                                                                            name: String::new(),
-                                                                                            total_pages: 0,
-                                                                                            completed_pages: 0,
-                                                                                            status: LiveChapterStatus::InProgress,
+                                                                            <PermissionGate permission="chapter:download">
+                                                                                <button
+                                                                                    class=move || if is_active {
+                                                                                        "download-button download-button--active update-chapter-item__download"
+                                                                                    } else {
+                                                                                        "download-button update-chapter-item__download"
+                                                                                    }
+                                                                                    title="Download chapter"
+                                                                                    disabled=is_active
+                                                                                    on:click=move |_| {
+                                                                                        chapters_progress.update(|m| {
+                                                                                            m.insert(chapter_id, crate::types::ChapterProgress {
+                                                                                                id: chapter_id,
+                                                                                                name: String::new(),
+                                                                                                total_pages: 0,
+                                                                                                completed_pages: 0,
+                                                                                                status: LiveChapterStatus::InProgress,
+                                                                                            });
                                                                                         });
-                                                                                    });
-                                                                                    leptos::task::spawn_local(async move {
-                                                                                        let _ = download_chapter(chapter_id).await;
-                                                                                    });
-                                                                                }
-                                                                            >
-                                                                                {if is_active { "⏳" } else { "⬇" }}
-                                                                            </button>
+                                                                                        leptos::task::spawn_local(async move {
+                                                                                            let _ = download_chapter(chapter_id).await;
+                                                                                        });
+                                                                                    }
+                                                                                >
+                                                                                    {if is_active { "⏳" } else { "⬇" }}
+                                                                                </button>
+                                                                            </PermissionGate>
                                                                         }
                                                                     }}
                                                                 </li>

@@ -39,12 +39,20 @@ pub fn load_or_generate_secret() -> [u8; 32] {
 
 /// Seal a (url, referer) pair into an opaque, time-limited token.
 pub fn seal_proxy_token(url: &str, referer: &str, secret: &[u8; 32]) -> String {
-    let expiry = time::OffsetDateTime::now_utc().unix_timestamp() + TOKEN_TTL_SECS;
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let expiry = ((now / TOKEN_TTL_SECS) + 1) * TOKEN_TTL_SECS;
     let plaintext = format!("{}|{}|{}", url, referer, expiry);
 
-    let nonce_bytes: [u8; NONCE_LEN] = rand::random();
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(secret)
+        .expect("HMAC accepts any key length");
+    mac.update(b"nonce|");
+    mac.update(plaintext.as_bytes());
+    let digest = mac.finalize().into_bytes();
+    let nonce_bytes: [u8; NONCE_LEN] = digest[..NONCE_LEN]
+        .try_into()
+        .expect("HMAC-SHA256 output is >= 12 bytes");
 
+    let nonce = Nonce::from_slice(&nonce_bytes);
     let cipher = ChaCha20Poly1305::new(secret.into());
     let ciphertext = cipher
         .encrypt(nonce, plaintext.as_bytes())
@@ -53,7 +61,6 @@ pub fn seal_proxy_token(url: &str, referer: &str, secret: &[u8; 32]) -> String {
     let mut token = Vec::with_capacity(NONCE_LEN + ciphertext.len());
     token.extend_from_slice(&nonce_bytes);
     token.extend_from_slice(&ciphertext);
-
     URL_SAFE_NO_PAD.encode(token)
 }
 

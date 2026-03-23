@@ -6,11 +6,13 @@ use std::{collections::HashMap, sync::Arc};
 
 const MAX_RETRIES: u32 = 3;
 const BASE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+const CREDENTIAL_TTL_SECS: u64 = 3600;
 
 #[derive(Clone, Default)]
-struct CachedCredentials {
+pub struct CachedCredentials {
     cookies: String,
     user_agent: Option<String>,
+    stored_at: Option<std::time::Instant>,
 }
 
 pub enum SmartResponse {
@@ -94,9 +96,9 @@ impl SmartResponse {
 #[derive(Clone)]
 pub struct SmartClient {
     client: rquest::Client,
-    credentials: Arc<ArcSwap<HashMap<String, CachedCredentials>>>,
+    pub credentials: Arc<ArcSwap<HashMap<String, CachedCredentials>>>,
     solver_url: Arc<ArcSwap<Option<String>>>,
-    solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    pub solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl SmartClient {
@@ -116,7 +118,11 @@ impl SmartClient {
         })
     }
 
-    pub fn new_proxy(solver_url: Option<String>) -> Result<Self> {
+    pub fn new_proxy(
+        solver_url: Option<String>,
+        credentials: Arc<ArcSwap<HashMap<String, CachedCredentials>>>,
+        solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    ) -> Result<Self> {
         let resolver = ValidatingResolver::new()?;
         let client = rquest::Client::builder()
             .emulation(rquest_util::Emulation::Chrome130)
@@ -128,26 +134,39 @@ impl SmartClient {
 
         Ok(Self {
             client,
-            credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
+            credentials,
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
-            solving: Arc::new(dashmap::DashMap::new()),
+            solving,
         })
     }
 
     pub async fn send_request(&self, request: rquest::Request) -> Result<SmartResponse> {
         let mut request = request;
 
-        let domain = request.url().host_str().unwrap_or("").to_string();
+        let domain = request.url().host_str().map(base_domain).unwrap_or_default();
         let creds_map = self.credentials.load();
         if let Some(creds) = creds_map.get(&domain) {
-            if let Ok(val) = rquest::header::HeaderValue::from_str(&creds.cookies) {
-                request.headers_mut().insert(rquest::header::COOKIE, val);
+            let expired = creds.stored_at
+                .map(|t| t.elapsed().as_secs() > CREDENTIAL_TTL_SECS)
+                .unwrap_or(true);
+
+            if expired {
+                tracing::debug!("Credentials for {} have expired, dropping", domain);
+                drop(creds_map);
+                let mut fresh = (**self.credentials.load()).clone();
+                fresh.remove(&domain);
+                self.credentials.store(Arc::new(fresh));
             } else {
-                tracing::warn!("Stored cookies for {} contained invalid header characters, skipping", domain);
-            }
-            if let Some(ref ua) = creds.user_agent
-            && let Ok(val) = rquest::header::HeaderValue::from_str(ua) {
-                request.headers_mut().insert(rquest::header::USER_AGENT, val);
+                if let Ok(val) = rquest::header::HeaderValue::from_str(&creds.cookies) {
+                    request.headers_mut().insert(rquest::header::COOKIE, val);
+                } else {
+                    tracing::warn!("Stored cookies for {} contained invalid header characters, skipping", domain);
+                }
+
+                if let Some(ref ua) = creds.user_agent
+                && let Ok(val) = rquest::header::HeaderValue::from_str(ua) {
+                    request.headers_mut().insert(rquest::header::USER_AGENT, val);
+                }
             }
         }
 
@@ -217,8 +236,7 @@ impl SmartClient {
                         && request_clone_for_retry.is_some()
                     {
                         let url_str = url.as_str().to_string();
-                        let domain = url.host_str().unwrap_or("").to_string();
-                        let resp = self.get_rendered_page_once(&url_str, &domain).await?;
+                        let resp = self.get_rendered_page_once(&url_str).await?;
                         return Ok(resp);
                     } else {
                         return Ok(SmartResponse::Buffered {
@@ -239,10 +257,22 @@ impl SmartClient {
                 && request_clone_for_retry.is_some()
             {
                 let url = resp.url().as_str().to_string();
+                let domain = url.parse::<rquest::Url>()
+                    .ok()
+                    .and_then(|u| u.host_str().map(base_domain));
 
-                let (new_cookies, new_ua) = self.solve_challenge_once(&url, &domain).await?;
+                if let Some(domain) = domain {
+                    let mut creds = (**self.credentials.load()).clone();
+                    if creds.remove(&domain).is_some() {
+                        tracing::info!(
+                            "Stored credentials for {} returned 403, clearing and re-solving",
+                            domain
+                        );
+                        self.credentials.store(Arc::new(creds));
+                    }
+                }
 
-                self.store_credentials(&url, &new_cookies, &new_ua);
+                let (new_cookies, new_ua) = self.solve_challenge_once(&url).await?;
 
                 if let Some(mut request) = request_clone_for_retry {
                     if let Ok(val) = rquest::header::HeaderValue::from_str(&new_cookies) {
@@ -277,6 +307,32 @@ impl SmartClient {
         let mut current_url = initial_url.to_string();
         let mut solver_headers = rquest::header::HeaderMap::new();
         let mut solved = false;
+
+        if let Ok(parsed) = initial_url.parse::<rquest::Url>()
+            && let Some(domain) = parsed.host_str().map(base_domain)
+        {
+            let creds_map = self.credentials.load();
+            if let Some(creds) = creds_map.get(&domain) {
+                let expired = creds.stored_at
+                    .map(|t| t.elapsed().as_secs() > CREDENTIAL_TTL_SECS)
+                    .unwrap_or(true);
+                if expired {
+                    tracing::debug!("Credentials for {} have expired, clearing", domain);
+                    drop(creds_map);
+                    let mut fresh = (**self.credentials.load()).clone();
+                    fresh.remove(&domain);
+                    self.credentials.store(Arc::new(fresh));
+                } else {
+                    if let Ok(val) = rquest::header::HeaderValue::from_str(&creds.cookies) {
+                        solver_headers.insert(rquest::header::COOKIE, val);
+                    }
+                    if let Some(ref ua) = creds.user_agent
+                    && let Ok(val) = rquest::header::HeaderValue::from_str(ua) {
+                        solver_headers.insert(rquest::header::USER_AGENT, val);
+                    }
+                }
+            }
+        }
 
         for _ in 0..MAX_REDIRECTS {
             let mut req_builder = self.client.get(&current_url);
@@ -321,8 +377,22 @@ impl SmartClient {
                 && self.solver_url.load().is_some()
             {
                 let url = resp.url().as_str().to_string();
-                let domain = resp.url().host_str().unwrap_or("").to_string();
-                let (cookies, ua) = self.solve_challenge_once(&url, &domain).await?;
+                let domain = url.parse::<rquest::Url>()
+                    .ok()
+                    .and_then(|u| u.host_str().map(base_domain));
+
+                if let Some(domain) = domain {
+                    let mut creds = (**self.credentials.load()).clone();
+                    if creds.remove(&domain).is_some() {
+                        tracing::info!(
+                            "Stored credentials for {} returned 403, clearing and re-solving",
+                            domain
+                        );
+                        self.credentials.store(Arc::new(creds));
+                    }
+                }
+
+                let (cookies, ua) = self.solve_challenge_once(&url).await?;
 
                 if let Ok(val) = rquest::header::HeaderValue::from_str(&cookies) {
                     solver_headers.insert(rquest::header::COOKIE, val);
@@ -407,23 +477,28 @@ impl SmartClient {
         Ok((cookies, ua))
     }
 
-    async fn solve_challenge_once(&self, url: &str, domain: &str) -> Result<(String, String)> {
+    async fn solve_challenge_once(&self, url: &str) -> Result<(String, String)> {
+        let base = url.parse::<rquest::Url>()
+            .ok()
+            .and_then(|u| u.host_str().map(base_domain))
+            .unwrap_or_else(|| url.to_string());
+
         let mutex = self.solving
-            .entry(domain.to_string())
+            .entry(base.clone())
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone();
 
         let _guard = mutex.lock().await;
 
         let creds = self.credentials.load();
-        if let Some(c) = creds.get(domain)
+        if let Some(c) = creds.get(&base)
             && !c.cookies.is_empty()
         {
-            tracing::debug!("Challenge for {} already solved by another request, reusing cookies", domain);
+            tracing::debug!("Challenge for {} already solved, reusing cookies", base);
             return Ok((c.cookies.clone(), c.user_agent.clone().unwrap_or_default()));
         }
 
-        tracing::info!("Solving challenge for domain {}", domain);
+        tracing::info!("Solving challenge for domain {}", base);
         let (cookies, ua) = self.solve_challenge(url).await?;
         self.store_credentials(url, &cookies, &ua);
         Ok((cookies, ua))
@@ -485,19 +560,28 @@ impl SmartClient {
         })
     }
 
-    async fn get_rendered_page_once(&self, url: &str, domain: &str) -> Result<SmartResponse> {
+    async fn get_rendered_page_once(&self, url: &str) -> Result<SmartResponse> {
+        let base = url.parse::<rquest::Url>()
+            .ok()
+            .and_then(|u| u.host_str().map(base_domain))
+            .unwrap_or_else(|| url.to_string());
+
         let mutex = self.solving
-            .entry(domain.to_string())
+            .entry(base.clone())
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone();
 
         let _guard = mutex.lock().await;
 
         let creds = self.credentials.load();
-        if let Some(c) = creds.get(domain)
+        if let Some(c) = creds.get(&base)
             && !c.cookies.is_empty()
         {
-            tracing::debug!("Challenge for {} already solved, retrying with stored credentials", domain);
+            tracing::debug!(
+                "Challenge for {} already solved, retrying with stored credentials",
+                base
+            );
+
             let mut builder = self.client.get(url);
             if let Ok(val) = rquest::header::HeaderValue::from_str(&c.cookies) {
                 builder = builder.header(rquest::header::COOKIE, val);
@@ -508,12 +592,13 @@ impl SmartClient {
                 builder = builder.header(rquest::header::USER_AGENT, val);
             }
 
-            let request = builder.build().map_err(|e| crate::error::Error::Other(e.to_string()))?;
+            let request = builder.build()
+                .map_err(|e| crate::error::Error::Other(e.to_string()))?;
             let resp = self.client.execute(request).await?;
             return Ok(SmartResponse::Normal(resp));
         }
 
-        tracing::info!("Solving HTML challenge for domain {}", domain);
+        tracing::info!("Solving HTML challenge for domain {}", base);
         let result = self.get_rendered_page(url).await?;
 
         if let Ok((cookies, ua)) = self.solve_challenge(url).await {
@@ -524,27 +609,26 @@ impl SmartClient {
     }
 
     fn store_credentials(&self, url: &str, cookies: &str, user_agent: &str) {
-        let mut creds = (**self.credentials.load()).clone();
-
         let domain = match url.parse::<rquest::Url>()
             .ok()
-            .and_then(|u| u.host_str().map(|h| h.to_string()))
+            .and_then(|u| u.host_str().map(base_domain))
         {
             Some(d) => d,
             None => {
-                tracing::warn!("store_credentials: could not extract domain from '{}', credentials will not be applied", url);
+                tracing::warn!(
+                    "store_credentials: could not extract domain from '{}', \
+                    credentials will not be applied", url
+                );
                 return;
             }
         };
 
-        creds.insert(
-            domain,
-            CachedCredentials {
-                cookies: cookies.to_string(),
-                user_agent: Some(user_agent.to_string()),
-            },
-        );
-
+        let mut creds = (**self.credentials.load()).clone();
+        creds.insert(domain, CachedCredentials {
+            cookies: cookies.to_string(),
+            user_agent: Some(user_agent.to_string()),
+            stored_at: Some(std::time::Instant::now()),
+        });
         self.credentials.store(Arc::new(creds));
     }
 
@@ -588,4 +672,14 @@ where
     }
 
     Ok(buf.freeze())
+}
+
+fn base_domain(host: &str) -> String {
+    use publicsuffix::{List, Psl};
+    static LIST: std::sync::OnceLock<List> = std::sync::OnceLock::new();
+    let list = LIST.get_or_init(List::default);
+    
+    list.domain(host.as_bytes())
+        .and_then(|d| std::str::from_utf8(d.as_bytes()).ok().map(|s| s.to_string()))
+        .unwrap_or_else(|| host.to_string())
 }

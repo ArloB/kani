@@ -558,3 +558,39 @@ pub struct LoginForm {
 
 #[cfg(feature = "ssr")]
 pub use crate::auth::User;
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DownloadSettings {
+    pub concurrent_page_downloads:  i64,
+    pub concurrent_manga_downloads: i64,
+    pub chapter_queue_size:         i64,
+    pub max_retries:                i64,
+    pub initial_retry_delay_ms:     i64,
+}
+ 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct ScanSettings {
+    pub auto_scan:             bool,
+    pub scan_interval_minutes: i64,
+}
+ 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AdvancedSettings {
+    pub flaresolverr_url:  String,
+    pub library_path:      String,
+    pub max_wasm_instances: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum SettingsUpdate {
+    Download(DownloadSettings),
+    Scan(ScanSettings),
+    Advanced(AdvancedSettings),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum PermissionState {
+    Loading,
+    Granted,
+    Denied,
+}

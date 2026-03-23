@@ -1,5 +1,5 @@
 use crate::{
-    pages::components::{cover_image::CoverImage, pagination::Pagination, combobox::Combobox},
+    pages::components::{cover_image::CoverImage, pagination::Pagination, combobox::Combobox, permission_handlers::PermissionGate},
     server_fns::{
         get_all_artists, get_all_authors, get_all_tags, get_categories,
         get_library, start_refresh_all,
@@ -99,6 +99,7 @@ pub fn Library() -> impl IntoView {
             <div class="library-header">
                 <h1>"My Library"</h1>
                 <div class="library-header__actions">
+                    <PermissionGate permission="library:refresh">
                     {move || match refresh_state.get() {
                         RefreshState::Running { completed, total } if total > 0 => {
                             let pct = (completed as f64 / total as f64 * 100.0) as u32;
@@ -132,23 +133,26 @@ pub fn Library() -> impl IntoView {
                         }.into_any(),
                         RefreshState::Idle => ().into_any(),
                     }}
-                    <button
-                        class="refresh-button"
-                        disabled=is_running
-                        on:click=move |_| {
-                            leptos::task::spawn_local(async move {
-                                let _ = start_refresh_all().await;
-                            });
-                        }
-                    >
-                        {move || match refresh_state.get() {
-                            RefreshState::Idle => "↻ Refresh All".to_string(),
-                            RefreshState::Running { completed, total } if total > 0 =>
-                                format!("Refreshing... {}/{}", completed, total),
-                            RefreshState::Running { .. } => "Refreshing...".to_string(),
-                            RefreshState::Done { .. } => "↻ Refresh All".to_string(),
-                        }}
-                    </button>
+                    </PermissionGate>
+                    <PermissionGate permission="library:refresh">
+                        <button
+                            class="refresh-button"
+                            disabled=is_running
+                            on:click=move |_| {
+                                leptos::task::spawn_local(async move {
+                                    let _ = start_refresh_all().await;
+                                });
+                            }
+                        >
+                            {move || match refresh_state.get() {
+                                RefreshState::Idle => "↻ Refresh All".to_string(),
+                                RefreshState::Running { completed, total } if total > 0 =>
+                                    format!("Refreshing... {}/{}", completed, total),
+                                RefreshState::Running { .. } => "Refreshing...".to_string(),
+                                RefreshState::Done { .. } => "↻ Refresh All".to_string(),
+                            }}
+                        </button>
+                    </PermissionGate>
                 </div>
             </div>
 

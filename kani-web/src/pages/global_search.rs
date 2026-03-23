@@ -5,6 +5,7 @@ use crate::{
         collapsible_panel::CollapsiblePanel,
         cover_image::CoverImage,
         pagination::Pagination,
+        permission_handlers::RequirePermission,
     },
     server_fns::{fetch_sources, global_search},
     types::SearchScope,
@@ -62,6 +63,7 @@ pub fn GlobalSearch() -> impl IntoView {
     let (is_pending, set_pending) = signal(false);
 
     view! {
+      <RequirePermission permission="source:browse">
         <div class="global-search-page">
             <div class="search-bar">
                 <span class="search-icon">"🔍"</span>
@@ -234,5 +236,6 @@ pub fn GlobalSearch() -> impl IntoView {
                 })}
             </Transition>
         </div>
+      </RequirePermission>
     }
 }

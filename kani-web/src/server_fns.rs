@@ -10,9 +10,29 @@ fn to_server_err(e: impl std::fmt::Display) -> ServerFnError {
     ServerFnError::new(e.to_string())
 }
 
+#[cfg(feature = "ssr")]
+pub async fn require_permission<P: crate::permissions::AuthRequirement>() -> Result<crate::auth::User, ServerFnError> {
+    use crate::auth::AuthSession;
+    use axum_login::AuthzBackend;
+    use leptos_axum::extract;
+
+    let auth: AuthSession = extract().await.map_err(to_server_err)?;
+    let user = auth.user.ok_or_else(|| ServerFnError::new("User not authenticated."))?;
+
+    if let Some(perm) = P::required_permission()
+    && !auth.backend.has_perm(&user, perm).await.map_err(to_server_err)? {
+        return Err(ServerFnError::new(format!("Forbidden: requires permission '{perm}'")));
+    }
+
+    Ok(user)
+}
+
 #[server]
 pub async fn fetch_sources() -> Result<Vec<Source>, ServerFnError> {
     use crate::state::AppState;
+
+    require_permission::<crate::permissions::guards::SourceBrowse>().await?;
+
     let state = expect_context::<AppState>();
     sqlx::query_as!(Source, "SELECT * FROM sources LIMIT 1000")
         .fetch_all(&state.db)
@@ -34,6 +54,8 @@ async fn get_source_base_url(db: &sqlx::SqlitePool, source_id: i64) -> Result<St
 
 #[server]
 pub async fn get_popular_manga(source_id: i64, page: i32) -> Result<MangaList, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceBrowse>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let base_url = get_source_base_url(&state.db, source_id).await?;
 
@@ -58,6 +80,8 @@ pub async fn search_manga(
     query: String,
     page: i32,
 ) -> Result<MangaList, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceBrowse>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let base_url = get_source_base_url(&state.db, source_id).await?;
 
@@ -81,6 +105,8 @@ pub async fn get_manga_details(
     source_id: i64,
     manga_id: String,
 ) -> Result<MangaInfo, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceBrowse>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let base_url = get_source_base_url(&state.db, source_id).await?;
 
@@ -102,6 +128,8 @@ pub async fn get_chapter_list(
     manga_id: String,
     page: i32,
 ) -> Result<ChapterList, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceBrowse>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let json = state
         .get_chapter_list_paged(source_id, &manga_id, page)
@@ -116,6 +144,8 @@ pub async fn get_pages(
     manga_id: String,
     chapter_id: String,
 ) -> Result<crate::types::ChapterContents, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceBrowse>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let base_url = {
         sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
@@ -140,12 +170,15 @@ pub async fn get_pages(
 
 #[server]
 pub async fn save_to_library(source_id: i64, manga_id: String) -> Result<i64, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryAdd>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     state.save_to_library(source_id, &manga_id).await.map_err(to_server_err)
 }
 
 #[server]
 pub async fn download_chapter(chapter_id: i64) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::ChapterDownload>().await?;
     let state = expect_context::<crate::state::AppState>();
     state
         .download_chapter(chapter_id)
@@ -155,6 +188,8 @@ pub async fn download_chapter(chapter_id: i64) -> Result<(), ServerFnError> {
 
 #[server]
 pub async fn cancel_download(chapter_id: i64) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::ChapterDownload>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
     let was_cancelled = state.downloader.cancel_download(chapter_id).await;
@@ -174,6 +209,8 @@ pub async fn cancel_download(chapter_id: i64) -> Result<(), ServerFnError> {
 
 #[server]
 pub async fn download_all(manga_id: i64) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::ChapterDownload>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
     let state_clone = state.clone();
@@ -188,6 +225,8 @@ pub async fn download_all(manga_id: i64) -> Result<(), ServerFnError> {
 
 #[server]
 pub async fn delete_downloaded(id: i64) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::ChapterDelete>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     state
         .delete_downloaded(id)
@@ -197,6 +236,8 @@ pub async fn delete_downloaded(id: i64) -> Result<(), ServerFnError> {
 
 #[server]
 pub async fn check_in_library(source_id: i64, manga_id: String) -> Result<Option<i64>, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
     let decoded_manga_id = crate::utils::decode_manga_id(&manga_id);
@@ -215,6 +256,8 @@ pub async fn check_in_library(source_id: i64, manga_id: String) -> Result<Option
 
 #[server]
 pub async fn get_local_manga(id: i64) -> Result<(MangaInfo, Source, bool, bool), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let manga = sqlx::query_as!(crate::models::Manga, "SELECT * FROM manga WHERE id = ?", id)
         .fetch_optional(&state.db)
@@ -278,6 +321,8 @@ pub async fn get_local_chapter_list(
     page: i32,
     sort_order: crate::types::ChapterSortOrder,
 ) -> Result<ChapterList, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let limit = 66i64;
     let offset = ((page - 1).max(0) as i64) * limit;
@@ -325,15 +370,18 @@ pub async fn get_local_chapter_list(
 
 #[server]
 pub async fn delete_manga(id: i64) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryDelete>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
-    let manga = sqlx::query!("SELECT name FROM manga WHERE id = ?", id)
+    let manga = sqlx::query!("SELECT name, local_cover_path FROM manga WHERE id = ?", id)
         .fetch_optional(&state.db)
         .await
         .map_err(to_server_err)?
         .ok_or_else(|| ServerFnError::new("Manga not found"))?;
 
     let library_path = state.settings.read().await.library_path.clone();
+
     let safe_manga_name_base = kani_core::utilities::sanitize_filename(&manga.name);
     let safe_manga_name = format!("{} - {}", safe_manga_name_base, id);
     let path = library_path.join(safe_manga_name);
@@ -342,6 +390,18 @@ pub async fn delete_manga(id: i64) -> Result<(), ServerFnError> {
         Ok(_) => {},
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
         Err(e) => return Err(to_server_err(format!("Failed to remove directory: {}", e))),
+    }
+
+    if let Some(cover_rel_path) = manga.local_cover_path {
+        let cover_path = library_path.join(&cover_rel_path);
+        match kani_core::utilities::assert_within_root(&library_path, &cover_path) {
+            Ok(safe_path) => match tokio::fs::remove_file(&safe_path).await {
+                Ok(_) => {},
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                Err(e) => tracing::warn!("Failed to remove cover {:?}: {}", safe_path, e),
+            },
+            Err(e) => tracing::warn!("Cover path traversal blocked: {}", e),
+        }
     }
 
     sqlx::query!("DELETE FROM manga WHERE id = ?", id)
@@ -363,6 +423,8 @@ pub async fn get_library(
     category_filter: Option<i64>,
     sort_by: MangaSortOrder
 ) -> Result<LibraryPage, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
     const PAGE_SIZE: i32 = 20;
@@ -459,12 +521,16 @@ async fn fetch_filter_options(
 
 #[server]
 pub async fn get_all_tags() -> Result<Vec<(i64, String)>, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     fetch_filter_options(&state.db, "SELECT id, name FROM tags ORDER BY name").await
 }
 
 #[server]
 pub async fn get_all_authors() -> Result<Vec<(i64, String)>, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     fetch_filter_options(&state.db,
         "SELECT p.id, p.name FROM people p
@@ -476,6 +542,8 @@ pub async fn get_all_authors() -> Result<Vec<(i64, String)>, ServerFnError> {
 
 #[server]
 pub async fn get_all_artists() -> Result<Vec<(i64, String)>, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     fetch_filter_options(&state.db,
         "SELECT p.id, p.name FROM people p
@@ -487,12 +555,15 @@ pub async fn get_all_artists() -> Result<Vec<(i64, String)>, ServerFnError> {
 
 #[server]
 pub async fn refresh_manga(id: i64) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryRefresh>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     state.refresh_manga(id).await.map_err(to_server_err)
 }
 
 #[server]
 pub async fn scan_for_new_chapters(id: i64) -> Result<i64, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryRefresh>().await?;
     let state = expect_context::<crate::state::AppState>();
     let new_chapters = state.scan_for_new_chapters(id).await.map_err(to_server_err)?;
     Ok(new_chapters.len() as i64)
@@ -500,6 +571,8 @@ pub async fn scan_for_new_chapters(id: i64) -> Result<i64, ServerFnError> {
 
 #[server]
 pub async fn toggle_auto_scan() -> Result<bool, ServerFnError> {
+    require_permission::<crate::permissions::guards::SettingsEditScan>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     
     let new_state = !state.settings.read().await.auto_scan;
@@ -519,6 +592,8 @@ pub async fn toggle_auto_scan() -> Result<bool, ServerFnError> {
 
 #[server]
 pub async fn toggle_auto_download(manga_db_id: i64, enabled: bool) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     sqlx::query!(
         "UPDATE manga SET auto_download = ? WHERE id = ?",
@@ -536,6 +611,8 @@ pub async fn global_search(
     scope: crate::types::SearchScope,
     page: i32,
 ) -> Result<Vec<GlobalSearchResult>, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceBrowse>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
     let mut list = state
@@ -584,6 +661,8 @@ pub async fn toggle_source_favourite(
     source_id: i64,
     favourited: bool,
 ) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceBrowse>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     sqlx::query!(
         "UPDATE sources SET favourited = ? WHERE id = ?",
@@ -598,12 +677,16 @@ pub async fn toggle_source_favourite(
 
 #[server]
 pub async fn start_refresh_all() -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryRefresh>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     state.start_refresh_all().await.map_err(to_server_err)
 }
 
 #[server]
 pub async fn is_refreshing() -> Result<bool, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryRefresh>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     Ok(state.is_refreshing().await)
 }
@@ -612,6 +695,8 @@ pub async fn is_refreshing() -> Result<bool, ServerFnError> {
 pub async fn get_download_rules(
     manga_db_id: i64,
 ) -> Result<Vec<DownloadRule>, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     use crate::models::DownloadRuleRow;
 
     let state = expect_context::<crate::state::AppState>();
@@ -638,6 +723,8 @@ pub async fn add_download_rule(
     manga_db_id: i64,
     kind: DownloadRuleKind,
 ) -> Result<i64, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
     let (rule_type, value) = match &kind {
@@ -668,6 +755,8 @@ pub async fn add_download_rule(
 pub async fn remove_download_rule(
     rule_id: i64,
 ) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
     sqlx::query!("DELETE FROM download_rules WHERE id = ?", rule_id)
@@ -682,6 +771,8 @@ pub async fn remove_download_rule(
 pub async fn get_scanlator_preferences(
     manga_db_id: i64,
 ) -> Result<Vec<crate::types::ScanlatorPreference>, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     sqlx::query_as!(
         crate::types::ScanlatorPreference,
@@ -702,6 +793,8 @@ pub async fn set_scanlator_preference(
     scanlator: String,
     priority: i64,
 ) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     sqlx::query!(
         "INSERT INTO scanlator_preferences (manga_id, scanlator, priority)
@@ -719,6 +812,8 @@ pub async fn set_scanlator_preference(
 
 #[server]
 pub async fn remove_scanlator_preference(pref_id: i64) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     sqlx::query!("DELETE FROM scanlator_preferences WHERE id = ?", pref_id)
         .execute(&state.db)
@@ -729,6 +824,8 @@ pub async fn remove_scanlator_preference(pref_id: i64) -> Result<(), ServerFnErr
 
 #[server]
 pub async fn get_categories() -> Result<Vec<Category>, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     sqlx::query_as!(
         Category,
@@ -741,6 +838,8 @@ pub async fn get_categories() -> Result<Vec<Category>, ServerFnError> {
 
 #[server]
 pub async fn create_category(name: String, sort_order: i64) -> Result<i64, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -757,6 +856,8 @@ pub async fn create_category(name: String, sort_order: i64) -> Result<i64, Serve
 
 #[server]
 pub async fn rename_category(category_id: i64, name: String) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -774,6 +875,8 @@ pub async fn rename_category(category_id: i64, name: String) -> Result<(), Serve
 
 #[server]
 pub async fn delete_category(category_id: i64) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     sqlx::query!("DELETE FROM categories WHERE id = ?", category_id)
         .execute(&state.db)
@@ -784,6 +887,8 @@ pub async fn delete_category(category_id: i64) -> Result<(), ServerFnError> {
 
 #[server]
 pub async fn reorder_categories(ordered_ids: Vec<i64>) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let mut tx = state.db.begin().await.map_err(to_server_err)?;
     for (idx, id) in ordered_ids.into_iter().enumerate() {
@@ -798,6 +903,8 @@ pub async fn reorder_categories(ordered_ids: Vec<i64>) -> Result<(), ServerFnErr
 
 #[server]
 pub async fn get_manga_categories(manga_db_id: i64) -> Result<Vec<Category>, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     sqlx::query_as!(
         Category,
@@ -818,6 +925,8 @@ pub async fn set_manga_categories(
     manga_db_id: i64,
     category_ids: Vec<i64>,
 ) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let mut tx = state.db.begin().await.map_err(to_server_err)?;
 
@@ -841,6 +950,8 @@ pub async fn set_manga_categories(
 
 #[server]
 pub async fn get_settings() -> Result<AppSettings, ServerFnError> {
+    require_permission::<crate::permissions::guards::SettingsView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let s = state.settings.read().await;
     Ok(AppSettings {
@@ -858,75 +969,115 @@ pub async fn get_settings() -> Result<AppSettings, ServerFnError> {
 }
 
 #[server]
-pub async fn update_settings(settings: AppSettings) -> Result<(), ServerFnError> {
-    let state = expect_context::<crate::state::AppState>();
+pub async fn update_settings(update: crate::types::SettingsUpdate) -> Result<(), ServerFnError> {
+    use crate::types::SettingsUpdate;
+    use crate::permissions::guards::{SettingsEditDownload, SettingsEditScan, SettingsEditAdvanced};
 
-    if settings.concurrent_page_downloads < 1 || settings.concurrent_page_downloads > 32 {
-        return Err(ServerFnError::new("concurrent_page_downloads must be 1–32"));
-    }
-    if settings.concurrent_manga_downloads < 1 || settings.concurrent_manga_downloads > 16 {
-        return Err(ServerFnError::new("concurrent_manga_downloads must be 1–16"));
-    }
-    if settings.scan_interval_minutes < 5 {
-        return Err(ServerFnError::new("scan_interval_minutes must be at least 5"));
-    }
-
-    sqlx::query!(
-        "UPDATE settings SET
-            flaresolverr_url           = ?,
-            library_path               = ?,
-            concurrent_page_downloads  = ?,
-            concurrent_manga_downloads = ?,
-            chapter_queue_size         = ?,
-            max_retries                = ?,
-            initial_retry_delay_ms     = ?,
-            max_wasm_instances         = ?,
-            auto_scan                  = ?,
-            scan_interval_minutes      = ?
-         WHERE id = 'singleton'",
-        settings.flaresolverr_url,
-        settings.library_path,
-        settings.concurrent_page_downloads,
-        settings.concurrent_manga_downloads,
-        settings.chapter_queue_size,
-        settings.max_retries,
-        settings.initial_retry_delay_ms,
-        settings.max_wasm_instances,
-        settings.auto_scan,
-        settings.scan_interval_minutes,
-    )
-    .execute(&state.db)
-    .await
-    .map_err(to_server_err)?;
-
-    {
-        let mut s = state.settings.write().await;
-        s.flaresolverr_url          = settings.flaresolverr_url.clone();
-        s.library_path              = settings.library_path.into();
-        s.concurrent_page_downloads = settings.concurrent_page_downloads;
-        s.concurrent_manga_downloads = settings.concurrent_manga_downloads;
-        s.chapter_queue_size        = settings.chapter_queue_size;
-        s.max_retries               = settings.max_retries;
-        s.initial_retry_delay_ms    = settings.initial_retry_delay_ms;
-        s.max_wasm_instances        = settings.max_wasm_instances;
-        s.auto_scan                 = settings.auto_scan;
-        s.scan_interval_minutes     = settings.scan_interval_minutes;
-    }
-
-    let new_solver = if settings.flaresolverr_url.is_empty() {
-        None
-    } else {
-        Some(settings.flaresolverr_url)
+    let _ = match &update {
+        SettingsUpdate::Download(_) => require_permission::<SettingsEditDownload>().await?,
+        SettingsUpdate::Scan(_)     => require_permission::<SettingsEditScan>().await?,
+        SettingsUpdate::Advanced(_) => require_permission::<SettingsEditAdvanced>().await?,
     };
 
-    state.smart_client.update_solver_url(new_solver.clone());
-    state.proxy_client.update_solver_url(new_solver);
+    let state = expect_context::<crate::state::AppState>();
+
+    match update {
+        SettingsUpdate::Download(s) => {
+            if s.concurrent_page_downloads < 1 || s.concurrent_page_downloads > 32 {
+                return Err(ServerFnError::new("concurrent_page_downloads must be 1-32"));
+            }
+            if s.concurrent_manga_downloads < 1 || s.concurrent_manga_downloads > 16 {
+                return Err(ServerFnError::new("concurrent_manga_downloads must be 1-16"));
+            }
+
+            sqlx::query!(
+                "UPDATE settings SET
+                    concurrent_page_downloads  = ?,
+                    concurrent_manga_downloads = ?,
+                    chapter_queue_size         = ?,
+                    max_retries                = ?,
+                    initial_retry_delay_ms     = ?
+                 WHERE id = 'singleton'",
+                s.concurrent_page_downloads,
+                s.concurrent_manga_downloads,
+                s.chapter_queue_size,
+                s.max_retries,
+                s.initial_retry_delay_ms,
+            )
+            .execute(&state.db)
+            .await
+            .map_err(to_server_err)?;
+
+            let mut settings = state.settings.write().await;
+            settings.concurrent_page_downloads  = s.concurrent_page_downloads;
+            settings.concurrent_manga_downloads = s.concurrent_manga_downloads;
+            settings.chapter_queue_size         = s.chapter_queue_size;
+            settings.max_retries                = s.max_retries;
+            settings.initial_retry_delay_ms     = s.initial_retry_delay_ms;
+        }
+
+        SettingsUpdate::Scan(s) => {
+            if s.scan_interval_minutes < 5 {
+                return Err(ServerFnError::new("scan_interval_minutes must be at least 5"));
+            }
+
+            sqlx::query!(
+                "UPDATE settings SET
+                    auto_scan             = ?,
+                    scan_interval_minutes = ?
+                 WHERE id = 'singleton'",
+                s.auto_scan,
+                s.scan_interval_minutes,
+            )
+            .execute(&state.db)
+            .await
+            .map_err(to_server_err)?;
+
+            let mut settings = state.settings.write().await;
+            settings.auto_scan             = s.auto_scan;
+            settings.scan_interval_minutes = s.scan_interval_minutes;
+        }
+
+        SettingsUpdate::Advanced(s) => {
+            sqlx::query!(
+                "UPDATE settings SET
+                    flaresolverr_url   = ?,
+                    library_path       = ?,
+                    max_wasm_instances = ?
+                 WHERE id = 'singleton'",
+                s.flaresolverr_url,
+                s.library_path,
+                s.max_wasm_instances,
+            )
+            .execute(&state.db)
+            .await
+            .map_err(to_server_err)?;
+
+            {
+                let mut settings = state.settings.write().await;
+                settings.flaresolverr_url   = s.flaresolverr_url.clone();
+                settings.library_path       = s.library_path.clone().into();
+                settings.max_wasm_instances = s.max_wasm_instances;
+            }
+
+            let new_solver = if s.flaresolverr_url.is_empty() {
+                None
+            } else {
+                Some(s.flaresolverr_url)
+            };
+
+            state.smart_client.update_solver_url(new_solver.clone());
+            state.proxy_client.update_solver_url(new_solver);
+        }
+    }
 
     Ok(())
 }
 
 #[server]
 pub async fn get_recent_updates(page: i32) -> Result<RecentUpdate, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
     let offset = (page - 1) * 50;
@@ -969,6 +1120,8 @@ pub async fn toggle_source_enabled(
     source_id: i64,
     enabled: bool,
 ) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceToggleEnabled>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     sqlx::query!(
         "UPDATE sources SET enabled = ? WHERE id = ?",
@@ -982,6 +1135,8 @@ pub async fn toggle_source_enabled(
 
 #[server]
 pub async fn get_source(id: i64) -> Result<Source, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceBrowse>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     state.get_source(id).await.map_err(to_server_err)
 }
@@ -990,6 +1145,8 @@ pub async fn get_source(id: i64) -> Result<Source, ServerFnError> {
 pub async fn get_source_preference_schema(
     source_id: i64,
 ) -> Result<Vec<crate::types::PreferenceDescriptor>, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceConfigure>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
     if let Some(cached) = state.cache.get_preference_schema(source_id) {
@@ -1043,6 +1200,8 @@ pub async fn get_source_preference_schema(
 pub async fn get_source_preferences(
     source_id: i64,
 ) -> Result<Vec<(String, String)>, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceConfigure>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let rows = sqlx::query!(
         "SELECT key, value FROM source_preferences WHERE source_id = ?",
@@ -1060,6 +1219,8 @@ pub async fn set_source_preference(
     key: String,
     value: String,
 ) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceConfigure>().await?;
+
     serde_json::from_str::<serde_json::Value>(&value)
         .map_err(|_| ServerFnError::new("Preference value must be valid JSON"))?;
 
@@ -1073,6 +1234,8 @@ pub async fn append_preference_list_item(
     key: String,
     item: String,
 ) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceConfigure>().await?;
+
     if item.trim().is_empty() {
         return Err(ServerFnError::new("Item cannot be empty"));
     }
@@ -1100,6 +1263,8 @@ pub async fn remove_preference_list_item(
     key: String,
     item: String,
 ) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceConfigure>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     let row = state.get_preference(source_id, &key).await.map_err(to_server_err)?;
 
@@ -1121,6 +1286,8 @@ pub async fn toggle_preference_select_item(
     item: String,
     selected: bool,
 ) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceConfigure>().await?;
+
     let state = expect_context::<crate::state::AppState>();
 
     let current = state.get_preference(source_id, &key).await.map_err(to_server_err)?;
@@ -1146,6 +1313,8 @@ pub async fn preview_migration(
     target_source_id: i64,
     target_source_manga_id: String,
 ) -> Result<MigrationPreview, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     state
         .preview_migration(manga_db_id, target_source_id, target_source_manga_id)
@@ -1160,6 +1329,8 @@ pub async fn migrate_manga(
     target_source_manga_id: String,
     keep_orphaned_downloads: bool,
 ) -> Result<MigrationResult, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryManage>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     state
         .migrate_manga(manga_db_id, target_source_id, target_source_manga_id, keep_orphaned_downloads)
@@ -1169,12 +1340,16 @@ pub async fn migrate_manga(
 
 #[server]
 pub async fn get_boot_id() -> Result<String, ServerFnError> {
+    require_permission::<crate::permissions::guards::LibraryView>().await?;
+
     let state = expect_context::<crate::state::AppState>();
     Ok(state.boot_id.clone())
 }
 
 #[server]
 pub async fn get_current_user() -> Result<Option<crate::types::AuthenticatedUser>, ServerFnError> {
+    require_permission::<crate::permissions::IsAuthenticated>().await?;
+
     use crate::auth::AuthSession;
     use leptos_axum::extract;
 
@@ -1194,6 +1369,8 @@ pub async fn change_password(
     current_password: String,
     new_password:     String,
 ) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::IsAuthenticated>().await?;
+
     use crate::auth::{AuthBackend, AuthSession};
     use crate::state::AppState;
     use leptos_axum::extract;
@@ -1228,6 +1405,8 @@ pub async fn change_password(
 /// their password — useful as a "log out everywhere" action.
 #[server]
 pub async fn logout_everywhere() -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::IsAuthenticated>().await?;
+
     use crate::auth::{AuthBackend, AuthSession};
     use crate::state::AppState;
     use leptos_axum::extract;
@@ -1238,6 +1417,19 @@ pub async fn logout_everywhere() -> Result<(), ServerFnError> {
     let state   = expect_context::<AppState>();
     let backend = AuthBackend::new(state.db.clone());
     backend.cycle_change_id(user.id).await.map_err(to_server_err)
+}
+
+#[server]
+pub async fn get_my_permissions() -> Result<std::collections::HashSet<crate::permissions::Permission> , ServerFnError> {
+    require_permission::<crate::permissions::IsAuthenticated>().await?;
+
+    use axum_login::AuthzBackend;
+    use crate::auth::AuthSession;
+    use leptos_axum::extract;
+
+    let auth: AuthSession = extract().await.map_err(to_server_err)?;
+    let user = auth.user.ok_or_else(|| ServerFnError::new("Not authenticated"))?;
+    auth.backend.get_all_permissions(&user).await.map_err(to_server_err)
 }
 
 #[cfg(feature = "ssr")]

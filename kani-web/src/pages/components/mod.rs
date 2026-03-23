@@ -5,3 +5,4 @@ pub mod source_settings_card;
 pub mod preference_row;
 pub mod combobox;
 pub mod migration_dialogue;
+pub mod permission_handlers;

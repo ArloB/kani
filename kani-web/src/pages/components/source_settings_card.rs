@@ -5,7 +5,8 @@ use crate::{
         get_source_preference_schema, get_source_preferences, toggle_source_enabled, toggle_source_favourite
     },
     types::{PreferenceDescriptor, Source},
-    pages::components::preference_row::PreferenceRow
+    pages::components::preference_row::PreferenceRow,
+    pages::components::permission_handlers::PermissionGate,
 };
 
 #[component]
@@ -78,43 +79,49 @@ pub fn SourceSettingsCard(source: Source) -> impl IntoView {
                                 .unwrap_or(false);
                             if has_prefs {
                                 view! {
-                                    <button
-                                        class="source-settings-card__configure-btn"
-                                        title="Configure source"
-                                        on:click=move |_| set_modal_open.set(true)
-                                    >
-                                        "⚙"
-                                    </button>
+                                    <PermissionGate permission="source:configure">
+                                        <button
+                                            class="source-settings-card__configure-btn"
+                                            title="Configure source"
+                                            on:click=move |_| set_modal_open.set(true)
+                                        >
+                                            "⚙"
+                                        </button>
+                                    </PermissionGate>
                                 }.into_any()
                             } else {
                                 view! { <span></span> }.into_any()
                             }
                         }}
                     </Suspense>
-                    <label class="star-checkbox" title="Favourite">
-                        <input
-                            type="checkbox"
-                            checked=move || starred.get()
-                            on:change=move |ev| {
-                                let val = event_target_checked(&ev);
-                                set_starred.set(val);
-                                leptos::task::spawn_local(async move {
-                                    let _ = toggle_source_favourite(sid, val).await;
-                                });
-                            }
-                        />
-                        <span class="star-checkbox__icon">
-                            {move || if starred.get() { "★" } else { "☆" }}
-                        </span>
-                    </label>
-                    <label class="toggle-label" title="Enable source">
-                        <input
-                            type="checkbox"
-                            checked=move || enabled.get()
-                            on:change=handle_enable_toggle
-                        />
-                        {move || if enabled.get() { " On" } else { " Off" }}
-                    </label>
+                    <PermissionGate permission="source:browse">
+                        <label class="star-checkbox" title="Favourite">
+                            <input
+                                type="checkbox"
+                                checked=move || starred.get()
+                                on:change=move |ev| {
+                                    let val = event_target_checked(&ev);
+                                    set_starred.set(val);
+                                    leptos::task::spawn_local(async move {
+                                        let _ = toggle_source_favourite(sid, val).await;
+                                    });
+                                }
+                            />
+                            <span class="star-checkbox__icon">
+                                {move || if starred.get() { "★" } else { "☆" }}
+                            </span>
+                        </label>
+                    </PermissionGate>
+                    <PermissionGate permission="source:toggle_enabled">
+                        <label class="toggle-label" title="Enable source">
+                            <input
+                                type="checkbox"
+                                checked=move || enabled.get()
+                                on:change=handle_enable_toggle
+                            />
+                            {move || if enabled.get() { " On" } else { " Off" }}
+                        </label>
+                    </PermissionGate>
                 </div>
             </div>
 

@@ -165,7 +165,11 @@ impl AppState {
         .map_err(AppError::CoreError)?;
         tracing::info!("Downloader manager created");
 
-        let proxy_client = kani_core::http::SmartClient::new_proxy(flaresolverr_url)?;
+        let proxy_client = kani_core::http::SmartClient::new_proxy(
+            flaresolverr_url,
+            global_smart_client.credentials.clone(),
+            global_smart_client.solving.clone(),
+        )?;
         tracing::info!("Proxy client created");
 
         let (refresh_tx, _) = tokio::sync::broadcast::channel(256);
@@ -989,10 +993,13 @@ impl AppState {
         let name = chapter_name(record.volume, record.chapter_number, record.chapter_name);
 
         let library_path = self.settings.read().await.library_path.clone();
+
         let safe_manga_name_base = kani_core::utilities::sanitize_filename(&record.manga_name);
         let safe_manga_name = format!("{} - {}", safe_manga_name_base, record.manga_id);
+
         let path = library_path.join(safe_manga_name);
         let safe_chapter_name = kani_core::utilities::sanitize_filename(&name);
+
         let cbz_path = path.join(format!("{}.cbz", &safe_chapter_name));
 
         if let Err(e) = tokio::fs::remove_file(&cbz_path).await {

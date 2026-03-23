@@ -60,6 +60,15 @@ pub enum AppError {
 
     #[error("Password error: {0}")]
     PasswordError(String),
+
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
+
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
+
+    #[error("Permission error: {0}")]
+    PermissionParseError(#[from] crate::permissions::PermissionParseError),
 }
 
 impl IntoResponse for AppError {
@@ -92,6 +101,9 @@ impl IntoResponse for AppError {
             Self::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
             Self::HashError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::PasswordError(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
+            Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
+            Self::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
+            Self::PermissionParseError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
         };
 
         let body = Json(json!({

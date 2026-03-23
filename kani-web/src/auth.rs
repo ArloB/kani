@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
@@ -9,7 +11,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     Json,
 };
-use axum_login::{AuthUser, AuthnBackend, UserId};
+use axum_login::{AuthUser, AuthnBackend, AuthzBackend, UserId};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
@@ -411,4 +413,42 @@ pub fn fresh_change_id() -> Vec<u8> {
     let mut bytes = [0u8; 16];
     OsRng.fill_bytes(&mut bytes);
     bytes.to_vec()
+}
+
+impl AuthzBackend for AuthBackend {
+    type Permission = crate::permissions::Permission;
+
+    async fn get_user_permissions(
+        &self,
+        _user: &Self::User,
+    ) -> Result<HashSet<Self::Permission>, Self::Error> {
+        Ok(HashSet::new())
+    }
+
+    async fn get_group_permissions(
+        &self,
+        user: &Self::User,
+    ) -> Result<HashSet<Self::Permission>, Self::Error> {
+        if user.roles.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let roles_json = serde_json::to_string(&user.roles).unwrap_or_default();
+        let rows = sqlx::query_scalar!(
+            "WITH RECURSIVE role_tree(slug) AS (
+                SELECT slug FROM roles WHERE slug IN (SELECT value FROM json_each(?))
+                UNION
+                SELECT r.parent FROM roles r JOIN role_tree rt ON r.slug = rt.slug
+                WHERE r.parent IS NOT NULL
+            )
+            SELECT DISTINCT rp.permission
+            FROM role_permissions rp
+            JOIN role_tree rt ON rp.role_slug = rt.slug",
+            roles_json
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        Ok(rows.into_iter().filter_map(|s| s.parse().ok()).collect())
+    }
 }

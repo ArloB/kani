@@ -9,23 +9,55 @@ use axum::{
         IntoResponse,
         Redirect,
         sse::{Event, KeepAlive, Sse},
-    }, routing::{delete, get, post}
+    }, 
+    routing::{delete, get, post}
 };
+use axum_login::AuthzBackend;
+use std::marker::PhantomData;
 use serde_json::json;
 use std::{convert::Infallible, sync::Arc};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use futures::TryStreamExt;
-
 use crate::{
-    auth::{AuthSession, Credentials},
-    error::AppError,
-    models::{CreateSource, FetchWasmRequest, Manga, ProxyQuery, SearchMangaRequest, UpdateSource},
-    state::AppState,
-    types::{LoginForm, Source},
+    auth::{AuthSession, Credentials}, 
+    error::AppError, 
+    models::{
+        CreateSource, FetchWasmRequest, Manga, ProxyQuery, 
+        SearchMangaRequest, UpdateSource
+    },
+    permissions::{AuthRequirement},
+    state::AppState, 
+    types::{LoginForm, Source}
 };
 use kani_core::source_manager::SourceManager;
 
 const MAX_WASM_BYTES: usize = 10 * 1024 * 1024;
+
+pub struct AuthGuard<P: AuthRequirement>(pub crate::auth::User, pub PhantomData<P>);
+
+impl<S, P> axum::extract::FromRequestParts<S> for AuthGuard<P>
+where
+    S: Send + Sync,
+    P: AuthRequirement,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let auth_session = crate::auth::AuthSession::from_request_parts(parts, state)
+            .await
+            .map_err(|_| AppError::InternalServerError("Session error".into()))?;
+
+        let user = auth_session.user
+            .ok_or(AppError::Unauthorized("User not authenticated".into()))?;
+
+        if let Some(perm) = P::required_permission()
+        && !auth_session.backend.has_perm(&user, perm).await.unwrap_or(false) {
+            return Err(AppError::Forbidden(format!("User lacks permission: {}", perm)));
+        }
+
+        Ok(Self(user, PhantomData))
+    }
+}
 
 pub fn routes(state: AppState) -> Router {
     Router::new()
@@ -35,8 +67,8 @@ pub fn routes(state: AppState) -> Router {
         .route("/auth/me",     get(auth_me))
         // Binary response — image proxy
         .route("/image_proxy", get(image_proxy))
-        // SSE — download progress
-        .route("/downloads/progress", get(download_progress_sse))
+        // Events
+        .route("/events", get(combined_sse))
         // Source admin CRUD
         .route("/sources", get(list_sources).post(add_source))
         .route(
@@ -66,8 +98,6 @@ pub fn routes(state: AppState) -> Router {
         .route("/manga/{id}/cover", get(serve_manga_cover))
         .route("/chapter/{id}/download", post(start_download))
         .route("/chapter/{id}/delete", delete(delete_downloaded))
-        // Events
-        .route("/events", get(combined_sse))
         .route("/refresh/start", post(start_refresh_all_rest))
         .with_state(state)
         .layer(DefaultBodyLimit::max(MAX_WASM_BYTES))
@@ -106,51 +136,13 @@ async fn auth_logout(mut auth: AuthSession) -> impl IntoResponse {
     Redirect::to("/login")
 }
 
-async fn auth_me(auth: AuthSession) -> impl IntoResponse {
-    match auth.user {
-        Some(user) => Json(json!({
-            "id": user.id,
-            "username": user.username,
-        }))
-        .into_response(),
-        None => (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "Not authenticated" })),
-        )
-            .into_response(),
-    }
-}
-
-pub async fn download_progress_sse(
-    State(state): State<AppState>,
+async fn auth_me(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
 ) -> Result<impl IntoResponse, AppError> {
-    let rx = state.downloader.subscribe();
-    let snapshot    = state.downloader.snapshot().await;
-
-    let snapshot_event = {
-        let json = serde_json::json!({
-            "type": "state_snapshot",
-            "chapters": snapshot
-        }).to_string();
-        Ok::<Event, Infallible>(Event::default().data(json))
-    };
-
-    let live_stream = BroadcastStream::new(rx).filter_map(|result| {
-        match result {
-            Ok(event) => {
-                let json = serde_json::to_string(&event).ok()?;
-                Some(Ok::<Event, Infallible>(Event::default().data(json)))
-            }
-            Err(tokio_stream::wrappers::errors::BroadcastStreamRecvError::Lagged(n)) => {
-                tracing::warn!("SSE client lagged by {} events, closing to force reconnect", n);
-                Some(Ok(Event::default().event("close").data("")))
-            }
-        }
-    });
-
-    let stream = tokio_stream::once(snapshot_event).chain(live_stream);
-
-    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+    Ok(Json(json!({
+        "id": user.id,
+        "username": user.username,
+    })))
 }
 
 const PER_HOST_CONCURRENCY: usize = 5;
@@ -165,6 +157,7 @@ fn host_semaphore(
 }
 
 pub async fn image_proxy(
+    AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<ProxyQuery>,
@@ -288,7 +281,10 @@ pub async fn image_proxy(
     ).into_response())
 }
 
-async fn list_sources(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
+async fn list_sources(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+    State(state): State<AppState>
+) -> Result<impl IntoResponse, AppError> {
     let sources = sqlx::query_as!(
         Source,
         "SELECT * FROM sources LIMIT 1000"
@@ -300,6 +296,7 @@ async fn list_sources(State(state): State<AppState>) -> Result<impl IntoResponse
 }
 
 async fn add_source(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Json(payload): Json<CreateSource>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -314,6 +311,7 @@ async fn add_source(
 }
 
 async fn get_source(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -322,6 +320,7 @@ async fn get_source(
 }
 
 async fn update_source(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(payload): Json<UpdateSource>,
@@ -343,6 +342,7 @@ async fn update_source(
 }
 
 async fn delete_source(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceDelete>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -368,6 +368,7 @@ async fn delete_source(
 }
 
 async fn get_metadata(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -473,11 +474,12 @@ async fn install_source(
 }
 
 async fn upload_wasm(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
-     let source = sqlx::query_as!(
+    let source = sqlx::query_as!(
         Source,
         "SELECT * FROM sources WHERE id = ?",
         id
@@ -508,6 +510,7 @@ async fn upload_wasm(
 }
 
 async fn fetch_wasm(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(payload): Json<FetchWasmRequest>,
@@ -531,6 +534,7 @@ async fn fetch_wasm(
 }
 
 async fn get_popular_manga(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, page)): Path<(i64, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -538,14 +542,17 @@ async fn get_popular_manga(
 }
 
 async fn search_manga(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, page)): Path<(i64, i32)>,
     Query(payload): Query<SearchMangaRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    
     state.search_manga(id, &payload.query, page).await
 }
 
 async fn get_manga_details(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -553,6 +560,7 @@ async fn get_manga_details(
 }
 
 async fn get_chapter_list(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, manga_id, page)): Path<(i64, String, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -560,6 +568,7 @@ async fn get_chapter_list(
 }
 
 async fn get_pages(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, manga_id, chapter_id)): Path<(i64, String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -567,6 +576,7 @@ async fn get_pages(
 }
 
 async fn save_to_library(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryAdd>,
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -575,6 +585,7 @@ async fn save_to_library(
 }
 
 async fn get_library(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path((page, order)): Path<(i32, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -599,6 +610,7 @@ async fn get_library(
 }
 
 async fn get_manga(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -611,6 +623,7 @@ async fn get_manga(
 }
 
 async fn delete_manga(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -622,6 +635,7 @@ async fn delete_manga(
 }
 
 async fn start_download(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::ChapterDownload>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -630,6 +644,7 @@ async fn start_download(
 }
 
 async fn delete_downloaded(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::ChapterDelete>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -638,6 +653,7 @@ async fn delete_downloaded(
 }
 
 async fn serve_manga_cover(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     headers: HeaderMap,
@@ -709,6 +725,7 @@ async fn serve_manga_cover(
 }
 
 pub async fn combined_sse(
+    AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let snapshot = state.downloader.snapshot().await;
@@ -757,6 +774,7 @@ pub async fn combined_sse(
 }
 
 pub async fn start_refresh_all_rest(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     state.start_refresh_all().await?;

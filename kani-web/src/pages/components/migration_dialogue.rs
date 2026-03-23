@@ -1,4 +1,5 @@
 use crate::pages::components::collapsible_panel::CollapsiblePanel;
+use crate::pages::components::permission_handlers::PermissionGate;
 use crate::server_fns::{migrate_manga as migrate_manga_fn, preview_migration};
 use crate::types::{GlobalSearchResult, MangaListItem, MigrationStep, SearchScope};
 use leptos::prelude::*;
@@ -31,6 +32,7 @@ pub fn MigrationDialogue(
     let (keep_orphaned, set_keep_orphaned) = signal(true);
 
     view! {
+        <PermissionGate permission="library:manage">
         <Show when=move || migration_step.get() != MigrationStep::Closed fallback=|| ()>
             <div
                 class="modal-overlay"
@@ -357,6 +359,7 @@ pub fn MigrationDialogue(
                 </div>
             </div>
         </Show>
+        </PermissionGate>
     }
 }
 

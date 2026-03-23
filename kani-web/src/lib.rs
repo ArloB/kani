@@ -4,6 +4,7 @@ pub mod pages;
 pub mod server_fns;
 pub mod types;
 pub mod utils;
+pub mod permissions;
 
 #[cfg(feature = "ssr")]
 pub mod error;
