@@ -2,19 +2,31 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Debug)]
+fn validate_https_url(value: &str, _: &()) -> garde::Result {
+    if value.starts_with("https://") {
+        Ok(())
+    } else {
+        Err(garde::Error::new("URL must use HTTPS scheme"))
+    }
+}
+
+#[derive(garde::Validate, Deserialize, Debug)]
 pub struct CreateSource {
+    #[garde(length(min = 1, max = 100))]
     pub name: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(garde::Validate, Deserialize, Debug)]
 pub struct UpdateSource {
+    #[garde(inner(length(min = 1, max = 100)))]
     pub name: Option<String>,
+    #[garde(inner(length(min = 1, max = 50)))]
     pub version: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(garde::Validate, Deserialize, Debug)]
 pub struct FetchWasmRequest {
+    #[garde(length(min = 1, max = 2048), custom(validate_https_url))]
     pub url: String,
 }
 
@@ -33,13 +45,15 @@ pub struct Settings {
     pub scan_interval_minutes:      i64,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(garde::Validate, Deserialize, Debug)]
 pub struct SearchMangaRequest {
+    #[garde(length(min = 1, max = 200))]
     pub query: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(garde::Validate, Deserialize, Debug)]
 pub struct ProxyQuery {
+    #[garde(length(min = 1, max = 4096))]
     pub token: String,
 }
 
@@ -116,60 +130,4 @@ impl TryFrom<DownloadRuleRow> for crate::types::DownloadRule {
         Ok(crate::types::DownloadRule { id: row.id, manga_id: row.manga_id, kind })
     }
 }
-
-mod pref_conversions {
-    use crate::types::{PreferenceDescriptor, PreferenceKind, SelectOption};
-    use kani_core::wasm::kani::extension::types as wit;
-
-    impl From<wit::SelectOption> for SelectOption {
-        fn from(o: wit::SelectOption) -> Self {
-            Self { label: o.label, value: o.value }
-        }
-    }
-
-    impl From<wit::PreferenceKind> for PreferenceKind {
-        fn from(k: wit::PreferenceKind) -> Self {
-            match k {
-                wit::PreferenceKind::TextInput(p) => Self::TextInput {
-                    placeholder: p.placeholder,
-                    default_value: p.default_value,
-                    is_secret: p.is_secret,
-                },
-                wit::PreferenceKind::Checkbox(p) => Self::Checkbox {
-                    default_value: p.default_value,
-                },
-                wit::PreferenceKind::Select(p) => Self::Select {
-                    options: p.options.into_iter().map(Into::into).collect(),
-                    default_value: p.default_value,
-                },
-                wit::PreferenceKind::MultiSelect(p) => Self::MultiSelect {
-                    options: p.options.into_iter().map(Into::into).collect(),
-                    default_values: p.default_values,
-                },
-                wit::PreferenceKind::Number(p) => Self::Number {
-                    min: p.min, max: p.max, step: p.step,
-                    default_value: p.default_value,
-                },
-                wit::PreferenceKind::MultiValueList(p) => Self::MultiValueList {
-                    placeholder: p.placeholder,
-                    item_label: p.item_label,
-                    default_values: p.default_values,
-                },
-                wit::PreferenceKind::Label(p) => Self::Label { text: p.text },
-            }
-        }
-    }
-
-    impl From<wit::PreferenceDescriptor> for PreferenceDescriptor {
-        fn from(d: wit::PreferenceDescriptor) -> Self {
-            Self {
-                key: d.key,
-                title: d.title,
-                description: d.description,
-                kind: d.kind.into(),
-                group: d.group,
-                requires_key: d.requires_key,
-            }
-        }
-    }
-}
+

@@ -6,10 +6,11 @@ use moka::future::Cache;
 
 #[derive(Clone)]
 pub struct RequestCache {
-    manga_details: Cache<(i64, String), String>,
-    popular_manga: Cache<(i64, i32), String>,
-    chapter_list:  Cache<(i64, String, i32), String>,
-    pages:         Cache<(i64, String, String), String>,
+    manga_details:  Cache<(i64, String), String>,
+    popular_manga:  Cache<(i64, i32, i32), String>,
+    chapter_list:   Cache<(i64, String, i32, i32), String>,
+    pages:          Cache<(i64, String, String), String>,
+    search_results: Cache<(i64, String, i32, i32), String>,
     pub preference_schema: DashMap<i64, Vec<crate::types::PreferenceDescriptor>>,
 }
 
@@ -31,6 +32,10 @@ impl RequestCache {
             pages: Cache::builder()
                 .max_capacity(50)
                 .time_to_live(Duration::from_secs(10 * 60))
+                .build(),
+            search_results: Cache::builder()
+                .max_capacity(300)
+                .time_to_live(Duration::from_secs(90))
                 .build(),
             preference_schema: DashMap::new(),
         }
@@ -55,6 +60,7 @@ impl RequestCache {
         &self,
         source_id: i64,
         page: i32,
+        page_size: i32,
         init: F,
     ) -> Result<String, Arc<E>>
     where
@@ -62,7 +68,7 @@ impl RequestCache {
         E: Send + Sync + 'static,
     {
         self.popular_manga
-            .try_get_with((source_id, page), init)
+            .try_get_with((source_id, page, page_size), init)
             .await
     }
 
@@ -71,6 +77,7 @@ impl RequestCache {
         source_id: i64,
         manga_id: &str,
         page: i32,
+        page_size: i32,
         init: F,
     ) -> Result<String, Arc<E>>
     where
@@ -78,7 +85,24 @@ impl RequestCache {
         E: Send + Sync + 'static,
     {
         self.chapter_list
-            .try_get_with((source_id, manga_id.to_string(), page), init)
+            .try_get_with((source_id, manga_id.to_string(), page, page_size), init)
+            .await
+    }
+
+    pub async fn get_or_fetch_search_results<F, E>(
+        &self,
+        source_id: i64,
+        query: &str,
+        page: i32,
+        page_size: i32,
+        init: F,
+    ) -> Result<String, Arc<E>>
+    where
+        F: Future<Output = Result<String, E>>,
+        E: Send + Sync + 'static,
+    {
+        self.search_results
+            .try_get_with((source_id, query.to_string(), page, page_size), init)
             .await
     }
 
@@ -119,16 +143,17 @@ impl RequestCache {
     pub async fn invalidate_chapter_list_for_manga(&self, source_id: i64, manga_id: &str) {
         let owned = manga_id.to_string();
         let _ = self.chapter_list.invalidate_entries_if(
-            move |(sid, mid, _page), _| *sid == source_id && *mid == owned,
+            move |(sid, mid, _page, _page_size), _| *sid == source_id && *mid == owned,
         );
     }
 
     pub fn invalidate_source(&self, source_id: i64) {
         let sid = source_id;
         let _ = self.manga_details.invalidate_entries_if(move |(id, _), _| *id == sid);
-        let _ = self.popular_manga.invalidate_entries_if(move |(id, _), _| *id == sid);
+        let _ = self.popular_manga.invalidate_entries_if(move |(id, ..), _| *id == sid);
         let _ = self.chapter_list.invalidate_entries_if(move |(id, ..), _| *id == sid);
         let _ = self.pages.invalidate_entries_if(move |(id, ..), _| *id == sid);
+        let _ = self.search_results.invalidate_entries_if(move |(id, ..), _| *id == sid);
         self.preference_schema.remove(&source_id);
     }
 }

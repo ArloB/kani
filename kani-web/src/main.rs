@@ -8,9 +8,13 @@ async fn main() {
     };
     use tower_sessions_sqlx_store::SqliteStore;
     use kani_web::{app::App, rest, state::AppState, auth::{AuthBackend}};
+    use std::sync::Arc;
+    use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
     use leptos::prelude::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
     use tower_http::compression::CompressionLayer;
+    use tower_http::set_header::SetResponseHeaderLayer;
+    use axum::http::{header, HeaderValue};
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -29,9 +33,12 @@ async fn main() {
     let session_store = SqliteStore::new(state.db.clone());
     session_store.migrate().await.unwrap();
 
-    // TODO: Set `with_secure(true)` when running behind HTTPS
+    let secure_cookies = std::env::var("KANI_SECURE_COOKIES")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+
     let session_layer = SessionManagerLayer::new(session_store)
-        .with_secure(false)
+        .with_secure(secure_cookies)
         .with_http_only(true)
         .with_same_site(SameSite::Lax);
 
@@ -43,26 +50,18 @@ async fn main() {
     }
 
     {
-        let cleanup_state = state.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-            let idle_timeout = std::time::Duration::from_secs(300);
-            loop {
-                interval.tick().await;
-                let sources = cleanup_state.sources.read().await;
-                for manager in sources.values() {
-                    manager.cleanup(idle_timeout).await;
-                }
-            }
-        });
-    }
-
-    {
         let scan_state = state.clone();
+        let token = state.shutdown_token.clone();
         tokio::spawn(async move {
             loop {
                 let interval_mins = scan_state.settings.read().await.scan_interval_minutes;
-                tokio::time::sleep(std::time::Duration::from_secs(interval_mins as u64 * 60)).await;
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        tracing::info!("Scan task shutting down");
+                        break;
+                    }
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(interval_mins as u64 * 60)) => {}
+                }
 
                 if !scan_state.settings.read().await.auto_scan {
                     continue;
@@ -91,7 +90,7 @@ async fn main() {
                                         filtered_ids.len(), manga_db_id
                                     );
 
-                                    let futures = new_ids.into_iter().map(|new_id| {
+                                    let futures = filtered_ids.into_iter().map(|new_id| {
                                         let state = scan_state.clone();
                                         async move {
                                             match state.enqueue_claimed_chapter(new_id).await {
@@ -115,43 +114,71 @@ async fn main() {
         });
     }
 
+    let governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(2)
+            .burst_size(120)
+            .finish()
+            .unwrap(),
+    );
+
     let rest_router = rest::routes(state.clone());
+    let health_router = axum::Router::new()
+        .route("/health", axum::routing::get(rest::health))
+        .route("/ready", axum::routing::get(rest::ready))
+        .with_state(state.clone());
 
     {
         let db = state.db.clone();
         let mut rx = state.downloader.subscribe();
         let listener_state = state.clone();
+        let token = state.shutdown_token.clone();
         tokio::spawn(async move {
             loop {
-                match rx.recv().await {
+                let event = tokio::select! {
+                    _ = token.cancelled() => {
+                        tracing::info!("Download listener shutting down");
+                        break;
+                    }
+                    result = rx.recv() => result,
+                };
+                match event {
                     Ok(event) => match event {
                         kani_shared::DownloadProgressEvent::ChapterStarted { chapter_id, .. } => {
-                            let _ = sqlx::query!(
+                            if let Err(e) = sqlx::query!(
                                 "UPDATE chapters SET download_status = 1 WHERE id = ?",
                                 chapter_id
                             )
                             .execute(&db)
-                            .await;
+                            .await {
+                                tracing::warn!("Failed to update download_status=1 for chapter {}: {}", chapter_id, e);
+                            }
                         }
                         kani_shared::DownloadProgressEvent::ChapterCompleted { chapter_id, .. } => {
-                            let _ = sqlx::query!(
+                            if let Err(e) = sqlx::query!(
                                 "UPDATE chapters SET download_status = 2 WHERE id = ?",
                                 chapter_id
                             )
                             .execute(&db)
-                            .await;
+                            .await {
+                                tracing::warn!("Failed to update download_status=2 for chapter {}: {}", chapter_id, e);
+                            }
                         }
                         kani_shared::DownloadProgressEvent::ChapterFailed { chapter_id, error, .. } => {
                             tracing::error!("Chapter failed to download: {}", error);
-                            let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
+                            if let Err(e) = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
                                 .execute(&db)
-                                .await;
+                                .await {
+                                tracing::warn!("Failed to reset download_status for failed chapter {}: {}", chapter_id, e);
+                            }
                         }
                         kani_shared::DownloadProgressEvent::ChapterCancelled { chapter_id, .. }
                         | kani_shared::DownloadProgressEvent::ChapterDeferred { chapter_id, .. } => {
-                            let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
+                            if let Err(e) = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", chapter_id)
                                 .execute(&db)
-                                .await;
+                                .await {
+                                tracing::warn!("Failed to reset download_status for cancelled/deferred chapter {}: {}", chapter_id, e);
+                            }
                         }
                         _ => {}
                     },
@@ -179,9 +206,11 @@ async fn main() {
                                 let file_path = manga_path.join(format!("{}.cbz", safe_chapter_name));
 
                                 if tokio::fs::try_exists(&file_path).await.unwrap_or(false) {
-                                    let _ = sqlx::query!("UPDATE chapters SET download_status = 2 WHERE id = ?", record.id).execute(&sweep_state.db).await;
-                                } else {
-                                    let _ = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", record.id).execute(&sweep_state.db).await;
+                                    if let Err(e) = sqlx::query!("UPDATE chapters SET download_status = 2 WHERE id = ?", record.id).execute(&sweep_state.db).await {
+                                        tracing::warn!("Reconcile: failed to set download_status=2 for chapter {}: {}", record.id, e);
+                                    }
+                                } else if let Err(e) = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE id = ?", record.id).execute(&sweep_state.db).await {
+                                    tracing::warn!("Reconcile: failed to reset download_status for chapter {}: {}", record.id, e);
                                 }
                             }
                         });
@@ -225,26 +254,46 @@ async fn main() {
         .fallback(leptos_axum::file_and_error_handler(shell))
         .with_state(leptos_options)
         .merge(Router::new().nest("/rest", rest_router))
+        .merge(health_router)
         .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
         .layer(auth_layer)
-        .layer(CompressionLayer::new());
+        .layer(GovernorLayer { config: governor_conf })
+        .layer(CompressionLayer::new())
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'"
+            ),
+        ));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8242")
         .await
         .expect("Failed to bind port 8242");
 
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
-
-    tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl_c");
-        let _ = shutdown_tx.send(true);
-    });
+    let shutdown_token = state.shutdown_token.clone();
 
     tracing::info!("Server listening on http://0.0.0.0:8242");
-    axum::serve(listener, app).with_graceful_shutdown(async move {
-        shutdown_rx.changed().await.ok();
-        sqlx::query!("UPDATE chapters SET download_status = 0 WHERE download_status = 1")
-            .execute(&state.db).await.ok();
+    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).with_graceful_shutdown(async move {
+        tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl_c");
+        tracing::info!("Shutdown signal received, stopping background tasks...");
+        shutdown_token.cancel();
+        tokio::task::yield_now().await;
+        if let Err(e) = sqlx::query!("UPDATE chapters SET download_status = 0 WHERE download_status = 1")
+            .execute(&state.db).await {
+            tracing::warn!("Failed to reset in-flight download statuses on shutdown: {e}");
+        }
         state.db.close().await;
     }).await.expect("Server error");
 }

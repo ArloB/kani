@@ -2,6 +2,7 @@ use crate::pages::components::collapsible_panel::CollapsiblePanel;
 use crate::pages::components::pagination::Pagination;
 use crate::pages::components::migration_dialogue::MigrationDialogue;
 use crate::pages::components::permission_handlers::PermissionGate;
+use crate::pages::components::toggle::Toggle;
 use crate::server_fns::{
     add_download_rule, cancel_download, check_in_library, delete_downloaded, delete_manga, 
     download_all, download_chapter, get_categories, get_chapter_list, get_download_rules, 
@@ -14,6 +15,7 @@ use crate::types::{
     Category, DownloadRule, DownloadRuleKind, LiveChapterStatus, MigrationStep, SearchScope
 };
 use leptos::prelude::*;
+use leptos_meta::Title;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 use time::macros::format_description;
@@ -29,11 +31,17 @@ pub fn MangaDetails() -> impl IntoView {
 
     let (page, set_page)                     = signal(1);
     let (added_db_id, set_added_db_id)       = signal::<Option<i64>>(None);
+
+    let initial_chapter_page_size = crate::utils::get_local_string("kani_chapter_page_size")
+        .parse::<i32>()
+        .unwrap_or(50);
+    let (chapter_page_size, set_chapter_page_size) = signal(initial_chapter_page_size);
     let (sort_order_sig, set_sort_order)     = signal(crate::types::ChapterSortOrder::default());
     let (library_pending, set_library_pending) = signal(false);
     let (refreshing, set_refreshing)         = signal(false);
     let (scanning, set_scanning)             = signal(false);
-    let (scan_message, set_scan_message)     = signal(None::<String>);
+    // (&'static str variant, message): variant is "success" | "info" | "error"
+    let (scan_message, set_scan_message) = signal(None::<(&'static str, String)>);
     let (auto_download_sig, set_auto_download) = signal(false);
     let (cat_pending, set_cat_pending)       = signal(false);
     let (new_rule_type, set_new_rule_type)   = signal("scanlator_include".to_string());
@@ -46,7 +54,7 @@ pub fn MangaDetails() -> impl IntoView {
 
     let chapters_progress = expect_context::<RwSignal<std::collections::HashMap<i64, crate::types::ChapterProgress>>>();
 
-    let is_local = move || db_id().is_some();
+    let is_local = move || db_id().is_some() || added_db_id.get().is_some();
 
     let manga = Resource::new(
         move || (source_id(), manga_id(), db_id()),
@@ -66,12 +74,12 @@ pub fn MangaDetails() -> impl IntoView {
     );
 
     let chapters = Resource::new(
-        move || (source_id(), manga_id(), db_id(), page.get(), sort_order_sig.get()),
-        move |(sid, mid, did, p, sort_order)| async move {
+        move || (source_id(), manga_id(), db_id(), page.get(), sort_order_sig.get(), chapter_page_size.get()),
+        move |(sid, mid, did, p, sort_order, ps)| async move {
             if let Some(did) = did {
                 get_local_chapter_list(did, p, sort_order).await
             } else if let (Some(sid), Some(mid)) = (sid, mid) {
-                get_chapter_list(sid, mid, p).await
+                get_chapter_list(sid, mid, p, ps).await
             } else {
                 Err(ServerFnError::new("Invalid route parameters"))
             }
@@ -86,11 +94,11 @@ pub fn MangaDetails() -> impl IntoView {
             if q.is_empty() {
                 return Ok(vec![]);
             }
-            global_search(q, scope, 1).await
+            global_search(q, scope, 1, 24).await
         },
     );
 
-    let did_signal        = move || db_id().unwrap_or_default();
+    let did_signal        = move || db_id().or_else(|| added_db_id.get()).unwrap_or_default();
     let categories_resource  = Resource::new(|| (), move |_| get_categories());
     let manga_cats_resource  = Resource::new(did_signal, get_manga_categories);
     let rules_resource       = Resource::new(did_signal, get_download_rules);
@@ -105,6 +113,12 @@ pub fn MangaDetails() -> impl IntoView {
     let fmt = format_description!("[month repr:short] [day], [year]");
 
     view! {
+        <Title text=move || {
+            manga.get()
+                .and_then(|r| r.ok())
+                .map(|(info, ..)| format!("{} - Kani", info.title))
+                .unwrap_or_else(|| "Manga - Kani".into())
+        }/>
         <div class="manga-details">
             <Suspense fallback=move || view! {
                 <div class="skeleton-manga-hero">
@@ -282,11 +296,11 @@ pub fn MangaDetails() -> impl IntoView {
                                                                     leptos::task::spawn_local(async move {
                                                                         match scan_for_new_chapters(did_val).await {
                                                                             Ok(cnt) if cnt > 0 => {
-                                                                                set_scan_message.set(Some(format!("Found {} new chapters!", cnt)));
+                                                                                set_scan_message.set(Some(("success", format!("Found {} new chapter{}.", cnt, if cnt == 1 { "" } else { "s" }))));
                                                                                 chapters.refetch();
                                                                             }
-                                                                            Ok(_) => set_scan_message.set(Some("No new chapters found.".to_string())),
-                                                                            Err(e) => set_scan_message.set(Some(format!("Scan failed: {:?}", e))),
+                                                                            Ok(_) => set_scan_message.set(Some(("info", "No new chapters found.".to_string()))),
+                                                                            Err(e) => set_scan_message.set(Some(("error", format!("Scan failed: {e:?}")))),
                                                                         }
                                                                         set_scanning.set(false);
                                                                     });
@@ -295,27 +309,21 @@ pub fn MangaDetails() -> impl IntoView {
                                                                 {move || if scanning.get() { "Scanning..." } else { "Scan for new chapters" }}
                                                             </button>
                                                         </PermissionGate>
-                                                        {move || scan_message.get().map(|msg| view! {
-                                                            <span class="scan-message">{msg}</span>
-                                                        }.into_any())}
                                                         {move || if auto_scan {
                                                             view! {
                                                                 <PermissionGate permission="library:manage">
                                                                     <div class="auto-download-toggle">
-                                                                        <label>
-                                                                            <input
-                                                                                type="checkbox"
-                                                                                checked=move || auto_download_sig.get()
-                                                                                on:change=move |ev| {
-                                                                                    let checked = event_target_checked(&ev);
-                                                                                    set_auto_download.set(checked);
-                                                                                    leptos::task::spawn_local(async move {
-                                                                                        let _ = toggle_auto_download(did_val, checked).await;
-                                                                                    });
-                                                                                }
-                                                                            />
+                                                                        <Toggle
+                                                                            checked=auto_download_sig.into()
+                                                                            on_change=move |checked| {
+                                                                                set_auto_download.set(checked);
+                                                                                leptos::task::spawn_local(async move {
+                                                                                    let _ = toggle_auto_download(did_val, checked).await;
+                                                                                });
+                                                                            }
+                                                                        >
                                                                             " Auto-Download New Chapters"
-                                                                        </label>
+                                                                        </Toggle>
                                                                     </div>
                                                                 </PermissionGate>
                                                             }.into_any()
@@ -354,6 +362,21 @@ pub fn MangaDetails() -> impl IntoView {
                                                 }
                                             }}
                                         </div>
+
+                                        {move || scan_message.get().map(|(variant, msg)| {
+                                            let cls = format!("scan-result scan-result--{variant}");
+                                            let icon = match variant {
+                                                "success" => "✓",
+                                                "error"   => "✕",
+                                                _         => "ℹ",
+                                            };
+                                            view! {
+                                                <div class=cls>
+                                                    <span class="scan-result__icon">{icon}</span>
+                                                    <span class="scan-result__text">{msg}</span>
+                                                </div>
+                                            }
+                                        })}
 
                                         <PermissionGate permission="library:manage">
                                         <Show when=move || is_local_route fallback=|| ()>
@@ -635,29 +658,45 @@ pub fn MangaDetails() -> impl IntoView {
                                 <div class="chapter-list-group">
                                     <div class="chapter-list-header">
                                         <h2>"Chapters"</h2>
-                                        <PermissionGate permission="library:manage">
-                                        <Show when=move || is_local() fallback=|| ()>
+                                        <div class="chapter-list-header__controls">
+                                            <PermissionGate permission="library:manage">
+                                            <Show when=move || is_local() fallback=|| ()>
+                                                <select
+                                                    prop:value=move || sort_order_sig.get().to_select_value()
+                                                    on:change=move |ev| {
+                                                        let val = event_target_value(&ev);
+                                                        set_sort_order.set(crate::types::ChapterSortOrder::from_select_value(&val));
+                                                        set_page.set(1);
+                                                    }
+                                                >
+                                                    <option value="uploaded_desc">"Newest first"</option>
+                                                    <option value="uploaded_asc">"Oldest first"</option>
+                                                    <option value="chapter_desc">"Ch. # ↓"</option>
+                                                    <option value="chapter_asc">"Ch. # ↑"</option>
+                                                    <option value="volume_desc">"Volume ↓"</option>
+                                                    <option value="volume_asc">"Volume ↑"</option>
+                                                    <option value="language_asc">"Language A→Z"</option>
+                                                    <option value="language_desc">"Language Z→A"</option>
+                                                    <option value="scanlator_asc">"Scanlator A→Z"</option>
+                                                    <option value="scanlator_desc">"Scanlator Z→A"</option>
+                                                </select>
+                                            </Show>
+                                            </PermissionGate>
                                             <select
-                                                prop:value=move || sort_order_sig.get().to_select_value()
+                                                prop:value=move || chapter_page_size.get().to_string()
                                                 on:change=move |ev| {
-                                                    let val = event_target_value(&ev);
-                                                    set_sort_order.set(crate::types::ChapterSortOrder::from_select_value(&val));
+                                                    let ps = event_target_value(&ev).parse::<i32>().unwrap_or(50);
+                                                    crate::utils::set_local_string("kani_chapter_page_size", &ps.to_string());
+                                                    set_chapter_page_size.set(ps);
                                                     set_page.set(1);
                                                 }
                                             >
-                                                <option value="uploaded_desc">"Newest first"</option>
-                                                <option value="uploaded_asc">"Oldest first"</option>
-                                                <option value="chapter_desc">"Ch. # ↓"</option>
-                                                <option value="chapter_asc">"Ch. # ↑"</option>
-                                                <option value="volume_desc">"Volume ↓"</option>
-                                                <option value="volume_asc">"Volume ↑"</option>
-                                                <option value="language_asc">"Language A→Z"</option>
-                                                <option value="language_desc">"Language Z→A"</option>
-                                                <option value="scanlator_asc">"Scanlator A→Z"</option>
-                                                <option value="scanlator_desc">"Scanlator Z→A"</option>
+                                                <option value="25">"25 per page"</option>
+                                                <option value="50">"50 per page"</option>
+                                                <option value="100">"100 per page"</option>
+                                                <option value="200">"200 per page"</option>
                                             </select>
-                                        </Show>
-                                        </PermissionGate>
+                                        </div>
                                     </div>
 
                                     <div class="chapter-list">

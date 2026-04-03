@@ -3,14 +3,16 @@ use crate::{
         collapsible_panel::{CollapsiblePanel, CollapsibleVariant},
         source_settings_card::SourceSettingsCard,
         permission_handlers::PermissionGate,
+        toggle::Toggle,
     },
     server_fns::{
-        create_category, delete_category, fetch_sources, get_boot_id, get_categories,
-        get_settings, rename_category, reorder_categories, update_settings,
+        create_category, create_source, delete_category, fetch_sources, get_boot_id,
+        get_categories, get_settings, rename_category, reorder_categories, update_settings,
     },
     types::{AdvancedSettings, Category, DownloadSettings, ScanSettings, SettingsUpdate, Source},
 };
 use leptos::{either::Either, prelude::*};
+use leptos_meta::Title;
 
 fn add_restart_field(
     set_restart_needed: WriteSignal<bool>,
@@ -125,6 +127,7 @@ pub fn Settings() -> impl IntoView {
     });
 
     view! {
+        <Title text="Settings - Kani"/>
         <div class="settings-page">
             <Show when=move || restart_needed.get() fallback=|| ()>
                 <div class="restart-banner">
@@ -159,19 +162,16 @@ pub fn Settings() -> impl IntoView {
                                 <p class="settings-field__hint">
                                     "Automatically check for new chapters on a timer."
                                 </p>
-                                <label class="toggle-label">
-                                    <input
-                                        type="checkbox"
-                                        checked=draft.auto_scan
-                                        on:change=move |ev| {
-                                            let checked = event_target_checked(&ev);
-                                            set_scan_draft.update(|s| {
-                                                if let Some(s) = s { s.auto_scan = checked; }
-                                            });
-                                        }
-                                    />
-                                    {if draft.auto_scan { " Enabled" } else { " Disabled" }}
-                                </label>
+                                <Toggle
+                                    checked=Signal::derive(move || scan_draft.get().map(|d| d.auto_scan).unwrap_or(false))
+                                    on_change=move |checked| {
+                                        set_scan_draft.update(|s| {
+                                            if let Some(s) = s { s.auto_scan = checked; }
+                                        });
+                                    }
+                                >
+                                    {move || if scan_draft.get().map(|d| d.auto_scan).unwrap_or(false) { " Enabled" } else { " Disabled" }}
+                                </Toggle>
                             </div>
 
                             <div class="settings-field">
@@ -366,12 +366,64 @@ pub fn Settings() -> impl IntoView {
                                 <For
                                     each=move || sources.clone()
                                     key=|s: &Source| s.id
-                                    children=move |source| view! { <SourceSettingsCard source=source /> }
+                                    children=move |source| view! {
+                                        <SourceSettingsCard
+                                            source=source
+                                            on_deleted=move || sources_res.refetch()
+                                        />
+                                    }
                                 />
                             </div>
                         }
                     }}
                 </Suspense>
+
+                <PermissionGate permission="source:install">
+                    {
+                        let (new_name, set_new_name) = signal(String::new());
+                        let (add_error, set_add_error) = signal(Option::<String>::None);
+                        let (adding, set_adding) = signal(false);
+                        view! {
+                            <div class="source-add-row">
+                                <input
+                                    type="text"
+                                    class="source-add-row__input"
+                                    placeholder="New source name..."
+                                    prop:value=new_name
+                                    on:input=move |ev| {
+                                        set_new_name.set(event_target_value(&ev));
+                                        set_add_error.set(None);
+                                    }
+                                />
+                                <button
+                                    class="source-add-row__btn"
+                                    disabled=move || adding.get() || new_name.get().trim().is_empty()
+                                    on:click=move |_| {
+                                        let name = new_name.get().trim().to_string();
+                                        if name.is_empty() { return; }
+                                        set_adding.set(true);
+                                        set_add_error.set(None);
+                                        leptos::task::spawn_local(async move {
+                                            match create_source(name).await {
+                                                Ok(_) => {
+                                                    set_new_name.set(String::new());
+                                                    sources_res.refetch();
+                                                }
+                                                Err(e) => set_add_error.set(Some(e.to_string())),
+                                            }
+                                            set_adding.set(false);
+                                        });
+                                    }
+                                >
+                                    {move || if adding.get() { "Adding…" } else { "+ Add Source" }}
+                                </button>
+                            </div>
+                            {move || add_error.get().map(|e| view! {
+                                <p class="source-add-row__error">{e}</p>
+                            })}
+                        }
+                    }
+                </PermissionGate>
             </CollapsiblePanel>
             </PermissionGate>
 

@@ -5,6 +5,7 @@ edition = "2024"
 build = "build.rs"
 
 [lib]
+name = "kani_web"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
@@ -18,11 +19,13 @@ thiserror = "2.0"
 urlencoding = "2.1"
 time = { version = "0.3.47", features = ["serde", "formatting", "macros"] }
 paste = "1.0.15"
+kani-shared = { path = "../kani-shared" }
 
 # ── SSR-only (native server binary) ───────────────────────────────────────
 leptos_axum = { version = "0.8", optional = true }
 axum = { version = "0.8", features = ["multipart"], optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
+tokio-util = { version = "0.7", optional = true }
 tower-http = { version = "0.6", features = [
   "compression-full",
   "set-header",
@@ -41,7 +44,6 @@ tracing-subscriber = { version = "0.3", features = [
 ], optional = true }
 tokio-stream = { version = "0.1", features = ["sync"], optional = true }
 kani-core = { path = "../kani-core", optional = true }
-kani-shared = { path = "../kani-shared", optional = true }
 bytes = { version = "1.11.1", optional = true }
 futures = { version = "0.3.32", optional = true }
 indexmap = { version = "2.13.0", optional = true }
@@ -60,6 +62,7 @@ axum-login = { version = "0.18", optional = true }
 argon2 = { version = "0.5.3", optional = true, features = ["std"] }
 dirs = { version = "6.0.0", optional = true }
 tower-sessions-sqlx-store = { version = "0.15", default-features = false, features = ["sqlite"], optional = true }
+garde = { version = "0.22", features = ["derive"], optional = true }
 
 # ── Hydrate-only (browser WASM) ──────────────────────────────────────────
 wasm-bindgen = { version = "0.2", optional = true }
@@ -76,6 +79,7 @@ web-sys = { version = "0.3", features = [
   "Storage",
 ], optional = true }
 gloo-timers = { version = "0.3.0", features = ["futures"], optional = true }
+tower_governor = { version = "0.6", optional = true }
 
 [features]
 hydrate = [
@@ -94,6 +98,7 @@ ssr = [
   "dep:leptos_axum",
   "dep:axum",
   "dep:tokio",
+  "dep:tokio-util",
   "dep:tower-http",
   "dep:sqlx",
   "dep:rquest",
@@ -103,7 +108,7 @@ ssr = [
   "dep:tracing-subscriber",
   "dep:tokio-stream",
   "dep:kani-core",
-  "dep:kani-shared",
+  "kani-shared/ssr",
   "dep:bytes",
   "dep:futures",
   "dep:indexmap",
@@ -122,7 +127,12 @@ ssr = [
   "dep:argon2",
   "dep:dirs",
   "dep:tower-sessions-sqlx-store",
+  "dep:garde",
+  "dep:tower_governor",
 ]
+
+[dev-dependencies]
+tempfile = "3.27.0"
 
 [package.metadata.leptos]
 output-name = "kani-web"

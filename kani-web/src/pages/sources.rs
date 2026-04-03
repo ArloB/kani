@@ -1,4 +1,5 @@
 use leptos::{prelude::*, either::Either};
+use leptos_meta::Title;
 use leptos_router::components::A;
 use crate::{
   server_fns::fetch_sources,
@@ -10,6 +11,7 @@ pub fn Sources() -> impl IntoView {
     let sources = Resource::new(|| (), |_| fetch_sources());
 
     view! {
+      <Title text="Sources - Kani"/>
       <RequirePermission permission="source:browse">
         <h1>"Sources"</h1>
         <div class="source-list">
@@ -17,10 +19,8 @@ pub fn Sources() -> impl IntoView {
                 <div class="skeleton-source-grid">
                     {(0..6).map(|_| view! {
                         <div class="skeleton-source-card">
-                            <div class="skeleton-source-card__meta">
-                                <div class="skeleton-source-card__name"></div>
-                                <div class="skeleton-source-card__meta"></div>
-                            </div>
+                            <div class="skeleton-source-card__name"></div>
+                            <div class="skeleton-source-card__meta"></div>
                             <div class="skeleton-source-card__btn"></div>
                         </div>
                     }).collect::<Vec<_>>()}

@@ -60,3 +60,68 @@ pub async fn delete_wasm_file(wasm_storage_path: &str, name: &str) -> Result<()>
 pub fn validate_wasm_magic(bytes: &[u8]) -> bool {
     bytes.len() >= 4 && bytes[..4] == WASM_MAGIC
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_wasm() -> Vec<u8> {
+        let mut v = vec![0x00, 0x61, 0x73, 0x6D]; // \0asm magic
+        v.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]); // version 1
+        v
+    }
+
+    #[test]
+    fn valid_magic_accepted() {
+        assert!(validate_wasm_magic(&valid_wasm()));
+    }
+
+    #[test]
+    fn random_bytes_rejected() {
+        assert!(!validate_wasm_magic(&[0x01, 0x02, 0x03, 0x04]));
+    }
+
+    #[test]
+    fn empty_bytes_rejected() {
+        assert!(!validate_wasm_magic(&[]));
+    }
+
+    #[test]
+    fn too_short_rejected() {
+        assert!(!validate_wasm_magic(&[0x00, 0x61, 0x73]));
+    }
+
+    #[tokio::test]
+    async fn save_wasm_creates_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_wasm(dir.path().to_str().unwrap(), "test_ext", &valid_wasm())
+            .await
+            .unwrap();
+        assert!(path.exists());
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("wasm"));
+    }
+
+    #[tokio::test]
+    async fn save_wasm_rejects_non_wasm() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = save_wasm(dir.path().to_str().unwrap(), "bad_ext", &[0x01, 0x02, 0x03, 0x04])
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_wasm_file_removes_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = dir.path().to_str().unwrap();
+        save_wasm(storage, "ext_to_delete", &valid_wasm()).await.unwrap();
+        delete_wasm_file(storage, "ext_to_delete").await.unwrap();
+        assert!(!dir.path().join("ext_to_delete.wasm").exists());
+    }
+
+    #[tokio::test]
+    async fn delete_wasm_file_nonexistent_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = delete_wasm_file(dir.path().to_str().unwrap(), "nonexistent").await;
+        assert!(result.is_ok());
+    }
+}

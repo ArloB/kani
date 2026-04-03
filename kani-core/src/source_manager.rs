@@ -1,61 +1,41 @@
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use wasmtime::component::{Component, Linker};
+use wasmtime::Store;
 
-use crate::error::{Error, Result};
-use crate::sources::SourceInstance;
-use crate::wasm::HostState;
+use crate::error::Result;
+use crate::execute_wasm;
+use crate::wasm::{AllowedHost, HostState, KaniExtensionPre};
 
-/// Manages a pool of source instances.
+/// Manages concurrent access to WASM source extensions via InstancePre.
 pub struct SourceManager {
     engine: wasmtime::Engine,
-    component: Component,
-    linker: Linker<HostState>,
-    pool: Arc<std::sync::Mutex<Vec<SourceInstance>>>,
+    instance_pre: KaniExtensionPre<HostState>,
     semaphore: Arc<Semaphore>,
     smart_client: crate::http::SmartClient,
     base_url: Option<String>,
     unrestricted_http: bool,
-    min_idle: usize,
     preferences: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
 }
 
 impl SourceManager {
-    pub async fn new(
+    pub fn new(
         engine: wasmtime::Engine,
-        component: Component,
-        linker: Linker<HostState>,
+        instance_pre: KaniExtensionPre<HostState>,
         smart_client: crate::http::SmartClient,
         base_url: Option<String>,
         unrestricted_http: bool,
-        pool_size: usize,
-        min_idle: usize,
+        max_concurrent: usize,
         preferences: std::collections::HashMap<String, String>,
-    ) -> Result<Self> {
-        let mut initial_pool: Vec<SourceInstance> = Vec::new();
-
-        for _ in 0..min_idle.min(pool_size) {
-            let mut inst = SourceInstance::new(smart_client.clone(), base_url.clone(), unrestricted_http);
-            inst.load(&engine, &component, &linker).await?;
-            initial_pool.push(inst);
-        }
-
-        let pool = Arc::new(std::sync::Mutex::new(initial_pool));
-        let preferences = Arc::new(std::sync::RwLock::new(preferences));
-
-        Ok(Self {
+    ) -> Self {
+        Self {
             engine,
-            component,
-            linker,
-            pool,
-            semaphore: Arc::new(Semaphore::new(pool_size)),
+            instance_pre,
+            semaphore: Arc::new(Semaphore::new(max_concurrent)),
             smart_client,
             base_url,
             unrestricted_http,
-            min_idle,
-            preferences,
-        })
+            preferences: Arc::new(std::sync::RwLock::new(preferences)),
+        }
     }
 
     pub fn update_preferences(&self, prefs: std::collections::HashMap<String, String>) {
@@ -70,80 +50,79 @@ impl SourceManager {
             .clone()
             .acquire_owned()
             .await
-            .map_err(|e| Error::Internal(format!("Failed to acquire semaphore: {}", e)))?;
+            .map_err(|_| crate::error::Error::Internal("Semaphore closed".into()))?;
 
-        let instance = if let Ok(mut pool) = self.pool.lock() {
-            Ok(pool.pop())
-        } else {
-            Err(Error::Internal("Failed to acquire pool lock".to_string()))
-        }?;
+        let allowed_host = match (self.base_url.as_deref(), self.unrestricted_http) {
+            (_, true) => AllowedHost::Unrestricted,
+            (Some(url), false) => AllowedHost::Restricted(url.to_string()),
+            (None, false) => AllowedHost::MetadataOnly,
+        };
 
-        let instance = match instance {
-            Some(inst) => inst,
-            None => {
-                let mut inst = SourceInstance::new(
-                    self.smart_client.clone(),
-                    self.base_url.clone(),
-                    self.unrestricted_http,
-                );
-                inst.load(&self.engine, &self.component, &self.linker)
-                    .await
-                    .map_err(|e| {
-                        let msg = e.to_string();
-                        if msg.contains("maximum concurrent component instance limit") {
-                            Error::PoolExhausted
-                        } else {
-                            e
-                        }
-                    })?;
-                inst
+        let mut store = Store::new(
+            &self.engine,
+            HostState::new(self.smart_client.clone(), allowed_host)?,
+        );
+
+        store.set_epoch_deadline(crate::sources::EPOCH_DEADLINE_TICKS);
+        store.epoch_deadline_callback(|ctx| {
+            let data = ctx.data();
+            if data
+                .last_io_at
+                .map(|t| {
+                    t.elapsed().as_millis()
+                        < (crate::sources::EPOCH_DEADLINE_TICKS as u128 * 10)
+                })
+                .unwrap_or(false)
+            {
+                Ok(wasmtime::UpdateDeadline::Continue(crate::sources::EPOCH_DEADLINE_TICKS))
+            } else {
+                Err(wasmtime::Error::msg("WASM computation deadline exceeded"))
             }
-        };
+        });
 
-        let mut owned = OwnedSourceInstance {
-            instance: Some(instance),
-            pool: self.pool.clone(),
-            _permit: Some(permit),
-        };
-
-        if let Ok(prefs) = self.preferences.read() {
-            owned.set_preference_map(prefs.clone());
+        {
+            let prefs = self
+                .preferences
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            store.data_mut().preferences = prefs.clone();
         }
 
-        Ok(owned)
-    }
+        let bindings = self
+            .instance_pre
+            .instantiate_async(&mut store)
+            .await?;
 
-    pub async fn cleanup(&self, idle_timeout: Duration) {
-        let mut pool = self.pool.lock().unwrap();
-        let min_idle = self.min_idle;
-        let mut retained = 0usize;
-
-        pool.retain(|inst| {
-            if retained < min_idle {
-                retained += 1;
-                return true;
-            }
-
-            inst.is_idle(idle_timeout).map(|idle| !idle).unwrap_or(true)
-        });
+        Ok(OwnedSourceInstance {
+            store,
+            bindings,
+            _permit: permit,
+        })
     }
 }
 
-/// A wrapper around `SourceInstance` that returns it to the pool when dropped.
+/// A leased WASM source instance. Dropping it releases the concurrency permit.
 pub struct OwnedSourceInstance {
-    instance: Option<SourceInstance>,
-    pool: Arc<std::sync::Mutex<Vec<SourceInstance>>>,
-    _permit: Option<OwnedSemaphorePermit>,
+    store: Store<HostState>,
+    bindings: crate::wasm::KaniExtension,
+    _permit: OwnedSemaphorePermit,
 }
 
 impl OwnedSourceInstance {
+    pub fn set_preference_map(
+        &mut self,
+        prefs: std::collections::HashMap<String, String>,
+    ) {
+        self.store.data_mut().preferences = prefs;
+    }
+
     /// Calls the `get_popular_manga` function in the WASM module.
     pub async fn get_popular_manga(
         &mut self,
         page: i32,
+        page_size: i32,
     ) -> Result<crate::wasm::kani::extension::types::MangaList> {
-        let instance = self.instance.as_mut().expect("Instance should be present");
-        instance.get_popular_manga(page).await
+        execute_wasm!(self, call_get_popular_manga, page, page_size)
     }
 
     /// Calls the `search_manga` function in the WASM module.
@@ -151,9 +130,9 @@ impl OwnedSourceInstance {
         &mut self,
         query: &str,
         page: i32,
+        page_size: i32,
     ) -> Result<crate::wasm::kani::extension::types::MangaList> {
-        let instance = self.instance.as_mut().expect("Instance should be present");
-        instance.search_manga(query, page).await
+        execute_wasm!(self, call_search_manga, query, page, page_size)
     }
 
     /// Calls the `get_manga_details` function in the WASM module.
@@ -161,8 +140,7 @@ impl OwnedSourceInstance {
         &mut self,
         manga_id: &str,
     ) -> Result<crate::wasm::kani::extension::types::MangaInfo> {
-        let instance = self.instance.as_mut().expect("Instance should be present");
-        instance.get_manga_details(manga_id).await
+        execute_wasm!(self, call_get_manga_details, manga_id)
     }
 
     /// Calls the `get_chapter_list` function in the WASM module.
@@ -170,9 +148,9 @@ impl OwnedSourceInstance {
         &mut self,
         manga_id: &str,
         page: i32,
+        page_size: Option<i32>,
     ) -> Result<crate::wasm::kani::extension::types::ChapterList> {
-        let instance = self.instance.as_mut().expect("Instance should be present");
-        instance.get_chapter_list(manga_id, page).await
+        execute_wasm!(self, call_get_chapter_list, manga_id, page, page_size)
     }
 
     /// Calls the `get_pages` function in the WASM module.
@@ -181,46 +159,20 @@ impl OwnedSourceInstance {
         manga_id: &str,
         chapter_id: &str,
     ) -> Result<crate::wasm::kani::extension::types::Chapter> {
-        let instance = self.instance.as_mut().expect("Instance should be present");
-        instance.get_pages(manga_id, chapter_id).await
+        execute_wasm!(self, call_get_pages, manga_id, chapter_id)
     }
 
     /// Calls the `get_metadata` function in the WASM module.
     pub async fn get_metadata(
         &mut self,
     ) -> Result<crate::wasm::kani::extension::types::ExtensionMetadata> {
-        let instance = self.instance.as_mut().expect("Instance should be present");
-        instance.get_metadata().await
+        execute_wasm!(self, call_get_metadata)
     }
 
-    pub fn set_preference_map(
-        &mut self,
-        prefs: std::collections::HashMap<String, String>,
-    ) {
-        self.instance.as_mut().unwrap().set_preference_map(prefs);
-    }
-
+    /// Calls the `get_preferences` function in the WASM module.
     pub async fn get_preferences(
         &mut self,
     ) -> Result<Vec<crate::wasm::kani::extension::types::PreferenceDescriptor>> {
-        self.instance.as_mut().unwrap().get_preferences().await
-    }
-}
-
-impl Drop for OwnedSourceInstance {
-    fn drop(&mut self) {
-        if let Some(instance) = self.instance.take() {
-            if instance.poisoned || instance.in_flight {
-                tracing::debug!(
-                    "Discarding dirty WASM instance (poisoned={}, in_flight={})",
-                    instance.poisoned,
-                    instance.in_flight
-                );
-            } else if let Ok(mut pool) = self.pool.lock() {
-                pool.push(instance);
-            }
-        }
-
-        drop(self._permit.take());
+        execute_wasm!(self, call_get_preferences)
     }
 }

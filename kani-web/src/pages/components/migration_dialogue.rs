@@ -1,5 +1,6 @@
 use crate::pages::components::collapsible_panel::CollapsiblePanel;
 use crate::pages::components::permission_handlers::PermissionGate;
+use crate::pages::components::toggle::Toggle;
 use crate::server_fns::{migrate_manga as migrate_manga_fn, preview_migration};
 use crate::types::{GlobalSearchResult, MangaListItem, MigrationStep, SearchScope};
 use leptos::prelude::*;
@@ -220,16 +221,13 @@ pub fn MigrationDialogue(
                                             <div class="modal-notice modal-notice--warn">
                                                 "Some downloaded chapters don't exist on the new source and would normally be permanently deleted."
                                             </div>
-                                            <label class="toggle-label migration-keep-orphaned">
-                                                <input
-                                                    type="checkbox"
-                                                    checked=move || keep_orphaned.get()
-                                                    on:change=move |ev| {
-                                                        set_keep_orphaned.set(event_target_checked(&ev))
-                                                    }
-                                                />
+                                            <Toggle
+                                                checked=keep_orphaned.into()
+                                                on_change=move |v| set_keep_orphaned.set(v)
+                                                extra_class="migration-keep-orphaned"
+                                            >
                                                 " Keep these downloaded chapters (shown as Orphaned in the chapter list)"
-                                            </label>
+                                            </Toggle>
                                         }.into_any()
                                     } else {
                                         view! { <span/> }.into_any()

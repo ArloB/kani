@@ -103,9 +103,11 @@ pub struct SmartClient {
 
 impl SmartClient {
     pub fn new(solver_url: Option<String>) -> Result<Self> {
+        let resolver = ValidatingResolver::new()?;
         let client = rquest::Client::builder()
             .emulation(rquest_util::Emulation::Chrome130)
             .redirect(rquest::redirect::Policy::limited(10))
+            .dns_resolver(Arc::new(resolver))
             .pool_idle_timeout(std::time::Duration::from_secs(300))
             .pool_max_idle_per_host(100)
             .build()?;

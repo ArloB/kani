@@ -25,6 +25,7 @@ pub mod bindings {
 }
 
 pub use bindings::KaniExtension;
+pub use bindings::KaniExtensionPre;
 pub use bindings::exports;
 pub use bindings::kani;
 
@@ -34,6 +35,9 @@ pub struct ResponseData {
 }
 
 pub struct SafeHtml(pub scraper::Html);
+// SAFETY: SafeHtml is only ever accessed behind Arc<Mutex<_>> (via SendHtml),
+// which serialises all access. scraper::Html is !Send due to internal use of
+// ego_tree NodeId (raw pointers), but these are never shared across threads.
 unsafe impl Send for SafeHtml {}
 unsafe impl Sync for SafeHtml {}
 
@@ -203,6 +207,16 @@ impl WasmRuntime {
         Ok(binding)
     }
 
+    /// Pre-links a component's imports so instances can be created cheaply.
+    pub fn instantiate_pre(
+        &self,
+        component: &Component,
+    ) -> Result<KaniExtensionPre<HostState>> {
+        let instance_pre = self.linker.instantiate_pre(component)?;
+        let pre = KaniExtensionPre::new(instance_pre)?;
+        Ok(pre)
+    }
+
     /// Returns a reference to the linker.
     pub fn linker(&self) -> &Linker<HostState> {
         &self.linker
@@ -214,5 +228,62 @@ impl std::fmt::Debug for WasmRuntime {
         f.debug_struct("WasmRuntime")
             .field("engine", &"<wasmtime::Engine>")
             .finish()
+    }
+}
+
+pub mod pref_conversions {
+    use kani_shared::types::{PreferenceDescriptor, PreferenceKind, SelectOption};
+    use crate::wasm::kani::extension::types as wit;
+
+    impl From<wit::SelectOption> for SelectOption {
+        fn from(o: wit::SelectOption) -> Self {
+            Self { label: o.label, value: o.value }
+        }
+    }
+
+    impl From<wit::PreferenceKind> for PreferenceKind {
+        fn from(k: wit::PreferenceKind) -> Self {
+            match k {
+                wit::PreferenceKind::TextInput(p) => Self::TextInput {
+                    placeholder: p.placeholder,
+                    default_value: p.default_value,
+                    is_secret: p.is_secret,
+                },
+                wit::PreferenceKind::Checkbox(p) => Self::Checkbox {
+                    default_value: p.default_value,
+                },
+                wit::PreferenceKind::Select(p) => Self::Select {
+                    options: p.options.into_iter().map(Into::into).collect(),
+                    default_value: p.default_value,
+                },
+                wit::PreferenceKind::MultiSelect(p) => Self::MultiSelect {
+                    options: p.options.into_iter().map(Into::into).collect(),
+                    default_values: p.default_values,
+                },
+                wit::PreferenceKind::Number(p) => Self::Number {
+                    min: p.min, max: p.max, step: p.step,
+                    default_value: p.default_value,
+                },
+                wit::PreferenceKind::MultiValueList(p) => Self::MultiValueList {
+                    placeholder: p.placeholder,
+                    item_label: p.item_label,
+                    default_values: p.default_values,
+                },
+                wit::PreferenceKind::Label(p) => Self::Label { text: p.text },
+            }
+        }
+    }
+
+    impl From<wit::PreferenceDescriptor> for PreferenceDescriptor {
+        fn from(d: wit::PreferenceDescriptor) -> Self {
+            Self {
+                key: d.key,
+                title: d.title,
+                description: d.description,
+                kind: d.kind.into(),
+                group: d.group,
+                requires_key: d.requires_key,
+            }
+        }
     }
 }

@@ -386,6 +386,8 @@ fn is_public_path(path: &str) -> bool {
         || path.starts_with("/rest/auth/")
         || path.starts_with("/pkg/")
         || path == "/favicon.ico"
+        || path == "/health"
+        || path == "/ready"
 }
  
 /// Hashes a plaintext password using Argon2id.
@@ -414,6 +416,7 @@ pub fn fresh_change_id() -> Vec<u8> {
     OsRng.fill_bytes(&mut bytes);
     bytes.to_vec()
 }
+
 
 impl AuthzBackend for AuthBackend {
     type Permission = crate::permissions::Permission;
@@ -450,5 +453,276 @@ impl AuthzBackend for AuthBackend {
         .await?;
 
         Ok(rows.into_iter().filter_map(|s| s.parse().ok()).collect())
+    }
+}
+
+#[cfg(test)]
+pub(crate) async fn test_db() -> SqlitePool {
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    sqlx::migrate!("../migrations").run(&pool).await.unwrap();
+    sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await.unwrap();
+    pool
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum_login::AuthzBackend;
+
+    // ── hash / verify password ───────────────────────────────────────────────
+
+    #[test]
+    fn hash_password_produces_argon2_string() {
+        let hash = hash_password("hunter2").unwrap();
+        assert!(hash.starts_with("$argon2id$"));
+    }
+
+    #[test]
+    fn verify_password_correct_returns_true() {
+        let hash = hash_password("correct-horse").unwrap();
+        assert!(verify_password("correct-horse", &hash).unwrap());
+    }
+
+    #[test]
+    fn verify_password_wrong_returns_false() {
+        let hash = hash_password("correct-horse").unwrap();
+        assert!(!verify_password("battery-staple", &hash).unwrap());
+    }
+
+    #[test]
+    fn different_salts_per_hash() {
+        let h1 = hash_password("same").unwrap();
+        let h2 = hash_password("same").unwrap();
+        assert_ne!(h1, h2, "Argon2 should use different salts each time");
+    }
+
+    // ── is_public_path ───────────────────────────────────────────────────────
+
+    #[test]
+    fn login_path_is_public() {
+        assert!(is_public_path("/login"));
+    }
+
+    #[test]
+    fn rest_auth_is_public() {
+        assert!(is_public_path("/rest/auth/login"));
+        assert!(is_public_path("/rest/auth/logout"));
+    }
+
+    #[test]
+    fn pkg_is_public() {
+        assert!(is_public_path("/pkg/kani-web.js"));
+        assert!(is_public_path("/pkg/kani-web_bg.wasm"));
+    }
+
+    #[test]
+    fn favicon_is_public() {
+        assert!(is_public_path("/favicon.ico"));
+    }
+
+    #[test]
+    fn health_is_public() {
+        assert!(is_public_path("/health"));
+        assert!(is_public_path("/ready"));
+    }
+
+    #[test]
+    fn rest_sources_is_not_public() {
+        assert!(!is_public_path("/rest/sources"));
+    }
+
+    #[test]
+    fn settings_page_is_not_public() {
+        assert!(!is_public_path("/settings"));
+    }
+
+    // ── create_user / fetch / list ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_user_inserts_and_assigns_user_role() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let user = backend.create_user("alice", "alice@test.com", "pass123").await.unwrap();
+        assert_eq!(user.username, "alice");
+        assert!(user.has_role("user"));
+    }
+
+    #[tokio::test]
+    async fn create_user_duplicate_username_errors() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        backend.create_user("bob", "bob@test.com", "pass1").await.unwrap();
+        let result = backend.create_user("bob", "bob2@test.com", "pass2").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn fetch_user_by_identity_finds_by_username() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        backend.create_user("carol", "carol@test.com", "pass").await.unwrap();
+        let found = backend.fetch_user_by_identity("carol").await.unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().username, "carol");
+    }
+
+    #[tokio::test]
+    async fn fetch_user_by_identity_returns_none_for_unknown() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let found = backend.fetch_user_by_identity("nobody").await.unwrap();
+        assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_users_returns_all() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        backend.create_user("u1", "u1@t.com", "p").await.unwrap();
+        backend.create_user("u2", "u2@t.com", "p").await.unwrap();
+        let users = backend.list_users().await.unwrap();
+        assert_eq!(users.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn user_count_is_correct() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        assert_eq!(backend.user_count().await.unwrap(), 0);
+        backend.create_user("x", "x@t.com", "p").await.unwrap();
+        assert_eq!(backend.user_count().await.unwrap(), 1);
+    }
+
+    // ── authenticate ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn authenticate_succeeds_with_valid_credentials() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        backend.create_user("dave", "dave@test.com", "secret").await.unwrap();
+        let result = backend.authenticate(Credentials {
+            username: "dave".into(), password: "secret".into(),
+        }).await.unwrap();
+        assert!(result.is_some());
+    }
+
+    #[tokio::test]
+    async fn authenticate_fails_wrong_password() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        backend.create_user("eve", "eve@test.com", "right").await.unwrap();
+        let result = backend.authenticate(Credentials {
+            username: "eve".into(), password: "wrong".into(),
+        }).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn authenticate_fails_nonexistent_user() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let result = backend.authenticate(Credentials {
+            username: "ghost".into(), password: "pass".into(),
+        }).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn authenticate_fails_inactive_user() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let user = backend.create_user("frank", "frank@test.com", "pass").await.unwrap();
+        backend.set_active(user.id, false).await.unwrap();
+        let result = backend.authenticate(Credentials {
+            username: "frank".into(), password: "pass".into(),
+        }).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    // ── role management ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn grant_role_adds_role() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let user = backend.create_user("grace", "grace@test.com", "pass").await.unwrap();
+        backend.grant_role(user.id, "admin", None).await.unwrap();
+        let updated = backend.fetch_user_by_identity("grace").await.unwrap().unwrap();
+        assert!(updated.has_role("admin"));
+    }
+
+    #[tokio::test]
+    async fn grant_role_is_idempotent() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let user = backend.create_user("hank", "hank@test.com", "pass").await.unwrap();
+        backend.grant_role(user.id, "admin", None).await.unwrap();
+        backend.grant_role(user.id, "admin", None).await.unwrap();
+        let updated = backend.fetch_user_by_identity("hank").await.unwrap().unwrap();
+        assert_eq!(updated.roles.iter().filter(|r| *r == "admin").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn revoke_role_removes_role() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let user = backend.create_user("ivy", "ivy@test.com", "pass").await.unwrap();
+        backend.grant_role(user.id, "admin", None).await.unwrap();
+        backend.revoke_role(user.id, "admin").await.unwrap();
+        let updated = backend.fetch_user_by_identity("ivy").await.unwrap().unwrap();
+        assert!(!updated.has_role("admin"));
+    }
+
+    #[tokio::test]
+    async fn is_admin_true_for_admin_role() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let user = backend.create_user("jake", "jake@test.com", "pass").await.unwrap();
+        assert!(!user.is_admin());
+        backend.grant_role(user.id, "admin", None).await.unwrap();
+        let updated = backend.fetch_user_by_identity("jake").await.unwrap().unwrap();
+        assert!(updated.is_admin());
+    }
+
+    // ── get_group_permissions with role hierarchy ────────────────────────────
+
+    #[tokio::test]
+    async fn user_role_gets_expected_permissions() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let user = backend.create_user("kate", "kate@test.com", "pass").await.unwrap();
+        let perms = backend.get_group_permissions(&user).await.unwrap();
+        assert!(perms.contains(&"library:view".parse().unwrap()));
+        assert!(perms.contains(&"source:browse".parse().unwrap()));
+        // user role should NOT have admin-only permissions
+        assert!(!perms.contains(&"source:install".parse().unwrap()));
+        assert!(!perms.contains(&"user:manage".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn admin_role_inherits_user_permissions() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let user = backend.create_user("leo", "leo@test.com", "pass").await.unwrap();
+        backend.grant_role(user.id, "admin", None).await.unwrap();
+        let updated = backend.fetch_user_by_identity("leo").await.unwrap().unwrap();
+        let perms = backend.get_group_permissions(&updated).await.unwrap();
+        // Admin inherits user permissions via recursive CTE
+        assert!(perms.contains(&"library:view".parse().unwrap()));
+        // Admin also has admin-only permissions
+        assert!(perms.contains(&"source:install".parse().unwrap()));
+        assert!(perms.contains(&"user:manage".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn empty_roles_returns_empty_permissions() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        let user = backend.create_user("mia", "mia@test.com", "pass").await.unwrap();
+        // Revoke the default 'user' role
+        backend.revoke_role(user.id, "user").await.unwrap();
+        let updated = backend.fetch_user_by_identity("mia").await.unwrap().unwrap();
+        let perms = backend.get_group_permissions(&updated).await.unwrap();
+        assert!(perms.is_empty());
     }
 }

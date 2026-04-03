@@ -46,6 +46,7 @@ pub struct AppState {
     pub proxy_secret: Arc<[u8; 32]>,
     pub proxy_semaphores: Arc<DashMap<String, Arc<tokio::sync::Semaphore>>>,
     pub boot_id: String,
+    pub shutdown_token: tokio_util::sync::CancellationToken,
 }
 
 impl AppState {
@@ -56,6 +57,7 @@ impl AppState {
                 sqlx::query("PRAGMA journal_mode=WAL;").execute(&mut *conn).await?;
                 sqlx::query("PRAGMA synchronous=NORMAL;").execute(&mut *conn).await?;
                 sqlx::query("PRAGMA busy_timeout=5000;").execute(&mut *conn).await?;
+                sqlx::query("PRAGMA foreign_keys=ON;").execute(&mut *conn).await?;
                 Ok(())
             }))
             .connect("sqlite://kani.db?mode=rwc")
@@ -75,12 +77,22 @@ impl AppState {
         let max_wasm_instances = settings.max_wasm_instances as u32;
         let wasm_runtime = Arc::new(WasmRuntime::new(max_wasm_instances).map_err(AppError::CoreError)?);
 
+        let shutdown_token = tokio_util::sync::CancellationToken::new();
+
         let engine_for_ticker = wasm_runtime.engine().clone();
+        let ticker_token = shutdown_token.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_millis(10));
             loop {
-                interval.tick().await;
-                engine_for_ticker.increment_epoch();
+                tokio::select! {
+                    _ = ticker_token.cancelled() => {
+                        tracing::info!("Epoch ticker shutting down");
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        engine_for_ticker.increment_epoch();
+                    }
+                }
             }
         });
 
@@ -133,21 +145,21 @@ impl AppState {
                 .compile_component(&bytes)
                 .map_err(AppError::CoreError)?;
 
+            let instance_pre = wasm_runtime
+                .instantiate_pre(&component)
+                .map_err(AppError::CoreError)?;
+
             let prefs = Self::load_pref_map_static(&pool, source.id).await?;
 
             let source_manager = SourceManager::new(
                 wasm_runtime.engine().clone(),
-                component,
-                wasm_runtime.linker().clone(),
+                instance_pre,
                 global_smart_client.clone(),
                 Some(source.base_url),
                 source.unrestricted_http,
                 25,
-                1,
                 prefs,
-            )
-            .await
-            .map_err(AppError::CoreError)?;
+            );
 
             sources_map.insert(source.id, Arc::new(source_manager));
         }
@@ -199,14 +211,15 @@ impl AppState {
                 .unwrap_or_default()
                 .as_millis()
                 .to_string(),
+            shutdown_token,
         })
     }
 
-    pub async fn get_popular_manga(&self, id: i64, page: i32) -> Result<String, AppError> {
+    pub async fn get_popular_manga(&self, id: i64, page: i32, page_size: i32) -> Result<String, AppError> {
         let sources = self.sources.clone();
 
         self.cache
-            .get_or_fetch_popular_manga(id, page, async move {
+            .get_or_fetch_popular_manga(id, page, page_size, async move {
                 let source_manager = {
                     let sources = sources.read().await;
                     sources.get(&id).cloned()
@@ -214,7 +227,7 @@ impl AppState {
                 };
                 let result = source_manager
                     .lease_instance().await?
-                    .get_popular_manga(page).await?;
+                    .get_popular_manga(page, page_size).await?;
                 serde_json::to_string(&result)
                     .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
             })
@@ -222,22 +235,28 @@ impl AppState {
             .map_err(unwrap_cache_err)
     }
 
-    pub async fn search_manga(&self, id: i64, query: &str, page: i32) -> Result<String, AppError> {
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
-        };
-
-        let result = source_manager
-            .lease_instance()
-            .await?
-            .search_manga(query, page)
-            .await?;
-
-        serde_json::to_string(&result).map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+    pub async fn search_manga(&self, id: i64, query: &str, page: i32, page_size: i32) -> Result<String, AppError> {
+        let sources = self.sources.clone();
+        let q = query.to_string();
+        self.cache
+            .get_or_fetch_search_results(id, query, page, page_size, async move {
+                let source_manager = {
+                    let sources = sources.read().await;
+                    sources
+                        .get(&id)
+                        .cloned()
+                        .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?
+                };
+                let result = source_manager
+                    .lease_instance()
+                    .await?
+                    .search_manga(&q, page, page_size)
+                    .await?;
+                serde_json::to_string(&result)
+                    .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
+            })
+            .await
+            .map_err(unwrap_cache_err)
     }
 
     pub async fn get_manga_details(&self, id: i64, manga_id: &str) -> Result<String, AppError> {
@@ -404,7 +423,7 @@ impl AppState {
         };
         let res = source_manager
             .lease_instance().await?
-            .get_chapter_list(manga_id, page).await?;
+            .get_chapter_list(manga_id, page, None).await?;
         let json = serde_json::to_string(&res)
             .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?;
         let chapter_list: wit_types::ChapterList = serde_json::from_str(&json)
@@ -428,7 +447,7 @@ impl AppState {
                     .push_bind(chapter.volume)
                     .push_bind(chapter.scanlator.clone())
                     .push_bind(chapter.date_uploaded);
-                b.push("CURRENT_TIMESTAMP");
+                b.push("NULL");
             });
 
             query_builder.build().execute(&self.db).await?;
@@ -493,12 +512,13 @@ impl AppState {
         id: i64,
         manga_id: &str,
         page: i32,
+        page_size: i32,
     ) -> Result<String, AppError> {
         let sources    = self.sources.clone();
         let manga_id_d = crate::utils::decode_manga_id(manga_id);
 
         self.cache
-            .get_or_fetch_chapter_list(id, &manga_id_d.clone(), page, async move {
+            .get_or_fetch_chapter_list(id, &manga_id_d.clone(), page, page_size, async move {
                 let source_manager = {
                     let sources = sources.read().await;
                     sources.get(&id).cloned()
@@ -506,7 +526,7 @@ impl AppState {
                 };
                 let result = source_manager
                     .lease_instance().await?
-                    .get_chapter_list(&manga_id_d, page).await?;
+                    .get_chapter_list(&manga_id_d, page, Some(page_size)).await?;
                 serde_json::to_string(&result)
                     .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))
             })
@@ -777,7 +797,7 @@ impl AppState {
         loop {
             let res = source_manager
                 .lease_instance().await?
-                .get_chapter_list(&ids.source_manga_id, page).await?;
+                .get_chapter_list(&ids.source_manga_id, page, None).await?;
             let json = serde_json::to_string(&res)
                 .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?;
             let chapter_list: wit_types::ChapterList = serde_json::from_str(&json)
@@ -1045,6 +1065,7 @@ impl AppState {
         query: &str,
         scope: SearchScope,
         page: i32,
+        page_size: i32,
     ) -> Result<Vec<GlobalSearchResult>, AppError> {
         let favourited_only = matches!(scope, SearchScope::FavouritedOnly) as i64;
 
@@ -1070,7 +1091,7 @@ impl AppState {
                 let source_name = source_name.clone();
 
                 tokio::spawn(async move {
-                    let result = state.search_manga(source_id, &q, page).await;
+                    let result = state.search_manga(source_id, &q, page, page_size).await;
                     (source_id, source_name, result)
                 })
             })
@@ -1408,11 +1429,21 @@ impl AppState {
         source_id: i64,
         source_manga_id: &str,
     ) -> Result<Vec<wit_types::ChapterInfo>, AppError> {
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources.get(&source_id).cloned()
+                .ok_or_else(|| AppError::NotFound(format!("Source {source_id} not found")))?
+        };
+
         let mut all: Vec<wit_types::ChapterInfo> = Vec::new();
         let mut page = 1i32;
         loop {
-            let raw  = self.get_chapter_list_paged(source_id, source_manga_id, page).await?;
-            let list: wit_types::ChapterList = serde_json::from_str(&raw)
+            let res = source_manager
+                .lease_instance().await?
+                .get_chapter_list(source_manga_id, page, None).await?;
+            let json = serde_json::to_string(&res)
+                .map_err(|e| AppError::CoreError(kani_core::Error::Json(e)))?;
+            let list: wit_types::ChapterList = serde_json::from_str(&json)
                 .map_err(|e| AppError::InternalServerError(
                     format!("Failed to parse chapter list: {e}")
                 ))?;
@@ -1603,7 +1634,7 @@ impl AppState {
             let target_ch = target_chapters
                 .iter()
                 .find(|c| c.id == *new_source_chapter_id)
-                .expect("matched chapter must be present in target_chapters");
+                .ok_or_else(|| AppError::InternalServerError("Chapter match inconsistency during migration".into()))?;
 
             let vol: Option<i64> = target_ch.volume.map(|v| v as i64);
             sqlx::query!(
@@ -1643,7 +1674,7 @@ impl AppState {
                 "INSERT OR IGNORE INTO chapters
                 (manga_id, source_chapter_id, name, chapter_number, language,
                 volume, scanlator, uploaded_at, discovered_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                 manga_db_id, ch.id, ch.title, ch.number, ch.language,
                 vol, ch.scanlator, ch.date_uploaded
             )
@@ -1720,7 +1751,11 @@ pub fn chapter_name(volume: Option<i64>, chapter_number: f64, title: Option<Stri
     if let Some(vol) = volume {
         name.push_str(&format!("Vol. {vol} "));
     }
-    name.push_str(&format!("Ch. {chapter_number}"));
+    if chapter_number.fract().abs() < f64::EPSILON {
+        name.push_str(&format!("Ch. {}", chapter_number as i64));
+    } else {
+        name.push_str(&format!("Ch. {chapter_number:.1}"));
+    }
     if let Some(title) = title
         && !title.is_empty() {
             name.push_str(&format!(" - {title}"));

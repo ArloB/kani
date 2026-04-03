@@ -14,7 +14,6 @@ static ALLOCATOR: talc::TalckWasm = unsafe { talc::TalckWasm::new_global() };
 
 pub struct Example {
     _base_url: String,
-    _return_limit: i32,
 }
 
 impl Default for Example {
@@ -27,7 +26,6 @@ impl Example {
     pub fn new() -> Self {
         Self {
             _base_url: "https://example.com".to_string(),
-            _return_limit: 65,
         }
     }
 
@@ -49,15 +47,15 @@ impl Guest for Example {
         Ok(Example::metadata())
     }
 
-    fn get_popular_manga(page: i32) -> Result<MangaList, String> {
+    fn get_popular_manga(page: i32, page_size: i32) -> Result<MangaList, String> {
         get_extension()
-            .get_popular_manga(page)
+            .get_popular_manga(page, page_size)
             .map_err(|e| e.to_string())
     }
 
-    fn search_manga(query: String, page: i32) -> Result<MangaList, String> {
+    fn search_manga(query: String, page: i32, page_size: i32) -> Result<MangaList, String> {
         get_extension()
-            .search_manga(&query, page)
+            .search_manga(&query, page, page_size)
             .map_err(|e| e.to_string())
     }
 
@@ -67,9 +65,9 @@ impl Guest for Example {
             .map_err(|e| e.to_string())
     }
 
-    fn get_chapter_list(manga_id: String, page: i32) -> Result<ChapterList, String> {
+    fn get_chapter_list(manga_id: String, page: i32, page_size: Option<i32>) -> Result<ChapterList, String> {
         get_extension()
-            .get_chapter_list(&manga_id, page)
+            .get_chapter_list(&manga_id, page, page_size)
             .map_err(|e| e.to_string())
     }
 
@@ -91,7 +89,7 @@ impl MangaExtension for Example {
         "Example"
     }
 
-    fn get_popular_manga(&self, _page: i32) -> ExtensionResult<MangaList> {
+    fn get_popular_manga(&self, _page: i32, _page_size: i32) -> ExtensionResult<MangaList> {
         let manga_list = Vec::new();
         let has_next_page = false;
 
@@ -101,7 +99,7 @@ impl MangaExtension for Example {
         })
     }
 
-    fn search_manga(&self, _query: &str, _page: i32) -> ExtensionResult<MangaList> {
+    fn search_manga(&self, _query: &str, _page: i32, _page_size: i32) -> ExtensionResult<MangaList> {
         let manga_list = Vec::new();
         let has_next_page = false;
 
@@ -126,7 +124,7 @@ impl MangaExtension for Example {
         Ok(manga_info)
     }
 
-    fn get_chapter_list(&self, _manga_id: &str, _page: i32) -> ExtensionResult<ChapterList> {
+    fn get_chapter_list(&self, _manga_id: &str, _page: i32, _page_size: Option<i32>) -> ExtensionResult<ChapterList> {
         let chapter_list = ChapterList {
             chapters: Vec::new(),
             has_next_page: false,

@@ -6,128 +6,54 @@ use std::time::Instant;
 use wasmtime::Store;
 use wasmtime::component::Linker;
 
-const EPOCH_DEADLINE_TICKS: u64 = 500;
+pub(crate) const EPOCH_DEADLINE_TICKS: u64 = 500;
 
+#[macro_export]
 macro_rules! execute_wasm {
     ($self:expr, $method:ident $(, $args:expr)*) => {{
-        let store = $self.store.as_mut()
-            .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
-
         {
-            let data = store.data_mut();
+            let data = $self.store.data_mut();
             data.call_started_at = std::time::Instant::now();
             data.io_count = 0;
             data.last_io_at = None;
         }
 
-        let bindings = $self.bindings.as_ref().expect("Bindings should be initialized");
-
-        $self.in_flight = true;
-
-        store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
-        let provider = bindings.kani_extension_manga_provider();
-        let raw_result = provider.$method(&mut *store $(, $args)*)
+        $self.store.set_epoch_deadline($crate::sources::EPOCH_DEADLINE_TICKS);
+        let provider = $self.bindings.kani_extension_manga_provider();
+        let raw_result = provider.$method(&mut $self.store $(, $args)*)
             .await
-            .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)));
+            .map_err(|e| $crate::error::Error::Internal(format!("WASM function call failed: {}", e)));
 
-        if let Err(Error::Internal(ref msg)) = raw_result {
-            if msg.contains("deadlock detected") || msg.contains("event loop cannot make further progress") {
-                tracing::error!("WASM deadlock detected, poisoning instance");
-                $self.poisoned = true;
-                $self.in_flight = false;
-                return Err(Error::Internal("WASM instance deadlocked and has been discarded".to_string()));
-            }
-        }
-
-        store.data_mut().clear_all();
-        $self.last_call = Some(Instant::now());
-        $self.in_flight = false;
+        $self.store.data_mut().clear_all();
         let inner = raw_result?;
-        let result = inner.map_err(Error::Extension)?;
+        let result = inner.map_err($crate::error::Error::Extension)?;
         Ok(result)
     }};
 }
 
-/// Hosts a single WASM source extension.
+
+/// Hosts a single WASM source extension. Used for one-off instantiation
 pub struct SourceInstance {
-    store: Option<Store<HostState>>,
-    bindings: Option<crate::wasm::KaniExtension>,
-    last_call: Option<Instant>,
+    pub store: Option<Store<HostState>>,
+    pub bindings: Option<crate::wasm::KaniExtension>,
     smart_client: crate::http::SmartClient,
     base_url: Option<String>,
     unrestricted_http: bool,
-    pub poisoned: bool,
-    pub in_flight: bool,
 }
 
 impl SourceInstance {
-    pub fn new(smart_client: crate::http::SmartClient, base_url: Option<String>, unrestricted_http: bool) -> Self {
+    pub fn new(
+        smart_client: crate::http::SmartClient,
+        base_url: Option<String>,
+        unrestricted_http: bool,
+    ) -> Self {
         Self {
             store: None,
             bindings: None,
-            last_call: None,
             smart_client,
             base_url,
             unrestricted_http,
-            poisoned: false,
-            in_flight: false,
         }
-    }
-
-    /// Calls the `get_popular_manga` function in the WASM module.
-    pub async fn get_popular_manga(
-        &mut self,
-        page: i32,
-    ) -> Result<crate::wasm::kani::extension::types::MangaList> {
-        execute_wasm!(self, call_get_popular_manga, page)
-    }
-
-    /// Calls the `search_manga` function in the WASM module.
-    pub async fn search_manga(
-        &mut self,
-        query: &str,
-        page: i32,
-    ) -> Result<crate::wasm::kani::extension::types::MangaList> {
-        execute_wasm!(self, call_search_manga, query, page)
-    }
-
-    /// Calls the `get_manga_details` function in the WASM module.
-    pub async fn get_manga_details(
-        &mut self,
-        manga_id: &str,
-    ) -> Result<crate::wasm::kani::extension::types::MangaInfo> {
-        execute_wasm!(self, call_get_manga_details, manga_id)
-    }
-
-    /// Calls the `get_chapter_list` function in the WASM module.
-    pub async fn get_chapter_list(
-        &mut self,
-        manga_id: &str,
-        page: i32,
-    ) -> Result<crate::wasm::kani::extension::types::ChapterList> {
-        execute_wasm!(self, call_get_chapter_list, manga_id, page)
-    }
-
-    /// Calls the `get_pages` function in the WASM module.
-    pub async fn get_pages(
-        &mut self,
-        manga_id: &str,
-        chapter_id: &str,
-    ) -> Result<crate::wasm::kani::extension::types::Chapter> {
-        execute_wasm!(self, call_get_pages, manga_id, chapter_id)
-    }
-
-    /// Calls the `get_metadata` function in the WASM module.
-    pub async fn get_metadata(
-        &mut self,
-    ) -> Result<crate::wasm::kani::extension::types::ExtensionMetadata> {
-        execute_wasm!(self, call_get_metadata)
-    }
-
-    /// Returns `Some(true)` if this instance has been idle longer than `timeout`,
-    /// `Some(false)` if it is still within the window, or `None` if never called.
-    pub(crate) fn is_idle(&self, timeout: std::time::Duration) -> Option<bool> {
-        self.last_call.map(|t| t.elapsed() > timeout)
     }
 
     /// Loads a source from the component.
@@ -138,20 +64,18 @@ impl SourceInstance {
         linker: &Linker<HostState>,
     ) -> Result<()> {
         let allowed_host = match (self.base_url.as_deref(), self.unrestricted_http) {
-            (_, true)        => AllowedHost::Unrestricted,
+            (_, true) => AllowedHost::Unrestricted,
             (Some(url), false) => AllowedHost::Restricted(url.to_string()),
-            (None, false)    => AllowedHost::MetadataOnly,
+            (None, false) => AllowedHost::MetadataOnly,
         };
 
-        let mut store = Store::new(
-            engine,
-            HostState::new(self.smart_client.clone(), allowed_host)?,
-        );
+        let mut store = Store::new(engine, HostState::new(self.smart_client.clone(), allowed_host)?);
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
         store.epoch_deadline_callback(|mut ctx| {
             let data = ctx.data_mut();
-            if data.last_io_at
+            if data
+                .last_io_at
                 .map(|t| t.elapsed().as_millis() < (EPOCH_DEADLINE_TICKS * 10) as u128)
                 .unwrap_or(false)
             {
@@ -168,26 +92,72 @@ impl SourceInstance {
 
         self.store = Some(store);
         self.bindings = Some(bindings);
-        self.last_call = Some(Instant::now());
 
         Ok(())
     }
 
-    /// Injects current preference values into the store so the extension
-    /// can read them via the `prefs` host import.
-    pub fn set_preference_map(
-        &mut self,
-        prefs: std::collections::HashMap<String, String>,
-    ) {
+    /// Injects current preference values into the store.
+    pub fn set_preference_map(&mut self, prefs: std::collections::HashMap<String, String>) {
         if let Some(store) = &mut self.store {
             store.data_mut().preferences = prefs;
         }
     }
 
-    /// Calls get-preferences on the WASM module, returning the schema.
+    /// Calls the `get_metadata` function in the WASM module.
+    pub async fn get_metadata(
+        &mut self,
+    ) -> Result<crate::wasm::kani::extension::types::ExtensionMetadata> {
+        let store = self
+            .store
+            .as_mut()
+            .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
+        let bindings = self.bindings.as_ref().expect("Bindings should be initialized");
+
+        {
+            let data = store.data_mut();
+            data.call_started_at = Instant::now();
+            data.io_count = 0;
+            data.last_io_at = None;
+        }
+
+        store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
+        let provider = bindings.kani_extension_manga_provider();
+        let raw_result = provider
+            .call_get_metadata(&mut *store)
+            .await
+            .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)));
+
+        store.data_mut().clear_all();
+        let inner = raw_result?;
+        inner.map_err(Error::Extension)
+    }
+
+    /// Calls the `get_preferences` function in the WASM module.
     pub async fn get_preferences(
         &mut self,
     ) -> Result<Vec<crate::wasm::kani::extension::types::PreferenceDescriptor>> {
-        execute_wasm!(self, call_get_preferences)
+        let store = self
+            .store
+            .as_mut()
+            .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
+        let bindings = self.bindings.as_ref().expect("Bindings should be initialized");
+
+        {
+            let data = store.data_mut();
+            data.call_started_at = Instant::now();
+            data.io_count = 0;
+            data.last_io_at = None;
+        }
+
+        store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
+        let provider = bindings.kani_extension_manga_provider();
+        let raw_result = provider
+            .call_get_preferences(&mut *store)
+            .await
+            .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)));
+
+        store.data_mut().clear_all();
+        let inner = raw_result?;
+        inner.map_err(Error::Extension)
     }
 }

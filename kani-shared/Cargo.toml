@@ -9,3 +9,9 @@ serde = { version = "1.0", features = ["derive"] }
 wit-bindgen = "0.53.1"
 serde_json = "1.0"
 base64 = "0.22.1"
+sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio"], optional = true }
+time = { version = "0.3", features = ["serde", "formatting", "macros"] }
+ts-rs = { version = "10", features = ["serde-compat"] }
+
+[features]
+ssr = ["dep:sqlx"]

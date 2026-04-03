@@ -2,22 +2,43 @@ use leptos::{prelude::*, web_sys};
 use std::collections::HashMap;
 use crate::{
     server_fns::{
-        get_source_preference_schema, get_source_preferences, toggle_source_enabled, toggle_source_favourite
+        delete_source, fetch_wasm_url, get_active_source_ids,
+        get_source_preference_schema, get_source_preferences,
+        toggle_source_enabled, toggle_source_favourite,
     },
     types::{PreferenceDescriptor, Source},
     pages::components::preference_row::PreferenceRow,
     pages::components::permission_handlers::PermissionGate,
+    pages::components::toggle::Toggle,
 };
 
 #[component]
-pub fn SourceSettingsCard(source: Source) -> impl IntoView {
+pub fn SourceSettingsCard(
+    source: Source,
+    on_deleted: impl Fn() + Send + Sync + 'static,
+) -> impl IntoView {
     let sid = source.id;
     let is_unsafe = source.unrestricted_http;
+    let on_deleted = StoredValue::new(on_deleted);
 
     let (enabled, set_enabled) = signal(source.enabled);
     let (starred, set_starred) = signal(source.favourited);
     let (confirming, set_confirming) = signal(false);
+    let (confirming_delete, set_confirming_delete) = signal(false);
     let (modal_open, set_modal_open) = signal(false);
+    let (install_open, set_install_open) = signal(false);
+    let (wasm_url, set_wasm_url) = signal(String::new());
+    let (wasm_fetching, set_wasm_fetching) = signal(false);
+    let (wasm_error, set_wasm_error) = signal(Option::<String>::None);
+    let (wasm_success, set_wasm_success) = signal(false);
+
+    let active_ids_res = Resource::new(|| (), |_| get_active_source_ids());
+    let is_active = move || {
+        active_ids_res.get()
+            .and_then(|r| r.ok())
+            .map(|ids| ids.contains(&sid))
+            .unwrap_or(false)
+    };
 
     let schema_res = Resource::new(move || sid, get_source_preference_schema);
     let values_res = Resource::new(move || sid, get_source_preferences);
@@ -30,17 +51,6 @@ pub fn SourceSettingsCard(source: Source) -> impl IntoView {
         }
     });
 
-    let handle_enable_toggle = move |ev: web_sys::Event| {
-        let val = event_target_checked(&ev);
-        if val && is_unsafe && !enabled.get() {
-            set_confirming.set(true);
-        } else {
-            set_enabled.set(val);
-            leptos::task::spawn_local(async move {
-                let _ = toggle_source_enabled(sid, val).await;
-            });
-        }
-    };
 
     let close_on_escape = move |ev: web_sys::KeyboardEvent| {
         if ev.key() == "Escape" {
@@ -58,6 +68,20 @@ pub fn SourceSettingsCard(source: Source) -> impl IntoView {
                 <div class="source-settings-card__meta">
                     <div class="source-settings-card__name-row">
                         <span class="source-settings-card__name">{source.name.clone()}</span>
+                        <Suspense fallback=|| ()>
+                            {move || {
+                                let active = is_active();
+                                view! {
+                                    <span
+                                        class="source-status-badge"
+                                        class:source-status-badge--active=active
+                                        class:source-status-badge--inactive=!active
+                                    >
+                                        {if active { "Active" } else { "No WASM" }}
+                                    </span>
+                                }
+                            }}
+                        </Suspense>
                         <Show when=move || is_unsafe>
                             <span
                                 class="source-unsafe-badge"
@@ -112,15 +136,44 @@ pub fn SourceSettingsCard(source: Source) -> impl IntoView {
                             </span>
                         </label>
                     </PermissionGate>
+                    <PermissionGate permission="source:install">
+                        <button
+                            class="source-settings-card__install-btn"
+                            title="Install WASM"
+                            on:click=move |_| {
+                                set_install_open.update(|v| *v = !*v);
+                                set_wasm_error.set(None);
+                                set_wasm_success.set(false);
+                            }
+                        >
+                            "↑"
+                        </button>
+                    </PermissionGate>
+                    <PermissionGate permission="source:delete">
+                        <button
+                            class="source-settings-card__delete-btn"
+                            title="Delete source"
+                            on:click=move |_| set_confirming_delete.set(true)
+                        >
+                            "✕"
+                        </button>
+                    </PermissionGate>
                     <PermissionGate permission="source:toggle_enabled">
-                        <label class="toggle-label" title="Enable source">
-                            <input
-                                type="checkbox"
-                                checked=move || enabled.get()
-                                on:change=handle_enable_toggle
-                            />
+                        <Toggle
+                            checked=enabled.into()
+                            on_change=move |val| {
+                                if val && is_unsafe && !enabled.get() {
+                                    set_confirming.set(true);
+                                } else {
+                                    set_enabled.set(val);
+                                    leptos::task::spawn_local(async move {
+                                        let _ = toggle_source_enabled(sid, val).await;
+                                    });
+                                }
+                            }
+                        >
                             {move || if enabled.get() { " On" } else { " Off" }}
-                        </label>
+                        </Toggle>
                     </PermissionGate>
                 </div>
             </div>
@@ -149,6 +202,82 @@ pub fn SourceSettingsCard(source: Source) -> impl IntoView {
                             }
                         >
                             "Enable anyway"
+                        </button>
+                    </div>
+                </div>
+            </Show>
+
+            <Show when=move || install_open.get()>
+                <div class="source-install-panel">
+                    <div class="source-install-panel__row">
+                        <input
+                            type="url"
+                            class="source-install-panel__url"
+                            placeholder="https://example.com/extension.wasm"
+                            prop:value=wasm_url
+                            on:input=move |ev| {
+                                set_wasm_url.set(event_target_value(&ev));
+                                set_wasm_error.set(None);
+                                set_wasm_success.set(false);
+                            }
+                        />
+                        <button
+                            class="source-install-panel__fetch-btn"
+                            disabled=move || wasm_fetching.get() || wasm_url.get().trim().is_empty()
+                            on:click=move |_| {
+                                let url = wasm_url.get().trim().to_string();
+                                if url.is_empty() { return; }
+                                set_wasm_fetching.set(true);
+                                set_wasm_error.set(None);
+                                set_wasm_success.set(false);
+                                leptos::task::spawn_local(async move {
+                                    match fetch_wasm_url(sid, url).await {
+                                        Ok(_) => {
+                                            set_wasm_success.set(true);
+                                            set_wasm_url.set(String::new());
+                                            active_ids_res.refetch();
+                                        }
+                                        Err(e) => set_wasm_error.set(Some(e.to_string())),
+                                    }
+                                    set_wasm_fetching.set(false);
+                                });
+                            }
+                        >
+                            {move || if wasm_fetching.get() { "Fetching…" } else { "Fetch" }}
+                        </button>
+                    </div>
+                    {move || wasm_error.get().map(|e| view! {
+                        <p class="source-install-panel__error">{e}</p>
+                    })}
+                    {move || wasm_success.get().then(|| view! {
+                        <p class="source-install-panel__success">"WASM installed successfully."</p>
+                    })}
+                </div>
+            </Show>
+
+            <Show when=move || confirming_delete.get()>
+                <div class="source-delete-confirm">
+                    <p class="source-delete-confirm__text">
+                        "Delete this source? This will remove all associated manga and chapters."
+                    </p>
+                    <div class="source-delete-confirm__actions">
+                        <button
+                            class="source-delete-confirm__cancel"
+                            on:click=move |_| set_confirming_delete.set(false)
+                        >
+                            "Cancel"
+                        </button>
+                        <button
+                            class="source-delete-confirm__accept"
+                            on:click=move |_| {
+                                set_confirming_delete.set(false);
+                                leptos::task::spawn_local(async move {
+                                    let _ = delete_source(sid).await;
+                                    on_deleted.with_value(|f| f());
+                                });
+                            }
+                        >
+                            "Delete"
                         </button>
                     </div>
                 </div>

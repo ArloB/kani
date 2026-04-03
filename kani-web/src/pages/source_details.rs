@@ -1,17 +1,18 @@
 use crate::pages::components::{
-  cover_image::CoverImage, 
+  cover_image::CoverImage,
   pagination::Pagination,
   permission_handlers::RequirePermission,
 };
 use crate::server_fns::{get_popular_manga, get_source, search_manga};
 use leptos::prelude::*;
+use leptos_meta::Title;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 
 fn skeleton_source_grid() -> impl IntoView {
     view! {
-        <div class="skeleton-manga-grid">
-            {(0..20).map(|_| view! {
+        <div class="manga-grid manga-grid--large">
+            {(0..24).map(|_| view! {
                 <div class="skeleton-card">
                     <div class="skeleton-card__cover"></div>
                     <div class="skeleton-card__title skeleton-card__title--long"></div>
@@ -38,6 +39,11 @@ pub fn SourceDetails() -> impl IntoView {
     let (page, set_page)               = signal(1i32);
     let (input_value, set_input_value) = signal(String::new());
 
+    let initial_page_size = crate::utils::get_local_string("kani_source_page_size")
+        .parse::<i32>()
+        .unwrap_or(24);
+    let (page_size, set_page_size) = signal(initial_page_size);
+
     let debounced_query = crate::utils::use_debounced_signal(input_value, 600);
 
     Effect::new(move |prev: Option<String>| {
@@ -51,12 +57,12 @@ pub fn SourceDetails() -> impl IntoView {
     let source = Resource::new(id, move |sid| async move { get_source(sid).await });
 
     let manga_list = Resource::new(
-        move || (id(), page.get(), debounced_query.get()),
-        move |(sid, p, q)| async move {
+        move || (id(), page.get(), page_size.get(), debounced_query.get()),
+        move |(sid, p, ps, q)| async move {
             if q.is_empty() {
-                get_popular_manga(sid, p).await
+                get_popular_manga(sid, p, ps).await
             } else {
-                search_manga(sid, q, p).await
+                search_manga(sid, q, p, ps).await
             }
         },
     );
@@ -64,6 +70,12 @@ pub fn SourceDetails() -> impl IntoView {
     let (is_pending, set_pending) = signal(false);
 
     view! {
+      <Title text=move || {
+          source.get()
+              .and_then(|r| r.ok())
+              .map(|s| format!("{} - Kani", s.name))
+              .unwrap_or_else(|| "Source - Kani".into())
+      }/>
       <RequirePermission permission="source:browse">
         <div class="source-details">
             <header class="sticky-header">
@@ -82,6 +94,19 @@ pub fn SourceDetails() -> impl IntoView {
                         prop:value=input_value
                         on:input=move |ev| set_input_value.set(event_target_value(&ev))
                     />
+                    <select
+                        prop:value=move || page_size.get().to_string()
+                        on:change=move |ev| {
+                            let ps = event_target_value(&ev).parse::<i32>().unwrap_or(24);
+                            crate::utils::set_local_string("kani_source_page_size", &ps.to_string());
+                            set_page_size.set(ps);
+                            set_page.set(1);
+                        }
+                    >
+                        <option value="12">"12 per page"</option>
+                        <option value="24">"24 per page"</option>
+                        <option value="48">"48 per page"</option>
+                    </select>
                 </div>
             </header>
 
@@ -101,7 +126,7 @@ pub fn SourceDetails() -> impl IntoView {
                         let has_next = list.has_next_page;
                         view! {
                             <div
-                                class="manga-grid"
+                                class="manga-grid manga-grid--large"
                                 class:content--stale=move || is_pending.get()
                             >
                                 <For

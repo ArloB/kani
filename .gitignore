@@ -4,10 +4,11 @@ wasm_sources
 .env
 *.db
 *.db*
-Cargo.lock
+kani-shared/bindings
 library
 kani-web/dist
 todo.txt
 changes
 .vscode
 .kani_admin_password
+log/

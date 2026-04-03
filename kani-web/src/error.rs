@@ -69,41 +69,82 @@ pub enum AppError {
 
     #[error("Permission error: {0}")]
     PermissionParseError(#[from] crate::permissions::PermissionParseError),
+
+    #[error("Validation error: {0}")]
+    ValidationError(String),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
+            // Client errors: safe to surface the message
             Self::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
-            Self::Other(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
-            Self::SqlxError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            Self::CoreError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            Self::IoError(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("IO error: {e}")),
-            Self::TryFromIntError(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("TryFromIntError: {e}"),
-            ),
-            Self::MigrationError(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Migration error: {e}"),
-            ),
-            Self::RequestError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            Self::LockPoisoned => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Lock poisoned".to_string(),
-            ),
-            Self::InternalServerError(msg) | Self::ChannelSendError(msg) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
-            }
-            Self::JsonError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            Self::MultipartError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            Self::InvalidHeaderValue(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             Self::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
-            Self::HashError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            Self::PasswordError(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
-            Self::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
+            Self::Unauthorized(msg) | Self::PasswordError(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
             Self::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
-            Self::PermissionParseError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            Self::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+
+            // Internal errors: log details, return generic message
+            Self::SqlxError(e) => {
+                tracing::error!("Database error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::CoreError(e) => {
+                tracing::error!("Core error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::IoError(e) => {
+                tracing::error!("IO error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::TryFromIntError(e) => {
+                tracing::error!("Integer conversion error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::MigrationError(e) => {
+                tracing::error!("Migration error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::RequestError(e) => {
+                tracing::error!("HTTP request error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::LockPoisoned => {
+                tracing::error!("Mutex lock poisoned");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::InternalServerError(msg) => {
+                tracing::error!("Internal error: {msg}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::ChannelSendError(msg) => {
+                tracing::error!("Channel send error: {msg}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::JsonError(e) => {
+                tracing::error!("JSON error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::MultipartError(e) => {
+                tracing::error!("Multipart error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::InvalidHeaderValue(e) => {
+                tracing::error!("Invalid header value: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::HashError(e) => {
+                tracing::error!("Password hash error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::Other(msg) => {
+                tracing::error!("Unclassified error: {msg}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
+            Self::PermissionParseError(e) => {
+                tracing::error!("Permission parse error: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
+            }
         };
 
         let body = Json(json!({

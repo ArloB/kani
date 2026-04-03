@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use leptos_meta::Title;
 use leptos_router::hooks::use_query_map;
 
 #[component]
@@ -16,6 +17,7 @@ pub fn Login() -> impl IntoView {
     };
 
     view! {
+        <Title text="Login - Kani"/>
         <div class="login-page">
             <div class="login-card">
                 <div class="login-brand">

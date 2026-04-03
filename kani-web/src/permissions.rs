@@ -147,3 +147,110 @@ impl<'de> serde::Deserialize<'de> for Permission {
         s.parse().map_err(serde::de::Error::custom)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_library_view() {
+        assert_eq!("library:view".parse::<Permission>().unwrap(), Permission::Library(Library::View));
+    }
+
+    #[test]
+    fn display_library_view() {
+        assert_eq!(Permission::Library(Library::View).to_string(), "library:view");
+    }
+
+    #[test]
+    fn no_colon_is_parse_error() {
+        assert!("libraryview".parse::<Permission>().is_err());
+    }
+
+    #[test]
+    fn unknown_resource_is_error() {
+        assert!("unknown:view".parse::<Permission>().is_err());
+    }
+
+    #[test]
+    fn unknown_action_is_error() {
+        assert!("library:fly".parse::<Permission>().is_err());
+    }
+
+    #[test]
+    fn all_permissions_round_trip() {
+        let perms = [
+            "library:view", "library:add", "library:delete", "library:refresh", "library:manage",
+            "chapter:download", "chapter:delete",
+            "source:browse", "source:install", "source:delete", "source:toggle_enabled", "source:configure",
+            "settings:view", "settings:edit_download", "settings:edit_scan", "settings:edit_advanced",
+            "user:manage",
+        ];
+        for raw in &perms {
+            let parsed: Permission = raw.parse().expect(raw);
+            assert_eq!(parsed.to_string(), *raw, "round-trip failed for {raw}");
+        }
+    }
+
+    #[test]
+    fn all_display_strings_are_unique() {
+        let perms = [
+            Permission::Library(Library::View),
+            Permission::Library(Library::Add),
+            Permission::Library(Library::Delete),
+            Permission::Library(Library::Refresh),
+            Permission::Library(Library::Manage),
+            Permission::Chapter(Chapter::Download),
+            Permission::Chapter(Chapter::Delete),
+            Permission::Source(Source::Browse),
+            Permission::Source(Source::Install),
+            Permission::Source(Source::Delete),
+            Permission::Source(Source::ToggleEnabled),
+            Permission::Source(Source::Configure),
+            Permission::Settings(Settings::View),
+            Permission::Settings(Settings::EditDownload),
+            Permission::Settings(Settings::EditScan),
+            Permission::Settings(Settings::EditAdvanced),
+            Permission::User(User::Manage),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for p in &perms {
+            let s = p.to_string();
+            assert!(seen.insert(s.clone()), "duplicate display string: {s}");
+        }
+    }
+
+    #[test]
+    fn serde_roundtrip() {
+        let p = Permission::Source(Source::Install);
+        let json = serde_json::to_string(&p).unwrap();
+        assert_eq!(json, r#""source:install""#);
+        let back: Permission = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, p);
+    }
+
+    #[test]
+    fn source_install_guard_returns_correct_permission() {
+        assert_eq!(guards::SourceInstall::required_permission(), Some(Permission::Source(Source::Install)));
+    }
+
+    #[test]
+    fn source_delete_guard_returns_correct_permission() {
+        assert_eq!(guards::SourceDelete::required_permission(), Some(Permission::Source(Source::Delete)));
+    }
+
+    #[test]
+    fn is_authenticated_guard_returns_none() {
+        assert_eq!(IsAuthenticated::required_permission(), None);
+    }
+
+    #[test]
+    fn library_view_guard_returns_correct_permission() {
+        assert_eq!(guards::LibraryView::required_permission(), Some(Permission::Library(Library::View)));
+    }
+
+    #[test]
+    fn user_manage_guard_returns_correct_permission() {
+        assert_eq!(guards::UserManage::required_permission(), Some(Permission::User(User::Manage)));
+    }
+}

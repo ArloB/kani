@@ -52,14 +52,16 @@ pub trait MangaExtension {
     ///
     /// # Arguments
     /// * `page` - Page number (1-indexed)
-    fn get_popular_manga(&self, page: i32) -> ExtensionResult<MangaList>;
+    /// * `page_size` - Number of items per page
+    fn get_popular_manga(&self, page: i32, page_size: i32) -> ExtensionResult<MangaList>;
 
     /// Search for manga by query.
     ///
     /// # Arguments
     /// * `query` - Search query string
     /// * `page` - Page number (1-indexed)
-    fn search_manga(&self, query: &str, page: i32) -> ExtensionResult<MangaList>;
+    /// * `page_size` - Number of items per page
+    fn search_manga(&self, query: &str, page: i32, page_size: i32) -> ExtensionResult<MangaList>;
 
     /// Get detailed information about a specific manga.
     ///
@@ -72,7 +74,8 @@ pub trait MangaExtension {
     /// # Arguments
     /// * `manga_id` - The manga's unique identifier
     /// * `page` - Page number (1-indexed)
-    fn get_chapter_list(&self, manga_id: &str, page: i32) -> ExtensionResult<ChapterList>;
+    /// * `page_size` - Number of items per page; `None` uses the source's maximum per call
+    fn get_chapter_list(&self, manga_id: &str, page: i32, page_size: Option<i32>) -> ExtensionResult<ChapterList>;
 
     /// Get page URLs for a chapter for downloading.
     ///

@@ -3,6 +3,7 @@ use crate::pages::components::permission_handlers::PermissionGate;
 use crate::server_fns::{download_chapter, get_recent_updates};
 use crate::types::{LiveChapterStatus, RecentUpdateItem};
 use leptos::prelude::*;
+use leptos_meta::Title;
 use leptos_router::components::A;
 use time::macros::format_description;
 
@@ -32,6 +33,8 @@ fn group_by_manga(updates: Vec<RecentUpdateItem>) -> GroupedUpdates {
 }
 
 fn skeleton_update_list() -> impl IntoView {
+    // Vary label widths per row to look more natural
+    let row_widths = ["55%", "70%", "45%"];
     view! {
         <div class="skeleton-update-list">
             {(0..4).map(|_| view! {
@@ -41,8 +44,15 @@ fn skeleton_update_list() -> impl IntoView {
                         <div class="skeleton-update-group__title"></div>
                     </div>
                     <div class="skeleton-update-group__rows">
-                        {(0..3).map(|_| view! {
-                            <div class="skeleton-row skeleton-row--sm"></div>
+                        {row_widths.iter().map(|w| view! {
+                            <div class="skeleton-update-group__row">
+                                <div
+                                    class="skeleton-row skeleton-row--xs"
+                                    style=format!("flex: 1; max-width: {w}")
+                                ></div>
+                                <div class="skeleton-row skeleton-row--xs" style="width: 72px; flex-shrink: 0"></div>
+                                <div class="skeleton-row skeleton-row--xs" style="width: 28px; flex-shrink: 0; border-radius: var(--radius-sm)"></div>
+                            </div>
                         }).collect::<Vec<_>>()}
                     </div>
                 </div>
@@ -68,6 +78,7 @@ pub fn RecentUpdates() -> impl IntoView {
     let fmt = format_description!("[month repr:short] [day], [year]");
 
     view! {
+        <Title text="Updates - Kani"/>
         <div class="recent-updates-page">
             <div class="page-header">
                 <h1>"Recent Updates"</h1>

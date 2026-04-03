@@ -2,34 +2,71 @@
 
 use axum::{
     Json, Router, Form,
-    body::Body, 
-    extract::{DefaultBodyLimit, Multipart, Path, Query, State}, 
+    body::Body,
+    extract::{DefaultBodyLimit, Multipart, Path, Query, Request, State},
     http::{HeaderMap, StatusCode, header},
     response::{
         IntoResponse,
         Redirect,
         sse::{Event, KeepAlive, Sse},
-    }, 
+    },
     routing::{delete, get, post}
 };
 use axum_login::AuthzBackend;
 use std::marker::PhantomData;
+use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::{convert::Infallible, sync::Arc};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 use futures::TryStreamExt;
 use crate::{
-    auth::{AuthSession, Credentials}, 
-    error::AppError, 
+    auth::{AuthSession, Credentials},
+    error::AppError,
     models::{
-        CreateSource, FetchWasmRequest, Manga, ProxyQuery, 
+        CreateSource, FetchWasmRequest, Manga, ProxyQuery,
         SearchMangaRequest, UpdateSource
     },
     permissions::{AuthRequirement},
-    state::AppState, 
+    state::AppState,
     types::{LoginForm, Source}
 };
 use kani_core::source_manager::SourceManager;
+
+struct ValidatedJson<T>(T);
+
+impl<S, T> axum::extract::FromRequest<S> for ValidatedJson<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned + garde::Validate<Context = ()>,
+{
+    type Rejection = AppError;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let Json(value) = Json::<T>::from_request(req, state)
+            .await
+            .map_err(|e| AppError::ValidationError(e.to_string()))?;
+        value.validate().map_err(|e| AppError::ValidationError(e.to_string()))?;
+        Ok(ValidatedJson(value))
+    }
+}
+
+struct ValidatedQuery<T>(T);
+
+impl<S, T> axum::extract::FromRequestParts<S> for ValidatedQuery<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned + garde::Validate<Context = ()>,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Query(value) = Query::<T>::from_request_parts(parts, state)
+            .await
+            .map_err(|e| AppError::ValidationError(e.to_string()))?;
+        value.validate().map_err(|e| AppError::ValidationError(e.to_string()))?;
+        Ok(ValidatedQuery(value))
+    }
+}
 
 const MAX_WASM_BYTES: usize = 10 * 1024 * 1024;
 
@@ -80,12 +117,12 @@ pub fn routes(state: AppState) -> Router {
         .route("/sources/{id}/wasm", post(upload_wasm))
         .route("/sources/{id}/wasm/fetch", post(fetch_wasm))
         // Source data endpoints
-        .route("/sources/{id}/popular/{page}", get(get_popular_manga))
-        .route("/sources/{id}/search/{page}", get(search_manga))
+        .route("/sources/{id}/popular/{page}/{page_size}", get(get_popular_manga))
+        .route("/sources/{id}/search/{page}/{page_size}", get(search_manga))
         .route("/sources/{id}/details/{manga_id}", get(get_manga_details))
         .route("/sources/{id}/save/{manga_id}", post(save_to_library))
         .route(
-            "/sources/{id}/chapters/{manga_id}/{page}",
+            "/sources/{id}/chapters/{manga_id}/{page}/{page_size}",
             get(get_chapter_list),
         )
         .route(
@@ -156,11 +193,11 @@ fn host_semaphore(
         .clone()
 }
 
-pub async fn image_proxy(
+async fn image_proxy(
     AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<ProxyQuery>,
+    ValidatedQuery(query): ValidatedQuery<ProxyQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let (url, referer) = crate::proxy::unseal_proxy_token(
         &query.token,
@@ -298,7 +335,7 @@ async fn list_sources(
 async fn add_source(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
-    Json(payload): Json<CreateSource>,
+    ValidatedJson(payload): ValidatedJson<CreateSource>,
 ) -> Result<impl IntoResponse, AppError> {
     let result = sqlx::query!(
         "INSERT INTO sources (name, version) VALUES (?, '0.1') RETURNING id",
@@ -323,7 +360,7 @@ async fn update_source(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
-    Json(payload): Json<UpdateSource>,
+    ValidatedJson(payload): ValidatedJson<UpdateSource>,
 ) -> Result<impl IntoResponse, AppError> {
     if payload.name.is_none() && payload.version.is_none() {
         return Ok((StatusCode::OK, Json(json!({}))));
@@ -376,7 +413,7 @@ async fn get_metadata(
     Ok(result)
 }
 
-async fn install_source(
+pub(crate) async fn install_source(
     state: &AppState,
     id: i64,
     current_source: &Source,
@@ -438,17 +475,13 @@ async fn install_source(
 
     let source_manager = SourceManager::new(
         state.wasm_runtime.engine().clone(),
-        component,
-        state.wasm_runtime.linker().clone(),
+        state.wasm_runtime.instantiate_pre(&component).map_err(AppError::CoreError)?,
         state.smart_client.clone(),
         Some(metadata.base_url.clone()),
         metadata.unrestricted_http,
         25,
-        1,
         state.load_pref_map(id).await.unwrap_or_default(),
-    )
-    .await
-    .map_err(AppError::CoreError)?;
+    );
 
     state
         .sources
@@ -513,7 +546,7 @@ async fn fetch_wasm(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
-    Json(payload): Json<FetchWasmRequest>,
+    ValidatedJson(payload): ValidatedJson<FetchWasmRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let source = sqlx::query_as!(
         Source,
@@ -536,19 +569,18 @@ async fn fetch_wasm(
 async fn get_popular_manga(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
-    Path((id, page)): Path<(i64, i32)>,
+    Path((id, page, page_size)): Path<(i64, i32, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.get_popular_manga(id, page).await
+    state.get_popular_manga(id, page, page_size).await
 }
 
 async fn search_manga(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
-    Path((id, page)): Path<(i64, i32)>,
-    Query(payload): Query<SearchMangaRequest>,
+    Path((id, page, page_size)): Path<(i64, i32, i32)>,
+    ValidatedQuery(payload): ValidatedQuery<SearchMangaRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    
-    state.search_manga(id, &payload.query, page).await
+    state.search_manga(id, &payload.query, page, page_size).await
 }
 
 async fn get_manga_details(
@@ -562,9 +594,9 @@ async fn get_manga_details(
 async fn get_chapter_list(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
-    Path((id, manga_id, page)): Path<(i64, String, i32)>,
+    Path((id, manga_id, page, page_size)): Path<(i64, String, i32, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.get_chapter_list_paged(id, &manga_id, page).await
+    state.get_chapter_list_paged(id, &manga_id, page, page_size).await
 }
 
 async fn get_pages(
@@ -779,4 +811,18 @@ pub async fn start_refresh_all_rest(
 ) -> Result<impl IntoResponse, AppError> {
     state.start_refresh_all().await?;
     Ok(StatusCode::ACCEPTED)
+}
+
+pub async fn health() -> impl IntoResponse {
+    (StatusCode::OK, Json(json!({"status": "ok"})))
+}
+
+pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    match sqlx::query("SELECT 1").execute(&state.db).await {
+        Ok(_) => (StatusCode::OK, Json(json!({"status": "ready"}))).into_response(),
+        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            "status": "not_ready",
+            "reason": format!("database: {e}")
+        }))).into_response(),
+    }
 }

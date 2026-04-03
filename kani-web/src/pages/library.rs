@@ -7,6 +7,7 @@ use crate::{
     types::{Category, MangaSortOrder, RefreshState},
 };
 use leptos::prelude::*;
+use leptos_meta::Title;
 use leptos_router::{components::A, hooks::use_query_map};
 
 #[cfg(feature = "ssr")]
@@ -31,8 +32,8 @@ fn sync_filter_from_url(
 
 fn skeleton_library_grid() -> impl IntoView {
     view! {
-        <div class="skeleton-manga-grid">
-            {(0..20).map(|_| view! {
+        <div class="manga-grid manga-grid--large">
+            {(0..24).map(|_| view! {
                 <div class="skeleton-card">
                     <div class="skeleton-card__cover"></div>
                     <div class="skeleton-card__title skeleton-card__title--long"></div>
@@ -56,6 +57,11 @@ pub fn Library() -> impl IntoView {
     let (sort_order, set_sort_order)           = signal(MangaSortOrder::default());
     let (page, set_page)                       = signal(1i32);
 
+    let initial_page_size = crate::utils::get_local_string("kani_library_page_size")
+        .parse::<i32>()
+        .unwrap_or(24);
+    let (page_size, set_page_size) = signal(initial_page_size);
+
     let all_tags       = Resource::new(|| (), |_| get_all_tags());
     let all_authors    = Resource::new(|| (), |_| get_all_authors());
     let all_artists    = Resource::new(|| (), |_| get_all_artists());
@@ -67,6 +73,7 @@ pub fn Library() -> impl IntoView {
     let library = Resource::new(
         move || (
             page.get(),
+            page_size.get(),
             { let s = debounced_search.get(); if s.is_empty() { None } else { Some(s) } },
             status_filter.get(),
             tag_filter.get(),
@@ -76,8 +83,8 @@ pub fn Library() -> impl IntoView {
             sort_order.get(),
             library_invalidation.get(),
         ),
-        move |(p, search, status, tag, author, artist, category, sort, _)| async move {
-            get_library(p, search, status, tag, author, artist, category, sort).await
+        move |(p, ps, search, status, tag, author, artist, category, sort, _)| async move {
+            get_library(p, ps, search, status, tag, author, artist, category, sort).await
         },
     );
 
@@ -95,6 +102,7 @@ pub fn Library() -> impl IntoView {
     let is_running = move || matches!(refresh_state.get(), RefreshState::Running { .. });
 
     view! {
+        <Title text="Library - Kani"/>
         <div class="library-page">
             <div class="library-header">
                 <h1>"My Library"</h1>
@@ -292,6 +300,20 @@ pub fn Library() -> impl IntoView {
                     <option value="name_asc">"Name A-Z"</option>
                     <option value="name_desc">"Name Z-A"</option>
                 </select>
+
+                <select
+                    prop:value=move || page_size.get().to_string()
+                    on:change=move |ev| {
+                        let ps = event_target_value(&ev).parse::<i32>().unwrap_or(24);
+                        crate::utils::set_local_string("kani_library_page_size", &ps.to_string());
+                        set_page_size.set(ps);
+                        set_page.set(1);
+                    }
+                >
+                    <option value="12">"12 per page"</option>
+                    <option value="24">"24 per page"</option>
+                    <option value="48">"48 per page"</option>
+                </select>
             </div>
 
             <div class="page-loading-bar" class:page-loading-bar--active=move || is_pending.get()>
@@ -312,7 +334,7 @@ pub fn Library() -> impl IntoView {
                         let has_next = page_data.has_next_page;
                         view! {
                             <div
-                                class="manga-grid"
+                                class="manga-grid manga-grid--large"
                                 class:content--stale=move || is_pending.get()
                             >
                                 <For

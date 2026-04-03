@@ -105,8 +105,10 @@ pub fn App() -> impl IntoView {
             use crate::events::{DownloadProgressEvent, RefreshProgressEvent};
             use crate::types::LiveChapterStatus;
             use serde::Deserialize;
+            use std::cell::{Cell, RefCell};
+            use std::rc::Rc;
             use wasm_bindgen::prelude::*;
-            use web_sys::{EventSource, MessageEvent};
+            use web_sys::MessageEvent;
 
             #[derive(Deserialize)]
             #[serde(tag = "type", rename_all = "snake_case")]
@@ -127,209 +129,278 @@ pub fn App() -> impl IntoView {
                 Download(DownloadProgressEvent),
             }
 
-            let es = match EventSource::new("/rest/events") {
-                Ok(es) => es,
-                Err(e) => {
-                    log::error!("Failed to open EventSource: {:?}", e);
-                    return;
-                }
-            };
+            let retry_count: Rc<Cell<u32>> = Rc::new(Cell::new(0));
+            // Tracks the active EventSource so reconnects can close the old one first.
+            let es_holder: Rc<RefCell<Option<web_sys::EventSource>>> =
+                Rc::new(RefCell::new(None));
 
-            let es_for_close = es.clone();
-            let on_close_signal =
-                Closure::<dyn FnMut(MessageEvent)>::new(move |_: MessageEvent| {
-                    es_for_close.close();
-                });
-            es.add_event_listener_with_callback(
-                "close",
-                on_close_signal.as_ref().unchecked_ref(),
-            )
-            .ok();
-            on_close_signal.forget();
+            // Late-binding holder for the connect fn, allowing the onerror handler
+            // to schedule a reconnect via a Weak reference (avoids Rc cycle).
+            let connect_holder: Rc<RefCell<Option<Box<dyn Fn()>>>> =
+                Rc::new(RefCell::new(None));
 
+            let retry_for_setup = retry_count.clone();
+            let connect_weak    = Rc::downgrade(&connect_holder);
             let chapters_signal = chapters;
-            let on_message =
-                Closure::<dyn FnMut(MessageEvent)>::new(move |msg: MessageEvent| {
-                    let data = match msg.data().as_string() {
-                        Some(d) => d,
-                        None => return,
-                    };
 
-                    let event: IncomingEvent = match serde_json::from_str(&data) {
-                        Ok(e) => e,
-                        Err(e) => {
-                            log::warn!("Failed to parse SSE event: {e}");
-                            return;
-                        }
-                    };
+            let actual_connect = move || {
+                // Close any existing connection before opening a new one
+                if let Some(old) = es_holder.borrow_mut().take() {
+                    old.close();
+                }
 
-                    match event {
-                        IncomingEvent::StateSnapshot { chapters, is_refreshing } => {
-                            chapters_signal.update(|map| {
-                                map.clear();
-                                for chapter in chapters {
-                                    let id = chapter.chapter_id;
-                                    map.insert(id, chapter.into());
-                                }
-                            });
-                            if is_refreshing {
-                                refresh_state.set(crate::types::RefreshState::Running {
-                                    completed: 0,
-                                    total: 0,
-                                });
+                let es = match web_sys::EventSource::new("/rest/events") {
+                    Ok(es) => es,
+                    Err(e) => {
+                        log::error!("Failed to open EventSource: {:?}", e);
+                        return;
+                    }
+                };
+
+                *es_holder.borrow_mut() = Some(es.clone());
+
+                // onopen: reset retry counter on successful connection
+                let retry_open = retry_for_setup.clone();
+                let onopen = Closure::<dyn FnMut(_)>::new(move |_: web_sys::Event| {
+                    retry_open.set(0);
+                });
+                es.set_onopen(Some(onopen.as_ref().unchecked_ref()));
+                onopen.forget();
+
+                // onerror: schedule reconnect with exponential backoff
+                let retry_err    = retry_for_setup.clone();
+                let connect_err  = connect_weak.clone();
+                let onerror = Closure::<dyn FnMut(_)>::new(move |_: web_sys::Event| {
+                    let count     = retry_err.get();
+                    let delay_ms  = (1000u32 * 2u32.pow(count.min(4))).min(30_000);
+                    retry_err.set(count + 1);
+                    log::info!("SSE disconnected, reconnecting in {}ms (attempt {})", delay_ms, count + 1);
+                    let connect_retry = connect_err.clone();
+                    gloo_timers::callback::Timeout::new(delay_ms, move || {
+                        if let Some(rc) = connect_retry.upgrade() {
+                            if let Some(f) = rc.borrow().as_ref() {
+                                f();
                             }
                         }
+                    })
+                    .forget();
+                });
+                es.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+                onerror.forget();
 
-                        IncomingEvent::NewChapters { manga_id, manga_name, count } => {
-                            scan_notifications.update(|v| {
-                                if let Some(n) =
-                                    v.iter_mut().find(|n| n.manga_id == manga_id)
-                                {
-                                    n.count += count;
-                                } else {
-                                    v.push(ScanNotification {
-                                        manga_id,
-                                        manga_name,
-                                        count,
-                                    });
-                                }
-                            });
-                        }
+                // close event (app-level close signal)
+                let es_for_close = es.clone();
+                let on_close = Closure::<dyn FnMut(MessageEvent)>::new(
+                    move |_: MessageEvent| { es_for_close.close(); },
+                );
+                es.add_event_listener_with_callback(
+                    "close",
+                    on_close.as_ref().unchecked_ref(),
+                )
+                .ok();
+                on_close.forget();
 
-                        IncomingEvent::Refresh(event) => {
-                            use crate::events::RefreshProgressEvent;
-                            match event {
-                                RefreshProgressEvent::Started { total } => {
+                // message handler
+                let on_message =
+                    Closure::<dyn FnMut(MessageEvent)>::new(move |msg: MessageEvent| {
+                        let data = match msg.data().as_string() {
+                            Some(d) => d,
+                            None => return,
+                        };
+                        let event: IncomingEvent = match serde_json::from_str(&data) {
+                            Ok(e) => e,
+                            Err(e) => {
+                                log::warn!("Failed to parse SSE event: {e}");
+                                return;
+                            }
+                        };
+
+                        match event {
+                            IncomingEvent::StateSnapshot { chapters, is_refreshing } => {
+                                chapters_signal.update(|map| {
+                                    map.clear();
+                                    for chapter in chapters {
+                                        let id = chapter.chapter_id;
+                                        map.insert(id, chapter.into());
+                                    }
+                                });
+                                if is_refreshing {
                                     refresh_state.set(crate::types::RefreshState::Running {
                                         completed: 0,
-                                        total,
+                                        total: 0,
                                     });
                                 }
-                                RefreshProgressEvent::MangaRefreshed { completed, total, .. } => {
-                                    refresh_state.set(crate::types::RefreshState::Running { completed, total });
+                            }
+
+                            IncomingEvent::NewChapters { manga_id, manga_name, count } => {
+                                scan_notifications.update(|v| {
+                                    if let Some(n) =
+                                        v.iter_mut().find(|n| n.manga_id == manga_id)
+                                    {
+                                        n.count += count;
+                                    } else {
+                                        v.push(ScanNotification {
+                                            manga_id,
+                                            manga_name,
+                                            count,
+                                        });
+                                    }
+                                });
+                            }
+
+                            IncomingEvent::Refresh(event) => {
+                                use crate::events::RefreshProgressEvent;
+                                match event {
+                                    RefreshProgressEvent::Started { total } => {
+                                        refresh_state.set(crate::types::RefreshState::Running {
+                                            completed: 0,
+                                            total,
+                                        });
+                                    }
+                                    RefreshProgressEvent::MangaRefreshed {
+                                        completed, total, ..
+                                    } => {
+                                        refresh_state.set(crate::types::RefreshState::Running {
+                                            completed,
+                                            total,
+                                        });
+                                    }
+                                    RefreshProgressEvent::Completed { total, failed } => {
+                                        refresh_state
+                                            .set(crate::types::RefreshState::Done { total, failed });
+                                        library_invalidation.update(|n| *n += 1);
+                                        set_timeout(
+                                            move || {
+                                                refresh_state
+                                                    .set(crate::types::RefreshState::Idle)
+                                            },
+                                            std::time::Duration::from_secs(5),
+                                        );
+                                    }
                                 }
-                                RefreshProgressEvent::Completed { total, failed } => {
-                                    refresh_state.set(crate::types::RefreshState::Done { total, failed });
-                                    library_invalidation.update(|n| *n += 1);
+                            }
+
+                            IncomingEvent::Download(download_event) => {
+                                let maybe_dismiss_id = match &download_event {
+                                    DownloadProgressEvent::ChapterCompleted {
+                                        chapter_id, ..
+                                    } => Some(*chapter_id),
+                                    DownloadProgressEvent::ChapterFailed {
+                                        chapter_id, ..
+                                    } => Some(*chapter_id),
+                                    DownloadProgressEvent::ChapterCancelled {
+                                        chapter_id, ..
+                                    } => Some(*chapter_id),
+                                    _ => None,
+                                };
+
+                                chapters_signal.update(|map| match download_event {
+                                    DownloadProgressEvent::ChapterStarted {
+                                        chapter_id,
+                                        chapter_name,
+                                        total_pages,
+                                    } => {
+                                        map.entry(chapter_id)
+                                            .and_modify(|c| {
+                                                if total_pages > 0 {
+                                                    c.total_pages = total_pages;
+                                                }
+                                                if c.name.is_empty() {
+                                                    c.name = chapter_name.clone();
+                                                }
+                                            })
+                                            .or_insert_with(|| crate::types::ChapterProgress {
+                                                id: chapter_id,
+                                                name: chapter_name,
+                                                total_pages,
+                                                completed_pages: 0,
+                                                status: LiveChapterStatus::InProgress,
+                                            });
+                                    }
+                                    DownloadProgressEvent::PageCompleted {
+                                        chapter_id, ..
+                                    } => {
+                                        if let Some(c) = map.get_mut(&chapter_id) {
+                                            c.completed_pages += 1;
+                                        }
+                                    }
+                                    DownloadProgressEvent::ChapterCompleted {
+                                        chapter_id,
+                                        successful_pages,
+                                        ..
+                                    } => {
+                                        if let Some(c) = map.get_mut(&chapter_id) {
+                                            c.completed_pages = successful_pages;
+                                            c.status = LiveChapterStatus::Completed;
+                                        }
+                                    }
+                                    DownloadProgressEvent::ChapterFailed {
+                                        chapter_id,
+                                        error,
+                                        ..
+                                    } => {
+                                        if let Some(c) = map.get_mut(&chapter_id) {
+                                            c.status = LiveChapterStatus::Failed(error);
+                                        }
+                                    }
+                                    DownloadProgressEvent::ChapterCancelled {
+                                        chapter_id, ..
+                                    } => {
+                                        if let Some(c) = map.get_mut(&chapter_id) {
+                                            c.status = LiveChapterStatus::Cancelled;
+                                        }
+                                    }
+                                    DownloadProgressEvent::ChapterDeferred {
+                                        chapter_id,
+                                        reason,
+                                        ..
+                                    } => {
+                                        if let Some(c) = map.get_mut(&chapter_id) {
+                                            c.status = LiveChapterStatus::Failed(reason);
+                                        }
+                                    }
+                                });
+
+                                if let Some(id) = maybe_dismiss_id {
+                                    let s = chapters_signal;
                                     set_timeout(
-                                        move || refresh_state.set(crate::types::RefreshState::Idle),
+                                        move || {
+                                            s.update(|m| {
+                                                if let Some(c) = m.get_mut(&id) {
+                                                    if matches!(
+                                                        c.status,
+                                                        LiveChapterStatus::Completed
+                                                    ) {
+                                                        c.status =
+                                                            LiveChapterStatus::CompletedHidden;
+                                                    } else {
+                                                        m.remove(&id);
+                                                    }
+                                                }
+                                            });
+                                        },
                                         std::time::Duration::from_secs(5),
                                     );
                                 }
                             }
                         }
+                    });
 
-                        IncomingEvent::Download(download_event) => {
-                            let maybe_dismiss_id = match &download_event {
-                                DownloadProgressEvent::ChapterCompleted {
-                                    chapter_id, ..
-                                } => Some(*chapter_id),
-                                DownloadProgressEvent::ChapterFailed {
-                                    chapter_id, ..
-                                } => Some(*chapter_id),
-                                DownloadProgressEvent::ChapterCancelled {
-                                    chapter_id, ..
-                                } => Some(*chapter_id),
-                                _ => None,
-                            };
+                es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+                on_message.forget();
+            };
 
-                            chapters_signal.update(|map| match download_event {
-                                DownloadProgressEvent::ChapterStarted {
-                                    chapter_id,
-                                    chapter_name,
-                                    total_pages,
-                                } => {
-                                    map.entry(chapter_id)
-                                        .and_modify(|c| {
-                                            if total_pages > 0 {
-                                                c.total_pages = total_pages;
-                                            }
-                                            if c.name.is_empty() {
-                                                c.name = chapter_name.clone();
-                                            }
-                                        })
-                                        .or_insert_with(|| crate::types::ChapterProgress {
-                                            id: chapter_id,
-                                            name: chapter_name,
-                                            total_pages,
-                                            completed_pages: 0,
-                                            status: LiveChapterStatus::InProgress,
-                                        });
-                                }
-                                DownloadProgressEvent::PageCompleted {
-                                    chapter_id, ..
-                                } => {
-                                    if let Some(c) = map.get_mut(&chapter_id) {
-                                        c.completed_pages += 1;
-                                    }
-                                }
-                                DownloadProgressEvent::ChapterCompleted {
-                                    chapter_id,
-                                    successful_pages,
-                                    ..
-                                } => {
-                                    if let Some(c) = map.get_mut(&chapter_id) {
-                                        c.completed_pages = successful_pages;
-                                        c.status = LiveChapterStatus::Completed;
-                                    }
-                                }
-                                DownloadProgressEvent::ChapterFailed {
-                                    chapter_id,
-                                    error,
-                                    ..
-                                } => {
-                                    if let Some(c) = map.get_mut(&chapter_id) {
-                                        c.status = LiveChapterStatus::Failed(error);
-                                    }
-                                }
-                                DownloadProgressEvent::ChapterCancelled {
-                                    chapter_id, ..
-                                } => {
-                                    if let Some(c) = map.get_mut(&chapter_id) {
-                                        c.status = LiveChapterStatus::Cancelled;
-                                    }
-                                }
-                                DownloadProgressEvent::ChapterDeferred { chapter_id, reason, .. } => {
-                                    if let Some(c) = map.get_mut(&chapter_id) {
-                                        c.status = LiveChapterStatus::Failed(reason);
-                                    }
-                                }
-                            });
+            *connect_holder.borrow_mut() = Some(Box::new(actual_connect));
 
-                            if let Some(id) = maybe_dismiss_id {
-                                let s = chapters_signal;
-                                set_timeout(
-                                    move || {
-                                        s.update(|m| {
-                                            if let Some(c) = m.get_mut(&id) {
-                                                if matches!(
-                                                    c.status,
-                                                    LiveChapterStatus::Completed
-                                                ) {
-                                                    c.status =
-                                                        LiveChapterStatus::CompletedHidden;
-                                                } else {
-                                                    m.remove(&id);
-                                                }
-                                            }
-                                        });
-                                    },
-                                    std::time::Duration::from_secs(5),
-                                );
-                            }
-                        }
-                    }
-                });
+            // Initial connection
+            if let Some(f) = connect_holder.borrow().as_ref() {
+                f();
+            }
 
-            es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-            on_message.forget();
-
-            let es_clone = es.clone();
-            on_cleanup(move || {
-                es_clone.close();
-            });
-
-            drop(es);
+            // App is the root component and lives for the entire browser session.
+            // Keep connect_holder alive so that Weak refs inside onerror handlers
+            // can upgrade and trigger reconnects. Intentional leak.
+            std::mem::forget(connect_holder);
         }
     });
 

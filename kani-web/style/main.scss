@@ -213,6 +213,10 @@ main.container {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-w), 1fr));
   gap: var(--sp-5);
+
+  &--large {
+    --grid-min-w: 180px;
+  }
 }
 
 .manga-card {
@@ -342,6 +346,10 @@ main.container {
   align-items: center;
   gap: var(--sp-2);
   margin-bottom: var(--sp-6);
+
+  &__page-size {
+    margin-left: auto;
+  }
 }
 
 .chip {
@@ -1037,31 +1045,47 @@ main.container:has(.manga-details) {
 }
 
 .auto-download-toggle {
+  margin-top: var(--sp-3);
+}
+
+.scan-result {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
   font-size: var(--text-sm);
-  color: var(--clr-text-muted);
+  font-weight: 500;
+  border: 1px solid transparent;
 
-  input[type="checkbox"] {
-    accent-color: var(--clr-accent);
-    width: 15px;
-    height: 15px;
-    cursor: pointer;
+  &--success {
+    background: color-mix(in srgb, var(--clr-success) 12%, transparent);
+    border-color: color-mix(in srgb, var(--clr-success) 35%, transparent);
+    color: var(--clr-success);
   }
 
-  label {
-    cursor: pointer;
+  &--info {
+    background: color-mix(in srgb, var(--clr-text-muted) 8%, transparent);
+    border-color: var(--clr-border);
+    color: var(--clr-text-muted);
   }
-}
 
-.scan-message {
-  display: inline-block;
-  margin-left: var(--sp-3);
-  font-size: var(--text-sm);
-  font-weight: 700;
-  color: var(--clr-success);
+  &--error {
+    background: color-mix(in srgb, var(--clr-danger) 12%, transparent);
+    border-color: color-mix(in srgb, var(--clr-danger) 35%, transparent);
+    color: var(--clr-danger);
+  }
+
+  &__icon {
+    font-size: var(--text-base);
+    font-style: normal;
+    flex-shrink: 0;
+  }
+
+  &__text {
+    line-height: 1.3;
+  }
 }
 
 // ── Chapter list ──────────────────────────────────────────────
@@ -1095,6 +1119,13 @@ main.container:has(.manga-details) {
     flex-shrink: 0;
     min-width: 160px;
   }
+}
+
+.chapter-list-header__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
 }
 
 .chapter-list {
@@ -1762,6 +1793,62 @@ main.container:has(.manga-details) {
     cursor: pointer;
   }
 }
+
+// ── Kani custom toggle switch ─────────────────────────────────────────────
+
+.kani-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--clr-text-muted);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+.kani-toggle__input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.kani-toggle__track {
+  display: block;
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--clr-surface-3);
+  border: 1px solid var(--clr-border);
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--clr-text-muted);
+    transition: transform 0.2s, background 0.2s;
+  }
+}
+
+.kani-toggle__input:checked ~ .kani-toggle__track {
+  background: var(--clr-accent-dim);
+  border-color: var(--clr-accent);
+
+  &::after {
+    transform: translateX(16px);
+    background: var(--clr-accent);
+  }
+}
+
+// ── End kani-toggle ───────────────────────────────────────────────────────
 
 .settings-save-row {
   display: flex;
@@ -2976,6 +3063,151 @@ main.container:has(.manga-details) {
   }
 }
 
+// Source status badge
+.source-status-badge {
+  font-size: var(--text-xs);
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-full);
+  font-weight: 600;
+
+  &--active {
+    background: rgba(72, 187, 120, 0.15);
+    color: var(--clr-success);
+    border: 1px solid rgba(72, 187, 120, 0.3);
+  }
+
+  &--inactive {
+    background: rgba(160, 160, 160, 0.12);
+    color: var(--clr-text-muted);
+    border: 1px solid rgba(160, 160, 160, 0.2);
+  }
+}
+
+// Source install & delete action buttons
+.source-settings-card__install-btn,
+.source-settings-card__delete-btn {
+  @extend %btn-ghost;
+  font-size: var(--text-sm);
+  padding: var(--sp-1) var(--sp-2);
+  min-width: unset;
+}
+
+.source-settings-card__delete-btn {
+  color: var(--clr-danger);
+  border-color: transparent;
+
+  &:hover {
+    border-color: var(--clr-danger);
+    background: rgba(239, 68, 68, 0.08);
+  }
+}
+
+// WASM install panel
+.source-install-panel {
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--clr-border);
+  background: var(--clr-surface-1);
+}
+
+.source-install-panel__row {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.source-install-panel__url {
+  flex: 1;
+  font-size: var(--text-xs);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--clr-surface-2);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-sm);
+  color: var(--clr-text);
+
+  &:focus { outline: 1px solid var(--clr-accent); }
+}
+
+.source-install-panel__fetch-btn {
+  @extend %btn-primary;
+  font-size: var(--text-xs);
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.source-install-panel__error {
+  margin-top: var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--clr-danger);
+}
+
+.source-install-panel__success {
+  margin-top: var(--sp-1);
+  font-size: var(--text-xs);
+  color: var(--clr-success);
+}
+
+// Source delete confirmation
+.source-delete-confirm {
+  @extend .source-unsafe-confirm;
+}
+
+.source-delete-confirm__text {
+  @extend .source-unsafe-confirm__text;
+  color: var(--clr-danger);
+}
+
+.source-delete-confirm__actions {
+  @extend .source-unsafe-confirm__actions;
+}
+
+.source-delete-confirm__cancel {
+  @extend .source-unsafe-confirm__cancel;
+}
+
+.source-delete-confirm__accept {
+  @extend %btn-ghost;
+  font-size: var(--text-xs);
+  padding: var(--sp-1) var(--sp-3);
+  border-color: var(--clr-danger);
+  color: var(--clr-danger);
+
+  &:hover {
+    background: rgba(239, 68, 68, 0.08);
+  }
+}
+
+// Add source row in settings
+.source-add-row {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--clr-border);
+}
+
+.source-add-row__input {
+  flex: 1;
+  font-size: var(--text-sm);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--clr-surface-2);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-sm);
+  color: var(--clr-text);
+
+  &:focus { outline: 1px solid var(--clr-accent); }
+}
+
+.source-add-row__btn {
+  @extend %btn-primary;
+  font-size: var(--text-sm);
+  padding: var(--sp-1) var(--sp-3);
+  white-space: nowrap;
+}
+
+.source-add-row__error {
+  font-size: var(--text-xs);
+  color: var(--clr-danger);
+  margin-top: var(--sp-1);
+}
+
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -3015,12 +3247,6 @@ main.container:has(.manga-details) {
 }
 
 // ── Skeleton card — used wherever manga grid cards appear ─────────────────
-
-.skeleton-manga-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--grid-min-w), 1fr));
-  gap: var(--sp-5);
-}
 
 .skeleton-card {
   display: flex;
@@ -3076,13 +3302,13 @@ main.container:has(.manga-details) {
   padding: var(--sp-5);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
   background: var(--clr-surface);
   border: 1px solid var(--clr-border);
 
-  &__name  { height: 1rem;   width: 55%; border-radius: var(--radius-sm); @extend %skeleton-base; }
-  &__meta  { height: 0.72rem; width: 35%; border-radius: var(--radius-sm); @extend %skeleton-base; }
-  &__btn   { height: 2rem;   width: 80px; border-radius: var(--radius-sm); margin-top: auto; @extend %skeleton-base; }
+  &__name  { height: 1rem;    width: 55%; border-radius: var(--radius-sm); @extend %skeleton-base; }
+  &__meta  { height: 0.75rem; width: 35%; border-radius: var(--radius-sm); @extend %skeleton-base; }
+  &__btn   { height: 2rem;    width: 80px; border-radius: var(--radius-sm); margin-top: auto; @extend %skeleton-base; }
 }
 
 // ── Skeleton update group ─────────────────────────────────────────────────
@@ -3129,10 +3355,15 @@ main.container:has(.manga-details) {
   }
 
   &__row {
-    height: 2.25rem;
-    margin: var(--sp-2) var(--sp-4);
-    border-radius: var(--radius-sm);
-    @extend %skeleton-base;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-4);
+    border-bottom: 1px solid var(--clr-border-subtle);
+
+    &:last-child {
+      border-bottom: none;
+    }
   }
 }
 

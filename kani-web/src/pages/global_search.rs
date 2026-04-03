@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use leptos_meta::Title;
 
 use crate::{
     pages::components::{
@@ -38,6 +39,11 @@ pub fn GlobalSearch() -> impl IntoView {
     let (page, set_page)           = signal(1i32);
     let (scope, set_scope)         = signal(SearchScope::AllEnabled);
 
+    let initial_page_size = crate::utils::get_local_string("kani_search_page_size")
+        .parse::<i32>()
+        .unwrap_or(24);
+    let (page_size, set_page_size) = signal(initial_page_size);
+
     let committed_query = crate::utils::use_debounced_signal(raw_input, 600);
 
     Effect::new(move |prev: Option<String>| {
@@ -51,18 +57,22 @@ pub fn GlobalSearch() -> impl IntoView {
     let sources = Resource::new(|| (), |_| fetch_sources());
 
     let search_results = Resource::new(
-        move || (committed_query.get(), scope.get(), page.get()),
-        move |(q, scope, p)| async move {
+        move || (committed_query.get(), scope.get(), page.get(), page_size.get()),
+        move |(q, scope, p, ps)| async move {
             if q.is_empty() {
                 return Ok(vec![]);
             }
-            global_search(q, scope, p).await
+            global_search(q, scope, p, ps).await
         },
     );
 
     let (is_pending, set_pending) = signal(false);
 
     view! {
+      <Title text=move || {
+          let q = committed_query.get();
+          if q.is_empty() { "Search - Kani".into() } else { format!("{q} - Search - Kani") }
+      }/>
       <RequirePermission permission="source:browse">
         <div class="global-search-page">
             <div class="search-bar">
@@ -144,6 +154,21 @@ pub fn GlobalSearch() -> impl IntoView {
                         }
                     })}
                 </Suspense>
+
+                <select
+                    class="source-filters__page-size"
+                    prop:value=move || page_size.get().to_string()
+                    on:change=move |ev| {
+                        let ps = event_target_value(&ev).parse::<i32>().unwrap_or(24);
+                        crate::utils::set_local_string("kani_search_page_size", &ps.to_string());
+                        set_page_size.set(ps);
+                        set_page.set(1);
+                    }
+                >
+                    <option value="12">"12 per page"</option>
+                    <option value="24">"24 per page"</option>
+                    <option value="48">"48 per page"</option>
+                </select>
             </div>
 
             <div class="page-loading-bar" class:page-loading-bar--active=move || is_pending.get()>

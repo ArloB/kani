@@ -40,6 +40,95 @@ pub async fn fetch_sources() -> Result<Vec<Source>, ServerFnError> {
         .map_err(to_server_err)
 }
 
+#[server]
+pub async fn create_source(name: String) -> Result<i64, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceInstall>().await?;
+
+    if name.is_empty() || name.len() > 100 {
+        return Err(ServerFnError::new("Source name must be between 1 and 100 characters"));
+    }
+
+    let state = expect_context::<crate::state::AppState>();
+    let result = sqlx::query!(
+        "INSERT INTO sources (name, version) VALUES (?, '0.1') RETURNING id",
+        name
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(to_server_err)?;
+
+    Ok(result.id)
+}
+
+#[server]
+pub async fn delete_source(source_id: i64) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceDelete>().await?;
+
+    let state = expect_context::<crate::state::AppState>();
+
+    let result = sqlx::query!("DELETE FROM sources WHERE id = ? RETURNING name", source_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(to_server_err)?;
+
+    if let Some(row) = result {
+        let settings = state.settings.read().await;
+        if let Some(path_str) = settings.wasm_storage_path.to_str() {
+            let _ = kani_core::file_storage::delete_wasm_file(path_str, &row.name).await;
+        }
+        drop(settings);
+
+        state.sources.write().await.remove(&source_id);
+        state.cache.invalidate_source(source_id);
+    }
+
+    Ok(())
+}
+
+#[server]
+pub async fn fetch_wasm_url(source_id: i64, url: String) -> Result<(), ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceInstall>().await?;
+
+    if !url.starts_with("https://") {
+        return Err(ServerFnError::new("URL must use HTTPS scheme"));
+    }
+
+    let state = expect_context::<crate::state::AppState>();
+
+    let source = sqlx::query_as!(
+        crate::types::Source,
+        "SELECT * FROM sources WHERE id = ?",
+        source_id
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(to_server_err)?
+    .ok_or_else(|| ServerFnError::new(format!("Source {source_id} not found")))?;
+
+    const MAX_WASM_BYTES: usize = 10 * 1024 * 1024;
+    let response = state.proxy_client.safe_get(&url, None)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    let bytes = response.bytes_limited(MAX_WASM_BYTES)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    crate::rest::install_source(&state, source_id, &source, &bytes)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+
+    Ok(())
+}
+
+#[server]
+pub async fn get_active_source_ids() -> Result<Vec<i64>, ServerFnError> {
+    require_permission::<crate::permissions::guards::SourceBrowse>().await?;
+
+    let state = expect_context::<crate::state::AppState>();
+    let sources = state.sources.read().await;
+    Ok(sources.keys().copied().collect())
+}
+
 #[cfg(feature = "ssr")]
 async fn get_source_base_url(db: &sqlx::SqlitePool, source_id: i64) -> Result<String, ServerFnError> {
     let base_url = {
@@ -53,14 +142,14 @@ async fn get_source_base_url(db: &sqlx::SqlitePool, source_id: i64) -> Result<St
 }
 
 #[server]
-pub async fn get_popular_manga(source_id: i64, page: i32) -> Result<MangaList, ServerFnError> {
+pub async fn get_popular_manga(source_id: i64, page: i32, page_size: i32) -> Result<MangaList, ServerFnError> {
     require_permission::<crate::permissions::guards::SourceBrowse>().await?;
 
     let state = expect_context::<crate::state::AppState>();
     let base_url = get_source_base_url(&state.db, source_id).await?;
 
     let json = state
-        .get_popular_manga(source_id, page)
+        .get_popular_manga(source_id, page, page_size)
         .await
         .map_err(to_server_err)?;
     let mut list: MangaList = serde_json::from_str(&json).map_err(to_server_err)?;
@@ -79,6 +168,7 @@ pub async fn search_manga(
     source_id: i64,
     query: String,
     page: i32,
+    page_size: i32,
 ) -> Result<MangaList, ServerFnError> {
     require_permission::<crate::permissions::guards::SourceBrowse>().await?;
 
@@ -86,7 +176,7 @@ pub async fn search_manga(
     let base_url = get_source_base_url(&state.db, source_id).await?;
 
     let json = state
-        .search_manga(source_id, &query, page)
+        .search_manga(source_id, &query, page, page_size)
         .await
         .map_err(to_server_err)?;
     let mut list: MangaList = serde_json::from_str(&json).map_err(to_server_err)?;
@@ -127,12 +217,13 @@ pub async fn get_chapter_list(
     source_id: i64,
     manga_id: String,
     page: i32,
+    page_size: i32,
 ) -> Result<ChapterList, ServerFnError> {
     require_permission::<crate::permissions::guards::SourceBrowse>().await?;
 
     let state = expect_context::<crate::state::AppState>();
     let json = state
-        .get_chapter_list_paged(source_id, &manga_id, page)
+        .get_chapter_list_paged(source_id, &manga_id, page, page_size)
         .await
         .map_err(to_server_err)?;
     serde_json::from_str(&json).map_err(to_server_err)
@@ -414,7 +505,8 @@ pub async fn delete_manga(id: i64) -> Result<(), ServerFnError> {
 
 #[server]
 pub async fn get_library(
-    page: i32, 
+    page: i32,
+    page_size: i32,
     search: Option<String>,
     status_filter: Option<i64>,
     tag_filter: Option<i64>,
@@ -427,9 +519,7 @@ pub async fn get_library(
 
     let state = expect_context::<crate::state::AppState>();
 
-    const PAGE_SIZE: i32 = 20;
-
-    let offset = (page - 1).max(0) * PAGE_SIZE;
+    let offset = (page - 1).max(0) * page_size;
 
     let mut qb = sqlx::QueryBuilder::new(
         "SELECT m.id, m.name, m.cover_url, m.local_cover_path, s.base_url
@@ -473,7 +563,7 @@ pub async fn get_library(
         qb.push(")");
     }
 
-    qb.push(format!(" ORDER BY {} LIMIT {} OFFSET ", sort_by.to_sql_order(), PAGE_SIZE + 1));
+    qb.push(format!(" ORDER BY {} LIMIT {} OFFSET ", sort_by.to_sql_order(), page_size + 1));
     qb.push_bind(offset);
 
     let mut records = qb
@@ -482,8 +572,8 @@ pub async fn get_library(
         .await
         .map_err(to_server_err)?;
 
-    let has_next_page = records.len() == PAGE_SIZE as usize + 1;
-    records.truncate(PAGE_SIZE as usize);
+    let has_next_page = records.len() == page_size as usize + 1;
+    records.truncate(page_size as usize);
 
     let items = records.into_iter().map(|r| {
         let cover_url = if r.local_cover_path.is_some() {
@@ -610,13 +700,14 @@ pub async fn global_search(
     query: String,
     scope: crate::types::SearchScope,
     page: i32,
+    page_size: i32,
 ) -> Result<Vec<GlobalSearchResult>, ServerFnError> {
     require_permission::<crate::permissions::guards::SourceBrowse>().await?;
 
     let state = expect_context::<crate::state::AppState>();
 
     let mut list = state
-        .global_search(&query, scope, page)
+        .global_search(&query, scope, page, page_size)
         .await
         .map_err(to_server_err)?;
 
@@ -1253,7 +1344,8 @@ pub async fn append_preference_list_item(
         list.push(item);
     }
 
-    let encoded = serde_json::to_string(&list).unwrap();
+    let encoded = serde_json::to_string(&list)
+        .map_err(|e| ServerFnError::new(format!("Serialization error: {e}")))?;
     state.set_preference(source_id, &key, &encoded).await.map_err(to_server_err)
 }
 
@@ -1275,7 +1367,8 @@ pub async fn remove_preference_list_item(
 
     list.retain(|x| x != &item);
 
-    let encoded = serde_json::to_string(&list).unwrap();
+    let encoded = serde_json::to_string(&list)
+        .map_err(|e| ServerFnError::new(format!("Serialization error: {e}")))?;
     state.set_preference(source_id, &key, &encoded).await.map_err(to_server_err)
 }
 
@@ -1303,7 +1396,8 @@ pub async fn toggle_preference_select_item(
         list.retain(|x| x != &item);
     }
 
-    let encoded = serde_json::to_string(&list).unwrap();
+    let encoded = serde_json::to_string(&list)
+        .map_err(|e| ServerFnError::new(format!("Serialization error: {e}")))?;
     state.set_preference(source_id, &key, &encoded).await.map_err(to_server_err)
 }
 

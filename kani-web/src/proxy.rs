@@ -108,3 +108,173 @@ pub fn make_proxy_url(url: &str, referer: &str, secret: &[u8; 32]) -> String {
     let token = seal_proxy_token(url, referer, secret);
     format!("/rest/image_proxy?token={}", token)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    fn secret() -> [u8; 32] { [0xABu8; 32] }
+    fn other_secret() -> [u8; 32] { [0xCDu8; 32] }
+
+    #[test]
+    fn roundtrip_basic() {
+        let s = secret();
+        let token = seal_proxy_token("https://img.example.com/a.jpg", "https://example.com", &s);
+        assert_eq!(
+            unseal_proxy_token(&token, &s),
+            Some(("https://img.example.com/a.jpg".into(), "https://example.com".into()))
+        );
+    }
+
+    #[test]
+    fn roundtrip_empty_referer() {
+        let s = secret();
+        let token = seal_proxy_token("https://img.example.com/a.jpg", "", &s);
+        assert_eq!(
+            unseal_proxy_token(&token, &s),
+            Some(("https://img.example.com/a.jpg".into(), "".into()))
+        );
+    }
+
+    #[test]
+    fn roundtrip_special_chars_in_url() {
+        let s = secret();
+        let url = "https://cdn.example.com/path?size=800&quality=90";
+        let referer = "https://example.com/manga/chapter/1";
+        let token = seal_proxy_token(url, referer, &s);
+        assert_eq!(unseal_proxy_token(&token, &s), Some((url.into(), referer.into())));
+    }
+
+    #[test]
+    fn roundtrip_unicode_in_url() {
+        let s = secret();
+        let url = "https://example.com/\u{753b}\u{50cf}/test.jpg";
+        let referer = "https://example.com/\u{6f2b}\u{753b}/1";
+        let token = seal_proxy_token(url, referer, &s);
+        assert_eq!(unseal_proxy_token(&token, &s), Some((url.into(), referer.into())));
+    }
+
+    #[test]
+    fn roundtrip_pipe_in_referer() {
+        let s = secret();
+        let url = "https://cdn.example.com/img.jpg";
+        let referer = "https://example.com/page|with|pipes";
+        let token = seal_proxy_token(url, referer, &s);
+        assert_eq!(unseal_proxy_token(&token, &s), Some((url.into(), referer.into())));
+    }
+
+    #[test]
+    fn wrong_secret_returns_none() {
+        let token = seal_proxy_token("https://img.example.com/a.jpg", "ref", &secret());
+        assert_eq!(unseal_proxy_token(&token, &other_secret()), None);
+    }
+
+    #[test]
+    fn different_secrets_produce_different_tokens() {
+        let url = "https://img.example.com/a.jpg";
+        let t1 = seal_proxy_token(url, "ref", &secret());
+        let t2 = seal_proxy_token(url, "ref", &other_secret());
+        assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn empty_token_returns_none() {
+        assert_eq!(unseal_proxy_token("", &secret()), None);
+    }
+
+    #[test]
+    fn garbage_token_returns_none() {
+        assert_eq!(unseal_proxy_token("not-a-real-token!!", &secret()), None);
+    }
+
+    #[test]
+    fn truncated_token_returns_none() {
+        let token = seal_proxy_token("https://img.example.com/a.jpg", "ref", &secret());
+        let truncated = &token[..token.len() / 2];
+        assert_eq!(unseal_proxy_token(truncated, &secret()), None);
+    }
+
+    #[test]
+    fn modified_ciphertext_returns_none() {
+        let s = secret();
+        let token = seal_proxy_token("https://img.example.com/a.jpg", "ref", &s);
+        let mut raw = URL_SAFE_NO_PAD.decode(&token).unwrap();
+        let last = raw.len() - 1;
+        raw[last] ^= 0xFF;
+        let bad_token = URL_SAFE_NO_PAD.encode(&raw);
+        assert_eq!(unseal_proxy_token(&bad_token, &s), None);
+    }
+
+    #[test]
+    fn modified_nonce_returns_none() {
+        let s = secret();
+        let token = seal_proxy_token("https://img.example.com/a.jpg", "ref", &s);
+        let mut raw = URL_SAFE_NO_PAD.decode(&token).unwrap();
+        raw[0] ^= 0xFF;
+        let bad_token = URL_SAFE_NO_PAD.encode(&raw);
+        assert_eq!(unseal_proxy_token(&bad_token, &s), None);
+    }
+
+    #[test]
+    fn token_contains_only_base64url_chars() {
+        let token = seal_proxy_token("https://img.example.com/a.jpg", "ref", &secret());
+        assert!(token.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn fresh_token_is_valid() {
+        let s = secret();
+        let token = seal_proxy_token("https://img.example.com/a.jpg", "ref", &s);
+        assert!(unseal_proxy_token(&token, &s).is_some());
+    }
+
+    #[test]
+    fn seal_empty_url() {
+        let s = secret();
+        let token = seal_proxy_token("", "ref", &s);
+        let result = unseal_proxy_token(&token, &s);
+        assert_eq!(result, Some(("".into(), "ref".into())));
+    }
+
+    #[test]
+    fn seal_long_url() {
+        let s = secret();
+        let url = format!("https://example.com/{}", "a".repeat(1000));
+        let token = seal_proxy_token(&url, "ref", &s);
+        assert_eq!(unseal_proxy_token(&token, &s), Some((url, "ref".into())));
+    }
+
+    #[test]
+    fn etag_is_deterministic() {
+        let s = secret();
+        let e1 = compute_etag("https://img.example.com/a.jpg", "ref", &s);
+        let e2 = compute_etag("https://img.example.com/a.jpg", "ref", &s);
+        assert_eq!(e1, e2);
+    }
+
+    #[test]
+    fn etag_differs_by_url() {
+        let s = secret();
+        let e1 = compute_etag("https://img1.example.com/a.jpg", "ref", &s);
+        let e2 = compute_etag("https://img2.example.com/b.jpg", "ref", &s);
+        assert_ne!(e1, e2);
+    }
+
+    #[test]
+    fn etag_differs_by_referer() {
+        let s = secret();
+        let e1 = compute_etag("https://img.example.com/a.jpg", "ref1", &s);
+        let e2 = compute_etag("https://img.example.com/a.jpg", "ref2", &s);
+        assert_ne!(e1, e2);
+    }
+
+    #[test]
+    fn etag_is_quoted_hex() {
+        let etag = compute_etag("https://img.example.com/a.jpg", "ref", &secret());
+        assert!(etag.starts_with('"') && etag.ends_with('"'));
+        let inner = &etag[1..etag.len() - 1];
+        assert!(!inner.is_empty());
+        assert!(inner.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+}

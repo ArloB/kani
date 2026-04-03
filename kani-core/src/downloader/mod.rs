@@ -421,29 +421,33 @@ impl DownloaderManager {
         initial_retry_delay_ms: i64,
     ) {
         loop {
-            let queue_permit = queue_semaphore
-                .clone()
-                .acquire_owned()
-                .await
-                .expect("queue semaphore closed");
+            let queue_permit = match queue_semaphore.clone().acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => {
+                    tracing::warn!("Download queue semaphore closed, shutting down worker");
+                    break;
+                }
+            };
             queue_permit.forget();
 
             let (task, cancel_rx) = {
                 let mut state = queue_state.lock().await;
-                let task = state
-                    .queue
-                    .pop_front()
-                    .expect("semaphore guarantees an item exists");
+                let Some(task) = state.queue.pop_front() else {
+                    tracing::warn!("Download queue empty after semaphore acquire, skipping");
+                    continue;
+                };
                 let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
                 state.active_tasks.insert(task.task.chapter_id, cancel_tx);
                 (task, cancel_rx)
             };
 
-            let concurrency_permit = chapter_limiter
-                .clone()
-                .acquire_owned()
-                .await
-                .expect("chapter limiter closed");
+            let concurrency_permit = match chapter_limiter.clone().acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => {
+                    tracing::warn!("Chapter limiter semaphore closed, shutting down worker");
+                    break;
+                }
+            };
 
             let client = client_global.clone();
             let tx = progress_tx.clone();
@@ -549,18 +553,6 @@ impl DownloaderManager {
         let chapter_generated = tokio::select! {
             res = fetch_fut => match res {
                 Ok(pages) => Some(pages),
-                Err(crate::error::Error::PoolExhausted) => {
-                    tracing::warn!("Chapter '{}' download deferred: WASM pool exhausted", name);
-                    Self::send_event(
-                        &progress_tx,
-                        DownloadProgressEvent::ChapterDeferred {
-                            chapter_id,
-                            chapter_name: name.clone(),
-                            reason: "Server busy — please retry download".to_string(),
-                        },
-                    );
-                    return Ok(());
-                }
                 Err(e) => {
                     tracing::error!("Failed to get pages: {}", e);
                     Self::send_event(
