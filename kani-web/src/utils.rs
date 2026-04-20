@@ -10,10 +10,23 @@ pub fn decode_manga_id(encoded: &str) -> String {
         .unwrap_or_else(|| encoded.to_string())
 }
 
+pub fn render_description(raw: &str) -> String {
+    use pulldown_cmark::{html, Options, Parser};
+
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+
+    let parser = Parser::new_ext(raw, opts);
+    let mut html_output = String::with_capacity(raw.len() * 2);
+    html::push_html(&mut html_output, parser);
+
+    ammonia::clean(&html_output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
     fn encode(s: &str) -> String {
         URL_SAFE_NO_PAD.encode(s.as_bytes())

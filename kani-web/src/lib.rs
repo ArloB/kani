@@ -1,8 +1,6 @@
 pub mod auth;
 pub mod cache;
 pub mod error;
-pub mod events;
-pub mod markdown;
 pub mod models;
 pub mod permissions;
 pub mod proxy;

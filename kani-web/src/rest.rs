@@ -826,7 +826,7 @@ async fn get_manga_details(
     info.description_html = info
         .description
         .as_deref()
-        .map(crate::markdown::render_description);
+        .map(crate::utils::render_description);
     Ok(Json(info))
 }
 
@@ -1072,7 +1072,7 @@ async fn get_local_manga_details(
         .manga
         .description
         .as_ref()
-        .map(|s| crate::markdown::render_description(s));
+        .map(|s| crate::utils::render_description(s));
     let cover_url = if d.manga.local_cover_path.is_some() {
         Some(format!("/rest/manga/{}/cover", id))
     } else {
