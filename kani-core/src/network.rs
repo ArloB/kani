@@ -103,42 +103,70 @@ impl Resolve for ValidatingResolver {
 mod tests {
     use super::*;
 
-    fn ip4(s: &str) -> IpAddr { s.parse().unwrap() }
-    fn ip6(s: &str) -> IpAddr { s.parse().unwrap() }
+    fn ip4(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+    fn ip6(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
 
     #[test]
-    fn loopback_ipv4_is_forbidden() { assert!(is_forbidden_ip(ip4("127.0.0.1"))); }
+    fn loopback_ipv4_is_forbidden() {
+        assert!(is_forbidden_ip(ip4("127.0.0.1")));
+    }
 
     #[test]
-    fn private_class_a_is_forbidden() { assert!(is_forbidden_ip(ip4("10.0.0.1"))); }
+    fn private_class_a_is_forbidden() {
+        assert!(is_forbidden_ip(ip4("10.0.0.1")));
+    }
 
     #[test]
-    fn private_class_b_is_forbidden() { assert!(is_forbidden_ip(ip4("172.16.0.1"))); }
+    fn private_class_b_is_forbidden() {
+        assert!(is_forbidden_ip(ip4("172.16.0.1")));
+    }
 
     #[test]
-    fn private_class_c_is_forbidden() { assert!(is_forbidden_ip(ip4("192.168.1.1"))); }
+    fn private_class_c_is_forbidden() {
+        assert!(is_forbidden_ip(ip4("192.168.1.1")));
+    }
 
     #[test]
-    fn link_local_is_forbidden() { assert!(is_forbidden_ip(ip4("169.254.1.1"))); }
+    fn link_local_is_forbidden() {
+        assert!(is_forbidden_ip(ip4("169.254.1.1")));
+    }
 
     #[test]
-    fn cgnat_is_forbidden() { assert!(is_forbidden_ip(ip4("100.64.0.1"))); }
+    fn cgnat_is_forbidden() {
+        assert!(is_forbidden_ip(ip4("100.64.0.1")));
+    }
 
     #[test]
-    fn reserved_range_is_forbidden() { assert!(is_forbidden_ip(ip4("240.0.0.1"))); }
+    fn reserved_range_is_forbidden() {
+        assert!(is_forbidden_ip(ip4("240.0.0.1")));
+    }
 
     #[test]
-    fn broadcast_is_forbidden() { assert!(is_forbidden_ip(ip4("255.255.255.255"))); }
+    fn broadcast_is_forbidden() {
+        assert!(is_forbidden_ip(ip4("255.255.255.255")));
+    }
 
     #[test]
-    fn ipv6_loopback_is_forbidden() { assert!(is_forbidden_ip(ip6("::1"))); }
+    fn ipv6_loopback_is_forbidden() {
+        assert!(is_forbidden_ip(ip6("::1")));
+    }
 
     #[test]
-    fn ipv4_mapped_private_is_forbidden() { assert!(is_forbidden_ip(ip6("::ffff:192.168.1.1"))); }
+    fn ipv4_mapped_private_is_forbidden() {
+        assert!(is_forbidden_ip(ip6("::ffff:192.168.1.1")));
+    }
 
     #[test]
-    fn google_dns_is_allowed() { assert!(!is_forbidden_ip(ip4("8.8.8.8"))); }
+    fn google_dns_is_allowed() {
+        assert!(!is_forbidden_ip(ip4("8.8.8.8")));
+    }
 
     #[test]
-    fn cloudflare_ipv6_is_allowed() { assert!(!is_forbidden_ip(ip6("2606:4700::1"))); }
+    fn cloudflare_ipv6_is_allowed() {
+        assert!(!is_forbidden_ip(ip6("2606:4700::1")));
+    }
 }

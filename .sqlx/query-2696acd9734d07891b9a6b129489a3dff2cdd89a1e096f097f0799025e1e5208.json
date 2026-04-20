@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT p.id, p.name FROM people p JOIN manga_people mp ON mp.person_id = p.id WHERE mp.role = 'artist' ORDER BY p.name",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2696acd9734d07891b9a6b129489a3dff2cdd89a1e096f097f0799025e1e5208"
+}

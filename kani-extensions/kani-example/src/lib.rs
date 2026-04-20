@@ -1,12 +1,9 @@
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
-// use kani_shared::host_abi::{HttpRequest, JsonHandle};
 use kani_shared::{
-    ExtensionResult, FilterList, MangaExtension, 
-    MangaStatus, PreferenceList, bindings, wit_types
+    ExtensionResult, MangaExtension, MangaStatus, bindings, wit_types,
+    types::ActiveFilter, to_shared_filters,
 };
-use wit_types::{
-    Chapter, ChapterList, ExtensionMetadata, MangaInfo, MangaList
-};
+use wit_types::{Chapter, ChapterList, ExtensionMetadata, MangaInfo, MangaList, PreferenceSpec};
 
 #[cfg(target_family = "wasm")]
 #[global_allocator]
@@ -47,15 +44,23 @@ impl Guest for Example {
         Ok(Example::metadata())
     }
 
-    fn get_popular_manga(page: i32, page_size: i32) -> Result<MangaList, String> {
+    fn get_popular_manga(page: i32, page_size: i32, filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, String> {
+        let shared = to_shared_filters(filters);
         get_extension()
-            .get_popular_manga(page, page_size)
+            .get_popular_manga(page, page_size, &shared)
             .map_err(|e| e.to_string())
     }
 
-    fn search_manga(query: String, page: i32, page_size: i32) -> Result<MangaList, String> {
+    fn search_manga(query: String, page: i32, page_size: i32, filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, String> {
+        let shared = to_shared_filters(filters);
         get_extension()
-            .search_manga(&query, page, page_size)
+            .search_manga(&query, page, page_size, &shared)
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_filter_list() -> Result<wit_types::FilterList, String> {
+        get_extension()
+            .get_filter_list()
             .map_err(|e| e.to_string())
     }
 
@@ -65,9 +70,20 @@ impl Guest for Example {
             .map_err(|e| e.to_string())
     }
 
-    fn get_chapter_list(manga_id: String, page: i32, page_size: Option<i32>) -> Result<ChapterList, String> {
+    fn get_chapter_list(
+        manga_id: String,
+        page: i32,
+        page_size: Option<i32>,
+        sort: Option<String>,
+    ) -> Result<ChapterList, String> {
         get_extension()
-            .get_chapter_list(&manga_id, page, page_size)
+            .get_chapter_list(&manga_id, page, page_size, sort)
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_chapter_sort_list() -> Result<Vec<wit_types::ChapterSortOption>, String> {
+        get_extension()
+            .get_chapter_sort_list()
             .map_err(|e| e.to_string())
     }
 
@@ -76,10 +92,10 @@ impl Guest for Example {
             .get_pages(&manga_id, &chapter_id)
             .map_err(|e| e.to_string())
     }
-    fn get_preferences() -> Result<Vec<wit_types::PreferenceDescriptor>, String> {
+
+    fn get_preferences() -> Result<Vec<PreferenceSpec>, String> {
         get_extension()
             .get_preferences()
-            .map(|pl| pl.preferences.into_iter().map(Into::into).collect())
             .map_err(|e| e.to_string())
     }
 }
@@ -89,70 +105,63 @@ impl MangaExtension for Example {
         "Example"
     }
 
-    fn get_popular_manga(&self, _page: i32, _page_size: i32) -> ExtensionResult<MangaList> {
-        let manga_list = Vec::new();
-        let has_next_page = false;
-
-        Ok(MangaList {
-            manga: manga_list,
-            has_next_page,
-        })
+    fn get_popular_manga(&self, _page: i32, _page_size: i32, _filters: &[ActiveFilter]) -> ExtensionResult<MangaList> {
+        Ok(MangaList { manga: vec![], has_next_page: false })
     }
 
-    fn search_manga(&self, _query: &str, _page: i32, _page_size: i32) -> ExtensionResult<MangaList> {
-        let manga_list = Vec::new();
-        let has_next_page = false;
-
-        Ok(MangaList {
-            manga: manga_list,
-            has_next_page,
-        })
+    fn search_manga(
+        &self,
+        _query: &str,
+        _page: i32,
+        _page_size: i32,
+        _filters: &[ActiveFilter],
+    ) -> ExtensionResult<MangaList> {
+        Ok(MangaList { manga: vec![], has_next_page: false })
     }
 
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
-        let manga_info = MangaInfo {
+        Ok(MangaInfo {
             id: manga_id.to_string(),
             title: "Example".to_string(),
             description: Some("Example".to_string()),
             status: MangaStatus::Ongoing,
-            authors: Vec::new(),
-            artists: Vec::new(),
-            tags: Vec::new(),
+            authors: vec![],
+            artists: vec![],
+            tags: vec![],
             cover_url: Some("https://example.com/cover.jpg".to_string()),
-        };
-
-        Ok(manga_info)
+        })
     }
 
-    fn get_chapter_list(&self, _manga_id: &str, _page: i32, _page_size: Option<i32>) -> ExtensionResult<ChapterList> {
-        let chapter_list = ChapterList {
-            chapters: Vec::new(),
-            has_next_page: false,
-        };
-
-        Ok(chapter_list)
+    fn get_chapter_list(
+        &self,
+        _manga_id: &str,
+        _page: i32,
+        _page_size: Option<i32>,
+        _sort: Option<String>,
+    ) -> ExtensionResult<ChapterList> {
+        Ok(ChapterList { chapters: vec![], has_next_page: false })
     }
 
     fn get_pages(&self, _manga_id: &str, _chapter_id: &str) -> ExtensionResult<Chapter> {
-        let chapter_info = Chapter { pages: Vec::new() };
-
-        Ok(chapter_info)
+        Ok(Chapter { pages: vec![] })
     }
 
-    fn get_filter_list(&self) -> ExtensionResult<FilterList> {
-        Ok(FilterList { filters: vec![] })
+    fn get_filter_list(&self) -> ExtensionResult<wit_types::FilterList> {
+        Ok(wit_types::FilterList { filters: vec![] })
     }
 
-    fn get_preferences(&self) -> ExtensionResult<PreferenceList> {
-        Ok(PreferenceList { preferences: vec![] })
+    fn get_preferences(&self) -> ExtensionResult<Vec<PreferenceSpec>> {
+        Ok(vec![])
+    }
+    
+    fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<wit_types::ChapterSortOption>> {
+        Ok(vec![])
     }
 }
 
 // ============================================================
 // WASM Exports
 // ============================================================
-// These functions are the entry points called by the host when
-// this extension is loaded as a WASM module.
 
 use std::sync::OnceLock;
 

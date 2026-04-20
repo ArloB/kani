@@ -38,6 +38,8 @@ pub struct QueuedChapter {
 
 pub struct DownloadTask {
     pub chapter_id: i64,
+    pub manga_id: i64,
+    pub manga_title: String,
     pub source_manager: Arc<crate::source_manager::SourceManager>,
     pub source_manga_id: String,
     pub source_chapter_id: String,
@@ -78,6 +80,8 @@ impl QueueState {
 pub struct ActiveDownloadState {
     pub chapter_id: i64,
     pub chapter_name: String,
+    pub manga_id: i64,
+    pub manga_title: String,
     pub total_pages: usize,
     pub completed_pages: usize,
     pub status: ActiveDownloadStatus,
@@ -299,12 +303,13 @@ impl DownloaderManager {
         staging_dir: &std::path::Path,
         max_retries: i64,
         initial_retry_delay_ms: i64,
+        base_url: &str,
     ) -> Result<(PathBuf, String)> {
         let mut attempts = 0;
         let mut delay = Duration::from_millis(initial_retry_delay_ms.try_into()?);
 
         loop {
-            match Self::download_page(client, url, page_index, staging_dir).await {
+            match Self::download_page(client, url, page_index, staging_dir, base_url).await {
                 Ok(data) => return Ok(data),
                 Err(e) => {
                     attempts += 1;
@@ -338,8 +343,20 @@ impl DownloaderManager {
         url: &str,
         page: i32,
         staging_dir: &std::path::Path,
+        referer: &str,
     ) -> Result<(PathBuf, String)> {
-        let mut resp = client.get(url).await?;
+        let request = client.inner().get(url)
+            .header(rquest::header::REFERER, referer).build()
+            .map_err(|e| crate::error::Error::Other(e.to_string()))?;
+        
+        let mut resp = client.send_request(request).await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(error::Error::Other(format!(
+                "HTTP {status} downloading page {page}"
+            )));
+        }
 
         let extension = Self::get_image_extension(&resp, url);
 
@@ -347,11 +364,19 @@ impl DownloaderManager {
         let tmp_file_path = staging_dir.join(format!("{:04}.tmp", page));
 
         let mut file = tokio::fs::File::create(&tmp_file_path).await?;
+        let mut bytes_written: u64 = 0;
 
         while let Some(chunk) = resp.chunk().await? {
+            bytes_written += chunk.len() as u64;
             file.write_all(&chunk).await?;
         }
         file.flush().await?;
+
+        if bytes_written == 0 {
+            return Err(error::Error::Other(format!(
+                "Server returned empty body for page {page}"
+            )));
+        }
 
         Ok((tmp_file_path, filename))
     }
@@ -488,6 +513,8 @@ impl DownloaderManager {
             task:
                 DownloadTask {
                     chapter_id,
+                    manga_id,
+                    manga_title,
                     source_manager,
                     source_manga_id,
                     source_chapter_id,
@@ -545,14 +572,22 @@ impl DownloaderManager {
 
         let fetch_fut = async {
             match source_manager.lease_instance().await {
-                Ok(mut instance) => instance.get_pages(&source_manga_id, &source_chapter_id).await,
+                Ok(mut instance) => {
+                    let pages = instance
+                        .get_pages(&source_manga_id, &source_chapter_id)
+                        .await?;
+                    
+                    let metadata = instance.get_metadata().await?;
+                                
+                    Ok((pages, metadata.base_url))
+                }
                 Err(e) => Err(e),
             }
         };
 
         let chapter_generated = tokio::select! {
             res = fetch_fut => match res {
-                Ok(pages) => Some(pages),
+                Ok((pages, base_url)) => Some((pages, base_url)),
                 Err(e) => {
                     tracing::error!("Failed to get pages: {}", e);
                     Self::send_event(
@@ -579,7 +614,7 @@ impl DownloaderManager {
             }
         };
 
-        if let Some(chapter_generated) = chapter_generated {
+        if let Some((chapter_generated, base_url)) = chapter_generated {
             let pages = chapter_generated.pages;
             let pages_len = pages.len();
 
@@ -590,6 +625,8 @@ impl DownloaderManager {
                     ActiveDownloadState {
                         chapter_id,
                         chapter_name: name.clone(),
+                        manga_id,
+                        manga_title: manga_title.clone(),
                         total_pages: pages_len,
                         completed_pages: 0,
                         status: ActiveDownloadStatus::InProgress,
@@ -602,6 +639,8 @@ impl DownloaderManager {
                 DownloadProgressEvent::ChapterStarted {
                     chapter_id,
                     chapter_name: name.clone(),
+                    manga_id,
+                    manga_title: manga_title.clone(),
                     total_pages: pages_len,
                 },
             );
@@ -611,6 +650,7 @@ impl DownloaderManager {
             let mut stream = stream::iter(pages.into_iter())
                 .map(|page| {
                     let client = client.clone();
+                    let base_url = base_url.clone();
                     let name = name.clone();
                     let page_tx = progress_tx.clone();
                     let staging_dir = staging_dir.clone();
@@ -624,6 +664,7 @@ impl DownloaderManager {
                             &staging_dir,
                             max_retries,
                             initial_retry_delay_ms,
+                            &base_url,
                         )
                         .await;
 
@@ -705,6 +746,8 @@ impl DownloaderManager {
                             DownloadProgressEvent::ChapterCompleted {
                                 chapter_id,
                                 chapter_name: name.clone(),
+                                manga_id,
+                                manga_title: manga_title.clone(),
                                 successful_pages: successful_len,
                             },
                         );
@@ -755,5 +798,114 @@ impl DownloaderManager {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn make_manager() -> DownloaderManager {
+        let client = crate::http::SmartClient::new(None).expect("SmartClient");
+        DownloaderManager::new(client, 4, 2, 3, 100, 32)
+            .await
+            .expect("DownloaderManager")
+    }
+
+    // ── initial state ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn new_manager_queue_is_empty() {
+        let mgr = make_manager().await;
+        assert_eq!(mgr.queue_len().await, 0);
+    }
+
+    #[tokio::test]
+    async fn list_queue_initially_empty() {
+        let mgr = make_manager().await;
+        assert!(mgr.list_queue().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn snapshot_initially_empty() {
+        let mgr = make_manager().await;
+        assert!(mgr.snapshot().await.is_empty());
+    }
+
+    // ── operations on missing entries ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn remove_unknown_id_returns_false() {
+        let mgr = make_manager().await;
+        assert!(!mgr.remove_from_queue(9999).await);
+    }
+
+    #[tokio::test]
+    async fn cancel_nonexistent_chapter_returns_false() {
+        let mgr = make_manager().await;
+        assert!(!mgr.cancel_download(9999).await);
+    }
+
+    #[tokio::test]
+    async fn cancel_already_completed_chapter_returns_false() {
+        let mgr = make_manager().await;
+        // Insert a fake completed entry into active map.
+        mgr.active.write().await.insert(
+            42,
+            ActiveDownloadState {
+                chapter_id:42,
+                chapter_name:"ch".into(),
+                total_pages:1,
+                completed_pages:1,
+                status:ActiveDownloadStatus::Completed, 
+                manga_id: 1, 
+                manga_title: "manga".into() 
+            },
+        );
+        assert!(!mgr.cancel_download(42).await);
+    }
+
+    // ── subscribe ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn subscribe_returns_receiver() {
+        let mgr = make_manager().await;
+        let mut rx = mgr.subscribe();
+        // Receiver starts with no messages.
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn multiple_subscribers_receive_same_broadcast() {
+        let mgr = make_manager().await;
+        let mut rx1 = mgr.subscribe();
+        let mut rx2 = mgr.subscribe();
+
+        let _ = mgr.progress_tx.send(DownloadProgressEvent::ChapterFailed {
+            chapter_id: 1,
+            chapter_name: "ch".into(),
+            error: "test".into(),
+        });
+
+        assert!(rx1.recv().await.is_ok());
+        assert!(rx2.recv().await.is_ok());
+    }
+
+    // ── queue id generation ──────────────────────────────────────────────────
+
+    #[test]
+    fn queue_state_ids_are_unique_and_incrementing() {
+        let qs = QueueState::new();
+        let id1 = qs.generate_id();
+        let id2 = qs.generate_id();
+        let id3 = qs.generate_id();
+        assert!(id1 < id2);
+        assert!(id2 < id3);
+    }
+
+    #[test]
+    fn queue_state_starts_at_one() {
+        let qs = QueueState::new();
+        assert_eq!(qs.generate_id(), 1);
     }
 }

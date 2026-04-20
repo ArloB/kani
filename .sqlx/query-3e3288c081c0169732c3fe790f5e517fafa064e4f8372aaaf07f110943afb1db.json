@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT tracker_manga_id FROM tracker_manga_mappings WHERE user_id = ? AND tracker_id = ? AND manga_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "tracker_manga_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3e3288c081c0169732c3fe790f5e517fafa064e4f8372aaaf07f110943afb1db"
+}

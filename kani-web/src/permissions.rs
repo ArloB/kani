@@ -16,7 +16,7 @@ pub trait AuthRequirement {
 pub struct IsAuthenticated;
 impl AuthRequirement for IsAuthenticated {
     fn required_permission() -> Option<Permission> {
-        None 
+        None
     }
 }
 
@@ -85,12 +85,12 @@ macro_rules! permissions {
             impl super::AuthRequirement for Authenticated {
                 fn required_permission() -> Option<super::Permission> { None }
             }
-        
+
             $(
                 $(
                     ::paste::paste! {
                         pub struct [<$resource $action>];
-        
+
                         impl super::AuthRequirement for [<$resource $action>] {
                             fn required_permission() -> Option<super::Permission> {
                                 Some(super::Permission::$resource(
@@ -133,6 +133,9 @@ permissions! {
     User => "user" {
         Manage => "manage",
     },
+    Server => "server" {
+        Manage => "manage",
+    },
 }
 
 impl serde::Serialize for Permission {
@@ -154,12 +157,18 @@ mod tests {
 
     #[test]
     fn parse_library_view() {
-        assert_eq!("library:view".parse::<Permission>().unwrap(), Permission::Library(Library::View));
+        assert_eq!(
+            "library:view".parse::<Permission>().unwrap(),
+            Permission::Library(Library::View)
+        );
     }
 
     #[test]
     fn display_library_view() {
-        assert_eq!(Permission::Library(Library::View).to_string(), "library:view");
+        assert_eq!(
+            Permission::Library(Library::View).to_string(),
+            "library:view"
+        );
     }
 
     #[test]
@@ -180,10 +189,22 @@ mod tests {
     #[test]
     fn all_permissions_round_trip() {
         let perms = [
-            "library:view", "library:add", "library:delete", "library:refresh", "library:manage",
-            "chapter:download", "chapter:delete",
-            "source:browse", "source:install", "source:delete", "source:toggle_enabled", "source:configure",
-            "settings:view", "settings:edit_download", "settings:edit_scan", "settings:edit_advanced",
+            "library:view",
+            "library:add",
+            "library:delete",
+            "library:refresh",
+            "library:manage",
+            "chapter:download",
+            "chapter:delete",
+            "source:browse",
+            "source:install",
+            "source:delete",
+            "source:toggle_enabled",
+            "source:configure",
+            "settings:view",
+            "settings:edit_download",
+            "settings:edit_scan",
+            "settings:edit_advanced",
             "user:manage",
         ];
         for raw in &perms {
@@ -212,6 +233,7 @@ mod tests {
             Permission::Settings(Settings::EditScan),
             Permission::Settings(Settings::EditAdvanced),
             Permission::User(User::Manage),
+            Permission::Server(Server::Manage),
         ];
         let mut seen = std::collections::HashSet::new();
         for p in &perms {
@@ -231,12 +253,18 @@ mod tests {
 
     #[test]
     fn source_install_guard_returns_correct_permission() {
-        assert_eq!(guards::SourceInstall::required_permission(), Some(Permission::Source(Source::Install)));
+        assert_eq!(
+            guards::SourceInstall::required_permission(),
+            Some(Permission::Source(Source::Install))
+        );
     }
 
     #[test]
     fn source_delete_guard_returns_correct_permission() {
-        assert_eq!(guards::SourceDelete::required_permission(), Some(Permission::Source(Source::Delete)));
+        assert_eq!(
+            guards::SourceDelete::required_permission(),
+            Some(Permission::Source(Source::Delete))
+        );
     }
 
     #[test]
@@ -246,11 +274,17 @@ mod tests {
 
     #[test]
     fn library_view_guard_returns_correct_permission() {
-        assert_eq!(guards::LibraryView::required_permission(), Some(Permission::Library(Library::View)));
+        assert_eq!(
+            guards::LibraryView::required_permission(),
+            Some(Permission::Library(Library::View))
+        );
     }
 
     #[test]
     fn user_manage_guard_returns_correct_permission() {
-        assert_eq!(guards::UserManage::required_permission(), Some(Permission::User(User::Manage)));
+        assert_eq!(
+            guards::UserManage::required_permission(),
+            Some(Permission::User(User::Manage))
+        );
     }
 }

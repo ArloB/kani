@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT name, chapter_number, volume FROM chapters WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "chapter_number",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "volume",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "e7e9a021a19b93933a1df5576f12b1fff9ab83e4613d69239b69fef97e61019f"
+}

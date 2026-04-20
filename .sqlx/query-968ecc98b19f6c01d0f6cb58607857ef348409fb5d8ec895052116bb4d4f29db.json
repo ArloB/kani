@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO chapters\n                (manga_id, source_chapter_id, name, chapter_number, language,\n                volume, scanlator, uploaded_at, discovered_at)\n                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "968ecc98b19f6c01d0f6cb58607857ef348409fb5d8ec895052116bb4d4f29db"
+}

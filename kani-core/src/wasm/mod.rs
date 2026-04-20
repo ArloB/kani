@@ -78,8 +78,8 @@ pub enum AllowedHost {
 
 use crate::http::SmartClient;
 
-/// Host state passed to WASM guest via Store.
-/// Manages handles for HTTP requests, responses, and parsed HTML documents.
+pub const MAX_HANDLES: usize = 10_000;
+
 pub struct HostState {
     pub http_client: SmartClient,
     pub allowed_host: AllowedHost,
@@ -87,12 +87,40 @@ pub struct HostState {
     pub html_docs: HashMap<i32, StoredNode>,
     pub html_lists: HashMap<i32, Vec<StoredNode>>,
     pub json_docs: HashMap<i32, serde_json::Value>,
-    pub selector_cache: HashMap<String, scraper::Selector>,
+    pub selector_cache: std::cell::RefCell<HashMap<String, scraper::Selector>>,
     pub last_error: Option<i32>,
     pub preferences: std::collections::HashMap<String, String>,
     pub call_started_at: std::time::Instant,
     pub io_count: u32,
     pub last_io_at: Option<std::time::Instant>,
+}
+
+impl StoredNode {
+    /// Locks the document, wraps the node as an `ElementRef`, and calls `f`.
+    /// Returns an error if the node is not an element or the lock is poisoned.
+    pub fn with_element<T, F>(&self, f: F) -> std::result::Result<T, String>
+    where
+        F: FnOnce(scraper::ElementRef) -> std::result::Result<T, String>,
+    {
+        let guard = self.doc.lock().map_err(|_| "HTML document lock poisoned")?;
+        match scraper::ElementRef::wrap(guard.0.tree.get(self.node_id).unwrap()) {
+            Some(el) => f(el),
+            None => Err("node is not an element".into()),
+        }
+    }
+
+    /// Like [`with_element`] but returns `Ok(None)` when the node is not an element,
+    /// so callers that treat that as a non-error can propagate it cleanly.
+    pub fn try_with_element<T, F>(&self, f: F) -> std::result::Result<Option<T>, String>
+    where
+        F: FnOnce(scraper::ElementRef) -> std::result::Result<Option<T>, String>,
+    {
+        let guard = self.doc.lock().map_err(|_| "HTML document lock poisoned")?;
+        Ok(match scraper::ElementRef::wrap(guard.0.tree.get(self.node_id).unwrap()) {
+            Some(el) => f(el)?,
+            None => None,
+        })
+    }
 }
 
 impl HostState {
@@ -121,7 +149,7 @@ impl HostState {
             html_docs: HashMap::new(),
             html_lists: HashMap::new(),
             json_docs: HashMap::new(),
-            selector_cache: HashMap::new(),
+            selector_cache: std::cell::RefCell::new(HashMap::new()),
             last_error: None,
             preferences: HashMap::new(),
             call_started_at: std::time::Instant::now(),
@@ -137,15 +165,57 @@ impl HostState {
         self.next_doc_handle = 1;
     }
 
+    /// Returns an error string if the total live handle count is at or above
+    /// [`MAX_HANDLES`].
+    pub fn check_handle_capacity(&self) -> std::result::Result<(), String> {
+        let total = self.html_docs.len() + self.html_lists.len() + self.json_docs.len();
+        if total >= MAX_HANDLES {
+            Err(format!(
+                "handle limit reached ({MAX_HANDLES}): extension is leaking document handles"
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Enforces the `AllowedHost` policy for a given request host string.
+    pub fn check_allowed_host(&self, host: &str) -> std::result::Result<(), String> {
+        match &self.allowed_host {
+            AllowedHost::Restricted(allowed) => {
+                if host != allowed {
+                    Err(format!(
+                        "Request blocked: extension may only contact '{}', got '{}'",
+                        allowed, host
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            AllowedHost::Unrestricted => Ok(()),
+            AllowedHost::MetadataOnly => Err("HTTP requests are not permitted on metadata-only instances.".into()),
+        }
+    }
+
+    /// Returns a reference to the JSON document for `handle`, or an error string.
+    pub fn get_json(&self, handle: i32) -> std::result::Result<&serde_json::Value, String> {
+        self.json_docs.get(&handle).ok_or_else(|| "Invalid JSON handle".to_string())
+    }
+
+    /// Returns a reference to the HTML document node for `handle`, or an error string.
+    pub fn get_html_doc(&self, handle: i32) -> std::result::Result<&StoredNode, String> {
+        self.html_docs.get(&handle).ok_or_else(|| "Document not found".to_string())
+    }
+
     /// Returns a reference to the compiled selector, parsing and caching it on
     /// the first call for a given `selector` string.
     pub fn get_or_parse_selector(&mut self, selector: &str) -> Result<&scraper::Selector> {
-        if !self.selector_cache.contains_key(selector) {
+        let cache = self.selector_cache.get_mut();
+        if !cache.contains_key(selector) {
             let parsed = scraper::Selector::parse(selector)
                 .map_err(|e| crate::error::Error::Internal(format!("Invalid selector: {:?}", e)))?;
-            self.selector_cache.insert(selector.to_string(), parsed);
+            cache.insert(selector.to_string(), parsed);
         }
-        Ok(self.selector_cache.get(selector).unwrap())
+        Ok(cache.get(selector).unwrap())
     }
 }
 
@@ -208,10 +278,7 @@ impl WasmRuntime {
     }
 
     /// Pre-links a component's imports so instances can be created cheaply.
-    pub fn instantiate_pre(
-        &self,
-        component: &Component,
-    ) -> Result<KaniExtensionPre<HostState>> {
+    pub fn instantiate_pre(&self, component: &Component) -> Result<KaniExtensionPre<HostState>> {
         let instance_pre = self.linker.instantiate_pre(component)?;
         let pre = KaniExtensionPre::new(instance_pre)?;
         Ok(pre)
@@ -231,59 +298,40 @@ impl std::fmt::Debug for WasmRuntime {
     }
 }
 
-pub mod pref_conversions {
-    use kani_shared::types::{PreferenceDescriptor, PreferenceKind, SelectOption};
+pub mod filter_conversions {
     use crate::wasm::kani::extension::types as wit;
+    use kani_shared::types::{ActiveFilter, FilterState};
 
-    impl From<wit::SelectOption> for SelectOption {
-        fn from(o: wit::SelectOption) -> Self {
-            Self { label: o.label, value: o.value }
-        }
-    }
-
-    impl From<wit::PreferenceKind> for PreferenceKind {
-        fn from(k: wit::PreferenceKind) -> Self {
-            match k {
-                wit::PreferenceKind::TextInput(p) => Self::TextInput {
-                    placeholder: p.placeholder,
-                    default_value: p.default_value,
-                    is_secret: p.is_secret,
-                },
-                wit::PreferenceKind::Checkbox(p) => Self::Checkbox {
-                    default_value: p.default_value,
-                },
-                wit::PreferenceKind::Select(p) => Self::Select {
-                    options: p.options.into_iter().map(Into::into).collect(),
-                    default_value: p.default_value,
-                },
-                wit::PreferenceKind::MultiSelect(p) => Self::MultiSelect {
-                    options: p.options.into_iter().map(Into::into).collect(),
-                    default_values: p.default_values,
-                },
-                wit::PreferenceKind::Number(p) => Self::Number {
-                    min: p.min, max: p.max, step: p.step,
-                    default_value: p.default_value,
-                },
-                wit::PreferenceKind::MultiValueList(p) => Self::MultiValueList {
-                    placeholder: p.placeholder,
-                    item_label: p.item_label,
-                    default_values: p.default_values,
-                },
-                wit::PreferenceKind::Label(p) => Self::Label { text: p.text },
+    impl From<wit::FilterState> for FilterState {
+        fn from(s: wit::FilterState) -> Self {
+            match s {
+                wit::FilterState::Checkbox(c) => FilterState::Checkbox(c),
+                wit::FilterState::TextInput(t) => FilterState::TextInput(t),
+                wit::FilterState::Selection(opt) => {
+                    FilterState::Selection { name: opt.name, value: opt.value }
+                }
+                wit::FilterState::Multiselect(values) => FilterState::Multiselect(values),
             }
         }
     }
 
-    impl From<wit::PreferenceDescriptor> for PreferenceDescriptor {
-        fn from(d: wit::PreferenceDescriptor) -> Self {
-            Self {
-                key: d.key,
-                title: d.title,
-                description: d.description,
-                kind: d.kind.into(),
-                group: d.group,
-                requires_key: d.requires_key,
+    impl From<FilterState> for wit::FilterState {
+        fn from(s: FilterState) -> Self {
+            match s {
+                FilterState::Checkbox(c) => Self::Checkbox(c),
+                FilterState::TextInput(t) => Self::TextInput(t),
+                FilterState::Selection { name, value } => {
+                    Self::Selection(wit::OptionState { name, value })
+                }
+                FilterState::Multiselect(values) => Self::Multiselect(values),
             }
         }
+    }
+
+    pub fn to_wit_active_filters(filters: &[ActiveFilter]) -> Vec<wit::ActiveFilter> {
+        filters.iter().map(|f| wit::ActiveFilter {
+            filter_name: f.filter_name.clone(),
+            state: f.state.clone().into(),
+        }).collect()
     }
 }

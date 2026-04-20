@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM oauth_pkce_state WHERE state = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "421ff48a9fb70a26a54b6e7388c1439ff3ffa70496bdacff032ac7791fa956dc"
+}

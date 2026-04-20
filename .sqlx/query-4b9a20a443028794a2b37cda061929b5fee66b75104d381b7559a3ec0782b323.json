@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO manga_tags (manga_id, tag_id) SELECT ?, id FROM tags WHERE name = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "4b9a20a443028794a2b37cda061929b5fee66b75104d381b7559a3ec0782b323"
+}

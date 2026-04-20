@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE chapters SET page_count = ? WHERE id = ? AND page_count IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b193317b5106226927e397fba79da92787d5a9ebc4c682ccb8546ad502d8900f"
+}

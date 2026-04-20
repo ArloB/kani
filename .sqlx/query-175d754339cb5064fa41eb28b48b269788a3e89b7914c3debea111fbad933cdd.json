@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO tracker_app_config (tracker_id, client_id, client_secret)\n           VALUES (?1, ?2, ?3)\n           ON CONFLICT (tracker_id) DO UPDATE SET\n               client_id = excluded.client_id,\n               client_secret = COALESCE(excluded.client_secret, tracker_app_config.client_secret)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "175d754339cb5064fa41eb28b48b269788a3e89b7914c3debea111fbad933cdd"
+}

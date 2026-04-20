@@ -1,0 +1,304 @@
+// @ts-check
+// Migration dialogue — multi-step manga source migration flow.
+
+import { h, render } from 'preact';
+import { useState, useEffect, useRef } from 'preact/hooks';
+import htm from 'htm';
+import * as api from '../api.js';
+import { Modal } from './modal.js';
+import { iconChevronRight } from '../icons.js';
+import { Icon } from './icon.js';
+const html = htm.bind(h);
+
+/** @typedef {'search'|'previewing'|'preview'|'confirming'|'done'} MigrationStep */
+
+/**
+ * @param {{
+ *   dbId: number,
+ *   currentSourceId: number,
+ *   currentSourceName: string,
+ *   currentTitle: string,
+ *   currentCoverUrl?: string | null,
+ *   onComplete: (newSourceId: number, newMangaId: string) => void,
+ *   onClose: () => void,
+ * }} props
+ */
+export function MigrationDialogue({
+  dbId, currentSourceId, currentSourceName, currentTitle, currentCoverUrl,
+  onComplete, onClose,
+}) {
+  /** @type {[MigrationStep, (s: MigrationStep) => void]} */
+  const [step, setStep] = useState(/** @type {MigrationStep} */ ('search'));
+  const [scope, setScope] = useState(/** @type {'FavouritedOnly'|'AllEnabled'} */ ('FavouritedOnly'));
+  const [query, setQuery] = useState(currentTitle);
+  const [searchResults, setSearchResults] = useState(/** @type {any[]} */ ([]));
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(/** @type {string|null} */ (null));
+
+  const [targetSid, setTargetSid] = useState(0);
+  const [targetMid, setTargetMid] = useState('');
+  const [targetTitle, setTargetTitle] = useState('');
+  const [targetCoverUrl, setTargetCoverUrl] = useState(/** @type {string|null} */ (null));
+
+  const [preview, setPreview] = useState(/** @type {any|null} */ (null));
+  const [keepOrphaned, setKeepOrphaned] = useState(true);
+  const [error, setError] = useState(/** @type {string|null} */ (null));
+  const [result, setResult] = useState(/** @type {any|null} */ (null));
+
+  const debounceRef = useRef(/** @type {ReturnType<typeof setTimeout>|null} */ (null));
+  const abortRef = useRef(/** @type {AbortController|null} */ (null));
+
+  // Auto-search when query/scope changes
+  useEffect(() => {
+    if (!query.trim()) { setSearchResults([]); return; }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => _doSearch(), 400);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query, scope]);
+
+  async function _doSearch() {
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const res = await api.globalSearch(query, scope, 1, 20, abortRef.current.signal);
+      // globalSearch returns GlobalSearchResult[] — already grouped by source
+      const grouped = Array.isArray(res?.results) ? res.results
+        : Array.isArray(res)                       ? res
+        : [];
+      setSearchResults(grouped);
+    } catch (e) {
+      if (e?.name !== 'AbortError') setSearchError('Search failed');
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function _selectTarget(sid, mid, title, coverUrl) {
+    setTargetSid(sid);
+    setTargetMid(mid);
+    setTargetTitle(title);
+    setTargetCoverUrl(coverUrl ?? null);
+    setStep('previewing');
+    setError(null);
+    try {
+      const res = await api.previewMigration(dbId, sid, mid);
+      setPreview(res);
+      setStep('preview');
+    } catch {
+      setError('Failed to load migration preview.');
+      setStep('search');
+    }
+  }
+
+  async function _confirmMigration() {
+    setStep('confirming');
+    setError(null);
+    try {
+      const res = await api.migrateManga(dbId, targetSid, targetMid, keepOrphaned);
+      setResult(res);
+      setStep('done');
+    } catch {
+      setError('Migration failed.');
+      setStep('preview');
+    }
+  }
+
+  // searchResults is GlobalSearchResult[] — each element is already a source group
+  /** @type {Map<string, { sourceName: string, sourceId: number, items: any[] }>} */
+  const bySource = new Map();
+  for (const sourceResult of searchResults) {
+    bySource.set(String(sourceResult.source_id), {
+      sourceName: sourceResult.source_name ?? String(sourceResult.source_id),
+      sourceId: sourceResult.source_id,
+      items: sourceResult.manga ?? [],
+    });
+  }
+
+  const footer = step === 'preview' && html`
+    <div class="flex gap-3 justify-end">
+      <button class="btn-ghost" onClick=${() => setStep('search')}>Back</button>
+      <button class="btn-primary" onClick=${_confirmMigration}>Migrate</button>
+    </div>
+  `;
+
+  const footerDone = step === 'done' && html`
+    <div class="flex justify-end">
+      <button class="btn-primary" onClick=${() => onComplete(targetSid, targetMid)}>
+        Go to new manga
+      </button>
+    </div>
+  `;
+
+  return html`
+    <${Modal} open=${true} onClose=${onClose} title="Migrate Manga" wide=${true} footer=${footer || footerDone || undefined}>
+
+      ${step === 'search' && html`
+        <div class="flex flex-col gap-3 mb-4">
+          <input
+            type="search"
+            class="input"
+            placeholder="Search for manga…"
+            value=${query}
+            onInput=${(e) => setQuery(/** @type {HTMLInputElement} */ (e.target).value)}
+          />
+          <div class="flex flex-wrap gap-2">
+            ${(['FavouritedOnly', 'AllEnabled']).map(s => html`
+              <button
+                key=${s}
+                type="button"
+                class=${scope === s ? 'chip chip-active' : 'chip'}
+                onClick=${() => setScope(/** @type {any} */ (s))}
+              >${s === 'FavouritedOnly' ? 'Favourites' : 'All enabled'}</button>
+            `)}
+          </div>
+        </div>
+
+        ${searching && html`<p class="text-sm text-text-muted py-2">Searching…</p>`}
+        ${searchError && html`<p class="text-sm text-danger">${searchError}</p>`}
+        ${!searching && searchResults.length === 0 && query.trim() && html`
+          <p class="text-sm text-text-muted py-2">No results found.</p>
+        `}
+
+        ${[...bySource.entries()].map(([sid, { sourceName, sourceId, items }]) => html`
+          <div key=${sid} class="flex items-center gap-2 py-2 text-sm font-semibold text-text-muted border-t border-border-subtle mt-2">
+            <span>${sourceName}</span>
+          </div>
+          ${items.length === 0
+            ? html`<p class="text-sm text-text-muted px-1">No results from this source.</p>`
+            : html`
+              <div class="manga-row" role="list">
+                ${items.map(item => html`
+                  <div
+                    key=${item.id}
+                    role="button"
+                    tabindex="0"
+                    class=${'manga-card manga-row__item cursor-pointer focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none' + (sourceId === currentSourceId ? ' ring-2 ring-accent' : '')}
+                    onClick=${() => _selectTarget(sourceId, item.id, item.title, item.cover_url ?? null)}
+                    onKeyDown=${(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _selectTarget(sourceId, item.id, item.title, item.cover_url ?? null); } }}
+                  >
+                    <div class="cover">
+                      ${item.cover_url
+                        ? html`<img src=${item.cover_url} alt=${item.title} loading="lazy" />`
+                        : html`<div class="no-cover">No Cover</div>`
+                      }
+                    </div>
+                    <p class="title"><span>${item.title}</span></p>
+                  </div>
+                `)}
+              </div>
+            `}
+        `)}
+      `}
+
+      ${step === 'previewing' && html`
+        <div class="flex items-center justify-center gap-6 py-4">
+          <div class="flex flex-col items-center gap-2 w-32">
+            <strong class="text-xs font-semibold text-text-muted text-center">${currentSourceName}</strong>
+            <div class="cover">
+              ${currentCoverUrl
+                ? html`<img src=${currentCoverUrl} alt=${currentTitle} />`
+                : html`<div class="no-cover">No Cover</div>`}
+            </div>
+            <span class="text-xs text-text text-center line-clamp-2">${currentTitle}</span>
+          </div>
+          <span class="text-text-muted [&_svg]:w-6 [&_svg]:h-6 shrink-0"><${Icon} svg=${iconChevronRight} /></span>
+          <div class="flex flex-col items-center gap-2 w-32">
+            <strong class="text-xs font-semibold text-text-muted text-center">Loading…</strong>
+            <div class="skeleton h-40 w-full rounded-md"></div>
+            <div class="skeleton h-3 w-24 rounded"></div>
+          </div>
+        </div>
+      `}
+
+      ${step === 'preview' && preview && html`
+        <div class="flex items-center justify-center gap-6 py-4">
+          <div class="flex flex-col items-center gap-2 w-32">
+            <strong class="text-xs font-semibold text-text-muted text-center">${currentSourceName}</strong>
+            <div class="cover">
+              ${currentCoverUrl
+                ? html`<img src=${currentCoverUrl} alt=${currentTitle} />`
+                : html`<div class="no-cover">No Cover</div>`}
+            </div>
+            <span class="text-xs text-text text-center line-clamp-2">${currentTitle}</span>
+          </div>
+          <span class="text-text-muted [&_svg]:w-6 [&_svg]:h-6 shrink-0"><${Icon} svg=${iconChevronRight} /></span>
+          <div class="flex flex-col items-center gap-2 w-32">
+            <strong class="text-xs font-semibold text-text-muted text-center">${targetTitle}</strong>
+            <div class="cover">
+              ${targetCoverUrl
+                ? html`<img src=${targetCoverUrl} alt=${targetTitle} />`
+                : html`<div class="no-cover">No Cover</div>`}
+            </div>
+            <span class="text-xs text-text text-center line-clamp-2">${targetTitle}</span>
+          </div>
+        </div>
+
+        <div class="flex flex-col border border-border rounded-lg overflow-hidden mt-4">
+          ${[
+            { label: 'Chapters matched', value: preview.chapters_matched, cls: '' },
+            { label: 'New chapters', value: preview.chapters_new, cls: preview.chapters_new > 0 ? 'text-success bg-success/5' : '' },
+            { label: 'Orphaned chapters', value: preview.chapters_orphaned, cls: '' },
+            { label: 'Downloaded at risk', value: preview.downloaded_chapters_at_risk, cls: preview.downloaded_chapters_at_risk > 0 ? 'text-warn bg-warn/5' : '' },
+          ].map(({ label, value, cls }) => html`
+            <div key=${label} class=${'flex items-center justify-between px-4 py-2 border-b border-border-subtle last:border-b-0 text-sm ' + cls}>
+              <span class="text-text-muted">${label}</span>
+              <span class="font-semibold text-text">${value ?? 0}</span>
+            </div>
+          `)}
+        </div>
+
+        ${preview.downloaded_chapters_at_risk > 0 && html`
+          <div class="mt-4 p-3 rounded-lg bg-warn/10 border border-warn/30 text-sm text-warn">
+            ${preview.downloaded_chapters_at_risk} downloaded chapter(s) may be lost. Keep them as orphaned?
+            <div class="flex items-center gap-2 mt-2">
+              <label class="kani-toggle" title=${keepOrphaned ? 'Disable' : 'Enable'}>
+                <input
+                    type="checkbox"
+                    class="kani-toggle__input"
+                    checked=${keepOrphaned}
+                    onChange=${(e) => setKeepOrphaned(/** @type {HTMLInputElement} */ (e.target).checked)}
+                />
+                <span class="kani-toggle__track"></span>
+              </label>
+              Keep downloaded chapters
+            </div>
+          </div>
+        `}
+        ${error && html`<p class="text-sm text-danger mt-2">${error}</p>`}
+      `}
+
+      ${step === 'confirming' && html`<p class="text-sm text-text-muted py-2">Migrating…</p>`}
+
+      ${step === 'done' && result && html`
+        <div class="flex flex-col gap-4">
+          <p class="text-sm text-success font-medium">Migration complete!</p>
+          <div class="flex flex-col border border-border rounded-lg overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-2 border-b border-border-subtle text-sm">
+              <span class="text-text-muted">Chapters migrated</span>
+              <span class="font-semibold text-text">${result.chapters_migrated ?? 0}</span>
+            </div>
+            <div class="flex items-center justify-between px-4 py-2 text-sm">
+              <span class="text-text-muted">Orphaned</span>
+              <span class="font-semibold text-text">${result.chapters_orphaned ?? 0}</span>
+            </div>
+          </div>
+        </div>
+      `}
+
+    <//>
+  `;
+}
+
+/**
+ * Mount the migration dialogue into #modal-root and return an unmount function.
+ * @param {ConstructorParameters<typeof MigrationDialogue>[0]} props
+ * @returns {() => void}
+ */
+export function mountMigrationDialogue(props) {
+  const root = document.getElementById('modal-root');
+  if (!root) return () => {};
+  render(html`<${MigrationDialogue} ...${props} onClose=${() => { render(null, root); props.onClose?.(); }} />`, root);
+  return () => render(null, root);
+}

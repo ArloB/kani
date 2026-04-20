@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM tracker_app_config WHERE tracker_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "1dc90bd8ccc86cc63e85ab97a96eade806a768316bb9f16f4a9791365696ab1c"
+}

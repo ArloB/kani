@@ -1,6 +1,5 @@
 target
 wasm_sources
-.sqlx
 .env
 *.db
 *.db*
@@ -12,3 +11,9 @@ changes
 .vscode
 .kani_admin_password
 log/
+static/js/vendor/
+static/js/dist/
+static/types/
+static/css/main.css
+tools/
+.idea/

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "839a938df9b8011a06fce6eeb18186cff0ab36049f542ed9bf56a9e28c442179"
+}

@@ -1,80 +1,5 @@
-//! Utilities used across both SSR and hydrate builds.
-
-use leptos::prelude::*;
-
-/// Sleep for `ms` milliseconds in a way that works in both WASM (browser) and
-/// native (SSR) builds.
-pub async fn sleep_ms(ms: u32) {
-    #[cfg(feature = "hydrate")]
-    gloo_timers::future::TimeoutFuture::new(ms).await;
-
-    #[cfg(feature = "ssr")]
-    tokio::time::sleep(std::time::Duration::from_millis(ms as u64)).await;
-
-    #[cfg(not(any(feature = "hydrate", feature = "ssr")))]
-    let _ = ms;
-}
-
-/// Returns a debounced version of `source` that only updates after `delay_ms`
-/// of inactivity.
-pub fn use_debounced_signal<T>(source: ReadSignal<T>, delay_ms: u32) -> ReadSignal<T>
-where
-    T: Clone + Send + Sync + 'static + PartialEq,
-{
-    let (debounced, set_debounced) = signal(source.get_untracked());
-
-    Effect::new(move |_| {
-        let val = source.get();
-        leptos::task::spawn_local(async move {
-            sleep_ms(delay_ms).await;
-            if source.get_untracked() == val {
-                set_debounced.set(val);
-            }
-        });
-    });
-
-    debounced
-}
-
-/// Persist a boolean flag to localStorage under `key`.
-/// No-op in SSR builds.
-pub fn set_local_flag(key: &str, value: bool) {
-    #[cfg(feature = "hydrate")]
-    {
-        use leptos::web_sys::window;
-        if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
-            if value {
-                let _ = storage.set_item(key, "1");
-            } else {
-                let _ = storage.remove_item(key);
-            }
-        }
-    }
-    #[cfg(not(feature = "hydrate"))]
-    let _ = (key, value);
-}
-
-/// Read a boolean flag from localStorage.
-/// Always returns `false` in SSR builds.
-pub fn get_local_flag(key: &str) -> bool {
-    #[cfg(feature = "hydrate")]
-    {
-        use leptos::web_sys::window;
-        window()
-            .and_then(|w| w.local_storage().ok())
-            .flatten()
-            .and_then(|s| s.get_item(key).ok())
-            .flatten()
-            .as_deref() == Some("1")
-    }
-    #[cfg(not(feature = "hydrate"))]
-    {
-        let _ = key;
-        false
-    }
-}
-
-#[cfg(feature = "ssr")]
+/// Decodes a base64url-encoded manga ID back to its original string form.
+/// Falls back to returning the input unchanged if decoding fails.
 pub fn decode_manga_id(encoded: &str) -> String {
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
@@ -85,71 +10,48 @@ pub fn decode_manga_id(encoded: &str) -> String {
         .unwrap_or_else(|| encoded.to_string())
 }
 
-pub fn set_local_string(key: &str, value: &str) {
-    #[cfg(feature = "hydrate")]
-    {
-        use leptos::web_sys::window;
-        if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
-            let _ = storage.set_item(key, value);
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    fn encode(s: &str) -> String {
+        URL_SAFE_NO_PAD.encode(s.as_bytes())
     }
-    #[cfg(not(feature = "hydrate"))]
-    let _ = (key, value);
-}
 
-pub fn get_local_string(key: &str) -> String {
-    #[cfg(feature = "hydrate")]
-    {
-        use leptos::web_sys::window;
-        window()
-            .and_then(|w| w.local_storage().ok())
-            .flatten()
-            .and_then(|s| s.get_item(key).ok())
-            .flatten()
-            .unwrap_or_default()
+    #[test]
+    fn roundtrip_encode_decode() {
+        let original = "https://example.com/manga/12345";
+        assert_eq!(decode_manga_id(&encode(original)), original);
     }
-    #[cfg(not(feature = "hydrate"))]
-    {
-        let _ = key;
-        String::new()
+
+    #[test]
+    fn plain_id_falls_back_to_original() {
+        // A simple slug that is not valid base64url decodes — returned as-is.
+        assert_eq!(decode_manga_id("my-manga-slug"), "my-manga-slug");
     }
-}
 
-pub fn use_permission_state(permission: Option<&'static str>) -> Signal<crate::types::PermissionState> {
-    let parsed = permission.map(|s| s.parse::<crate::permissions::Permission>());
-    let permissions = expect_context::<Resource<
-        Result<std::collections::HashSet<crate::permissions::Permission>, ServerFnError>
-    >>();
+    #[test]
+    fn empty_string_returns_empty() {
+        assert_eq!(decode_manga_id(""), "");
+    }
 
-    Signal::derive(move || {
-        if let Some(Err(ref e)) = parsed {
-            #[cfg(debug_assertions)]
-            panic!("Invalid permission string: {e}");
-            #[cfg(not(debug_assertions))]
-            {
-                tracing::error!("Invalid permission string: {e}");
-                return PermissionState::Denied;
-            }
-        }
+    #[test]
+    fn invalid_base64_returns_original() {
+        let input = "not-base64!!!";
+        assert_eq!(decode_manga_id(input), input);
+    }
 
-        let perm = parsed.as_ref().and_then(|r| r.as_ref().ok().copied());
+    #[test]
+    fn valid_base64_non_utf8_falls_back() {
+        // Bytes that are valid base64url but produce invalid UTF-8.
+        let bad_utf8 = URL_SAFE_NO_PAD.encode([0xFF, 0xFE]);
+        assert_eq!(decode_manga_id(&bad_utf8), bad_utf8);
+    }
 
-        match permissions.get() {
-            None           => crate::types::PermissionState::Loading,
-            Some(Err(_))   => crate::types::PermissionState::Denied,
-            Some(Ok(set))  => match perm {
-                None       => crate::types::PermissionState::Granted,
-                Some(p)    => if set.contains(&p) {
-                    crate::types::PermissionState::Granted
-                } else {
-                    crate::types::PermissionState::Denied
-                },
-            },
-        }
-    })
-}
-
-pub fn use_permission(permission: Option<&'static str>) -> Signal<bool> {
-    let state = use_permission_state(permission);
-    Signal::derive(move || state.get() == crate::types::PermissionState::Granted)
+    #[test]
+    fn unicode_manga_id_roundtrips() {
+        let original = "manga/進撃の巨人/ch1";
+        assert_eq!(decode_manga_id(&encode(original)), original);
+    }
 }

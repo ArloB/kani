@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM tracker_manga_mappings WHERE tracker_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "f39439ac35b3d382b355fc28ea98bd694363eb22d31730b283c80cb63aeaa0b2"
+}

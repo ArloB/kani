@@ -31,7 +31,6 @@ macro_rules! execute_wasm {
     }};
 }
 
-
 /// Hosts a single WASM source extension. Used for one-off instantiation
 pub struct SourceInstance {
     pub store: Option<Store<HostState>>,
@@ -69,7 +68,10 @@ impl SourceInstance {
             (None, false) => AllowedHost::MetadataOnly,
         };
 
-        let mut store = Store::new(engine, HostState::new(self.smart_client.clone(), allowed_host)?);
+        let mut store = Store::new(
+            engine,
+            HostState::new(self.smart_client.clone(), allowed_host)?,
+        );
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
         store.epoch_deadline_callback(|mut ctx| {
@@ -111,7 +113,10 @@ impl SourceInstance {
             .store
             .as_mut()
             .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
-        let bindings = self.bindings.as_ref().expect("Bindings should be initialized");
+        let bindings = self
+            .bindings
+            .as_ref()
+            .expect("Bindings should be initialized");
 
         {
             let data = store.data_mut();
@@ -135,12 +140,15 @@ impl SourceInstance {
     /// Calls the `get_preferences` function in the WASM module.
     pub async fn get_preferences(
         &mut self,
-    ) -> Result<Vec<crate::wasm::kani::extension::types::PreferenceDescriptor>> {
+    ) -> Result<Vec<crate::wasm::kani::extension::types::PreferenceSpec>> {
         let store = self
             .store
             .as_mut()
             .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
-        let bindings = self.bindings.as_ref().expect("Bindings should be initialized");
+        let bindings = self
+            .bindings
+            .as_ref()
+            .expect("Bindings should be initialized");
 
         {
             let data = store.data_mut();

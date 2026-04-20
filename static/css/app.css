@@ -1,0 +1,548 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Kani — Tailwind v4 source CSS
+   Input  → static/css/app.css  (this file, committed)
+   Output → static/css/main.css (generated, gitignored)
+
+   Build:  ./scripts/build-css.sh [dev|watch|prod]
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* ── 2. Tailwind v4 + legacy CSS ─────────────────────────────────────────── */
+@import "tailwindcss";
+
+/* ── 3. Content sources ───────────────────────────────────────────────────── */
+/*
+ * Tell Tailwind where to scan for utility class names.  The standalone CLI
+ * automatically scans files near the input CSS; adding an explicit @source
+ * ensures the JS component tree is always included.
+ */
+@source "../js";
+
+/* ── 4. Design tokens ────────────────────────────────────────────────────── */
+@theme {
+  --color-bg:            #0f0f17;
+  --color-surface:       #18181f;
+  --color-surface-2:     #22222d;
+  --color-surface-3:     #2b2b38;
+  --color-border:        #2e2e3d;
+  --color-border-subtle: #222230;
+  --color-accent:        #e8545a;
+  --color-accent-hover:  #cf3d43;
+  --color-accent-dim:    rgba(232, 84, 90, 0.15);
+  --color-text:          #ddddf0;
+  --color-text-muted:    #7878a0;
+  --color-text-faint:    #6868a0;
+  --color-success:       #4caf79;
+  --color-warn:          #e8a954;
+  --color-danger:        #e85454;
+
+  /* Fonts */
+  --font-body: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'DM Mono', 'Fira Code', ui-monospace, monospace;
+
+  /* Type scale (overrides Tailwind defaults) */
+  --text-xs:   0.72rem;
+  --text-sm:   0.85rem;
+  --text-base: 1rem;
+  --text-lg:   1.15rem;
+  --text-xl:   1.35rem;
+  --text-2xl:  1.75rem;
+  --text-3xl:  2.2rem;
+
+  /* Border radius (overrides Tailwind defaults) */
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-xl:   16px;
+  --radius-full: 9999px;
+
+  /* Shadows (overrides Tailwind defaults) */
+  --shadow-sm:   0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md:   0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg:   0 8px 32px rgba(0, 0, 0, 0.6);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.45);
+
+  /* Breakpoints (overrides Tailwind defaults) */
+  --breakpoint-sm: 480px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1400px;
+}
+
+/* ── 5. Base styles ──────────────────────────────────────────────────────── */
+@layer base {
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&display=swap');
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  body {
+    font-family: var(--font-body);
+    font-size: var(--text-base);
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    line-height: 1.6;
+    min-height: 100svh;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* Base focus ring — all interactive elements inherit this; components may
+     override with a tighter box-shadow ring (focus-visible pattern) */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+}
+
+/* ── 6. Component classes ────────────────────────────────────────────────── */
+@layer components {
+
+  /* ── Buttons ─────────────────────────────────────────────────────────── */
+
+  /* Base layout shared across all button variants.
+     Applied via multi-selector so each variant gets the base without @apply
+     chaining (which would be circular within the same layer). */
+  .btn-primary,
+  .btn-ghost,
+  .btn-danger,
+  .btn-icon {
+    @apply inline-flex items-center justify-center gap-2 h-9 px-4 text-sm font-medium rounded-md cursor-pointer select-none;
+    touch-action: manipulation;
+    transition: background-color 150ms ease, border-color 150ms ease,
+                color 150ms ease, opacity 150ms ease;
+
+    &:focus-visible {
+      outline: none;
+      /* ring-2 ring-accent ring-offset-2 ring-offset-bg equivalent */
+      box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+    }
+
+    &:active:not(:disabled):not([aria-disabled="true"]) {
+      transform: scale(0.97);
+    }
+
+    &:disabled,
+    &[aria-disabled="true"] {
+      opacity: 0.4;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+  }
+
+  .btn-primary {
+    background-color: var(--color-accent);
+    color: #fff;
+
+    &:hover:not(:disabled):not([aria-disabled="true"]) {
+      background-color: var(--color-accent-hover);
+    }
+  }
+
+  .btn-ghost {
+    background-color: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+
+    &:hover:not(:disabled):not([aria-disabled="true"]) {
+      background-color: var(--color-surface-2);
+    }
+  }
+
+  .btn-danger {
+    background-color: var(--color-danger);
+    color: #fff;
+
+    &:hover:not(:disabled):not([aria-disabled="true"]) {
+      background-color: color-mix(in srgb, var(--color-danger) 85%, #000);
+    }
+  }
+
+  /* Icon-only: square, no horizontal padding, muted color */
+  .btn-icon {
+    @apply w-9 px-0;
+    background-color: transparent;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+
+    &:hover:not(:disabled):not([aria-disabled="true"]) {
+      background-color: var(--color-surface-2);
+      color: var(--color-text);
+    }
+  }
+
+  /* ── Card ────────────────────────────────────────────────────────────── */
+
+  .card {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    @apply rounded-lg p-4;
+    box-shadow: var(--shadow-card);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+
+  /* Interactive card (anchor or button) gets a lift on hover */
+  a.card:hover,
+  button.card:hover {
+    border-color: color-mix(in srgb, var(--color-border) 60%, var(--color-surface-3));
+    box-shadow: var(--shadow-md);
+  }
+
+  /* ── Input ───────────────────────────────────────────────────────────── */
+
+  .input {
+    @apply w-full h-10 px-3 text-base rounded-md;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-surface-2);
+    color: var(--color-text);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+
+    &::placeholder {
+      color: var(--color-text-muted);
+    }
+
+    &:focus {
+      outline: none;
+      border-color: var(--color-accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent);
+    }
+
+    &:focus-visible {
+      outline: none;
+    }
+  }
+
+  /* ── Input pills (multi-select combobox container) ──────────────────── */
+
+  .input-pills {
+    @apply w-full rounded-md flex flex-wrap items-center gap-1.5 cursor-text;
+    min-height: 2.5rem;
+    padding: 0.375rem 0.5rem;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-surface-2);
+    color: var(--color-text);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+
+    &:focus-within {
+      outline: none;
+      border-color: var(--color-accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent);
+    }
+  }
+
+  /* ── Chips ───────────────────────────────────────────────────────────── */
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 text-sm rounded-sm cursor-pointer select-none;
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    touch-action: manipulation;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+
+    &:hover {
+      background-color: var(--color-surface-2);
+    }
+
+    &:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+    }
+  }
+
+  /* Active/selected chip */
+  .chip-active {
+    background-color: var(--color-accent-dim);
+    color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+
+  /* ── Skeleton loader ─────────────────────────────────────────────────── */
+
+  .skeleton {
+    background-color: var(--color-surface-2);
+    @apply rounded-md;
+
+    @media (prefers-reduced-motion: no-preference) {
+      background-image: linear-gradient(
+        90deg,
+        transparent 0%,
+        color-mix(in srgb, var(--color-surface-3) 70%, transparent) 50%,
+        transparent 100%
+      );
+      background-size: 200% 100%;
+      animation: skeleton-shimmer 1.6s ease-in-out infinite;
+    }
+  }
+
+  @keyframes skeleton-shimmer {
+    0%   { background-position:  200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ── Button size modifier ── */
+  .btn-sm {
+    @apply h-7 px-2.5 text-xs;
+  }
+
+  /* ── Manga grid ── */
+  .manga-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+  @media (min-width: 480px) {
+    .manga-grid {
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 1rem;
+    }
+  }
+  .manga-grid--large {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+  @media (min-width: 480px) {
+    .manga-grid--large {
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+  }
+
+  /* ── Manga card ── */
+  .manga-card {
+    @apply relative flex flex-col cursor-pointer;
+  }
+  .manga-card a {
+    @apply block;
+  }
+  /* Title overlays the bottom of the cover */
+  .manga-card .title {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 1.5rem 0.5rem 0.4rem;
+    background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.55) 35%, rgba(0,0,0,0.82));
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  }
+  /* Inner span handles line-clamp without padding interference */
+  .manga-card .title > span {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: #fff;
+    line-height: 1.3;
+  }
+  .manga-card__badge {
+    @apply absolute top-1.5 right-1.5 px-1.5 py-0.5 text-xs font-semibold z-10;
+    background-color: var(--color-accent);
+    border-radius: var(--radius-sm);
+    color: #fff;
+  }
+  .manga-card__menu-btn {
+    position: absolute;
+    top: 0.375rem;
+    right: 0.375rem;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff;
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease;
+  }
+  .manga-card__menu-btn [data-svg], .manga-card__menu-btn svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .manga-card:hover .manga-card__menu-btn,
+  .manga-card__menu-btn:focus-visible {
+    opacity: 1;
+  }
+  .manga-card__menu-btn:hover {
+    background: rgba(0, 0, 0, 0.65);
+  }
+  .is-select-mode .manga-card__menu-btn {
+    display: none !important;
+  }
+
+  /* ── Manga row (horizontal scroll, used in global search) ── */
+  .manga-row {
+    display: flex;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    scrollbar-width: none;
+  }
+  .manga-row__item {
+    flex: 0 0 120px;
+    width: 120px;
+  }
+
+  /* ── Category tabs ── */
+  .category-tab {
+    @apply inline-flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap cursor-pointer select-none;
+    color: var(--color-text-muted);
+    border-bottom: 2px solid transparent;
+    background: none;
+    touch-action: manipulation;
+    transition: color 150ms ease, border-color 150ms ease;
+    &:hover {
+      color: var(--color-text);
+    }
+    &:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+    }
+  }
+  .category-tab-active {
+    color: var(--color-accent);
+    border-bottom-color: var(--color-accent);
+  }
+
+  /* ── Toggle switch ── */
+  .kani-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    width: 2.5rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+    touch-action: manipulation;
+  }
+  .kani-toggle__input {
+    @apply sr-only;
+  }
+  .kani-toggle__track {
+    width: 100%;
+    height: 100%;
+    border-radius: 9999px;
+    position: relative;
+    transition: background-color 150ms ease;
+    background-color: var(--color-surface-3);
+    &::after {
+      content: '';
+      @apply absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full;
+      transition: transform 150ms ease;
+    }
+  }
+  .kani-toggle__input:checked ~ .kani-toggle__track {
+    background-color: var(--color-accent);
+  }
+  .kani-toggle__input:checked ~ .kani-toggle__track::after {
+    transform: translateX(1.25rem);
+  }
+  /* Visible focus ring on the track when the hidden input receives keyboard focus */
+  .kani-toggle__input:focus-visible ~ .kani-toggle__track {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+  }
+
+  /* ── Star / favourite checkbox ── */
+  .star-checkbox {
+    @apply inline-flex items-center justify-center w-9 h-9 rounded-md cursor-pointer;
+    color: var(--color-text-muted);
+    touch-action: manipulation;
+    transition: background-color 150ms ease, color 150ms ease;
+    &:hover {
+      background-color: var(--color-surface-2);
+      color: var(--color-text);
+    }
+  }
+  .star-checkbox__input {
+    @apply sr-only;
+  }
+  .star-checkbox__icon {
+    @apply flex;
+    [&_svg] { width: 1rem; height: 1rem; }
+  }
+  /* Visible focus ring on the icon span when the hidden input gets keyboard focus */
+  .star-checkbox__input:focus-visible ~ .star-checkbox__icon {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+    border-radius: var(--radius-sm);
+  }
+
+  /* ── Download button variants ── */
+  .dl-btn {
+    @apply inline-flex items-center justify-center gap-1 w-9 h-9 text-xs font-medium rounded-md cursor-pointer select-none;
+    border: 1px solid var(--color-border);
+    background-color: transparent;
+    color: var(--color-text-muted);
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+    touch-action: manipulation;
+    flex-shrink: 0;
+    &:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+    }
+    &:active { transform: scale(0.95); }
+  }
+  .dl-btn-active {
+    color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+    background-color: var(--color-accent-dim);
+  }
+  .dl-btn-failed {
+    color: var(--color-danger);
+    border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+    background-color: color-mix(in srgb, var(--color-danger) 15%, transparent);
+  }
+  .dl-btn-done {
+    color: var(--color-success);
+    border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+    background-color: color-mix(in srgb, var(--color-success) 15%, transparent);
+  }
+  .dl-btn-readonly {
+    cursor: default;
+    pointer-events: none;
+  }
+
+  /* ── Page loading bar ── */
+  .page-loading-bar {
+    @apply fixed top-0 left-0 right-0 h-[3px] pointer-events-none overflow-hidden z-50;
+    background-color: transparent;
+  }
+  .page-loading-bar__fill {
+    height: 100%;
+    width: 0;
+    background-color: var(--color-accent);
+  }
+  .page-loading-bar--active .page-loading-bar__fill {
+    width: 70%;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: loading-sweep 1.4s ease-in-out infinite;
+    }
+  }
+  @keyframes loading-sweep {
+    0%   { transform: translateX(-100%); width: 50%; }
+    50%  { transform: translateX(50%);   width: 80%; }
+    100% { transform: translateX(250%);  width: 50%; }
+  }
+
+  /* ── Progress ring spin (indeterminate) ── */
+  @keyframes ring-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  .dl-ring-spin {
+    transform-origin: center;
+    animation: ring-spin 0.9s linear infinite;
+  }
+}

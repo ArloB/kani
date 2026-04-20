@@ -43,6 +43,19 @@ interface html {
 
 interface utility {
     date-parse: func(date: string, fmt: string) -> result<s64, string>;
+    date-parse-rfc3339: func(date: string) -> result<s64, string>;
+    
+    resolve-url: func(base: string, path: string) -> result<string, string>;
+    build-url: func(base: string, queries: list<tuple<string, string>>) -> result<string, string>;
+    
+    url-encode: func(input: string) -> string;
+    url-decode: func(input: string) -> result<string, string>;
+    
+    get-query-param: func(url: string, key: string) -> option<string>;
+    
+    encode-form: func(data: list<tuple<string, string>>) -> string;
+    
+    log: func(level: u8, line: u32, message: string);
 }
 
 interface json {
@@ -61,6 +74,8 @@ interface json {
     object-keys: func(handle: json-handle, ptr: string) -> result<list<string>, string>;
     object-get:  func(handle: json-handle, ptr: string, key: string) -> result<option<json-handle>, string>;
 
+    to-string: func(handle: json-handle) -> result<string, string>;
+    
     drop-json: func(handle: json-handle);
 }
 
@@ -110,6 +125,12 @@ interface types {
         has-next-page: bool,
     }
 
+    /// A single sort option that an extension can apply to its chapter list.
+    record chapter-sort-option {
+        id: string,
+        name: string,
+    }
+
     record page {
         index: s32,
         url: string,
@@ -129,65 +150,76 @@ interface types {
         unrestricted-http: bool,
     }
 
-    variant preference-kind {
-        text-input(text-input-pref),
-        checkbox(checkbox-pref),
-        select(select-pref),
-        multi-select(multi-select-pref),
-        number(number-input-pref),
-        multi-value-list(multi-value-list-pref),
-        label(label-pref),
+    enum filter-type-tag {
+        select,
+        checkbox,
+        text-input,
+        sort,
+        multiselect,
     }
 
-    record text-input-pref {
-        placeholder: option<string>,
-        default-value: option<string>,
-        is-secret: bool,
+    enum filter-semantic {
+        author,
+        artist,
+        tag,
     }
 
-    record checkbox-pref {
-        default-value: bool,
-    }
-
-    record select-option {
-        label: string,
+    record filter-option {
+        filter-name: string,
+        name: string,
         value: string,
     }
 
-    record multi-select-pref {
-        options: list<select-option>,
-        default-values: list<string>,
+    record filter-def {
+        id: string,
+        name: string,
+        tag: filter-type-tag,
+        options: list<filter-option>,
+        default-value: option<filter-state>,
+        semantic: option<filter-semantic>,
     }
 
-    record number-input-pref {
-        default-value: option<f64>,
-        min: option<f64>,
-        max: option<f64>,
-        step: option<f64>,
+    record filter-list {
+        filters: list<filter-def>,
     }
 
-    record select-pref {
-        options: list<select-option>,
-        default-value: option<string>,
+    record option-state {
+        name: string,
+        value: string,
     }
 
-    record multi-value-list-pref {
-        placeholder: option<string>,
-        item-label: option<string>,
-        default-values: list<string>,
+    variant filter-state {
+        selection(option-state),
+        checkbox(bool),
+        text-input(string),
+        multiselect(list<string>),
     }
 
-    record label-pref {
-        text: string,
+    record active-filter {
+        filter-name: string,
+        state: filter-state,
     }
 
-    record preference-descriptor {
+    // Simplified flat preference manifest - extensions declare what they need,
+    // the host handles storage, rendering, and serialization.
+    enum pref-kind {
+        toggle,          // bool stored as "true"/"false"
+        select,          // single-value selection; options lists available values
+        text,            // free-form text input
+        multi-value-list, // JSON-array of strings; options may carry metadata (e.g. placeholder)
+    }
+
+    record preference-spec {
         key: string,
-        title: string,
+        label: string,
+        kind: pref-kind,
+        // (display-label, stored-value) pairs; only used for select kind
+        options: list<tuple<string, string>>,
+        // Stringified default: "true"/"false" for toggle, value string for select/text
+        default: string,
         description: option<string>,
-        kind: preference-kind,
-        group: option<string>,
-        requires-key: option<string>,
+        // For text kind: render as a password/secret field
+        secret: bool,
     }
 }
 
@@ -196,17 +228,28 @@ interface prefs {
 }
 
 interface manga-provider {
-    use types.{manga-list, manga-info, chapter-list, chapter, extension-metadata, preference-descriptor};
+    use types.{manga-list, manga-info, chapter-list, chapter, extension-metadata, preference-spec, filter-list, active-filter, chapter-sort-option};
 
     get-metadata: func() -> result<extension-metadata, string>;
 
-    get-popular-manga: func(page: s32, page-size: s32) -> result<manga-list, string>;
-    search-manga: func(query: string, page: s32, page-size: s32) -> result<manga-list, string>;
+    get-popular-manga: func(page: s32, page-size: s32, filters: list<active-filter>) -> result<manga-list, string>;
+    search-manga: func(query: string, page: s32, page-size: s32, filters: list<active-filter>) -> result<manga-list, string>;
     get-manga-details: func(manga-id: string) -> result<manga-info, string>;
-    get-chapter-list: func(manga-id: string, page: s32, page-size: option<s32>) -> result<chapter-list, string>;
+    get-chapter-list: func(manga-id: string, page: s32, page-size: option<s32>, sort: option<string>) -> result<chapter-list, string>;
     get-pages: func(manga-id: string, chapter-id: string) -> result<chapter, string>;
 
-    get-preferences: func() -> result<list<preference-descriptor>, string>;
+    get-chapter-sort-list: func() -> result<list<chapter-sort-option>, string>;
+    get-filter-list: func() -> result<filter-list, string>;
+    get-preferences: func() -> result<list<preference-spec>, string>;
+}
+
+interface extraction {
+    // Blueprint is passed as postcard-encoded bytes (list<u8>).
+    extract-html: func(doc: option<s32>, blueprint: list<u8>) -> result<s32, string>;
+    extract-json: func(handle: option<s32>, blueprint: list<u8>) -> result<s32, string>;
+    // Like extract-html but the host handles multi-chunk fetching for fixed-page-size sources.
+    // Blueprint must include a PaginationConfig; the host injects the offset param per chunk.
+    paginated-extract-html: func(page: s32, page-size: s32, blueprint: list<u8>) -> result<s32, string>;
 }
 
 world kani-extension {
@@ -216,5 +259,6 @@ world kani-extension {
     import utility;
     import json;
     import prefs;
+    import extraction;
     export manga-provider;
 }

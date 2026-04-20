@@ -1,6 +1,6 @@
 //! Server-specific models (database entities and API request/response types).
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 fn validate_https_url(value: &str, _: &()) -> garde::Result {
     if value.starts_with("https://") {
@@ -30,25 +30,22 @@ pub struct FetchWasmRequest {
     pub url: String,
 }
 
-#[derive(Clone, Debug, sqlx::FromRow)]
-pub struct Settings {
-    pub flaresolverr_url:           String,
-    pub library_path:               std::path::PathBuf,
-    pub wasm_storage_path:          std::path::PathBuf,
-    pub concurrent_page_downloads:  i64,
-    pub concurrent_manga_downloads: i64,
-    pub chapter_queue_size:         i64,
-    pub max_retries:                i64,
-    pub initial_retry_delay_ms:     i64,
-    pub max_wasm_instances:         i64,
-    pub auto_scan:                  bool,
-    pub scan_interval_minutes:      i64,
-}
+// Types moved to kani-app. Re-exported here so that existing kani-web code
+// (rest.rs, tests) continues to compile unchanged.
+pub use kani_app::models::{DownloadRuleRow, LibraryManga, Manga, Settings};
 
 #[derive(garde::Validate, Deserialize, Debug)]
 pub struct SearchMangaRequest {
-    #[garde(length(min = 1, max = 200))]
-    pub query: String,
+    #[garde(inner(length(max = 200)))]
+    pub query: Option<String>,
+    #[garde(skip)]
+    pub filters: Option<String>,
+}
+
+#[derive(garde::Validate, Deserialize, Debug)]
+pub struct PopularMangaQuery {
+    #[garde(skip)]
+    pub filters: Option<String>,
 }
 
 #[derive(garde::Validate, Deserialize, Debug)]
@@ -57,77 +54,316 @@ pub struct ProxyQuery {
     pub token: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
-pub struct Manga {
-    pub id: i64,
-    pub source_id: i64,
-    pub source_manga_id: String,
-    pub name: String,
-    pub cover_url: Option<String>,
-    pub local_cover_path: Option<String>,
-    pub description: Option<String>,
-    pub auto_download: bool,
-    #[sqlx(try_from = "i64")]
-    pub status: kani_shared::MangaStatus,
-    pub created_at: time::OffsetDateTime,
-    pub updated_at: time::OffsetDateTime,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
-pub struct Chapter {
-    pub id: i64,
-    pub source_chapter_id: String,
-    pub name: Option<String>,
-    pub chapter_number: f64,
-    pub volume: Option<i64>,
-    pub language: String,
-    pub scanlator: Option<String>,
-    pub uploaded_at: Option<i64>,
-    pub download_status: i64,
-    pub is_orphaned: bool,
-}
-
-#[derive(Clone, Debug, sqlx::FromRow)]
-pub struct LibraryRow {
-    pub id: i64,
-    pub name: String,
-    pub cover_url: Option<String>,
-    pub local_cover_path: Option<String>,
-    pub base_url: String
-}
-
 #[derive(sqlx::FromRow)]
 pub struct FilterOptionResult {
     pub id: i64,
     pub name: String,
 }
 
-#[cfg(feature = "ssr")]
-#[derive(sqlx::FromRow)]
-pub struct DownloadRuleRow {
-    pub id:        i64,
-    pub manga_id:  i64,
-    pub rule_type: String,
-    pub value:     String,
+#[derive(garde::Validate, serde::Deserialize, Debug)]
+pub struct LibraryQuery {
+    #[garde(range(min = 1))]
+    pub page: i32,
+    #[garde(range(min = 1, max = 200))]
+    pub page_size: i32,
+    #[garde(skip)]
+    pub search: Option<String>,
+    #[garde(skip)]
+    pub status_filter: Option<i64>,
+    #[garde(skip)]
+    pub tag_filter: Option<i64>,
+    #[garde(skip)]
+    pub author_filter: Option<i64>,
+    #[garde(skip)]
+    pub artist_filter: Option<i64>,
+    #[garde(skip)]
+    pub category_filter: Option<i64>,
+    #[garde(skip)]
+    pub reading_status_filter: Option<i64>,
+    #[garde(skip)]
+    #[serde(default)]
+    pub hide_no_unread: bool,
+    #[garde(skip)]
+    #[serde(default)]
+    pub hide_completed_status: bool,
+    #[garde(skip)]
+    pub source_id: Option<i64>,
+    #[garde(skip)]
+    #[serde(default)]
+    pub sort_by: kani_shared::MangaSortOrder,
 }
 
-#[cfg(feature = "ssr")]
-impl TryFrom<DownloadRuleRow> for crate::types::DownloadRule {
-    type Error = String;
+#[derive(garde::Validate, serde::Deserialize, Debug)]
+pub struct LocalChaptersQuery {
+    #[garde(range(min = 1))]
+    pub page: i32,
+    #[garde(range(min = 1, max = 200))]
+    #[serde(default = "default_chapter_page_size")]
+    pub page_size: i32,
+    #[garde(skip)]
+    #[serde(default)]
+    pub sort_order: kani_shared::ChapterSortOrder,
+    /// `true` = downloaded only, `false` = undownloaded only, absent = all
+    #[garde(skip)]
+    pub filter_downloaded: Option<bool>,
+    /// `true` = unread only
+    #[garde(skip)]
+    pub filter_unread: Option<bool>,
+    /// Limit to a specific scanlator when set
+    #[garde(skip)]
+    pub filter_scanlator: Option<String>,
+}
 
-    fn try_from(row: DownloadRuleRow) -> Result<Self, Self::Error> {
-        use crate::types::DownloadRuleKind;
+/// Query parameters for the chapter-IDs endpoint (no pagination).
+#[derive(garde::Validate, serde::Deserialize, Debug)]
+pub struct ChapterIdsQuery {
+    #[garde(skip)]
+    #[serde(default)]
+    pub sort_order: kani_shared::ChapterSortOrder,
+    /// `true` = downloaded only, `false` = undownloaded only, absent = all
+    #[garde(skip)]
+    pub filter_downloaded: Option<bool>,
+    /// `true` = unread only
+    #[garde(skip)]
+    pub filter_unread: Option<bool>,
+    /// Limit to a specific scanlator when set
+    #[garde(skip)]
+    pub filter_scanlator: Option<String>,
+    /// When true, applies scanlator preferences + download rules to return
+    /// only the preferred one version per chapter number (undownloaded only).
+    #[garde(skip)]
+    #[serde(default)]
+    pub preferred_only: bool,
+}
 
-        let kind = match row.rule_type.as_str() {
-            "scanlator_include" => DownloadRuleKind::ScanlatorInclude(row.value),
-            "scanlator_exclude" => DownloadRuleKind::ScanlatorExclude(row.value),
-            "language_include"  => DownloadRuleKind::LanguageInclude(row.value),
-            "language_exclude"  => DownloadRuleKind::LanguageExclude(row.value),
-            "title_contains"    => DownloadRuleKind::TitleContains(row.value),
-            "title_excludes"    => DownloadRuleKind::TitleExcludes(row.value),
-            other => return Err(format!("Unknown rule_type in DB: {}", other)),
-        };
-        Ok(crate::types::DownloadRule { id: row.id, manga_id: row.manga_id, kind })
+fn default_chapter_page_size() -> i32 {
+    50
+}
+
+#[derive(garde::Validate, serde::Deserialize, Debug)]
+pub struct PageQuery {
+    #[garde(range(min = 1))]
+    pub page: i32,
+}
+
+fn deserialize_search_scope<'de, D>(deserializer: D) -> Result<kani_shared::SearchScope, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use kani_shared::SearchScope;
+    use serde::Deserialize;
+    let s = String::deserialize(deserializer)?;
+    // Try to parse as JSON first (handles {"Sources":[1,2]})
+    if let Ok(scope) = serde_json::from_str::<SearchScope>(&s) {
+        return Ok(scope);
     }
+    // Fall back to unit variant name (handles FavouritedOnly, AllEnabled)
+    serde_json::from_str::<SearchScope>(&format!("\"{}\"", s)).map_err(serde::de::Error::custom)
 }
-
+
+#[derive(serde::Deserialize, Debug)]
+pub struct GlobalSearchQuery {
+    pub query: String,
+    #[serde(deserialize_with = "deserialize_search_scope")]
+    pub scope: kani_shared::SearchScope,
+    pub page: i32,
+    pub page_size: i32,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct AddDownloadRuleRequest {
+    pub kind: kani_shared::DownloadRuleKind,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SetScanlatorPrefRequest {
+    pub scanlator: String,
+    pub priority: i64,
+    #[serde(default)]
+    pub blocked: bool,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SetScanlatorModeRequest {
+    pub mode: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct CreateCategoryRequest {
+    pub name: String,
+    pub sort_order: i64,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct RenameCategoryRequest {
+    pub name: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ReorderCategoriesRequest {
+    pub ordered_ids: Vec<i64>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SetMangaCategoriesRequest {
+    pub category_ids: Vec<i64>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SetPreferenceRequest {
+    pub value: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ListItemRequest {
+    pub item: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ToggleSelectRequest {
+    pub item: String,
+    pub selected: bool,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ToggleEnabledRequest {
+    pub enabled: bool,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ToggleFavouritedRequest {
+    pub favourited: bool,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ToggleAutoDownloadRequest {
+    pub enabled: bool,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct PreviewMigrationRequest {
+    pub target_source_id: i64,
+    pub target_source_manga_id: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct MigrateMangaRequest {
+    pub target_source_id: i64,
+    pub target_source_manga_id: String,
+    pub keep_orphaned_downloads: bool,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SetChapterProgressRequest {
+    pub page: i64,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SetReadStatusRequest {
+    pub chapter_ids: Vec<i64>,
+    pub is_read: bool,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SetMangaTrackingRequest {
+    pub status: Option<kani_shared::types::MangaTrackingStatus>,
+    pub score: Option<f64>,
+    pub tracking_enabled: Option<bool>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct TrackerAuthUrlQuery {
+    pub redirect_uri: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct TrackerCallbackQuery {
+    pub code: String,
+    pub state: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SetTrackerConfigRequest {
+    pub client_id: String,
+    /// Omit to keep existing secret; set to empty string to clear.
+    pub client_secret: Option<String>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct TrackerSearchQuery {
+    pub query: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SetTrackerMappingRequest {
+    pub tracker_id: i64,
+    pub tracker_manga_id: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct MarkUpToRequest {
+    pub chapter_number: f64,
+    pub is_read: bool,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ContinueReadingShelfQuery {
+    #[serde(default = "default_shelf_limit")]
+    pub limit: i64,
+}
+
+fn default_shelf_limit() -> i64 {
+    12
+}
+
+// ── Admin / user-management request types ─────────────────────────────────────
+
+#[derive(serde::Deserialize, Debug)]
+pub struct AdminCreateUserRequest {
+    pub username: String,
+    pub email: String,
+    pub password: String,
+    /// Roles to assign in addition to the default "user" role.
+    #[serde(default)]
+    pub roles: Vec<String>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct AdminUpdateUserRequest {
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub is_active: Option<bool>,
+    pub password: Option<String>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct AdminGrantRoleRequest {
+    pub role_slug: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct AdminCreateRoleRequest {
+    pub slug: String,
+    pub parent: Option<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct AdminUpdateRoleRequest {
+    pub description: Option<String>,
+    pub permissions: Option<Vec<String>>,
+}

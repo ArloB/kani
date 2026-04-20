@@ -104,8 +104,12 @@ mod tests {
     #[tokio::test]
     async fn save_wasm_rejects_non_wasm() {
         let dir = tempfile::tempdir().unwrap();
-        let result = save_wasm(dir.path().to_str().unwrap(), "bad_ext", &[0x01, 0x02, 0x03, 0x04])
-            .await;
+        let result = save_wasm(
+            dir.path().to_str().unwrap(),
+            "bad_ext",
+            &[0x01, 0x02, 0x03, 0x04],
+        )
+        .await;
         assert!(result.is_err());
     }
 
@@ -113,7 +117,9 @@ mod tests {
     async fn delete_wasm_file_removes_file() {
         let dir = tempfile::tempdir().unwrap();
         let storage = dir.path().to_str().unwrap();
-        save_wasm(storage, "ext_to_delete", &valid_wasm()).await.unwrap();
+        save_wasm(storage, "ext_to_delete", &valid_wasm())
+            .await
+            .unwrap();
         delete_wasm_file(storage, "ext_to_delete").await.unwrap();
         assert!(!dir.path().join("ext_to_delete.wasm").exists());
     }
@@ -122,6 +128,45 @@ mod tests {
     async fn delete_wasm_file_nonexistent_is_ok() {
         let dir = tempfile::tempdir().unwrap();
         let result = delete_wasm_file(dir.path().to_str().unwrap(), "nonexistent").await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn exactly_four_magic_bytes_is_valid() {
+        assert!(validate_wasm_magic(&WASM_MAGIC));
+    }
+
+    #[test]
+    fn partial_magic_rejected() {
+        assert!(!validate_wasm_magic(&[0x00, 0x61, 0x73]));
+        assert!(!validate_wasm_magic(&[0x00, 0x61]));
+        assert!(!validate_wasm_magic(&[0x00]));
+    }
+
+    #[test]
+    fn correct_prefix_with_wrong_bytes_rejected() {
+        // First byte right, rest wrong.
+        assert!(!validate_wasm_magic(&[0x00, 0x62, 0x73, 0x6D]));
+    }
+
+    #[tokio::test]
+    async fn save_wasm_name_with_special_chars_is_sanitized_and_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        // Forbidden chars are stripped; the sanitized name should still be usable.
+        let path = save_wasm(dir.path().to_str().unwrap(), "my:source/ext", &valid_wasm())
+            .await
+            .unwrap();
+        assert!(path.exists());
+        assert!(!path.to_string_lossy().contains('/'));
+    }
+
+    #[tokio::test]
+    async fn save_wasm_overwrites_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = dir.path().to_str().unwrap();
+        save_wasm(storage, "ext", &valid_wasm()).await.unwrap();
+        // Save again — should succeed (overwrite).
+        let result = save_wasm(storage, "ext", &valid_wasm()).await;
         assert!(result.is_ok());
     }
 }

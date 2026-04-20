@@ -1,6 +1,20 @@
-//! Sanitization utilities for untrusted input.
+//! Sanitization, parsing, and other shared utilities.
 use crate::error::{Error, Result};
 use std::path::{Path, PathBuf};
+
+/// Parse a date string using a format pattern, falling back from datetime to date-only.
+/// Returns a Unix timestamp in seconds.
+pub fn parse_date_flexible(date: &str, format: &str) -> std::result::Result<i64, String> {
+    let fmt = time::format_description::parse(format)
+        .map_err(|e| format!("Invalid format string: {}", e))?;
+    if let Ok(dt) = time::PrimitiveDateTime::parse(date, &fmt) {
+        return Ok(dt.assume_utc().unix_timestamp());
+    }
+    if let Ok(d) = time::Date::parse(date, &fmt) {
+        return Ok(time::PrimitiveDateTime::new(d, time::Time::MIDNIGHT).assume_utc().unix_timestamp());
+    }
+    Err(format!("Unable to parse date '{}' with format '{}'", date, format))
+}
 
 /// Sanitizes a string to be used as a safe filename or directory name.
 pub fn sanitize_filename(name: &str) -> String {
@@ -39,23 +53,25 @@ pub fn sanitize_filename(name: &str) -> String {
 /// Resolves `target` and asserts it remains under `root`.
 /// Fails if `target` does not yet exist — use the parent dir for new files.
 pub fn assert_within_root(root: &Path, target: &Path) -> Result<PathBuf> {
-    let (canonical_base, suffix) = if target.exists() {
-        (target.canonicalize()?, PathBuf::new())
+    // Resolve the full canonical path cleanly
+    let full = if target.exists() {
+        dunce::canonicalize(target)?
     } else {
         let parent = target
             .parent()
             .ok_or_else(|| Error::Internal("path has no parent".to_string()))?;
-        let canonical_parent = parent
-            .canonicalize()
+
+        let canonical_parent = dunce::canonicalize(parent)
             .map_err(|_| Error::Internal("parent directory does not exist".to_string()))?;
+
         let file_name = target
             .file_name()
             .ok_or_else(|| Error::Internal("path has no filename".to_string()))?;
-        (canonical_parent, PathBuf::from(file_name))
+
+        canonical_parent.join(file_name)
     };
 
-    let canonical_root = root.canonicalize()?;
-    let full = canonical_base.join(&suffix);
+    let canonical_root = dunce::canonicalize(root)?;
 
     if !full.starts_with(&canonical_root) {
         return Err(Error::Internal(format!(
@@ -65,4 +81,130 @@ pub fn assert_within_root(root: &Path, target: &Path) -> Result<PathBuf> {
     }
 
     Ok(full)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    // ── sanitize_filename ────────────────────────────────────────────────────
+
+    #[test]
+    fn normal_text_is_unchanged() {
+        assert_eq!(sanitize_filename("My Manga Vol 1"), "My Manga Vol 1");
+    }
+
+    #[test]
+    fn forward_slash_removed() {
+        assert_eq!(sanitize_filename("a/b/c"), "abc");
+    }
+
+    #[test]
+    fn backslash_removed() {
+        assert_eq!(sanitize_filename("a\\b"), "ab");
+    }
+
+    #[test]
+    fn forbidden_chars_stripped() {
+        assert_eq!(sanitize_filename("file:name"), "filename");
+        assert_eq!(sanitize_filename("a<b>c"), "abc");
+        assert_eq!(sanitize_filename("foo|bar"), "foobar");
+        assert_eq!(sanitize_filename("test?query"), "testquery");
+        assert_eq!(sanitize_filename("glob*"), "glob");
+        assert_eq!(sanitize_filename(r#"say "hello""#), "say hello");
+    }
+
+    #[test]
+    fn control_chars_removed() {
+        assert_eq!(sanitize_filename("hello\x00world"), "helloworld");
+        assert_eq!(sanitize_filename("tab\there"), "tabhere");
+        assert_eq!(sanitize_filename("newline\nhere"), "newlinehere");
+    }
+
+    #[test]
+    fn all_forbidden_produces_unnamed() {
+        assert_eq!(sanitize_filename("/\\<>:\"|?*"), "_unnamed");
+    }
+
+    #[test]
+    fn empty_input_produces_unnamed() {
+        assert_eq!(sanitize_filename(""), "_unnamed");
+    }
+
+    #[test]
+    fn only_dots_produces_unnamed() {
+        assert_eq!(sanitize_filename("..."), "_unnamed");
+    }
+
+    #[test]
+    fn leading_trailing_dots_trimmed() {
+        assert_eq!(sanitize_filename(".hidden."), "hidden");
+    }
+
+    #[test]
+    fn leading_trailing_whitespace_trimmed() {
+        assert_eq!(sanitize_filename("  spaced  "), "spaced");
+    }
+
+    #[test]
+    fn unicode_preserved() {
+        assert_eq!(sanitize_filename("Berserk 全集"), "Berserk 全集");
+    }
+
+    // ── assert_within_root ───────────────────────────────────────────────────
+
+    #[test]
+    fn allows_existing_file_within_root() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("file.txt");
+        fs::write(&file, b"").unwrap();
+
+        let result = assert_within_root(dir.path(), &file);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn allows_new_file_whose_parent_is_root() {
+        let dir = tempdir().unwrap();
+        let new_file = dir.path().join("new_file.txt");
+        // File doesn't exist yet but parent does.
+        let result = assert_within_root(dir.path(), &new_file);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn allows_file_in_subdirectory() {
+        let dir = tempdir().unwrap();
+        let subdir = dir.path().join("sub");
+        fs::create_dir_all(&subdir).unwrap();
+        let file = subdir.join("file.txt");
+        fs::write(&file, b"").unwrap();
+
+        let result = assert_within_root(dir.path(), &file);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn rejects_path_that_escapes_root() {
+        let root = tempdir().unwrap();
+        let other = tempdir().unwrap();
+        // A file that lives outside root entirely.
+        let outside = other.path().join("escape.txt");
+        fs::write(&outside, b"").unwrap();
+
+        let result = assert_within_root(root.path(), &outside);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_dotdot_traversal() {
+        let dir = tempdir().unwrap();
+        // Construct a path that climbs out with `..`
+        let escape = dir.path().join("..").join("escape.txt");
+
+        let result = assert_within_root(dir.path(), &escape);
+        assert!(result.is_err());
+    }
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE manga SET download_all_preferred_only=? WHERE id=?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "5e3df64f9b62836966b917701b1672efcbfa8f0e677edcd80d0ac53fc409a0fa"
+}

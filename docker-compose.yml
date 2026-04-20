@@ -1,0 +1,33 @@
+services:
+  kani:
+    build: .
+    image: kani:latest
+    ports:
+      - "8242:8242"
+    volumes:
+      # Database and WASM extensions.
+      # The kani user inside the container runs as UID 1000.
+      # If using a bind mount and you hit permission errors, run:
+      #   sudo chown -R 1000:1000 ./data
+      - ./data:/data
+
+      # Manga image library. This is kept separate so it can be placed on a
+      # different drive or filesystem on the host. To use a custom path, replace
+      # the left-hand side with an absolute path, e.g.:
+      #   - /mnt/large-drive/manga:/library
+      - ./library:/library
+
+    environment:
+      KANI_BIND: "0.0.0.0:8242"
+
+      # Set to "true" when running behind a TLS-terminating reverse proxy (Caddy, nginx, etc.)
+      # so that session cookies are marked Secure.
+      KANI_SECURE_COOKIES: "false"
+
+      # Restrict CORS to a specific origin in production.
+      # Leave unset to mirror the request origin (permissive, suitable for local use).
+      # KANI_CORS_ORIGIN: "https://kani.example.com"
+
+      # Override the log level (error, warn, info, debug, trace).
+      # RUST_LOG: "info"
+    restart: unless-stopped

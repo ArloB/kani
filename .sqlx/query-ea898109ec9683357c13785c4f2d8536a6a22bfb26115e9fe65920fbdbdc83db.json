@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT c.id, c.name, c.sort_order FROM categories c\n             JOIN manga_categories mc ON mc.category_id = c.id\n             WHERE mc.manga_id=? ORDER BY c.sort_order ASC, c.name ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "sort_order",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ea898109ec9683357c13785c4f2d8536a6a22bfb26115e9fe65920fbdbdc83db"
+}

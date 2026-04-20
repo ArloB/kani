@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COALESCE(scanlator_mode, 'priority') FROM manga WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "COALESCE(scanlator_mode, 'priority')",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c55b633dc7f579d80e6aa43ac319361e440ff6a4f350d86422677c24c419cd62"
+}

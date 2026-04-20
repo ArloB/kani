@@ -1,0 +1,92 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT * FROM manga WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "source_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "source_manga_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "cover_url",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "local_cover_path",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "status",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "auto_download",
+        "ordinal": 8,
+        "type_info": "Bool"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 9,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 10,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "scanlator_mode",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "download_all_preferred_only",
+        "ordinal": 12,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fb9a7e6792619e6c64865e767ecd8723841985cbbafccd94dd5907da2c7d55fa"
+}

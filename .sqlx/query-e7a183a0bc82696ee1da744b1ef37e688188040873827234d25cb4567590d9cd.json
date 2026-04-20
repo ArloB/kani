@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT volume, chapter_number, name FROM chapters WHERE id IN (SELECT value FROM json_each(?))",
+  "describe": {
+    "columns": [
+      {
+        "name": "volume",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "chapter_number",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "e7a183a0bc82696ee1da744b1ef37e688188040873827234d25cb4567590d9cd"
+}

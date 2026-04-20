@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT client_id, client_secret FROM tracker_app_config WHERE tracker_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "client_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "client_secret",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "cf8e6a66448d1aef40e4949bc9fa36d251c7e41f2232dcc9a756f01b0cb21c3a"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE sources SET favourited = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "90893d4a381d48c979ae6eb0874b35bd3e40ee9924d56eb9b465b9ab8fb18bcd"
+}

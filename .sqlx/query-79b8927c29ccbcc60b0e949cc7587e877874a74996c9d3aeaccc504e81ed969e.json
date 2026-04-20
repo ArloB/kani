@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, chapter_number, download_status FROM chapters WHERE manga_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "chapter_number",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "download_status",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "79b8927c29ccbcc60b0e949cc7587e877874a74996c9d3aeaccc504e81ed969e"
+}

@@ -4,8 +4,8 @@
 //! to provide manga source functionality.
 
 use crate::{
-    wit_types::{Chapter, ChapterList,MangaInfo, MangaList},
-    FilterList, PreferenceList
+    types::ActiveFilter,
+    wit_types::{Chapter, ChapterList, ChapterSortOption, FilterList, MangaInfo, MangaList, PreferenceSpec},
 };
 
 /// Result type for extension operations.
@@ -41,72 +41,46 @@ impl std::fmt::Display for ExtensionError {
 impl std::error::Error for ExtensionError {}
 
 /// Trait that all manga source extensions must implement.
-///
-/// This defines the core functionality required to fetch manga data
-/// from a source. Each method corresponds to a WASM export function.
 pub trait MangaExtension {
-    /// Get the name of this source (e.g., "MangaDex", "MangaSee").
     fn name(&self) -> &str;
 
-    /// Get popular/trending manga.
-    ///
-    /// # Arguments
-    /// * `page` - Page number (1-indexed)
-    /// * `page_size` - Number of items per page
-    fn get_popular_manga(&self, page: i32, page_size: i32) -> ExtensionResult<MangaList>;
+    fn get_popular_manga(&self, page: i32, page_size: i32, filters: &[ActiveFilter]) -> ExtensionResult<MangaList>;
 
-    /// Search for manga by query.
-    ///
-    /// # Arguments
-    /// * `query` - Search query string
-    /// * `page` - Page number (1-indexed)
-    /// * `page_size` - Number of items per page
-    fn search_manga(&self, query: &str, page: i32, page_size: i32) -> ExtensionResult<MangaList>;
+    fn search_manga(&self, query: &str, page: i32, page_size: i32, filters: &[ActiveFilter]) -> ExtensionResult<MangaList>;
 
-    /// Get detailed information about a specific manga.
-    ///
-    /// # Arguments
-    /// * `manga_id` - The manga's unique identifier
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo>;
 
-    /// Get all chapters for a manga.
-    ///
-    /// # Arguments
-    /// * `manga_id` - The manga's unique identifier
-    /// * `page` - Page number (1-indexed)
-    /// * `page_size` - Number of items per page; `None` uses the source's maximum per call
-    fn get_chapter_list(&self, manga_id: &str, page: i32, page_size: Option<i32>) -> ExtensionResult<ChapterList>;
+    fn get_chapter_list(
+        &self,
+        manga_id: &str,
+        page: i32,
+        page_size: Option<i32>,
+        sort: Option<String>,
+    ) -> ExtensionResult<ChapterList>;
 
-    /// Get page URLs for a chapter for downloading.
-    ///
-    /// # Arguments
-    /// * `manga_id` - The manga's unique identifier
-    /// * `chapter_id` - The chapter's unique identifier
     fn get_pages(&self, manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter>;
 
-    // Returns: A JSON schema defining the available filters (Drop-downs, Checkboxes, Text Inputs, Sort options).
-    // Host Responsibility: The main app reads this JSON, renders the UI natively, and then serializes the user's selection back into JSON to pass into search_manga
+    /// Returns the sort options this extension supports for its chapter list.
+    fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<ChapterSortOption>>;
+
+    /// Returns the available filters for search/browse.
     fn get_filter_list(&self) -> ExtensionResult<FilterList>;
 
-    // Purpose: Allow the user to set login credentials or domain overrides. The extension should expose a definition of what settings it needs, and the host handles storage.
-    fn get_preferences(&self) -> ExtensionResult<PreferenceList>;
+    /// Returns the extension's preference definitions.
+    /// The host stores and serves the values; extensions read them via `host_abi::prefs`.
+    fn get_preferences(&self) -> ExtensionResult<Vec<PreferenceSpec>>;
 }
 
 /// Metadata about a source extension.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+/// Used on the host side for deserialization and caching.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExtensionMetadata {
-    /// Unique identifier for this extension
     pub id: String,
-    /// Human-readable name
     pub name: String,
-    /// Version string (semver recommended)
     pub version: String,
-    /// Base URL of the source
     pub base_url: String,
-    /// Language code (e.g., "en", "multi")
     pub language: String,
-    /// Whether the source supports NSFW content
     pub nsfw: bool,
-    /// Whether the source has unrestricted HTTP access (unsafe)
     pub unrestricted_http: bool,
 }

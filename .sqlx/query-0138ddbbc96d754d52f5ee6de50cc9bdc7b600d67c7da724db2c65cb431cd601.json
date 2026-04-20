@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO scanlator_preferences (manga_id, scanlator, priority, blocked) VALUES (?,?,?,?) ON CONFLICT (manga_id, scanlator) DO UPDATE SET priority = excluded.priority, blocked = excluded.blocked",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "0138ddbbc96d754d52f5ee6de50cc9bdc7b600d67c7da724db2c65cb431cd601"
+}

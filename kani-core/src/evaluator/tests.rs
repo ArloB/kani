@@ -1,0 +1,2073 @@
+#[cfg(test)]
+mod helpers {
+    use kani_shared::ast::*;
+    use crate::evaluator::html_eval::extract_html;
+    use crate::evaluator::json_eval::extract_json;
+    use crate::wasm::{HostState, SendHtml, StoredNode};
+
+    // ── Expression constructors ───────────────────────────────────────────────
+
+    pub fn lit(s: &str) -> Expr { Expr::Literal(s.into()) }
+    pub fn num(n: f64) -> Expr { Expr::Number(n) }
+    pub fn var(name: &str) -> Expr { Expr::Var(name.into()) }
+
+    pub fn binop(op: Op, lhs: Expr, rhs: Expr) -> Expr {
+        Expr::BinaryOperation { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
+    }
+
+    pub fn field(name: &str, expr: Expr) -> FieldDef {
+        FieldDef { name: name.into(), expr, optional: false }
+    }
+
+    pub fn opt_field(name: &str, expr: Expr) -> FieldDef {
+        FieldDef { name: name.into(), expr, optional: true }
+    }
+
+    pub fn bind(name: &str, expr: Expr) -> Binding {
+        Binding { name: name.into(), expr }
+    }
+
+    // ── JSON evaluation helpers ───────────────────────────────────────────────
+
+    pub async fn json_rows(
+        json: &str,
+        container: &str,
+        fields: Vec<FieldDef>,
+        bindings: Vec<Binding>,
+    ) -> Vec<serde_json::Value> {
+        let mut state = HostState::default();
+        let value: serde_json::Value = serde_json::from_str(json).unwrap();
+        let handle = state.next_doc_handle;
+        state.next_doc_handle += 1;
+        state.json_docs.insert(handle, value);
+        let bp = Blueprint { request: None, container: container.into(), fields, bindings, scalars: vec![], pagination: None };
+        let out = extract_json(&mut state, Some(handle), &bp).await.unwrap();
+        out["rows"].as_array().unwrap().clone()
+    }
+
+    /// Evaluate a single expression against `{}` as a root container.
+    pub async fn json_eval(expr: Expr) -> serde_json::Value {
+        json_rows("{}", "", vec![field("v", expr)], vec![]).await[0]["v"].clone()
+    }
+
+    pub async fn json_eval_opt(expr: Expr) -> serde_json::Value {
+        json_rows("{}", "", vec![opt_field("v", expr)], vec![]).await[0]["v"].clone()
+    }
+
+    /// Evaluate and expect an error, returning it.
+    pub async fn json_eval_err(expr: Expr) -> String {
+        let mut state = HostState::default();
+        let doc: serde_json::Value = serde_json::from_str("{}").unwrap();
+        state.json_docs.insert(1, doc);
+        state.next_doc_handle = 2;
+        let bp = Blueprint {
+            request: None,
+            container: "".into(),
+            fields: vec![field("v", expr)],
+            bindings: vec![],
+            scalars: vec![],
+            pagination: None,
+        };
+        extract_json(&mut state, Some(1), &bp).await.unwrap_err()
+    }
+
+    // ── HTML evaluation helpers ───────────────────────────────────────────────
+
+    pub async fn html_rows(
+        html: &str,
+        container: &str,
+        fields: Vec<FieldDef>,
+        bindings: Vec<Binding>,
+    ) -> Vec<serde_json::Value> {
+        let mut state = HostState::default();
+        let parsed = SendHtml::parse_document(html);
+        let root_id = parsed.0.lock().unwrap().0.root_element().id();
+        let handle = state.next_doc_handle;
+        state.next_doc_handle += 1;
+        state.html_docs.insert(handle, StoredNode { doc: parsed.0, node_id: root_id });
+        let bp = Blueprint { request: None, container: container.into(), fields, bindings, scalars: vec![], pagination: None };
+        let out = extract_html(&mut state, Some(handle), &bp).await.unwrap();
+        out["rows"].as_array().unwrap().clone()
+    }
+
+    pub const MANGA_HTML: &str = r#"
+        <html><body>
+          <div class="container">
+            <article class="manga-card active" data-id="manga-123">
+              <img src="/covers/123.jpg" data-src="https://cdn.example.com/123.jpg" alt="Cover A">
+              <h2 class="title">Test Manga</h2>
+              <p class="desc">A great manga</p>
+              <span class="status">ongoing</span>
+              <div class="tags">
+                <a class="tag" href="/tag/action">Action</a>
+                <a class="tag" href="/tag/adventure">Adventure</a>
+              </div>
+              <span class="chapter">Chapter 42</span>
+            </article>
+            <article class="manga-card" data-id="manga-456">
+              <img src="/covers/456.jpg" alt="Cover B">
+              <h2 class="title">Another Title</h2>
+              <p class="desc">Another manga</p>
+              <span class="status">completed</span>
+              <div class="tags">
+                <a class="tag" href="/tag/romance">Romance</a>
+              </div>
+              <span class="chapter">Chapter 1.5</span>
+            </article>
+          </div>
+        </body></html>
+    "#;
+
+    pub const MANGA_JSON: &str = r#"
+    {
+      "data": [
+        {
+          "id": "manga-1",
+          "attributes": {
+            "title": {"en": "Test Manga", "ja": "テスト漫画"},
+            "status": "ongoing",
+            "chapterCount": 42,
+            "rating": 8.5,
+            "adult": false
+          }
+        },
+        {
+          "id": "manga-2",
+          "attributes": {
+            "title": {"en": "Another Manga"},
+            "status": "completed",
+            "chapterCount": 10,
+            "rating": 7.2,
+            "adult": true
+          }
+        }
+      ],
+      "relationships": [
+        {"type": "cover_art", "id": "cov-1", "attributes": {"fileName": "cover1.jpg"}},
+        {"type": "author",   "id": "auth-1", "attributes": {"name": "John Doe"}}
+      ],
+      "meta": {"total": 2}
+    }
+    "#;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared evaluator tests (exercised through the JSON evaluator)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod shared_tests {
+    use super::helpers::*;
+    use kani_shared::ast::*;
+
+    // ── Leaf nodes ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn literal_string() {
+        assert_eq!(json_eval(lit("hello")).await, "hello");
+    }
+
+    #[tokio::test]
+    async fn literal_number() {
+        let v = json_eval(num(3.14)).await;
+        assert!((v.as_f64().unwrap() - 3.14).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn null_optional_field() {
+        let rows = json_rows("{}", "", vec![opt_field("v", Expr::Null)], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::Value::Null);
+    }
+
+    // ── Let / Var ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn let_binds_and_var_reads() {
+        let expr = Expr::Let {
+            name: "$x".into(),
+            value: Box::new(lit("world")),
+            body: Box::new(Expr::Prepend {
+                target: Box::new(lit(" world")),
+                prefix: Box::new(var("$x")),
+            }),
+        };
+        assert_eq!(json_eval(expr).await, "world world");
+    }
+
+    #[tokio::test]
+    async fn undefined_var_errors() {
+        let err = json_eval_err(var("$nope")).await;
+        assert!(err.contains("Undefined variable"));
+    }
+
+    // ── Arithmetic ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn add_floats() {
+        let v = json_eval(binop(Op::Add, num(10.0), num(5.0))).await;
+        assert_eq!(v.as_f64().unwrap(), 15.0);
+    }
+
+    #[tokio::test]
+    async fn sub() {
+        let v = json_eval(binop(Op::Sub, num(10.0), num(3.0))).await;
+        assert_eq!(v.as_f64().unwrap(), 7.0);
+    }
+
+    #[tokio::test]
+    async fn mul() {
+        let v = json_eval(binop(Op::Mul, num(4.0), num(3.0))).await;
+        assert_eq!(v.as_f64().unwrap(), 12.0);
+    }
+
+    #[tokio::test]
+    async fn div() {
+        let v = json_eval(binop(Op::Div, num(10.0), num(4.0))).await;
+        assert_eq!(v.as_f64().unwrap(), 2.5);
+    }
+
+    #[tokio::test]
+    async fn div_by_zero_errors() {
+        let err = json_eval_err(binop(Op::Div, num(1.0), num(0.0))).await;
+        assert!(err.contains("division by zero"));
+    }
+
+    // ── Comparison ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn eq_equal() {
+        assert_eq!(json_eval(binop(Op::Eq, lit("a"), lit("a"))).await, true);
+    }
+
+    #[tokio::test]
+    async fn eq_unequal() {
+        assert_eq!(json_eval(binop(Op::Eq, lit("a"), lit("b"))).await, false);
+    }
+
+    #[tokio::test]
+    async fn ne() {
+        assert_eq!(json_eval(binop(Op::Ne, lit("a"), lit("b"))).await, true);
+    }
+
+    #[tokio::test]
+    async fn lt_true() {
+        assert_eq!(json_eval(binop(Op::Lt, num(1.0), num(2.0))).await, true);
+    }
+
+    #[tokio::test]
+    async fn gt_true() {
+        assert_eq!(json_eval(binop(Op::Gt, num(5.0), num(3.0))).await, true);
+    }
+
+    #[tokio::test]
+    async fn le_equal() {
+        assert_eq!(json_eval(binop(Op::Le, num(3.0), num(3.0))).await, true);
+    }
+
+    #[tokio::test]
+    async fn ge_greater() {
+        assert_eq!(json_eval(binop(Op::Ge, num(4.0), num(3.0))).await, true);
+    }
+
+    // ── Logical (short-circuit) ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn and_truth_table() {
+        let tt = json_eval(binop(Op::And, binop(Op::Eq, lit("a"), lit("a")), binop(Op::Eq, lit("b"), lit("b")))).await;
+        let tf = json_eval(binop(Op::And, binop(Op::Eq, lit("a"), lit("a")), binop(Op::Eq, lit("a"), lit("b")))).await;
+        let ff = json_eval(binop(Op::And, binop(Op::Eq, lit("a"), lit("b")), binop(Op::Eq, lit("a"), lit("b")))).await;
+        assert_eq!((tt, tf, ff), (true.into(), false.into(), false.into()));
+    }
+
+    #[tokio::test]
+    async fn or_truth_table() {
+        let ft = json_eval(binop(Op::Or, binop(Op::Eq, lit("a"), lit("b")), binop(Op::Eq, lit("a"), lit("a")))).await;
+        let ff = json_eval(binop(Op::Or, binop(Op::Eq, lit("a"), lit("b")), binop(Op::Eq, lit("c"), lit("d")))).await;
+        assert_eq!((ft, ff), (true.into(), false.into()));
+    }
+
+    // ── String operations ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn split_and_at_positive() {
+        let expr = Expr::At {
+            target: Box::new(Expr::Split { target: Box::new(lit("a/b/c")), delimiter: "/".into() }),
+            index: 1,
+        };
+        assert_eq!(json_eval(expr).await, "b");
+    }
+
+    #[tokio::test]
+    async fn at_negative_index() {
+        let expr = Expr::At {
+            target: Box::new(Expr::Split { target: Box::new(lit("a/b/c")), delimiter: "/".into() }),
+            index: -1,
+        };
+        assert_eq!(json_eval(expr).await, "c");
+    }
+
+    #[tokio::test]
+    async fn at_out_of_bounds_is_null() {
+        let rows = json_rows("{}", "", vec![opt_field("v", Expr::At {
+            target: Box::new(Expr::Split { target: Box::new(lit("a/b")), delimiter: "/".into() }),
+            index: 10,
+        })], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn replace_all_occurrences() {
+        let expr = Expr::Replace { target: Box::new(lit("aXbXc")), from: "X".into(), to: "-".into() };
+        assert_eq!(json_eval(expr).await, "a-b-c");
+    }
+
+    #[tokio::test]
+    async fn trim() {
+        assert_eq!(json_eval(Expr::Trim { target: Box::new(lit("  hello  ")) }).await, "hello");
+    }
+
+    #[tokio::test]
+    async fn lower() {
+        assert_eq!(json_eval(Expr::Lower { target: Box::new(lit("HELLO World")) }).await, "hello world");
+    }
+
+    #[tokio::test]
+    async fn prepend() {
+        let expr = Expr::Prepend { target: Box::new(lit(" world")), prefix: Box::new(lit("hello")) };
+        assert_eq!(json_eval(expr).await, "hello world");
+    }
+
+    #[tokio::test]
+    async fn append() {
+        let expr = Expr::Append { target: Box::new(lit("hello")), suffix: Box::new(lit(" world")) };
+        assert_eq!(json_eval(expr).await, "hello world");
+    }
+
+    #[tokio::test]
+    async fn starts_with_true() {
+        let v = json_eval(Expr::StartsWith { target: Box::new(lit("Chapter 1")), prefix: "Chapter".into() }).await;
+        assert_eq!(v, true);
+    }
+
+    #[tokio::test]
+    async fn starts_with_false() {
+        let v = json_eval(Expr::StartsWith { target: Box::new(lit("Vol. 1")), prefix: "Chapter".into() }).await;
+        assert_eq!(v, false);
+    }
+
+    #[tokio::test]
+    async fn ends_with_true() {
+        let v = json_eval(Expr::EndsWith { target: Box::new(lit("cover.jpg")), suffix: ".jpg".into() }).await;
+        assert_eq!(v, true);
+    }
+
+    #[tokio::test]
+    async fn slice_from_start() {
+        let v = json_eval(Expr::Slice { target: Box::new(lit("hello world")), start: 0, end: Some(5) }).await;
+        assert_eq!(v, "hello");
+    }
+
+    #[tokio::test]
+    async fn slice_to_end_no_end() {
+        let v = json_eval(Expr::Slice { target: Box::new(lit("hello world")), start: 6, end: None }).await;
+        assert_eq!(v, "world");
+    }
+
+    #[tokio::test]
+    async fn slice_negative_start() {
+        let v = json_eval(Expr::Slice { target: Box::new(lit("hello")), start: -3, end: None }).await;
+        assert_eq!(v, "llo");
+    }
+
+    #[tokio::test]
+    async fn slice_inverted_range_empty() {
+        let v = json_eval(Expr::Slice { target: Box::new(lit("hello")), start: 3, end: Some(1) }).await;
+        assert_eq!(v, "");
+    }
+
+    // ── Regex ────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn matches_true() {
+        let v = json_eval(Expr::Matches { target: Box::new(lit("Chapter 42")), pattern: r"Chapter\s+\d+".into() }).await;
+        assert_eq!(v, true);
+    }
+
+    #[tokio::test]
+    async fn matches_false() {
+        let v = json_eval(Expr::Matches { target: Box::new(lit("Vol. 1")), pattern: r"Chapter\s+\d+".into() }).await;
+        assert_eq!(v, false);
+    }
+
+    #[tokio::test]
+    async fn capture_group_0_full_match() {
+        let v = json_eval(Expr::At {
+            target: Box::new(Expr::Capture { target: Box::new(lit("Chapter 42")), pattern: r"Chapter (\d+)".into() }),
+            index: 0,
+        }).await;
+        assert_eq!(v, "Chapter 42");
+    }
+
+    #[tokio::test]
+    async fn capture_group_1() {
+        let v = json_eval(Expr::At {
+            target: Box::new(Expr::Capture { target: Box::new(lit("Chapter 42")), pattern: r"Chapter (\d+)".into() }),
+            index: 1,
+        }).await;
+        assert_eq!(v, "42");
+    }
+
+    #[tokio::test]
+    async fn capture_no_match_returns_empty_list() {
+        let rows = json_rows("{}", "", vec![opt_field("v", Expr::At {
+            target: Box::new(Expr::Capture { target: Box::new(lit("Vol. 1")), pattern: r"Chapter (\d+)".into() }),
+            index: 0,
+        })], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn capture_optional_group_null() {
+        // Regex with two groups where group 2 doesn't participate
+        let v = json_eval_opt(Expr::At {
+            target: Box::new(Expr::Capture {
+                target: Box::new(lit("Chapter 42")),
+                pattern: r"Chapter (\d+)(\.\d+)?".into(),
+            }),
+            index: 2,
+        }).await;
+        assert_eq!(v, serde_json::Value::Null);
+    }
+
+    // ── Parse ops ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn parse_float() {
+        let v = json_eval(Expr::ParseFloat { target: Box::new(lit("3.14")) }).await;
+        assert!((v.as_f64().unwrap() - 3.14).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn parse_int() {
+        let v = json_eval(Expr::ParseInt { target: Box::new(lit("42")) }).await;
+        assert_eq!(v.as_i64().unwrap(), 42);
+    }
+
+    #[tokio::test]
+    async fn parse_int_negative() {
+        let v = json_eval(Expr::ParseInt { target: Box::new(lit("-7")) }).await;
+        assert_eq!(v.as_i64().unwrap(), -7);
+    }
+
+    #[tokio::test]
+    async fn parse_float_invalid_errors() {
+        let err = json_eval_err(Expr::ParseFloat { target: Box::new(lit("abc")) }).await;
+        assert!(err.contains("Invalid float"));
+    }
+
+    // ── Date ops ─────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn date_parse_rfc3339_epoch() {
+        let v = json_eval(Expr::DateParseRfc3339 { target: Box::new(lit("1970-01-01T00:00:00Z")) }).await;
+        assert_eq!(v.as_i64().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn date_parse_rfc3339_known_timestamp() {
+        let v = json_eval(Expr::DateParseRfc3339 { target: Box::new(lit("2024-01-15T12:00:00Z")) }).await;
+        assert!(v.as_i64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn date_parse_format() {
+        let v = json_eval(Expr::DateParse {
+            target: Box::new(lit("1970-01-01")),
+            format: "[year]-[month]-[day]".into(),
+        }).await;
+        assert_eq!(v.as_i64().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn date_parse_rfc3339_invalid_errors() {
+        let err = json_eval_err(Expr::DateParseRfc3339 { target: Box::new(lit("not-a-date")) }).await;
+        assert!(err.contains("Invalid RFC3339"));
+    }
+
+    // ── Fallback ─────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fallback_on_null() {
+        let expr = Expr::Fallback { target: Box::new(Expr::Null), default: Box::new(lit("default")) };
+        assert_eq!(json_eval(expr).await, "default");
+    }
+
+    #[tokio::test]
+    async fn fallback_on_empty_string() {
+        let expr = Expr::Fallback { target: Box::new(lit("")), default: Box::new(lit("fallback")) };
+        assert_eq!(json_eval(expr).await, "fallback");
+    }
+
+    #[tokio::test]
+    async fn fallback_passes_through_value() {
+        let expr = Expr::Fallback { target: Box::new(lit("real")), default: Box::new(lit("default")) };
+        assert_eq!(json_eval(expr).await, "real");
+    }
+
+    // ── Lookup ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn lookup_hit() {
+        let expr = Expr::Lookup {
+            target: Box::new(lit("publishing")),
+            table: vec![("publishing".into(), "ongoing".into()), ("finished".into(), "completed".into())],
+        };
+        assert_eq!(json_eval(expr).await, "ongoing");
+    }
+
+    #[tokio::test]
+    async fn lookup_miss_returns_null_not_error() {
+        let rows = json_rows("{}", "", vec![opt_field("v", Expr::Lookup {
+            target: Box::new(lit("unknown")),
+            table: vec![("publishing".into(), "ongoing".into())],
+        })], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn lookup_miss_with_fallback() {
+        let expr = Expr::Fallback {
+            target: Box::new(Expr::Lookup {
+                target: Box::new(lit("unknown")),
+                table: vec![("publishing".into(), "ongoing".into())],
+            }),
+            default: Box::new(lit("other")),
+        };
+        assert_eq!(json_eval(expr).await, "other");
+    }
+
+    // ── URL ──────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn resolve_url_relative_path() {
+        let expr = Expr::ResolveUrl {
+            target: Box::new(lit("/chapter/1")),
+            base: Box::new(lit("https://example.com/manga/abc")),
+        };
+        assert_eq!(json_eval(expr).await, "https://example.com/chapter/1");
+    }
+
+    #[tokio::test]
+    async fn resolve_url_relative_to_dir() {
+        let expr = Expr::ResolveUrl {
+            target: Box::new(lit("image.jpg")),
+            base: Box::new(lit("https://example.com/manga/abc/")),
+        };
+        assert_eq!(json_eval(expr).await, "https://example.com/manga/abc/image.jpg");
+    }
+
+    // ── Concat / List ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn concat_three_parts() {
+        let expr = Expr::Concat(vec![lit("hello"), lit(", "), lit("world")]);
+        assert_eq!(json_eval(expr).await, "hello, world");
+    }
+
+    #[tokio::test]
+    async fn list_literal_produces_array() {
+        let rows = json_rows("{}", "", vec![field("v", Expr::List(vec![lit("x"), lit("y"), lit("z")]))], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::json!(["x", "y", "z"]));
+    }
+
+    // ── Map / FlatMap / Filter / Fold ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn map_transforms_each_item() {
+        let expr = Expr::Map {
+            target: Box::new(Expr::List(vec![lit("a"), lit("b"), lit("c")])),
+            transform: Box::new(Expr::Prepend {
+                target: Box::new(var("$item")),
+                prefix: Box::new(lit("x_")),
+            }),
+        };
+        let rows = json_rows("{}", "", vec![field("v", expr)], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::json!(["x_a", "x_b", "x_c"]));
+    }
+
+    #[tokio::test]
+    async fn map_drops_null_results() {
+        // Filter items: only keep "a" and "c" by mapping others to null via lookup miss
+        let expr = Expr::Map {
+            target: Box::new(Expr::List(vec![lit("a"), lit("b"), lit("a")])),
+            transform: Box::new(Expr::Lookup {
+                target: Box::new(var("$item")),
+                table: vec![("a".into(), "kept".into())],
+            }),
+        };
+        let rows = json_rows("{}", "", vec![field("v", expr)], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::json!(["kept", "kept"]));
+    }
+
+    #[tokio::test]
+    async fn map_exposes_index() {
+        let expr = Expr::Map {
+            target: Box::new(Expr::List(vec![lit("a"), lit("b")])),
+            transform: Box::new(Expr::ToString { target: Box::new(var("$index")) }),
+        };
+        let rows = json_rows("{}", "", vec![field("v", expr)], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::json!(["0", "1"]));
+    }
+
+    #[tokio::test]
+    async fn flat_map_flattens_sublists() {
+        let expr = Expr::FlatMap {
+            target: Box::new(Expr::List(vec![lit("a,b"), lit("c,d")])),
+            transform: Box::new(Expr::Split { target: Box::new(var("$item")), delimiter: ",".into() }),
+        };
+        let rows = json_rows("{}", "", vec![field("v", expr)], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::json!(["a", "b", "c", "d"]));
+    }
+
+    #[tokio::test]
+    async fn filter_keeps_matching_items() {
+        let expr = Expr::Filter {
+            target: Box::new(Expr::List(vec![lit("apple"), lit("banana"), lit("apricot")])),
+            filter: Box::new(Expr::StartsWith { target: Box::new(var("$item")), prefix: "a".into() }),
+        };
+        let rows = json_rows("{}", "", vec![field("v", expr)], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::json!(["apple", "apricot"]));
+    }
+
+    #[tokio::test]
+    async fn filter_drops_null_predicate() {
+        // Lookup returns Null for non-matching → should be treated as false
+        let expr = Expr::Filter {
+            target: Box::new(Expr::List(vec![lit("a"), lit("b"), lit("a")])),
+            filter: Box::new(Expr::Matches { target: Box::new(var("$item")), pattern: "^a$".into() }),
+        };
+        let rows = json_rows("{}", "", vec![field("v", expr)], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::json!(["a", "a"]));
+    }
+
+    #[tokio::test]
+    async fn fold_accumulates() {
+        let expr = Expr::Fold {
+            target: Box::new(Expr::List(vec![lit("a"), lit("b"), lit("c")])),
+            base: Box::new(lit("")),
+            transform: Box::new(Expr::Append {
+                target: Box::new(var("$acc")),
+                suffix: Box::new(var("$item")),
+            }),
+        };
+        assert_eq!(json_eval(expr).await, "abc");
+    }
+
+    #[tokio::test]
+    async fn fold_empty_list_returns_base() {
+        let expr = Expr::Fold {
+            target: Box::new(Expr::List(vec![])),
+            base: Box::new(lit("base")),
+            transform: Box::new(var("$acc")),
+        };
+        assert_eq!(json_eval(expr).await, "base");
+    }
+
+    // ── If (new) ──────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn if_true_takes_then_branch() {
+        let expr = Expr::If {
+            condition: Box::new(binop(Op::Eq, lit("a"), lit("a"))),
+            then: Box::new(lit("yes")),
+            else_: Box::new(lit("no")),
+        };
+        assert_eq!(json_eval(expr).await, "yes");
+    }
+
+    #[tokio::test]
+    async fn if_false_takes_else_branch() {
+        let expr = Expr::If {
+            condition: Box::new(binop(Op::Eq, lit("a"), lit("b"))),
+            then: Box::new(lit("yes")),
+            else_: Box::new(lit("no")),
+        };
+        assert_eq!(json_eval(expr).await, "no");
+    }
+
+    #[tokio::test]
+    async fn if_null_condition_takes_else_branch() {
+        let expr = Expr::If {
+            condition: Box::new(Expr::Null),
+            then: Box::new(lit("yes")),
+            else_: Box::new(lit("no")),
+        };
+        assert_eq!(json_eval(expr).await, "no");
+    }
+
+    #[tokio::test]
+    async fn if_only_evaluates_taken_branch() {
+        // The else branch would be an undefined var error if reached
+        let expr = Expr::If {
+            condition: Box::new(binop(Op::Eq, lit("a"), lit("a"))),
+            then: Box::new(lit("ok")),
+            else_: Box::new(var("$undefined_var")),
+        };
+        assert_eq!(json_eval(expr).await, "ok");
+    }
+
+    // ── ToString (new) ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn to_string_int() {
+        let expr = Expr::ToString { target: Box::new(Expr::ParseInt { target: Box::new(lit("42")) }) };
+        assert_eq!(json_eval(expr).await, "42");
+    }
+
+    #[tokio::test]
+    async fn to_string_float_whole_no_trailing_zero() {
+        assert_eq!(json_eval(Expr::ToString { target: Box::new(num(3.0)) }).await, "3");
+    }
+
+    #[tokio::test]
+    async fn to_string_float_decimal() {
+        assert_eq!(json_eval(Expr::ToString { target: Box::new(num(3.14)) }).await, "3.14");
+    }
+
+    #[tokio::test]
+    async fn to_string_bool_true() {
+        let expr = Expr::ToString { target: Box::new(binop(Op::Eq, lit("a"), lit("a"))) };
+        assert_eq!(json_eval(expr).await, "true");
+    }
+
+    #[tokio::test]
+    async fn to_string_bool_false() {
+        let expr = Expr::ToString { target: Box::new(binop(Op::Eq, lit("a"), lit("b"))) };
+        assert_eq!(json_eval(expr).await, "false");
+    }
+
+    #[tokio::test]
+    async fn to_string_null_propagates() {
+        let rows = json_rows("{}", "", vec![opt_field("v", Expr::ToString { target: Box::new(Expr::Null) })], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::Value::Null);
+    }
+
+    // ── Join (new) ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn join_comma_separated() {
+        let expr = Expr::Join {
+            target: Box::new(Expr::List(vec![lit("a"), lit("b"), lit("c")])),
+            delimiter: ", ".into(),
+        };
+        assert_eq!(json_eval(expr).await, "a, b, c");
+    }
+
+    #[tokio::test]
+    async fn join_skips_nulls() {
+        let expr = Expr::Join {
+            target: Box::new(Expr::List(vec![lit("a"), Expr::Null, lit("c")])),
+            delimiter: "-".into(),
+        };
+        assert_eq!(json_eval(expr).await, "a-c");
+    }
+
+    #[tokio::test]
+    async fn join_empty_list() {
+        let expr = Expr::Join { target: Box::new(Expr::List(vec![])), delimiter: ", ".into() };
+        assert_eq!(json_eval(expr).await, "");
+    }
+
+    #[tokio::test]
+    async fn join_with_map() {
+        // dom(...).map($item.text()).join(", ") pattern
+        let expr = Expr::Join {
+            target: Box::new(Expr::Map {
+                target: Box::new(Expr::List(vec![lit("action"), lit("adventure")])),
+                transform: Box::new(Expr::Prepend {
+                    target: Box::new(var("$item")),
+                    prefix: Box::new(lit("#")),
+                }),
+            }),
+            delimiter: " ".into(),
+        };
+        assert_eq!(json_eval(expr).await, "#action #adventure");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HTML evaluator tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod html_tests {
+    use super::helpers::*;
+    use kani_shared::ast::*;
+
+    fn dom(selector: &str) -> Expr { Expr::Dom(selector.into()) }
+    fn attr(target: Expr, name: &str) -> Expr { Expr::Attr { target: Box::new(target), name: name.into() } }
+    fn text(target: Expr) -> Expr { Expr::Text { target: Box::new(target) } }
+    fn select(target: Expr, selector: &str) -> Expr { Expr::Select { target: Box::new(target), selector: selector.into() } }
+    fn first(target: Expr, selector: &str) -> Expr { Expr::First { target: Box::new(target), selector: selector.into() } }
+
+    #[tokio::test]
+    async fn container_iterates_matching_elements() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("id", attr(Expr::SelfRef, "data-id")),
+        ], vec![]).await;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["id"], "manga-123");
+        assert_eq!(rows[1]["id"], "manga-456");
+    }
+
+    #[tokio::test]
+    async fn index_in_container() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("idx", Expr::ToString { target: Box::new(Expr::Index) }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["idx"], "0");
+        assert_eq!(rows[1]["idx"], "1");
+    }
+
+    #[tokio::test]
+    async fn attr_existing() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("id", attr(Expr::SelfRef, "data-id")),
+        ], vec![]).await;
+        assert_eq!(rows[0]["id"], "manga-123");
+    }
+
+    #[tokio::test]
+    async fn attr_missing_on_one_element_optional() {
+        // data-src is only on the first article's img
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            opt_field("src", attr(first(Expr::SelfRef, "img"), "data-src")),
+        ], vec![]).await;
+        assert_eq!(rows[0]["src"], "https://cdn.example.com/123.jpg");
+        assert_eq!(rows[1]["src"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn text_content() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("title", text(first(Expr::SelfRef, "h2.title"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["title"], "Test Manga");
+        assert_eq!(rows[1]["title"], "Another Title");
+    }
+
+    #[tokio::test]
+    async fn inner_html() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("tags_html", Expr::InnerHtml { target: Box::new(first(Expr::SelfRef, "div.tags")) }),
+        ], vec![]).await;
+        // Should contain the <a> tags
+        let s = rows[0]["tags_html"].as_str().unwrap();
+        assert!(s.contains("<a"));
+        assert!(s.contains("Action"));
+    }
+
+    #[tokio::test]
+    async fn select_returns_list_of_elements() {
+        // Use map to get text from each tag
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("tags", Expr::Map {
+                target: Box::new(select(Expr::SelfRef, "a.tag")),
+                transform: Box::new(text(var("$item"))),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["tags"], serde_json::json!(["Action", "Adventure"]));
+        assert_eq!(rows[1]["tags"], serde_json::json!(["Romance"]));
+    }
+
+    #[tokio::test]
+    async fn first_element() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("first_tag", text(first(Expr::SelfRef, "a.tag"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["first_tag"], "Action");
+        assert_eq!(rows[1]["first_tag"], "Romance");
+    }
+
+    #[tokio::test]
+    async fn first_returns_null_when_no_match() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            opt_field("v", first(Expr::SelfRef, "span.nonexistent")),
+        ], vec![]).await;
+        // first returns None when no match, which means Value::Null
+        assert_eq!(rows[0]["v"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn has_class_true() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("active", Expr::HasClass { target: Box::new(Expr::SelfRef), class: "active".into() }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["active"], true);
+        assert_eq!(rows[1]["active"], false);
+    }
+
+    #[tokio::test]
+    async fn children_of_element() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("tag_count", Expr::ToString { target: Box::new(Expr::Fold {
+                target: Box::new(Expr::Children { target: Box::new(first(Expr::SelfRef, "div.tags")) }),
+                base: Box::new(num(0.0)),
+                transform: Box::new(binop(Op::Add, var("$acc"), num(1.0))),
+            })}),
+        ], vec![]).await;
+        assert_eq!(rows[0]["tag_count"], "2");
+        assert_eq!(rows[1]["tag_count"], "1");
+    }
+
+    #[tokio::test]
+    async fn dom_from_document_root() {
+        // Bindings use dom() which queries from the document root, not the container element
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("title", text(first(Expr::SelfRef, "h2.title"))),
+        ], vec![
+            bind("$page_title", text(Expr::Dom("h2.title".into()))),
+        ]).await;
+        // $page_title is bound but not used in fields — just ensuring bindings run without error
+        assert_eq!(rows.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn binding_available_in_all_rows() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("suffix", Expr::Append {
+                target: Box::new(attr(Expr::SelfRef, "data-id")),
+                suffix: Box::new(var("$suffix")),
+            }),
+        ], vec![
+            bind("$suffix", lit("_item")),
+        ]).await;
+        assert_eq!(rows[0]["suffix"], "manga-123_item");
+        assert_eq!(rows[1]["suffix"], "manga-456_item");
+    }
+
+    #[tokio::test]
+    async fn capture_chapter_number() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("chapter", Expr::ParseFloat {
+                target: Box::new(Expr::At {
+                    target: Box::new(Expr::Capture {
+                        target: Box::new(text(first(Expr::SelfRef, "span.chapter"))),
+                        pattern: r"Chapter (\d+(?:\.\d+)?)".into(),
+                    }),
+                    index: 1,
+                }),
+            }),
+        ], vec![]).await;
+        assert!((rows[0]["chapter"].as_f64().unwrap() - 42.0).abs() < 1e-9);
+        assert!((rows[1]["chapter"].as_f64().unwrap() - 1.5).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn if_conditional_on_class() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("kind", Expr::If {
+                condition: Box::new(Expr::HasClass { target: Box::new(Expr::SelfRef), class: "active".into() }),
+                then: Box::new(lit("featured")),
+                else_: Box::new(lit("regular")),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["kind"], "featured");
+        assert_eq!(rows[1]["kind"], "regular");
+    }
+
+    #[tokio::test]
+    async fn join_tag_texts() {
+        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
+            field("tags", Expr::Join {
+                target: Box::new(Expr::Map {
+                    target: Box::new(select(Expr::SelfRef, "a.tag")),
+                    transform: Box::new(text(var("$item"))),
+                }),
+                delimiter: ", ".into(),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["tags"], "Action, Adventure");
+        assert_eq!(rows[1]["tags"], "Romance");
+    }
+
+    #[tokio::test]
+    async fn no_container_matches_empty_result() {
+        let rows = html_rows(MANGA_HTML, "div.nonexistent", vec![
+            field("x", lit("val")),
+        ], vec![]).await;
+        assert_eq!(rows.len(), 0);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JSON evaluator tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod json_tests {
+    use super::helpers::*;
+    use kani_shared::ast::*;
+
+    fn ptr(target: Expr, pointer: &str) -> Expr {
+        Expr::JsonPtr { target: Box::new(target), pointer: pointer.into() }
+    }
+
+    fn json(pointer: &str) -> Expr { Expr::Json(pointer.into()) }
+
+    #[tokio::test]
+    async fn array_container_iterates_elements() {
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            field("id", Expr::JsonStr { target: Box::new(ptr(Expr::SelfRef, "/id")) }),
+        ], vec![]).await;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["id"], "manga-1");
+        assert_eq!(rows[1]["id"], "manga-2");
+    }
+
+    #[tokio::test]
+    async fn json_pointer_root_navigation() {
+        let rows = json_rows(MANGA_JSON, "", vec![
+            field("total", Expr::JsonInt { target: Box::new(json("/meta/total")) }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["total"].as_i64().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn json_ptr_chained() {
+        let rows = json_rows(MANGA_JSON, "", vec![
+            field("status", Expr::JsonStr { target: Box::new(ptr(json("/data"), "/0/attributes/status")) }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["status"], "ongoing");
+    }
+
+    #[tokio::test]
+    async fn json_str() {
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            field("status", Expr::JsonStr {
+                target: Box::new(ptr(Expr::SelfRef, "/attributes/status")),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["status"], "ongoing");
+        assert_eq!(rows[1]["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn json_int() {
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            field("count", Expr::JsonInt {
+                target: Box::new(ptr(Expr::SelfRef, "/attributes/chapterCount")),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["count"].as_i64().unwrap(), 42);
+        assert_eq!(rows[1]["count"].as_i64().unwrap(), 10);
+    }
+
+    #[tokio::test]
+    async fn json_float() {
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            field("rating", Expr::JsonFloat {
+                target: Box::new(ptr(Expr::SelfRef, "/attributes/rating")),
+            }),
+        ], vec![]).await;
+        assert!((rows[0]["rating"].as_f64().unwrap() - 8.5).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn json_bool() {
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            field("adult", Expr::JsonBool {
+                target: Box::new(ptr(Expr::SelfRef, "/attributes/adult")),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["adult"], false);
+        assert_eq!(rows[1]["adult"], true);
+    }
+
+    #[tokio::test]
+    async fn json_ptr_missing_returns_null() {
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            opt_field("v", Expr::JsonStr {
+                target: Box::new(ptr(Expr::SelfRef, "/attributes/nonexistent")),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn array_len() {
+        let rows = json_rows(MANGA_JSON, "", vec![
+            field("count", Expr::ToString {
+                target: Box::new(Expr::ArrayLen { target: Box::new(json("/data")) }),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["count"], "2");
+    }
+
+    #[tokio::test]
+    async fn json_keys() {
+        let rows = json_rows(MANGA_JSON, "", vec![
+            field("keys", Expr::JsonKeys { target: Box::new(json("/data/0/attributes/title")) }),
+        ], vec![]).await;
+        let keys = rows[0]["keys"].as_array().unwrap();
+        assert!(keys.iter().any(|k| k == "en"));
+        assert!(keys.iter().any(|k| k == "ja"));
+    }
+
+    #[tokio::test]
+    async fn json_get_dynamic_key() {
+        // Simulate `json("/data/0/attributes/title").get("en")`
+        let rows = json_rows(MANGA_JSON, "", vec![
+            field("title", Expr::JsonStr {
+                target: Box::new(Expr::JsonGet {
+                    target: Box::new(json("/data/0/attributes/title")),
+                    key: Box::new(Expr::Literal("en".into())),
+                }),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["title"], "Test Manga");
+    }
+
+    #[tokio::test]
+    async fn json_get_with_variable_key() {
+        // Bind $lang = "ja", then use it as a dynamic key
+        let rows = json_rows(MANGA_JSON, "", vec![
+            field("title", Expr::JsonStr {
+                target: Box::new(Expr::JsonGet {
+                    target: Box::new(json("/data/0/attributes/title")),
+                    key: Box::new(Expr::Var("$lang".into())),
+                }),
+            }),
+        ], vec![bind("$lang", Expr::Literal("ja".into()))]).await;
+        assert_eq!(rows[0]["title"], "テスト漫画");
+    }
+
+    #[tokio::test]
+    async fn json_get_missing_key_returns_null() {
+        let rows = json_rows(MANGA_JSON, "", vec![
+            opt_field("v", Expr::JsonStr {
+                target: Box::new(Expr::JsonGet {
+                    target: Box::new(json("/data/0/attributes/title")),
+                    key: Box::new(Expr::Literal("fr".into())),
+                }),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn json_find_locates_first_match() {
+        let rows = json_rows(MANGA_JSON, "", vec![
+            field("filename", Expr::JsonStr {
+                target: Box::new(Expr::JsonPtr {
+                    target: Box::new(Expr::JsonFind {
+                        target: Box::new(json("/relationships")),
+                        key: Box::new(Expr::Literal("type".into())),
+                        value: Box::new(Expr::Literal("cover_art".into())),
+                    }),
+                    pointer: "/attributes/fileName".into(),
+                }),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["filename"], "cover1.jpg");
+    }
+
+    #[tokio::test]
+    async fn json_find_no_match_returns_null() {
+        let rows = json_rows(MANGA_JSON, "", vec![
+            opt_field("v", Expr::JsonFind {
+                target: Box::new(json("/relationships")),
+                key: Box::new(Expr::Literal("type".into())),
+                value: Box::new(Expr::Literal("publisher".into())),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["v"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn binding_evaluated_before_iteration() {
+        // Bind the cover_art relationship once, use it in each row
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            field("cover_file", Expr::Fallback {
+                target: Box::new(Expr::JsonStr {
+                    target: Box::new(Expr::JsonPtr {
+                        target: Box::new(Expr::Var("$cover".into())),
+                        pointer: "/attributes/fileName".into(),
+                    }),
+                }),
+                default: Box::new(Expr::Literal("unknown.jpg".into())),
+            }),
+        ], vec![bind("$cover", Expr::JsonFind {
+            target: Box::new(Expr::Json("/relationships".into())),
+            key: Box::new(Expr::Literal("type".into())),
+            value: Box::new(Expr::Literal("cover_art".into())),
+        })]).await;
+        // Both rows use the same binding
+        assert_eq!(rows[0]["cover_file"], "cover1.jpg");
+        assert_eq!(rows[1]["cover_file"], "cover1.jpg");
+    }
+
+    #[tokio::test]
+    async fn index_in_json_container() {
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            field("pos", Expr::Index),
+        ], vec![]).await;
+        assert_eq!(rows[0]["pos"].as_i64().unwrap(), 0);
+        assert_eq!(rows[1]["pos"].as_i64().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn self_ref_in_json_container() {
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            field("id", Expr::JsonStr { target: Box::new(ptr(Expr::SelfRef, "/id")) }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["id"], "manga-1");
+    }
+
+    #[tokio::test]
+    async fn map_over_json_array() {
+        let rows = json_rows(MANGA_JSON, "", vec![
+            field("ids", Expr::Map {
+                target: Box::new(json("/data")),
+                transform: Box::new(Expr::JsonStr {
+                    target: Box::new(ptr(var("$item"), "/id")),
+                }),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["ids"], serde_json::json!(["manga-1", "manga-2"]));
+    }
+
+    #[tokio::test]
+    async fn json_if_conditional_on_field() {
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            field("label", Expr::If {
+                condition: Box::new(Expr::JsonBool {
+                    target: Box::new(ptr(Expr::SelfRef, "/attributes/adult")),
+                }),
+                then: Box::new(lit("nsfw")),
+                else_: Box::new(lit("safe")),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["label"], "safe");
+        assert_eq!(rows[1]["label"], "nsfw");
+    }
+
+    #[tokio::test]
+    async fn chapter_count_to_string() {
+        let rows = json_rows(MANGA_JSON, "/data", vec![
+            field("display", Expr::Append {
+                target: Box::new(Expr::ToString {
+                    target: Box::new(Expr::JsonInt {
+                        target: Box::new(ptr(Expr::SelfRef, "/attributes/chapterCount")),
+                    }),
+                }),
+                suffix: Box::new(lit(" chapters")),
+            }),
+        ], vec![]).await;
+        assert_eq!(rows[0]["display"], "42 chapters");
+        assert_eq!(rows[1]["display"], "10 chapters");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extension integration tests
+// Each module transcribes the extraction patterns from a real extension so that
+// evaluator regressions are caught before they reach the WASM boundary.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod extension_integration_tests {
+    use super::helpers::*;
+    use kani_shared::ast::*;
+
+    // ── Local constructor shortcuts ───────────────────────────────────────────
+    fn attr(target: Expr, name: &str) -> Expr { Expr::Attr  { target: Box::new(target), name: name.into() } }
+    fn text(target: Expr)             -> Expr { Expr::Text  { target: Box::new(target) } }
+    fn first(target: Expr, sel: &str) -> Expr { Expr::First { target: Box::new(target), selector: sel.into() } }
+    fn select(target: Expr, sel: &str)-> Expr { Expr::Select{ target: Box::new(target), selector: sel.into() } }
+    fn dom(sel: &str)                 -> Expr { Expr::Dom(sel.into()) }
+    fn split(target: Expr, d: &str)   -> Expr { Expr::Split { target: Box::new(target), delimiter: d.into() } }
+    fn at(target: Expr, idx: i32)     -> Expr { Expr::At    { target: Box::new(target), index: idx } }
+    fn trim(target: Expr)             -> Expr { Expr::Trim  { target: Box::new(target) } }
+    fn lower(target: Expr)            -> Expr { Expr::Lower { target: Box::new(target) } }
+    fn fallback(t: Expr, d: Expr)     -> Expr { Expr::Fallback { target: Box::new(t), default: Box::new(d) } }
+    fn map(target: Expr, body: Expr)  -> Expr { Expr::Map   { target: Box::new(target), transform: Box::new(body) } }
+    fn filter(target: Expr, pred: Expr)->Expr { Expr::Filter{ target: Box::new(target), filter: Box::new(pred) } }
+    fn join(target: Expr, d: &str)    -> Expr { Expr::Join  { target: Box::new(target), delimiter: d.into() } }
+    fn matches(target: Expr, p: &str) -> Expr { Expr::Matches { target: Box::new(target), pattern: p.into() } }
+    fn capture(target: Expr, p: &str) -> Expr { Expr::Capture { target: Box::new(target), pattern: p.into() } }
+    fn parse_float(target: Expr)      -> Expr { Expr::ParseFloat { target: Box::new(target) } }
+    fn to_string_e(target: Expr)      -> Expr { Expr::ToString { target: Box::new(target) } }
+    fn lookup(target: Expr, table: Vec<(&str, &str)>) -> Expr {
+        Expr::Lookup { target: Box::new(target), table: table.into_iter().map(|(k,v)| (k.into(), v.into())).collect() }
+    }
+    fn if_expr(cond: Expr, then: Expr, else_: Expr) -> Expr {
+        Expr::If { condition: Box::new(cond), then: Box::new(then), else_: Box::new(else_) }
+    }
+
+    fn json(ptr: &str) -> Expr { Expr::Json(ptr.into()) }
+    fn ptr_e(target: Expr, p: &str) -> Expr { Expr::JsonPtr  { target: Box::new(target), pointer: p.into() } }
+    fn jstr(target: Expr)           -> Expr { Expr::JsonStr  { target: Box::new(target) } }
+    fn jint(target: Expr)           -> Expr { Expr::JsonInt  { target: Box::new(target) } }
+    fn get(target: Expr, key: Expr) -> Expr { Expr::JsonGet  { target: Box::new(target), key: Box::new(key) } }
+    fn find(target: Expr, key: Expr, value: Expr) -> Expr {
+        Expr::JsonFind { target: Box::new(target), key: Box::new(key), value: Box::new(value) }
+    }
+    fn append(t: Expr, s: Expr) -> Expr { Expr::Append { target: Box::new(t), suffix: Box::new(s) } }
+    fn rfc3339(target: Expr) -> Expr { Expr::DateParseRfc3339 { target: Box::new(target) } }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Mangapill (HTML scraper)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const MANGAPILL_SEARCH_HTML: &str = r#"<html><body>
+      <div class="grid gap-3">
+        <div>
+          <a href="/manga/1234/action-hero">
+            <img src="/placeholder.jpg" data-src="https://cdn.mangapill.com/1234.jpg">
+            <div class="line-clamp-2">Action Hero</div>
+          </a>
+        </div>
+        <div>
+          <a href="/manga/5678/romance-story">
+            <img src="https://cdn.mangapill.com/5678.jpg">
+            <div class="line-clamp-2">Romance Story</div>
+          </a>
+        </div>
+      </div>
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn mangapill_search_id_from_href() {
+        // self.first("a").attr("href").split("/").at(2)
+        let rows = html_rows(MANGAPILL_SEARCH_HTML, ".grid.gap-3 > div", vec![
+            field("id", at(split(attr(first(Expr::SelfRef, "a"), "href"), "/"), 2)),
+        ], vec![]).await;
+        assert_eq!(rows[0]["id"], "1234");
+        assert_eq!(rows[1]["id"], "5678");
+    }
+
+    #[tokio::test]
+    async fn mangapill_search_cover_fallback_to_src() {
+        // fallback(img[data-src], img[src])
+        let rows = html_rows(MANGAPILL_SEARCH_HTML, ".grid.gap-3 > div", vec![
+            field("cover", fallback(
+                attr(first(Expr::SelfRef, "img"), "data-src"),
+                attr(first(Expr::SelfRef, "img"), "src"),
+            )),
+        ], vec![]).await;
+        assert_eq!(rows[0]["cover"], "https://cdn.mangapill.com/1234.jpg");
+        // second card has no data-src → falls back to src
+        assert_eq!(rows[1]["cover"], "https://cdn.mangapill.com/5678.jpg");
+    }
+
+    #[tokio::test]
+    async fn mangapill_search_title() {
+        let rows = html_rows(MANGAPILL_SEARCH_HTML, ".grid.gap-3 > div", vec![
+            field("title", text(first(Expr::SelfRef, ".line-clamp-2"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["title"], "Action Hero");
+        assert_eq!(rows[1]["title"], "Romance Story");
+    }
+
+    const MANGAPILL_DETAILS_HTML: &str = r#"<html><body>
+      <h1 class="font-bold">One Piece</h1>
+      <p class="text-sm">A story about pirates.</p>
+      <img data-src="https://cdn.mangapill.com/op.jpg">
+      <div class="grid">
+        <div>
+          <div><div>Type</div><div class="type-val">Manga</div></div>
+          <div><div>Status</div><div class="status-val">publishing</div></div>
+          <div><div>Year</div><div>1999</div></div>
+        </div>
+      </div>
+      <div class="mb-3">
+        <a class="text-sm">Action</a>
+        <a class="text-sm">Adventure</a>
+        <a class="text-sm">  </a>
+      </div>
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn mangapill_details_title() {
+        let rows = html_rows(MANGAPILL_DETAILS_HTML, ":root", vec![
+            field("title", text(dom("h1.font-bold"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["title"], "One Piece");
+    }
+
+    #[tokio::test]
+    async fn mangapill_details_description() {
+        let rows = html_rows(MANGAPILL_DETAILS_HTML, ":root", vec![
+            field("desc", text(dom("p.text-sm"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["desc"], "A story about pirates.");
+    }
+
+    #[tokio::test]
+    async fn mangapill_details_cover() {
+        let rows = html_rows(MANGAPILL_DETAILS_HTML, ":root", vec![
+            field("cover", attr(dom("img"), "data-src")),
+        ], vec![]).await;
+        assert_eq!(rows[0]["cover"], "https://cdn.mangapill.com/op.jpg");
+    }
+
+    #[tokio::test]
+    async fn mangapill_details_status_lookup() {
+        let rows = html_rows(MANGAPILL_DETAILS_HTML, ":root", vec![
+            field("status",
+                fallback(
+                    lookup(lower(trim(text(dom(".status-val")))),
+                        vec![
+                            ("publishing",       "ongoing"),
+                            ("finished",         "completed"),
+                            ("on hiatus",        "hiatus"),
+                            ("discontinued",     "cancelled"),
+                            ("not yet published","hiatus"),
+                        ]
+                    ),
+                    lit("unknown"),
+                )
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["status"], "ongoing");
+    }
+
+    #[tokio::test]
+    async fn mangapill_details_tags_join() {
+        // self.select("div.mb-3 a.text-sm").map($item.text().trim()).filter($item.matches("[^\s]")).join(", ")
+        let rows = html_rows(MANGAPILL_DETAILS_HTML, ":root", vec![
+            field("tags",
+                join(
+                    filter(
+                        map(select(Expr::SelfRef, "div.mb-3 a.text-sm"), trim(text(var("$item")))),
+                        matches(var("$item"), r"[^\s]"),
+                    ),
+                    ", ",
+                )
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["tags"], "Action, Adventure");
+    }
+
+    const MANGAPILL_CHAPTER_HTML: &str = r#"<html><body>
+      <div class="grid">
+        <a class="border" href="/chapters/1234567">Chapter 42</a>
+        <a class="border" href="/chapters/1234568">Chapter 1.5</a>
+        <a class="border" href="/chapters/1234569">Chapter Volume 1</a>
+      </div>
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn mangapill_chapter_id_from_href() {
+        // self.attr("href").split("/").at(2)
+        let rows = html_rows(MANGAPILL_CHAPTER_HTML, "div.grid a.border", vec![
+            field("id", at(split(attr(Expr::SelfRef, "href"), "/"), 2)),
+        ], vec![]).await;
+        assert_eq!(rows[0]["id"], "1234567");
+        assert_eq!(rows[1]["id"], "1234568");
+    }
+
+    #[tokio::test]
+    async fn mangapill_chapter_number_from_capture() {
+        // self.text().trim().capture("Chapter\s+(\d+(?:\.\d+)?)").at(1)
+        //     .fallback(self.text().trim().split(" ").at(-1))
+        //     .parse_float().fallback(0.0)
+        let chapter_text = trim(text(Expr::SelfRef));
+        let rows = html_rows(MANGAPILL_CHAPTER_HTML, "div.grid a.border", vec![
+            field("number",
+                fallback(
+                    parse_float(fallback(
+                        at(capture(chapter_text.clone(), r"Chapter\s+(\d+(?:\.\d+)?)"), 1),
+                        at(split(chapter_text.clone(), " "), -1),
+                    )),
+                    num(0.0),
+                )
+            ),
+        ], vec![]).await;
+        assert!((rows[0]["number"].as_f64().unwrap() - 42.0).abs() < 1e-9);
+        assert!((rows[1]["number"].as_f64().unwrap() - 1.5).abs() < 1e-9);
+        assert!((rows[2]["number"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+    }
+
+    const MANGAPILL_PAGES_HTML: &str = r#"<html><body>
+      <img class="js-page" data-src="https://cdn.mangapill.com/p/001.jpg">
+      <img class="js-page" data-src="https://cdn.mangapill.com/p/002.jpg">
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn mangapill_pages_url_and_index() {
+        let rows = html_rows(MANGAPILL_PAGES_HTML, "img.js-page", vec![
+            field("url",   attr(Expr::SelfRef, "data-src")),
+            field("index", to_string_e(Expr::Index)),
+        ], vec![]).await;
+        assert_eq!(rows[0]["url"],   "https://cdn.mangapill.com/p/001.jpg");
+        assert_eq!(rows[1]["url"],   "https://cdn.mangapill.com/p/002.jpg");
+        assert_eq!(rows[0]["index"], "0");
+        assert_eq!(rows[1]["index"], "1");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // WeebCentral (HTML scraper)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const WC_SEARCH_HTML: &str = r#"<html><body>
+      <article>
+        <a class="line-clamp-1" href="/series/01JKABCDEF/dungeon-hero">Dungeon Hero</a>
+        <img src="https://cdn.weebcentral.com/covers/1.jpg">
+      </article>
+      <article>
+        <a class="line-clamp-1" href="/series/01JKGHIJKL/spirit-blade">Spirit Blade</a>
+        <img src="https://cdn.weebcentral.com/covers/2.jpg">
+      </article>
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn weebcentral_search_id_from_href() {
+        // self.first("a.line-clamp-1").attr("href").split("/").at(-2)
+        let rows = html_rows(WC_SEARCH_HTML, "body > article", vec![
+            field("id", at(split(attr(first(Expr::SelfRef, "a.line-clamp-1"), "href"), "/"), -2)),
+        ], vec![]).await;
+        assert_eq!(rows[0]["id"], "01JKABCDEF");
+        assert_eq!(rows[1]["id"], "01JKGHIJKL");
+    }
+
+    #[tokio::test]
+    async fn weebcentral_search_title_and_cover() {
+        let rows = html_rows(WC_SEARCH_HTML, "body > article", vec![
+            field("title", text(first(Expr::SelfRef, "a.line-clamp-1"))),
+            field("cover", attr(first(Expr::SelfRef, "img"), "src")),
+        ], vec![]).await;
+        assert_eq!(rows[0]["title"], "Dungeon Hero");
+        assert_eq!(rows[0]["cover"], "https://cdn.weebcentral.com/covers/1.jpg");
+    }
+
+    const WC_DETAILS_HTML: &str = r#"<html><body>
+      <h1 class="hidden">Spirit Blade Chronicle</h1>
+      <p class="whitespace-pre-wrap">A sword saint travels the land.</p>
+      <ul class="flex-col">
+        <li>
+          <span><a>John Doe</a><a>Jane Smith</a></span>
+        </li>
+        <li>
+          <span><a>Action</a><a>Fantasy</a></span>
+        </li>
+        <li><a>Manga</a></li>
+        <li><a>Ongoing</a></li>
+        <li><span>Shonen</span></li>
+      </ul>
+      <section class="flex" style="nth-child(3)">
+        <picture><img src="/cover-small.jpg"><img src="https://cdn.weebcentral.com/cover.jpg"></picture>
+      </section>
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn weebcentral_details_title() {
+        let rows = html_rows(WC_DETAILS_HTML, ":root", vec![
+            field("title", text(dom("h1.hidden"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["title"], "Spirit Blade Chronicle");
+    }
+
+    #[tokio::test]
+    async fn weebcentral_details_description() {
+        let rows = html_rows(WC_DETAILS_HTML, ":root", vec![
+            field("desc", text(dom(".whitespace-pre-wrap"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["desc"], "A sword saint travels the land.");
+    }
+
+    #[tokio::test]
+    async fn weebcentral_details_status() {
+        let rows = html_rows(WC_DETAILS_HTML, ":root", vec![
+            field("status", text(dom("ul.flex-col li:nth-child(4) a"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["status"], "Ongoing");
+    }
+
+    #[tokio::test]
+    async fn weebcentral_details_authors_as_list() {
+        // ul.flex-col li:first-child span a → map text → join
+        let rows = html_rows(WC_DETAILS_HTML, ":root", vec![
+            field("authors",
+                join(
+                    map(select(Expr::SelfRef, "ul.flex-col li:first-child span a"),
+                        text(var("$item"))),
+                    ", ",
+                )
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["authors"], "John Doe, Jane Smith");
+    }
+
+    const WC_CHAPTERS_HTML: &str = r#"<html><body>
+      <div>
+        <a href="https://weebcentral.com/chapters/01JKCH0001">
+          <span class="gap-2"><span>Chapter 1</span></span>
+        </a>
+        <time datetime="2024-03-15T12:00:00+00:00">Mar 15, 2024</time>
+      </div>
+      <div>
+        <a href="https://weebcentral.com/chapters/01JKCH0002">
+          <span class="gap-2"><span>Chapter 2</span></span>
+        </a>
+        <time datetime="2024-03-22T12:00:00+00:00">Mar 22, 2024</time>
+      </div>
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn weebcentral_chapter_id_last_segment() {
+        // self.first("a").attr("href").split("/").at(-1)
+        let rows = html_rows(WC_CHAPTERS_HTML, "body > div", vec![
+            field("id", at(split(attr(first(Expr::SelfRef, "a"), "href"), "/"), -1)),
+        ], vec![]).await;
+        assert_eq!(rows[0]["id"], "01JKCH0001");
+        assert_eq!(rows[1]["id"], "01JKCH0002");
+    }
+
+    #[tokio::test]
+    async fn weebcentral_chapter_number_last_word() {
+        // self.first("span.gap-2 span").text().split(" ").at(-1).parse_float()
+        let rows = html_rows(WC_CHAPTERS_HTML, "body > div", vec![
+            field("number",
+                parse_float(at(split(text(first(Expr::SelfRef, "span.gap-2 span")), " "), -1))
+            ),
+        ], vec![]).await;
+        assert!((rows[0]["number"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+        assert!((rows[1]["number"].as_f64().unwrap() - 2.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn weebcentral_chapter_date_rfc3339() {
+        // self.first("time").attr("datetime").date_parse_rfc3339()
+        let rows = html_rows(WC_CHAPTERS_HTML, "body > div", vec![
+            field("date", rfc3339(attr(first(Expr::SelfRef, "time"), "datetime"))),
+        ], vec![]).await;
+        // 2024-03-15T12:00:00+00:00 → unix timestamp 1710504000
+        assert_eq!(rows[0]["date"].as_i64().unwrap(), 1710504000);
+    }
+
+    const WC_PAGES_HTML: &str = r#"<html><body>
+      <section>
+        <img src="https://cdn.weebcentral.com/p/001.jpg">
+        <img src="https://cdn.weebcentral.com/p/002.jpg">
+      </section>
+    </body></html>"#;
+
+    #[tokio::test]
+    async fn weebcentral_pages_src_and_index() {
+        let rows = html_rows(WC_PAGES_HTML, "section img", vec![
+            field("url",   attr(Expr::SelfRef, "src")),
+            field("index", to_string_e(Expr::Index)),
+        ], vec![]).await;
+        assert_eq!(rows[0]["url"],   "https://cdn.weebcentral.com/p/001.jpg");
+        assert_eq!(rows[1]["url"],   "https://cdn.weebcentral.com/p/002.jpg");
+        assert_eq!(rows[0]["index"], "0");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MangaDex (JSON API)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const MD_POPULAR_JSON: &str = r#"{
+      "data": [
+        {
+          "id": "uuid-manga-1",
+          "attributes": {
+            "title": {"en": "Blue Lock", "ja": "ブルーロック"},
+            "status": "ongoing",
+            "tags": [
+              {"attributes": {"name": {"en": "Sports", "ja": "スポーツ"}}},
+              {"attributes": {"name": {"en": "Action"}}}
+            ]
+          },
+          "relationships": [
+            {"type": "cover_art",  "attributes": {"fileName": "blue-lock.jpg"}},
+            {"type": "author",     "attributes": {"name": "Muneyuki Kaneshiro"}},
+            {"type": "artist",     "attributes": {"name": "Yusuke Nomura"}}
+          ]
+        },
+        {
+          "id": "uuid-manga-2",
+          "attributes": {
+            "title": {"ja-ro": "Chainsaw Man"},
+            "status": "completed",
+            "tags": [
+              {"attributes": {"name": {"en": "Action"}}}
+            ]
+          },
+          "relationships": [
+            {"type": "cover_art", "attributes": {"fileName": "csm.jpg"}}
+          ]
+        }
+      ],
+      "total": 2
+    }"#;
+
+    #[tokio::test]
+    async fn mangadex_popular_id() {
+        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
+            field("id", jstr(ptr_e(Expr::SelfRef, "/id"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["id"], "uuid-manga-1");
+        assert_eq!(rows[1]["id"], "uuid-manga-2");
+    }
+
+    #[tokio::test]
+    async fn mangadex_localized_title_en_fallback_ja_ro() {
+        // json("/title").get("en").str().fallback(get("ja-ro").str())
+        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
+            field("title",
+                fallback(
+                    jstr(get(ptr_e(Expr::SelfRef, "/attributes/title"), lit("en"))),
+                    jstr(get(ptr_e(Expr::SelfRef, "/attributes/title"), lit("ja-ro"))),
+                )
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["title"], "Blue Lock");
+        // manga-2 has no "en" title, falls back to "ja-ro"
+        assert_eq!(rows[1]["title"], "Chainsaw Man");
+    }
+
+    #[tokio::test]
+    async fn mangadex_cover_url_from_relationships_find() {
+        // json("/relationships").find("type","cover_art").ptr("/attributes/fileName").str()
+        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
+            field("cover_file",
+                jstr(ptr_e(
+                    find(
+                        ptr_e(Expr::SelfRef, "/relationships"),
+                        lit("type"),
+                        lit("cover_art"),
+                    ),
+                    "/attributes/fileName",
+                ))
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["cover_file"], "blue-lock.jpg");
+        assert_eq!(rows[1]["cover_file"], "csm.jpg");
+    }
+
+    #[tokio::test]
+    async fn mangadex_tags_map_and_join() {
+        // json("/attributes/tags").map($item.ptr("/attributes/name").get("en").str()).filter(...).join(", ")
+        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
+            field("tags",
+                join(
+                    filter(
+                        map(
+                            ptr_e(Expr::SelfRef, "/attributes/tags"),
+                            fallback(
+                                jstr(get(ptr_e(var("$item"), "/attributes/name"), lit("en"))),
+                                Expr::Null,
+                            ),
+                        ),
+                        Expr::BinaryOperation {
+                            op: Op::Ne,
+                            lhs: Box::new(var("$item")),
+                            rhs: Box::new(Expr::Null),
+                        },
+                    ),
+                    ", ",
+                )
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["tags"], "Sports, Action");
+        assert_eq!(rows[1]["tags"], "Action");
+    }
+
+    #[tokio::test]
+    async fn mangadex_authors_from_relationships() {
+        // json("/data/0/relationships").map($item: if type=="author" then name else null).filter(!=null)
+        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
+            field("authors",
+                join(
+                    filter(
+                        map(
+                            ptr_e(Expr::SelfRef, "/relationships"),
+                            if_expr(
+                                Expr::BinaryOperation {
+                                    op: Op::Eq,
+                                    lhs: Box::new(jstr(ptr_e(var("$item"), "/type"))),
+                                    rhs: Box::new(lit("author")),
+                                },
+                                jstr(ptr_e(var("$item"), "/attributes/name")),
+                                Expr::Null,
+                            ),
+                        ),
+                        Expr::BinaryOperation {
+                            op: Op::Ne,
+                            lhs: Box::new(var("$item")),
+                            rhs: Box::new(Expr::Null),
+                        },
+                    ),
+                    ", ",
+                )
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["authors"], "Muneyuki Kaneshiro");
+        assert_eq!(rows[1]["authors"], "");
+    }
+
+    #[tokio::test]
+    async fn mangadex_status_lookup() {
+        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
+            field("status",
+                lookup(
+                    jstr(ptr_e(Expr::SelfRef, "/attributes/status")),
+                    vec![
+                        ("ongoing",   "ongoing"),
+                        ("completed", "completed"),
+                        ("hiatus",    "hiatus"),
+                        ("cancelled", "cancelled"),
+                    ],
+                )
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["status"], "ongoing");
+        assert_eq!(rows[1]["status"], "completed");
+    }
+
+    const MD_CHAPTER_JSON: &str = r#"{
+      "data": [
+        {
+          "id": "ch-uuid-1",
+          "attributes": {
+            "chapter": "42",
+            "volume": "4",
+            "title": "The Showdown",
+            "translatedLanguage": "en",
+            "createdAt": "2024-01-15T08:00:00+00:00"
+          },
+          "relationships": [
+            {"type": "scanlation_group", "attributes": {"name": "ScanGroup A"}}
+          ]
+        }
+      ],
+      "total": 1
+    }"#;
+
+    #[tokio::test]
+    async fn mangadex_chapter_number_parse_float() {
+        // json("/attributes/chapter").str().parse_float().fallback(0.0)
+        let rows = json_rows(MD_CHAPTER_JSON, "/data", vec![
+            field("number",
+                fallback(
+                    parse_float(jstr(ptr_e(Expr::SelfRef, "/attributes/chapter"))),
+                    num(0.0),
+                )
+            ),
+        ], vec![]).await;
+        assert!((rows[0]["number"].as_f64().unwrap() - 42.0).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn mangadex_chapter_date_rfc3339() {
+        let rows = json_rows(MD_CHAPTER_JSON, "/data", vec![
+            field("date",
+                rfc3339(jstr(ptr_e(Expr::SelfRef, "/attributes/createdAt")))
+            ),
+        ], vec![]).await;
+        // 2024-01-15T08:00:00+00:00 → unix 1705305600
+        assert_eq!(rows[0]["date"].as_i64().unwrap(), 1705305600);
+    }
+
+    #[tokio::test]
+    async fn mangadex_scanlator_from_relationships_find() {
+        let rows = json_rows(MD_CHAPTER_JSON, "/data", vec![
+            field("scanlator",
+                jstr(ptr_e(
+                    find(
+                        ptr_e(Expr::SelfRef, "/relationships"),
+                        lit("type"),
+                        lit("scanlation_group"),
+                    ),
+                    "/attributes/name",
+                ))
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["scanlator"], "ScanGroup A");
+    }
+
+    const MD_AT_HOME_JSON: &str = r#"{
+      "baseUrl": "https://uploads.mangadex.org",
+      "chapter": {
+        "hash": "abc123def456",
+        "data": ["001-x1.jpg", "002-x2.jpg", "003-x3.jpg"]
+      }
+    }"#;
+
+    #[tokio::test]
+    async fn mangadex_pages_construct_url() {
+        // binding: $base = json("/baseUrl").str(), $hash = json("/chapter/hash").str()
+        // field:   url = $base.append("/data/").append($hash).append("/").append($item)
+        let rows = json_rows(MD_AT_HOME_JSON, "/chapter/data", vec![
+            field("url",
+                append(
+                    append(
+                        append(
+                            append(var("$base"), lit("/data/")),
+                            var("$hash"),
+                        ),
+                        lit("/"),
+                    ),
+                    jstr(Expr::SelfRef),
+                )
+            ),
+            field("index", to_string_e(Expr::Index)),
+        ], vec![
+            bind("$base", jstr(json("/baseUrl"))),
+            bind("$hash", jstr(json("/chapter/hash"))),
+        ]).await;
+        assert_eq!(rows[0]["url"], "https://uploads.mangadex.org/data/abc123def456/001-x1.jpg");
+        assert_eq!(rows[1]["url"], "https://uploads.mangadex.org/data/abc123def456/002-x2.jpg");
+        assert_eq!(rows[2]["index"], "2");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Comix (JSON API)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const COMIX_LIST_JSON: &str = r#"{
+      "result": {
+        "items": [
+          {"hash_id": "abc123", "title": "Hero Academia", "poster": {"large": "https://cdn.comix.to/ha.jpg"}},
+          {"hash_id": "def456", "title": "Solo Leveling"}
+        ],
+        "pagination": {"last_page": 5, "current_page": 1}
+      }
+    }"#;
+
+    #[tokio::test]
+    async fn comix_list_id_and_title() {
+        let rows = json_rows(COMIX_LIST_JSON, "/result/items", vec![
+            field("id",    jstr(ptr_e(Expr::SelfRef, "/hash_id"))),
+            field("title", jstr(ptr_e(Expr::SelfRef, "/title"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["id"],    "abc123");
+        assert_eq!(rows[0]["title"], "Hero Academia");
+        assert_eq!(rows[1]["id"],    "def456");
+    }
+
+    #[tokio::test]
+    async fn comix_optional_cover_url() {
+        // poster/large present for item 0, missing for item 1
+        let rows = json_rows(COMIX_LIST_JSON, "/result/items", vec![
+            opt_field("cover", jstr(ptr_e(Expr::SelfRef, "/poster/large"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["cover"], "https://cdn.comix.to/ha.jpg");
+        assert_eq!(rows[1]["cover"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn comix_pagination_last_page() {
+        let rows = json_rows(COMIX_LIST_JSON, "", vec![
+            field("last_page", to_string_e(jint(json("/result/pagination/last_page")))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["last_page"], "5");
+    }
+
+    const COMIX_DETAIL_JSON: &str = r#"{
+      "result": {
+        "title": "Hero Academia",
+        "synopsis": "A story of heroes.",
+        "status": "RELEASING",
+        "poster": {"large": "https://cdn.comix.to/ha-large.jpg"},
+        "type": "Manga",
+        "genre": [
+          {"title": "Action"},
+          {"title": "School Life"}
+        ],
+        "author": [{"title": "Kohei Horikoshi"}],
+        "artist": [{"title": "Kohei Horikoshi"}]
+      }
+    }"#;
+
+    #[tokio::test]
+    async fn comix_details_title_and_description() {
+        let rows = json_rows(COMIX_DETAIL_JSON, "", vec![
+            field("title", jstr(json("/result/title"))),
+            field("desc",  jstr(json("/result/synopsis"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["title"], "Hero Academia");
+        assert_eq!(rows[0]["desc"],  "A story of heroes.");
+    }
+
+    #[tokio::test]
+    async fn comix_details_status_lookup() {
+        let rows = json_rows(COMIX_DETAIL_JSON, "", vec![
+            field("status",
+                lookup(jstr(json("/result/status")),
+                    vec![
+                        ("RELEASING",     "ongoing"),
+                        ("FINISHED",      "completed"),
+                        ("HIATUS",        "hiatus"),
+                        ("DISCONTINUED",  "cancelled"),
+                    ]
+                )
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["status"], "ongoing");
+    }
+
+    #[tokio::test]
+    async fn comix_details_tags_from_genre_array() {
+        // iterate /result/genre, map /title → join
+        let rows = json_rows(COMIX_DETAIL_JSON, "", vec![
+            field("tags",
+                join(
+                    map(json("/result/genre"), jstr(ptr_e(var("$item"), "/title"))),
+                    ", ",
+                )
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["tags"], "Action, School Life");
+    }
+
+    #[tokio::test]
+    async fn comix_details_authors() {
+        let rows = json_rows(COMIX_DETAIL_JSON, "", vec![
+            field("authors",
+                join(
+                    map(json("/result/author"), jstr(ptr_e(var("$item"), "/title"))),
+                    ", ",
+                )
+            ),
+        ], vec![]).await;
+        assert_eq!(rows[0]["authors"], "Kohei Horikoshi");
+    }
+
+    const COMIX_CHAPTER_JSON: &str = r#"{
+      "result": {
+        "items": [
+          {
+            "chapter_id": 98765,
+            "number": 42.0,
+            "name": "Showdown",
+            "volume": 4,
+            "created_at": 1710504000,
+            "language": "en",
+            "scanlation_group": {"name": "OfficialRip"}
+          }
+        ],
+        "pagination": {"last_page": 3}
+      }
+    }"#;
+
+    #[tokio::test]
+    async fn comix_chapter_id_as_string() {
+        // chapter_id is an integer → to_string
+        let rows = json_rows(COMIX_CHAPTER_JSON, "/result/items", vec![
+            field("id", to_string_e(Expr::JsonInt { target: Box::new(ptr_e(Expr::SelfRef, "/chapter_id")) })),
+        ], vec![]).await;
+        assert_eq!(rows[0]["id"], "98765");
+    }
+
+    #[tokio::test]
+    async fn comix_chapter_scanlator() {
+        let rows = json_rows(COMIX_CHAPTER_JSON, "/result/items", vec![
+            field("scanlator", jstr(ptr_e(Expr::SelfRef, "/scanlation_group/name"))),
+        ], vec![]).await;
+        assert_eq!(rows[0]["scanlator"], "OfficialRip");
+    }
+}

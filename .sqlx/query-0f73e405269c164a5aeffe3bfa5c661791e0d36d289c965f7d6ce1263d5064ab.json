@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM scanlator_preferences WHERE id=?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "0f73e405269c164a5aeffe3bfa5c661791e0d36d289c965f7d6ce1263d5064ab"
+}

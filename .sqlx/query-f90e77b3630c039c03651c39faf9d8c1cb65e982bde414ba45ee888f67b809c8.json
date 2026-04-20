@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO user_chapter_tracking (user_id, chapter_id, last_page_read, is_read, last_read_at)\n            SELECT ?1, CAST(value AS INTEGER), 0, ?3,\n                   CASE WHEN ?3 THEN datetime('now') ELSE NULL END\n            FROM json_each(?2)\n            WHERE 1=1\n            ON CONFLICT (user_id, chapter_id) DO UPDATE SET\n                is_read = excluded.is_read,\n                last_page_read = CASE WHEN excluded.is_read THEN user_chapter_tracking.last_page_read ELSE 0 END,\n                last_read_at = CASE WHEN excluded.is_read THEN datetime('now') ELSE user_chapter_tracking.last_read_at END\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "f90e77b3630c039c03651c39faf9d8c1cb65e982bde414ba45ee888f67b809c8"
+}

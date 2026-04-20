@@ -1,0 +1,98 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n                c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language,\n                m.id as manga_id, m.source_id, m.source_manga_id, m.name as manga_name,\n                m.description, s.base_url,\n                (SELECT GROUP_CONCAT(p.name, ', ')\n                FROM manga_people mp JOIN people p ON mp.person_id = p.id\n                WHERE mp.manga_id = m.id and role = 'author') as authors,\n                (SELECT GROUP_CONCAT(p.name, ', ')\n                FROM manga_people mp JOIN people p ON mp.person_id = p.id\n                WHERE mp.manga_id = m.id and role = 'artist') as artists,\n                (SELECT GROUP_CONCAT(t.name, ', ')\n                FROM manga_tags mt JOIN tags t ON mt.tag_id = t.id\n                WHERE mt.manga_id = m.id) as tags\n            FROM chapters c\n            JOIN manga m ON c.manga_id = m.id\n            JOIN sources s ON m.source_id = s.id\n            WHERE c.id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_chapter_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "chapter_number",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "volume",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "language",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "manga_id",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "source_id",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "source_manga_id",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "manga_name",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "base_url",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "authors",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "artists",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "tags",
+        "ordinal": 13,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "a80149cd40d03c757ab35cec9b60520257e0b294d3dad1062b43b4ff22469163"
+}

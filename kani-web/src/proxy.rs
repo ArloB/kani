@@ -1,10 +1,7 @@
 //! Cryptographic helpers for the opaque image proxy.
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use chacha20poly1305::{
-    ChaCha20Poly1305, KeyInit, Nonce,
-    aead::Aead,
-};
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
@@ -43,8 +40,8 @@ pub fn seal_proxy_token(url: &str, referer: &str, secret: &[u8; 32]) -> String {
     let expiry = ((now / TOKEN_TTL_SECS) + 1) * TOKEN_TTL_SECS;
     let plaintext = format!("{}|{}|{}", url, referer, expiry);
 
-    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(secret)
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        <HmacSha256 as hmac::Mac>::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(b"nonce|");
     mac.update(plaintext.as_bytes());
     let digest = mac.finalize().into_bytes();
@@ -94,8 +91,8 @@ pub fn unseal_proxy_token(token: &str, secret: &[u8; 32]) -> Option<(String, Str
 
 /// Compute a stable, server-signed ETag for a (url, referer) pair.
 pub fn compute_etag(url: &str, referer: &str, secret: &[u8; 32]) -> String {
-    let mut mac = <HmacSha256 as hmac::Mac>::new_from_slice(secret)
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        <HmacSha256 as hmac::Mac>::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(b"etag|");
     mac.update(url.as_bytes());
     mac.update(b"|");
@@ -114,8 +111,12 @@ mod tests {
     use super::*;
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
-    fn secret() -> [u8; 32] { [0xABu8; 32] }
-    fn other_secret() -> [u8; 32] { [0xCDu8; 32] }
+    fn secret() -> [u8; 32] {
+        [0xABu8; 32]
+    }
+    fn other_secret() -> [u8; 32] {
+        [0xCDu8; 32]
+    }
 
     #[test]
     fn roundtrip_basic() {
@@ -123,7 +124,10 @@ mod tests {
         let token = seal_proxy_token("https://img.example.com/a.jpg", "https://example.com", &s);
         assert_eq!(
             unseal_proxy_token(&token, &s),
-            Some(("https://img.example.com/a.jpg".into(), "https://example.com".into()))
+            Some((
+                "https://img.example.com/a.jpg".into(),
+                "https://example.com".into()
+            ))
         );
     }
 
@@ -143,7 +147,10 @@ mod tests {
         let url = "https://cdn.example.com/path?size=800&quality=90";
         let referer = "https://example.com/manga/chapter/1";
         let token = seal_proxy_token(url, referer, &s);
-        assert_eq!(unseal_proxy_token(&token, &s), Some((url.into(), referer.into())));
+        assert_eq!(
+            unseal_proxy_token(&token, &s),
+            Some((url.into(), referer.into()))
+        );
     }
 
     #[test]
@@ -152,7 +159,10 @@ mod tests {
         let url = "https://example.com/\u{753b}\u{50cf}/test.jpg";
         let referer = "https://example.com/\u{6f2b}\u{753b}/1";
         let token = seal_proxy_token(url, referer, &s);
-        assert_eq!(unseal_proxy_token(&token, &s), Some((url.into(), referer.into())));
+        assert_eq!(
+            unseal_proxy_token(&token, &s),
+            Some((url.into(), referer.into()))
+        );
     }
 
     #[test]
@@ -161,7 +171,10 @@ mod tests {
         let url = "https://cdn.example.com/img.jpg";
         let referer = "https://example.com/page|with|pipes";
         let token = seal_proxy_token(url, referer, &s);
-        assert_eq!(unseal_proxy_token(&token, &s), Some((url.into(), referer.into())));
+        assert_eq!(
+            unseal_proxy_token(&token, &s),
+            Some((url.into(), referer.into()))
+        );
     }
 
     #[test]
@@ -219,7 +232,11 @@ mod tests {
     #[test]
     fn token_contains_only_base64url_chars() {
         let token = seal_proxy_token("https://img.example.com/a.jpg", "ref", &secret());
-        assert!(token.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'));
+        assert!(
+            token
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        );
     }
 
     #[test]

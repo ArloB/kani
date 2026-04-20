@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO manga (source_manga_id, source_id, name, cover_url, description, status) VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "cf380866e688a54849f23a2d76e04ab6aabca05c2b224ca47d28da94ef5f54b4"
+}

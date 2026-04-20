@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO user_roles (user_id, role_slug) VALUES (?, 'user')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "4976c4b25ab253db5c039084892cd063dbbb191ef9c5d1629a16fbbef41dc87b"
+}

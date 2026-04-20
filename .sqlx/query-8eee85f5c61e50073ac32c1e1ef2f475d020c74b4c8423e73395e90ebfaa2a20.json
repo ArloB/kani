@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT tac.client_id, tac.client_secret\n               FROM tracker_app_config tac\n               JOIN trackers t ON t.id = tac.tracker_id\n               WHERE t.name = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "client_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "client_secret",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "8eee85f5c61e50073ac32c1e1ef2f475d020c74b4c8423e73395e90ebfaa2a20"
+}

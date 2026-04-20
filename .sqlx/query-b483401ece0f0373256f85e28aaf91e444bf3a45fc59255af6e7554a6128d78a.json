@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM manga_tags WHERE manga_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "b483401ece0f0373256f85e28aaf91e444bf3a45fc59255af6e7554a6128d78a"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT local_cover_path FROM manga WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "local_cover_path",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "49d98ce829045bf4e09b8e6e82645e8001a3968c7491528ef3650961c6110997"
+}

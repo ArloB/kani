@@ -69,29 +69,24 @@ impl SourceManager {
             if data
                 .last_io_at
                 .map(|t| {
-                    t.elapsed().as_millis()
-                        < (crate::sources::EPOCH_DEADLINE_TICKS as u128 * 10)
+                    t.elapsed().as_millis() < (crate::sources::EPOCH_DEADLINE_TICKS as u128 * 10)
                 })
                 .unwrap_or(false)
             {
-                Ok(wasmtime::UpdateDeadline::Continue(crate::sources::EPOCH_DEADLINE_TICKS))
+                Ok(wasmtime::UpdateDeadline::Continue(
+                    crate::sources::EPOCH_DEADLINE_TICKS,
+                ))
             } else {
                 Err(wasmtime::Error::msg("WASM computation deadline exceeded"))
             }
         });
 
         {
-            let prefs = self
-                .preferences
-                .read()
-                .unwrap_or_else(|e| e.into_inner());
+            let prefs = self.preferences.read().unwrap_or_else(|e| e.into_inner());
             store.data_mut().preferences = prefs.clone();
         }
 
-        let bindings = self
-            .instance_pre
-            .instantiate_async(&mut store)
-            .await?;
+        let bindings = self.instance_pre.instantiate_async(&mut store).await?;
 
         Ok(OwnedSourceInstance {
             store,
@@ -109,10 +104,7 @@ pub struct OwnedSourceInstance {
 }
 
 impl OwnedSourceInstance {
-    pub fn set_preference_map(
-        &mut self,
-        prefs: std::collections::HashMap<String, String>,
-    ) {
+    pub fn set_preference_map(&mut self, prefs: std::collections::HashMap<String, String>) {
         self.store.data_mut().preferences = prefs;
     }
 
@@ -121,8 +113,10 @@ impl OwnedSourceInstance {
         &mut self,
         page: i32,
         page_size: i32,
+        filters: &[kani_shared::types::ActiveFilter],
     ) -> Result<crate::wasm::kani::extension::types::MangaList> {
-        execute_wasm!(self, call_get_popular_manga, page, page_size)
+        let wit_filters = crate::wasm::filter_conversions::to_wit_active_filters(filters);
+        execute_wasm!(self, call_get_popular_manga, page, page_size, &wit_filters)
     }
 
     /// Calls the `search_manga` function in the WASM module.
@@ -131,8 +125,10 @@ impl OwnedSourceInstance {
         query: &str,
         page: i32,
         page_size: i32,
+        filters: &[kani_shared::types::ActiveFilter],
     ) -> Result<crate::wasm::kani::extension::types::MangaList> {
-        execute_wasm!(self, call_search_manga, query, page, page_size)
+        let wit_filters = crate::wasm::filter_conversions::to_wit_active_filters(filters);
+        execute_wasm!(self, call_search_manga, query, page, page_size, &wit_filters)
     }
 
     /// Calls the `get_manga_details` function in the WASM module.
@@ -149,8 +145,16 @@ impl OwnedSourceInstance {
         manga_id: &str,
         page: i32,
         page_size: Option<i32>,
+        sort: Option<String>,
     ) -> Result<crate::wasm::kani::extension::types::ChapterList> {
-        execute_wasm!(self, call_get_chapter_list, manga_id, page, page_size)
+        execute_wasm!(self, call_get_chapter_list, manga_id, page, page_size, sort.as_deref())
+    }
+
+    /// Calls the `get_chapter_sort_list` function in the WASM module.
+    pub async fn get_chapter_sort_list(
+        &mut self,
+    ) -> Result<Vec<crate::wasm::kani::extension::types::ChapterSortOption>> {
+        execute_wasm!(self, call_get_chapter_sort_list)
     }
 
     /// Calls the `get_pages` function in the WASM module.
@@ -169,10 +173,17 @@ impl OwnedSourceInstance {
         execute_wasm!(self, call_get_metadata)
     }
 
+    /// Calls the `get_filter_list` function in the WASM module.
+    pub async fn get_filter_list(
+        &mut self,
+    ) -> Result<crate::wasm::kani::extension::types::FilterList> {
+        execute_wasm!(self, call_get_filter_list)
+    }
+
     /// Calls the `get_preferences` function in the WASM module.
     pub async fn get_preferences(
         &mut self,
-    ) -> Result<Vec<crate::wasm::kani::extension::types::PreferenceDescriptor>> {
+    ) -> Result<Vec<crate::wasm::kani::extension::types::PreferenceSpec>> {
         execute_wasm!(self, call_get_preferences)
     }
 }

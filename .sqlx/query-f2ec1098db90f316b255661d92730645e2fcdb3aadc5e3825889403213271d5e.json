@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, manga_id, rule_type, value\n                 FROM download_rules\n                 WHERE manga_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "manga_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rule_type",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "value",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f2ec1098db90f316b255661d92730645e2fcdb3aadc5e3825889403213271d5e"
+}

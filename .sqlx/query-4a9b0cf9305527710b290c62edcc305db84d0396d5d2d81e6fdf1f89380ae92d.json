@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO oauth_pkce_state (state, code_verifier, tracker_id, redirect_uri)\n           VALUES (?1, ?2, ?3, ?4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "4a9b0cf9305527710b290c62edcc305db84d0396d5d2d81e6fdf1f89380ae92d"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id: i64\" FROM chapters WHERE manga_id = ? AND chapter_number <= ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "853c5981bc2a5a8be19d3fd61281b0aa886be2c3eb11b0b0ddb741baf11d5d56"
+}

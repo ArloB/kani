@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE chapters SET source_chapter_id = ?, name = ?, language = ?,\n                scanlator = ?, uploaded_at = ?, volume = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "994b083b0388250418b79eca55e4d778578f2c61d240d69cbb58cfb9293bce39"
+}

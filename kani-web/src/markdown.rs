@@ -1,4 +1,4 @@
-use pulldown_cmark::{Parser, Options, html};
+use pulldown_cmark::{Options, Parser, html};
 
 pub fn render_description(raw: &str) -> String {
     let mut opts = Options::empty();

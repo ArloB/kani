@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT DISTINCT scanlator FROM chapters WHERE manga_id = ? AND scanlator IS NOT NULL ORDER BY scanlator",
+  "describe": {
+    "columns": [
+      {
+        "name": "scanlator",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "ef85b3473be81314ccf09a74129028096e72541af7af0ffb323371e722eebb30"
+}

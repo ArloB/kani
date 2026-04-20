@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT c.id, c.volume, c.chapter_number, c.name, m.id as manga_id, m.name as manga_name FROM chapters c JOIN manga m ON c.manga_id = m.id WHERE c.download_status = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "volume",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "chapter_number",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "name",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "manga_id",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "manga_name",
+        "ordinal": 5,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "4c847821379d728486f46e2c6a1242a2627bc3486e1b1b6a406b986cbce19630"
+}

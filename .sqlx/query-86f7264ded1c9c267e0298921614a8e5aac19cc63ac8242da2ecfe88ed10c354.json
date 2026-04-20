@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT is_orphaned FROM chapters WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "is_orphaned",
+        "ordinal": 0,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "86f7264ded1c9c267e0298921614a8e5aac19cc63ac8242da2ecfe88ed10c354"
+}

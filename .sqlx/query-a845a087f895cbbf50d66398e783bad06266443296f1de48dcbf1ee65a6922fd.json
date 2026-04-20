@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE settings SET auto_scan=? WHERE id='singleton'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "a845a087f895cbbf50d66398e783bad06266443296f1de48dcbf1ee65a6922fd"
+}

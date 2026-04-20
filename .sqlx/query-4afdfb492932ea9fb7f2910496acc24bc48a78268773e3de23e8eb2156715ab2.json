@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM oauth_pkce_state WHERE created_at < datetime('now', '-10 minutes')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "4afdfb492932ea9fb7f2910496acc24bc48a78268773e3de23e8eb2156715ab2"
+}

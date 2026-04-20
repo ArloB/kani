@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web"]
+members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web", "kani-app", "kani-cli"]
 
 [profile.release]
 opt-level = 3

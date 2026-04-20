@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT last_page_read, is_read as \"is_read: bool\"\n            FROM user_chapter_tracking\n            WHERE user_id = ? AND chapter_id = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "last_page_read",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "is_read: bool",
+        "ordinal": 1,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "7bbb1e879633477c52d3ff15134e23b6a26c3f9c13da57c202cdd006fbad3f17"
+}

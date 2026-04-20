@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE manga SET name = ?, cover_url = ?, description = ?, status = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "b4633bc2c8101f236be1ff0d0b15a329c04f107ff3ae5a39199b61e9626970cb"
+}

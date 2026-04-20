@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT role_slug, permission FROM role_permissions ORDER BY role_slug, permission",
+  "describe": {
+    "columns": [
+      {
+        "name": "role_slug",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "permission",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "f6cdf82c1c2e8268fd587fb95e2a00877587dc78ad96a6c438774759bc4d7fdf"
+}

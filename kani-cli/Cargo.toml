@@ -1,0 +1,20 @@
+[package]
+name = "kani-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "kani-cli"
+path = "src/main.rs"
+
+[dependencies]
+clap        = { version = "4", features = ["derive"] }
+thiserror   = "2.0"
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+serde_yaml  = "0.9"
+tar         = "0.4"
+flate2      = "1"
+chumsky     = "0.9"
+kani-shared = { path = "../kani-shared", features = ["builder"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }

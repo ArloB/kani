@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO user_manga_tracking (user_id, manga_id, tracking_enabled)\n            VALUES (?1, ?2, ?3)\n            ON CONFLICT (user_id, manga_id) DO UPDATE SET\n                tracking_enabled = excluded.tracking_enabled\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "83b091fbfa2dc268ec57a5692044bb937cfe19866c83dbce45063a443cbad85b"
+}

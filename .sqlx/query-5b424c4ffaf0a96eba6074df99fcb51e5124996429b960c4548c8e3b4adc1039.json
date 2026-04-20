@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE sources SET name = COALESCE(?, name), version = COALESCE(?, version) WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "5b424c4ffaf0a96eba6074df99fcb51e5124996429b960c4548c8e3b4adc1039"
+}

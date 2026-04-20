@@ -10,10 +10,26 @@ pub mod types;
 pub use types::*;
 
 pub mod bindings {
+    // When the `host` feature is enabled (kani-app, kani-core) the generated WIT
+    // types get serde derives so the service layer can serialize/deserialize them
+    // for the JSON cache.  WASM extension crates never enable `host`, so they
+    // compile without any serde dependency.
+    #[cfg(feature = "host")]
     wit_bindgen::generate!({
         path: "../kani-core/wit/kani.wit",
         world: "kani-extension",
         additional_derives: [serde::Serialize, serde::Deserialize],
+        pub_export_macro: true,
+        default_bindings_module: "kani_shared::bindings",
+        with: {
+            "kani:extension/types/manga-status": crate::types::MangaStatus
+        }
+    });
+
+    #[cfg(not(feature = "host"))]
+    wit_bindgen::generate!({
+        path: "../kani-core/wit/kani.wit",
+        world: "kani-extension",
         pub_export_macro: true,
         default_bindings_module: "kani_shared::bindings",
         with: {
@@ -31,4 +47,7 @@ pub use extension::*;
 pub mod host_abi;
 
 pub mod encoding;
-pub use encoding::{encode_manga_id, decode_manga_id};
+pub use encoding::{decode_manga_id, encode_manga_id};
+
+pub mod ast;
+pub use ast::{OffsetType, PaginationConfig};
