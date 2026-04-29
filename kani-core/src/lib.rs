@@ -18,6 +18,11 @@ pub mod evaluator;
 
 pub use error::Error;
 
+/// Runtime toggle: when `false`, HTTP request log lines are suppressed.
+/// Initialised from settings at startup and updated on settings change.
+pub static HTTP_LOGGING_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
 // Re-export wasmtime for downstream crates
 pub use wasmtime;
 

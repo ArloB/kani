@@ -106,6 +106,7 @@ impl AppService {
     }
 
     pub async fn get_metadata(&self, id: i64) -> Result<String> {
+        self.require_source_active(id).await?;
         let source_manager = {
             let sources = self.sources.read().await;
             sources
@@ -130,6 +131,7 @@ impl AppService {
         page_size: i32,
         filters: Option<String>,
     ) -> Result<String> {
+        self.require_source_active(id).await?;
         let filters_key = filters.clone().unwrap_or_default();
         let active_filters: Vec<kani_shared::types::ActiveFilter> = filters
             .as_deref()
@@ -167,6 +169,7 @@ impl AppService {
         page_size: i32,
         filters: Option<String>,
     ) -> Result<String> {
+        self.require_source_active(id).await?;
         let filters_key = filters.clone().unwrap_or_default();
         let active_filters: Vec<kani_shared::types::ActiveFilter> = filters
             .as_deref()
@@ -197,6 +200,7 @@ impl AppService {
     }
 
     pub async fn get_filter_list(&self, id: i64) -> Result<kani_core::WitFilterList> {
+        self.require_source_active(id).await?;
         let source_manager = {
             let sources = self.sources.read().await;
             sources
@@ -212,7 +216,25 @@ impl AppService {
             .map_err(ServiceError::Core)
     }
 
+    pub async fn get_source_url(&self, id: i64, manga_id: &str) -> Result<String> {
+        self.require_source_active(id).await?;
+        let source_manager = {
+            let sources = self.sources.read().await;
+            sources
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
+        };
+        source_manager
+            .lease_instance()
+            .await?
+            .get_url(manga_id)
+            .await
+            .map_err(ServiceError::Core)
+    }
+
     pub async fn get_manga_details(&self, id: i64, manga_id: &str) -> Result<String> {
+        self.require_source_active(id).await?;
         let sources = self.sources.clone();
         let manga_id_d = decode_manga_id(manga_id);
 
@@ -238,6 +260,7 @@ impl AppService {
     }
 
     pub async fn get_pages(&self, id: i64, manga_id: &str, chapter_id: &str) -> Result<String> {
+        self.require_source_active(id).await?;
         let sources = self.sources.clone();
         let manga_id_d = decode_manga_id(manga_id);
         let chapter_id_d = decode_manga_id(chapter_id);
@@ -271,6 +294,7 @@ impl AppService {
         page_size: i32,
         sort: Option<String>,
     ) -> Result<String> {
+        self.require_source_active(id).await?;
         let sources = self.sources.clone();
         let manga_id_d = decode_manga_id(manga_id);
         let sort_key = sort.clone().unwrap_or_default();
@@ -297,6 +321,7 @@ impl AppService {
     }
 
     pub async fn get_chapter_sort_list(&self, id: i64) -> Result<Vec<kani_shared::types::ChapterSortOption>> {
+        self.require_source_active(id).await?;
         let source_manager = {
             let sources = self.sources.read().await;
             sources
@@ -313,6 +338,23 @@ impl AppService {
             .into_iter()
             .map(|o| kani_shared::types::ChapterSortOption { id: o.id, name: o.name })
             .collect())
+    }
+
+    async fn require_source_active(&self, id: i64) -> Result<()> {
+        {
+            let sources = self.sources.read().await;
+            if sources.contains_key(&id) {
+                return Ok(());
+            }
+        }
+        let row = sqlx::query!("SELECT enabled FROM sources WHERE id = ?", id)
+            .fetch_optional(&self.db)
+            .await?;
+        match row {
+            None => Err(ServiceError::NotFound(format!("Source {id} not found"))),
+            Some(r) if !r.enabled => Err(ServiceError::SourceDisabled(id)),
+            Some(_) => Err(ServiceError::NotFound(format!("Source {id} not found"))),
+        }
     }
 
     pub async fn global_search(
@@ -418,68 +460,122 @@ impl AppService {
                 let filename = path
                     .file_stem()
                     .and_then(|s| s.to_str())
-                    .ok_or_else(|| ServiceError::Internal("Invalid filename".to_string()))?;
+                    .ok_or_else(|| ServiceError::Internal("Invalid filename".to_string()))?
+                    .to_owned();
 
-                let exists = sqlx::query!("SELECT id FROM sources WHERE name = ?", filename)
-                    .fetch_optional(db)
-                    .await?
-                    .is_some();
+                let bytes = tokio::fs::read(&path)
+                    .await
+                    .map_err(|e| ServiceError::Core(kani_core::Error::Io(e)))?;
 
-                if !exists {
-                    let bytes = tokio::fs::read(&path)
+                let component = wasm_runtime
+                    .compile_component(&bytes)
+                    .map_err(ServiceError::Core)?;
+
+                let (raw_meta, schema) = {
+                    let mut inst = kani_core::sources::SourceInstance::new(
+                        smart_client.clone(),
+                        None,
+                        false,
+                    );
+                    inst.load(wasm_runtime.engine(), &component, wasm_runtime.linker())
                         .await
-                        .map_err(|e| ServiceError::Core(kani_core::Error::Io(e)))?;
-
-                    let component = wasm_runtime
-                        .compile_component(&bytes)
                         .map_err(ServiceError::Core)?;
 
-                    let (metadata, schema) = {
-                        let mut inst = kani_core::sources::SourceInstance::new(
-                            smart_client.clone(),
-                            None,
-                            false,
-                        );
-                        inst.load(wasm_runtime.engine(), &component, wasm_runtime.linker())
-                            .await
-                            .map_err(ServiceError::Core)?;
+                    let meta = inst.get_metadata().await.map_err(ServiceError::Core)?;
+                    let schema = inst.get_preferences().await.ok();
+                    (meta, schema)
+                };
 
-                        let meta = inst.get_metadata().await.map_err(ServiceError::Core)?;
-                        let schema = inst.get_preferences().await.ok();
-                        (meta, schema)
-                    };
-
-                    match serde_json::to_value(&metadata)
-                        .and_then(serde_json::from_value::<kani_shared::ExtensionMetadata>)
-                    {
-                        Ok(metadata) => {
-                            let initially_enabled = if metadata.unrestricted_http {
-                                0i64
-                            } else {
-                                1i64
-                            };
-
-                            let result = sqlx::query!(
-                                "INSERT INTO sources (name, version, base_url, enabled, unrestricted_http)
-                                VALUES (?, ?, ?, ?, ?)",
-                                filename, metadata.version, metadata.base_url,
-                                initially_enabled, metadata.unrestricted_http,
-                            )
-                            .execute(db)
-                            .await?;
-
-                            if let Some(schema) = schema {
-                                let id = result.last_insert_rowid();
-                                preference_schemas.insert(id, schema);
-                            }
-
-                            tracing::info!("Registered new source: {}", filename);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to convert metadata for {}: {}", filename, e);
-                        }
+                let metadata = match serde_json::to_value(&raw_meta)
+                    .and_then(serde_json::from_value::<kani_shared::ExtensionMetadata>)
+                {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::error!("Failed to convert metadata for {}: {}", filename, e);
+                        continue;
                     }
+                };
+
+                let canonical_id = metadata.id.clone();
+                let initially_enabled = if metadata.unrestricted_http { 0i64 } else { 1i64 };
+
+                // Helper: rename the wasm file on disk if the filename differs from the canonical id.
+                let rename_file = |current_filename: &str| {
+                    let src = wasm_storage_path.join(format!("{current_filename}.wasm"));
+                    let dst = wasm_storage_path.join(format!("{canonical_id}.wasm"));
+                    (src, dst, current_filename != canonical_id.as_str())
+                };
+
+                // Already registered under the canonical id — ensure the file is named correctly.
+                let by_id = sqlx::query!(
+                    "SELECT id FROM sources WHERE name = ?",
+                    canonical_id
+                )
+                .fetch_optional(db)
+                .await?;
+
+                if by_id.is_some() {
+                    let (src, dst, needs_rename) = rename_file(&filename);
+                    if needs_rename && src.exists() && !dst.exists() &&
+                    let Err(e) = tokio::fs::rename(&src, &dst).await {
+                        tracing::warn!("Failed to rename {} → {}: {}", src.display(), dst.display(), e);
+                    }
+                    continue;
                 }
+
+                // Check for legacy record by filename or display name, migrate if found.
+                let legacy = sqlx::query!(
+                    "SELECT id FROM sources WHERE name = ? OR name = ? LIMIT 1",
+                    filename,
+                    metadata.name
+                )
+                .fetch_optional(db)
+                .await?;
+
+                if let Some(row) = legacy {
+                    sqlx::query!(
+                        "UPDATE sources SET name = ?, version = ?, base_url = ?, unrestricted_http = ? WHERE id = ?",
+                        canonical_id,
+                        metadata.version,
+                        metadata.base_url,
+                        metadata.unrestricted_http,
+                        row.id
+                    )
+                    .execute(db)
+                    .await?;
+
+                    let (src, dst, needs_rename) = rename_file(&filename);
+                    if needs_rename && src.exists() && !dst.exists() && let Err(e) = tokio::fs::rename(&src, &dst).await {
+                        tracing::warn!("Failed to rename {} → {}: {}", src.display(), dst.display(), e);
+                    }
+
+                    tracing::info!("Migrated source '{}' → '{}'", filename, canonical_id);
+                    continue;
+                }
+
+                // New source — insert with canonical id.
+                let result = sqlx::query!(
+                    "INSERT INTO sources (name, version, base_url, enabled, unrestricted_http) VALUES (?, ?, ?, ?, ?)",
+                    canonical_id,
+                    metadata.version,
+                    metadata.base_url,
+                    initially_enabled,
+                    metadata.unrestricted_http,
+                )
+                .execute(db)
+                .await?;
+
+                if let Some(schema) = schema {
+                    preference_schemas.insert(result.last_insert_rowid(), schema);
+                }
+
+                let (src, dst, needs_rename) = rename_file(&filename);
+                if needs_rename && src.exists() && !dst.exists() &&
+                let Err(e) = tokio::fs::rename(&src, &dst).await {
+                    tracing::warn!("Failed to rename {} → {}: {}", src.display(), dst.display(), e);
+                }
+
+                tracing::info!("Registered new source: {}", canonical_id);
             }
         }
         Ok(())

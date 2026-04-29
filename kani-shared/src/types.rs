@@ -586,6 +586,8 @@ pub struct MangaListItem {
 pub struct MangaList {
     pub manga: Vec<MangaListItem>,
     pub has_next_page: bool,
+    #[serde(default)]
+    pub total_pages: Option<u32>,
 }
 
 #[cfg(feature = "host")]
@@ -635,6 +637,8 @@ pub struct Chapter {
 pub struct ChapterList {
     pub chapters: Vec<Chapter>,
     pub has_next_page: bool,
+    #[serde(default)]
+    pub total_pages: Option<u32>,
 }
 
 /// A sort option declared by a source extension for its chapter list.
@@ -831,6 +835,7 @@ pub enum DownloadProgressEvent {
 pub struct LibraryPage {
     pub items: Vec<MangaListItem>,
     pub has_next_page: bool,
+    pub total_pages: Option<u32>,
 }
 
 #[cfg(feature = "host")]
@@ -1011,6 +1016,8 @@ pub struct AppSettings {
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
     pub default_tracking_enabled: bool,
+    pub http_request_logging: bool,
+    pub registration_enabled: bool,
 }
 
 #[cfg(feature = "host")]
@@ -1019,6 +1026,7 @@ pub struct AppSettings {
 pub struct RecentUpdate {
     pub recent_updates: Vec<RecentUpdateItem>,
     pub has_next_page: bool,
+    pub total_pages: Option<u32>,
 }
 
 #[cfg(feature = "host")]
@@ -1037,6 +1045,7 @@ pub struct RecentUpdateItem {
     #[ts(type = "string")]
     #[serde(with = "time::serde::rfc3339::option")]
     pub discovered_at: std::option::Option<time::OffsetDateTime>,
+    pub is_downloaded: bool,
 }
 
 #[cfg(feature = "host")]
@@ -1122,6 +1131,8 @@ pub struct AdvancedSettings {
     pub flaresolverr_url: String,
     pub library_path: String,
     pub max_wasm_instances: i64,
+    pub http_request_logging: bool,
+    pub registration_enabled: bool,
 }
 
 #[cfg(feature = "host")]

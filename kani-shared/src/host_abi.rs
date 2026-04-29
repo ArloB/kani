@@ -107,6 +107,18 @@ impl HttpRequest {
         self
     }
     
+    /// Consume this request and return its components for use with raw extraction.
+    pub(crate) fn into_extract_parts(self) -> Result<(String, String, Vec<(String, String)>, Vec<(String, String)>), ExtensionError> {
+        let url = self.build_final_url()?;
+        let method = match self.method {
+            HttpMethod::Get    => "GET",
+            HttpMethod::Post   => "POST",
+            HttpMethod::Put    => "PUT",
+            HttpMethod::Delete => "DELETE",
+        }.to_string();
+        Ok((url, method, self.headers, self.queries))
+    }
+
     /// Build the final URL with query parameters.
     fn build_final_url(&self) -> Result<String, ExtensionError> {
         let url = match &self.url {
@@ -418,6 +430,12 @@ impl JsonHandle {
         Self { handle }
     }
 
+    /// Return the underlying host-side handle (an opaque i32).
+    /// The handle remains valid as long as this `JsonHandle` is live.
+    pub fn raw_handle(&self) -> json::JsonHandle {
+        self.handle
+    }
+
     /// Parse raw response bytes into a host-side JSON value.
     pub fn parse(data: &[u8]) -> Result<Self, ExtensionError> {
         let handle = json::parse(data).map_err(ExtensionError::ParseError)?;
@@ -617,6 +635,43 @@ pub mod extract {
     pub fn paginated_html(page: i32, page_size: i32, blueprint: &Blueprint) -> Result<JsonHandle, ExtensionError> {
         let bytes = blueprint.to_bytes();
         let handle = extraction::paginated_extract_html(page, page_size, &bytes).map_err(ExtensionError::Other)?;
+        Ok(JsonHandle::from_raw(handle))
+    }
+}
+
+// ============================================================
+// Raw extraction API (no builder feature required)
+// ============================================================
+
+/// Like [`extract`] but takes pre-computed postcard bytes directly, bypassing
+/// `BlueprintBuilder` and the `builder` feature entirely.  The blueprint bytes
+/// must **not** include a `RequestDef`; callers are responsible for fetching
+/// the document and passing the resulting handle.
+pub mod extract_raw {
+    use crate::bindings::kani::extension::extraction;
+    use crate::host_abi::JsonHandle;
+    use crate::ExtensionError;
+    use super::HttpRequest;
+
+    /// Run a blueprint extraction over a pre-fetched HTML document handle.
+    pub fn html(doc: Option<i32>, bytes: &[u8]) -> Result<JsonHandle, ExtensionError> {
+        let handle = extraction::extract_html(doc, bytes).map_err(ExtensionError::Other)?;
+        Ok(JsonHandle::from_raw(handle))
+    }
+
+    /// Run a blueprint extraction over a pre-fetched JSON handle.
+    pub fn json(handle: Option<i32>, bytes: &[u8]) -> Result<JsonHandle, ExtensionError> {
+        let result = extraction::extract_json(handle, bytes).map_err(ExtensionError::Other)?;
+        Ok(JsonHandle::from_raw(result))
+    }
+
+    /// Run a paginated HTML extraction.  The blueprint bytes must include a
+    /// `PaginationConfig` but no `RequestDef`; the request is provided separately
+    /// so the host can attach it before each paginated fetch.
+    pub fn paginated_html(page: i32, page_size: i32, req: HttpRequest, bytes: &[u8]) -> Result<JsonHandle, ExtensionError> {
+        let (url, method, headers, queries) = req.into_extract_parts()?;
+        let handle = extraction::paginated_extract_html_raw(page, page_size, &url, &method, &headers, &queries, bytes)
+            .map_err(ExtensionError::Other)?;
         Ok(JsonHandle::from_raw(handle))
     }
 }

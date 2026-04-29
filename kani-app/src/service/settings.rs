@@ -16,6 +16,8 @@ impl AppService {
             auto_scan: s.auto_scan,
             scan_interval_minutes: s.scan_interval_minutes,
             default_tracking_enabled: s.default_tracking_enabled,
+            http_request_logging: s.http_request_logging,
+            registration_enabled: s.registration_enabled,
         }
     }
 
@@ -91,11 +93,13 @@ impl AppService {
             }
             SettingsUpdate::Advanced(s) => {
                 sqlx::query!(
-                    "UPDATE settings SET flaresolverr_url=?, library_path=?, max_wasm_instances=? \
-                     WHERE id='singleton'",
+                    "UPDATE settings SET flaresolverr_url=?, library_path=?, max_wasm_instances=?, \
+                     http_request_logging=?, registration_enabled=? WHERE id='singleton'",
                     s.flaresolverr_url,
                     s.library_path,
-                    s.max_wasm_instances
+                    s.max_wasm_instances,
+                    s.http_request_logging,
+                    s.registration_enabled,
                 )
                 .execute(&self.db)
                 .await?;
@@ -104,6 +108,8 @@ impl AppService {
                     settings.flaresolverr_url = s.flaresolverr_url.clone();
                     settings.library_path = s.library_path.clone().into();
                     settings.max_wasm_instances = s.max_wasm_instances;
+                    settings.http_request_logging = s.http_request_logging;
+                    settings.registration_enabled = s.registration_enabled;
                 }
                 let new_solver = if s.flaresolverr_url.is_empty() {
                     None

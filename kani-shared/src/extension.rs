@@ -69,6 +69,12 @@ pub trait MangaExtension {
     /// Returns the extension's preference definitions.
     /// The host stores and serves the values; extensions read them via `host_abi::prefs`.
     fn get_preferences(&self) -> ExtensionResult<Vec<PreferenceSpec>>;
+
+    /// Returns the canonical upstream URL for a manga, suitable for opening in a browser.
+    /// Defaults to an error; extensions with a straightforward URL scheme should override.
+    fn get_url(&self, _manga_id: &str) -> ExtensionResult<String> {
+        Err(ExtensionError::Other("get_url not implemented for this source".into()))
+    }
 }
 
 /// Metadata about a source extension.

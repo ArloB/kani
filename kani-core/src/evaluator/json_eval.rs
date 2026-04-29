@@ -171,6 +171,7 @@ fn eval_json_expr<'a>(
                 let mut merged: Option<serde_json::Value> = None;
                 for item in items {
                     let v = item.into_json("json_fold")?;
+                    if v.is_null() { continue; }
                     merged = Some(match merged {
                         None => v,
                         Some(acc) => json_merge_two(acc, v)?,

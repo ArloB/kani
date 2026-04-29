@@ -85,7 +85,7 @@ impl AppService {
 
         let mut sources_map = HashMap::new();
 
-        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, concurrent_manga_downloads, default_tracking_enabled FROM settings")
+        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, registration_enabled FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");

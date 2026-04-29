@@ -83,6 +83,9 @@ pub enum AppError {
 
     #[error("Source requires authentication: {0}")]
     SourceAuthRequired(String),
+
+    #[error("Source {0} is disabled")]
+    SourceDisabled(i64),
 }
 
 impl AppError {
@@ -97,6 +100,7 @@ impl AppError {
             Self::FlareSolverrRequired => "flaresolverr_required",
             Self::RateLimitExceeded => "rate_limited",
             Self::SourceAuthRequired(_) => "source_auth_required",
+            Self::SourceDisabled(_) => "source_disabled",
             _ => "internal_error",
         }
     }
@@ -241,6 +245,17 @@ impl IntoResponse for AppError {
             Self::FlareSolverrRequired => (StatusCode::BAD_GATEWAY, self.to_string()),
             Self::RateLimitExceeded => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
             Self::SourceAuthRequired(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
+            Self::SourceDisabled(id) => {
+                tracing::debug!("Request to disabled source {id}");
+                let body = Json(json!({
+                    "error": format!("Source {id} is disabled"),
+                    "code": "source_disabled",
+                    "disabled": true,
+                    "source_id": id,
+                    "hint": null,
+                }));
+                return (StatusCode::CONFLICT, body).into_response();
+            }
         };
 
         let body = Json(json!({
@@ -269,6 +284,7 @@ impl From<kani_app::ServiceError> for AppError {
     fn from(e: kani_app::ServiceError) -> Self {
         match e {
             kani_app::ServiceError::NotFound(s) => Self::NotFound(s),
+            kani_app::ServiceError::SourceDisabled(id) => Self::SourceDisabled(id),
             kani_app::ServiceError::Conflict(s) => Self::Conflict(s),
             kani_app::ServiceError::Internal(s) => Self::InternalServerError(s),
             kani_app::ServiceError::Validation(s) => Self::ValidationError(s),

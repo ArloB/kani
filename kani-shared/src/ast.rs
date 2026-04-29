@@ -22,10 +22,6 @@ pub enum Expr {
     /// Null value
     Null,
 
-    True,
-
-    False,
-
     Bool(bool),
 
     BinaryOperation { op: Op, lhs: Box<Expr>, rhs: Box<Expr> },
@@ -183,7 +179,7 @@ pub enum Expr {
     /// pref("key") — read an extension preference value; returns String or Null if unset
     Pref(String),
 
-    /// format("template {}", [args...]) — interpolate `{}` placeholders with evaluated args
+    /// format("template {}", arg1, arg2, ...) — interpolate `{}` placeholders with evaluated args
     Format { template: String, args: Vec<Expr> },
 
     /// .not() — boolean negation; Null is treated as false (not(null) = true)
@@ -286,8 +282,8 @@ impl Expr {
     #[inline] pub fn self_ref() -> Self { Expr::SelfRef }
     #[inline] pub fn index()    -> Self { Expr::Index }
     #[inline] pub fn null()     -> Self { Expr::Null }
-    #[inline] pub fn true_val()   -> Self { Expr::True }
-    #[inline] pub fn false_val()  -> Self { Expr::False }
+    #[inline] pub fn true_val()   -> Self { Expr::Bool(true) }
+    #[inline] pub fn false_val()  -> Self { Expr::Bool(false) }
     #[inline] pub fn lit(s: impl Into<String>) -> Self { Expr::Literal(s.into()) }
     #[inline] pub fn num(n: f64) -> Self { Expr::Number(n) }
     #[inline] pub fn var(name: impl Into<String>) -> Self { Expr::Var(name.into()) }

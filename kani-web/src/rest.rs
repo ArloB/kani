@@ -156,6 +156,9 @@ pub fn routes(state: AppState) -> Router {
         .route("/auth/change_password", post(change_password))
         .route("/auth/logout_everywhere", post(logout_everywhere))
         .route("/auth/permissions", get(get_my_permissions))
+        .route("/auth/registration-enabled", get(get_registration_enabled))
+        .route("/auth/captcha", get(get_captcha))
+        .route("/auth/register", post(auth_register))
         // ── Image proxy — mounted separately with its own rate limit ────
         // ── Server-sent events ───────────────────────────────────────────
         .route("/events", get(combined_sse))
@@ -178,6 +181,7 @@ pub fn routes(state: AppState) -> Router {
         )
         .route("/sources/{id}/search/{page}/{page_size}", get(search_manga))
         .route("/sources/{id}/details/{manga_id}", get(get_manga_details))
+        .route("/sources/{id}/url/{manga_id}", get(get_source_manga_url))
         .route("/sources/{id}/save/{manga_id}", post(save_to_library))
         .route(
             "/sources/{id}/chapters/{manga_id}/{page}/{page_size}",
@@ -217,6 +221,7 @@ pub fn routes(state: AppState) -> Router {
         )
         // ── Library ──────────────────────────────────────────────────────
         .route("/library", get(get_library_filtered))
+        .route("/library/scan-all", post(scan_all_library))
         .route("/library/continue_reading", get(get_continue_reading_shelf))
         .route("/library/{page}/{order}", get(get_library)) // legacy Leptos compat
         .route("/recent_updates", get(get_recent_updates))
@@ -319,6 +324,7 @@ pub fn routes(state: AppState) -> Router {
             "/admin/users/{id}/roles/{role}",
             delete(admin_revoke_role),
         )
+        .route("/admin/users/{id}/activity", get(admin_user_activity))
         // ── Admin — role management ──────────────────────────────────────
         .route("/admin/roles", get(admin_list_roles).post(admin_create_role))
         .route(
@@ -414,6 +420,76 @@ async fn auth_me(
         "id": user.id,
         "username": user.username,
     })))
+}
+
+async fn get_registration_enabled(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let enabled = state.get_settings().await.registration_enabled;
+    Ok(Json(json!({ "enabled": enabled })))
+}
+
+async fn get_captcha(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    if !state.get_settings().await.registration_enabled {
+        return Err(AppError::NotFound("Registration is disabled".into()));
+    }
+    let a: i64 = rand::random::<u8>() as i64 % 10 + 1;
+    let b: i64 = rand::random::<u8>() as i64 % 10 + 1;
+    let answer = a + b;
+    let id = uuid::Uuid::new_v4().to_string();
+    let expires_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+        + 300;
+    sqlx::query!(
+        "INSERT INTO captcha_challenges (id, answer, expires_at) VALUES (?, ?, ?)",
+        id, answer, expires_at
+    )
+    .execute(&state.db)
+    .await?;
+    Ok(Json(json!({ "id": id, "prompt": format!("What is {} + {}?", a, b) })))
+}
+
+#[derive(serde::Deserialize)]
+struct RegisterRequest {
+    username: String,
+    email: String,
+    password: String,
+    captcha_id: String,
+    captcha_answer: i64,
+}
+
+async fn auth_register(
+    auth: AuthSession,
+    State(state): State<AppState>,
+    Json(body): Json<RegisterRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    if !state.get_settings().await.registration_enabled {
+        return Err(AppError::NotFound("Registration is disabled".into()));
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let row = sqlx::query!(
+        "DELETE FROM captcha_challenges WHERE id = ? AND expires_at > ? RETURNING answer",
+        body.captcha_id, now
+    )
+    .fetch_optional(&state.db)
+    .await?;
+    let row = row.ok_or_else(|| AppError::ValidationError("Invalid or expired captcha.".into()))?;
+    if row.answer != body.captcha_answer {
+        return Err(AppError::ValidationError("Incorrect captcha answer.".into()));
+    }
+    if body.username.trim().is_empty() || body.password.len() < 8 {
+        return Err(AppError::ValidationError("Username required and password must be at least 8 characters.".into()));
+    }
+    let user = auth.backend.create_user(&body.username, &body.email, &body.password).await?;
+    state.audit(Some(user.id), "auth.register", Some(&user.username), None).await;
+    Ok(Json(json!({ "ok": true })))
 }
 
 const PER_HOST_CONCURRENCY: usize = 5;
@@ -655,7 +731,7 @@ pub(crate) async fn install_source(
 
     sqlx::query!(
         "UPDATE sources SET name = ?, version = ?, base_url = ?, unrestricted_http = ? WHERE id = ?",
-        metadata.name,
+        metadata.id,
         metadata.version,
         metadata.base_url,
         metadata.unrestricted_http,
@@ -670,16 +746,16 @@ pub(crate) async fn install_source(
         .to_str()
         .ok_or_else(|| AppError::InternalServerError("Failed to convert path".to_string()))?;
 
-    if current_source.name != metadata.name {
+    if current_source.name != metadata.id {
         tracing::info!(
             "Source name changed from {} to {}. Deleting old file.",
             current_source.name,
-            metadata.name
+            metadata.id
         );
         let _ = kani_core::file_storage::delete_wasm_file(storage_path, &current_source.name).await;
     }
 
-    let path = kani_core::file_storage::save_wasm(storage_path, &metadata.name, bytes)
+    let path = kani_core::file_storage::save_wasm(storage_path, &metadata.id, bytes)
         .await
         .map_err(AppError::CoreError)?;
     drop(settings);
@@ -828,6 +904,15 @@ async fn get_manga_details(
         .as_deref()
         .map(crate::utils::render_description);
     Ok(Json(info))
+}
+
+async fn get_source_manga_url(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+    State(state): State<AppState>,
+    Path((id, manga_id)): Path<(i64, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    let url = state.get_source_url(id, &manga_id).await?;
+    Ok(Json(serde_json::json!({ "url": url })))
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -1019,7 +1104,7 @@ async fn get_library_filtered(
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<LibraryQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let (records, has_next_page) = state
+    let (records, has_next_page, total_pages) = state
         .get_library_filtered(
             user.id,
             q.page,
@@ -1058,6 +1143,7 @@ async fn get_library_filtered(
     Ok(Json(crate::types::LibraryPage {
         items,
         has_next_page,
+        total_pages,
     }))
 }
 
@@ -1107,7 +1193,7 @@ async fn get_local_chapters(
     Path(manga_id): Path<i64>,
     ValidatedQuery(q): ValidatedQuery<LocalChaptersQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let (chapters, has_next_page) = state
+    let (chapters, has_next_page, total_pages) = state
         .get_local_chapters(
             manga_id,
             q.page,
@@ -1122,6 +1208,7 @@ async fn get_local_chapters(
     Ok(Json(crate::types::ChapterList {
         chapters,
         has_next_page,
+        total_pages,
     }))
 }
 
@@ -1212,7 +1299,7 @@ async fn get_recent_updates(
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<PageQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let (mut items, has_next_page) = state.get_recent_updates(q.page).await?;
+    let (mut items, has_next_page, total_pages) = state.get_recent_updates(q.page).await?;
     for u in &mut items {
         u.cover_url = if u.local_cover_path.is_some() {
             Some(format!("/rest/manga/{}/cover", u.manga_id))
@@ -1225,6 +1312,7 @@ async fn get_recent_updates(
     Ok(Json(crate::types::RecentUpdate {
         recent_updates: items,
         has_next_page,
+        total_pages,
     }))
 }
 
@@ -1332,6 +1420,10 @@ async fn update_settings(
     {
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
+    if let crate::types::SettingsUpdate::Advanced(ref adv) = update {
+        crate::HTTP_LOGGING_ENABLED
+            .store(adv.http_request_logging, std::sync::atomic::Ordering::Relaxed);
+    }
     state.update_settings(update, user.id).await?;
     Ok(Json(json!({})))
 }
@@ -1413,6 +1505,14 @@ async fn scan_manga(
 ) -> Result<impl IntoResponse, AppError> {
     let new_chapters = state.scan_for_new_chapters(id).await?.len() as i64;
     Ok(Json(json!({ "new_chapters": new_chapters })))
+}
+
+async fn scan_all_library(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let queued = state.scan_all_manga().await?;
+    Ok(Json(json!({ "queued": queued })))
 }
 
 async fn get_boot_id(
@@ -2413,6 +2513,67 @@ async fn admin_revoke_role(
         )
         .await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Admin — user activity feed ────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct UserActivityQuery {
+    limit: Option<i64>,
+    before: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ActivityEvent {
+    id: i64,
+    action: String,
+    target: Option<String>,
+    details: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
+    created_at: time::OffsetDateTime,
+}
+
+#[derive(serde::Serialize)]
+struct UserActivityResponse {
+    events: Vec<ActivityEvent>,
+}
+
+async fn admin_user_activity(
+    AuthGuard(_, _): AuthGuard<crate::permissions::guards::UserManage>,
+    State(state): State<AppState>,
+    Path(user_id): Path<i64>,
+    Query(q): Query<UserActivityQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let limit = q.limit.unwrap_or(50).min(200);
+    let rows = if let Some(before) = q.before {
+        sqlx::query_as!(
+            ActivityEvent,
+            r#"SELECT id, action, target, details, created_at
+               FROM audit_log
+               WHERE user_id = ? AND created_at < ?
+               ORDER BY created_at DESC
+               LIMIT ?"#,
+            user_id,
+            before,
+            limit,
+        )
+        .fetch_all(&state.db)
+        .await?
+    } else {
+        sqlx::query_as!(
+            ActivityEvent,
+            r#"SELECT id, action, target, details, created_at
+               FROM audit_log
+               WHERE user_id = ?
+               ORDER BY created_at DESC
+               LIMIT ?"#,
+            user_id,
+            limit,
+        )
+        .fetch_all(&state.db)
+        .await?
+    };
+    Ok(Json(UserActivityResponse { events: rows }))
 }
 
 // ── Admin — role management ───────────────────────────────────────────────────

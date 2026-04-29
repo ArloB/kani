@@ -98,6 +98,9 @@ impl Guest for Example {
             .get_preferences()
             .map_err(|e| e.to_string())
     }
+    fn get_url(manga_id: String) -> Result<String, String> {
+        get_extension().get_url(&manga_id).map_err(|e| e.to_string())
+    }
 }
 
 impl MangaExtension for Example {
@@ -106,7 +109,7 @@ impl MangaExtension for Example {
     }
 
     fn get_popular_manga(&self, _page: i32, _page_size: i32, _filters: &[ActiveFilter]) -> ExtensionResult<MangaList> {
-        Ok(MangaList { manga: vec![], has_next_page: false })
+        Ok(MangaList { manga: vec![], has_next_page: false, total_pages: None })
     }
 
     fn search_manga(
@@ -116,7 +119,7 @@ impl MangaExtension for Example {
         _page_size: i32,
         _filters: &[ActiveFilter],
     ) -> ExtensionResult<MangaList> {
-        Ok(MangaList { manga: vec![], has_next_page: false })
+        Ok(MangaList { manga: vec![], has_next_page: false, total_pages: None })
     }
 
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
@@ -139,7 +142,7 @@ impl MangaExtension for Example {
         _page_size: Option<i32>,
         _sort: Option<String>,
     ) -> ExtensionResult<ChapterList> {
-        Ok(ChapterList { chapters: vec![], has_next_page: false })
+        Ok(ChapterList { chapters: vec![], has_next_page: false, total_pages: None })
     }
 
     fn get_pages(&self, _manga_id: &str, _chapter_id: &str) -> ExtensionResult<Chapter> {

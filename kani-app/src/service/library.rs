@@ -63,7 +63,7 @@ impl AppService {
         Ok(())
     }
 
-    /// Filtered/paginated library query. Returns (rows, has_next_page).
+    /// Filtered/paginated library query. Returns (rows, has_next_page, total_pages).
     #[allow(clippy::too_many_arguments)]
     pub async fn get_library_filtered(
         &self,
@@ -81,7 +81,7 @@ impl AppService {
         hide_completed_status: bool,
         source_id: Option<i64>,
         sort_by: kani_shared::types::MangaSortOrder,
-    ) -> Result<(Vec<crate::models::LibraryManga>, bool)> {
+    ) -> Result<(Vec<crate::models::LibraryManga>, bool, Option<u32>)> {
         use kani_shared::types::MangaSortOrder;
 
         let offset = (page - 1).max(0) * page_size;
@@ -92,7 +92,8 @@ impl AppService {
             || hide_completed_status;
 
         let mut qb = sqlx::QueryBuilder::new(
-            "SELECT m.id, m.name, m.cover_url, m.local_cover_path, s.base_url \
+            "SELECT m.id, m.name, m.cover_url, m.local_cover_path, s.base_url, \
+             COUNT(*) OVER() AS total_count \
              FROM manga m JOIN sources s ON m.source_id = s.id",
         );
 
@@ -185,8 +186,11 @@ impl AppService {
             .await?;
 
         let has_next_page = records.len() == limit as usize;
+        let total_count = records.first().map(|r| r.total_count).unwrap_or(0);
         records.truncate(page_size as usize);
-        Ok((records, has_next_page))
+        let ps = page_size as i64;
+        let total_pages = Some(((total_count + ps - 1) / ps).max(0) as u32);
+        Ok((records, has_next_page, total_pages))
     }
 
     /// Returns the continue-reading shelf: manga the user has started that still have
@@ -310,17 +314,18 @@ impl AppService {
         .map_err(Into::into)
     }
 
-    /// Returns the 50 most recent chapter updates (paginated). Returns (items, has_next_page).
+    /// Returns the 50 most recent chapter updates (paginated). Returns (items, has_next_page, total_pages).
     pub async fn get_recent_updates(
         &self,
         page: i32,
-    ) -> Result<(Vec<kani_shared::types::RecentUpdateItem>, bool)> {
+    ) -> Result<(Vec<kani_shared::types::RecentUpdateItem>, bool, Option<u32>)> {
         let offset = (page - 1) * 50;
         let mut items = sqlx::query_as!(
             kani_shared::types::RecentUpdateItem,
             "SELECT m.id as manga_id, m.name as manga_name, m.cover_url, m.local_cover_path,
                     s.base_url, c.id as chapter_id, c.chapter_number,
-                    c.name as chapter_name, c.discovered_at
+                    c.name as chapter_name, c.discovered_at,
+                    (c.download_status = 2) as \"is_downloaded: bool\"
              FROM chapters c
              JOIN manga m ON c.manga_id = m.id
              JOIN sources s ON m.source_id = s.id
@@ -335,7 +340,15 @@ impl AppService {
         if has_next_page {
             items.truncate(50);
         }
-        Ok((items, has_next_page))
+
+        let total_count = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM chapters c WHERE c.discovered_at IS NOT NULL"
+        )
+        .fetch_one(&self.db)
+        .await?;
+        let total_pages = Some(((total_count as i64 + 49) / 50).max(0) as u32);
+
+        Ok((items, has_next_page, total_pages))
     }
 
     pub async fn save_to_library(&self, source_id: i64, manga_id: &str) -> Result<i64> {
@@ -1117,6 +1130,24 @@ impl AppService {
         }
 
         Ok(chapter_list.has_next_page)
+    }
+
+    /// Queues a background scan for every manga in the library.
+    /// Returns immediately with the count of manga queued.
+    pub async fn scan_all_manga(&self) -> Result<usize> {
+        let ids: Vec<i64> = sqlx::query_scalar!("SELECT id FROM manga")
+            .fetch_all(&self.db)
+            .await?;
+        let count = ids.len();
+        let service = self.clone();
+        tokio::task::spawn(async move {
+            for id in ids {
+                if let Err(e) = service.scan_for_new_chapters(id).await {
+                    tracing::debug!("scan_all: skipped manga {id}: {e:?}");
+                }
+            }
+        });
+        Ok(count)
     }
 
     pub async fn fetch_and_store_remaining_chapters(

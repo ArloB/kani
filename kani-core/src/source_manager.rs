@@ -186,4 +186,9 @@ impl OwnedSourceInstance {
     ) -> Result<Vec<crate::wasm::kani::extension::types::PreferenceSpec>> {
         execute_wasm!(self, call_get_preferences)
     }
+
+    /// Calls the `get_url` function in the WASM module.
+    pub async fn get_url(&mut self, manga_id: &str) -> Result<String> {
+        execute_wasm!(self, call_get_url, manga_id)
+    }
 }

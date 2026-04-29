@@ -97,6 +97,7 @@ interface types {
     record manga-list {
         manga: list<manga-list-item>,
         has-next-page: bool,
+        total-pages: option<u32>,
     }
 
     record manga-info {
@@ -123,6 +124,7 @@ interface types {
     record chapter-list {
         chapters: list<chapter-info>,
         has-next-page: bool,
+        total-pages: option<u32>,
     }
 
     /// A single sort option that an extension can apply to its chapter list.
@@ -241,6 +243,8 @@ interface manga-provider {
     get-chapter-sort-list: func() -> result<list<chapter-sort-option>, string>;
     get-filter-list: func() -> result<filter-list, string>;
     get-preferences: func() -> result<list<preference-spec>, string>;
+
+    get-url: func(manga-id: string) -> result<string, string>;
 }
 
 interface extraction {
@@ -250,6 +254,9 @@ interface extraction {
     // Like extract-html but the host handles multi-chunk fetching for fixed-page-size sources.
     // Blueprint must include a PaginationConfig; the host injects the offset param per chunk.
     paginated-extract-html: func(page: s32, page-size: s32, blueprint: list<u8>) -> result<s32, string>;
+    // Like paginated-extract-html but the request is provided separately so blueprint bytes
+    // need not contain a RequestDef (used by the embedded-bytes codegen path).
+    paginated-extract-html-raw: func(page: s32, page-size: s32, url: string, method: string, headers: list<tuple<string, string>>, queries: list<tuple<string, string>>, blueprint: list<u8>) -> result<s32, string>;
 }
 
 world kani-extension {

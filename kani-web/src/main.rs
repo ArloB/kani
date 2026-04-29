@@ -36,6 +36,7 @@ async fn main() {
         cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer},
         services::{ServeDir, ServeFile},
         set_header::SetResponseHeaderLayer,
+        trace::TraceLayer,
     };
     use tower_sessions_sqlx_store::SqliteStore;
 
@@ -74,6 +75,12 @@ async fn main() {
     if let Err(e) = ensure_default_user(&auth_backend).await {
         tracing::error!("Failed to ensure default user: {}", e);
     }
+
+    // Initialise HTTP logging toggle from persisted setting.
+    kani_web::HTTP_LOGGING_ENABLED.store(
+        state.get_settings().await.http_request_logging,
+        std::sync::atomic::Ordering::Relaxed,
+    );
 
     state.spawn_auto_scan();
     state.spawn_cover_retry();
@@ -336,7 +343,21 @@ async fn main() {
                 "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
             ),
         ))
-        .layer(cors_layer);
+        .layer(cors_layer)
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
+                if kani_web::HTTP_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                    tracing::info_span!(
+                        "http",
+                        method = %request.method(),
+                        uri = %request.uri(),
+                        status = tracing::field::Empty,
+                    )
+                } else {
+                    tracing::Span::none()
+                }
+            }),
+        );
 
     // Cache-Control headers for static assets — release only.
     #[cfg(not(debug_assertions))]

@@ -246,28 +246,30 @@ where
         Expr::ParseFloat { target } => Some(
             recurse(target, env).await
                 .and_then(|v| v.map_str("parse_float", |s|
-                    s.parse::<f64>().map(Value::Num).map_err(|e| format!("parse_float: {}", e))
+                    Ok(s.parse::<f64>().map(Value::Num).unwrap_or(Value::Null))
                 ))
         ),
 
         Expr::ParseInt { target } => Some(
             recurse(target, env).await
                 .and_then(|v| v.map_str("parse_int", |s|
-                    s.parse::<i64>().map(Value::Int).map_err(|e| format!("parse_int: {}", e))
+                    Ok(s.parse::<i64>().map(Value::Int).unwrap_or(Value::Null))
                 ))
         ),
 
         Expr::DateParse { target, format } => Some(
             recurse(target, env).await
-                .and_then(|v| v.map_str("date_parse", |date| parse_date_flexible(&date, format).map(Value::Int)))
+                .and_then(|v| v.map_str("date_parse", |date|
+                    Ok(parse_date_flexible(&date, format).map(Value::Int).unwrap_or(Value::Null))
+                ))
         ),
 
         Expr::DateParseRfc3339 { target } => Some(
             recurse(target, env).await
                 .and_then(|v| v.map_str("date_parse_rfc3339", |date|
-                    time::OffsetDateTime::parse(&date, &time::format_description::well_known::Rfc3339)
+                    Ok(time::OffsetDateTime::parse(&date, &time::format_description::well_known::Rfc3339)
                         .map(|dt| Value::Int(dt.unix_timestamp()))
-                        .map_err(|e| format!("Invalid RFC3339 date string: {}", e))
+                        .unwrap_or(Value::Null))
                 ))
         ),
 
@@ -289,26 +291,23 @@ where
 
         Expr::StartsWith { target, prefix } => Some(
             recurse(target, env).await
-                .and_then(|v| v.into_str("starts_with"))
-                .map(|s| Value::Bool(s.starts_with(prefix.as_str())))
+                .and_then(|v| v.map_str("starts_with", |s| Ok(Value::Bool(s.starts_with(prefix.as_str())))))
         ),
 
         Expr::EndsWith { target, suffix } => Some(
             recurse(target, env).await
-                .and_then(|v| v.into_str("ends_with"))
-                .map(|s| Value::Bool(s.ends_with(suffix.as_str())))
+                .and_then(|v| v.map_str("ends_with", |s| Ok(Value::Bool(s.ends_with(suffix.as_str())))))
         ),
 
         Expr::Slice { target, start, end } => Some(
             recurse(target, env).await
-                .and_then(|v| v.into_str("slice"))
-                .map(|s| {
+                .and_then(|v| v.map_str("slice", |s| {
                     let len     = s.chars().count() as i32;
                     let resolve = |i: i32| if i < 0 { (len + i).max(0) as usize } else { (i as usize).min(len as usize) };
                     let s_idx   = resolve(*start);
                     let e_idx   = end.map_or(len as usize, resolve);
-                    Value::Str(if s_idx >= e_idx { String::new() } else { s.chars().skip(s_idx).take(e_idx - s_idx).collect() })
-                })
+                    Ok(Value::Str(if s_idx >= e_idx { String::new() } else { s.chars().skip(s_idx).take(e_idx - s_idx).collect() }))
+                }))
         ),
 
         Expr::ResolveUrl { target, base } => Some((async {
@@ -471,8 +470,7 @@ where
 
         Expr::StringLen { target } => Some(
             recurse(target, env).await
-                .and_then(|v| v.into_str("string_len"))
-                .map(|s| Value::Int(s.chars().count() as i64))
+                .and_then(|v| v.map_str("string_len", |s| Ok(Value::Int(s.chars().count() as i64))))
         ),
 
         _ => None,
@@ -491,6 +489,14 @@ pub async fn fetch_body(
 
     state.check_allowed_host(url.host_str().unwrap_or(""))?;
 
+    state.io_count += 1;
+    if state.io_count > 32 {
+        return Err("Extension exceeded maximum HTTP request count".into());
+    }
+    if state.call_started_at.elapsed().as_secs() > 120 {
+        return Err("Extension exceeded maximum wall time".into());
+    }
+
     let method = match req.method.to_uppercase().as_str() {
         "GET"    => rquest::Method::GET,
         "POST"   => rquest::Method::POST,
@@ -506,6 +512,7 @@ pub async fn fetch_body(
     for (k, v) in &req.headers { builder = builder.header(k, v); }
     let request = builder.build().map_err(|e| e.to_string())?;
 
+    let ttfb_start = std::time::Instant::now();
     let response = match tokio::time::timeout(
         std::time::Duration::from_secs(90),
         state.http_client.send_request(request),
@@ -514,6 +521,11 @@ pub async fn fetch_body(
         Ok(Err(e)) => return Err(e.to_string()),
         Err(_)     => return Err("HTTP request timed out after 90 seconds".into()),
     };
+    let ttfb = ttfb_start.elapsed();
+    state.last_io_at = Some(std::time::Instant::now());
+    if crate::HTTP_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        tracing::info!(ttfb_ms = ttfb.as_millis(), status_code = response.status().as_u16(), url = url.to_string(), "fetch_body: connection established");
+    }
 
     const MAX_BYTES: usize = 15 * 1024 * 1024;
     let body = response.bytes_limited(MAX_BYTES).await.map_err(|e| e.to_string())?.to_vec();

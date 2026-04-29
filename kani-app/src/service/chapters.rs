@@ -1,7 +1,7 @@
 use super::*;
 
 impl AppService {
-    /// Returns a paginated chapter list for a manga. Returns (chapters, has_next_page).
+    /// Returns a paginated chapter list for a manga. Returns (chapters, has_next_page, total_pages).
     pub async fn get_local_chapters(
         &self,
         manga_id: i64,
@@ -12,7 +12,7 @@ impl AppService {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
-    ) -> Result<(Vec<kani_shared::types::Chapter>, bool)> {
+    ) -> Result<(Vec<kani_shared::types::Chapter>, bool, Option<u32>)> {
         let limit = (page_size as i64) + 1;
         let offset = ((page - 1).max(0) as i64) * (page_size as i64);
 
@@ -43,6 +43,7 @@ impl AppService {
             sort_order.to_sql_order()
         );
 
+        let scanlator_for_count = filter_scanlator.clone();
         let mut rows = sqlx::query_as::<_, crate::models::ChapterRow>(&sql)
             .bind(manga_id)
             .bind(user_id)
@@ -77,7 +78,22 @@ impl AppService {
             })
             .collect();
 
-        Ok((chapters, has_next_page))
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM chapters c \
+             LEFT JOIN user_chapter_tracking uct ON uct.chapter_id = c.id AND uct.user_id = ? \
+             WHERE c.manga_id = ?{extra} AND (? IS NULL OR c.scanlator = ?)"
+        );
+        let total_count: i64 = sqlx::query_scalar(&count_sql)
+            .bind(user_id)
+            .bind(manga_id)
+            .bind(scanlator_for_count.clone())
+            .bind(scanlator_for_count)
+            .fetch_one(&self.db)
+            .await?;
+        let ps = page_size as i64;
+        let total_pages = Some(((total_count + ps - 1) / ps).max(0) as u32);
+
+        Ok((chapters, has_next_page, total_pages))
     }
 
     /// Returns all chapter IDs for a manga matching the given filters (no pagination).

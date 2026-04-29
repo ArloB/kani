@@ -14,7 +14,7 @@ use postcard;
 const MAX_HTTP_RESPONSE_BYTES: usize = 15 * 1024 * 1024; // 15 MB
 
 impl http::Host for HostState {
-    #[tracing::instrument(skip(self, req), fields(method = ?req.method, url = %req.url))]
+    #[tracing::instrument(level = "debug", skip(self, req), fields(method = ?req.method, url = %req.url))]
     async fn send(&mut self, req: http::Request) -> wasmtime::Result<http::Response, String> {
         self.io_count += 1;
 
@@ -54,7 +54,9 @@ impl http::Host for HostState {
         match result {
             Ok(Ok(response)) => {
                 let status = response.status().as_u16();
-                tracing::info!(ttfb_ms = ttfb.as_millis(), status_code = status, "Connection established and headers received");
+                if crate::HTTP_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                    tracing::info!(ttfb_ms = ttfb.as_millis(), status_code = status, "Connection established and headers received");
+                }
                 let headers = response.headers().iter()
                     .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
                     .collect();
@@ -346,6 +348,29 @@ impl extraction::Host for HostState {
             .map_err(|e| format!("Invalid blueprint: {}", e))?;
         let value = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(extract_json(self, doc, &bp))
+        })?;
+        self.check_handle_capacity()?;
+        let handle = self.next_doc_handle;
+        self.next_doc_handle += 1;
+        self.json_docs.insert(handle, value);
+        Ok(handle)
+    }
+
+    fn paginated_extract_html_raw(
+        &mut self,
+        page: i32,
+        page_size: i32,
+        url: String,
+        method: String,
+        headers: Vec<(String, String)>,
+        queries: Vec<(String, String)>,
+        blueprint: Vec<u8>,
+    ) -> wasmtime::Result<i32, String> {
+        let mut bp: kani_shared::ast::Blueprint = postcard::from_bytes(&blueprint)
+            .map_err(|e| format!("Invalid blueprint: {}", e))?;
+        bp.request = Some(kani_shared::ast::RequestDef { url, method, headers, queries });
+        let value = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(extract_html_paginated(self, page, page_size, &bp))
         })?;
         self.check_handle_capacity()?;
         let handle = self.next_doc_handle;

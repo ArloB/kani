@@ -17,6 +17,8 @@ pub struct Settings {
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
     pub default_tracking_enabled: bool,
+    pub http_request_logging: bool,
+    pub registration_enabled: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -93,6 +95,9 @@ pub struct LibraryManga {
     pub cover_url: Option<String>,
     pub local_cover_path: Option<String>,
     pub base_url: String,
+    /// Total matching rows (populated by COUNT(*) OVER() in get_library_filtered).
+    #[sqlx(default)]
+    pub total_count: i64,
 }
 
 /// One item in the "continue reading" shelf.

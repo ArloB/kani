@@ -7,6 +7,9 @@ pub enum ServiceError {
     #[error("Not found: {0}")]
     NotFound(String),
 
+    #[error("Source {0} is disabled")]
+    SourceDisabled(i64),
+
     #[error("Conflict: {0}")]
     Conflict(String),
 

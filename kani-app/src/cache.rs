@@ -292,7 +292,7 @@ mod tests {
 
         let c = calls.clone();
         let _ = cache
-            .get_or_fetch_chapter_list(1, "m1", 1, 20, "".into(), async move {
+            .get_or_fetch_chapter_list(1, "m1", 1, 20, "", async move {
                 c.fetch_add(1, Ordering::SeqCst);
                 Ok::<_, std::io::Error>("chapters".to_string())
             })
