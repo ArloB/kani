@@ -13,12 +13,19 @@ export function createBreadcrumb(crumbs, { truncateLast = true } = {}) {
   nav.setAttribute('aria-label', 'Breadcrumb');
   nav.className = 'flex items-center gap-1 text-sm';
 
+  if (crumbs.length > 0) {
+    const leadSep = document.createElement('span');
+    leadSep.className = 'text-text-muted';
+    leadSep.setAttribute('aria-hidden', 'true');
+    leadSep.textContent = '/';
+    nav.appendChild(leadSep);
+  }
   crumbs.forEach((crumb, i) => {
     const isLast = i === crumbs.length - 1;
 
     if (i > 0) {
       const sep = document.createElement('span');
-      sep.className = 'text-text-muted [&_svg]:w-3 [&_svg]:h-3 shrink-0';
+      sep.className = 'text-text-muted icon-xs shrink-0';
       sep.setAttribute('aria-hidden', 'true');
       sep.innerHTML = iconChevronRight;
       nav.appendChild(sep);
@@ -26,14 +33,14 @@ export function createBreadcrumb(crumbs, { truncateLast = true } = {}) {
 
     if (isLast || !crumb.href) {
       const span = document.createElement('span');
-      span.className = 'text-base font-semibold text-text' + (truncateLast ? ' truncate max-w-[200px]' : '');
+      span.className = 'text-base font-semibold text-text' + (truncateLast ? ' truncate-crumb' : '');
       span.setAttribute('aria-current', 'page');
       span.textContent = crumb.label;
       nav.appendChild(span);
     } else {
       const a = document.createElement('a');
       a.href = crumb.href;
-      a.className = 'text-text-muted hover:text-text transition-colors focus-visible:outline-none focus-visible:underline truncate max-w-[160px]';
+      a.className = 'text-text-muted hover:text-text transition-colors focus-visible:outline-none focus-visible:underline truncate max-w-40';
       a.textContent = crumb.label;
       a.addEventListener('click', e => {
         e.preventDefault();

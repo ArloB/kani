@@ -51,7 +51,7 @@ function DownloadItem({ entry }) {
         `}
       </div>
       <div class="h-1 rounded-full bg-surface-2 overflow-hidden">
-        <div class=${'h-full rounded-full transition-[width] duration-300 ' + barColor} style=${{ width: pct + '%' }}></div>
+        <div class=${'h-full rounded-full transition-[width] duration-300 ' + barColor} style=${{ width: pct + '%' }}></div>{/* justified: animates only width */}
       </div>
     </div>
   `;

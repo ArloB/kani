@@ -121,12 +121,12 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
     } else if (isFailed) {
       statusIndicator = html`<span class="text-danger text-xs shrink-0 font-medium" aria-label="Download failed">!</span>`;
     } else if (downloaded && !isCancelled) {
-      statusIndicator = html`<span class="text-success shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5" aria-label="Downloaded"><${Icon} svg=${iconCheck} /></span>`;
+      statusIndicator = html`<span class="text-success shrink-0 icon-xs" aria-label="Downloaded"><${Icon} svg=${iconCheck} /></span>`;
     } else if (isRead) {
       // Read but not downloaded — show a muted checkmark so the read state is clearly visible
-      statusIndicator = html`<span class="text-text-faint shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5" aria-label="Read, not downloaded"><${Icon} svg=${iconCheck} /></span>`;
+      statusIndicator = html`<span class="text-text-faint shrink-0 icon-xs" aria-label="Read, not downloaded"><${Icon} svg=${iconCheck} /></span>`;
     } else {
-      statusIndicator = html`<span class="text-text-faint shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5" aria-label="Not downloaded"><${Icon} svg=${iconDownload} /></span>`;
+      statusIndicator = html`<span class="text-text-faint shrink-0 icon-xs" aria-label="Not downloaded"><${Icon} svg=${iconDownload} /></span>`;
     }
   }
 

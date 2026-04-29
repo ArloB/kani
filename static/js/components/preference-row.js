@@ -31,9 +31,11 @@ const html = htm.bind(h);
  *   currentValue: any,
  *   liveValues: Record<string, any>,
  *   onValueChange: (key: string, value: any) => void,
+ *   onDirtyChange?: (dirty: boolean) => void,
+ *   dirty?: boolean,
  * }} props
  */
-export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, onValueChange, onOpenDetail }) {
+export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, onValueChange, onOpenDetail, onDirtyChange, dirty = false }) {
   // Support both new shape (label, kind as plain string, options as [[label,val],...])
   // and old shape (title, kind as tagged-enum object, options nested inside kind data).
   const key = descriptor.key;
@@ -182,7 +184,7 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
           onClick=${() => onOpenDetail(descriptor)}
         >
           ${meta}
-          <div class="shrink-0 flex items-center gap-1.5 text-text-muted [&_svg]:w-4 [&_svg]:h-4">
+          <div class="shrink-0 flex items-center gap-1.5 text-text-muted icon-sm">
             <span class="text-sm">${list.length} item${list.length !== 1 ? 's' : ''}</span>
             <${Icon} svg=${iconChevronRight} />
           </div>
@@ -240,9 +242,9 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
   }
 
   return html`
-    <div class="flex items-start gap-4 py-3">
+    <div class=${'flex items-start gap-4 py-3' + (dirty ? ' pref-dirty' : '')}>
       ${meta}
-      <div class="shrink-0">${control}</div>
+      <div class=${'shrink-0 pref-ctrl' + (dirty ? ' [&_.input]:border-warn [&_select]:border-warn' : '')}>${control}</div>
     </div>
   `;
 }
@@ -280,7 +282,7 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
 
   const header = html`
     <div class="flex items-start gap-3 pb-4 mb-2 border-b border-border-subtle">
-      <button class="btn-ghost btn-sm shrink-0 flex items-center gap-1 [&_svg]:w-4 [&_svg]:h-4" onClick=${onBack}>
+      <button class="btn-ghost btn-sm shrink-0 flex items-center gap-1 icon-sm" onClick=${onBack}>
         <${Icon} svg=${iconChevronLeft} /> Back
       </button>
       <div class="flex flex-col gap-0.5 min-w-0">

@@ -10,6 +10,7 @@
 /** @type {Array<{ re: RegExp, keys: string[], load: () => Promise<PageModule> }>} */
 const _routes = [
   { path: '/login',                     load: () => import('./pages/login.js') },
+  { path: '/register',                  load: () => import('./pages/register.js') },
   { path: '/sources',                   load: () => import('./pages/sources.js') },
   { path: '/source/:id/manga/:manga_id',load: () => import('./pages/manga-details.js') },
   { path: '/source/:id',                load: () => import('./pages/source-details.js') },
@@ -17,7 +18,7 @@ const _routes = [
   { path: '/reader/:id',                load: () => import('./pages/reader.js') },
   { path: '/search',                    load: () => import('./pages/global-search.js') },
   { path: '/downloads',                 load: () => import('./pages/downloads.js') },
-  { path: '/settings',                  load: () => import('./pages/settings.js') },
+  { path: '/settings',                  load: () => import('./pages/settings/index.js') },
   { path: '/accounts',                  load: () => import('./pages/accounts.js') },
   { path: '/updates',                   load: () => import('./pages/recent-updates.js') },
   { path: '/',                          load: () => import('./pages/library.js') },

@@ -10,7 +10,8 @@ import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
 import { createMangaCard } from '../components/manga-card.js';
-import { iconSearch } from '../icons.js';
+import { iconSearch, iconChevronLeft, iconChevronRight } from '../icons.js';
+import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -19,6 +20,9 @@ let _query = '';
 let _scope = 'FavouritedOnly';
 /** @type {AbortController|null} */ let _abort = null;
 /** @type {any[]} */               let _sources = [];
+/** Per-source pagination state: sourceId → { page, hasNext } */
+/** @type {Map<number, { page: number, hasNext: boolean }>} */
+let _sourcePages = new Map();
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -27,6 +31,7 @@ export async function init(container) {
   document.title = 'Search - Kani';
   _query = '';
   _scope = 'FavouritedOnly';
+  setPageHeader({ crumbs: [{ label: 'Search' }] });
 
   if (!hasPermission('source:browse')) {
     container.innerHTML = '';
@@ -35,11 +40,11 @@ export async function init(container) {
   }
 
   container.innerHTML = `
-    <div class="max-w-[1400px] mx-auto px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4">
+    <div class="max-w-page mx-auto w-full overflow-x-hidden px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4">
       <!-- Large centered search bar -->
       <div class="flex flex-col items-center gap-4 py-4 md:py-8">
         <div class="relative w-full max-w-2xl">
-          <span class="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none [&_svg]:w-5 [&_svg]:h-5" aria-hidden="true">${iconSearch}</span>
+          <span class="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none icon-md" aria-hidden="true">${iconSearch}</span>
           <input
             type="search"
             class="input w-full pl-11 h-12 text-base"
@@ -172,8 +177,14 @@ async function _fetchSearch(resultsEl) {
     return;
   }
 
+  // Initialise per-source page tracking from the fresh global search (page 1)
+  _sourcePages = new Map();
+  for (const sr of sourceResults) {
+    _sourcePages.set(sr.source_id, { page: 1, hasNext: sr.has_next_page ?? false });
+  }
+
   const wrap = document.createElement('div');
-  wrap.className = 'flex flex-col gap-8';
+  wrap.className = 'flex flex-col gap-8 min-w-0';
   wrap.setAttribute('role', 'list');
 
   for (const sourceResult of sourceResults) {
@@ -197,20 +208,112 @@ async function _fetchSearch(resultsEl) {
       empty.textContent = 'No results from this source.';
       section.appendChild(empty);
     } else {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'manga-row-wrapper';
+
+      const navLeft = document.createElement('button');
+      navLeft.type = 'button';
+      navLeft.className = 'manga-row-nav';
+      navLeft.setAttribute('data-dir', 'left');
+      navLeft.setAttribute('aria-label', 'Previous page');
+      navLeft.style.display = 'none';
+      navLeft.innerHTML = iconChevronLeft;
+
+      const navRight = document.createElement('button');
+      navRight.type = 'button';
+      navRight.className = 'manga-row-nav';
+      navRight.setAttribute('data-dir', 'right');
+      navRight.setAttribute('aria-label', 'Next page');
+      navRight.style.display = 'none';
+      navRight.innerHTML = iconChevronRight;
+
       const row = document.createElement('div');
       row.className = 'manga-row';
       row.setAttribute('role', 'list');
-      for (const manga of sourceResult.manga) {
-        const mangaId = encodeURIComponent(manga.id);
-        const card = createMangaCard({
-          manga: { id: manga.id, title: manga.title, source_id: sid, cover_image_url: manga.cover_url ?? null },
-          href: `/source/${sid}/manga/${mangaId}`,
-          extraClass: 'manga-row__item',
-        });
-        card.setAttribute('role', 'listitem');
-        row.appendChild(card);
+
+      /** Populate the row from a manga array (handles both global and per-source result shapes) */
+      function _fillRow(mangaList) {
+        row.innerHTML = '';
+        for (const manga of mangaList) {
+          const navId  = manga.source_manga_id ?? manga.id;
+          const cardId = manga.db_id ?? manga.id;
+          const card = createMangaCard({
+            manga: { id: cardId, title: manga.title, source_id: sid, cover_image_url: manga.cover_url ?? null },
+            href: `/source/${sid}/manga/${encodeURIComponent(navId)}`,
+            extraClass: 'manga-row__item',
+          });
+          card.setAttribute('role', 'listitem');
+          row.appendChild(card);
+        }
       }
-      section.appendChild(row);
+
+      /** Sync nav button visibility to current scroll position + page state */
+      function _updateNav() {
+        const { page, hasNext } = _sourcePages.get(sid) ?? { page: 1, hasNext: false };
+        const atStart = row.scrollLeft <= 2;
+        const atEnd   = row.scrollLeft + row.clientWidth >= row.scrollWidth - 2;
+        // Only show left if scrolled right, or prev page available
+        navLeft.style.display  = (!atStart || page > 1) ? '' : 'none';
+        // Only show right if more to scroll, or next page available
+        navRight.style.display = (!atEnd || hasNext) ? '' : 'none';
+      }
+
+      _fillRow(sourceResult.manga);
+
+      row.addEventListener('scroll', _updateNav, { passive: true });
+      // Re-check after images load (layout may shift)
+      requestAnimationFrame(_updateNav);
+
+      navLeft.addEventListener('click', async () => {
+        const { page, hasNext } = _sourcePages.get(sid) ?? { page: 1, hasNext: false };
+        if (row.scrollLeft > 2) {
+          row.scrollBy({ left: -(row.clientWidth * 0.8), behavior: 'smooth' });
+          return;
+        }
+        if (page <= 1) return;
+        navLeft.disabled = true;
+        navRight.disabled = true;
+        try {
+          const res = await api.searchManga(sid, _query, page - 1, 24, undefined, _abort?.signal);
+          const manga = Array.isArray(res?.manga) ? res.manga : Array.isArray(res) ? res : [];
+          _sourcePages.set(sid, { page: page - 1, hasNext: true });
+          _fillRow(manga);
+          row.scrollLeft = row.scrollWidth;
+        } catch { /* ignore */ } finally {
+          navLeft.disabled = false;
+          navRight.disabled = false;
+          requestAnimationFrame(_updateNav);
+        }
+      });
+
+      navRight.addEventListener('click', async () => {
+        const { page, hasNext } = _sourcePages.get(sid) ?? { page: 1, hasNext: false };
+        const atEnd = row.scrollLeft + row.clientWidth >= row.scrollWidth - 2;
+        if (!atEnd) {
+          row.scrollBy({ left: row.clientWidth * 0.8, behavior: 'smooth' });
+          return;
+        }
+        if (!hasNext) return;
+        navLeft.disabled = true;
+        navRight.disabled = true;
+        try {
+          const res = await api.searchManga(sid, _query, page + 1, 24, undefined, _abort?.signal);
+          const manga = Array.isArray(res?.manga) ? res.manga : Array.isArray(res) ? res : [];
+          const nextHasNext = res?.has_next_page ?? false;
+          _sourcePages.set(sid, { page: page + 1, hasNext: nextHasNext });
+          _fillRow(manga);
+          row.scrollLeft = 0;
+        } catch { /* ignore */ } finally {
+          navLeft.disabled = false;
+          navRight.disabled = false;
+          requestAnimationFrame(_updateNav);
+        }
+      });
+
+      wrapper.appendChild(navLeft);
+      wrapper.appendChild(row);
+      wrapper.appendChild(navRight);
+      section.appendChild(wrapper);
     }
 
     wrap.appendChild(section);
@@ -223,7 +326,9 @@ async function _fetchSearch(resultsEl) {
 
 /** @param {HTMLElement} container */
 export function destroy(container) {
+  clearPageHeader();
   _abort?.abort();
   _abort = null;
+  _sourcePages = new Map();
   container.innerHTML = '';
 }

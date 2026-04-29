@@ -190,6 +190,11 @@ export async function getRemoteMangaDetails(sid, mangaId, signal) {
 }
 
 /** @param {number} sid @param {string} mangaId */
+export async function getSourceMangaUrl(sid, mangaId) {
+  return _req('GET', `/sources/${sid}/url/${encodeURIComponent(mangaId)}`);
+}
+
+/** @param {number} sid @param {string} mangaId */
 export async function saveToLibrary(sid, mangaId) {
   return _req('POST', `/sources/${sid}/save/${encodeURIComponent(mangaId)}`);
 }
@@ -412,6 +417,11 @@ export async function refreshManga(id) {
 /** @param {number} id @returns {Promise<{ new_chapters: number }>} */
 export async function scanManga(id) {
   return _req('POST', `/manga/${id}/scan`);
+}
+
+/** @returns {Promise<{ queued: number }>} */
+export async function scanAllLibrary() {
+  return _req('POST', '/library/scan-all');
 }
 
 /** @param {number} id @param {boolean} enabled */
@@ -770,6 +780,17 @@ export async function adminUpdateRole(slug, body) {
 /** @param {string} slug */
 export async function adminDeleteRole(slug) {
   return _req('DELETE', `/admin/roles/${slug}`);
+}
+
+/**
+ * @param {number} userId
+ * @param {{ before?: string, limit?: number }} [opts]
+ */
+export async function getUserActivity(userId, opts = {}) {
+  const params = {};
+  if (opts.before) params.before = opts.before;
+  if (opts.limit)  params.limit  = opts.limit;
+  return _req('GET', `/admin/users/${userId}/activity`, Object.keys(params).length ? { params } : {});
 }
 
 /** @param {number} [limit] */

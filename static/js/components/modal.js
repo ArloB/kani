@@ -71,7 +71,7 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
 
   return html`
     <div
-      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+      class="fixed inset-0 z-modal flex items-center justify-center p-4 bg-scrim"
       onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
@@ -79,7 +79,7 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
         aria-modal="true"
         aria-labelledby=${title ? titleId : undefined}
         tabindex="-1"
-        class=${'relative bg-surface rounded-xl shadow-lg w-full flex flex-col overflow-hidden max-h-[90vh] outline-none ' + (wide ? 'max-w-[800px]' : 'max-w-[600px]')}
+        class=${'relative bg-surface rounded-xl shadow-lg w-full flex flex-col overflow-hidden max-h-modal outline-none ' + (wide ? 'modal-wide' : 'modal-narrow')}
         ref=${dialogRef}
       >
         ${title && html`

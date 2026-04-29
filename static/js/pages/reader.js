@@ -458,7 +458,7 @@ export async function init(container, { id }) {
 
       // Full bar: clickable segments
       const seg = document.createElement('div');
-      seg.className = `flex-1 h-full rounded-[2px] cursor-pointer ${color}`;
+      seg.className = `flex-1 h-full rounded-sm cursor-pointer ${color}`;
       const idx = i;
       seg.addEventListener('click', (e) => {
         e.stopPropagation();

@@ -40,6 +40,9 @@ const _state = {
 
   /** Server boot_id — compared on SSE reconnect to detect server restarts. */
   bootId: '',
+
+  /** Chapter ids currently being requested for download (prevents double-submit). */
+  inFlightChapters: /** @type {Set<number>} */ (new Set()),
 };
 
 /**

@@ -40,7 +40,7 @@ export function renderCollapsiblePanel(container, { label, open = false, variant
   toggleBtn.appendChild(labelEl);
 
   const chevron = document.createElement('span');
-  chevron.className = 'text-text-muted transition-transform duration-150 shrink-0 [&_svg]:w-4 [&_svg]:h-4';
+  chevron.className = 'text-text-muted transition-transform duration-150 shrink-0 icon-sm';
   chevron.innerHTML = iconChevronRight;
   toggleBtn.appendChild(chevron);
 
