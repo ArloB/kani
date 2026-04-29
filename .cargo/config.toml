@@ -1,0 +1,5 @@
+[target.x86_64-pc-windows-msvc]
+# rust-lld ships with: rustup component add llvm-tools
+# Significantly faster than link.exe for large binaries.
+linker = "rust-lld"
+rustflags = ["-C", "link-arg=/DEBUG:FASTLINK"]
