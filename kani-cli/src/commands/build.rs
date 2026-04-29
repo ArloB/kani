@@ -51,6 +51,24 @@ fn build_one(name: &str) -> Result<(), CliError> {
         return Err(CliError::BuildFailed(name.to_owned()));
     }
 
+    let metadata_output = Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .output()?;
+        
+    let mut ext_id = name.to_string();
+    
+    if metadata_output.status.success() &&
+        let Ok(json) = serde_json::from_slice::<serde_json::Value>(&metadata_output.stdout) &&
+        let Some(pkg) = json["packages"]
+            .as_array()
+            .and_then(|pkgs| pkgs.iter().find(|p| p["name"] == name)) &&
+        let Some(id) = pkg["metadata"]["id"]
+            .as_str()
+            .or_else(|| pkg["metadata"]["kani"]["id"].as_str()) 
+                {
+                    ext_id = id.to_string();
+                }
+
     let wasm_sources = Path::new("wasm_sources");
     fs::create_dir_all(wasm_sources)?;
 
@@ -58,7 +76,8 @@ fn build_one(name: &str) -> Result<(), CliError> {
         "target/wasm32-unknown-unknown/wasm-release/{}.wasm",
         name.replace('-', "_"),
     ));
-    let dest = wasm_sources.join(format!("{name}.wasm"));
+    
+    let dest = wasm_sources.join(format!("{ext_id}.wasm"));
     fs::copy(&src, &dest)?;
 
     if is_available("wasm-opt") {

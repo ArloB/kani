@@ -32,6 +32,12 @@ pub enum Command {
     Generate {
         /// Path to the YAML file
         file: String,
+        /// Overwrite an existing generated crate
+        #[arg(long)]
+        force: bool,
+        /// Embed blueprint DSL as precomputed postcard bytes instead of using BlueprintBuilder
+        #[arg(long)]
+        embedded_bytes: bool,
     },
     /// Compile extension(s) to WASM
     Build {
@@ -74,7 +80,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
     match cli.command {
         Command::New      { name }              => new::run(&name),
         Command::Validate { file }              => validate::run(&file),
-        Command::Generate { file }              => generate::run(&file),
+        Command::Generate { file, force, embedded_bytes } => generate::run(&file, force, embedded_bytes).map(|_| ()),
         Command::Build    { extension, all }    => build::run(extension.as_deref(), all),
         Command::Css      { watch, prod }       => css::run(watch, prod),
         Command::Setup    { vendors, tailwind, esbuild }
