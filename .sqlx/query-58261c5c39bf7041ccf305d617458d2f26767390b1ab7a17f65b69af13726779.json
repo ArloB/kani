@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT c.id, c.name, c.chapter_number, c.volume, c.manga_id, m.name as manga_title, c.downloaded_at\n             FROM chapters c\n             JOIN manga m ON m.id = c.manga_id\n             WHERE c.download_status = 2\n             ORDER BY c.id DESC\n             LIMIT ?",
+  "query": "SELECT c.id, c.name, c.chapter_number, c.volume, c.manga_id, m.name as manga_title, c.downloaded_at\n             FROM chapters c\n             JOIN manga m ON m.id = c.manga_id\n             WHERE c.download_status = 2\n             ORDER BY c.downloaded_at DESC\n             LIMIT ?",
   "describe": {
     "columns": [
       {
@@ -52,5 +52,5 @@
       true
     ]
   },
-  "hash": "e48b4f1779ca87cedd13fafd74f1fbb0a5fafedcea2cf484a7f4bb76829cfcb1"
+  "hash": "58261c5c39bf7041ccf305d617458d2f26767390b1ab7a17f65b69af13726779"
 }

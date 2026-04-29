@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, concurrent_manga_downloads, default_tracking_enabled FROM settings",
+  "query": "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, registration_enabled FROM settings",
   "describe": {
     "columns": [
       {
@@ -62,6 +62,16 @@
         "name": "default_tracking_enabled",
         "ordinal": 11,
         "type_info": "Bool"
+      },
+      {
+        "name": "http_request_logging",
+        "ordinal": 12,
+        "type_info": "Bool"
+      },
+      {
+        "name": "registration_enabled",
+        "ordinal": 13,
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -79,8 +89,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "9449dcf4dd5323f2313562b0796f3ffcf4b0a1d53f083133e7d2dd1c43b26dad"
+  "hash": "b304e64a71de99497f5b57cddf431f46dba57ded2dec93c6879fe223706f636d"
 }
