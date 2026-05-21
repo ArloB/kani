@@ -1,0 +1,45 @@
+name: Coverage
+
+on:
+  push:
+  pull_request:
+
+env:
+  SQLX_OFFLINE: "true"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-tools
+
+      - name: Install wasm-opt (binaryen)
+        run: sudo apt-get install -y binaryen
+
+      # Build dev/test WASM extensions so kani-core WASM tests are included
+      # in coverage (they skip gracefully if the WASM binaries are missing).
+      - name: Build dev/test WASM extensions
+        run: cargo run -p kani-cli -- build --dev
+
+      - name: Collect coverage
+        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: lcov.info

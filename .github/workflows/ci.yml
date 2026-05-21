@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  SQLX_OFFLINE: "true"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Pre-built binary — much faster than cargo install
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-tools
+
+      - name: Install wasm-opt (binaryen)
+        run: sudo apt-get install -y binaryen
+
+      # kani-example and kani-test-abi are excluded from --all builds.
+      # Build them explicitly so the kani-core WASM integration tests can load them.
+      - name: Build dev/test WASM extensions
+        run: cargo run -p kani-cli -- build --dev
+
+      - name: Build
+        run: cargo build --workspace --locked
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      # No --all-targets: test targets relax some lints deliberately.
+      - name: Clippy
+        run: cargo clippy --workspace --locked -- -D warnings
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features sqlite
+
+      # Verify committed .sqlx query metadata is current with the schema.
+      # SQLX_OFFLINE is overridden here so the macros reconnect to the live DB.
+      - name: Check sqlx offline data
+        env:
+          DATABASE_URL: sqlite:ci-check.db
+          SQLX_OFFLINE: "false"
+        run: |
+          cargo sqlx migrate run
+          cargo sqlx prepare --check --workspace
