@@ -1,0 +1,7 @@
+ALTER TABLE settings ADD COLUMN email_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE settings ADD COLUMN email_provider TEXT NOT NULL DEFAULT 'smtp';
+ALTER TABLE settings ADD COLUMN email_provider_config TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE settings ADD COLUMN email_from_address TEXT NOT NULL DEFAULT '';
+ALTER TABLE settings ADD COLUMN app_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE settings ADD COLUMN password_reset_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE settings ADD COLUMN email_verification_required BOOLEAN NOT NULL DEFAULT FALSE;
