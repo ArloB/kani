@@ -79,7 +79,7 @@ pub fn emit_blueprint_chain_no_request(ep: &ValidatedEndpoint) -> String {
 /// serialize it to postcard bytes, and return a Rust `const` declaration.
 ///
 /// The generated constant looks like:
-/// ```rust
+/// ```ignore
 /// const BP: &[u8] = &[0x01, 0x02, ...];
 /// ```
 pub fn emit_blueprint_bytes(ep: &ValidatedEndpoint) -> String {

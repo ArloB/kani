@@ -50,8 +50,11 @@ url = "2.5.8"
 urlencoding.workspace = true
 time = { workspace = true, features = ["parsing"] }
 regex = "1.12.3"
+rand = "0.10.0"
 
 
 [dev-dependencies]
 tempfile = "3.27.0"
+tokio = { version = "1", features = ["test-util"] }
 tokio-test = "0.4"
+wiremock = "0.6"

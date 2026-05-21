@@ -277,6 +277,7 @@ pub struct RequestDef {
 // ============================================================
 
 #[cfg(feature = "builder")]
+#[allow(clippy::should_implement_trait)]
 impl Expr {
     // ── Leaf constructors ────────────────────────────────────────────────────
     #[inline] pub fn self_ref() -> Self { Expr::SelfRef }
@@ -530,5 +531,277 @@ impl Blueprint {
         let mut bp = self.clone();
         bp.request = Some(req);
         bp
+    }
+}
+
+#[cfg(all(test, feature = "builder"))]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::approx_constant)]
+    use super::*;
+
+    fn postcard_rt(expr: &Expr) {
+        let bytes = postcard::to_allocvec(expr).unwrap();
+        let back: Expr = postcard::from_bytes(&bytes).unwrap();
+        assert_eq!(*expr, back);
+    }
+
+    // ── Expr variants — postcard round-trip ──────────────────────────────────
+
+    #[test]
+    fn expr_postcard_round_trip_leaf_variants() {
+        for e in &[
+            Expr::SelfRef,
+            Expr::Index,
+            Expr::Null,
+            Expr::Bool(true),
+            Expr::Bool(false),
+            Expr::Number(3.14),
+            Expr::Number(-0.0),
+            Expr::Literal("hello world".into()),
+            Expr::Literal(String::new()),
+            Expr::Var("base_url".into()),
+            Expr::Dom("div.manga-title".into()),
+            Expr::Json("/data/items".into()),
+            Expr::Pref("lang".into()),
+        ] {
+            postcard_rt(e);
+        }
+    }
+
+    #[test]
+    fn expr_postcard_round_trip_binary_operations_all_ops() {
+        for op in &[Op::Add, Op::Sub, Op::Mul, Op::Div,
+                    Op::Eq, Op::Ne, Op::Lt, Op::Gt, Op::Le, Op::Ge,
+                    Op::And, Op::Or] {
+            let e = Expr::BinaryOperation {
+                op: op.clone(),
+                lhs: Box::new(Expr::Number(1.0)),
+                rhs: Box::new(Expr::Number(2.0)),
+            };
+            postcard_rt(&e);
+        }
+    }
+
+    #[test]
+    fn expr_postcard_round_trip_html_methods() {
+        for e in &[
+            Expr::Attr { target: Box::new(Expr::SelfRef), name: "href".into() },
+            Expr::Text { target: Box::new(Expr::SelfRef) },
+            Expr::InnerHtml { target: Box::new(Expr::SelfRef) },
+            Expr::Select { target: Box::new(Expr::SelfRef), selector: "a.link".into() },
+            Expr::First { target: Box::new(Expr::SelfRef), selector: "span".into() },
+            Expr::HasClass { target: Box::new(Expr::SelfRef), class: "active".into() },
+            Expr::Children { target: Box::new(Expr::SelfRef) },
+        ] {
+            postcard_rt(e);
+        }
+    }
+
+    #[test]
+    fn expr_postcard_round_trip_string_methods() {
+        for e in &[
+            Expr::Split { target: Box::new(Expr::Literal("a,b,c".into())), delimiter: ",".into() },
+            Expr::At { target: Box::new(Expr::SelfRef), index: 0 },
+            Expr::At { target: Box::new(Expr::SelfRef), index: -1 },
+            Expr::Replace { target: Box::new(Expr::Literal("hello".into())), from: "l".into(), to: "r".into() },
+            Expr::Trim { target: Box::new(Expr::SelfRef) },
+            Expr::Lower { target: Box::new(Expr::SelfRef) },
+            Expr::Matches { target: Box::new(Expr::SelfRef), pattern: r"^\d+$".into() },
+            Expr::Capture { target: Box::new(Expr::SelfRef), pattern: r"(\d+)".into() },
+            Expr::Prepend { target: Box::new(Expr::Literal("world".into())), prefix: Box::new(Expr::Literal("hello ".into())) },
+            Expr::Append { target: Box::new(Expr::Literal("hello".into())), suffix: Box::new(Expr::Literal(" world".into())) },
+            Expr::StartsWith { target: Box::new(Expr::Literal("hello".into())), prefix: "he".into() },
+            Expr::EndsWith { target: Box::new(Expr::Literal("hello".into())), suffix: "lo".into() },
+            Expr::Slice { target: Box::new(Expr::SelfRef), start: 0, end: Some(5) },
+            Expr::Slice { target: Box::new(Expr::SelfRef), start: -3, end: None },
+            Expr::Join { target: Box::new(Expr::SelfRef), delimiter: ", ".into() },
+            Expr::StringLen { target: Box::new(Expr::Literal("hello".into())) },
+            Expr::ToString { target: Box::new(Expr::Number(42.0)) },
+        ] {
+            postcard_rt(e);
+        }
+    }
+
+    #[test]
+    fn expr_postcard_round_trip_parse_and_date() {
+        for e in &[
+            Expr::ParseFloat { target: Box::new(Expr::Literal("3.14".into())) },
+            Expr::ParseInt   { target: Box::new(Expr::Literal("42".into())) },
+            Expr::DateParse  { target: Box::new(Expr::SelfRef), format: "%Y-%m-%d".into() },
+            Expr::DateParseRfc3339 { target: Box::new(Expr::SelfRef) },
+        ] {
+            postcard_rt(e);
+        }
+    }
+
+    #[test]
+    fn expr_postcard_round_trip_json_methods() {
+        for e in &[
+            Expr::JsonPtr  { target: Box::new(Expr::Json("/".into())), pointer: "/key".into() },
+            Expr::JsonStr  { target: Box::new(Expr::SelfRef) },
+            Expr::JsonInt  { target: Box::new(Expr::SelfRef) },
+            Expr::JsonFloat{ target: Box::new(Expr::SelfRef) },
+            Expr::JsonBool { target: Box::new(Expr::SelfRef) },
+            Expr::ArrayLen { target: Box::new(Expr::SelfRef) },
+            Expr::JsonKeys { target: Box::new(Expr::SelfRef) },
+            Expr::JsonGet  { target: Box::new(Expr::SelfRef), key: Box::new(Expr::Literal("k".into())) },
+            Expr::JsonFind { target: Box::new(Expr::SelfRef), key: Box::new(Expr::Literal("id".into())), value: Box::new(Expr::Literal("1".into())) },
+            Expr::JsonFold { target: Box::new(Expr::SelfRef) },
+            Expr::JsonArray(vec![Expr::Number(1.0), Expr::Null, Expr::Bool(false)]),
+        ] {
+            postcard_rt(e);
+        }
+    }
+
+    #[test]
+    fn expr_postcard_round_trip_control_flow_and_collections() {
+        for e in &[
+            Expr::Let { name: "x".into(), value: Box::new(Expr::Number(1.0)), body: Box::new(Expr::Var("x".into())) },
+            Expr::Fallback { target: Box::new(Expr::Null), default: Box::new(Expr::Literal("default".into())) },
+            Expr::Lookup { target: Box::new(Expr::SelfRef), table: vec![("a".into(), "A".into()), ("b".into(), "B".into())] },
+            Expr::If { condition: Box::new(Expr::Bool(true)), then: Box::new(Expr::Number(1.0)), else_: Box::new(Expr::Number(0.0)) },
+            Expr::Not { target: Box::new(Expr::Bool(false)) },
+            Expr::Map { target: Box::new(Expr::SelfRef), transform: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }) },
+            Expr::FlatMap { target: Box::new(Expr::SelfRef), transform: Box::new(Expr::SelfRef) },
+            Expr::Filter { target: Box::new(Expr::SelfRef), filter: Box::new(Expr::Bool(true)) },
+            Expr::Fold { target: Box::new(Expr::SelfRef), transform: Box::new(Expr::SelfRef), base: Box::new(Expr::Literal(String::new())) },
+            Expr::List(vec![Expr::Number(1.0), Expr::Number(2.0)]),
+            Expr::List(vec![]),
+            Expr::Concat(vec![Expr::Literal("a".into()), Expr::Literal("b".into())]),
+            Expr::Merge(vec![Expr::SelfRef, Expr::SelfRef]),
+            Expr::ResolveUrl { target: Box::new(Expr::Literal("/page".into())), base: Box::new(Expr::Literal("https://example.com".into())) },
+            Expr::Format { template: "Hello {}!".into(), args: vec![Expr::Literal("world".into())] },
+        ] {
+            postcard_rt(e);
+        }
+    }
+
+    // ── Blueprint round-trip and builder ─────────────────────────────────────
+
+    #[test]
+    fn blueprint_postcard_round_trip_all_fields_populated() {
+        let bp = BlueprintBuilder::new(".manga-list .item")
+            .bind("base", Expr::dom("meta[property='og:url']").attr("content"))
+            .field("id", Expr::self_ref().attr("data-id"))
+            .field_opt("cover", Expr::self_ref().first("img").attr("src"))
+            .scalar("total", Expr::dom(".pagination").text().parse_int())
+            .scalar_opt("has_next", Expr::Null)
+            .with_request(RequestDef {
+                url: "https://example.com/popular".into(),
+                method: "GET".into(),
+                headers: vec![("Accept".into(), "text/html".into())],
+                queries: vec![("page".into(), "1".into())],
+            })
+            .paginated(32, "offset", OffsetType::ItemOffset)
+            .build();
+
+        let bytes = postcard::to_allocvec(&bp).unwrap();
+        let back: Blueprint = postcard::from_bytes(&bytes).unwrap();
+
+        assert_eq!(bp.container, back.container);
+        assert_eq!(bp.fields.len(), back.fields.len());
+        assert_eq!(bp.bindings.len(), back.bindings.len());
+        assert_eq!(bp.scalars.len(), back.scalars.len());
+
+        let req = back.request.as_ref().unwrap();
+        assert_eq!(req.url, "https://example.com/popular");
+        assert_eq!(req.method, "GET");
+        assert_eq!(req.headers, vec![("Accept".into(), "text/html".into())]);
+        assert_eq!(req.queries, vec![("page".into(), "1".into())]);
+
+        let pg = back.pagination.as_ref().unwrap();
+        assert_eq!(pg.native_page_size, 32);
+        assert_eq!(pg.offset_param, "offset");
+        assert_eq!(pg.offset_type, OffsetType::ItemOffset);
+    }
+
+    #[test]
+    fn blueprint_postcard_round_trip_minimal() {
+        let bp = BlueprintBuilder::new("").build();
+        let bytes = postcard::to_allocvec(&bp).unwrap();
+        let back: Blueprint = postcard::from_bytes(&bytes).unwrap();
+        assert_eq!(bp.container, back.container);
+        assert!(back.request.is_none());
+        assert!(back.pagination.is_none());
+        assert!(back.fields.is_empty());
+    }
+
+    #[test]
+    fn blueprint_builder_produces_correct_structure() {
+        let bp = BlueprintBuilder::new(".card")
+            .field("id", Expr::self_ref().attr("data-id"))
+            .field_opt("subtitle", Expr::Null)
+            .bind("host", Expr::lit("https://example.com"))
+            .scalar("count", Expr::num(42.0))
+            .scalar_opt("page", Expr::Null)
+            .build();
+
+        assert_eq!(bp.container, ".card");
+        assert_eq!(bp.fields.len(), 2);
+        assert_eq!(bp.fields[0].name, "id");
+        assert!(!bp.fields[0].optional);
+        assert_eq!(bp.fields[1].name, "subtitle");
+        assert!(bp.fields[1].optional);
+        assert_eq!(bp.bindings.len(), 1);
+        assert_eq!(bp.bindings[0].name, "host");
+        assert_eq!(bp.scalars.len(), 2);
+        assert_eq!(bp.scalars[0].name, "count");
+        assert!(!bp.scalars[0].optional);
+        assert!(bp.scalars[1].optional);
+        assert!(bp.request.is_none());
+        assert!(bp.pagination.is_none());
+    }
+
+    #[test]
+    fn blueprint_to_bytes_is_deterministic() {
+        let bp = BlueprintBuilder::new(".item")
+            .field("title", Expr::self_ref().text().trim())
+            .field("url", Expr::self_ref().first("a").attr("href"))
+            .build();
+        assert_eq!(bp.to_bytes(), bp.to_bytes());
+    }
+
+    #[test]
+    fn with_request_def_only_changes_request_field() {
+        let bp = BlueprintBuilder::new(".item")
+            .field("title", Expr::self_ref().text())
+            .bind("x", Expr::Null)
+            .scalar("n", Expr::num(1.0))
+            .paginated(10, "page", OffsetType::PageNumber { start: 1 })
+            .build();
+
+        let req = RequestDef {
+            url: "https://test.com/list".into(),
+            method: "POST".into(),
+            headers: vec![],
+            queries: vec![],
+        };
+        let bp2 = bp.with_request_def(req);
+
+        let r = bp2.request.as_ref().unwrap();
+        assert_eq!(r.url, "https://test.com/list");
+        assert_eq!(r.method, "POST");
+        assert_eq!(bp2.container, ".item");
+        assert_eq!(bp2.fields.len(), 1);
+        assert_eq!(bp2.bindings.len(), 1);
+        assert_eq!(bp2.scalars.len(), 1);
+        let pg = bp2.pagination.as_ref().unwrap();
+        assert_eq!(pg.offset_type, OffsetType::PageNumber { start: 1 });
+    }
+
+    // ── PaginationConfig postcard round-trip ──────────────────────────────────
+
+    #[test]
+    fn pagination_config_postcard_round_trip_both_offset_types() {
+        for cfg in &[
+            PaginationConfig { native_page_size: 32, offset_param: "offset".into(), offset_type: OffsetType::ItemOffset },
+            PaginationConfig { native_page_size: 20, offset_param: "page".into(), offset_type: OffsetType::PageNumber { start: 1 } },
+            PaginationConfig { native_page_size: 50, offset_param: "p".into(), offset_type: OffsetType::PageNumber { start: 0 } },
+        ] {
+            let bytes = postcard::to_allocvec(cfg).unwrap();
+            let back: PaginationConfig = postcard::from_bytes(&bytes).unwrap();
+            assert_eq!(*cfg, back);
+        }
     }
 }

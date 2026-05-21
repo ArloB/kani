@@ -19,6 +19,8 @@ pub struct YamlExtension {
     pub filters: Vec<FilterEntry>,
     #[serde(default)]
     pub preferences: Vec<PreferenceEntry>,
+    /// Optional URL template for manga canonical URL. Use `$manga_id$` as placeholder.
+    pub get_url: Option<String>,
 }
 
 fn default_language() -> String { "en".to_string() }

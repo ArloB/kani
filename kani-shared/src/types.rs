@@ -298,6 +298,48 @@ macro_rules! filter_list {
     };
 
     // ==========================================
+    // SPLICE — dynamic &[(&str, &str)] slices
+    // ==========================================
+    // Compiles to a single iterator loop instead of N inline struct constructors,
+    // which is more efficient in WASM when the same large slice is reused across
+    // multiple call sites (e.g. genres_include / genres_exclude sharing GENRES).
+    //
+    // 2-arg Multiselect
+    (@munch [ $($output:tt)* ] $id:expr, $display:expr, Multiselect, splice: $opts:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
+        filter_list!(@build [ $($output)* ] $id, $display, Multiselect,
+            $opts.iter().map(|(n, v)| $crate::wit_types::FilterOption {
+                filter_name: ($id).to_string(),
+                name: n.to_string(),
+                value: v.to_string(),
+            }).collect(),
+            None,
+            { #[allow(unused_mut)] let mut _s: Option<$crate::wit_types::FilterSemantic> = None; $( _s = Some($sem); )? _s }
+            $(; $($rest)*)?
+        )
+    };
+    // 1-arg Multiselect
+    (@munch [ $($output:tt)* ] $display:expr, Multiselect, splice: $opts:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
+        filter_list!(@munch [ $($output)* ] $display, $display, Multiselect, splice: $opts $(, semantic: $sem)? $(; $($rest)*)? )
+    };
+    // 2-arg Select
+    (@munch [ $($output:tt)* ] $id:expr, $display:expr, Select, splice: $opts:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
+        filter_list!(@build [ $($output)* ] $id, $display, Select,
+            $opts.iter().map(|(n, v)| $crate::wit_types::FilterOption {
+                filter_name: ($id).to_string(),
+                name: n.to_string(),
+                value: v.to_string(),
+            }).collect(),
+            None,
+            { #[allow(unused_mut)] let mut _s: Option<$crate::wit_types::FilterSemantic> = None; $( _s = Some($sem); )? _s }
+            $(; $($rest)*)?
+        )
+    };
+    // 1-arg Select
+    (@munch [ $($output:tt)* ] $display:expr, Select, splice: $opts:expr $(, semantic: $sem:expr)? $(; $($rest:tt)*)? ) => {
+        filter_list!(@munch [ $($output)* ] $display, $display, Select, splice: $opts $(, semantic: $sem)? $(; $($rest)*)? )
+    };
+
+    // ==========================================
     // ERROR CATCHER & ENTRY POINTS
     // ==========================================
     (@munch $($invalid:tt)*) => {
@@ -578,6 +620,8 @@ pub struct MangaListItem {
     pub id: String,
     pub title: String,
     pub cover_url: Option<String>,
+    #[serde(default)]
+    pub new_chapter_count: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1007,6 +1051,7 @@ pub struct Category {
 pub struct AppSettings {
     pub flaresolverr_url: String,
     pub library_path: String,
+    pub wasm_storage_path: String,
     pub concurrent_page_downloads: i64,
     pub concurrent_manga_downloads: i64,
     pub chapter_queue_size: i64,
@@ -1015,9 +1060,21 @@ pub struct AppSettings {
     pub max_wasm_instances: i64,
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
+    pub scan_exclude_completed: bool,
+    pub auto_download_category_id: Option<i64>,
+    pub auto_download_category_ids: Vec<i64>,
     pub default_tracking_enabled: bool,
     pub http_request_logging: bool,
+    pub browser_debug_logging: bool,
     pub registration_enabled: bool,
+    pub cover_max_dimension: Option<i64>,
+    pub email_enabled: bool,
+    pub email_provider: String,
+    pub email_provider_config: String,
+    pub email_from_address: String,
+    pub app_url: String,
+    pub password_reset_enabled: bool,
+    pub email_verification_required: bool,
 }
 
 #[cfg(feature = "host")]
@@ -1093,6 +1150,7 @@ pub struct AuthenticatedUser {
     pub username: String,
     pub email: String,
     pub roles: Vec<String>,
+    pub email_verified_at: Option<String>,
 }
 
 #[cfg(feature = "host")]
@@ -1114,6 +1172,7 @@ pub struct DownloadSettings {
     pub chapter_queue_size: i64,
     pub max_retries: i64,
     pub initial_retry_delay_ms: i64,
+    pub auto_download_category_ids: Vec<i64>,
 }
 
 #[cfg(feature = "host")]
@@ -1122,6 +1181,7 @@ pub struct DownloadSettings {
 pub struct ScanSettings {
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
+    pub scan_exclude_completed: bool,
 }
 
 #[cfg(feature = "host")]
@@ -1130,9 +1190,12 @@ pub struct ScanSettings {
 pub struct AdvancedSettings {
     pub flaresolverr_url: String,
     pub library_path: String,
+    pub wasm_storage_path: String,
     pub max_wasm_instances: i64,
     pub http_request_logging: bool,
+    pub browser_debug_logging: bool,
     pub registration_enabled: bool,
+    pub cover_max_dimension: Option<i64>,
 }
 
 #[cfg(feature = "host")]
@@ -1145,11 +1208,36 @@ pub struct TrackingSettings {
 #[cfg(feature = "host")]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
 #[ts(export, export_to = "bindings/")]
+pub struct EmailSettings {
+    pub email_enabled: bool,
+    pub email_provider: String,
+    /// JSON blob with provider-specific credentials. Password/key fields use "••••••" as a
+    /// placeholder meaning "do not update the stored value".
+    pub email_provider_config: String,
+    pub email_from_address: String,
+    pub app_url: String,
+    pub password_reset_enabled: bool,
+    pub email_verification_required: bool,
+}
+
+#[cfg(feature = "host")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "bindings/")]
 pub enum SettingsUpdate {
     Download(DownloadSettings),
     Scan(ScanSettings),
     Advanced(AdvancedSettings),
     Tracking(TrackingSettings),
+    Email(EmailSettings),
+}
+
+#[cfg(feature = "host")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "bindings/")]
+pub struct CredentialEncryptionStatus {
+    pub encryption_enabled: bool,
+    /// Number of credential values currently stored in plaintext.
+    pub plaintext_count: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1175,6 +1263,8 @@ pub struct MangaTracking {
     pub chapters_read: i64,
     pub total_chapters: i64,
     pub tracking_enabled: bool,
+    pub notify_new_chapters: bool,
+    pub reading_direction: String,
 }
 
 #[cfg(feature = "host")]
@@ -1184,4 +1274,489 @@ pub struct ContinueReadingChapter {
     pub chapter_id: i64,
     pub chapter_number: f64,
     pub last_page: i64,
+}
+
+#[cfg(all(test, feature = "host"))]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn json_rt<T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(v: &T) {
+        let s = serde_json::to_string(v).unwrap();
+        let back: T = serde_json::from_str(&s).unwrap();
+        assert_eq!(*v, back);
+    }
+
+    // ── MangaStatus ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn manga_status_json_variants_are_lowercase() {
+        for (status, expected) in [
+            (MangaStatus::Ongoing,   "\"ongoing\""),
+            (MangaStatus::Completed, "\"completed\""),
+            (MangaStatus::Hiatus,    "\"hiatus\""),
+            (MangaStatus::Cancelled, "\"cancelled\""),
+            (MangaStatus::Unknown,   "\"unknown\""),
+        ] {
+            assert_eq!(serde_json::to_string(&status).unwrap(), expected, "serialise {status:?}");
+            let back: MangaStatus = serde_json::from_str(expected).unwrap();
+            assert_eq!(status, back, "deserialise {expected}");
+        }
+    }
+
+    #[test]
+    fn manga_status_default_is_unknown() {
+        assert_eq!(MangaStatus::default(), MangaStatus::Unknown);
+    }
+
+    #[test]
+    fn manga_status_from_i64_all_variants() {
+        assert_eq!(MangaStatus::from(0i64), MangaStatus::Ongoing);
+        assert_eq!(MangaStatus::from(1i64), MangaStatus::Completed);
+        assert_eq!(MangaStatus::from(2i64), MangaStatus::Hiatus);
+        assert_eq!(MangaStatus::from(3i64), MangaStatus::Cancelled);
+        assert_eq!(MangaStatus::from(99i64), MangaStatus::Unknown);
+    }
+
+    #[test]
+    fn manga_status_into_i64_all_variants() {
+        assert_eq!(i64::from(MangaStatus::Ongoing),   0i64);
+        assert_eq!(i64::from(MangaStatus::Completed), 1i64);
+        assert_eq!(i64::from(MangaStatus::Hiatus),    2i64);
+        assert_eq!(i64::from(MangaStatus::Cancelled), 3i64);
+        assert_eq!(i64::from(MangaStatus::Unknown),   4i64);
+    }
+
+    // ── FilterState ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn filter_state_json_round_trip_all_variants() {
+        for v in &[
+            FilterState::Selection { name: "Genre".into(), value: "action".into() },
+            FilterState::Checkbox(true),
+            FilterState::Checkbox(false),
+            FilterState::TextInput("naruto".into()),
+            FilterState::Multiselect(vec!["en".into(), "ja".into()]),
+        ] {
+            json_rt(v);
+        }
+    }
+
+    // ── ActiveFilter ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn active_filter_json_round_trip() {
+        json_rt(&ActiveFilter { filter_name: "genre".into(), state: FilterState::Checkbox(false) });
+    }
+
+    // ── MangaListItem ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn manga_list_item_json_round_trip() {
+        json_rt(&MangaListItem {
+            id: "abc123".into(),
+            title: "One Piece".into(),
+            cover_url: Some("https://example.com/cover.jpg".into()),
+            new_chapter_count: 5,
+        });
+    }
+
+    #[test]
+    fn manga_list_item_default_new_chapter_count_is_zero() {
+        let json = r#"{"id":"x","title":"t","cover_url":null}"#;
+        let item: MangaListItem = serde_json::from_str(json).unwrap();
+        assert_eq!(item.new_chapter_count, 0);
+    }
+
+    // ── MangaList ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn manga_list_json_round_trip() {
+        json_rt(&MangaList {
+            manga: vec![MangaListItem { id: "1".into(), title: "A".into(), cover_url: None, new_chapter_count: 0 }],
+            has_next_page: true,
+            total_pages: Some(5),
+        });
+    }
+
+    // ── MangaInfo & custom named-item deserializer ────────────────────────────
+
+    #[test]
+    fn manga_info_json_round_trip_with_named_item_objects() {
+        json_rt(&MangaInfo {
+            id: "m1".into(),
+            title: "Berserk".into(),
+            cover_url: None,
+            description: Some("Dark fantasy".into()),
+            description_html: None,
+            authors: vec![NamedItem { id: 1, name: "Kentaro Miura".into() }],
+            artists: vec![NamedItem { id: 2, name: "Studio Gaga".into() }],
+            status: MangaStatus::Ongoing,
+            tags: vec![NamedItem { id: 3, name: "Action".into() }],
+        });
+    }
+
+    #[test]
+    fn manga_info_deserializes_authors_as_plain_strings() {
+        let json = r#"{
+            "id":"m1","title":"Test","cover_url":null,
+            "description":null,"description_html":null,
+            "authors":["Oda"],
+            "artists":[],
+            "status":"ongoing",
+            "tags":[]
+        }"#;
+        let info: MangaInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.authors.len(), 1);
+        assert_eq!(info.authors[0].name, "Oda");
+        assert_eq!(info.authors[0].id, 0);
+    }
+
+    // ── Chapter ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn chapter_json_round_trip() {
+        json_rt(&Chapter {
+            id: "ch1".into(),
+            title: Some("Chapter 1: Dawn".into()),
+            number: 1.0,
+            volume: Some(1),
+            language: "en".into(),
+            scanlator: Some("TeamX".into()),
+            date_uploaded: Some(1_700_000_000),
+            download_status: 0,
+            is_orphaned: false,
+            page_count: Some(20),
+            is_read: true,
+            last_page_read: Some(10),
+        });
+    }
+
+    #[test]
+    fn chapter_missing_optional_fields_default_to_zero_or_false() {
+        let json = r#"{"id":"c","number":1.0,"language":"en"}"#;
+        let ch: Chapter = serde_json::from_str(json).unwrap();
+        assert_eq!(ch.download_status, 0);
+        assert!(!ch.is_orphaned);
+        assert!(!ch.is_read);
+        assert!(ch.last_page_read.is_none());
+    }
+
+    // ── ChapterList ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn chapter_list_json_round_trip() {
+        json_rt(&ChapterList { chapters: vec![], has_next_page: false, total_pages: None });
+    }
+
+    // ── ChapterSortOrder ──────────────────────────────────────────────────────
+
+    #[test]
+    fn chapter_sort_order_default_is_chapter_desc() {
+        assert_eq!(ChapterSortOrder::default(), ChapterSortOrder::ChapterDesc);
+    }
+
+    #[test]
+    fn chapter_sort_order_select_value_round_trip_all_variants() {
+        for order in &[
+            ChapterSortOrder::ChapterDesc,
+            ChapterSortOrder::ChapterAsc,
+            ChapterSortOrder::UploadedDesc,
+            ChapterSortOrder::UploadedAsc,
+            ChapterSortOrder::VolumeDesc,
+            ChapterSortOrder::VolumeAsc,
+            ChapterSortOrder::LanguageAsc,
+            ChapterSortOrder::LanguageDesc,
+            ChapterSortOrder::ScanlatorAsc,
+            ChapterSortOrder::ScanlatorDesc,
+        ] {
+            let val = order.to_select_value();
+            let back = ChapterSortOrder::from_select_value(val);
+            assert_eq!(*order, back, "failed round-trip for {order:?}");
+        }
+    }
+
+    // ── MangaSortOrder ────────────────────────────────────────────────────────
+
+    #[test]
+    fn manga_sort_order_default_is_name_desc() {
+        assert_eq!(MangaSortOrder::default(), MangaSortOrder::NameDesc);
+    }
+
+    #[test]
+    fn manga_sort_order_select_value_round_trip_all_variants() {
+        for order in &[
+            MangaSortOrder::NameDesc,
+            MangaSortOrder::NameAsc,
+            MangaSortOrder::UpdatedDesc,
+            MangaSortOrder::UpdatedAsc,
+            MangaSortOrder::AddedDesc,
+            MangaSortOrder::AddedAsc,
+            MangaSortOrder::ScoreDesc,
+            MangaSortOrder::ScoreAsc,
+            MangaSortOrder::LastReadDesc,
+        ] {
+            let val = order.to_select_value();
+            let back = MangaSortOrder::from_select_value(val);
+            assert_eq!(*order, back, "failed round-trip for {order:?}");
+        }
+    }
+
+    #[test]
+    fn manga_sort_order_needs_columns_flags() {
+        assert!(MangaSortOrder::LastReadDesc.needs_last_read_column());
+        assert!(!MangaSortOrder::NameAsc.needs_last_read_column());
+        assert!(MangaSortOrder::ScoreDesc.needs_tracking_join());
+        assert!(MangaSortOrder::ScoreAsc.needs_tracking_join());
+        assert!(MangaSortOrder::LastReadDesc.needs_tracking_join());
+        assert!(!MangaSortOrder::NameAsc.needs_tracking_join());
+    }
+
+    // ── DownloadProgressEvent ─────────────────────────────────────────────────
+
+    #[test]
+    fn download_progress_event_json_round_trip_all_variants() {
+        for ev in &[
+            DownloadProgressEvent::ChapterStarted {
+                chapter_id: 1, chapter_name: "Ch1".into(),
+                manga_id: 10, manga_title: "Manga".into(), total_pages: 20,
+            },
+            DownloadProgressEvent::PageCompleted {
+                chapter_id: 1, chapter_name: "Ch1".into(), page_index: 5,
+            },
+            DownloadProgressEvent::ChapterCompleted {
+                chapter_id: 1, chapter_name: "Ch1".into(),
+                manga_id: 10, manga_title: "Manga".into(), successful_pages: 20,
+            },
+            DownloadProgressEvent::ChapterFailed {
+                chapter_id: 1, chapter_name: "Ch1".into(), error: "timeout".into(),
+            },
+            DownloadProgressEvent::ChapterCancelled {
+                chapter_id: 1, chapter_name: "Ch1".into(),
+            },
+            DownloadProgressEvent::ChapterDeferred {
+                chapter_id: 1, chapter_name: "Ch1".into(), reason: "rate limited".into(),
+            },
+        ] {
+            json_rt(ev);
+        }
+    }
+
+    // ── DownloadRuleKind ──────────────────────────────────────────────────────
+
+    #[test]
+    fn download_rule_kind_json_round_trip_all_variants() {
+        for rule in &[
+            DownloadRuleKind::LanguageInclude("en".into()),
+            DownloadRuleKind::LanguageExclude("ja".into()),
+            DownloadRuleKind::TitleContains("vol".into()),
+            DownloadRuleKind::TitleExcludes("omake".into()),
+            DownloadRuleKind::ChapterNumberMin(1.5),
+            DownloadRuleKind::ChapterNumberMax(100.0),
+            DownloadRuleKind::ExcludeFractional,
+            DownloadRuleKind::MaxAgeDays(30),
+            DownloadRuleKind::PublishedAfter(1_700_000_000),
+        ] {
+            json_rt(rule);
+        }
+    }
+
+    #[test]
+    fn download_rule_kind_axis_values() {
+        assert_eq!(DownloadRuleKind::LanguageInclude("en".into()).axis(), 0);
+        assert_eq!(DownloadRuleKind::LanguageExclude("ja".into()).axis(), 0);
+        assert_eq!(DownloadRuleKind::TitleContains("x".into()).axis(), 1);
+        assert_eq!(DownloadRuleKind::TitleExcludes("x".into()).axis(), 1);
+        assert_eq!(DownloadRuleKind::ChapterNumberMin(1.0).axis(), 2);
+        assert_eq!(DownloadRuleKind::ChapterNumberMax(1.0).axis(), 2);
+        assert_eq!(DownloadRuleKind::ExcludeFractional.axis(), 3);
+        assert_eq!(DownloadRuleKind::MaxAgeDays(7).axis(), 4);
+        assert_eq!(DownloadRuleKind::PublishedAfter(0).axis(), 4);
+    }
+
+    #[test]
+    fn download_rule_kind_is_include() {
+        assert!(DownloadRuleKind::LanguageInclude("en".into()).is_include());
+        assert!(!DownloadRuleKind::LanguageExclude("en".into()).is_include());
+        assert!(DownloadRuleKind::TitleContains("x".into()).is_include());
+        assert!(!DownloadRuleKind::TitleExcludes("x".into()).is_include());
+        assert!(!DownloadRuleKind::ExcludeFractional.is_include());
+    }
+
+    fn ch_row(language: &str, title: Option<&str>, number: f64, uploaded_at: Option<i64>) -> ChapterFilterRow {
+        ChapterFilterRow {
+            id: 1,
+            scanlator: None,
+            language: language.into(),
+            name: title.map(Into::into),
+            chapter_number: number,
+            uploaded_at,
+        }
+    }
+
+    #[test]
+    fn download_rule_kind_passes_language_case_insensitive() {
+        let rule = DownloadRuleKind::LanguageInclude("en".into());
+        assert!(rule.passes(&ch_row("EN", None, 1.0, None)));
+        assert!(rule.passes(&ch_row("en", None, 1.0, None)));
+        assert!(!rule.passes(&ch_row("ja", None, 1.0, None)));
+    }
+
+    #[test]
+    fn download_rule_kind_passes_language_exclude() {
+        let rule = DownloadRuleKind::LanguageExclude("ja".into());
+        assert!(rule.passes(&ch_row("en", None, 1.0, None)));
+        assert!(!rule.passes(&ch_row("JA", None, 1.0, None)));
+    }
+
+    #[test]
+    fn download_rule_kind_passes_title_contains() {
+        let rule = DownloadRuleKind::TitleContains("Vol".into());
+        assert!(rule.passes(&ch_row("en", Some("Volume 1"), 1.0, None)));
+        assert!(!rule.passes(&ch_row("en", Some("Chapter 1"), 1.0, None)));
+        assert!(!rule.passes(&ch_row("en", None, 1.0, None)));
+    }
+
+    #[test]
+    fn download_rule_kind_passes_chapter_number_range() {
+        let min = DownloadRuleKind::ChapterNumberMin(5.0);
+        let max = DownloadRuleKind::ChapterNumberMax(10.0);
+        assert!(min.passes(&ch_row("en", None, 5.0, None)));
+        assert!(!min.passes(&ch_row("en", None, 4.99, None)));
+        assert!(max.passes(&ch_row("en", None, 10.0, None)));
+        assert!(!max.passes(&ch_row("en", None, 10.01, None)));
+    }
+
+    #[test]
+    fn download_rule_kind_passes_exclude_fractional() {
+        let rule = DownloadRuleKind::ExcludeFractional;
+        assert!(rule.passes(&ch_row("en", None, 5.0, None)));
+        assert!(!rule.passes(&ch_row("en", None, 5.5, None)));
+    }
+
+    #[test]
+    fn download_rule_kind_passes_published_after() {
+        let rule = DownloadRuleKind::PublishedAfter(1_000_000);
+        assert!(rule.passes(&ch_row("en", None, 1.0, None)));
+        assert!(rule.passes(&ch_row("en", None, 1.0, Some(1_000_001))));
+        assert!(!rule.passes(&ch_row("en", None, 1.0, Some(999_999))));
+    }
+
+    // ── Source ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn source_json_round_trip() {
+        json_rt(&Source {
+            id: 1,
+            name: "MangaDex".into(),
+            version: "1.0.0".into(),
+            base_url: "https://mangadex.org".into(),
+            enabled: true,
+            favourited: false,
+            unrestricted_http: false,
+        });
+    }
+
+    // ── SearchScope ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn search_scope_json_round_trip_all_variants() {
+        json_rt(&SearchScope::FavouritedOnly);
+        json_rt(&SearchScope::AllEnabled);
+        json_rt(&SearchScope::Sources(vec![1, 2, 3]));
+    }
+
+    // ── MangaTrackingStatus ───────────────────────────────────────────────────
+
+    #[test]
+    fn manga_tracking_status_json_round_trip_all_variants() {
+        for s in &[
+            MangaTrackingStatus::Reading,
+            MangaTrackingStatus::OnHold,
+            MangaTrackingStatus::Dropped,
+            MangaTrackingStatus::PlanToRead,
+            MangaTrackingStatus::Completed,
+            MangaTrackingStatus::Rereading,
+        ] {
+            json_rt(s);
+        }
+    }
+
+    #[test]
+    fn manga_tracking_status_repr_values() {
+        assert_eq!(MangaTrackingStatus::Reading    as i64, 0);
+        assert_eq!(MangaTrackingStatus::OnHold     as i64, 1);
+        assert_eq!(MangaTrackingStatus::Dropped    as i64, 2);
+        assert_eq!(MangaTrackingStatus::PlanToRead as i64, 3);
+        assert_eq!(MangaTrackingStatus::Completed  as i64, 4);
+        assert_eq!(MangaTrackingStatus::Rereading  as i64, 5);
+    }
+
+    // ── SettingsUpdate ────────────────────────────────────────────────────────
+
+    #[test]
+    fn settings_update_json_round_trip_all_variants() {
+        json_rt(&SettingsUpdate::Download(DownloadSettings {
+            concurrent_page_downloads: 4,
+            concurrent_manga_downloads: 2,
+            chapter_queue_size: 100,
+            max_retries: 3,
+            initial_retry_delay_ms: 1000,
+            auto_download_category_ids: vec![1, 2],
+        }));
+        json_rt(&SettingsUpdate::Scan(ScanSettings {
+            auto_scan: true,
+            scan_interval_minutes: 60,
+            scan_exclude_completed: false,
+        }));
+        json_rt(&SettingsUpdate::Advanced(AdvancedSettings {
+            flaresolverr_url: String::new(),
+            library_path: "/data/library".into(),
+            wasm_storage_path: "/data/wasm".into(),
+            max_wasm_instances: 4,
+            http_request_logging: false,
+            browser_debug_logging: false,
+            registration_enabled: true,
+            cover_max_dimension: Some(512),
+        }));
+        json_rt(&SettingsUpdate::Tracking(TrackingSettings { default_tracking_enabled: true }));
+        json_rt(&SettingsUpdate::Email(EmailSettings {
+            email_enabled: false,
+            email_provider: "smtp".into(),
+            email_provider_config: "{}".into(),
+            email_from_address: "noreply@example.com".into(),
+            app_url: "https://example.com".into(),
+            password_reset_enabled: false,
+            email_verification_required: false,
+        }));
+    }
+
+    // ── AuthenticatedUser ─────────────────────────────────────────────────────
+
+    #[test]
+    fn authenticated_user_role_checks() {
+        let user = AuthenticatedUser {
+            id: 1,
+            username: "alice".into(),
+            email: "alice@example.com".into(),
+            roles: vec!["admin".into(), "user".into()],
+            email_verified_at: None,
+        };
+        assert!(user.is_admin());
+        assert!(user.has_role("admin"));
+        assert!(user.has_role("user"));
+        assert!(!user.has_role("moderator"));
+    }
+
+    #[test]
+    fn authenticated_user_non_admin_does_not_have_admin_role() {
+        let user = AuthenticatedUser {
+            id: 2,
+            username: "bob".into(),
+            email: "bob@example.com".into(),
+            roles: vec!["user".into()],
+            email_verified_at: None,
+        };
+        assert!(!user.is_admin());
+    }
 }

@@ -23,6 +23,15 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
+# Debug WASM profile: preserves function names for readable backtraces.
+# Use with: cargo run -p kani-cli -- build --debug <extension>
+[profile.wasm-debug]
+inherits = "wasm-release"
+opt-level = 1
+debug = true
+strip = "none"
+debug-assertions = true
+
 [workspace.dependencies]
 serde       = { version = "1.0", features = ["derive"] }
 serde_json  = "1.0"

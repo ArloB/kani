@@ -434,6 +434,7 @@ impl DownloaderManager {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_worker(
         client_global: SmartClient,
         queue_state: Arc<Mutex<QueueState>>,
@@ -497,6 +498,7 @@ impl DownloaderManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn process_chapter(
         task: QueuedDownloadTask,
         mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
@@ -803,6 +805,7 @@ impl DownloaderManager {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     async fn make_manager() -> DownloaderManager {
@@ -907,5 +910,145 @@ mod tests {
     fn queue_state_starts_at_one() {
         let qs = QueueState::new();
         assert_eq!(qs.generate_id(), 1);
+    }
+
+    // ── get_image_extension ──────────────────────────────────────────────────
+
+    fn buffered_resp_with_ct(content_type: &'static str) -> SmartResponse {
+        let mut headers = rquest::header::HeaderMap::new();
+        headers.insert(
+            rquest::header::CONTENT_TYPE,
+            rquest::header::HeaderValue::from_static(content_type),
+        );
+        SmartResponse::Buffered {
+            status: rquest::StatusCode::OK,
+            url: rquest::Url::parse("https://example.com/img").unwrap(),
+            headers,
+            body: bytes::Bytes::new(),
+        }
+    }
+
+    fn buffered_resp_no_ct() -> SmartResponse {
+        SmartResponse::Buffered {
+            status: rquest::StatusCode::OK,
+            url: rquest::Url::parse("https://example.com/img").unwrap(),
+            headers: rquest::header::HeaderMap::new(),
+            body: bytes::Bytes::new(),
+        }
+    }
+
+    #[test]
+    fn image_extension_from_jpeg_content_type() {
+        let resp = buffered_resp_with_ct("image/jpeg");
+        assert_eq!(DownloaderManager::get_image_extension(&resp, "x"), "jpg");
+    }
+
+    #[test]
+    fn image_extension_from_png_content_type() {
+        let resp = buffered_resp_with_ct("image/png");
+        assert_eq!(DownloaderManager::get_image_extension(&resp, "x"), "png");
+    }
+
+    #[test]
+    fn image_extension_from_webp_content_type() {
+        let resp = buffered_resp_with_ct("image/webp");
+        assert_eq!(DownloaderManager::get_image_extension(&resp, "x"), "webp");
+    }
+
+    #[test]
+    fn image_extension_from_url_when_no_content_type() {
+        let resp = buffered_resp_no_ct();
+        assert_eq!(
+            DownloaderManager::get_image_extension(&resp, "https://cdn.example.com/page.png?v=1"),
+            "png"
+        );
+    }
+
+    #[test]
+    fn image_extension_defaults_to_jpg_when_unknown() {
+        let resp = buffered_resp_no_ct();
+        assert_eq!(
+            DownloaderManager::get_image_extension(&resp, "https://cdn.example.com/page"),
+            "jpg"
+        );
+    }
+
+    #[test]
+    fn image_extension_gif_content_type() {
+        let resp = buffered_resp_with_ct("image/gif");
+        assert_eq!(DownloaderManager::get_image_extension(&resp, "x"), "gif");
+    }
+
+    // ── create_cbz ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_cbz_produces_valid_zip_with_pages() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let page1 = dir.path().join("p1.tmp");
+        let page2 = dir.path().join("p2.tmp");
+        tokio::fs::write(&page1, b"fake-img-1").await.unwrap();
+        tokio::fs::write(&page2, b"fake-img-2").await.unwrap();
+
+        let cbz_path = dir.path().join("out.cbz");
+        let staged = vec![
+            (page1, "0001.jpg".to_string()),
+            (page2, "0002.png".to_string()),
+        ];
+        DownloaderManager::create_cbz(&cbz_path, staged, None).await.unwrap();
+
+        let pages = crate::cbz::list_cbz_pages(&cbz_path).unwrap();
+        assert_eq!(pages, vec!["0001.jpg", "0002.png"]);
+    }
+
+    #[tokio::test]
+    async fn create_cbz_includes_comic_info_xml() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let page = dir.path().join("p.tmp");
+        tokio::fs::write(&page, b"data").await.unwrap();
+
+        let cbz_path = dir.path().join("with_info.cbz");
+        let info = crate::comic_info::ComicInfo {
+            xmlns_xsi: "http://www.w3.org/2001/XMLSchema-instance",
+            series: "Test Series".to_string(),
+            title: None,
+            number: 1.0,
+            volume: None,
+            summary: None,
+            language_iso: None,
+            writer: None,
+            penciller: None,
+            genre: None,
+            web: None,
+        };
+        DownloaderManager::create_cbz(&cbz_path, vec![(page, "0001.jpg".to_string())], Some(info))
+            .await
+            .unwrap();
+
+        // Verify ComicInfo.xml is present in the archive
+        let file = std::fs::File::open(&cbz_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let entry_names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(entry_names.iter().any(|n| n == "ComicInfo.xml"), "ComicInfo.xml not found: {entry_names:?}");
+    }
+
+    #[tokio::test]
+    async fn create_cbz_without_comic_info_has_no_xml() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let page = dir.path().join("p.tmp");
+        tokio::fs::write(&page, b"data").await.unwrap();
+
+        let cbz_path = dir.path().join("no_info.cbz");
+        DownloaderManager::create_cbz(&cbz_path, vec![(page, "0001.jpg".to_string())], None)
+            .await
+            .unwrap();
+
+        let file = std::fs::File::open(&cbz_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let entry_names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(!entry_names.iter().any(|n| n == "ComicInfo.xml"), "unexpected ComicInfo.xml");
     }
 }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use wasmtime::Store;
 
@@ -15,6 +15,8 @@ pub struct SourceManager {
     base_url: Option<String>,
     unrestricted_http: bool,
     preferences: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
+    /// Shared Node.js V8 subprocess handle. Lazy-spawned on first use, shared across all leases.
+    v8_process: crate::v8_process::V8ProcessHandle,
 }
 
 impl SourceManager {
@@ -35,6 +37,7 @@ impl SourceManager {
             base_url,
             unrestricted_http,
             preferences: Arc::new(std::sync::RwLock::new(preferences)),
+            v8_process: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -60,7 +63,11 @@ impl SourceManager {
 
         let mut store = Store::new(
             &self.engine,
-            HostState::new(self.smart_client.clone(), allowed_host)?,
+            HostState::new(
+                self.smart_client.clone(),
+                allowed_host,
+                Arc::clone(&self.v8_process),
+            )?,
         );
 
         store.set_epoch_deadline(crate::sources::EPOCH_DEADLINE_TICKS);

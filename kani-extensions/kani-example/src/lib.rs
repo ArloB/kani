@@ -1,7 +1,7 @@
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::{
     ExtensionResult, MangaExtension, MangaStatus, bindings, wit_types,
-    types::ActiveFilter, to_shared_filters,
+    types::ActiveFilter, to_shared_filters, ext_version,
 };
 use wit_types::{Chapter, ChapterList, ExtensionMetadata, MangaInfo, MangaList, PreferenceSpec};
 
@@ -30,7 +30,7 @@ impl Example {
         ExtensionMetadata {
             id: "example".to_string(),
             name: "Example".to_string(),
-            version: "0.1.0".to_string(),
+            version: ext_version!("0.1.0"),
             base_url: "https://example.com".to_string(),
             language: "multi".to_string(),
             nsfw: false,

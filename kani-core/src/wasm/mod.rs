@@ -2,6 +2,9 @@
 
 pub mod abi;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -93,6 +96,8 @@ pub struct HostState {
     pub call_started_at: std::time::Instant,
     pub io_count: u32,
     pub last_io_at: Option<std::time::Instant>,
+    /// Handle to the shared Node.js V8 subprocess. Lazy-spawned on first use.
+    pub v8_process: crate::v8_process::V8ProcessHandle,
 }
 
 impl StoredNode {
@@ -124,7 +129,11 @@ impl StoredNode {
 }
 
 impl HostState {
-    pub fn new(http_client: SmartClient, allowed_host: AllowedHost) -> Result<Self> {
+    pub fn new(
+        http_client: SmartClient,
+        allowed_host: AllowedHost,
+        v8_process: crate::v8_process::V8ProcessHandle,
+    ) -> Result<Self> {
         let allowed_host = match allowed_host {
             AllowedHost::Restricted(raw) => {
                 let host = raw
@@ -155,6 +164,7 @@ impl HostState {
             call_started_at: std::time::Instant::now(),
             io_count: 0,
             last_io_at: None,
+            v8_process,
         })
     }
 
@@ -221,7 +231,12 @@ impl HostState {
 
 impl Default for HostState {
     fn default() -> Self {
-        HostState::new(SmartClient::new(None).unwrap(), AllowedHost::MetadataOnly).unwrap()
+        HostState::new(
+            SmartClient::new(None).unwrap(),
+            AllowedHost::MetadataOnly,
+            Arc::new(Mutex::new(None)),
+        )
+        .unwrap()
     }
 }
 

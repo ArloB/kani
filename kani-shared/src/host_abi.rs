@@ -106,8 +106,15 @@ impl HttpRequest {
         self.queries.push((key.into(), value.to_string()));
         self
     }
+
+    /// Returns the raw query pairs without building the URL (test only).
+    #[cfg(test)]
+    pub(crate) fn into_queries(self) -> Vec<(String, String)> {
+        self.queries
+    }
     
     /// Consume this request and return its components for use with raw extraction.
+    #[allow(clippy::type_complexity)]
     pub(crate) fn into_extract_parts(self) -> Result<(String, String, Vec<(String, String)>, Vec<(String, String)>), ExtensionError> {
         let url = self.build_final_url()?;
         let method = match self.method {
@@ -380,6 +387,18 @@ pub fn decode<S: Into<String>>(input: S) -> Result<String, String> {
 /// Extract the value of a specific query parameter from a full URL.
 pub fn get_query_param<U: Into<String>, K: Into<String>>(url: U, key: K) -> Option<String> {
     crate::utility::get_query_param(&url.into(), &key.into())
+}
+
+/// Returns the extension version string, appending `+debug` when compiled with
+/// debug assertions (i.e. `wasm-debug` profile). Usage: `ext_version!("1.2.3")`
+#[macro_export]
+macro_rules! ext_version {
+    ($v:literal) => {{
+        #[cfg(debug_assertions)]
+        { concat!($v, "+debug").to_string() }
+        #[cfg(not(debug_assertions))]
+        { $v.to_string() }
+    }};
 }
 
 #[macro_export]
@@ -713,5 +732,128 @@ pub mod prefs {
     /// Parses the stored value as `f64`, returning `None` if unset or not parseable.
     pub fn get_f64(key: &str) -> Option<f64> {
         raw(key)?.parse().ok()
+    }
+
+    /// Parses a multi-value-list preference (stored as a JSON array of strings) into a Vec<String>.
+    /// Returns an empty vec if the value is unset or cannot be parsed.
+    pub fn get_list(key: &str) -> Vec<String> {
+        parse_json_str_array(&raw(key).unwrap_or_default())
+    }
+
+    fn parse_json_str_array(s: &str) -> Vec<String> {
+        let s = s.trim();
+        if !s.starts_with('[') || !s.ends_with(']') { return vec![]; }
+        let inner = &s[1..s.len() - 1];
+        if inner.trim().is_empty() { return vec![]; }
+        let mut result = Vec::new();
+        let bytes = inner.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | b',') {
+                i += 1;
+            }
+            if i >= bytes.len() { break; }
+            if bytes[i] == b'"' {
+                i += 1;
+                let mut value = String::new();
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                        i += 1;
+                        match bytes[i] {
+                            b'n' => value.push('\n'),
+                            b't' => value.push('\t'),
+                            b'r' => value.push('\r'),
+                            b'"' => value.push('"'),
+                            b'\\' => value.push('\\'),
+                            c => { value.push('\\'); value.push(c as char); }
+                        }
+                    } else if bytes[i] == b'"' {
+                        break;
+                    } else {
+                        value.push(bytes[i] as char);
+                    }
+                    i += 1;
+                }
+                if i < bytes.len() { i += 1; }
+                result.push(value);
+            } else {
+                i += 1;
+            }
+        }
+        result
+    }
+}
+
+// ============================================================
+// Scripting API
+// ============================================================
+
+/// Wrappers for the host-side JS execution context (backed by the Node.js V8 subprocess).
+///
+/// This is an alias for `v8_context` kept for backwards compatibility. New extensions
+/// should use `v8_context` directly; existing extensions using `js_context` continue
+/// to work unchanged and will use the V8 runtime.
+pub mod js_context {
+    use crate::ExtensionError;
+
+    pub fn exists(name: &str) -> bool {
+        super::v8_context::exists(name)
+    }
+
+    pub fn create(name: &str, init_script: &str) -> Result<(), ExtensionError> {
+        super::v8_context::create(name, init_script)
+    }
+
+    pub fn eval(name: &str, script: &str) -> Result<String, ExtensionError> {
+        super::v8_context::eval(name, script)
+    }
+
+    pub fn drop_ctx(name: &str) {
+        super::v8_context::drop_ctx(name);
+    }
+
+    pub fn capture_url_param(page_url: &str, url_pattern: &str, param: &str, timeout_ms: u32, force_refresh: bool) -> Result<String, ExtensionError> {
+        super::v8_context::capture_url_param(page_url, url_pattern, param, timeout_ms, force_refresh)
+    }
+}
+
+/// Wrappers for the host-side Node.js V8 execution context.
+///
+/// The host maintains named V8 contexts backed by a persistent Node.js subprocess.
+/// Extensions initialize a context once (loading their JS bundle + minimal stubs),
+/// then call `eval` on subsequent requests. Provides native Web APIs: `crypto.subtle`,
+/// `TextEncoder`, `URL`, `URLSearchParams`, etc.
+pub mod v8_context {
+    use crate::ExtensionError;
+    use crate::bindings::kani::extension::scripting;
+
+    /// Returns true if a named V8 context currently exists on the host.
+    pub fn exists(name: &str) -> bool {
+        scripting::v8_context_exists(name)
+    }
+
+    /// Creates a named V8 context by running `init_script` in a fresh Node.js
+    /// vm.createContext sandbox. Idempotent: if the context already exists this is a no-op.
+    pub fn create(name: &str, init_script: &str) -> Result<(), ExtensionError> {
+        scripting::v8_context_create(name, init_script).map_err(ExtensionError::Other)
+    }
+
+    /// Evaluates `script` in the named V8 context. The script must produce a string value.
+    pub fn eval(name: &str, script: &str) -> Result<String, ExtensionError> {
+        scripting::v8_context_eval(name, script).map_err(ExtensionError::Other)
+    }
+
+    /// Drops the named context and frees its memory on the host.
+    pub fn drop_ctx(name: &str) {
+        scripting::v8_context_drop(name);
+    }
+
+    /// Loads `page_url` in a headless Chromium instance, intercepts network requests
+    /// whose URL contains `url_pattern`, and returns the value of `param` from the
+    /// first matching request's query string. `timeout_ms` controls the deadline.
+    /// Set `force_refresh` to bypass the per-URL cache after an API 401/403.
+    pub fn capture_url_param(page_url: &str, url_pattern: &str, param: &str, timeout_ms: u32, force_refresh: bool) -> Result<String, ExtensionError> {
+        scripting::capture_url_param(page_url, url_pattern, param, timeout_ms, force_refresh)
+            .map_err(ExtensionError::Other)
     }
 }

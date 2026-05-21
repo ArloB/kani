@@ -87,6 +87,7 @@ pub fn validate(
             pages,
             filters: ext.filters.clone(),
             preferences: ext.preferences.clone(),
+            get_url: ext.get_url.clone(),
         })
     } else {
         Err(errors)
@@ -158,13 +159,12 @@ fn validate_endpoint(
         .collect();
 
     for (key, entry) in &filter_mapping {
-        if let FilterMappingEntry::SortPair { key_template, .. } = entry {
-            if !key_template.contains("{}") {
+        if let FilterMappingEntry::SortPair { key_template, .. } = entry
+            && !key_template.contains("{}") {
                 errors.push(CliError::Other(format!(
                     "endpoints.{name}.filter_mapping.{key}: sort_pair key_template must contain '{{}}'"
                 )));
             }
-        }
     }
 
     let mut bindings = Vec::new();
@@ -318,13 +318,12 @@ fn parse_dsl(dsl: &str, field_path: &str) -> Result<Expr, Vec<CliError>> {
 
     let expr: Result<Expr, Vec<CliError>> = parse_ast.try_into();
 
-    expr.map_err(|errs| {
-        for e in &errs {
+    expr.inspect_err(|errs| {
+        for e in errs {
             if let CliError::DslConversion { message, span } = e {
                 report_custom_error(field_path, &normalized, message, span.clone());
             }
         }
-        errs
     })
 }
 

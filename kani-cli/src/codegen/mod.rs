@@ -86,6 +86,15 @@ fn emit_lib_rs(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
         );
     }
 
+    if let Some(url_template) = &ext.get_url {
+        let rust_template = url_template.replace("$manga_id$", "{manga_id}");
+        parts.push(format!(
+            "fn get_url(&self, manga_id: &str) -> ExtensionResult<String> {{\n\
+             Ok(format!(\"{rust_template}\"))\n\
+             }}"
+        ));
+    }
+
     parts.push(MANGA_EXT_STUB_SORT.into());
 
     // filter_list and preference_list

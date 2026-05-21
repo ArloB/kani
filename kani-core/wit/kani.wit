@@ -259,6 +259,28 @@ interface extraction {
     paginated-extract-html-raw: func(page: s32, page-size: s32, url: string, method: string, headers: list<tuple<string, string>>, queries: list<tuple<string, string>>, blueprint: list<u8>) -> result<s32, string>;
 }
 
+interface scripting {
+    /// Returns true if a named V8 (Node.js) context is currently live on the host.
+    v8-context-exists: func(name: string) -> bool;
+
+    /// Creates a named V8 context by evaluating init-script in a Node.js vm.createContext
+    /// sandbox with native Web APIs. Idempotent: if the context already exists returns ok.
+    v8-context-create: func(name: string, init-script: string) -> result<_, string>;
+
+    /// Evaluates a JS expression in the named V8 context. Must produce a string value.
+    v8-context-eval: func(name: string, script: string) -> result<string, string>;
+
+    /// Drops the named V8 context.
+    v8-context-drop: func(name: string);
+
+    /// Loads page-url in a headless Chromium instance (via puppeteer-core), intercepts
+    /// outgoing network requests whose URL contains url-pattern, and returns the value
+    /// of param from the first matching request's query string.
+    /// timeout-ms controls how long to wait before returning an error.
+    /// force-refresh bypasses the per-URL token cache; use after an API 401/403.
+    capture-url-param: func(page-url: string, url-pattern: string, param: string, timeout-ms: u32, force-refresh: bool) -> result<string, string>;
+}
+
 world kani-extension {
     import types;
     import http;
@@ -267,5 +289,6 @@ world kani-extension {
     import json;
     import prefs;
     import extraction;
+    import scripting;
     export manga-provider;
 }

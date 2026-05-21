@@ -219,11 +219,11 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
             ParseExpr::BinaryOperation { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
         });
 
-        let or_expr = and_expr.clone().foldl(just("||").to(Op::Or).then(and_expr).repeated(), |lhs, (op, rhs)| {
-            ParseExpr::BinaryOperation { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
-        });
+        
 
-        or_expr
+        and_expr.clone().foldl(just("||").to(Op::Or).then(and_expr).repeated(), |lhs, (op, rhs)| {
+            ParseExpr::BinaryOperation { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
+        })
     });
 
     expr.then_ignore(end())

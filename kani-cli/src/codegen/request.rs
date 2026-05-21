@@ -49,10 +49,10 @@ pub fn emit_request_block(
             match entry {
                 FilterMappingEntry::Simple(param) => {
                     lines.push(format!("        \"{group}\" => match &f.state {{"));
-                    lines.push(format!("            FilterState::Checkbox(c) if *c => {{"));
+                    lines.push("            FilterState::Checkbox(c) if *c => {".to_string());
                     lines.push(format!("                req = req.query(\"{param}\", if action.is_empty() {{ \"true\" }} else {{ action }});"));
                     lines.push("            }".into());
-                    lines.push(format!("            FilterState::Multiselect(values) => {{"));
+                    lines.push("            FilterState::Multiselect(values) => {".to_string());
                     lines.push(format!("                for v in values {{ req = req.query(\"{param}\", v.as_str()); }}"));
                     lines.push("            }".into());
                     lines.push(format!("            FilterState::Selection {{ value, .. }} => req = req.query(\"{param}\", value.as_str()),"));
@@ -64,8 +64,7 @@ pub fn emit_request_block(
                     lines.push(format!("        \"{group}\" => match &f.state {{"));
                     lines.push("            FilterState::Selection { value, .. } => {".into());
                     lines.push("                if let Some((key_part, dir)) = value.split_once(':') {".into());
-                    let key_fmt = key_template.replace("{}","{}");
-                    lines.push(format!("                    req = req.query(&format!(\"{key_fmt}\", key_part), dir);"));
+                    lines.push(format!("                    req = req.query(&format!(\"{key_template}\", key_part), dir);"));
                     if let Some(dir_param) = direction_param {
                         lines.push(format!("                    req = req.query(\"{dir_param}\", dir);"));
                     }

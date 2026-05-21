@@ -10,6 +10,7 @@ pub fn run(vendors: bool, tailwind: bool, esbuild: bool) -> Result<(), CliError>
     if run_all || vendors  { fetch_vendors(&client)?;  }
     if run_all || tailwind { fetch_tailwind(&client)?; }
     if run_all || esbuild  { fetch_esbuild(&client)?;  }
+    if run_all             { super::icons::run()?;     }
 
     Ok(())
 }
@@ -19,9 +20,10 @@ fn fetch_vendors(client: &Client) -> Result<(), CliError> {
     fs::create_dir_all(vendor_dir)?;
 
     let files = [
-        ("https://unpkg.com/preact@10.26.4/dist/preact.module.js",      "preact.module.js"),
-        ("https://unpkg.com/preact@10.26.4/hooks/dist/hooks.module.js", "preact-hooks.module.js"),
-        ("https://unpkg.com/htm@3.1.1/dist/htm.module.js",              "htm.module.js"),
+        ("https://unpkg.com/preact@10.26.4/dist/preact.module.js",                          "preact.module.js"),
+        ("https://unpkg.com/preact@10.26.4/hooks/dist/hooks.module.js",                     "preact-hooks.module.js"),
+        ("https://unpkg.com/htm@3.1.1/dist/htm.module.js",                                  "htm.module.js"),
+        ("https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js",               "chart.umd.min.js"),
     ];
 
     for (url, filename) in &files {

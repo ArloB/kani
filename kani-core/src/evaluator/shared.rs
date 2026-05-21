@@ -178,12 +178,12 @@ where
         Expr::At { target, index } => Some(
             recurse(target, env).await.and_then(|v| match v {
                 Value::Null => Ok(Value::Null),
-                v => v.into_list("at").and_then(|items| {
+                v => v.into_list("at").map(|items| {
                     let i = if *index < 0 { items.len().checked_sub((-*index) as usize) }
                             else          { Some(*index as usize) };
                     match i.and_then(|i| items.into_iter().nth(i)) {
-                        Some(v) => Ok(v),
-                        None    => Err(format!("at({}): index out of bounds", index)),
+                        Some(v) => v,
+                        None    => Value::Null,
                     }
                 }),
             })
@@ -246,7 +246,7 @@ where
         Expr::ParseFloat { target } => Some(
             recurse(target, env).await
                 .and_then(|v| v.map_str("parse_float", |s|
-                    Ok(s.parse::<f64>().map(Value::Num).unwrap_or(Value::Null))
+                    s.parse::<f64>().map(Value::Num).map_err(|e| format!("Invalid float '{}': {}", s, e))
                 ))
         ),
 
@@ -267,9 +267,9 @@ where
         Expr::DateParseRfc3339 { target } => Some(
             recurse(target, env).await
                 .and_then(|v| v.map_str("date_parse_rfc3339", |date|
-                    Ok(time::OffsetDateTime::parse(&date, &time::format_description::well_known::Rfc3339)
+                    time::OffsetDateTime::parse(&date, &time::format_description::well_known::Rfc3339)
                         .map(|dt| Value::Int(dt.unix_timestamp()))
-                        .unwrap_or(Value::Null))
+                        .map_err(|e| format!("Invalid RFC3339 date '{}': {}", date, e))
                 ))
         ),
 

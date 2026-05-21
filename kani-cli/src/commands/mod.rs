@@ -2,6 +2,7 @@ pub mod build;
 pub mod css;
 pub mod dsl_cmd;
 pub mod generate;
+pub mod icons;
 pub mod new;
 pub mod setup;
 pub mod validate;
@@ -42,11 +43,26 @@ pub enum Command {
     /// Compile extension(s) to WASM
     Build {
         /// Extension crate name (e.g. kani-weebcentral)
-        #[arg(conflicts_with = "all")]
+        #[arg(conflicts_with_all = ["all", "dev"])]
         extension: Option<String>,
-        /// Build all extensions
-        #[arg(long)]
+        /// Build all production extensions (excludes dev/test extensions)
+        #[arg(long, conflicts_with = "dev")]
         all: bool,
+        /// Build dev/test extensions only (kani-example, kani-test-abi); excluded from --all
+        #[arg(long)]
+        dev: bool,
+        /// Override the version embedded in the WASM (e.g. 1.2.3)
+        #[arg(long, value_name = "SEMVER")]
+        set_version: Option<String>,
+        /// Directory containing extension crates (default: kani-extensions)
+        #[arg(long, value_name = "PATH")]
+        ext_dir: Option<String>,
+        /// Output directory for compiled .wasm files (default: wasm_sources)
+        #[arg(long, value_name = "PATH")]
+        out_dir: Option<String>,
+        /// Build with debug info (larger binary, readable WASM backtraces)
+        #[arg(long)]
+        debug: bool,
     },
     /// Build the frontend CSS
     Css {
@@ -69,6 +85,8 @@ pub enum Command {
         #[arg(long)]
         esbuild: bool,
     },
+    /// Generate PWA icon PNGs from static/icons/kani-mark.svg
+    Icons,
     /// Parse a DSL expression and print the resulting Expr AST
     Dsl {
         /// DSL expression string
@@ -81,10 +99,12 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         Command::New      { name }              => new::run(&name),
         Command::Validate { file }              => validate::run(&file),
         Command::Generate { file, force, embedded_bytes } => generate::run(&file, force, embedded_bytes).map(|_| ()),
-        Command::Build    { extension, all }    => build::run(extension.as_deref(), all),
+        Command::Build    { extension, all, dev, set_version, ext_dir, out_dir, debug } =>
+            build::run(extension.as_deref(), all, dev, set_version.as_deref(), ext_dir.as_deref(), out_dir.as_deref(), debug),
         Command::Css      { watch, prod }       => css::run(watch, prod),
         Command::Setup    { vendors, tailwind, esbuild }
                                                 => setup::run(vendors, tailwind, esbuild),
+        Command::Icons                          => icons::run(),
         Command::Dsl      { expression }        => dsl_cmd::run(&expression),
     }
 }

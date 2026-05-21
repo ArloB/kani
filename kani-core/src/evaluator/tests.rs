@@ -1,3 +1,5 @@
+#![allow(clippy::approx_constant)]
+
 #[cfg(test)]
 mod helpers {
     use kani_shared::ast::*;
@@ -804,7 +806,6 @@ mod html_tests {
     use super::helpers::*;
     use kani_shared::ast::*;
 
-    fn dom(selector: &str) -> Expr { Expr::Dom(selector.into()) }
     fn attr(target: Expr, name: &str) -> Expr { Expr::Attr { target: Box::new(target), name: name.into() } }
     fn text(target: Expr) -> Expr { Expr::Text { target: Box::new(target) } }
     fn select(target: Expr, selector: &str) -> Expr { Expr::Select { target: Box::new(target), selector: selector.into() } }

@@ -19,6 +19,8 @@ pub struct ValidatedExtension {
     pub pages: Option<ValidatedEndpoint>,
     pub filters: Vec<FilterEntry>,
     pub preferences: Vec<PreferenceEntry>,
+    /// Optional URL template, e.g. `"https://example.com/manga/$manga_id$"`.
+    pub get_url: Option<String>,
 }
 
 pub enum ValidatedPopular {

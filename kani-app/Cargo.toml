@@ -12,7 +12,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 urlencoding.workspace = true
-tokio         = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio         = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "process"] }
 tokio-util.workspace = true
 sqlx.workspace = true
 rquest        = { version = "5.1", features = ["json"] }
@@ -22,9 +22,36 @@ indexmap.workspace = true
 ordered-float.workspace = true
 moka.workspace = true
 dashmap.workspace = true
-time          = { workspace = true, features = ["serde"] }
+time          = { workspace = true, features = ["serde", "formatting", "macros"] }
 base64.workspace = true
 sha2          = "0.10"
+hmac          = "0.12"
+chacha20poly1305 = "0.10.1"
 rand          = "0.10"
 hex           = "0.4"
 async-trait   = "0.1"
+lettre        = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-native-tls", "smtp-transport", "builder"] }
+image         = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+zip           = "2"
+flate2        = "1"
+prost         = "0.13"
+strsim        = "0.11"
+epub-builder  = "0.7"
+quick-xml     = "0.39.2"
+which         = "6"
+tempfile      = "3"
+fs2           = "0.4"
+dunce         = "1"
+
+[features]
+test-util = []
+
+[dev-dependencies]
+kani-core   = { path = "../kani-core" }
+kani-shared = { path = "../kani-shared", features = ["ssr"] }
+tokio-util  = { workspace = true }
+
+[build-dependencies]
+prost-build = "0.14.3"
+protox = "0.9.1"
+

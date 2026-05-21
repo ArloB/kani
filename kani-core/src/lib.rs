@@ -15,6 +15,7 @@ pub mod sources;
 pub mod utilities;
 pub mod wasm;
 pub mod evaluator;
+pub mod v8_process;
 
 pub use error::Error;
 
