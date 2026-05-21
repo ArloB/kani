@@ -43,6 +43,12 @@ const _state = {
 
   /** Chapter ids currently being requested for download (prevents double-submit). */
   inFlightChapters: /** @type {Set<number>} */ (new Set()),
+
+  /** Manga ids whose SSE scan event just fired — briefly non-empty while scan sweeps. */
+  scanningMangaIds: /** @type {Set<number>} */ (new Set()),
+
+  /** Per-manga browser notification opt-out. True = notify (default). */
+  mangaNotifyPrefs: /** @type {Map<number, boolean>} */ (new Map()),
 };
 
 /**

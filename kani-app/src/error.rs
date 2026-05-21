@@ -22,6 +22,9 @@ pub enum ServiceError {
     #[error("Other error: {0}")]
     Other(String),
 
+    #[error("Possible duplicate")]
+    PossibleDuplicate(Vec<crate::service::dedup::SimilarMangaHit>),
+
     #[error(transparent)]
     Core(#[from] kani_core::Error),
 

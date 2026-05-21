@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE settings SET flaresolverr_url=?, library_path=?, wasm_storage_path=?, max_wasm_instances=?, http_request_logging=?, browser_debug_logging=?, registration_enabled=?, cover_max_dimension=? WHERE id='singleton'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "34152402e51799680f7a36b39758aaf36dcd94bef2f6d646f66e2fb12f48215f"
+}

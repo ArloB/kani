@@ -11,6 +11,9 @@
 const _routes = [
   { path: '/login',                     load: () => import('./pages/login.js') },
   { path: '/register',                  load: () => import('./pages/register.js') },
+  { path: '/forgot-password',           load: () => import('./pages/forgot-password.js') },
+  { path: '/reset-password',            load: () => import('./pages/reset-password.js') },
+  { path: '/verify-email',              load: () => import('./pages/verify-email.js') },
   { path: '/sources',                   load: () => import('./pages/sources.js') },
   { path: '/source/:id/manga/:manga_id',load: () => import('./pages/manga-details.js') },
   { path: '/source/:id',                load: () => import('./pages/source-details.js') },
@@ -21,6 +24,8 @@ const _routes = [
   { path: '/settings',                  load: () => import('./pages/settings/index.js') },
   { path: '/accounts',                  load: () => import('./pages/accounts.js') },
   { path: '/updates',                   load: () => import('./pages/recent-updates.js') },
+  { path: '/stats',                     load: () => import('./pages/stats.js') },
+  { path: '/admin/logs',                load: () => import('./pages/admin/logs.js') },
   { path: '/',                          load: () => import('./pages/library.js') },
 ].map(({ path, load }) => ({ re: _pathToRegex(path), keys: _extractKeys(path), load }));
 
@@ -32,6 +37,16 @@ let _activePage = null;
 const _navCallbacks = new Set();
 /** @type {Record<string, string>} */
 let _currentParams = {};
+/** @type {(() => Promise<boolean>) | null} — resolve false to cancel navigation */
+let _beforeNavigate = null;
+
+/**
+ * Registers a guard called before every programmatic navigation.
+ * Return (or resolve) false to abort. Only one guard is active at a time.
+ * @param {() => boolean | Promise<boolean>} fn
+ */
+export function setBeforeNavigate(fn) { _beforeNavigate = fn; }
+export function clearBeforeNavigate() { _beforeNavigate = null; }
 
 /**
  * Initialises the router, performs the initial route match, and sets up
@@ -40,7 +55,7 @@ let _currentParams = {};
  */
 export function initRouter(container) {
   _container = container;
-  window.addEventListener('popstate', () => _route(location.pathname));
+  window.addEventListener('popstate', () => _route(location.pathname + location.search, true));
   document.addEventListener('click', _interceptLink);
   _route(location.pathname);
 }
@@ -49,8 +64,11 @@ export function initRouter(container) {
  * Navigates to `path`, updating the browser URL.
  * @param {string} path
  * @param {{ replace?: boolean }} [opts]
+ * @returns {Promise<void>}
  */
-export function navigate(path, opts = {}) {
+export async function navigate(path, opts = {}) {
+  if (_beforeNavigate && !(await _beforeNavigate())) return;
+  sessionStorage.setItem(`scroll:${location.pathname + location.search}`, String(window.scrollY));
   if (opts.replace) {
     history.replaceState(null, '', path);
   } else {
@@ -80,8 +98,11 @@ export function onNavigate(callback) {
 
 // ── Internal ─────────────────────────────────────────────────────────────────
 
-/** @param {string} path */
-async function _route(path) {
+/**
+ * @param {string} path
+ * @param {boolean} [fromPopstate]
+ */
+async function _route(path, fromPopstate = false) {
   if (!_container) return;
 
   // Strip query string before matching — pages read location.search directly
@@ -125,7 +146,12 @@ async function _route(path) {
     }
   }
 
-  window.scrollTo(0, 0);
+  if (fromPopstate) {
+    const saved = sessionStorage.getItem(`scroll:${location.pathname + location.search}`);
+    window.scrollTo(0, saved ? parseInt(saved, 10) : 0);
+  } else {
+    window.scrollTo(0, 0);
+  }
 
   // Notify nav and other listeners
   for (const cb of _navCallbacks) {

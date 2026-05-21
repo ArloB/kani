@@ -3,6 +3,7 @@
 // Manages reconnection with exponential backoff and detects server restarts.
 
 import { getState, setState, updateState } from './state.js';
+import { postToServiceWorker, cacheChapter } from './offline.js';
 
 const SSE_URL = '/rest/events';
 const MAX_DELAY_MS = 30_000;
@@ -144,6 +145,7 @@ function _handleEvent(data) {
       if (entry) m.set(id, { ...entry, status: 'completed', completedPages: entry.totalPages });
       return m;
     });
+    _maybeAutoCache(Number(data.chapter_id), Number(data.successful_pages ?? 0));
     return;
   }
 
@@ -172,6 +174,8 @@ function _handleEvent(data) {
   // ── Refresh events ───────────────────────────────────────────────────────
   if (type === 'started') {
     setState('refreshState', { type: 'running', completed: 0, total: data.total });
+    // Mark every manga that will be scanned as "pending" so covers show a spinner.
+    setState('scanningMangaIds', new Set((data.manga_ids ?? []).map(Number)));
     return;
   }
 
@@ -180,11 +184,14 @@ function _handleEvent(data) {
       if (s.type !== 'running') return s;
       return { ...s, completed: data.completed, total: data.total };
     });
+    // Remove from pending set — this manga is done.
+    updateState('scanningMangaIds', (s) => { const n = new Set(s); n.delete(Number(data.manga_id)); return n; });
     return;
   }
 
   if (type === 'completed') {
     setState('refreshState', { type: 'done', total: data.total, failed: data.failed });
+    setState('scanningMangaIds', new Set());
     // Increment library invalidation so pages re-fetch
     updateState('libraryInvalidation', (n) => n + 1);
     // Return to idle after 5s
@@ -194,26 +201,49 @@ function _handleEvent(data) {
 
   // ── New chapters ─────────────────────────────────────────────────────────
   if (type === 'new_chapters') {
-    if (localStorage.getItem('kani_disable_notifications') === 'true') return;
-    const incomingNames = /** @type {string[]} */ (data.chapter_names ?? []);
-    updateState('scanNotifications', (list) => {
-      const existing = list.findIndex((/** @type {{ mangaId: number; }} */ n) => n.mangaId === Number(data.manga_id));
-      if (existing >= 0) {
-        const copy = [...list];
-        copy[existing] = {
-          ...copy[existing],
-          count: copy[existing].count + data.count,
-          chapterNames: [...(copy[existing].chapterNames ?? []), ...incomingNames],
-        };
-        return copy;
-      }
-      return [...list, {
-        mangaId: Number(data.manga_id),
-        mangaName: data.manga_name,
-        count: data.count,
-        chapterNames: incomingNames,
-      }];
-    });
+    // In-app badge notifications
+    if (localStorage.getItem('kani_disable_notifications') !== 'true') {
+      const incomingNames = /** @type {string[]} */ (data.chapter_names ?? []);
+      updateState('scanNotifications', (list) => {
+        const existing = list.findIndex((/** @type {{ mangaId: number; }} */ n) => n.mangaId === Number(data.manga_id));
+        if (existing >= 0) {
+          const copy = [...list];
+          copy[existing] = {
+            ...copy[existing],
+            count: copy[existing].count + data.count,
+            chapterNames: [...(copy[existing].chapterNames ?? []), ...incomingNames],
+          };
+          return copy;
+        }
+        return [...list, {
+          mangaId: Number(data.manga_id),
+          mangaName: data.manga_name,
+          count: data.count,
+          chapterNames: incomingNames,
+        }];
+      });
+    }
+
+    // Browser push notifications
+    const mangaId = Number(data.manga_id);
+    const notifyPrefs = getState('mangaNotifyPrefs');
+    const notifyAllowed = notifyPrefs instanceof Map
+      ? (notifyPrefs.has(mangaId) ? notifyPrefs.get(mangaId) : true)
+      : true;
+    if (
+      notifyAllowed &&
+      localStorage.getItem('kani_browser_notifications') === 'true' &&
+      'Notification' in window &&
+      Notification.permission === 'granted'
+    ) {
+      const count = data.count ?? 1;
+      const body = count === 1
+        ? (data.chapter_names?.[0] ?? 'New chapter available')
+        : `${count} new chapters`;
+      try {
+        new Notification(data.manga_name ?? 'New chapters', { body, tag: `kani-manga-${mangaId}` });
+      } catch { /* ignore — browsers may restrict notifications in some contexts */ }
+    }
   }
 }
 
@@ -227,4 +257,16 @@ function _normaliseStatus(raw) {
   if (raw === 'completed')   return 'completed';
   if (raw === 'failed')      return 'failed';
   return 'cancelled';
+}
+
+/**
+ * Cache a just-downloaded chapter if offline auto-mode is active.
+ * @param {number} chapterId
+ * @param {number} pageCount
+ */
+function _maybeAutoCache(chapterId, pageCount) {
+  if (localStorage.getItem('kani_offline_mode') !== 'auto') return;
+  if (!navigator.serviceWorker?.controller) return;
+  if (pageCount <= 0) return;
+  cacheChapter(chapterId, pageCount);
 }

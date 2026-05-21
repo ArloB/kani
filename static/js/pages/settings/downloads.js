@@ -32,6 +32,46 @@ export function mount(el, settings) {
     serverCard.appendChild(mkSettingsRow({ label: f.label, description: f.desc, control: input }));
   }
 
+  // Category auto-download checkboxes (populated async)
+  const catContainer = document.createElement('div');
+  catContainer.className = 'flex flex-col gap-1.5 text-sm';
+  catContainer.innerHTML = '<p class="text-text-muted text-xs">Loading…</p>';
+  /** @type {number[]} */
+  let _selectedCatIds = Array.isArray(settings?.auto_download_category_ids)
+    ? settings.auto_download_category_ids
+    : [];
+  api.getCategories().then(cats => {
+    catContainer.innerHTML = '';
+    if (!Array.isArray(cats) || cats.length === 0) {
+      catContainer.innerHTML = '<p class="text-text-muted text-xs">No categories defined.</p>';
+      return;
+    }
+    for (const cat of cats) {
+      const label = document.createElement('label');
+      label.className = 'flex items-center gap-2 cursor-pointer';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'rounded';
+      cb.value = String(cat.id);
+      cb.checked = _selectedCatIds.includes(cat.id);
+      cb.addEventListener('change', () => {
+        if (cb.checked) {
+          if (!_selectedCatIds.includes(cat.id)) _selectedCatIds = [..._selectedCatIds, cat.id];
+        } else {
+          _selectedCatIds = _selectedCatIds.filter(id => id !== cat.id);
+        }
+      });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(cat.name));
+      catContainer.appendChild(label);
+    }
+  }).catch(() => { catContainer.innerHTML = '<p class="text-text-muted text-xs">Failed to load.</p>'; });
+  serverCard.appendChild(mkSettingsRow({
+    label: 'Auto-download categories',
+    description: 'New chapters for manga in these categories are auto-downloaded in addition to manga individually marked for auto-download.',
+    control: catContainer,
+  }));
+
   const saveRow = document.createElement('div');
   saveRow.className = 'flex items-center gap-3 px-4 py-3';
   saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-dl-save">Save</button><span class="js-dl-result text-sm hidden"></span>`;
@@ -41,16 +81,34 @@ export function mount(el, settings) {
   const saveBtn  = /** @type {HTMLButtonElement} */ (el.querySelector('.js-dl-save'));
   const resultEl = /** @type {HTMLElement} */ (el.querySelector('.js-dl-result'));
 
-  saveBtn.addEventListener('click', async () => {
-    saveBtn.disabled = true;
-    /** @type {Record<string, number>} */
+  /** @type {Record<string, any>} */
+  let lastSaved = {
+    ...Object.fromEntries(fields.map(f => [f.key, Number(settings?.[f.key] ?? 0)])),
+    auto_download_category_ids: _selectedCatIds.slice().sort((a, b) => a - b),
+  };
+
+  /** @returns {Record<string, any>} */
+  function buildPayload() {
+    /** @type {Record<string, any>} */
     const payload = {};
     for (const input of /** @type {NodeListOf<HTMLInputElement>} */ (el.querySelectorAll('.js-dl-field'))) {
       const key = input.dataset.key;
       if (key) payload[key] = Number(input.value);
     }
+    payload['auto_download_category_ids'] = _selectedCatIds.slice().sort((a, b) => a - b);
+    return payload;
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    const payload = buildPayload();
+    if (JSON.stringify(payload) === JSON.stringify(lastSaved)) {
+      saveBtn.disabled = false;
+      return;
+    }
     try {
       await api.updateSettings({ Download: payload });
+      lastSaved = { ...payload };
       showResult(resultEl, true, 'Saved.');
     } catch (e) {
       showResult(resultEl, false, e?.message ?? 'Failed to save.');
@@ -104,5 +162,8 @@ export function mount(el, settings) {
     setLocal('kani_download_ahead_count', String(v));
   });
 
-  return { destroy() { el.innerHTML = ''; } };
+  return {
+    destroy() { el.innerHTML = ''; },
+    isDirty() { return JSON.stringify(buildPayload()) !== JSON.stringify(lastSaved); },
+  };
 }

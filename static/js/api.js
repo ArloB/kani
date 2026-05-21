@@ -53,6 +53,8 @@ async function _req(method, path, opts = {}) {
       status: res.status,
       code: body?.code ?? null,
       hint: body?.hint ?? null,
+      suggestions: body?.suggestions ?? null,
+      body,
     });
   }
 
@@ -97,6 +99,48 @@ export async function logoutEverywhere() {
   return _req('POST', '/auth/logout_everywhere');
 }
 
+export async function getPasswordResetEnabled() {
+  return _req('GET', '/auth/password-reset-enabled');
+}
+
+export async function getRegistrationEnabled() {
+  return _req('GET', '/auth/registration-enabled');
+}
+
+/** @param {string} email */
+export async function requestPasswordReset(email) {
+  return _req('POST', '/auth/password-reset/request', { body: { email } });
+}
+
+/** @param {string} token */
+export async function validateResetToken(token) {
+  return _req('GET', '/auth/password-reset/validate', { params: { token } });
+}
+
+/** @param {string} token @param {string} newPassword */
+export async function confirmPasswordReset(token, newPassword) {
+  return _req('POST', '/auth/password-reset/confirm', { body: { token, new_password: newPassword } });
+}
+
+/** @param {string} token */
+export async function verifyEmail(token) {
+  return _req('POST', '/auth/verify-email', { body: { token } });
+}
+
+export async function resendVerification() {
+  return _req('POST', '/auth/resend-verification');
+}
+
+/** @param {string} to */
+export async function sendTestEmail(to) {
+  return _req('POST', '/admin/email/test', { body: { to } });
+}
+
+/** @param {number} userId */
+export async function adminTriggerPasswordReset(userId) {
+  return _req('POST', `/admin/users/${userId}/password-reset`);
+}
+
 // ── Boot / SSE ────────────────────────────────────────────────────────────────
 
 /** @returns {Promise<{ boot_id: string }>} */
@@ -108,6 +152,10 @@ export async function getBootId() {
 
 export async function getSources() {
   return _req('GET', '/sources');
+}
+
+export async function getSourcesHealth() {
+  return _req('GET', '/sources/health');
 }
 
 /** @param {string} name */
@@ -128,6 +176,11 @@ export async function deleteSource(id) {
 /** @param {number} id */
 export async function getSourceMetadata(id) {
   return _req('GET', `/sources/${id}/metadata`);
+}
+
+/** @param {number} id */
+export async function reloadSource(id) {
+  return _req('POST', `/sources/${id}/reload`);
 }
 
 /**
@@ -162,6 +215,8 @@ export async function uploadWasm(id, file) {
       status: res.status,
       code: body?.code ?? null,
       hint: body?.hint ?? null,
+      suggestions: body?.suggestions ?? null,
+      body,
     });
   }
   return null;
@@ -195,8 +250,10 @@ export async function getSourceMangaUrl(sid, mangaId) {
 }
 
 /** @param {number} sid @param {string} mangaId */
-export async function saveToLibrary(sid, mangaId) {
-  return _req('POST', `/sources/${sid}/save/${encodeURIComponent(mangaId)}`);
+/** @param {number|string} sid @param {string} mangaId @param {boolean} [force] */
+export async function saveToLibrary(sid, mangaId, force = false) {
+  const qs = force ? '?force=true' : '';
+  return _req('POST', `/sources/${sid}/save/${encodeURIComponent(mangaId)}${qs}`);
 }
 
 /** @param {number} sid @param {string} mangaId @param {number} page @param {number} size @param {AbortSignal|undefined} signal @param {string|null} [sort] */
@@ -430,6 +487,62 @@ export async function toggleAutoDownload(id, enabled) {
 }
 
 /** @param {number} id @param {boolean} enabled */
+export async function toggleAutoScan(id, enabled) {
+  return _req('POST', `/manga/${id}/toggle_auto_scan`, { body: { enabled } });
+}
+
+/** @param {number} id @param {string} notes */
+export async function updateMangaNotes(id, notes) {
+  return _req('PATCH', `/manga/${id}/notes`, { body: { notes } });
+}
+
+/**
+ * @param {number} id
+ * @param {{ local_name?: string|null, local_description?: string|null,
+ *           local_status?: number|null, authors?: string[]|null,
+ *           artists?: string[]|null, tags?: string[]|null }} data
+ */
+export async function updateLocalMetadata(id, data) {
+  return _req('PATCH', `/manga/${id}/local_metadata`, { body: data });
+}
+
+/** @param {number} id @param {File} file */
+export async function uploadMangaCover(id, file) {
+  const body = new FormData();
+  body.append('file', file);
+  const res = await fetch(`/rest/manga/${id}/cover`, { method: 'POST', credentials: 'include', body });
+  if (res.status === 401) {
+    if (location.pathname !== '/login') window.location.href = '/login';
+    throw Object.assign(new Error('Unauthorized'), { status: 401 });
+  }
+  if (!res.ok) {
+    let b;
+    try { b = await res.json(); } catch { b = { error: res.statusText }; }
+    throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status });
+  }
+  return res.status === 204 ? null : res.json().catch(() => null);
+}
+
+/** @param {number} id */
+export async function clearMangaCoverOverride(id) {
+  return _req('DELETE', `/manga/${id}/cover`);
+}
+
+/** @returns {Promise<Array<{id: number, name: string}>>} */
+export async function getFilterAuthors() { return _req('GET', '/filters/authors'); }
+
+/** @returns {Promise<Array<{id: number, name: string}>>} */
+export async function getFilterArtists() { return _req('GET', '/filters/artists'); }
+
+/** @returns {Promise<Array<{id: number, name: string}>>} */
+export async function getFilterTags() { return _req('GET', '/filters/tags'); }
+
+/** @param {number} id */
+export async function markMangaSeen(id) {
+  return _req('PATCH', `/manga/${id}/seen`);
+}
+
+/** @param {number} id @param {boolean} enabled */
 export async function toggleDownloadAllPreferred(id, enabled) {
   return _req('POST', `/manga/${id}/toggle_download_all_preferred`, { body: { enabled } });
 }
@@ -473,6 +586,28 @@ export async function addDownloadRule(mangaId, kind) {
 /** @param {number} ruleId */
 export async function deleteDownloadRule(ruleId) {
   return _req('DELETE', `/download_rules/${ruleId}`);
+}
+
+/** @param {number} ruleId @param {any} kind */
+export async function updateDownloadRule(ruleId, kind) {
+  return _req('PATCH', `/download_rules/${ruleId}`, { body: { kind } });
+}
+
+/**
+ * @param {number} mangaId
+ * @param {number[]} orderedIds
+ */
+export async function reorderDownloadRules(mangaId, orderedIds) {
+  return _req('PUT', `/manga/${mangaId}/download_rules/order`, { body: { ordered_ids: orderedIds } });
+}
+
+/**
+ * @param {number} mangaId
+ * @param {any[]} kinds
+ * @returns {Promise<{matching: number, total: number}>}
+ */
+export async function previewDownloadRules(mangaId, kinds) {
+  return _req('POST', `/manga/${mangaId}/download_rules/preview`, { body: { kinds } });
 }
 
 // ── Scanlator Preferences ─────────────────────────────────────────────────────
@@ -626,6 +761,30 @@ export async function serverStop() {
 
 export async function serverRestart() {
   return _req('POST', '/server/restart');
+}
+
+export async function runMaintenance() {
+  return _req('POST', '/admin/maintenance');
+}
+
+export async function clearCache() {
+  return _req('POST', '/admin/cache/clear');
+}
+
+export async function getCredentialEncryptionStatus() {
+  return _req('GET', '/admin/credentials/status');
+}
+
+export async function migrateCredentialsToEncrypted() {
+  return _req('POST', '/admin/credentials/encrypt');
+}
+
+export async function stopScan() {
+  return _req('POST', '/admin/scan/stop');
+}
+
+export async function cancelAllGlobalDownloads() {
+  return _req('DELETE', '/downloads/active');
 }
 
 // ── External Trackers ────────────────────────────────────────────────────
@@ -796,4 +955,192 @@ export async function getUserActivity(userId, opts = {}) {
 /** @param {number} [limit] */
 export async function getDownloadHistory(limit) {
   return _req('GET', '/downloads/history', limit ? { params: { limit } } : {});
+}
+
+// ── Admin logs ────────────────────────────────────────────────────────────────
+
+/**
+ * @param {{ level?: string, source?: string, from?: string, to?: string,
+ *           search?: string, page?: number, page_size?: number }} [params]
+ */
+export async function getAdminLogs(params = {}) {
+  return _req('GET', '/admin/logs', { params });
+}
+
+/**
+ * @param {{ user_id?: number, action?: string, from?: string, to?: string,
+ *           search?: string, page?: number, page_size?: number }} [params]
+ */
+export async function getAdminAuditLog(params = {}) {
+  return _req('GET', '/admin/audit-log', { params });
+}
+
+// ── Reading stats ─────────────────────────────────────────────────────────────
+
+/** @param {number} [period] Number of days for the activity window (default 90). */
+export async function getReadingStats(period) {
+  return _req('GET', '/stats', period ? { params: { period } } : {});
+}
+
+// ── Backup / Restore ──────────────────────────────────────────────────────────
+
+/** Fetch as a File download (navigates browser). */
+export function downloadBackup(includeChapterProgress = false) {
+  const qs = includeChapterProgress ? '?include_chapter_progress=true' : '';
+  window.location.href = `/rest/library/backup${qs}`;
+}
+
+/** @param {File} file */
+export async function previewBackup(file) {
+  const body = new FormData();
+  body.append('file', file);
+  const res = await fetch('/rest/library/backup/preview', { method: 'POST', credentials: 'include', body });
+  if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
+  return res.json();
+}
+
+/**
+ * @param {File} file
+ * @param {{ merge?: boolean, import_manga?: boolean, import_categories?: boolean,
+ *            import_download_rules?: boolean, import_tracking?: boolean,
+ *            import_chapter_progress?: boolean, import_settings?: boolean }} [opts]
+ */
+export async function restoreBackup(file, opts = {}) {
+  const body = new FormData();
+  body.append('file', file);
+  for (const [k, v] of Object.entries(opts)) body.append(k, String(v));
+  const res = await fetch('/rest/library/restore', { method: 'POST', credentials: 'include', body });
+  if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
+  return res.json();
+}
+
+/** @param {File} file */
+export async function previewTachiyomiImport(file) {
+  const body = new FormData();
+  body.append('file', file);
+  const res = await fetch('/rest/library/import/tachiyomi/preview', { method: 'POST', credentials: 'include', body });
+  if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
+  return res.json();
+}
+
+/**
+ * @param {File} file
+ * @param {{ import_manga?: boolean, import_categories?: boolean,
+ *            import_tracking?: boolean, import_chapter_progress?: boolean }} [opts]
+ */
+export async function importTachiyomiBackup(file, opts = {}) {
+  const body = new FormData();
+  body.append('file', file);
+  for (const [k, v] of Object.entries(opts)) body.append(k, String(v));
+  const res = await fetch('/rest/library/import/tachiyomi', { method: 'POST', credentials: 'include', body });
+  if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
+  return res.json();
+}
+
+// ── Pending imports ───────────────────────────────────────────────────────────
+
+export async function getPendingImports() {
+  return _req('GET', '/library/pending-imports');
+}
+
+/** @param {number} id */
+export async function deletePendingImport(id) {
+  return _req('DELETE', `/library/pending-imports/${id}`);
+}
+
+/** @param {number} id @param {number} sourceId @param {string} sourceMangaId */
+export async function resolvePendingImport(id, sourceId, sourceMangaId) {
+  return _req('POST', `/library/pending-imports/${id}/resolve`, { body: { source_id: sourceId, source_manga_id: sourceMangaId } });
+}
+
+// ── Orphaned manga ────────────────────────────────────────────────────────────
+
+export async function getOrphanedManga() {
+  return _req('GET', '/library/orphaned');
+}
+
+// ── Duplicates ────────────────────────────────────────────────────────────────
+
+export async function getDuplicates() {
+  return _req('GET', '/library/duplicates');
+}
+
+/** Trigger a full-library rescan and persist any new pairs found. */
+export async function rescanDuplicates() {
+  return _req('POST', '/library/duplicates/scan');
+}
+
+/** @param {number} aId @param {number} bId */
+export async function dismissDuplicate(aId, bId) {
+  return _req('POST', `/library/duplicates/${aId}/${bId}/dismiss`);
+}
+
+/** @param {number} keepId @param {number} discardId */
+export async function mergeDuplicate(keepId, discardId) {
+  return _req('POST', '/library/duplicates/merge', { body: { keep_id: keepId, discard_id: discardId } });
+}
+
+// ── Filesystem browser ────────────────────────────────────────────────────────
+
+/** @param {string} path */
+export async function fsBrowse(path) {
+  return _req('GET', '/admin/fs/browse', { params: { path } });
+}
+
+/** @param {string} path @param {string} name */
+export async function fsMkdir(path, name) {
+  return _req('POST', '/admin/fs/mkdir', { body: { path, name } });
+}
+
+// ── Path migration ────────────────────────────────────────────────────────────
+
+/** @param {'library_path'|'wasm_storage_path'} field @param {string} newPath */
+export async function estimatePathMigration(field, newPath) {
+  return _req('POST', '/admin/path/estimate', { body: { field, new_path: newPath } });
+}
+
+/** @param {'library_path'|'wasm_storage_path'} field @param {string} newPath */
+export async function startPathMigration(field, newPath) {
+  return _req('POST', '/admin/path/migrate', { body: { field, new_path: newPath } });
+}
+
+// ── Webhooks ──────────────────────────────────────────────────────────────────
+
+export async function listWebhooks() {
+  return _req('GET', '/webhooks');
+}
+
+/** @param {{ url: string, secret?: string, events?: string }} body */
+export async function createWebhook(body) {
+  return _req('POST', '/webhooks', { body });
+}
+
+/** @param {number} id @param {{ url?: string, secret?: string, events?: string, enabled?: boolean }} body */
+export async function updateWebhook(id, body) {
+  return _req('PATCH', `/webhooks/${id}`, { body });
+}
+
+/** @param {number} id */
+export async function deleteWebhook(id) {
+  return _req('DELETE', `/webhooks/${id}`);
+}
+
+/** @param {number} id */
+export async function testWebhook(id) {
+  return _req('POST', `/webhooks/${id}/test`);
+}
+
+/** @param {number} id */
+export async function listWebhookDeliveries(id) {
+  return _req('GET', `/webhooks/${id}/deliveries`);
+}
+
+/** @param {number} mangaId */
+export async function getMangaWebhookNotify(mangaId) {
+  return _req('GET', `/manga/${mangaId}/webhook-notify`);
+}
+
+/** @param {number} mangaId @param {boolean} enabled */
+export async function setMangaWebhookNotify(mangaId, enabled) {
+  return _req('PUT', `/manga/${mangaId}/webhook-notify`, { body: { enabled } });
 }

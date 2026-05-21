@@ -1,5 +1,5 @@
 // @ts-check
-// Settings — Server section (restart, stop).
+// Settings — Server section (restart, stop, admin controls).
 
 import * as api from '../../api.js';
 import { openConfirm } from '../../utils.js';
@@ -8,6 +8,64 @@ import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.j
 
 /** @param {HTMLElement} el */
 export function mount(el) {
+  // ── Admin actions ─────────────────────────────────────────────────────────
+
+  const adminGroup = mkSettingsGroup('Admin actions');
+  const adminCard  = mkSettingsGroupCard(adminGroup);
+
+  /** @param {string} label @param {string} btnLabel @param {string} btnClass @param {() => Promise<void>} onClick */
+  function _mkActionRow(label, description, btnLabel, btnClass, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `${btnClass} btn-sm`;
+    btn.textContent = btnLabel;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try { await onClick(); } finally { btn.disabled = false; }
+    });
+    adminCard.appendChild(mkSettingsRow({ label, description, control: btn }));
+    return btn;
+  }
+
+  _mkActionRow(
+    'Cancel all downloads',
+    'Stop all in-progress and queued chapter downloads.',
+    'Cancel downloads',
+    'btn-ghost',
+    async () => {
+      if (!(await openConfirm({ title: 'Cancel all downloads', message: 'Cancel all in-progress and queued downloads?', confirmLabel: 'Cancel downloads', danger: true }))) return;
+      await api.cancelAllGlobalDownloads();
+      showToast('All downloads cancelled.', { type: 'info' });
+    },
+  );
+
+  _mkActionRow(
+    'Stop current scan',
+    'Abort the in-progress library refresh scan.',
+    'Stop scan',
+    'btn-ghost',
+    async () => {
+      if (!(await openConfirm({ title: 'Stop scan', message: 'Abort the currently running library scan?', confirmLabel: 'Stop scan', danger: true }))) return;
+      await api.stopScan();
+      showToast('Scan aborted.', { type: 'info' });
+    },
+  );
+
+  _mkActionRow(
+    'Clear request cache',
+    'Flush the in-memory cache for source manga details, chapter lists, and search results.',
+    'Clear cache',
+    'btn-ghost',
+    async () => {
+      await api.clearCache();
+      showToast('Cache cleared.', { type: 'success' });
+    },
+  );
+
+  el.appendChild(adminGroup);
+
+  // ── Danger zone ───────────────────────────────────────────────────────────
+
   const dangerGroup = mkSettingsGroup('Danger zone');
   const dangerCard  = mkSettingsGroupCard(dangerGroup);
   dangerCard.classList.add('border', 'border-danger/20');

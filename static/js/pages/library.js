@@ -4,7 +4,7 @@
 import { h, render } from 'preact';
 import htm from 'htm';
 import * as api from '../api.js';
-import { hasPermission, getState, subscribe } from '../state.js';
+import { hasPermission, getState, setState, updateState, subscribe } from '../state.js';
 import { navigate } from '../router.js';
 import { debounce, getLocal, getLocalInt, setLocal, hasNextPage, confirmDialog, formatChapterTitle, deferredSkeleton } from '../utils.js';
 
@@ -13,7 +13,7 @@ const STATUS_VALUES = { ongoing: 0, completed: 1, hiatus: 2, cancelled: 3, unkno
 import { Combobox } from '../components/combobox.js';
 import { renderCategoryTabs } from '../components/tabs.js';
 import { renderPagination } from '../components/pagination.js';
-import { renderMangaGrid, createMangaCard } from '../components/manga-card.js';
+import { renderMangaGrid, createMangaCard, setMangaCardScanning, setMangaCardDownloadProgress } from '../components/manga-card.js';
 import { skeletonGrid } from '../components/skeletons.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
@@ -42,6 +42,8 @@ let _pageSize = 0;
 /** @type {AbortController|null} */ let _abort = null;
 /** @type {(() => void)|null} */   let _unsubRefresh = null;
 /** @type {(() => void)|null} */   let _unsubInvalidation = null;
+/** @type {(() => void)|null} */   let _unsubScanning = null;
+/** @type {(() => void)|null} */   let _unsubDownloads = null;
 /** @type {(() => void)|null} */   let _destroyPagination = null;
 /** @type {(() => void)|null} */   let _destroyTabs = null;
 /** @type {IntersectionObserver|null} */ let _sentinelObserver = null;
@@ -153,13 +155,28 @@ export async function init(container) {
     scanAllBtn.textContent = 'Scan all';
     scanAllBtn.addEventListener('click', async () => {
       if (scanAllBtn) { scanAllBtn.disabled = true; scanAllBtn.textContent = 'Scanning…'; }
+      // Immediately mark all visible cards as scanning so there's client-side feedback
+      // even before the SSE 'started' event arrives.
+      const visibleIds = Array.from(
+        /** @type {NodeListOf<HTMLElement>} */ (_gridEl?.querySelectorAll('[data-manga-id]') ?? [])
+      ).map(el => parseInt(el.dataset.mangaId ?? '', 10)).filter(n => !isNaN(n));
+      if (visibleIds.length) setState('scanningMangaIds', new Set(visibleIds));
       try {
         const { queued } = await api.scanAllLibrary();
         showToast(`Scan queued for ${queued} manga.`);
+        // Button stays disabled until the SSE 'completed' event re-enables it.
+        // If SSE is unavailable, re-enable after a reasonable timeout.
+        setTimeout(() => {
+          if (scanAllBtn && scanAllBtn.disabled) {
+            scanAllBtn.disabled = false;
+            scanAllBtn.textContent = 'Scan all';
+            setState('scanningMangaIds', new Set());
+          }
+        }, 120_000);
       } catch (e) {
         showToast(/** @type {any} */(e)?.message ?? 'Failed to start scan.', { type: 'error' });
-      } finally {
         if (scanAllBtn) { scanAllBtn.disabled = false; scanAllBtn.textContent = 'Scan all'; }
+        setState('scanningMangaIds', new Set());
       }
     });
   }
@@ -440,7 +457,7 @@ export async function init(container) {
       // Keep the other input in sync
       for (const other of searchEls) { if (other !== searchEl) other.value = searchEl.value; }
       _page = 1;
-      _updateUrl();
+      _updateUrl(true);
       _fetchLibrary();
     }, 300));
   }
@@ -509,6 +526,8 @@ export async function init(container) {
       refreshCircle?.classList.add('hidden');
       if (refreshBtn) { refreshBtn.classList.remove('hidden'); refreshBtn.disabled = false; }
       if (refreshMsg) refreshMsg.style.display = 'none';
+      // Re-enable scan all button if it was left disabled (SSE-driven re-enable).
+      if (scanAllBtn && scanAllBtn.disabled) { scanAllBtn.disabled = false; scanAllBtn.textContent = 'Scan all'; }
     } else if (state.type === 'running') {
       if (refreshBtn) { refreshBtn.classList.add('hidden'); refreshBtn.disabled = true; }
       refreshCircle?.classList.remove('hidden');
@@ -533,6 +552,7 @@ export async function init(container) {
     } else if (state.type === 'done') {
       refreshCircle?.classList.add('hidden');
       if (refreshBtn) { refreshBtn.classList.remove('hidden'); refreshBtn.disabled = false; }
+      if (scanAllBtn && scanAllBtn.disabled) { scanAllBtn.disabled = false; scanAllBtn.textContent = 'Scan all'; }
       if (refreshMsg) { refreshMsg.style.display = ''; refreshMsg.textContent = `Refresh complete — ${state.total} manga updated, ${state.failed} failed.`; }
     }
   }
@@ -546,6 +566,45 @@ export async function init(container) {
     if (val !== _lastInvalidation) {
       _lastInvalidation = val;
       _fetchLibrary();
+    }
+  });
+
+  // ── Scan spinner subscription ──
+  let _prevScanningIds = /** @type {Set<number>} */ (new Set());
+  _unsubScanning = subscribe('scanningMangaIds', (/** @type {Set<number>} */ ids) => {
+    if (!_gridEl) return;
+    for (const id of ids) {
+      if (!_prevScanningIds.has(id)) setMangaCardScanning(id, true, _gridEl);
+    }
+    for (const id of _prevScanningIds) {
+      if (!ids.has(id)) setMangaCardScanning(id, false, _gridEl);
+    }
+    _prevScanningIds = ids;
+  });
+
+  // ── Per-manga download progress subscription ──
+  _unsubDownloads = subscribe('chaptersProgress', (/** @type {Map<number, import('../state.js').ChapterProgress>} */ map) => {
+    if (!_gridEl) return;
+    // Aggregate progress by manga: sum pages of in-progress chapters.
+    /** @type {Map<number, { completed: number, total: number }>} */
+    const byManga = new Map();
+    for (const ch of map.values()) {
+      if (ch.status !== 'in_progress') continue;
+      const cur = byManga.get(ch.mangaId) ?? { completed: 0, total: 0 };
+      byManga.set(ch.mangaId, {
+        completed: cur.completed + ch.completedPages,
+        total: cur.total + ch.totalPages,
+      });
+    }
+    // Apply or remove progress bars on visible cards.
+    for (const card of /** @type {NodeListOf<HTMLElement>} */ (_gridEl.querySelectorAll('[data-manga-id]'))) {
+      const id = Number(card.dataset.mangaId);
+      const prog = byManga.get(id);
+      if (prog && prog.total > 0) {
+        setMangaCardDownloadProgress(id, Math.round((prog.completed / prog.total) * 100), _gridEl);
+      } else {
+        setMangaCardDownloadProgress(id, null, _gridEl);
+      }
     }
   });
 
@@ -597,7 +656,7 @@ export async function init(container) {
 
 // ── URL sync ──────────────────────────────────────────────────────────────────
 
-function _updateUrl() {
+function _updateUrl(replace = false) {
   const params = new URLSearchParams();
   if (_page > 1)                params.set('page',            String(_page));
   if (_search)                  params.set('search',          _search);
@@ -611,7 +670,9 @@ function _updateUrl() {
   if (_hideCompletedStatus)     params.set('hide_completed',  '1');
   if (_sortOrder && _sortOrder !== 'updated_desc') params.set('sort', _sortOrder);
   const qs = params.toString();
-  history.replaceState(null, '', qs ? '?' + qs : location.pathname);
+  const url = qs ? '?' + qs : location.pathname;
+  if (replace) history.replaceState(null, '', url);
+  else history.pushState(null, '', url);
 }
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -683,7 +744,7 @@ function _fetchLibrary() {
         _appendMangaCards(_gridEl, items);
       } else {
         renderMangaGrid(_gridEl, {
-          items: items.map(m => ({ id: m.id, title: m.title, cover_image_url: m.cover_url ?? null })),
+          items: items.map(m => ({ id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0 })),
           getHref: (m) => `/manga/${m.id}`,
           large: true,
           onCardClick: (m) => {
@@ -742,7 +803,7 @@ function _appendMangaCards(gridEl, items) {
   }
   for (const m of items) {
     grid.appendChild(createMangaCard({
-      manga: { id: m.id, title: m.title, cover_image_url: m.cover_url ?? null },
+      manga: { id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0 },
       href: `/manga/${m.id}`,
       onCardClick: (manga) => {
         const cardEl = /** @type {HTMLElement} */ (gridEl.querySelector(`[data-manga-id="${manga.id}"]`));
@@ -907,13 +968,20 @@ function _renderBulkBar() {
   // Scan selected for new chapters
   bar.querySelector('.js-bulk-scan')?.addEventListener('click', async () => {
     const ids = [..._selected];
+    const countEl = _bulkBarEl?.querySelector('.js-select-count');
+    // Disable all actions during scan
+    for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (bar.querySelectorAll('.js-bulk-action'))) btn.disabled = true;
+    setState('scanningMangaIds', new Set(ids));
     let done = 0, newChapters = 0;
-    for (const id of ids) {
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if (countEl) countEl.textContent = `Scanning ${i + 1} / ${ids.length}…`;
       try {
         const res = await api.scanManga(id);
         done++;
         newChapters += res?.new_chapters ?? 0;
       } catch { /* ignore */ }
+      updateState('scanningMangaIds', (/** @type {Set<number>} */ s) => { const n = new Set(s); n.delete(id); return n; });
     }
     showToast(`Scan complete: ${newChapters} new chapter${newChapters !== 1 ? 's' : ''} found across ${done} manga.`);
     _exitSelectMode();
@@ -1100,6 +1168,10 @@ export function destroy(container) {
   _unsubRefresh = null;
   _unsubInvalidation?.();
   _unsubInvalidation = null;
+  _unsubScanning?.();
+  _unsubScanning = null;
+  _unsubDownloads?.();
+  _unsubDownloads = null;
   _destroyPagination?.();
   _destroyPagination = null;
   _sentinelObserver?.disconnect();

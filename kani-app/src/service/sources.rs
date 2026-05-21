@@ -1,20 +1,30 @@
 use super::*;
+use crate::models::SourceHealthRow;
 
 impl AppService {
     pub async fn get_source(&self, id: i64) -> Result<Source> {
-        let source = sqlx::query_as!(Source, "SELECT * FROM sources WHERE id = ?", id)
-            .fetch_optional(&self.db)
-            .await?
-            .ok_or_else(|| ServiceError::NotFound("Source not found".into()))?;
+        let source = sqlx::query_as!(
+            Source,
+            "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http \
+             FROM sources WHERE id = ? AND deleted_at IS NULL",
+            id
+        )
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or_else(|| ServiceError::NotFound("Source not found".into()))?;
 
         Ok(source)
     }
 
     pub async fn list_sources(&self) -> Result<Vec<Source>> {
-        sqlx::query_as!(Source, "SELECT * FROM sources LIMIT 1000")
-            .fetch_all(&self.db)
-            .await
-            .map_err(Into::into)
+        sqlx::query_as!(
+            Source,
+            "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http \
+             FROM sources WHERE deleted_at IS NULL LIMIT 1000"
+        )
+        .fetch_all(&self.db)
+        .await
+        .map_err(Into::into)
     }
 
     /// Inserts a new source row with a default version and returns its id.
@@ -49,14 +59,37 @@ impl AppService {
         Ok(())
     }
 
-    /// Deletes a source, removes its WASM file, evicts it from the runtime, and
-    /// invalidates the cache. A no-op if the source does not exist.
+    /// Soft-deletes a source: marks manga as orphaned, sets deleted_at on the source
+    /// row, removes the WASM file, and evicts the source from the runtime. The source
+    /// row is kept so manga.source_id FKs remain valid.
     pub async fn delete_source(&self, id: i64, user_id: i64) -> Result<()> {
-        let row = sqlx::query!("DELETE FROM sources WHERE id = ? RETURNING name", id)
-            .fetch_optional(&self.db)
-            .await?;
+        let row = sqlx::query!(
+            "SELECT name FROM sources WHERE id = ? AND deleted_at IS NULL",
+            id
+        )
+        .fetch_optional(&self.db)
+        .await?;
 
         if let Some(row) = row {
+            let mut tx = self.db.begin().await?;
+
+            let orphaned = sqlx::query_scalar!(
+                "UPDATE manga SET is_orphaned = TRUE WHERE source_id = ? RETURNING id",
+                id
+            )
+            .fetch_all(&mut *tx)
+            .await?
+            .len() as i64;
+
+            sqlx::query!(
+                "UPDATE sources SET deleted_at = datetime('now'), enabled = FALSE WHERE id = ?",
+                id
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await?;
+
             let wasm_path = self.settings.read().await.wasm_storage_path.clone();
             let storage = wasm_path
                 .to_str()
@@ -70,8 +103,13 @@ impl AppService {
 
             self.sources.write().await.remove(&id);
             self.cache.invalidate_source(id);
-            self.audit(Some(user_id), "source.delete", Some(&row.name), None)
-                .await;
+            self.audit(
+                Some(user_id),
+                "source.delete",
+                Some(&row.name),
+                Some(serde_json::json!({ "manga_orphaned": orphaned })),
+            )
+            .await;
         }
 
         Ok(())
@@ -97,12 +135,13 @@ impl AppService {
 
     /// Returns the base URL of a source, or an empty string if the source has none.
     pub async fn get_source_base_url(&self, id: i64) -> Result<String> {
-        Ok(
-            sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", id)
-                .fetch_optional(&self.db)
-                .await?
-                .unwrap_or_default(),
+        Ok(sqlx::query_scalar!(
+            "SELECT base_url FROM sources WHERE id = ? AND deleted_at IS NULL",
+            id
         )
+        .fetch_optional(&self.db)
+        .await?
+        .unwrap_or_default())
     }
 
     pub async fn get_metadata(&self, id: i64) -> Result<String> {
@@ -115,13 +154,23 @@ impl AppService {
                 .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
         };
 
+        let t0 = std::time::Instant::now();
         let result = source_manager
             .lease_instance()
             .await?
             .get_metadata()
-            .await?;
-
-        serde_json::to_string(&result).map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+            .await;
+        let elapsed = t0.elapsed().as_millis() as u64;
+        match result {
+            Ok(r) => {
+                self.record_source_success(id, elapsed).await;
+                serde_json::to_string(&r).map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+            }
+            Err(e) => {
+                self.record_source_error(id).await;
+                Err(ServiceError::Core(e))
+            }
+        }
     }
 
     pub async fn get_popular_manga(
@@ -208,16 +257,22 @@ impl AppService {
                 .cloned()
                 .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
         };
-        source_manager
+        let t0 = std::time::Instant::now();
+        let result = source_manager
             .lease_instance()
             .await?
             .get_filter_list()
-            .await
-            .map_err(ServiceError::Core)
+            .await;
+        let elapsed = t0.elapsed().as_millis() as u64;
+        match result {
+            Ok(r) => { self.record_source_success(id, elapsed).await; Ok(r) }
+            Err(e) => { self.record_source_error(id).await; Err(ServiceError::Core(e)) }
+        }
     }
 
     pub async fn get_source_url(&self, id: i64, manga_id: &str) -> Result<String> {
         self.require_source_active(id).await?;
+        let manga_id_d = decode_manga_id(manga_id);
         let source_manager = {
             let sources = self.sources.read().await;
             sources
@@ -228,7 +283,7 @@ impl AppService {
         source_manager
             .lease_instance()
             .await?
-            .get_url(manga_id)
+            .get_url(&manga_id_d)
             .await
             .map_err(ServiceError::Core)
     }
@@ -347,9 +402,12 @@ impl AppService {
                 return Ok(());
             }
         }
-        let row = sqlx::query!("SELECT enabled FROM sources WHERE id = ?", id)
-            .fetch_optional(&self.db)
-            .await?;
+        let row = sqlx::query!(
+            "SELECT enabled FROM sources WHERE id = ? AND deleted_at IS NULL",
+            id
+        )
+        .fetch_optional(&self.db)
+        .await?;
         match row {
             None => Err(ServiceError::NotFound(format!("Source {id} not found"))),
             Some(r) if !r.enabled => Err(ServiceError::SourceDisabled(id)),
@@ -367,7 +425,7 @@ impl AppService {
         let favourited_only = matches!(scope, SearchScope::FavouritedOnly) as i64;
 
         let ids_to_search: IndexMap<i64, String> = sqlx::query!(
-            "SELECT id, name FROM sources WHERE enabled = 1 AND (favourited = 1 OR ? = 0)",
+            "SELECT id, name FROM sources WHERE enabled = 1 AND deleted_at IS NULL AND (favourited = 1 OR ? = 0)",
             favourited_only
         )
         .fetch_all(&self.db)
@@ -434,7 +492,58 @@ impl AppService {
         Ok(per_source_results)
     }
 
-    pub(super) async fn scan_and_register_sources(
+    pub async fn get_source_health(&self) -> Result<Vec<SourceHealthRow>> {
+        let rows = sqlx::query_as::<_, SourceHealthRow>(
+            r#"SELECT
+                s.id AS source_id,
+                s.name AS source_name,
+                sh.last_success_at,
+                sh.last_error_at,
+                COALESCE(sh.consecutive_error_count, 0) AS consecutive_error_count,
+                sh.avg_response_ms
+            FROM sources s
+            LEFT JOIN source_health sh ON sh.source_id = s.id
+            WHERE s.deleted_at IS NULL
+            ORDER BY s.name"#,
+        )
+        .fetch_all(&self.db)
+        .await?;
+        Ok(rows)
+    }
+
+    pub async fn record_source_success(&self, source_id: i64, elapsed_ms: u64) {
+        let ms = elapsed_ms as f64;
+        let _ = sqlx::query(
+            r#"INSERT INTO source_health (source_id, last_success_at, consecutive_error_count, avg_response_ms)
+               VALUES (?, datetime('now'), 0, ?)
+               ON CONFLICT(source_id) DO UPDATE SET
+                 last_success_at = datetime('now'),
+                 consecutive_error_count = 0,
+                 avg_response_ms = CASE
+                   WHEN avg_response_ms IS NULL THEN excluded.avg_response_ms
+                   ELSE (avg_response_ms * 0.8 + excluded.avg_response_ms * 0.2)
+                 END"#,
+        )
+        .bind(source_id)
+        .bind(ms)
+        .execute(&self.db)
+        .await;
+    }
+
+    pub async fn record_source_error(&self, source_id: i64) {
+        let _ = sqlx::query(
+            r#"INSERT INTO source_health (source_id, last_error_at, consecutive_error_count)
+               VALUES (?, datetime('now'), 1)
+               ON CONFLICT(source_id) DO UPDATE SET
+                 last_error_at = datetime('now'),
+                 consecutive_error_count = consecutive_error_count + 1"#,
+        )
+        .bind(source_id)
+        .execute(&self.db)
+        .await;
+    }
+
+    pub(crate) async fn scan_and_register_sources(
         db: &SqlitePool,
         wasm_storage_path: &std::path::Path,
         smart_client: kani_core::http::SmartClient,
@@ -506,15 +615,48 @@ impl AppService {
                     (src, dst, current_filename != canonical_id.as_str())
                 };
 
-                // Already registered under the canonical id — ensure the file is named correctly.
+                // Already registered under the canonical id — sync metadata, re-activate if
+                // soft-deleted, and ensure the file is named correctly.
                 let by_id = sqlx::query!(
-                    "SELECT id FROM sources WHERE name = ?",
+                    "SELECT id, version, base_url, unrestricted_http, deleted_at FROM sources WHERE name = ?",
                     canonical_id
                 )
                 .fetch_optional(db)
                 .await?;
 
-                if by_id.is_some() {
+                if let Some(existing) = by_id {
+                    if existing.version != metadata.version {
+                        tracing::warn!(
+                            "Source '{}' version changed: DB has '{}', loaded '{}'",
+                            canonical_id, existing.version, metadata.version
+                        );
+                    }
+                    let version_changed = existing.version != metadata.version;
+                    let base_url_changed = existing.base_url != metadata.base_url;
+                    let http_changed = existing.unrestricted_http != metadata.unrestricted_http;
+                    let was_deleted = existing.deleted_at.is_some();
+                    if version_changed || base_url_changed || http_changed || was_deleted {
+                        sqlx::query!(
+                            "UPDATE sources SET version = ?, base_url = ?, unrestricted_http = ?, deleted_at = NULL WHERE id = ?",
+                            metadata.version,
+                            metadata.base_url,
+                            metadata.unrestricted_http,
+                            existing.id
+                        )
+                        .execute(db)
+                        .await?;
+                        if was_deleted {
+                            sqlx::query!(
+                                "UPDATE manga SET is_orphaned = FALSE WHERE source_id = ?",
+                                existing.id
+                            )
+                            .execute(db)
+                            .await?;
+                            tracing::info!("Re-activated previously deleted source '{}'", canonical_id);
+                        } else {
+                            tracing::debug!("Synced metadata for source '{}'", canonical_id);
+                        }
+                    }
                     let (src, dst, needs_rename) = rename_file(&filename);
                     if needs_rename && src.exists() && !dst.exists() &&
                     let Err(e) = tokio::fs::rename(&src, &dst).await {

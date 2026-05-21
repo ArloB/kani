@@ -2,6 +2,7 @@
 // Login page — username/password form, submits as JSON to /rest/auth/login.
 
 import { iconX } from '../icons.js';
+import { getPasswordResetEnabled, getRegistrationEnabled } from '../api.js';
 
 /** @param {HTMLElement} container */
 export function init(container) {
@@ -53,6 +54,9 @@ export function init(container) {
           </div>
           <button type="submit" class="btn-primary w-full h-11 mt-2" id="login-submit">Sign in</button>
         </form>
+        <p class="text-center text-sm text-text-muted hidden" id="login-forgot-link">
+          <a href="/forgot-password" class="text-accent hover:underline">Forgot password?</a>
+        </p>
         <p class="text-center text-sm text-text-muted hidden" id="login-register-link">
           Don't have an account? <a href="/register" class="text-accent hover:underline">Create one</a>
         </p>
@@ -66,11 +70,19 @@ export function init(container) {
   const errMsg = /** @type {HTMLElement}       */ (container.querySelector('#login-error-msg'));
 
   // Show register link if registration is enabled
-  fetch('/rest/auth/registration-enabled', { credentials: 'include' })
-    .then(r => r.json())
+  getRegistrationEnabled()
     .then(d => {
       if (d?.enabled) {
         container.querySelector('#login-register-link')?.classList.remove('hidden');
+      }
+    })
+    .catch(() => {});
+
+  // Show forgot password link if password reset is enabled
+  getPasswordResetEnabled()
+    .then(d => {
+      if (d?.enabled) {
+        container.querySelector('#login-forgot-link')?.classList.remove('hidden');
       }
     })
     .catch(() => {});

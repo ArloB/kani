@@ -34,7 +34,7 @@ impl AppService {
                 };
 
                 let token =
-                    match get_access_token(&self.db, tracker_id, user_id, tracker).await {
+                    match get_access_token(&self.db, tracker_id, user_id, tracker, self.encryption.as_deref()).await {
                         Ok(t) => t,
                         Err(e) => {
                             tracing::warn!(

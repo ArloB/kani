@@ -26,16 +26,30 @@ function _renderPopover(vnode) {
  * Multi-select mode (multiple={true}):
  *   value: number[], onChange: (ids: number[]) => void
  *
+ * Creatable multi-select (creatable={true}):
+ *   value: string[], onChange: (names: string[]) => void
+ *   Options are suggestions only — new values can be typed and added freely.
+ *
  * @param {{
  *   options: Array<{ id: number, name: string }>,
- *   value: number | null | number[],
- *   onChange: ((id: number | null) => void) | ((ids: number[]) => void),
+ *   value: number | null | number[] | string[],
+ *   onChange: ((id: number | null) => void) | ((ids: number[]) => void) | ((names: string[]) => void),
  *   placeholder?: string,
  *   disabled?: boolean,
  *   multiple?: boolean,
+ *   creatable?: boolean,
  * }} props
  */
-export function Combobox({ options, value, onChange, placeholder = 'Select…', disabled = false, multiple = false }) {
+export function Combobox({ options, value, onChange, placeholder = 'Select…', disabled = false, multiple = false, creatable = false }) {
+  if (creatable) {
+    return html`<${CreatableMultiCombobox}
+      options=${options}
+      value=${/** @type {string[]} */ (Array.isArray(value) ? value : [])}
+      onChange=${/** @type {(names: string[]) => void} */ (onChange)}
+      placeholder=${placeholder}
+      disabled=${disabled}
+    />`;
+  }
   if (multiple) {
     return html`<${MultiCombobox}
       options=${options}
@@ -421,6 +435,196 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
           aria-expanded=${open}
           aria-autocomplete="list"
           aria-multiselectable="true"
+          onInput=${(/** @type {any} */ e) => {
+            setInputText(/** @type {HTMLInputElement} */(e.target).value);
+            if (!open) setOpen(true);
+          }}
+          onFocus=${() => { if (!disabled) setOpen(true); }}
+          onKeyDown=${_onKeyDown}
+        />
+        <span class="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none icon-sm" aria-hidden="true">
+          <${Icon} svg=${iconChevronDown} />
+        </span>
+      </div>
+    </div>
+  `;
+}
+
+// ── Creatable multi-select ────────────────────────────────────────────────────
+// value/onChange operate on string[] (names), not number[] (ids).
+// Options are suggestions from the DB; users can also type and add free-form entries.
+
+const _CREATE_ID = '__create__';
+
+function CreatableMultiCombobox({ options, value, onChange, placeholder, disabled }) {
+  const selectedNames = /** @type {string[]} */ (Array.isArray(value) ? value : []);
+
+  const [inputText, setInputText] = useState('');
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const [scrollTop, setScrollTop] = useState(0);
+  const dropdownRef = useRef(/** @type {HTMLDivElement | null} */(null));
+  const wrapRef = useRef(/** @type {HTMLDivElement | null} */(null));
+  const inputRef = useRef(/** @type {HTMLInputElement | null} */(null));
+
+  // Build the visible drop list: filtered existing options (excluding already-selected)
+  // plus an optional "Add '…'" row at the bottom when the input is a novel value.
+  const dropItems = useMemo(() => {
+    const q = inputText.trim().toLowerCase();
+    const filtered = options.filter(o => {
+      if (selectedNames.some(n => n.toLowerCase() === o.name.toLowerCase())) return false;
+      return !q || o.name.toLowerCase().includes(q);
+    });
+    const trimmed = inputText.trim();
+    const alreadyExact = trimmed
+      && (options.some(o => o.name.toLowerCase() === trimmed.toLowerCase())
+        || selectedNames.some(n => n.toLowerCase() === trimmed.toLowerCase()));
+    if (trimmed && !alreadyExact) {
+      return [...filtered, { id: _CREATE_ID, name: trimmed }];
+    }
+    return filtered;
+  }, [inputText, options, selectedNames]);
+
+  useEffect(() => { setHighlighted(0); }, [dropItems]);
+
+  useEffect(() => {
+    if (!open) return;
+    /** @param {MouseEvent} e */
+    const handler = (e) => {
+      const target = /** @type {Node} */ (e.target);
+      if (!document.contains(target)) return;
+      if (!wrapRef.current?.contains(target) && !dropdownRef.current?.contains(target)) {
+        setOpen(false); setInputText('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !dropItems.length || !wrapRef.current) {
+      _renderPopover(null);
+      return;
+    }
+    const rect = wrapRef.current.getBoundingClientRect();
+    const localWinStart = Math.max(0, Math.floor(scrollTop / ITEM_H) - 2);
+    const localWinItems = dropItems.slice(localWinStart, localWinStart + VISIBLE + 4);
+    const localTotalH = dropItems.length * ITEM_H;
+    const localDropH = Math.min(dropItems.length, VISIBLE) * ITEM_H;
+    const spaceBelow = window.innerHeight - rect.bottom - 4;
+    const spaceAbove = rect.top - 4;
+    const openUp = spaceBelow < localDropH && spaceAbove > localDropH;
+    const dropTop = openUp ? rect.top - localDropH - 4 : rect.bottom + 4;
+
+    _renderPopover(html`
+      <div
+        role="listbox"
+        style=${{
+          position: 'fixed',
+          top: dropTop + 'px',
+          left: rect.left + 'px',
+          width: rect.width + 'px',
+          height: localDropH + 'px',
+          background: 'var(--color-surface)',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-lg)',
+          boxShadow: '0 8px 24px rgba(0,0,0,.18)',
+          overflowY: 'auto',
+          zIndex: 'var(--z-popover)',
+          pointerEvents: 'auto',
+        }}
+        ref=${dropdownRef}
+        onScroll=${(/** @type {any} */ e) => setScrollTop(/** @type {HTMLElement} */(e.target).scrollTop)}
+      >
+        <div style=${{ height: localTotalH + 'px', position: 'relative' }}>
+          ${localWinItems.map((opt, i) => {
+            const idx = localWinStart + i;
+            const isCreate = opt.id === _CREATE_ID;
+            const isHighlighted = idx === highlighted;
+            return html`
+              <div
+                key=${isCreate ? _CREATE_ID : opt.id}
+                role="option"
+                class=${'flex items-center gap-2 px-3 text-sm cursor-pointer select-none '
+                  + (isHighlighted ? 'bg-surface-2 text-text' : 'text-text hover:bg-surface-2')}
+                style=${{ position: 'absolute', top: idx * ITEM_H + 'px', width: '100%', height: ITEM_H + 'px' }}
+                onMouseDown=${(/** @type {MouseEvent} */ e) => { e.preventDefault(); _add(opt); }}
+                onMouseEnter=${() => setHighlighted(idx)}
+              >
+                ${isCreate
+                  ? html`<span class="text-accent font-medium">+</span><span>Add "<em>${opt.name}</em>"</span>`
+                  : opt.name
+                }
+              </div>
+            `;
+          })}
+        </div>
+      </div>
+    `);
+  }, [open, dropItems, highlighted, scrollTop]);
+
+  useEffect(() => () => _renderPopover(null), []);
+
+  /** @param {{ id: any, name: string }} opt */
+  function _add(opt) {
+    onChange([...selectedNames, opt.name]);
+    setInputText('');
+    inputRef.current?.focus();
+  }
+
+  function _scrollTo(idx) {
+    const dd = dropdownRef.current;
+    if (!dd) return;
+    const top = idx * ITEM_H;
+    if (top < dd.scrollTop) dd.scrollTop = top;
+    else if (top + ITEM_H > dd.scrollTop + dd.clientHeight) dd.scrollTop = top + ITEM_H - dd.clientHeight;
+  }
+
+  /** @param {KeyboardEvent} e */
+  function _onKeyDown(e) {
+    if (e.key === 'Backspace' && inputText === '' && selectedNames.length > 0) {
+      onChange(selectedNames.slice(0, -1));
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = Math.min(highlighted + 1, dropItems.length - 1);
+      setHighlighted(next);
+      _scrollTo(next);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = Math.max(highlighted - 1, 0);
+      setHighlighted(prev);
+      _scrollTo(prev);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (open && dropItems[highlighted]) _add(dropItems[highlighted]);
+      else setOpen(true);
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+      setInputText('');
+    }
+  }
+
+  return html`
+    <div class="relative flex flex-col gap-1.5" ref=${wrapRef}>
+      ${selectedNames.length > 0 && html`
+        <div class="flex flex-wrap gap-1.5">
+          ${selectedNames.map(name => html`
+            <${Pill} key=${name} label=${name}
+              onDismiss=${() => onChange(selectedNames.filter(n => n !== name))} />
+          `)}
+        </div>
+      `}
+      <div class="relative flex items-center">
+        <input
+          ref=${inputRef}
+          type="text"
+          role="combobox"
+          class="input pr-8"
+          value=${inputText}
+          placeholder=${placeholder}
+          disabled=${disabled}
+          aria-expanded=${open}
+          aria-autocomplete="list"
           onInput=${(/** @type {any} */ e) => {
             setInputText(/** @type {HTMLInputElement} */(e.target).value);
             if (!open) setOpen(true);

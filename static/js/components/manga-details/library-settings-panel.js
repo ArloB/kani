@@ -14,6 +14,18 @@ export function mountLibrarySettingsPanel(containerEl, ctx) {
 
   const card = mkCard();
 
+  if (hasPermission('library:manage')) {
+    const toggle = document.createElement('label');
+    toggle.className = 'kani-toggle cursor-pointer';
+    toggle.innerHTML = `<input type="checkbox" class="kani-toggle__input" aria-label="Auto scan"><span class="kani-toggle__track"></span>`;
+    const input = /** @type {HTMLInputElement} */ (toggle.querySelector('.kani-toggle__input'));
+    input.checked = autoScan;
+    input.addEventListener('change', async () => {
+      try { await api.toggleAutoScan(dbId, input.checked); } catch { input.checked = !input.checked; }
+    });
+    card.appendChild(mkItem(mkRow('Auto scan', 'Automatically scan this manga for new chapters', toggle)));
+  }
+
   if (hasPermission('library:refresh')) {
     const refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
@@ -30,7 +42,7 @@ export function mountLibrarySettingsPanel(containerEl, ctx) {
     card.appendChild(mkItem(mkRow('Refresh metadata', 'Re-fetch title, cover, and description from source', refreshBtn)));
   }
 
-  if (autoScan && hasPermission('library:manage')) {
+  if (hasPermission('library:manage')) {
     const toggle = document.createElement('label');
     toggle.className = 'kani-toggle cursor-pointer';
     toggle.innerHTML = `<input type="checkbox" class="kani-toggle__input" aria-label="Auto-download new chapters"><span class="kani-toggle__track"></span>`;
@@ -40,6 +52,19 @@ export function mountLibrarySettingsPanel(containerEl, ctx) {
       try { await api.toggleAutoDownload(dbId, input.checked); } catch { input.checked = !input.checked; }
     });
     card.appendChild(mkItem(mkRow('Auto-download', 'Automatically download new chapters when found', toggle)));
+  }
+
+  if (hasPermission('library:manage')) {
+    const toggle = document.createElement('label');
+    toggle.className = 'kani-toggle cursor-pointer';
+    toggle.innerHTML = `<input type="checkbox" class="kani-toggle__input" aria-label="Webhook notifications"><span class="kani-toggle__track"></span>`;
+    const input = /** @type {HTMLInputElement} */ (toggle.querySelector('.kani-toggle__input'));
+    input.checked = true;
+    api.getMangaWebhookNotify(dbId).then(res => { input.checked = res?.enabled ?? true; }).catch(() => {});
+    input.addEventListener('change', async () => {
+      try { await api.setMangaWebhookNotify(dbId, input.checked); } catch { input.checked = !input.checked; }
+    });
+    card.appendChild(mkItem(mkRow('Webhook notifications', 'Send webhook events when new chapters are found for this manga', toggle)));
   }
 
   if (hasPermission('chapter:download')) {

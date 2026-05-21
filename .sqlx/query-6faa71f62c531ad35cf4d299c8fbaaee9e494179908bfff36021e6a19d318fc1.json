@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE settings SET concurrent_page_downloads=?, concurrent_manga_downloads=?, chapter_queue_size=?, max_retries=?, initial_retry_delay_ms=?, auto_download_category_ids=? WHERE id='singleton'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "6faa71f62c531ad35cf4d299c8fbaaee9e494179908bfff36021e6a19d318fc1"
+}

@@ -82,7 +82,7 @@ function DownloadOverlay() {
   if (entries.length === 0) return null;
 
   return html`
-    <div class="fixed bottom-4 right-4 w-72 bg-surface border border-border rounded-xl shadow-lg z-50 overflow-hidden">
+    <div class="fixed bottom-4 left-4 right-4 sm:left-auto sm:w-72 bg-surface border border-border rounded-xl shadow-lg z-50 overflow-hidden">
       <div class="flex items-center justify-between px-4 py-2.5 border-b border-border-subtle">
         <span class="text-sm font-semibold text-text">Downloads</span>
         <span class="text-xs text-text-muted">${entries.filter(e => e.status === 'in_progress').length} active</span>

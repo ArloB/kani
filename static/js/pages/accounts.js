@@ -105,9 +105,9 @@ function _updateHeaderActions() {
     }
   });
 
-  const crumbs = [{ label: 'Accounts' }];
+  const crumbs = [{ label: 'Accounts', href: '/accounts?tab=users' }];
   if (_selected) {
-    crumbs.push({ label: _activeTab === 'users' ? 'Users' : 'Roles' });
+    crumbs.push({ label: _activeTab === 'users' ? 'Users' : 'Roles', href: '/accounts?tab=' + _activeTab });
     crumbs.push({ label: _activeTab === 'users' ? _selected.username : _selected.slug });
   }
 

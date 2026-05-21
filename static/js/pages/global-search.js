@@ -4,6 +4,7 @@
 import * as api from '../api.js';
 import { hasPermission } from '../state.js';
 import { navigate } from '../router.js';
+import { getParam, replaceState as urlReplaceState } from '../url-params.js';
 import { debounce, escapeHtml } from '../utils.js';
 import { skeletonGrid } from '../components/skeletons.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
@@ -20,17 +21,26 @@ let _query = '';
 let _scope = 'FavouritedOnly';
 /** @type {AbortController|null} */ let _abort = null;
 /** @type {any[]} */               let _sources = [];
-/** Per-source pagination state: sourceId → { page, hasNext } */
-/** @type {Map<number, { page: number, hasNext: boolean }>} */
+/** Per-source pagination state: sourceId → { page, hasNext, loading } */
+/** @type {Map<number, { page: number, hasNext: boolean, loading: boolean }>} */
 let _sourcePages = new Map();
+/** @type {Map<number, IntersectionObserver>} */
+let _sourceObservers = new Map();
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export async function init(container) {
   document.title = 'Search - Kani';
-  _query = '';
+  _query = getParam('q') ?? '';
   _scope = 'FavouritedOnly';
+  const scopeParam = getParam('scope');
+  if (scopeParam === 'AllEnabled') {
+    _scope = 'AllEnabled';
+  } else if (scopeParam?.startsWith('sources:')) {
+    const ids = scopeParam.slice(8).split(',').map(Number).filter(Boolean);
+    if (ids.length) _scope = { Sources: ids };
+  }
   setPageHeader({ crumbs: [{ label: 'Search' }] });
 
   if (!hasPermission('source:browse')) {
@@ -67,6 +77,8 @@ export async function init(container) {
   const chipsEl     = /** @type {HTMLElement} */ (container.querySelector('#scope-chips'));
   const resultsEl   = /** @type {HTMLElement} */ (container.querySelector('#search-results'));
 
+  searchInput.value = _query;
+
   // Load sources for scope chips
   try {
     const all = await api.getSources();
@@ -75,10 +87,23 @@ export async function init(container) {
     _sources = [];
   }
 
+  function _updateUrl() {
+    /** @type {Record<string, string>} */
+    const params = {};
+    if (_query) params.q = _query;
+    if (_scope === 'AllEnabled') params.scope = 'AllEnabled';
+    else if (typeof _scope === 'object' && 'Sources' in _scope)
+      params.scope = `sources:${_scope.Sources.join(',')}`;
+    urlReplaceState(params);
+  }
+
   _renderChips(chipsEl, resultsEl);
+
+  if (_query) _fetchSearch(resultsEl);
 
   const _debouncedSearch = debounce(() => {
     _query = searchInput.value.trim();
+    _updateUrl();
     if (_query) _fetchSearch(resultsEl);
     else { resultsEl.innerHTML = ''; resultsEl.setAttribute('aria-busy', 'false'); }
   }, 500);
@@ -104,12 +129,14 @@ export async function init(container) {
 
     mkChip('Favourites', isFav, () => {
       _scope = 'FavouritedOnly';
+      _updateUrl();
       _renderChips(el, results);
       if (_query) _fetchSearch(results);
     });
 
     mkChip('All enabled', isAll, () => {
       _scope = 'AllEnabled';
+      _updateUrl();
       _renderChips(el, results);
       if (_query) _fetchSearch(results);
     });
@@ -125,6 +152,7 @@ export async function init(container) {
         } else {
           _scope = { Sources: [src.id] };
         }
+        _updateUrl();
         _renderChips(el, results);
         if (_query) _fetchSearch(results);
       });
@@ -180,7 +208,7 @@ async function _fetchSearch(resultsEl) {
   // Initialise per-source page tracking from the fresh global search (page 1)
   _sourcePages = new Map();
   for (const sr of sourceResults) {
-    _sourcePages.set(sr.source_id, { page: 1, hasNext: sr.has_next_page ?? false });
+    _sourcePages.set(sr.source_id, { page: 1, hasNext: sr.has_next_page ?? false, loading: false });
   }
 
   const wrap = document.createElement('div');
@@ -231,9 +259,8 @@ async function _fetchSearch(resultsEl) {
       row.className = 'manga-row';
       row.setAttribute('role', 'list');
 
-      /** Populate the row from a manga array (handles both global and per-source result shapes) */
-      function _fillRow(mangaList) {
-        row.innerHTML = '';
+      /** Append manga cards to the row (before the sentinel if present) */
+      function _appendCards(mangaList) {
         for (const manga of mangaList) {
           const navId  = manga.source_manga_id ?? manga.id;
           const cardId = manga.db_id ?? manga.id;
@@ -247,67 +274,34 @@ async function _fetchSearch(resultsEl) {
         }
       }
 
-      /** Sync nav button visibility to current scroll position + page state */
+      /** Sync nav button visibility to current scroll position */
       function _updateNav() {
-        const { page, hasNext } = _sourcePages.get(sid) ?? { page: 1, hasNext: false };
         const atStart = row.scrollLeft <= 2;
         const atEnd   = row.scrollLeft + row.clientWidth >= row.scrollWidth - 2;
-        // Only show left if scrolled right, or prev page available
-        navLeft.style.display  = (!atStart || page > 1) ? '' : 'none';
-        // Only show right if more to scroll, or next page available
-        navRight.style.display = (!atEnd || hasNext) ? '' : 'none';
+        navLeft.style.display  = atStart ? 'none' : '';
+        navRight.style.display = atEnd   ? 'none' : '';
       }
 
-      _fillRow(sourceResult.manga);
+      _appendCards(sourceResult.manga);
+
+      // Sentinel triggers append-on-scroll for this row
+      const sentinel = document.createElement('div');
+      sentinel.className = 'js-sentinel w-px shrink-0 self-stretch';
+      row.appendChild(sentinel);
+
+      const { hasNext: initialHasNext } = _sourcePages.get(sid) ?? { hasNext: false };
+      if (initialHasNext) _observeRow(row, sentinel, sid, _updateNav);
 
       row.addEventListener('scroll', _updateNav, { passive: true });
       // Re-check after images load (layout may shift)
       requestAnimationFrame(_updateNav);
 
-      navLeft.addEventListener('click', async () => {
-        const { page, hasNext } = _sourcePages.get(sid) ?? { page: 1, hasNext: false };
-        if (row.scrollLeft > 2) {
-          row.scrollBy({ left: -(row.clientWidth * 0.8), behavior: 'smooth' });
-          return;
-        }
-        if (page <= 1) return;
-        navLeft.disabled = true;
-        navRight.disabled = true;
-        try {
-          const res = await api.searchManga(sid, _query, page - 1, 24, undefined, _abort?.signal);
-          const manga = Array.isArray(res?.manga) ? res.manga : Array.isArray(res) ? res : [];
-          _sourcePages.set(sid, { page: page - 1, hasNext: true });
-          _fillRow(manga);
-          row.scrollLeft = row.scrollWidth;
-        } catch { /* ignore */ } finally {
-          navLeft.disabled = false;
-          navRight.disabled = false;
-          requestAnimationFrame(_updateNav);
-        }
+      navLeft.addEventListener('click', () => {
+        row.scrollBy({ left: -(row.clientWidth * 0.8), behavior: 'smooth' });
       });
 
-      navRight.addEventListener('click', async () => {
-        const { page, hasNext } = _sourcePages.get(sid) ?? { page: 1, hasNext: false };
-        const atEnd = row.scrollLeft + row.clientWidth >= row.scrollWidth - 2;
-        if (!atEnd) {
-          row.scrollBy({ left: row.clientWidth * 0.8, behavior: 'smooth' });
-          return;
-        }
-        if (!hasNext) return;
-        navLeft.disabled = true;
-        navRight.disabled = true;
-        try {
-          const res = await api.searchManga(sid, _query, page + 1, 24, undefined, _abort?.signal);
-          const manga = Array.isArray(res?.manga) ? res.manga : Array.isArray(res) ? res : [];
-          const nextHasNext = res?.has_next_page ?? false;
-          _sourcePages.set(sid, { page: page + 1, hasNext: nextHasNext });
-          _fillRow(manga);
-          row.scrollLeft = 0;
-        } catch { /* ignore */ } finally {
-          navLeft.disabled = false;
-          navRight.disabled = false;
-          requestAnimationFrame(_updateNav);
-        }
+      navRight.addEventListener('click', () => {
+        row.scrollBy({ left: row.clientWidth * 0.8, behavior: 'smooth' });
       });
 
       wrapper.appendChild(navLeft);
@@ -322,6 +316,69 @@ async function _fetchSearch(resultsEl) {
   resultsEl.appendChild(wrap);
 }
 
+// ── Per-row infinite scroll ────────────────────────────────────────────────────
+
+/**
+ * @param {HTMLElement} row
+ * @param {HTMLElement} sentinel
+ * @param {number} sid
+ */
+function _observeRow(row, sentinel, sid, onUpdate) {
+  _sourceObservers.get(sid)?.disconnect();
+
+  const observer = new IntersectionObserver(async ([entry]) => {
+    if (!entry.isIntersecting) return;
+    const state = _sourcePages.get(sid);
+    if (!state?.hasNext || state?.loading) return;
+
+    _sourcePages.set(sid, { ...state, loading: true });
+
+    const skels = [];
+    for (let i = 0; i < 4; i++) {
+      const s = document.createElement('div');
+      s.className = 'manga-row__item';
+      const sInner = document.createElement('div');
+      sInner.className = 'skeleton rounded-sm w-full aspect-[2/3]';
+      s.appendChild(sInner);
+      row.insertBefore(s, sentinel);
+      skels.push(s);
+    }
+
+    try {
+      const res = await api.searchManga(sid, _query, state.page + 1, 24, undefined, _abort?.signal);
+      const manga = Array.isArray(res?.manga) ? res.manga : Array.isArray(res) ? res : [];
+      const nextHasNext = res?.has_next_page ?? false;
+      _sourcePages.set(sid, { page: state.page + 1, hasNext: nextHasNext, loading: false });
+      skels.forEach(s => s.remove());
+      for (const m of manga) {
+        const navId  = m.source_manga_id ?? m.id;
+        const cardId = m.db_id ?? m.id;
+        const card = createMangaCard({
+          manga: { id: cardId, title: m.title, source_id: sid, cover_image_url: m.cover_url ?? null },
+          href: `/source/${sid}/manga/${encodeURIComponent(navId)}`,
+          extraClass: 'manga-row__item',
+        });
+        card.setAttribute('role', 'listitem');
+        row.insertBefore(card, sentinel);
+      }
+      if (!nextHasNext) {
+        observer.disconnect();
+        _sourceObservers.delete(sid);
+        sentinel.remove();
+      }
+      requestAnimationFrame(onUpdate);
+    } catch (e) {
+      if (e?.name !== 'AbortError') {
+        _sourcePages.set(sid, { ...state, loading: false });
+      }
+      skels.forEach(s => s.remove());
+    }
+  }, { root: row, rootMargin: '0px 200px 0px 0px' });
+
+  observer.observe(sentinel);
+  _sourceObservers.set(sid, observer);
+}
+
 // ── Destroy ───────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
@@ -330,5 +387,7 @@ export function destroy(container) {
   _abort?.abort();
   _abort = null;
   _sourcePages = new Map();
+  for (const obs of _sourceObservers.values()) obs.disconnect();
+  _sourceObservers = new Map();
   container.innerHTML = '';
 }

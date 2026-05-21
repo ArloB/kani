@@ -242,6 +242,18 @@ export function formatRelativeTime(dateInput) {
  * @param {number} [delayMs=150]
  * @returns {() => void}         — cancel function; call when real content is ready
  */
+/** Compact relative time: "just now", "5m ago", "3h ago", or a locale date string. */
+export function fmtCompactDate(dateStr) {
+  try {
+    const d = new Date(dateStr + 'Z');
+    const diff = Date.now() - d.getTime();
+    if (diff < 60_000) return 'just now';
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+    return d.toLocaleDateString();
+  } catch { return dateStr; }
+}
+
 export function deferredSkeleton(mountFn, delayMs = 150) {
   const t = setTimeout(mountFn, delayMs);
   return () => clearTimeout(t);

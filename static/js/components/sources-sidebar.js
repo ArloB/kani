@@ -266,7 +266,8 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
                     <span class="flex flex-col min-w-0 flex-1">
                         <span class="li-title truncate">${src.name}</span>
                         <span class="li-sub flex items-center gap-1.5">
-                            <span>v${src.version}${src.language ? ` · ${src.language}` : ''}</span>
+                            <span>v${(src.version ?? '').replace('+debug', '')}${src.language ? ` · ${src.language}` : ''}</span>
+                            ${src.version?.includes('+debug') && html`<span class="text-2xs px-1 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none">DEBUG</span>`}
                             ${!src.enabled && html`<span class="text-2xs px-1 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none">Off</span>`}
                         </span>
                     </span>

@@ -18,8 +18,10 @@ import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { renderTabs } from '../components/tabs.js';
 import { showToast } from '../components/toast.js';
 import { iconDocument } from '../icons.js';
+import { getCachedChapterIds, onChapterCached } from '../offline.js';
 import { mountMangaHeader } from '../components/manga-details/manga-header.js';
 import { mountLibrarySettingsPanel } from '../components/manga-details/library-settings-panel.js';
+import { mountMetadataPanel } from '../components/manga-details/metadata-panel.js';
 import { mountTrackerPanel } from '../components/manga-details/tracker-panel.js';
 import { mountCategoryPicker } from '../components/manga-details/category-picker.js';
 import { mountDownloadRulesPanel } from '../components/manga-details/download-rules-panel.js';
@@ -59,7 +61,11 @@ let _scanlatorMode = 'priority';
 let _downloadAllPreferredOnly = true;
 let _filterDownloaded = false;
 let _filterUnread = false;
+let _filterCached = false;
 let _filterScanlator = /** @type {string|null} */ (null);
+let _cachedChapterIds = /** @type {Set<number>} */ (new Set());
+let _kccAvailable = false;
+/** @type {(() => void)|null} */ let _unsubscribeCacheMsgs = null;
 /** @type {string[]} */ let _availableScanlators = [];
 let _allSelected = false;
 
@@ -124,7 +130,12 @@ export async function init(container, params) {
   _downloadAllPreferredOnly = true;
   _filterDownloaded = _dbId ? getLocal(`kani_filter_downloaded_${_dbId}`) === 'true' : false;
   _filterUnread = false;
+  _filterCached = false;
   _filterScanlator = null;
+  _cachedChapterIds = new Set();
+  _kccAvailable = false;
+  _unsubscribeCacheMsgs?.();
+  _unsubscribeCacheMsgs = null;
   _remoteChapterSorts = null;
   _remoteSort = null;
   _availableScanlators = [];
@@ -155,6 +166,24 @@ export async function init(container, params) {
       _autoScan = res.auto_scan ?? false;
       _scanlatorMode = res.scanlator_mode ?? 'priority';
       _downloadAllPreferredOnly = res.download_all_preferred_only ?? true;
+      if (info) {
+        if (res.notes !== undefined) info.notes = res.notes;
+        info.cover_overridden   = res.cover_overridden ?? false;
+        info.local_name         = res.local_name ?? null;
+        info.local_description  = res.local_description ?? null;
+        info.local_status       = res.local_status ?? null;
+        info.local_authors      = res.local_authors ?? [];
+        info.local_artists      = res.local_artists ?? [];
+        info.local_tags         = res.local_tags ?? [];
+        info.has_local_people   = res.has_local_people ?? false;
+        info.has_local_tags     = res.has_local_tags ?? false;
+        info.source_name        = res.source_name ?? info.title;
+        info.source_description = res.source_description ?? null;
+        info.source_status      = res.source_status ?? null;
+        info.source_authors     = res.source_authors ?? [];
+        info.source_artists     = res.source_artists ?? [];
+        info.source_tags        = res.source_tags ?? [];
+      }
       _sid = source?.id ?? 0;
       _mangaId = info?.source_manga_id ?? '';
       const [prefs, scanlators] = await Promise.all([
@@ -163,6 +192,9 @@ export async function init(container, params) {
       ]);
       _scanlatorPrefs = Array.isArray(prefs) ? prefs : [];
       _availableScanlators = Array.isArray(scanlators) ? scanlators : [];
+      if (_sid && _mangaId) {
+        _sourceUrl = await api.getSourceMangaUrl(_sid, _mangaId).then(r => r?.url ?? null).catch(() => null);
+      }
     } else {
       const [details, src, inLib, sourceUrlResult] = await Promise.all([
         api.getRemoteMangaDetails(_sid, _mangaId, _abort.signal),
@@ -184,6 +216,7 @@ export async function init(container, params) {
 
   _mangaData = info;
   document.title = (info?.title ?? 'Manga') + ' - Kani';
+  if (_isLocal && _dbId) api.markMangaSeen(_dbId).catch(() => {});
 
   container.innerHTML = '';
   const wrap = document.createElement('div');
@@ -309,6 +342,9 @@ export async function init(container, params) {
   }
 
   if (_isLocal) {
+    getCachedChapterIds().then(ids => { _cachedChapterIds = ids; _renderChapterList(); });
+    fetch('/rest/system/capabilities').then(r => r.json()).then(d => { _kccAvailable = !!d.kcc; _renderChapterList(); }).catch(() => {});
+    _unsubscribeCacheMsgs = onChapterCached(id => { _cachedChapterIds = new Set(_cachedChapterIds); _cachedChapterIds.add(id); _renderChapterList(); });
     _renderTabs(rightCol);
     await _fetchChapters(/** @type {HTMLElement} */(_contentSection));
   } else {
@@ -403,11 +439,21 @@ async function _renderManageTab(contentEl) {
   _manageResizeListener = applyManageHeight;
   window.addEventListener('resize', _manageResizeListener);
 
+  // ── 0. Metadata overrides ────────────────────────────────────────────────────
+
+  if (hasPermission('library:manage') && _isLocal) {
+    const metaSection = document.createElement('div');
+    metaSection.className = 'flex flex-col gap-3';
+    metaSection.appendChild(mkSectionHeader('Edit Metadata', 'Override title, description, status, authors, artists, tags, and cover. Source data is preserved and restored on refresh unless overridden.'));
+    mountMetadataPanel(metaSection, { dbId: _dbId, mangaData: _mangaData });
+    contentEl.appendChild(metaSection);
+  }
+
   // ── 1. Library ──────────────────────────────────────────────────────────────
 
   const hasLibSection =
     hasPermission('library:refresh') ||
-    (_autoScan && hasPermission('library:manage'));
+    hasPermission('library:manage');
 
   if (hasLibSection) {
     const section = document.createElement('div');
@@ -425,6 +471,45 @@ async function _renderManageTab(contentEl) {
     trackSection.appendChild(mkSectionHeader('Tracking', 'Set your reading status and score for this manga.'));
     mountTrackerPanel(trackSection, { dbId: _dbId });
     contentEl.appendChild(trackSection);
+  }
+
+  // ── 1d. Notes ──────────────────────────────────────────────────────────────
+
+  if (hasPermission('library:manage')) {
+    const notesSection = document.createElement('div');
+    notesSection.className = 'flex flex-col gap-3';
+    notesSection.appendChild(mkSectionHeader('Notes', 'Private notes about this manga.'));
+    const notesCard = mkCard();
+    const notesArea = document.createElement('textarea');
+    notesArea.className = 'input w-full text-sm resize-y min-h-24 p-3';
+    notesArea.placeholder = 'Add notes…';
+    notesArea.value = _mangaData?.notes ?? '';
+    let _notesSaveTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
+    const notesSaveStatus = document.createElement('span');
+    notesSaveStatus.className = 'text-xs text-muted mt-1 hidden';
+    notesArea.addEventListener('input', () => {
+      if (_notesSaveTimer) clearTimeout(_notesSaveTimer);
+      _notesSaveTimer = setTimeout(async () => {
+        try {
+          await api.updateMangaNotes(_dbId, notesArea.value);
+          notesSaveStatus.textContent = 'Saved';
+          notesSaveStatus.classList.remove('hidden', 'text-error');
+          notesSaveStatus.classList.add('text-success');
+          setTimeout(() => notesSaveStatus.classList.add('hidden'), 2000);
+        } catch {
+          notesSaveStatus.textContent = 'Failed to save';
+          notesSaveStatus.classList.remove('hidden', 'text-success');
+          notesSaveStatus.classList.add('text-error');
+        }
+      }, 500);
+    });
+    const notesWrap = document.createElement('div');
+    notesWrap.className = 'flex flex-col gap-1 px-4 py-3';
+    notesWrap.appendChild(notesArea);
+    notesWrap.appendChild(notesSaveStatus);
+    notesCard.appendChild(notesWrap);
+    notesSection.appendChild(notesCard);
+    contentEl.appendChild(notesSection);
   }
 
   // ── 2. Filters & Preferences ────────────────────────────────────────────────
@@ -704,6 +789,17 @@ async function _fetchChapters(sectionEl) {
     });
     controls.appendChild(unreadBtn);
 
+    const cachedBtn = document.createElement('button');
+    cachedBtn.type = 'button';
+    cachedBtn.className = 'btn-ghost btn-sm' + (_filterCached ? ' text-accent' : '');
+    cachedBtn.textContent = 'Cached';
+    cachedBtn.title = _filterCached ? 'Show all chapters' : 'Show cached chapters only';
+    cachedBtn.addEventListener('click', () => {
+      _filterCached = !_filterCached;
+      _renderChapterList();
+    });
+    controls.appendChild(cachedBtn);
+
     if (_availableScanlators.length > 1) {
       const scanSel = document.createElement('select');
       scanSel.className = 'input w-auto text-sm';
@@ -832,8 +928,9 @@ function _renderChapterList() {
   const height = window.innerWidth >= 768
     ? Math.max(200, window.innerHeight - _listContainerEl.getBoundingClientRect().top - 48 - paginH - 12)
     : undefined;
+  const displayChapters = _filterCached ? _chapters.filter(ch => _cachedChapterIds.has(ch.id)) : _chapters;
   render(html`<${VirtualChapterList}
-    chapters=${_chapters}
+    chapters=${displayChapters}
     readerHrefFn=${readerHrefFn}
     inLibrary=${_isLocal}
     mangaId=${_dbId || null}
@@ -922,20 +1019,28 @@ function _renderChapterList() {
         await api.setChapterReadStatus(ids, isRead);
         const idSet = new Set(ids);
         _chapters = _chapters.map(ch => idSet.has(ch.id) ? { ...ch, read: isRead } : ch);
+        showToast(`${ids.length} chapter${ids.length !== 1 ? 's' : ''} marked as ${isRead ? 'read' : 'unread'}`);
         _selected.clear(); _selectMode = false; _allSelected = false; _renderChapterList();
       } catch (err) { console.error('bulk read failed:', err); }
     }}
     onBulkDownload=${async () => {
       const ids = [..._selected].filter(id => { const ch = _chapters.find(c => c.id === id); return ch && !ch.downloaded; });
       if (!ids.length) return;
-      for (const id of ids) { try { await api.downloadChapter(id); } catch {} }
+      await Promise.allSettled(ids.map(id => api.downloadChapter(id)));
       _selected.clear(); _selectMode = false; _allSelected = false; _renderChapterList();
       showToast(`Queued ${ids.length} chapter${ids.length !== 1 ? 's' : ''} for download`);
     }}
     onBulkDelete=${async () => {
       const ids = [..._selected].filter(id => { const ch = _chapters.find(c => c.id === id); return ch && ch.downloaded; });
       if (!ids.length) return;
-      for (const id of ids) { try { await api.deleteChapter(id); } catch {} }
+      const ok = await confirmDialog({
+        title: `Delete ${ids.length} downloaded chapter${ids.length !== 1 ? 's' : ''}?`,
+        message: 'This will remove the downloaded files. This cannot be undone.',
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!ok) return;
+      await Promise.allSettled(ids.map(id => api.deleteChapter(id)));
       const idSet = new Set(ids);
       _chapters = _chapters.filter(ch => !(idSet.has(ch.id) && ch.is_orphaned)).map(ch => idSet.has(ch.id) ? { ...ch, download_status: 0, page_count: null, downloaded: false } : ch);
       _selected.clear(); _selectMode = false; _allSelected = false; _renderChapterList();
@@ -948,6 +1053,14 @@ function _renderChapterList() {
       if (!ch) return;
       if (ch.is_orphaned) { _chapters = _chapters.filter(c => c.id !== id); }
       else { _chapters = _chapters.map(c => c.id === id ? { ...c, download_status: 0, page_count: null, downloaded: false } : c); }
+      _renderChapterList();
+    }}
+    cachedChapterIds=${_cachedChapterIds}
+    kccAvailable=${_kccAvailable}
+    onCacheChange=${(id, isCached) => {
+      const next = new Set(_cachedChapterIds);
+      if (isCached) next.add(id); else next.delete(id);
+      _cachedChapterIds = next;
       _renderChapterList();
     }}
     height=${height}
@@ -999,6 +1112,8 @@ export function destroy(container) {
   _abort?.abort();
   _abort = null;
   if (_sseListener) { window.removeEventListener('kani:sse', _sseListener); _sseListener = null; }
+  _unsubscribeCacheMsgs?.();
+  _unsubscribeCacheMsgs = null;
   _destroyPagination?.();
   _destroyPagination = null;
   _destroyHeader?.();

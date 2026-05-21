@@ -197,6 +197,28 @@ impl AppService {
         Ok(())
     }
 
+    /// Cancels all in-progress downloads across all manga.
+    pub async fn cancel_all_global_downloads(&self) -> Result<()> {
+        let chapter_ids: Vec<i64> = sqlx::query_scalar!(
+            "SELECT id FROM chapters WHERE download_status = 1"
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        for id in chapter_ids {
+            let was_cancelled = self.downloader.cancel_download(id).await;
+            if was_cancelled {
+                let _ = sqlx::query!(
+                    "UPDATE chapters SET download_status = 0 WHERE id = ? AND download_status = 1",
+                    id
+                )
+                .execute(&self.db)
+                .await;
+            }
+        }
+        Ok(())
+    }
+
     pub async fn build_download_task(&self, chapter_id: i64) -> Result<DownloadTask> {
         let record = sqlx::query!(
             "SELECT
@@ -273,11 +295,10 @@ impl AppService {
         &self,
         manga_id: i64,
     ) -> Result<Vec<kani_shared::types::DownloadRule>> {
-        let rows = sqlx::query_as!(
-            crate::models::DownloadRuleRow,
-            "SELECT id, manga_id, rule_type, value FROM download_rules WHERE manga_id=? ORDER BY id",
-            manga_id
+        let rows = sqlx::query_as::<_, crate::models::DownloadRuleRow>(
+            "SELECT id, manga_id, rule_type, value FROM download_rules WHERE manga_id=? ORDER BY priority, id",
         )
+        .bind(manga_id)
         .fetch_all(&self.db)
         .await?;
 
@@ -330,6 +351,59 @@ impl AppService {
         sqlx::query!("DELETE FROM download_rules WHERE id=?", id)
             .execute(&self.db)
             .await?;
+        Ok(())
+    }
+
+    pub async fn update_download_rule(
+        &self,
+        id: i64,
+        kind: kani_shared::types::DownloadRuleKind,
+    ) -> Result<()> {
+        use kani_shared::types::DownloadRuleKind::*;
+        let (rule_type, value): (&str, String) = match &kind {
+            LanguageInclude(v) => ("language_include", v.clone()),
+            LanguageExclude(v) => ("language_exclude", v.clone()),
+            TitleContains(v) => ("title_contains", v.clone()),
+            TitleExcludes(v) => ("title_excludes", v.clone()),
+            ChapterNumberMin(n) => ("chapter_number_min", n.to_string()),
+            ChapterNumberMax(n) => ("chapter_number_max", n.to_string()),
+            ExcludeFractional => ("exclude_fractional", String::new()),
+            MaxAgeDays(n) => ("max_age_days", n.to_string()),
+            PublishedAfter(ts) => ("published_after", ts.to_string()),
+        };
+        match &kind {
+            LanguageInclude(_) | LanguageExclude(_) | TitleContains(_) | TitleExcludes(_) => {
+                if value.trim().is_empty() {
+                    return Err(ServiceError::Validation("Rule value cannot be empty".into()));
+                }
+            }
+            _ => {}
+        }
+        sqlx::query("UPDATE download_rules SET rule_type=?, value=? WHERE id=?")
+            .bind(rule_type)
+            .bind(value)
+            .bind(id)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn reorder_download_rules(
+        &self,
+        manga_id: i64,
+        ordered_ids: Vec<i64>,
+    ) -> Result<()> {
+        for (priority, id) in ordered_ids.iter().enumerate() {
+            let p = priority as i64;
+            sqlx::query(
+                "UPDATE download_rules SET priority=? WHERE id=? AND manga_id=?",
+            )
+            .bind(p)
+            .bind(id)
+            .bind(manga_id)
+            .execute(&self.db)
+            .await?;
+        }
         Ok(())
     }
 

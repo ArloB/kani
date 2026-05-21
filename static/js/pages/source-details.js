@@ -8,7 +8,7 @@ import htm from 'htm';
 import * as api from '../api.js';
 import { hasPermission, updateState, subscribe } from '../state.js';
 import { navigate } from '../router.js';
-import { setLocal, getLocal, getLocalInt, debounce, hasNextPage, confirmDialog } from '../utils.js';
+import { setLocal, getLocal, getLocalInt, debounce, hasNextPage, confirmDialog, fmtCompactDate } from '../utils.js';
 import { skeletonGrid } from '../components/skeletons.js';
 import { renderPagination } from '../components/pagination.js';
 import { createMangaCard } from '../components/manga-card.js';
@@ -131,8 +131,20 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [activeDescriptor, setActiveDescriptor] = useState(/** @type {any} */ (null));
   const [collapsedGroups, setCollapsedGroups] = useState(/** @type {Set<string>} */ (new Set()));
+  const [health, setHealth] = useState(/** @type {any|null} */ (null));
+  const [healthLoading, setHealthLoading] = useState(true);
+  const [reloading, setReloading] = useState(false);
+  const [reloadMsg, setReloadMsg] = useState(/** @type {'ok'|'err'|null} */ (null));
 
-  // Load preferences on mount
+  // Load preferences and health on mount
+  useEffect(() => {
+    api.getSourcesHealth().then(rows => {
+      if (Array.isArray(rows)) {
+        setHealth(rows.find(r => r.source_id === sid) ?? null);
+      }
+    }).catch(() => {}).finally(() => setHealthLoading(false));
+  }, [sid]);
+
   useEffect(() => {
     Promise.all([api.getPreferenceSchema(sid), api.getPreferences(sid)])
         .then(([schemaRes, prefsRes]) => {
@@ -170,6 +182,20 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
       setEnabled(val);
       onEnabledChange?.(val);
     } catch { /* revert on error */ }
+  }
+
+  async function handleReload() {
+    setReloading(true);
+    setReloadMsg(null);
+    try {
+      await api.reloadSource(sid);
+      setReloadMsg('ok');
+    } catch {
+      setReloadMsg('err');
+    } finally {
+      setReloading(false);
+      setTimeout(() => setReloadMsg(null), 3000);
+    }
   }
 
   async function handleDelete() {
@@ -316,9 +342,32 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
           <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
             <div class="flex items-center justify-between gap-4">
               <p class="text-sm font-medium text-text">Version</p>
-              <span class="text-sm text-text-muted shrink-0">v${source.version ?? '?'}</span>
+              <span class="flex items-center gap-2 shrink-0">
+                ${source.version?.includes('+debug') && html`
+                  <span class="text-2xs px-1.5 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none" title="Built with debug info — readable WASM backtraces, larger binary">DEBUG</span>
+                `}
+                <span class="text-sm text-text-muted">v${(source.version ?? '?').replace('+debug', '')}</span>
+              </span>
             </div>
           </div>
+
+          ${hasPermission('source:install') && html`
+            <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <p class="text-sm font-medium text-text">Reload extension</p>
+                  <p class="text-xs text-text-muted mt-0.5">Re-reads the WASM from disk and swaps the running instance</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  ${reloadMsg === 'ok' && html`<span class="text-xs text-success">Reloaded</span>`}
+                  ${reloadMsg === 'err' && html`<span class="text-xs text-danger">Failed</span>`}
+                  <button class="btn-ghost btn-sm" disabled=${reloading} onClick=${handleReload}>
+                    ${reloading ? 'Reloading…' : 'Reload'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          `}
 
         </div>
       </div>
@@ -354,6 +403,43 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
     </div>
 
 
+      <!-- 3. Health -->
+      <div class="flex flex-col gap-3">
+        ${mkSectionHdr('Health', 'Extension response times and error history.')}
+        <div class="bg-surface border border-border rounded-xl px-4 md:px-6 py-1">
+          ${healthLoading
+            ? html`<p class="text-sm text-text-muted py-3">Loading…</p>`
+            : health == null
+              ? html`<p class="text-sm text-text-muted py-3">No health data yet.</p>`
+              : html`
+                <div class="flex flex-col divide-y divide-border-subtle">
+                  <div class="flex items-center justify-between gap-4 py-3">
+                    <p class="text-sm text-text">Last success</p>
+                    <span class="text-sm text-text-muted">${health.last_success_at ? fmtCompactDate(health.last_success_at) : '—'}</span>
+                  </div>
+                  <div class="flex items-center justify-between gap-4 py-3">
+                    <p class="text-sm text-text">Last error</p>
+                    <span class="text-sm text-text-muted">${health.last_error_at ? fmtCompactDate(health.last_error_at) : '—'}</span>
+                  </div>
+                  <div class="flex items-center justify-between gap-4 py-3">
+                    <p class="text-sm text-text">Consecutive errors</p>
+                    ${(health.consecutive_error_count ?? 0) >= 3
+                      ? html`<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-danger/20 text-danger">${health.consecutive_error_count}</span>`
+                      : (health.consecutive_error_count ?? 0) > 0
+                        ? html`<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-warn/20 text-warn">${health.consecutive_error_count}</span>`
+                        : html`<span class="text-sm text-success">0</span>`
+                    }
+                  </div>
+                  <div class="flex items-center justify-between gap-4 py-3">
+                    <p class="text-sm text-text">Avg response</p>
+                    <span class="text-sm text-text-muted">${health.avg_response_ms != null ? Math.round(health.avg_response_ms) + ' ms' : '—'}</span>
+                  </div>
+                </div>
+              `
+          }
+        </div>
+      </div>
+
       <!-- 4. Danger Zone -->
       <div class="flex flex-col gap-3">
         ${mkSectionHdr('Danger Zone', 'These actions are difficult or impossible to reverse. Proceed with care.')}
@@ -374,12 +460,14 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
   `;
 }
 
+
 // ── URL state ─────────────────────────────────────────────────────────────────
 
 function _updateUrl() {
   const params = new URLSearchParams();
   params.set('tab', _activeTab);
   if (_page > 1) params.set('page', String(_page));
+  if (_libPage > 1) params.set('lib_page', String(_libPage));
   if (_query) params.set('q', _query);
   for (const [filterId, state] of Object.entries(_filters)) {
     params.set('f_' + filterId, JSON.stringify(state));
@@ -439,9 +527,11 @@ export async function init(container, { id }) {
     _activeTab = (_query || _preFilterName) ? 'search' : 'popular';
   }
 
-  // Restore page number from URL
+  // Restore page numbers from URL
   const _pageParam = _urlParams.get('page');
   if (_pageParam) _page = Math.max(1, parseInt(_pageParam, 10) || 1);
+  const _libPageParam = _urlParams.get('lib_page');
+  if (_libPageParam) _libPage = Math.max(1, parseInt(_libPageParam, 10) || 1);
 
   // Stash f_* filter params for async restoration after filter defs load
   _pendingFilterParams = {};
@@ -488,7 +578,7 @@ export async function init(container, { id }) {
             <div class="flex flex-col gap-4">
               <div class="flex items-end justify-end gap-2">
                 <select class="input w-20 js-popular-page-size" aria-label="Page size">
-                  ${[9, 18, 27].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
+                  ${[18, 27, 36].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
                 </select>
               </div>
               <div class="js-popular-grid" aria-live="polite" aria-busy="false"></div>
@@ -510,7 +600,7 @@ export async function init(container, { id }) {
                   />
                 </div>
                 <select class="input w-20 js-page-size" aria-label="Page size">
-                  ${[9, 18, 27].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
+                  ${[18, 27, 36].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
                 </select>
                 <button type="button" class="js-filter-btn btn-ghost btn-sm flex items-center gap-1.5" aria-label="Open filters" style="display:none">Filters</button>
               </div>
@@ -899,7 +989,7 @@ async function _fetchLibrary(gridEl, paginEl) {
       page: _libPage,
       hasNext,
       total: result?.total_pages ?? undefined,
-      onPageChange: (p) => { _libPage = p; _libLoaded = false; _fetchLibrary(gridEl, paginEl); window.scrollTo(0, 0); },
+      onPageChange: (p) => { _libPage = p; _libLoaded = false; _updateUrl(); _fetchLibrary(gridEl, paginEl); window.scrollTo(0, 0); },
     });
     _destroyLibPagination = destroy;
   }

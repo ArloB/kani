@@ -8,19 +8,27 @@ import { escapeHtml } from '../../utils.js';
 import { iconLock } from '../../icons.js';
 import { mountRestartTray } from '../../components/restart-tray.js';
 import { setPageHeader, clearPageHeader } from '../../components/app-header.js';
-import * as general   from './general.js';
-import * as library   from './library.js';
-import * as downloads from './downloads.js';
-import * as scan      from './scan.js';
-import * as trackers  from './trackers.js';
-import * as advanced  from './advanced.js';
-import * as account   from './account.js';
-import * as server    from './server.js';
+import { setBeforeNavigate, clearBeforeNavigate } from '../../router.js';
+import { showConfirm } from '../../components/modal.js';
+import * as general           from './general.js';
+import * as library           from './library.js';
+import * as mangaManagement   from './manga-management.js';
+import * as downloads         from './downloads.js';
+import * as scan              from './scan.js';
+import * as trackers          from './trackers.js';
+import * as offline           from './offline.js';
+import * as advanced          from './advanced.js';
+import * as account           from './account.js';
+import * as server            from './server.js';
+import * as email             from './email.js';
+import * as webhooks          from './webhooks.js';
 
 /** @type {Array<() => void>} */
 let _panelDestroys = [];
 /** @type {string | null} */
 let _activeSection = null;
+/** @type {(() => boolean) | null} */
+let _activeIsDirty = null;
 
 /** @param {HTMLElement} container */
 export async function init(container) {
@@ -28,6 +36,11 @@ export async function init(container) {
   _panelDestroys = [];
   _activeSection = null;
   setPageHeader({ crumbs: [{ label: 'Settings' }] });
+
+  setBeforeNavigate(async () => {
+    if (_activeIsDirty?.() && !(await showConfirm('You have unsaved changes. Leave this page anyway?', { title: 'Unsaved changes', confirmLabel: 'Leave', cancelLabel: 'Stay' }))) return false;
+    return true;
+  });
 
   if (!hasPermission('settings:view')) {
     container.innerHTML = '';
@@ -46,14 +59,18 @@ export async function init(container) {
 
   /** @type {Array<{ id: string, label: string, description: string, perm: string|null, group?: string, mount: (el: HTMLElement) => { destroy: () => void } }>} */
   const allSections = [
-    { id: 'general',   label: 'General',    description: 'Display preferences, reading behaviour, and notifications.',            perm: null,                     mount: el => general.mount(el) },
-    { id: 'library',   label: 'Library',    description: 'Manage categories to organise your manga collection.',                   perm: 'library:manage',          mount: el => library.mount(el, catList) },
-    { id: 'downloads', label: 'Downloads',  description: 'Control download concurrency, queue size, and reading-ahead behaviour.', perm: 'settings:edit_download',  mount: el => downloads.mount(el, settings) },
+    { id: 'general',          label: 'General',          description: 'Display preferences, reading behaviour, and notifications.',            perm: null,                     mount: el => general.mount(el) },
+    { id: 'library',          label: 'Library',          description: 'Manage categories and import/export your manga collection.',             perm: 'library:manage',          mount: el => library.mount(el, catList) },
+    { id: 'manga-management', label: 'Manga Management', description: 'Pending imports, duplicate detection, and orphaned manga.',              perm: 'library:manage',          mount: el => mangaManagement.mount(el) },
+    { id: 'downloads',        label: 'Downloads',        description: 'Control download concurrency, queue size, and reading-ahead behaviour.', perm: 'settings:edit_download',  mount: el => downloads.mount(el, settings) },
+    { id: 'offline',          label: 'Offline',          description: 'Configure offline reading, page cache, and the OPDS catalog server.',      perm: null,                      mount: el => offline.mount(el) },
     { id: 'scan',      label: 'Scan',       description: 'Configure automatic scanning for new chapters.',                         perm: 'settings:edit_scan',      mount: el => scan.mount(el, settings) },
     { id: 'trackers',  label: 'Trackers',   description: 'Link external tracking services like AniList and MyAnimeList.',          perm: null,                      mount: el => trackers.mount(el, settings) },
-    { id: 'advanced',  label: 'Advanced',   description: 'FlareSolverr, library path, and other low-level options.',               perm: 'settings:edit_advanced',  group: 'Server', mount: el => advanced.mount(el, settings, bootId) },
-    { id: 'server',    label: 'Lifecycle',  description: 'Stop or restart the server process.',                                    perm: 'server:manage',           group: 'Server', mount: el => server.mount(el) },
-    { id: 'account', label: 'My Account', description: 'Change your password and manage active sessions.', perm: null, group: 'Account', mount: el => account.mount(el) },
+    { id: 'email',           label: 'Email / SMTP',    description: 'Configure outbound email for password reset and notifications.', perm: 'settings:edit_advanced', group: 'Server',  mount: el => email.mount(el, settings) },
+    { id: 'webhooks',        label: 'Webhooks',        description: 'Send HTTP POST notifications to external services when events occur.', perm: 'settings:edit_advanced', group: 'Server',  mount: el => webhooks.mount(el) },
+    { id: 'advanced',        label: 'Advanced',        description: 'FlareSolverr, library path, and other low-level options.',  perm: 'settings:edit_advanced', group: 'Server',  mount: el => advanced.mount(el, settings, bootId) },
+    { id: 'server',          label: 'Lifecycle',       description: 'Stop or restart the server process.',                         perm: 'server:manage',          group: 'Server',  mount: el => server.mount(el) },
+    { id: 'account',         label: 'My Account',      description: 'Change your password and manage active sessions.',            perm: null,                     group: 'Account', mount: el => account.mount(el) },
   ];
 
   const sections = allSections.filter(s => !s.perm || hasPermission(s.perm));
@@ -142,7 +159,9 @@ export async function init(container) {
    * @param {string} sectionId
    * @param {boolean} [pushState] - true when triggered by user action; false on init/restore
    */
-  function _showSection(sectionId, pushState = false) {
+  async function _showSection(sectionId, pushState = false) {
+    if (_activeIsDirty?.() && !(await showConfirm('You have unsaved changes. Leave this section anyway?', { title: 'Unsaved changes', confirmLabel: 'Leave', cancelLabel: 'Stay' }))) return;
+
     _activeSection = sectionId;
     const section = sections.find(s => s.id === sectionId);
     if (!section) return;
@@ -165,6 +184,7 @@ export async function init(container) {
 
     for (const d of _panelDestroys.slice(1)) d(); // keep tray destroy at [0]
     _panelDestroys = [_panelDestroys[0]];
+    _activeIsDirty = null;
     contentEl.innerHTML = '';
 
     const headerEl = document.createElement('div');
@@ -181,12 +201,16 @@ export async function init(container) {
     bodyEl.className = 'flex flex-col gap-5';
     contentEl.appendChild(bodyEl);
 
-    const { destroy } = section.mount(bodyEl);
-    _panelDestroys.push(destroy);
+    const result = section.mount(bodyEl);
+    _activeIsDirty = result.isDirty ?? null;
+    _panelDestroys.push(result.destroy);
   }
 
-  function _showMobileList(pushState = false) {
+  async function _showMobileList(pushState = false) {
+    if (_activeIsDirty?.() && !(await showConfirm('You have unsaved changes. Leave this section anyway?', { title: 'Unsaved changes', confirmLabel: 'Leave', cancelLabel: 'Stay' }))) return;
+
     _activeSection = null;
+    _activeIsDirty = null;
     if (pushState) history.pushState(null, '', '/settings');
     setPageHeader({ crumbs: [{ label: 'Settings' }] });
     mobileListEl.classList.remove('hidden');
@@ -216,9 +240,11 @@ export async function init(container) {
 /** @param {HTMLElement} container */
 export function destroy(container) {
   clearPageHeader();
+  clearBeforeNavigate();
   for (const d of _panelDestroys) d();
   _panelDestroys = [];
   _activeSection = null;
+  _activeIsDirty = null;
   container.innerHTML = '';
 }
 

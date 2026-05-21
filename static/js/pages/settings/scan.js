@@ -38,6 +38,19 @@ export function mount(el, settings) {
   intervalRow.style.display = autoScan ? '' : 'none';
   scanCard.appendChild(intervalRow);
 
+  const excludeToggleLabel = document.createElement('label');
+  excludeToggleLabel.className = 'kani-toggle';
+  const excludeEl = document.createElement('input');
+  excludeEl.type = 'checkbox';
+  excludeEl.id = 'scan-exclude-completed';
+  excludeEl.className = 'kani-toggle__input';
+  excludeEl.checked = !!settings?.scan_exclude_completed;
+  const excludeTrack = document.createElement('span');
+  excludeTrack.className = 'kani-toggle__track';
+  excludeToggleLabel.appendChild(excludeEl);
+  excludeToggleLabel.appendChild(excludeTrack);
+  scanCard.appendChild(mkSettingsRow({ label: 'Exclude completed', description: 'Skip manga marked as Completed during automatic scans.', control: excludeToggleLabel }));
+
   const saveRow = document.createElement('div');
   saveRow.className = 'flex items-center gap-3 px-4 py-3';
   saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-scan-save">Save</button><span class="js-scan-result text-sm hidden"></span>`;
@@ -47,16 +60,35 @@ export function mount(el, settings) {
   const saveBtn  = /** @type {HTMLButtonElement} */ (el.querySelector('.js-scan-save'));
   const resultEl = /** @type {HTMLElement} */ (el.querySelector('.js-scan-result'));
 
+  let lastSaved = {
+    auto_scan: !!settings?.auto_scan,
+    scan_interval_minutes: settings?.scan_interval_minutes ?? 60,
+    scan_exclude_completed: !!settings?.scan_exclude_completed,
+  };
+
   autoEl.addEventListener('change', () => {
     autoScan = autoEl.checked;
     intervalRow.style.display = autoScan ? '' : 'none';
   });
 
+  function buildPayload() {
+    return {
+      auto_scan: autoEl.checked,
+      scan_interval_minutes: Number(intervalInput.value) || 60,
+      scan_exclude_completed: excludeEl.checked,
+    };
+  }
+
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true;
-    interval = Number(intervalInput.value) || 60;
+    const payload = buildPayload();
+    if (JSON.stringify(payload) === JSON.stringify(lastSaved)) {
+      saveBtn.disabled = false;
+      return;
+    }
     try {
-      await api.updateSettings({ Scan: { auto_scan: autoScan, scan_interval_minutes: interval } });
+      await api.updateSettings({ Scan: payload });
+      lastSaved = { ...payload };
       showResult(resultEl, true, 'Saved.');
     } catch (e) {
       showResult(resultEl, false, e?.message ?? 'Failed to save.');
@@ -65,5 +97,8 @@ export function mount(el, settings) {
     }
   });
 
-  return { destroy() { el.innerHTML = ''; } };
+  return {
+    destroy() { el.innerHTML = ''; },
+    isDirty() { return JSON.stringify(buildPayload()) !== JSON.stringify(lastSaved); },
+  };
 }

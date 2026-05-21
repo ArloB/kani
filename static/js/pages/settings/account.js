@@ -22,6 +22,52 @@ export function mount(el) {
   pwCard.appendChild(mkSettingsRow({ label: 'Password', description: 'Update your account password.', control: changePwBtn }));
   el.appendChild(pwGroup);
 
+  // Email verification status row
+  const emailGroup = mkSettingsGroup('Email');
+  const emailCard  = mkSettingsGroupCard(emailGroup);
+  const verifyCtrl = document.createElement('div');
+  verifyCtrl.className = 'flex items-center gap-2';
+  const verifyStatus = document.createElement('span');
+  verifyStatus.className = 'text-xs text-text-muted';
+  verifyStatus.textContent = 'Loading…';
+  verifyCtrl.appendChild(verifyStatus);
+  const resendBtn = document.createElement('button');
+  resendBtn.type = 'button';
+  resendBtn.className = 'btn-ghost btn-sm hidden';
+  resendBtn.textContent = 'Resend';
+  verifyCtrl.appendChild(resendBtn);
+  emailCard.appendChild(mkSettingsRow({ label: 'Email verification', description: 'Verify your email address to enable email features.', control: verifyCtrl }));
+  el.appendChild(emailGroup);
+
+  api.getCurrentUser().then(user => {
+    if (user?.email_verified_at) {
+      verifyStatus.textContent = `Verified on ${new Date(user.email_verified_at).toLocaleDateString()}`;
+      verifyStatus.classList.add('text-success');
+      verifyStatus.classList.remove('text-text-muted');
+    } else {
+      verifyStatus.textContent = 'Not verified';
+      resendBtn.classList.remove('hidden');
+    }
+  }).catch(() => {
+    verifyStatus.textContent = 'Unable to load';
+  });
+
+  resendBtn.addEventListener('click', async () => {
+    resendBtn.disabled = true;
+    resendBtn.textContent = 'Sending…';
+    try {
+      await api.resendVerification();
+      resendBtn.textContent = 'Sent!';
+      setTimeout(() => { resendBtn.textContent = 'Resend'; resendBtn.disabled = false; }, 3000);
+    } catch (e) {
+      import('../../components/toast.js').then(({ showToast }) => {
+        showToast(/** @type {any} */(e)?.message ?? 'Failed to send.', { type: 'error' });
+      });
+      resendBtn.disabled = false;
+      resendBtn.textContent = 'Resend';
+    }
+  });
+
   const sessGroup = mkSettingsGroup('Sessions');
   const sessCard  = mkSettingsGroupCard(sessGroup);
   const logoutBtn = document.createElement('button');

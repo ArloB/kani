@@ -1,3 +1,4 @@
+use crate::models::ReadingStats;
 use dashmap::DashMap;
 use moka::future::Cache;
 use std::future::Future;
@@ -12,6 +13,8 @@ pub struct RequestCache {
     pages: Cache<(i64, String, String), String>,
     search_results: Cache<(i64, String, i32, i32, String), String>,
     pub preference_schema: DashMap<i64, Vec<kani_core::PreferenceSpec>>,
+    /// Reading stats keyed by (user_id, period_days). 10-minute TTL.
+    pub stats: Cache<(i64, i32), Arc<ReadingStats>>,
 }
 
 impl RequestCache {
@@ -43,6 +46,11 @@ impl RequestCache {
                 .support_invalidation_closures()
                 .build(),
             preference_schema: DashMap::new(),
+            stats: Cache::builder()
+                .max_capacity(500)
+                .time_to_live(Duration::from_secs(10 * 60))
+                .support_invalidation_closures()
+                .build(),
         }
     }
 
@@ -157,6 +165,21 @@ impl RequestCache {
             .invalidate_entries_if(move |(sid, mid, _page, _page_size, _sort), _| {
                 *sid == source_id && *mid == owned
             });
+    }
+
+    pub fn invalidate_stats(&self, user_id: i64) {
+        let _ = self
+            .stats
+            .invalidate_entries_if(move |(id, _period), _| *id == user_id);
+    }
+
+    pub fn clear_all(&self) {
+        self.manga_details.invalidate_all();
+        self.popular_manga.invalidate_all();
+        self.chapter_list.invalidate_all();
+        self.pages.invalidate_all();
+        self.search_results.invalidate_all();
+        self.stats.invalidate_all();
     }
 
     pub fn invalidate_source(&self, source_id: i64) {

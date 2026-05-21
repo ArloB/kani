@@ -164,18 +164,13 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   const meta = document.createElement('div');
   meta.className = 'flex flex-col gap-1.5';
 
-  if (source || info?.source_id || sid) {
+  if (isLocal && (source || info?.source_id || sid)) {
     const p = document.createElement('p');
     p.className = 'text-base md:text-sm flex items-center gap-2';
     const sname = escapeHtml(source?.name || info?.source_name || 'Source');
     const srcId = source?.id || info?.source_id || sid;
-    const baseUrl = source?.base_url || info?.base_url || null;
-    if (baseUrl) {
-      p.innerHTML = `<span class="font-semibold text-text">Source:</span> <a href="${escapeHtml(baseUrl)}" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline focus-visible:outline-none focus-visible:underline">${sname}</a>`;
-    } else {
-      p.innerHTML = `<span class="font-semibold text-text">Source:</span> <a href="/source/${srcId}" class="text-accent hover:underline focus-visible:outline-none focus-visible:underline">${sname}</a>`;
-      p.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/source/${srcId}`); });
-    }
+    p.innerHTML = `<span class="font-semibold text-text">Source:</span> <a href="/source/${srcId}" class="text-accent hover:underline focus-visible:outline-none focus-visible:underline">${sname}</a>`;
+    p.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/source/${srcId}`); });
     meta.appendChild(p);
   }
 
@@ -565,9 +560,73 @@ function _renderBtnGroup(btnGroupEl, info, source, ctx) {
             onAddedToLibrary(newDbId);
             _renderBtnGroup(btnGroupEl, info, source, ctx);
           }
-        } catch { addBtn.disabled = false; }
+        } catch (err) {
+          if (err?.status === 409 && err?.suggestions) {
+            _showDuplicateModal(err.suggestions, sid, mangaId, onAddedToLibrary, btnGroupEl, info, source, ctx);
+          } else {
+            addBtn.disabled = false;
+          }
+        }
       });
       btnGroupEl.appendChild(addBtn);
     }
   }
+}
+
+/**
+ * Show an inline duplicate-warning dialog below the add button.
+ * @param {Array<{id: number, name: string, similarity: number, author_match: boolean}>} suggestions
+ */
+function _showDuplicateModal(suggestions, sid, mangaId, onAddedToLibrary, btnGroupEl, info, source, ctx) {
+  const overlay = document.createElement('div');
+  overlay.className = 'mt-3 p-3 rounded-lg bg-surface-2 border border-border-subtle text-sm flex flex-col gap-2';
+
+  const top = document.createElement('div');
+  top.className = 'font-medium text-warn';
+  top.textContent = 'Possible duplicate detected';
+  overlay.appendChild(top);
+
+  for (const s of suggestions.slice(0, 3)) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between gap-2';
+    const nameLink = document.createElement('a');
+    nameLink.href = `/manga/${s.id}`;
+    nameLink.className = 'text-accent hover:underline truncate';
+    nameLink.textContent = s.name;
+    nameLink.addEventListener('click', e => { e.preventDefault(); navigate(`/manga/${s.id}`); });
+    const meta = document.createElement('span');
+    meta.className = 'text-text-muted text-xs shrink-0';
+    meta.textContent = `${Math.round(s.similarity * 100)}% match${s.author_match ? ' · author' : ''}`;
+    row.appendChild(nameLink);
+    row.appendChild(meta);
+    overlay.appendChild(row);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'flex gap-2 pt-1';
+
+  const forceBtn = document.createElement('button');
+  forceBtn.type = 'button';
+  forceBtn.className = 'btn-primary btn-sm';
+  forceBtn.textContent = 'Add anyway';
+  forceBtn.addEventListener('click', async () => {
+    forceBtn.disabled = true;
+    try {
+      const res = await api.saveToLibrary(sid, mangaId, true);
+      const newDbId = res?.db_id ?? res?.id ?? null;
+      overlay.remove();
+      if (newDbId) { onAddedToLibrary(newDbId); _renderBtnGroup(btnGroupEl, info, source, ctx); }
+    } catch { forceBtn.disabled = false; }
+  });
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn-secondary btn-sm';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.addEventListener('click', () => overlay.remove());
+
+  actions.appendChild(forceBtn);
+  actions.appendChild(cancelBtn);
+  overlay.appendChild(actions);
+  btnGroupEl.appendChild(overlay);
 }

@@ -53,11 +53,45 @@ export function mount(el) {
     const notifGroup = mkSettingsGroup('Notifications');
     const notifCard  = mkSettingsGroupCard(notifGroup);
     notifCard.appendChild(mkToggleRow({
-      label: 'Show new chapter notifications',
+      label: 'Show in-app chapter badges',
       description: 'Show a notification badge when new chapters are found during a scan.',
       checked: getLocal('kani_disable_notifications') !== 'true',
       onChange: v => setLocal('kani_disable_notifications', v ? 'false' : 'true'),
     }));
+
+    // Browser push notifications (only show if the API is available)
+    if ('Notification' in window) {
+      const browserEnabled = getLocal('kani_browser_notifications') === 'true';
+      const browserRow = mkSettingsRow({
+        label: 'Browser notifications',
+        description: Notification.permission === 'denied'
+          ? 'Notifications are blocked by your browser. Update your browser settings to allow them.'
+          : 'Show a browser notification when new chapters are found during a scan.',
+        control: (() => {
+          const label = document.createElement('label');
+          label.className = 'kani-toggle';
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.className = 'kani-toggle__input';
+          input.checked = browserEnabled && Notification.permission === 'granted';
+          input.disabled = Notification.permission === 'denied';
+          const track = document.createElement('span');
+          track.className = 'kani-toggle__track';
+          label.appendChild(input);
+          label.appendChild(track);
+          input.addEventListener('change', async () => {
+            if (input.checked) {
+              const perm = await Notification.requestPermission();
+              if (perm !== 'granted') { input.checked = false; return; }
+            }
+            setLocal('kani_browser_notifications', input.checked ? 'true' : 'false');
+          });
+          return label;
+        })(),
+      });
+      notifCard.appendChild(browserRow);
+    }
+
     el.appendChild(notifGroup);
 
     const note = document.createElement('p');

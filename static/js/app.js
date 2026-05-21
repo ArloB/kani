@@ -5,7 +5,7 @@ import { initPermissions, getState, setState, subscribe, hasPermission } from '.
 import { connectSSE } from './sse.js';
 import { initRouter, navigate, onNavigate } from './router.js';
 import { getBootId, logout } from './api.js';
-import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube } from './icons.js';
+import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs } from './icons.js';
 import { mountNotificationsPanel } from './components/notifications-panel.js';
 import { mountAppHeader } from './components/app-header.js';
 
@@ -48,6 +48,8 @@ import { mountAppHeader } from './components/app-header.js';
   }
 
   window.addEventListener('kani:server-restart', _handleServerRestart);
+
+  _registerServiceWorker();
 })();
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -123,8 +125,10 @@ function _buildNavLinks() {
     { href: '/search',    label: 'Search',    icon: iconSearch,    perm: 'source:browse' },
     { href: '/updates',   label: 'Updates',   icon: iconUpdates,   perm: 'library:view' },
     { href: '/downloads', label: 'Downloads', icon: iconDownloads, perm: 'chapter:download' },
+    { href: '/stats',     label: 'Statistics', icon: iconStats,     perm: 'library:view' },
     { href: '/settings',  label: 'Settings',  icon: iconSettings,  perm: 'settings:view',  section: 'Admin' },
     { href: '/accounts',  label: 'Accounts',  icon: iconAccounts,  perm: 'user:manage' },
+    { href: '/admin/logs', label: 'Logs',     icon: iconLogs,      perm: 'admin:view_logs', matchPrefix: '/admin' },
   ];
   const visible = defs.filter(d => !d.perm || hasPermission(d.perm));
   let html = '';
@@ -253,4 +257,43 @@ function _handleServerRestart() {
     <button class="btn-primary btn-sm ml-auto" onclick="location.reload()">Reload</button>
   `;
   document.body.prepend(banner);
+}
+
+// ── Service worker ────────────────────────────────────────────────────────────
+
+function _registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    .then(reg => {
+      reg.addEventListener('updatefound', () => {
+        const incoming = reg.installing;
+        if (!incoming) return;
+        incoming.addEventListener('statechange', () => {
+          if (incoming.state === 'installed' && navigator.serviceWorker.controller) {
+            _showSwUpdateBanner(incoming);
+          }
+        });
+      });
+    })
+    .catch(err => console.warn('SW registration failed:', err));
+}
+
+/** @param {ServiceWorker} incoming */
+function _showSwUpdateBanner(incoming) {
+  if (document.getElementById('sw-update-banner')) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'sw-update-banner';
+  banner.className = 'fixed top-0 right-0 left-0 md:left-sidebar z-20 flex items-center gap-3 px-6 py-3 bg-surface-3 border-b border-border text-sm text-text';
+  banner.innerHTML = `
+    <span class="flex-1">A new version is available.</span>
+    <button class="btn-primary btn-sm ml-auto" id="sw-update-reload">Update now</button>
+  `;
+  document.body.prepend(banner);
+
+  document.getElementById('sw-update-reload')?.addEventListener('click', () => {
+    incoming.postMessage({ type: 'SKIP_WAITING' });
+    navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
+  });
 }

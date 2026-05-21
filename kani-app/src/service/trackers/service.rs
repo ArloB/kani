@@ -136,7 +136,7 @@ impl AppService {
                 .await?
         };
 
-        store_credentials(&self.db, user_id, tracker_id, &tokens).await?;
+        store_credentials(&self.db, user_id, tracker_id, &tokens, self.encryption.as_deref()).await?;
         Ok(())
     }
 
@@ -157,7 +157,7 @@ impl AppService {
             .get(tracker_id)
             .ok_or_else(|| ServiceError::NotFound(format!("Tracker {tracker_id} not found")))?;
         let access_token =
-            get_access_token(&self.db, tracker_id, user_id, tracker).await?;
+            get_access_token(&self.db, tracker_id, user_id, tracker, self.encryption.as_deref()).await?;
         let results = tracker.search_manga(&access_token, query).await?;
         Ok(results)
     }
@@ -209,7 +209,7 @@ impl AppService {
             )));
         }
 
-        set_tracker_app_config(&self.db, tracker_id, client_id, client_secret).await?;
+        set_tracker_app_config(&self.db, tracker_id, client_id, client_secret, self.encryption.as_deref()).await?;
         self.reload_tracker_registry().await
     }
 
@@ -221,7 +221,7 @@ impl AppService {
 
     /// Rebuild the tracker registry in-place (hot-reload after credential changes).
     pub async fn reload_tracker_registry(&self) -> Result<()> {
-        *self.tracker_registry.write().await = TrackerRegistry::new(&self.db).await?;
+        *self.tracker_registry.write().await = TrackerRegistry::new(&self.db, self.encryption.as_deref()).await?;
         Ok(())
     }
 }

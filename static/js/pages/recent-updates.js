@@ -4,6 +4,7 @@
 import * as api from '../api.js';
 import { hasPermission } from '../state.js';
 import { renderPagination } from '../components/pagination.js';
+import { getParam, replaceState as urlReplaceState } from '../url-params.js';
 import { getMangaCoverUrl } from '../api.js';
 import { formatChapterTitle, hasNextPage, formatDate, escapeHtml, deferredSkeleton } from '../utils.js';
 import { skeletonUpdateList } from '../components/skeletons.js';
@@ -13,6 +14,24 @@ import { createEmptyState } from '../components/empty-state.js';
 import { iconBookOpen, iconDownload, iconCheck, iconSpinner } from '../icons.js';
 import { getState, updateState, subscribe } from '../state.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the download control HTML for a chapter row.
+ * Exactly one of: a read link (green tick), a download button, or empty string.
+ * @param {{ id: number, title: string, is_downloaded: boolean }} ch
+ * @param {boolean} canDownload
+ */
+function _renderDownloadControl(ch, canDownload) {
+  if (ch.is_downloaded) {
+    return `<a href="/reader/${ch.id}" class="icon-xs text-success shrink-0 dl-btn" aria-label="Read ${escapeHtml(ch.title)}" title="Read">${iconCheck}</a>`;
+  }
+  if (canDownload) {
+    return `<button class="dl-btn shrink-0" aria-label="Download ${escapeHtml(ch.title)}" data-chapter-id="${ch.id}" title="Download">${iconDownload}</button>`;
+  }
+  return '';
+}
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -31,7 +50,7 @@ let _listEl = null;
 /** @param {HTMLElement} container */
 export async function init(container) {
   document.title = 'Recent Updates - Kani';
-  _page = 1;
+  _page = parseInt(getParam('page') ?? '1', 10) || 1;
   _listEl = null;
   _unsubProgress?.();
   _unsubProgress = null;
@@ -51,6 +70,12 @@ export async function init(container) {
   _unsubProgress = subscribe('chaptersProgress', _onProgressUpdate);
 
   await _fetch(_listEl, paginEl);
+}
+
+// ── URL state ─────────────────────────────────────────────────────────────────
+
+function _updateUrl() {
+  urlReplaceState(_page > 1 ? { page: _page } : {});
 }
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -164,16 +189,8 @@ async function _fetch(listEl, paginEl) {
         li.dataset.chapterId = String(ch.id);
         li.innerHTML = `
           <span class="text-sm text-text flex-1 truncate min-w-0">${escapeHtml(ch.title)}</span>
-          ${ch.is_downloaded ? `<span class="icon-xs text-success shrink-0" aria-label="Downloaded" title="Downloaded">${iconCheck}</span>` : ''}
           ${ch.date_uploaded ? `<span class="text-xs text-text-faint shrink-0">${escapeHtml(formatDate(ch.date_uploaded))}</span>` : ''}
-          ${canDownload ? `
-            <button
-              class="dl-btn shrink-0"
-              aria-label="Download ${escapeHtml(ch.title)}"
-              data-chapter-id="${ch.id}"
-              title="Download"
-            >${iconDownload}</button>
-          ` : ''}
+          <span class="js-dl-ctrl shrink-0">${_renderDownloadControl(ch, canDownload)}</span>
         `;
         chList.appendChild(li);
       }
@@ -185,7 +202,7 @@ async function _fetch(listEl, paginEl) {
 
   // Wire download buttons with in-flight guard
   if (canDownload) {
-    for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (listEl.querySelectorAll('[data-chapter-id]'))) {
+    for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (listEl.querySelectorAll('button[data-chapter-id]'))) {
       const id = Number(btn.dataset.chapterId);
       btn.addEventListener('click', async () => {
         /** @type {Set<number>} */
@@ -216,7 +233,7 @@ async function _fetch(listEl, paginEl) {
       page: _page,
       hasNext,
       total: result?.total_pages ?? undefined,
-      onPageChange: (p) => { _page = p; _fetch(listEl, paginEl); window.scrollTo(0, 0); },
+      onPageChange: (p) => { _page = p; _updateUrl(); _fetch(listEl, paginEl); window.scrollTo(0, 0); },
     });
     _destroyPagination = destroy;
   }
@@ -231,12 +248,15 @@ async function _fetch(listEl, paginEl) {
  */
 function _onProgressUpdate(progress) {
   if (!_listEl) return;
-  for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (_listEl.querySelectorAll('[data-chapter-id]'))) {
+  for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (_listEl.querySelectorAll('button[data-chapter-id]'))) {
     const id = Number(btn.dataset.chapterId);
     const p = progress?.get(id);
     if (!p) continue;
+    const ctrl = /** @type {HTMLElement | null} */ (btn.closest('.js-dl-ctrl'));
     if (p.status === 'completed' || p.status === 'completed_hidden') {
-      btn.outerHTML = `<span class="icon-xs text-success shrink-0 dl-btn" aria-label="Downloaded" title="Downloaded">${iconCheck}</span>`;
+      const title = btn.getAttribute('aria-label')?.replace('Download ', '') ?? '';
+      const ch = { id, title, is_downloaded: true };
+      if (ctrl) ctrl.innerHTML = _renderDownloadControl(ch, true);
     } else if (p.status === 'in_progress') {
       btn.disabled = true;
       btn.innerHTML = iconSpinner;

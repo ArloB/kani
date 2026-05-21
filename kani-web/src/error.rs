@@ -86,6 +86,12 @@ pub enum AppError {
 
     #[error("Source {0} is disabled")]
     SourceDisabled(i64),
+
+    #[error("Possible duplicate")]
+    PossibleDuplicate(Vec<kani_app::SimilarMangaHit>),
+
+    #[error("Email error: {0}")]
+    EmailError(String),
 }
 
 impl AppError {
@@ -101,6 +107,7 @@ impl AppError {
             Self::RateLimitExceeded => "rate_limited",
             Self::SourceAuthRequired(_) => "source_auth_required",
             Self::SourceDisabled(_) => "source_disabled",
+            Self::EmailError(_) => "email_error",
             _ => "internal_error",
         }
     }
@@ -256,6 +263,14 @@ impl IntoResponse for AppError {
                 }));
                 return (StatusCode::CONFLICT, body).into_response();
             }
+            Self::PossibleDuplicate(hits) => {
+                let body = Json(json!({
+                    "status": "possible_duplicate",
+                    "suggestions": hits,
+                }));
+                return (StatusCode::CONFLICT, body).into_response();
+            }
+            Self::EmailError(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg.clone()),
         };
 
         let body = Json(json!({
@@ -295,6 +310,7 @@ impl From<kani_app::ServiceError> for AppError {
             kani_app::ServiceError::Io(e) => Self::IoError(e),
             kani_app::ServiceError::TryFromInt(e) => Self::TryFromIntError(e),
             kani_app::ServiceError::RequestError(e) => Self::RequestError(e),
+            kani_app::ServiceError::PossibleDuplicate(hits) => Self::PossibleDuplicate(hits),
         }
     }
 }

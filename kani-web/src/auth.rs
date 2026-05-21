@@ -606,6 +606,10 @@ fn is_public_path(path: &str) -> bool {
         || path == "/favicon.ico"
         || path == "/health"
         || path == "/ready"
+        || path == "/manifest.webmanifest"
+        || path == "/sw.js"
+        || path.starts_with("/icons/")
+        || path.starts_with("/opds")
 }
 
 /// Hashes a plaintext password using Argon2id.

@@ -2,6 +2,7 @@ use super::*;
 
 impl AppService {
     /// Returns a paginated chapter list for a manga. Returns (chapters, has_next_page, total_pages).
+    #[allow(clippy::too_many_arguments)]
     pub async fn get_local_chapters(
         &self,
         manga_id: i64,
@@ -33,10 +34,12 @@ impl AppService {
                       uct.is_read, uct.last_page_read
                FROM chapters c
                LEFT JOIN scanlator_preferences sp
-                   ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator AND sp.manga_id = ?
+                   ON sp.manga_id = c.manga_id AND sp.manga_id = ?
+                   AND (c.scanlator = sp.scanlator OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
                LEFT JOIN user_chapter_tracking uct
                    ON uct.chapter_id = c.id AND uct.user_id = ?
                WHERE c.manga_id = ?{extra}
+                 AND c.is_orphaned = false
                  AND (? IS NULL OR c.scanlator = ?)
                ORDER BY {}, COALESCE(sp.priority, -1) DESC
                LIMIT ? OFFSET ?"#,
@@ -99,6 +102,7 @@ impl AppService {
     /// Returns all chapter IDs for a manga matching the given filters (no pagination).
     /// When `preferred_only` is true, applies scanlator preferences and download rules
     /// to return one preferred version per chapter number (undownloaded chapters only).
+    #[allow(clippy::too_many_arguments)]
     pub async fn get_chapter_ids(
         &self,
         manga_id: i64,
@@ -131,10 +135,12 @@ impl AppService {
             r#"SELECT c.id
                FROM chapters c
                LEFT JOIN scanlator_preferences sp
-                   ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator AND sp.manga_id = ?
+                   ON sp.manga_id = c.manga_id AND sp.manga_id = ?
+                   AND (c.scanlator = sp.scanlator OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
                LEFT JOIN user_chapter_tracking uct
                    ON uct.chapter_id = c.id AND uct.user_id = ?
                WHERE c.manga_id = ?{extra}
+                 AND c.is_orphaned = false
                  AND (? IS NULL OR c.scanlator = ?)
                ORDER BY {}, COALESCE(sp.priority, -1) DESC"#,
             sort_order.to_sql_order()

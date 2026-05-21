@@ -1,7 +1,10 @@
+pub mod app;
 pub mod auth;
 pub mod cache;
 pub mod error;
+pub mod logging;
 pub mod models;
+pub mod opds;
 pub mod permissions;
 pub mod proxy;
 pub mod rest;

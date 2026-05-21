@@ -2,6 +2,8 @@
 // Manage tab — Tracking + External Trackers sections.
 
 import * as api from '../../api.js';
+import { getState, setState } from '../../state.js';
+import { showAlert } from '../modal.js';
 import { mkCard, mkTitledCard, mkRow, mkItem } from './_shared.js';
 
 /**
@@ -62,8 +64,24 @@ export function mountTrackerPanel(containerEl, ctx) {
   trackCard.appendChild(mkItem(mkRow('Progress', 'Chapters read / total', progressText)));
   containerEl.appendChild(trackCard);
 
+  const notifyId = `notify-new-chapters-${dbId}`;
+  const notifyLabel = document.createElement('label');
+  notifyLabel.className = 'kani-toggle';
+  notifyLabel.setAttribute('for', notifyId);
+  notifyLabel.innerHTML = `
+    <input type="checkbox" id="${notifyId}" class="kani-toggle__input js-notify-chapters" checked>
+    <span class="kani-toggle__track"></span>
+  `;
+  const notifyToggle = /** @type {HTMLInputElement} */ (notifyLabel.querySelector('.js-notify-chapters'));
+  trackCard.appendChild(mkItem(mkRow('Notify new chapters', 'Show a browser notification when new chapters are found', notifyLabel)));
+
   api.getMangaTracking(dbId).then(tracking => {
     trackingToggle.checked = tracking.tracking_enabled ?? true;
+    const notify = tracking.notify_new_chapters ?? true;
+    notifyToggle.checked = notify;
+    const prefs = new Map(getState('mangaNotifyPrefs'));
+    prefs.set(dbId, notify);
+    setState('mangaNotifyPrefs', prefs);
     if (tracking.status) statusSelect.value = tracking.status;
     if (tracking.score != null) scoreInput.value = String(tracking.score);
     progressText.textContent = `${tracking.chapters_read} / ${tracking.total_chapters}`;
@@ -71,6 +89,29 @@ export function mountTrackerPanel(containerEl, ctx) {
 
   trackingToggle.addEventListener('change', () => {
     api.setMangaTracking(dbId, { tracking_enabled: trackingToggle.checked }).catch(() => {});
+  });
+
+  notifyToggle.addEventListener('change', async () => {
+    const val = notifyToggle.checked;
+    if (val && 'Notification' in window) {
+      if (Notification.permission === 'denied') {
+        notifyToggle.checked = false;
+        await showAlert('Browser notifications are blocked. Update your browser settings to allow them from this site.', { title: 'Notifications blocked' });
+        return;
+      }
+      if (Notification.permission !== 'granted') {
+        const perm = await Notification.requestPermission();
+        if (perm !== 'granted') { notifyToggle.checked = false; return; }
+      }
+      // Ensure the global kill-switch is on
+      if (localStorage.getItem('kani_browser_notifications') !== 'true') {
+        localStorage.setItem('kani_browser_notifications', 'true');
+      }
+    }
+    api.setMangaTracking(dbId, { notify_new_chapters: val }).catch(() => {});
+    const prefs = new Map(getState('mangaNotifyPrefs'));
+    prefs.set(dbId, val);
+    setState('mangaNotifyPrefs', prefs);
   });
 
   statusSelect.addEventListener('change', () => {
@@ -143,7 +184,7 @@ export function mountTrackerPanel(containerEl, ctx) {
             if (!query) return;
             try {
               const results = await api.searchTrackerManga(t.id, query);
-              if (!results.length) { alert('No results found.'); return; }
+              if (!results.length) { await showAlert('No results found.', { title: 'Search' }); return; }
               const choice = prompt(
                 results.map((r, i) => `${i + 1}. ${r.title} (${r.tracker_manga_id})`).join('\n') +
                 '\n\nEnter number to link:'
@@ -154,7 +195,7 @@ export function mountTrackerPanel(containerEl, ctx) {
                 statusEl.textContent = `Mapped to ID: ${results[idx].tracker_manga_id}`;
               }
             } catch (err) {
-              alert('Search failed: ' + (/** @type {any} */(err)?.message ?? err));
+              await showAlert('Search failed: ' + (/** @type {any} */(err)?.message ?? err), { title: 'Error' });
             }
           });
           btnGroup.appendChild(searchBtn);
