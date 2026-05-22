@@ -7,8 +7,8 @@
 mod common;
 use common::{insert_manga, insert_source, insert_user, test_service};
 use kani_app::service::trackers::{
-    TokenResponse, consume_pkce_state, delete_mapping, get_mapping, set_mapping,
-    store_credentials, store_pkce_state,
+    TokenResponse, consume_pkce_state, delete_mapping, get_mapping, set_mapping, store_credentials,
+    store_pkce_state,
 };
 
 /// Look up the DB id of a seeded tracker by name.
@@ -24,7 +24,11 @@ async fn tracker_id(svc: &kani_app::AppService, name: &str) -> i64 {
 async fn list_trackers_status_returns_anilist_and_mal_unconfigured() {
     let svc = test_service().await;
     let items = svc.list_trackers_status(1).await.unwrap();
-    assert_eq!(items.len(), 2, "AniList and MyAnimeList should always be seeded");
+    assert_eq!(
+        items.len(),
+        2,
+        "AniList and MyAnimeList should always be seeded"
+    );
     let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
     assert!(names.contains(&"AniList"));
     assert!(names.contains(&"MyAnimeList"));
@@ -38,9 +42,15 @@ async fn pkce_state_store_and_consume_is_single_use() {
     let svc = test_service().await;
     let tid = tracker_id(&svc, "AniList").await;
 
-    store_pkce_state(&svc.db, "csrf-abc", Some("verifier-xyz"), tid, "https://app/cb")
-        .await
-        .unwrap();
+    store_pkce_state(
+        &svc.db,
+        "csrf-abc",
+        Some("verifier-xyz"),
+        tid,
+        "https://app/cb",
+    )
+    .await
+    .unwrap();
 
     let pkce = consume_pkce_state(&svc.db, "csrf-abc").await.unwrap();
     assert!(pkce.is_some());
@@ -72,7 +82,9 @@ async fn credential_store_persists_access_token() {
         refresh_token: Some("my-refresh-token".to_string()),
         expires_at: None,
     };
-    store_credentials(&svc.db, user_id, tid, &tokens, None).await.unwrap();
+    store_credentials(&svc.db, user_id, tid, &tokens, None)
+        .await
+        .unwrap();
 
     let stored: String = sqlx::query_scalar(
         "SELECT access_token FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?",
@@ -103,17 +115,23 @@ async fn mapping_set_get_delete_round_trips() {
     assert!(none.is_none());
 
     // Set → get.
-    set_mapping(&svc.db, user_id, tid, manga_id, "anilist-123").await.unwrap();
+    set_mapping(&svc.db, user_id, tid, manga_id, "anilist-123")
+        .await
+        .unwrap();
     let found = get_mapping(&svc.db, user_id, tid, manga_id).await.unwrap();
     assert_eq!(found.as_deref(), Some("anilist-123"));
 
     // Overwrite via upsert.
-    set_mapping(&svc.db, user_id, tid, manga_id, "anilist-456").await.unwrap();
+    set_mapping(&svc.db, user_id, tid, manga_id, "anilist-456")
+        .await
+        .unwrap();
     let updated = get_mapping(&svc.db, user_id, tid, manga_id).await.unwrap();
     assert_eq!(updated.as_deref(), Some("anilist-456"));
 
     // Delete → None.
-    delete_mapping(&svc.db, user_id, tid, manga_id).await.unwrap();
+    delete_mapping(&svc.db, user_id, tid, manga_id)
+        .await
+        .unwrap();
     let gone = get_mapping(&svc.db, user_id, tid, manga_id).await.unwrap();
     assert!(gone.is_none());
 }
@@ -131,8 +149,12 @@ async fn unlink_tracker_removes_credentials_and_mappings() {
         refresh_token: None,
         expires_at: None,
     };
-    store_credentials(&svc.db, user_id, tid, &tokens, None).await.unwrap();
-    set_mapping(&svc.db, user_id, tid, manga_id, "remote-id").await.unwrap();
+    store_credentials(&svc.db, user_id, tid, &tokens, None)
+        .await
+        .unwrap();
+    set_mapping(&svc.db, user_id, tid, manga_id, "remote-id")
+        .await
+        .unwrap();
 
     svc.unlink_tracker(user_id, tid).await.unwrap();
 

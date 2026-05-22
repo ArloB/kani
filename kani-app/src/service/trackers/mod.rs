@@ -162,15 +162,18 @@ impl TrackerRegistry {
         .fetch_optional(db)
         .await?;
         Ok(row.map(|r| {
-            let secret = r.client_secret.as_deref().and_then(|s| {
-                match maybe_decrypt(cipher, s) {
+            let secret = r
+                .client_secret
+                .as_deref()
+                .and_then(|s| match maybe_decrypt(cipher, s) {
                     Ok(plain) => Some(plain),
                     Err(e) => {
-                        tracing::warn!("Cannot decrypt client_secret for {name}: {e}. Treating as unset.");
+                        tracing::warn!(
+                            "Cannot decrypt client_secret for {name}: {e}. Treating as unset."
+                        );
                         None
                     }
-                }
-            });
+                });
             (r.client_id, secret)
         }))
     }
@@ -257,11 +260,9 @@ pub async fn store_pkce_state(
     redirect_uri: &str,
 ) -> Result<()> {
     // Prune expired rows (older than 10 minutes) on each write.
-    sqlx::query!(
-        "DELETE FROM oauth_pkce_state WHERE created_at < datetime('now', '-10 minutes')"
-    )
-    .execute(db)
-    .await?;
+    sqlx::query!("DELETE FROM oauth_pkce_state WHERE created_at < datetime('now', '-10 minutes')")
+        .execute(db)
+        .await?;
 
     sqlx::query!(
         r#"INSERT INTO oauth_pkce_state (state, code_verifier, tracker_id, redirect_uri)
@@ -327,7 +328,10 @@ pub async fn store_credentials(
             .unwrap_or_default()
     });
     let access_token = maybe_encrypt(cipher, &tokens.access_token);
-    let refresh_token = tokens.refresh_token.as_deref().map(|t| maybe_encrypt(cipher, t));
+    let refresh_token = tokens
+        .refresh_token
+        .as_deref()
+        .map(|t| maybe_encrypt(cipher, t));
     sqlx::query!(
         r#"INSERT INTO user_tracker_credentials (user_id, tracker_id, access_token, refresh_token, expires_at)
            VALUES (?1, ?2, ?3, ?4, ?5)
@@ -377,7 +381,9 @@ pub async fn get_access_token(
         .unwrap_or(false);
 
     if needs_refresh {
-        let refresh_plain = row.refresh_token.as_deref()
+        let refresh_plain = row
+            .refresh_token
+            .as_deref()
             .map(|t| maybe_decrypt(cipher, t))
             .transpose()
             .map_err(|e| ServiceError::Internal(format!("Cannot decrypt refresh token: {e}")))?;
@@ -388,7 +394,8 @@ pub async fn get_access_token(
         }
     }
 
-    let stored = row.access_token
+    let stored = row
+        .access_token
         .ok_or_else(|| ServiceError::Internal("Missing access token".into()))?;
     maybe_decrypt(cipher, &stored)
         .map_err(|e| ServiceError::Internal(format!("Cannot decrypt access token: {e}")))

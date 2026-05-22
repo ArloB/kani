@@ -39,7 +39,9 @@ async fn normalise_title_collapses_punctuation_and_whitespace() {
 #[tokio::test]
 async fn find_similar_manga_returns_empty_on_fresh_db() {
     let svc = test_service().await;
-    let hits = find_similar_manga(&svc.db, "Dragon Ball", &[], None).await.unwrap();
+    let hits = find_similar_manga(&svc.db, "Dragon Ball", &[], None)
+        .await
+        .unwrap();
     assert!(hits.is_empty());
 }
 
@@ -51,10 +53,18 @@ async fn find_similar_manga_finds_close_title_match() {
     let _id2 = insert_manga(&svc.db, src, "m2", "Dragon Ball Z").await;
 
     // Searching for "Dragon Ball Z" should surface both titles (sim >= 0.85).
-    let hits = find_similar_manga(&svc.db, "Dragon Ball Z", &[], None).await.unwrap();
-    assert!(hits.len() >= 1, "at least 'Dragon Ball' should match 'Dragon Ball Z'");
+    let hits = find_similar_manga(&svc.db, "Dragon Ball Z", &[], None)
+        .await
+        .unwrap();
+    assert!(
+        hits.len() >= 1,
+        "at least 'Dragon Ball' should match 'Dragon Ball Z'"
+    );
     let hit_ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
-    assert!(hit_ids.contains(&id1), "'Dragon Ball' should be a hit for 'Dragon Ball Z'");
+    assert!(
+        hit_ids.contains(&id1),
+        "'Dragon Ball' should be a hit for 'Dragon Ball Z'"
+    );
 }
 
 #[tokio::test]
@@ -64,7 +74,9 @@ async fn find_similar_manga_returns_nothing_for_dissimilar_title() {
     insert_manga(&svc.db, src, "m1", "One Piece").await;
 
     // "Naruto" shares no first word with "One Piece".
-    let hits = find_similar_manga(&svc.db, "Naruto", &[], None).await.unwrap();
+    let hits = find_similar_manga(&svc.db, "Naruto", &[], None)
+        .await
+        .unwrap();
     assert!(hits.is_empty());
 }
 
@@ -76,9 +88,14 @@ async fn find_similar_manga_excludes_the_given_id() {
     let id2 = insert_manga(&svc.db, src, "m2", "Dragon Ball Z").await;
 
     // Searching from the perspective of id1: id1 itself must be excluded.
-    let hits = find_similar_manga(&svc.db, "Dragon Ball", &[], Some(id1)).await.unwrap();
+    let hits = find_similar_manga(&svc.db, "Dragon Ball", &[], Some(id1))
+        .await
+        .unwrap();
     let hit_ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
-    assert!(!hit_ids.contains(&id1), "the excluded manga should not appear in results");
+    assert!(
+        !hit_ids.contains(&id1),
+        "the excluded manga should not appear in results"
+    );
     // id2 ("Dragon Ball Z") is still similar enough to appear.
     assert!(hit_ids.contains(&id2));
 }
@@ -100,7 +117,10 @@ async fn scan_and_persist_duplicates_records_similar_pair() {
     insert_manga(&svc.db, src, "m2", "Dragon Ball Z").await;
 
     let new_pairs = scan_and_persist_duplicates(&svc.db).await.unwrap();
-    assert!(new_pairs >= 1, "at least one similar pair should be detected");
+    assert!(
+        new_pairs >= 1,
+        "at least one similar pair should be detected"
+    );
 
     let pair_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM duplicate_pairs")
         .fetch_one(&svc.db)
@@ -121,7 +141,10 @@ async fn scan_and_persist_duplicates_is_idempotent() {
 
     // Second run must not add more pairs (INSERT OR IGNORE prevents duplicates).
     let second_run = scan_and_persist_duplicates(&svc.db).await.unwrap();
-    assert_eq!(second_run, 0, "re-running should not insert duplicate pairs");
+    assert_eq!(
+        second_run, 0,
+        "re-running should not insert duplicate pairs"
+    );
 }
 
 // ── record_duplicates_for_manga tests ────────────────────────────────────────

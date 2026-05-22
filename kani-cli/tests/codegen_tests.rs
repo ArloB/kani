@@ -1,8 +1,11 @@
 #![allow(clippy::unwrap_used)]
 // Codegen snapshot tests: validate each fixture, generate code, snapshot with insta.
 
+use kani_cli::{
+    codegen,
+    yaml::{schema::YamlExtension, validate},
+};
 use std::path::Path;
-use kani_cli::{codegen, yaml::{schema::YamlExtension, validate}};
 
 fn load_and_validate(fixture: &str) -> kani_cli::yaml::model::ValidatedExtension {
     let path = Path::new("tests/fixtures").join(fixture);
@@ -54,11 +57,13 @@ fn codegen_get_url_emits_get_url_fn() {
     let generated = codegen::generate(&validated, false);
     assert!(
         generated.lib_rs.contains("get_url"),
-        "get_url fixture must emit a get_url fn: {}", generated.lib_rs
+        "get_url fixture must emit a get_url fn: {}",
+        generated.lib_rs
     );
     assert!(
         generated.lib_rs.contains("manga_id"),
-        "get_url fn must reference manga_id: {}", generated.lib_rs
+        "get_url fn must reference manga_id: {}",
+        generated.lib_rs
     );
 }
 
@@ -68,7 +73,8 @@ fn codegen_popular_id_in_cargo_toml() {
     let generated = codegen::generate(&validated, false);
     assert!(
         generated.cargo_toml.contains("test-popular"),
-        "Cargo.toml must contain the crate id: {}", generated.cargo_toml
+        "Cargo.toml must contain the crate id: {}",
+        generated.cargo_toml
     );
 }
 

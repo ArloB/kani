@@ -39,7 +39,12 @@ pub fn report_errors(filename: &str, source: &str, errors: Vec<chumsky::error::R
     }
 }
 
-pub fn report_custom_error(filename: &str, source: &str, message: &str, range: std::ops::Range<usize>) {
+pub fn report_custom_error(
+    filename: &str,
+    source: &str,
+    message: &str,
+    range: std::ops::Range<usize>,
+) {
     use ariadne::{Color, Label, Report, ReportKind, Source};
 
     Report::build(ReportKind::Error, (filename, range.clone()))

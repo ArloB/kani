@@ -11,7 +11,16 @@ async fn get_local_chapters_empty_returns_empty_list() {
     let manga_id = insert_manga(&svc.db, src, "m1", "Manga").await;
 
     let (chapters, has_next, _) = svc
-        .get_local_chapters(manga_id, 1, 20, ChapterSortOrder::ChapterDesc, 1, None, None, None)
+        .get_local_chapters(
+            manga_id,
+            1,
+            20,
+            ChapterSortOrder::ChapterDesc,
+            1,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(chapters.is_empty());
@@ -27,7 +36,16 @@ async fn get_local_chapters_returns_inserted_chapters() {
     insert_chapter(&svc.db, manga_id, "ch2", 2.0).await;
 
     let (chapters, _, _) = svc
-        .get_local_chapters(manga_id, 1, 20, ChapterSortOrder::ChapterDesc, 1, None, None, None)
+        .get_local_chapters(
+            manga_id,
+            1,
+            20,
+            ChapterSortOrder::ChapterDesc,
+            1,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(chapters.len(), 2);
@@ -46,7 +64,16 @@ async fn get_local_chapters_paging_works() {
     }
 
     let (page1, has_next1, total1) = svc
-        .get_local_chapters(manga_id, 1, 3, ChapterSortOrder::ChapterAsc, 1, None, None, None)
+        .get_local_chapters(
+            manga_id,
+            1,
+            3,
+            ChapterSortOrder::ChapterAsc,
+            1,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(page1.len(), 3);
@@ -54,7 +81,16 @@ async fn get_local_chapters_paging_works() {
     assert_eq!(total1, Some(2)); // ceil(5/3) = 2
 
     let (page2, has_next2, _) = svc
-        .get_local_chapters(manga_id, 2, 3, ChapterSortOrder::ChapterAsc, 1, None, None, None)
+        .get_local_chapters(
+            manga_id,
+            2,
+            3,
+            ChapterSortOrder::ChapterAsc,
+            1,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(page2.len(), 2);
@@ -76,13 +112,31 @@ async fn download_status_filter_works() {
         .unwrap();
 
     let (downloaded, _, _) = svc
-        .get_local_chapters(manga_id, 1, 20, ChapterSortOrder::ChapterDesc, 1, Some(true), None, None)
+        .get_local_chapters(
+            manga_id,
+            1,
+            20,
+            ChapterSortOrder::ChapterDesc,
+            1,
+            Some(true),
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(downloaded.len(), 1);
 
     let (not_downloaded, _, _) = svc
-        .get_local_chapters(manga_id, 1, 20, ChapterSortOrder::ChapterDesc, 1, Some(false), None, None)
+        .get_local_chapters(
+            manga_id,
+            1,
+            20,
+            ChapterSortOrder::ChapterDesc,
+            1,
+            Some(false),
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(not_downloaded.is_empty());
@@ -102,7 +156,16 @@ async fn orphaned_chapters_are_excluded() {
         .unwrap();
 
     let (chapters, _, _) = svc
-        .get_local_chapters(manga_id, 1, 20, ChapterSortOrder::ChapterDesc, 1, None, None, None)
+        .get_local_chapters(
+            manga_id,
+            1,
+            20,
+            ChapterSortOrder::ChapterDesc,
+            1,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert!(chapters.is_empty(), "orphaned chapters should not appear");

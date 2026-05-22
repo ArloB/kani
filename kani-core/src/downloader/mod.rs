@@ -345,10 +345,13 @@ impl DownloaderManager {
         staging_dir: &std::path::Path,
         referer: &str,
     ) -> Result<(PathBuf, String)> {
-        let request = client.inner().get(url)
-            .header(rquest::header::REFERER, referer).build()
+        let request = client
+            .inner()
+            .get(url)
+            .header(rquest::header::REFERER, referer)
+            .build()
             .map_err(|e| crate::error::Error::Other(e.to_string()))?;
-        
+
         let mut resp = client.send_request(request).await?;
 
         let status = resp.status();
@@ -578,9 +581,9 @@ impl DownloaderManager {
                     let pages = instance
                         .get_pages(&source_manga_id, &source_chapter_id)
                         .await?;
-                    
+
                     let metadata = instance.get_metadata().await?;
-                                
+
                     Ok((pages, metadata.base_url))
                 }
                 Err(e) => Err(e),
@@ -856,13 +859,13 @@ mod tests {
         mgr.active.write().await.insert(
             42,
             ActiveDownloadState {
-                chapter_id:42,
-                chapter_name:"ch".into(),
-                total_pages:1,
-                completed_pages:1,
-                status:ActiveDownloadStatus::Completed, 
-                manga_id: 1, 
-                manga_title: "manga".into() 
+                chapter_id: 42,
+                chapter_name: "ch".into(),
+                total_pages: 1,
+                completed_pages: 1,
+                status: ActiveDownloadStatus::Completed,
+                manga_id: 1,
+                manga_title: "manga".into(),
             },
         );
         assert!(!mgr.cancel_download(42).await);
@@ -994,7 +997,9 @@ mod tests {
             (page1, "0001.jpg".to_string()),
             (page2, "0002.png".to_string()),
         ];
-        DownloaderManager::create_cbz(&cbz_path, staged, None).await.unwrap();
+        DownloaderManager::create_cbz(&cbz_path, staged, None)
+            .await
+            .unwrap();
 
         let pages = crate::cbz::list_cbz_pages(&cbz_path).unwrap();
         assert_eq!(pages, vec!["0001.jpg", "0002.png"]);
@@ -1030,7 +1035,10 @@ mod tests {
         let entry_names: Vec<String> = (0..archive.len())
             .map(|i| archive.by_index(i).unwrap().name().to_string())
             .collect();
-        assert!(entry_names.iter().any(|n| n == "ComicInfo.xml"), "ComicInfo.xml not found: {entry_names:?}");
+        assert!(
+            entry_names.iter().any(|n| n == "ComicInfo.xml"),
+            "ComicInfo.xml not found: {entry_names:?}"
+        );
     }
 
     #[tokio::test]
@@ -1049,6 +1057,9 @@ mod tests {
         let entry_names: Vec<String> = (0..archive.len())
             .map(|i| archive.by_index(i).unwrap().name().to_string())
             .collect();
-        assert!(!entry_names.iter().any(|n| n == "ComicInfo.xml"), "unexpected ComicInfo.xml");
+        assert!(
+            !entry_names.iter().any(|n| n == "ComicInfo.xml"),
+            "unexpected ComicInfo.xml"
+        );
     }
 }

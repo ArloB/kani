@@ -136,11 +136,7 @@ mod tests {
         let cbz = make_cbz(
             &dir,
             "sorted.cbz",
-            &[
-                ("0003.jpg", b"c"),
-                ("0001.jpg", b"a"),
-                ("0002.jpg", b"b"),
-            ],
+            &[("0003.jpg", b"c"), ("0001.jpg", b"a"), ("0002.jpg", b"b")],
         );
         let pages = list_cbz_pages(&cbz).unwrap();
         assert_eq!(pages, vec!["0001.jpg", "0002.jpg", "0003.jpg"]);
@@ -152,10 +148,7 @@ mod tests {
         let cbz = make_cbz(
             &dir,
             "read.cbz",
-            &[
-                ("0001.jpg", b"image-data-1"),
-                ("0002.png", b"image-data-2"),
-            ],
+            &[("0001.jpg", b"image-data-1"), ("0002.png", b"image-data-2")],
         );
         let (data, ext) = read_cbz_page(&cbz, 0).unwrap();
         assert_eq!(data, b"image-data-1");

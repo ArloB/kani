@@ -39,35 +39,37 @@ impl AppService {
             qb.push_bind(uid);
         }
         if let Some(action) = action_filter
-            && !action.is_empty() {
-                qb.push(" AND LOWER(a.action) LIKE '%' || LOWER(");
-                qb.push_bind(action);
-                qb.push(") || '%'");
-            }
+            && !action.is_empty()
+        {
+            qb.push(" AND LOWER(a.action) LIKE '%' || LOWER(");
+            qb.push_bind(action);
+            qb.push(") || '%'");
+        }
         if let Some(from_str) = from
-            && !from_str.is_empty() {
-                qb.push(" AND a.created_at >= ");
-                qb.push_bind(from_str);
-            }
+            && !from_str.is_empty()
+        {
+            qb.push(" AND a.created_at >= ");
+            qb.push_bind(from_str);
+        }
         if let Some(to_str) = to
-            && !to_str.is_empty() {
-                qb.push(" AND a.created_at <= ");
-                qb.push_bind(to_str);
-            }
+            && !to_str.is_empty()
+        {
+            qb.push(" AND a.created_at <= ");
+            qb.push_bind(to_str);
+        }
         if let Some(s) = search
-            && !s.is_empty() {
-                qb.push(
-                    " AND (LOWER(a.action) LIKE '%' || LOWER(",
-                );
-                qb.push_bind(s);
-                qb.push(") || '%'");
-                qb.push(" OR LOWER(COALESCE(a.target,'')) LIKE '%' || LOWER(");
-                qb.push_bind(s);
-                qb.push(") || '%'");
-                qb.push(" OR LOWER(COALESCE(a.details,'')) LIKE '%' || LOWER(");
-                qb.push_bind(s);
-                qb.push(") || '%')");
-            }
+            && !s.is_empty()
+        {
+            qb.push(" AND (LOWER(a.action) LIKE '%' || LOWER(");
+            qb.push_bind(s);
+            qb.push(") || '%'");
+            qb.push(" OR LOWER(COALESCE(a.target,'')) LIKE '%' || LOWER(");
+            qb.push_bind(s);
+            qb.push(") || '%'");
+            qb.push(" OR LOWER(COALESCE(a.details,'')) LIKE '%' || LOWER(");
+            qb.push_bind(s);
+            qb.push(") || '%')");
+        }
 
         qb.push(" ORDER BY a.created_at DESC LIMIT ");
         qb.push_bind(fetch_size);

@@ -11,9 +11,14 @@ pub fn parse_date_flexible(date: &str, format: &str) -> std::result::Result<i64,
         return Ok(dt.assume_utc().unix_timestamp());
     }
     if let Ok(d) = time::Date::parse(date, &fmt) {
-        return Ok(time::PrimitiveDateTime::new(d, time::Time::MIDNIGHT).assume_utc().unix_timestamp());
+        return Ok(time::PrimitiveDateTime::new(d, time::Time::MIDNIGHT)
+            .assume_utc()
+            .unix_timestamp());
     }
-    Err(format!("Unable to parse date '{}' with format '{}'", date, format))
+    Err(format!(
+        "Unable to parse date '{}' with format '{}'",
+        date, format
+    ))
 }
 
 /// Sanitizes a string to be used as a safe filename or directory name.
@@ -212,7 +217,11 @@ mod tests {
 
     #[test]
     fn parse_date_datetime_format() {
-        let ts = parse_date_flexible("2024-01-15 10:30:00", "[year]-[month]-[day] [hour]:[minute]:[second]").unwrap();
+        let ts = parse_date_flexible(
+            "2024-01-15 10:30:00",
+            "[year]-[month]-[day] [hour]:[minute]:[second]",
+        )
+        .unwrap();
         assert!(ts > 0);
     }
 
@@ -226,7 +235,11 @@ mod tests {
     #[test]
     fn parse_date_known_epoch_value() {
         // 1970-01-01 00:00:00 UTC → Unix timestamp 0
-        let ts = parse_date_flexible("1970-01-01 00:00:00", "[year]-[month]-[day] [hour]:[minute]:[second]").unwrap();
+        let ts = parse_date_flexible(
+            "1970-01-01 00:00:00",
+            "[year]-[month]-[day] [hour]:[minute]:[second]",
+        )
+        .unwrap();
         assert_eq!(ts, 0);
     }
 
@@ -256,6 +269,12 @@ mod tests {
     #[test]
     fn parse_date_wrong_format_for_value_returns_err() {
         // format expects time component; date-only string doesn't satisfy it
-        assert!(parse_date_flexible("2024-01-15", "[year]-[month]-[day] [hour]:[minute]:[second]").is_err());
+        assert!(
+            parse_date_flexible(
+                "2024-01-15",
+                "[year]-[month]-[day] [hour]:[minute]:[second]"
+            )
+            .is_err()
+        );
     }
 }

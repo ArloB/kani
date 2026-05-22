@@ -5,7 +5,9 @@
 
 use crate::{
     types::ActiveFilter,
-    wit_types::{Chapter, ChapterList, ChapterSortOption, FilterList, MangaInfo, MangaList, PreferenceSpec},
+    wit_types::{
+        Chapter, ChapterList, ChapterSortOption, FilterList, MangaInfo, MangaList, PreferenceSpec,
+    },
 };
 
 /// Result type for extension operations.
@@ -44,9 +46,20 @@ impl std::error::Error for ExtensionError {}
 pub trait MangaExtension {
     fn name(&self) -> &str;
 
-    fn get_popular_manga(&self, page: i32, page_size: i32, filters: &[ActiveFilter]) -> ExtensionResult<MangaList>;
+    fn get_popular_manga(
+        &self,
+        page: i32,
+        page_size: i32,
+        filters: &[ActiveFilter],
+    ) -> ExtensionResult<MangaList>;
 
-    fn search_manga(&self, query: &str, page: i32, page_size: i32, filters: &[ActiveFilter]) -> ExtensionResult<MangaList>;
+    fn search_manga(
+        &self,
+        query: &str,
+        page: i32,
+        page_size: i32,
+        filters: &[ActiveFilter],
+    ) -> ExtensionResult<MangaList>;
 
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo>;
 
@@ -73,7 +86,9 @@ pub trait MangaExtension {
     /// Returns the canonical upstream URL for a manga, suitable for opening in a browser.
     /// Defaults to an error; extensions with a straightforward URL scheme should override.
     fn get_url(&self, _manga_id: &str) -> ExtensionResult<String> {
-        Err(ExtensionError::Other("get_url not implemented for this source".into()))
+        Err(ExtensionError::Other(
+            "get_url not implemented for this source".into(),
+        ))
     }
 }
 

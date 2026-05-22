@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Deserialize)]
 pub struct YamlExtension {
@@ -23,7 +23,9 @@ pub struct YamlExtension {
     pub get_url: Option<String>,
 }
 
-fn default_language() -> String { "en".to_string() }
+fn default_language() -> String {
+    "en".to_string()
+}
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Endpoints {
@@ -78,7 +80,9 @@ pub struct EndpointBody {
     pub pagination: Option<PaginationCfg>,
 }
 
-fn default_method() -> String { "GET".to_string() }
+fn default_method() -> String {
+    "GET".to_string()
+}
 
 /// `has_next_page` can be a literal `false`/`true` or a DSL expression string.
 #[derive(Debug, Deserialize)]
@@ -163,7 +167,9 @@ pub struct PaginationCfg {
     pub page_start: u32,
 }
 
-fn default_page_start() -> u32 { 1 }
+fn default_page_start() -> u32 {
+    1
+}
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

@@ -46,7 +46,19 @@ async fn get_library_filtered_empty_db_returns_empty() {
     let svc = test_service().await;
     let (rows, has_next, _total) = svc
         .get_library_filtered(
-            1, 1, 20, None, None, None, None, None, None, None, false, false, None,
+            1,
+            1,
+            20,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
             MangaSortOrder::UpdatedAsc,
         )
         .await

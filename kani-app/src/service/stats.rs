@@ -23,11 +23,10 @@ impl AppService {
 
     async fn compute_reading_stats(&self, user_id: i64, period_days: i32) -> Result<ReadingStats> {
         // Compute cutoff date in Rust to avoid SQLite string concat in datemod arg
-        let cutoff = (time::OffsetDateTime::now_utc()
-            - time::Duration::days(period_days as i64))
-        .date()
-        .format(DATE_FMT)
-        .unwrap_or_default();
+        let cutoff = (time::OffsetDateTime::now_utc() - time::Duration::days(period_days as i64))
+            .date()
+            .format(DATE_FMT)
+            .unwrap_or_default();
 
         let (totals, completed_manga, daily_rows, top_rows, genre_rows) = tokio::try_join!(
             sqlx::query!(
@@ -99,7 +98,10 @@ impl AppService {
 
         let daily_activity: Vec<DailyActivity> = daily_rows
             .into_iter()
-            .map(|r| DailyActivity { date: r.date, chapters_read: r.chapters_read })
+            .map(|r| DailyActivity {
+                date: r.date,
+                chapters_read: r.chapters_read,
+            })
             .collect();
         let top_manga: Vec<MangaReadCount> = top_rows
             .into_iter()
@@ -111,7 +113,10 @@ impl AppService {
             .collect();
         let genre_breakdown: Vec<GenreCount> = genre_rows
             .into_iter()
-            .map(|r| GenreCount { genre: r.genre, chapters_read: r.chapters_read })
+            .map(|r| GenreCount {
+                genre: r.genre,
+                chapters_read: r.chapters_read,
+            })
             .collect();
 
         let (current_streak, longest_streak) = calculate_streaks(&daily_activity);
@@ -159,7 +164,10 @@ fn calculate_streaks(activity: &[DailyActivity]) -> (i64, i64) {
     // Current streak: must end today or yesterday to be "live"
     let now = time::OffsetDateTime::now_utc();
     let today = now.date().format(DATE_FMT).unwrap_or_default();
-    let yesterday = (now - time::Duration::days(1)).date().format(DATE_FMT).unwrap_or_default();
+    let yesterday = (now - time::Duration::days(1))
+        .date()
+        .format(DATE_FMT)
+        .unwrap_or_default();
 
     let last = *dates.last().expect("non-empty");
     if last != today && last != yesterday {
@@ -181,15 +189,23 @@ fn calculate_streaks(activity: &[DailyActivity]) -> (i64, i64) {
 }
 
 fn is_next_day(a: &str, b: &str) -> bool {
-    let Some((ay, am, ad)) = parse_ymd(a) else { return false };
-    let Some((by_, bm, bd)) = parse_ymd(b) else { return false };
+    let Some((ay, am, ad)) = parse_ymd(a) else {
+        return false;
+    };
+    let Some((by_, bm, bd)) = parse_ymd(b) else {
+        return false;
+    };
 
     let dim = |y: u32, m: u32| -> u32 {
         match m {
             1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
             4 | 6 | 9 | 11 => 30,
             2 => {
-                if (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400) { 29 } else { 28 }
+                if (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400) {
+                    29
+                } else {
+                    28
+                }
             }
             _ => 30,
         }
@@ -210,7 +226,11 @@ fn parse_ymd(s: &str) -> Option<(u32, u32, u32)> {
     if s.len() < 10 {
         return None;
     }
-    Some((s[0..4].parse().ok()?, s[5..7].parse().ok()?, s[8..10].parse().ok()?))
+    Some((
+        s[0..4].parse().ok()?,
+        s[5..7].parse().ok()?,
+        s[8..10].parse().ok()?,
+    ))
 }
 
 #[cfg(test)]
@@ -220,7 +240,10 @@ mod tests {
     fn acts(dates: &[&str]) -> Vec<DailyActivity> {
         dates
             .iter()
-            .map(|d| DailyActivity { date: d.to_string(), chapters_read: 1 })
+            .map(|d| DailyActivity {
+                date: d.to_string(),
+                chapters_read: 1,
+            })
             .collect()
     }
 

@@ -100,7 +100,16 @@ impl RequestCache {
         E: Send + Sync + 'static,
     {
         self.chapter_list
-            .try_get_with((source_id, manga_id.to_string(), page, page_size, sort.to_string()), init)
+            .try_get_with(
+                (
+                    source_id,
+                    manga_id.to_string(),
+                    page,
+                    page_size,
+                    sort.to_string(),
+                ),
+                init,
+            )
             .await
     }
 
@@ -118,7 +127,10 @@ impl RequestCache {
         E: Send + Sync + 'static,
     {
         self.search_results
-            .try_get_with((source_id, query.to_string(), page, page_size, filters_key), init)
+            .try_get_with(
+                (source_id, query.to_string(), page, page_size, filters_key),
+                init,
+            )
             .await
     }
 
@@ -141,30 +153,21 @@ impl RequestCache {
             .await
     }
 
-    pub fn get_preference_schema(
-        &self,
-        source_id: i64,
-    ) -> Option<Vec<kani_core::PreferenceSpec>> {
+    pub fn get_preference_schema(&self, source_id: i64) -> Option<Vec<kani_core::PreferenceSpec>> {
         self.preference_schema
             .get(&source_id)
             .map(|r| r.value().clone())
     }
 
-    pub fn insert_preference_schema(
-        &self,
-        source_id: i64,
-        schema: Vec<kani_core::PreferenceSpec>,
-    ) {
+    pub fn insert_preference_schema(&self, source_id: i64, schema: Vec<kani_core::PreferenceSpec>) {
         self.preference_schema.insert(source_id, schema);
     }
 
     pub async fn invalidate_chapter_list_for_manga(&self, source_id: i64, manga_id: &str) {
         let owned = manga_id.to_string();
-        let _ = self
-            .chapter_list
-            .invalidate_entries_if(move |(sid, mid, _page, _page_size, _sort), _| {
-                *sid == source_id && *mid == owned
-            });
+        let _ = self.chapter_list.invalidate_entries_if(
+            move |(sid, mid, _page, _page_size, _sort), _| *sid == source_id && *mid == owned,
+        );
     }
 
     pub fn invalidate_stats(&self, user_id: i64) {

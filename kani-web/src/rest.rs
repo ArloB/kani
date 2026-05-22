@@ -4,22 +4,19 @@ use crate::{
     auth::{AuthBackend, AuthSession, Credentials},
     error::AppError,
     models::{
-        AddDownloadRuleRequest, UpdateDownloadRuleRequest, ReorderDownloadRulesRequest,
-        PreviewDownloadRulesRequest,
-        ChangePasswordRequest, CreateCategoryRequest, CreateSource,
+        AddDownloadRuleRequest, AdminCreateRoleRequest, AdminCreateUserRequest,
+        AdminGrantRoleRequest, AdminUpdateRoleRequest, AdminUpdateUserRequest,
+        ChangePasswordRequest, ContinueReadingShelfQuery, CreateCategoryRequest, CreateSource,
         FetchWasmRequest, GlobalSearchQuery, LibraryQuery, ListItemRequest, LocalChaptersQuery,
-        LoginRequest, MigrateMangaRequest, PageQuery, PreviewMigrationRequest, ProxyQuery,
-        RenameCategoryRequest, ReorderCategoriesRequest, SearchMangaRequest,
-        SetChapterProgressRequest, SetMangaCategoriesRequest, SetMangaTrackingRequest,
-        SetPreferenceRequest, SetReadStatusRequest, SetScanlatorPrefRequest,
-        ContinueReadingShelfQuery, MarkUpToRequest,
-        SetTrackerConfigRequest, SetTrackerMappingRequest, TrackerAuthUrlQuery,
-        TrackerCallbackQuery, TrackerSearchQuery,
-        ToggleAutoDownloadRequest, ToggleEnabledRequest, ToggleFavouritedRequest,
-        ToggleSelectRequest, UpdateSource,
-        AdminCreateUserRequest, AdminUpdateUserRequest, AdminGrantRoleRequest,
-        AdminCreateRoleRequest, AdminUpdateRoleRequest,
-        PasswordResetRequestBody, PasswordResetConfirmBody, TokenQuery, SendTestEmailBody,
+        LoginRequest, MarkUpToRequest, MigrateMangaRequest, PageQuery, PasswordResetConfirmBody,
+        PasswordResetRequestBody, PreviewDownloadRulesRequest, PreviewMigrationRequest, ProxyQuery,
+        RenameCategoryRequest, ReorderCategoriesRequest, ReorderDownloadRulesRequest,
+        SearchMangaRequest, SendTestEmailBody, SetChapterProgressRequest,
+        SetMangaCategoriesRequest, SetMangaTrackingRequest, SetPreferenceRequest,
+        SetReadStatusRequest, SetScanlatorPrefRequest, SetTrackerConfigRequest,
+        SetTrackerMappingRequest, ToggleAutoDownloadRequest, ToggleEnabledRequest,
+        ToggleFavouritedRequest, ToggleSelectRequest, TokenQuery, TrackerAuthUrlQuery,
+        TrackerCallbackQuery, TrackerSearchQuery, UpdateDownloadRuleRequest, UpdateSource,
     },
     permissions::AuthRequirement,
     state::AppState,
@@ -164,10 +161,16 @@ pub fn routes(state: AppState) -> Router {
         .route("/auth/registration-enabled", get(get_registration_enabled))
         .route("/auth/captcha", get(get_captcha))
         .route("/auth/register", post(auth_register))
-        .route("/auth/password-reset-enabled", get(get_password_reset_enabled))
+        .route(
+            "/auth/password-reset-enabled",
+            get(get_password_reset_enabled),
+        )
         .route("/auth/password-reset/request", post(password_reset_request))
         .route("/auth/password-reset/confirm", post(password_reset_confirm))
-        .route("/auth/password-reset/validate", get(password_reset_validate))
+        .route(
+            "/auth/password-reset/validate",
+            get(password_reset_validate),
+        )
         .route("/auth/verify-email", post(verify_email))
         .route("/auth/resend-verification", post(resend_verification))
         // ── Image proxy — mounted separately with its own rate limit ────
@@ -200,7 +203,10 @@ pub fn routes(state: AppState) -> Router {
             "/sources/{id}/chapters/{manga_id}/{page}/{page_size}",
             get(get_chapter_list),
         )
-        .route("/sources/{id}/chapter-sorts/{manga_id}", get(get_chapter_sort_list))
+        .route(
+            "/sources/{id}/chapter-sorts/{manga_id}",
+            get(get_chapter_sort_list),
+        )
         .route(
             "/sources/{id}/pages/{manga_id}/{chapter_id}",
             get(get_pages),
@@ -241,24 +247,20 @@ pub fn routes(state: AppState) -> Router {
         .route("/library/backup", get(library_backup))
         .route(
             "/library/backup/preview",
-            post(library_backup_preview)
-                .route_layer(DefaultBodyLimit::max(MAX_BACKUP_BYTES)),
+            post(library_backup_preview).route_layer(DefaultBodyLimit::max(MAX_BACKUP_BYTES)),
         )
         .route(
             "/library/restore",
-            post(library_restore)
-                .route_layer(DefaultBodyLimit::max(MAX_BACKUP_BYTES)),
+            post(library_restore).route_layer(DefaultBodyLimit::max(MAX_BACKUP_BYTES)),
         )
         // Tachiyomi import
         .route(
             "/library/import/tachiyomi/preview",
-            post(library_tachiyomi_preview)
-                .route_layer(DefaultBodyLimit::max(MAX_TACHI_BYTES)),
+            post(library_tachiyomi_preview).route_layer(DefaultBodyLimit::max(MAX_TACHI_BYTES)),
         )
         .route(
             "/library/import/tachiyomi",
-            post(library_import_tachiyomi)
-                .route_layer(DefaultBodyLimit::max(MAX_TACHI_BYTES)),
+            post(library_import_tachiyomi).route_layer(DefaultBodyLimit::max(MAX_TACHI_BYTES)),
         )
         // Pending imports
         .route("/library/pending-imports", get(library_pending_imports))
@@ -301,16 +303,16 @@ pub fn routes(state: AppState) -> Router {
             "/manga/{id}/toggle_auto_download",
             post(toggle_auto_download),
         )
-        .route(
-            "/manga/{id}/toggle_auto_scan",
-            post(toggle_auto_scan_manga),
-        )
+        .route("/manga/{id}/toggle_auto_scan", post(toggle_auto_scan_manga))
         .route(
             "/manga/{id}/toggle_download_all_preferred",
             post(toggle_download_all_preferred),
         )
         .route("/manga/{id}/notes", patch(update_manga_notes))
-        .route("/manga/{id}/local_metadata", patch(update_local_metadata_handler))
+        .route(
+            "/manga/{id}/local_metadata",
+            patch(update_local_metadata_handler),
+        )
         .route("/manga/{id}/seen", patch(mark_manga_seen))
         .route("/manga/{id}/preview_migration", post(preview_migration))
         .route("/manga/{id}/migrate", post(migrate_manga_handler))
@@ -319,16 +321,28 @@ pub fn routes(state: AppState) -> Router {
             "/manga/{id}/download_rules",
             get(get_download_rules).post(add_download_rule),
         )
-        .route("/download_rules/{id}", delete(delete_download_rule).patch(update_download_rule))
-        .route("/manga/{id}/download_rules/order", put(reorder_download_rules))
-        .route("/manga/{id}/download_rules/preview", post(preview_download_rules))
+        .route(
+            "/download_rules/{id}",
+            delete(delete_download_rule).patch(update_download_rule),
+        )
+        .route(
+            "/manga/{id}/download_rules/order",
+            put(reorder_download_rules),
+        )
+        .route(
+            "/manga/{id}/download_rules/preview",
+            post(preview_download_rules),
+        )
         // Scanlator preferences
         .route(
             "/manga/{id}/scanlator_preferences",
             get(get_scanlator_prefs).post(set_scanlator_pref),
         )
         .route("/scanlator_preferences/{id}", delete(delete_scanlator_pref))
-        .route("/manga/{id}/scanlator_mode", patch(set_scanlator_mode_handler))
+        .route(
+            "/manga/{id}/scanlator_mode",
+            patch(set_scanlator_mode_handler),
+        )
         .route("/manga/{id}/scanlators", get(get_chapter_scanlators))
         .route("/manga/{id}/languages", get(get_chapter_languages))
         // Categories
@@ -351,10 +365,22 @@ pub fn routes(state: AppState) -> Router {
         .route("/chapter/{id}/page/{page_num}", get(serve_chapter_page))
         // ── Progress tracking ────────────────────────────────────────
         .route("/chapter/{id}/progress", put(set_chapter_progress_handler))
-        .route("/chapters/read_status", put(set_chapter_read_status_handler))
-        .route("/manga/{id}/tracking", get(get_manga_tracking_handler).put(set_manga_tracking_handler))
-        .route("/manga/{id}/continue_reading", get(get_continue_reading_handler))
-        .route("/manga/{id}/chapters/mark_up_to", post(mark_chapters_up_to_handler))
+        .route(
+            "/chapters/read_status",
+            put(set_chapter_read_status_handler),
+        )
+        .route(
+            "/manga/{id}/tracking",
+            get(get_manga_tracking_handler).put(set_manga_tracking_handler),
+        )
+        .route(
+            "/manga/{id}/continue_reading",
+            get(get_continue_reading_handler),
+        )
+        .route(
+            "/manga/{id}/chapters/mark_up_to",
+            post(mark_chapters_up_to_handler),
+        )
         // ── External trackers ────────────────────────────────────────
         .route("/trackers", get(list_trackers))
         .route("/trackers/{id}/auth_url", get(get_tracker_auth_url))
@@ -367,8 +393,14 @@ pub fn routes(state: AppState) -> Router {
                 .put(set_tracker_config)
                 .delete(delete_tracker_config),
         )
-        .route("/manga/{id}/tracker_mappings", get(get_tracker_mappings).put(set_tracker_mapping))
-        .route("/manga/{id}/tracker_mappings/{tracker_id}", delete(delete_tracker_mapping))
+        .route(
+            "/manga/{id}/tracker_mappings",
+            get(get_tracker_mappings).put(set_tracker_mapping),
+        )
+        .route(
+            "/manga/{id}/tracker_mappings/{tracker_id}",
+            delete(delete_tracker_mapping),
+        )
         .route("/trackers/sync", post(sync_all_trackers))
         .route("/manga/{id}/sync", post(sync_manga_trackers))
         // ── Filters ──────────────────────────────────────────────────────
@@ -384,19 +416,22 @@ pub fn routes(state: AppState) -> Router {
         .route("/server/stop", post(server_stop))
         .route("/server/restart", post(server_restart))
         // ── Admin — user management ──────────────────────────────────────
-        .route("/admin/users", get(admin_list_users).post(admin_create_user))
+        .route(
+            "/admin/users",
+            get(admin_list_users).post(admin_create_user),
+        )
         .route(
             "/admin/users/{id}",
             patch(admin_update_user).delete(admin_delete_user),
         )
         .route("/admin/users/{id}/roles", post(admin_grant_role))
-        .route(
-            "/admin/users/{id}/roles/{role}",
-            delete(admin_revoke_role),
-        )
+        .route("/admin/users/{id}/roles/{role}", delete(admin_revoke_role))
         .route("/admin/users/{id}/activity", get(admin_user_activity))
         // ── Admin — role management ──────────────────────────────────────
-        .route("/admin/roles", get(admin_list_roles).post(admin_create_role))
+        .route(
+            "/admin/roles",
+            get(admin_list_roles).post(admin_create_role),
+        )
         .route(
             "/admin/roles/{slug}",
             patch(admin_update_role).delete(admin_delete_role),
@@ -405,9 +440,18 @@ pub fn routes(state: AppState) -> Router {
         .route("/admin/cache/clear", post(clear_cache))
         .route("/admin/scan/stop", post(stop_scan))
         .route("/admin/email/test", post(admin_send_test_email))
-        .route("/admin/users/{id}/password-reset", post(admin_trigger_password_reset_handler))
-        .route("/admin/credentials/status", get(get_credential_encryption_status_handler))
-        .route("/admin/credentials/encrypt", post(migrate_credentials_handler))
+        .route(
+            "/admin/users/{id}/password-reset",
+            post(admin_trigger_password_reset_handler),
+        )
+        .route(
+            "/admin/credentials/status",
+            get(get_credential_encryption_status_handler),
+        )
+        .route(
+            "/admin/credentials/encrypt",
+            post(migrate_credentials_handler),
+        )
         // ── Admin — logs & audit ─────────────────────────────────────────
         .route("/admin/logs", get(admin_logs))
         .route("/admin/logs/stream", get(admin_logs_stream))
@@ -539,9 +583,7 @@ async fn get_registration_enabled(
     Ok(Json(json!({ "enabled": enabled })))
 }
 
-async fn get_captcha(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, AppError> {
+async fn get_captcha(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
     if !state.get_settings().await.registration_enabled {
         return Err(AppError::NotFound("Registration is disabled".into()));
     }
@@ -556,11 +598,15 @@ async fn get_captcha(
         + 300;
     sqlx::query!(
         "INSERT INTO captcha_challenges (id, answer, expires_at) VALUES (?, ?, ?)",
-        id, answer, expires_at
+        id,
+        answer,
+        expires_at
     )
     .execute(&state.db)
     .await?;
-    Ok(Json(json!({ "id": id, "prompt": format!("What is {} + {}?", a, b) })))
+    Ok(Json(
+        json!({ "id": id, "prompt": format!("What is {} + {}?", a, b) }),
+    ))
 }
 
 #[derive(serde::Deserialize)]
@@ -586,19 +632,29 @@ async fn auth_register(
         .as_secs() as i64;
     let row = sqlx::query!(
         "DELETE FROM captcha_challenges WHERE id = ? AND expires_at > ? RETURNING answer",
-        body.captcha_id, now
+        body.captcha_id,
+        now
     )
     .fetch_optional(&state.db)
     .await?;
     let row = row.ok_or_else(|| AppError::ValidationError("Invalid or expired captcha.".into()))?;
     if row.answer != body.captcha_answer {
-        return Err(AppError::ValidationError("Incorrect captcha answer.".into()));
+        return Err(AppError::ValidationError(
+            "Incorrect captcha answer.".into(),
+        ));
     }
     if body.username.trim().is_empty() || body.password.len() < 8 {
-        return Err(AppError::ValidationError("Username required and password must be at least 8 characters.".into()));
+        return Err(AppError::ValidationError(
+            "Username required and password must be at least 8 characters.".into(),
+        ));
     }
-    let user = auth.backend.create_user(&body.username, &body.email, &body.password).await?;
-    state.audit(Some(user.id), "auth.register", Some(&user.username), None).await;
+    let user = auth
+        .backend
+        .create_user(&body.username, &body.email, &body.password)
+        .await?;
+    state
+        .audit(Some(user.id), "auth.register", Some(&user.username), None)
+        .await;
     state.send_welcome_email(user.id);
     if state.get_settings().await.email_verification_required {
         let _ = state.send_verification_email(user.id).await;
@@ -644,7 +700,9 @@ async fn password_reset_confirm(
     let backend = AuthBackend::new(state.db.clone());
     backend.change_password(user_id, &body.new_password).await?;
     state.notify_password_changed(user_id);
-    state.audit(Some(user_id), "auth.password_reset", None, None).await;
+    state
+        .audit(Some(user_id), "auth.password_reset", None, None)
+        .await;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -681,7 +739,9 @@ async fn admin_trigger_password_reset_handler(
     State(state): State<AppState>,
     Path(user_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.admin_trigger_password_reset(user_id, admin.id).await?;
+    state
+        .admin_trigger_password_reset(user_id, admin.id)
+        .await?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -732,12 +792,7 @@ async fn fs_mkdir_handler(
         .map_err(|e| AppError::InternalServerError(e.to_string()))??;
     let path_str = new_path.to_string_lossy().into_owned();
     state
-        .audit(
-            Some(user.id),
-            "fs.mkdir",
-            Some(&path_str),
-            None,
-        )
+        .audit(Some(user.id), "fs.mkdir", Some(&path_str), None)
         .await;
     Ok(Json(crate::models::FsMkdirResponse { path: path_str }))
 }
@@ -774,7 +829,9 @@ async fn path_migrate_handler(
     let estimate = path_migration::estimate_path_migration(&current, &new).await?;
     if !estimate.can_migrate {
         return Err(AppError::ValidationError(
-            estimate.reason.unwrap_or_else(|| "migration not possible".into()),
+            estimate
+                .reason
+                .unwrap_or_else(|| "migration not possible".into()),
         ));
     }
 
@@ -784,15 +841,14 @@ async fn path_migrate_handler(
     Ok((StatusCode::ACCEPTED, Json(json!({ "started": true }))))
 }
 
-async fn resolve_path_field(
-    state: &AppState,
-    field: &str,
-) -> Result<std::path::PathBuf, AppError> {
+async fn resolve_path_field(state: &AppState, field: &str) -> Result<std::path::PathBuf, AppError> {
     let settings = state.settings.read().await;
     match field {
         "library_path" => Ok(settings.library_path.clone()),
         "wasm_storage_path" => Ok(settings.wasm_storage_path.clone()),
-        other => Err(AppError::ValidationError(format!("unknown path field: {other}"))),
+        other => Err(AppError::ValidationError(format!(
+            "unknown path field: {other}"
+        ))),
     }
 }
 
@@ -814,16 +870,13 @@ fn proxy_retry_delay(
                 .ok()
                 .map(|secs| secs.min(PROXY_RETRY_AFTER_CAP_SECS))
                 .or_else(|| {
-                    time::OffsetDateTime::parse(
-                        s,
-                        &time::format_description::well_known::Rfc2822,
-                    )
-                    .ok()
-                    .map(|dt| {
-                        let now = time::OffsetDateTime::now_utc();
-                        (dt - now).whole_seconds().max(0) as u64
-                    })
-                    .map(|secs| secs.min(PROXY_RETRY_AFTER_CAP_SECS))
+                    time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc2822)
+                        .ok()
+                        .map(|dt| {
+                            let now = time::OffsetDateTime::now_utc();
+                            (dt - now).whole_seconds().max(0) as u64
+                        })
+                        .map(|secs| secs.min(PROXY_RETRY_AFTER_CAP_SECS))
                 })
         })
         .map(std::time::Duration::from_secs)
@@ -1394,7 +1447,9 @@ async fn get_popular_manga(
     Query(query): Query<crate::models::PopularMangaQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let base_url = state.get_source_base_url(id).await?;
-    let json_str = state.get_popular_manga(id, page, page_size, query.filters).await?;
+    let json_str = state
+        .get_popular_manga(id, page, page_size, query.filters)
+        .await?;
     let mut list: crate::types::MangaList = serde_json::from_str(&json_str)?;
     for item in &mut list.manga {
         if let Some(ref url) = item.cover_url.clone() {
@@ -1412,7 +1467,13 @@ async fn search_manga(
 ) -> Result<impl IntoResponse, AppError> {
     let base_url = state.get_source_base_url(id).await?;
     let json_str = state
-        .search_manga(id, &payload.query.unwrap_or("".to_string()), page, page_size, payload.filters)
+        .search_manga(
+            id,
+            &payload.query.unwrap_or("".to_string()),
+            page,
+            page_size,
+            payload.filters,
+        )
         .await?;
     let mut list: crate::types::MangaList = serde_json::from_str(&json_str)?;
     for item in &mut list.manga {
@@ -1729,8 +1790,11 @@ async fn get_local_manga_details(
     let display_description_html = display_description
         .as_ref()
         .map(|s| crate::utils::render_description(s));
-    let display_status =
-        MangaStatus::from(d.manga.local_status.unwrap_or_else(|| i64::from(d.manga.status)));
+    let display_status = MangaStatus::from(
+        d.manga
+            .local_status
+            .unwrap_or_else(|| i64::from(d.manga.status)),
+    );
     let info = MangaInfo {
         id: d.manga.source_manga_id,
         title: display_name,
@@ -1866,7 +1930,9 @@ struct DownloadHistoryQuery {
     #[serde(default = "default_history_limit")]
     limit: i64,
 }
-fn default_history_limit() -> i64 { 50 }
+fn default_history_limit() -> i64 {
+    50
+}
 
 async fn get_download_history(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
@@ -2007,8 +2073,10 @@ async fn update_settings(
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
     if let crate::types::SettingsUpdate::Advanced(ref adv) = update {
-        crate::HTTP_LOGGING_ENABLED
-            .store(adv.http_request_logging, std::sync::atomic::Ordering::Relaxed);
+        crate::HTTP_LOGGING_ENABLED.store(
+            adv.http_request_logging,
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
     state.update_settings(update, user.id).await?;
     Ok(Json(json!({})))
@@ -2047,7 +2115,9 @@ async fn server_restart(
 ) -> Result<impl IntoResponse, AppError> {
     use std::sync::atomic::Ordering;
     tracing::info!(user_id = user.id, username = %user.username, "Server restart requested");
-    state.audit(Some(user.id), "server.restart", None, None).await;
+    state
+        .audit(Some(user.id), "server.restart", None, None)
+        .await;
     state.restart_requested.store(true, Ordering::Relaxed);
     state.shutdown_token.cancel();
     Ok(Json(json!({ "ok": true })))
@@ -2079,7 +2149,10 @@ async fn update_manga_notes(
     Path(manga_id): Path<i64>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, AppError> {
-    let notes = body.get("notes").and_then(|v| v.as_str()).map(str::to_owned);
+    let notes = body
+        .get("notes")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
     state.update_manga_notes(manga_id, notes).await?;
     Ok(Json(json!({})))
 }
@@ -2117,10 +2190,7 @@ async fn upload_manga_cover_handler(
         .next_field()
         .await?
         .ok_or_else(|| AppError::Other("No file field provided".into()))?;
-    let content_type = field
-        .content_type()
-        .unwrap_or("image/jpeg")
-        .to_string();
+    let content_type = field.content_type().unwrap_or("image/jpeg").to_string();
     const MAX_COVER_BYTES: usize = 10 * 1024 * 1024;
     let bytes = field.bytes().await?;
     if bytes.len() > MAX_COVER_BYTES {
@@ -2247,7 +2317,9 @@ async fn reorder_download_rules(
     Path(manga_id): Path<i64>,
     Json(body): Json<ReorderDownloadRulesRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.reorder_download_rules(manga_id, body.ordered_ids).await?;
+    state
+        .reorder_download_rules(manga_id, body.ordered_ids)
+        .await?;
     Ok(Json(json!({})))
 }
 
@@ -2556,14 +2628,12 @@ async fn get_current_user(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    let verified_at = sqlx::query_scalar!(
-        "SELECT email_verified_at FROM users WHERE id = ?",
-        user.id
-    )
-    .fetch_optional(&state.db)
-    .await?
-    .flatten()
-    .map(|t: sqlx::types::time::OffsetDateTime| t.to_string());
+    let verified_at =
+        sqlx::query_scalar!("SELECT email_verified_at FROM users WHERE id = ?", user.id)
+            .fetch_optional(&state.db)
+            .await?
+            .flatten()
+            .map(|t: sqlx::types::time::OffsetDateTime| t.to_string());
 
     Ok(Json(crate::types::AuthenticatedUser {
         id: user.id,
@@ -2854,7 +2924,9 @@ async fn get_tracker_auth_url(
     Path(tracker_id): Path<i64>,
     Query(q): Query<TrackerAuthUrlQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let url = state.get_tracker_auth_url(tracker_id, &q.redirect_uri).await?;
+    let url = state
+        .get_tracker_auth_url(tracker_id, &q.redirect_uri)
+        .await?;
     Ok(Json(json!({ "url": url })))
 }
 
@@ -2864,7 +2936,9 @@ async fn tracker_oauth_callback(
     Path(tracker_id): Path<i64>,
     Query(q): Query<TrackerCallbackQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.complete_tracker_oauth(user.id, tracker_id, &q.code, &q.state).await?;
+    state
+        .complete_tracker_oauth(user.id, tracker_id, &q.code, &q.state)
+        .await?;
     Ok((
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
         OAUTH_SUCCESS_HTML,
@@ -2896,7 +2970,9 @@ async fn set_tracker_config(
     Json(body): Json<SetTrackerConfigRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let secret = body.client_secret.as_deref().filter(|s| !s.is_empty());
-    state.set_tracker_config(tracker_id, &body.client_id, secret).await?;
+    state
+        .set_tracker_config(tracker_id, &body.client_id, secret)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -2924,7 +3000,9 @@ async fn search_tracker_manga(
     Path(tracker_id): Path<i64>,
     Query(q): Query<TrackerSearchQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let results = state.search_tracker_manga(user.id, tracker_id, &q.query).await?;
+    let results = state
+        .search_tracker_manga(user.id, tracker_id, &q.query)
+        .await?;
     Ok(Json(results))
 }
 
@@ -3058,7 +3136,9 @@ async fn get_continue_reading_handler(
     State(state): State<AppState>,
     Path(manga_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let info = state.get_continue_reading_chapter(user.id, manga_id).await?;
+    let info = state
+        .get_continue_reading_chapter(user.id, manga_id)
+        .await?;
     Ok(Json(info))
 }
 
@@ -3096,8 +3176,12 @@ async fn mark_chapters_up_to_handler(
     Path(manga_id): Path<i64>,
     Json(body): Json<MarkUpToRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let ids = state.get_chapters_up_to(manga_id, body.chapter_number).await?;
-    state.set_chapter_read_status(user.id, ids, body.is_read).await?;
+    let ids = state
+        .get_chapters_up_to(manga_id, body.chapter_number)
+        .await?;
+    state
+        .set_chapter_read_status(user.id, ids, body.is_read)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -3108,7 +3192,9 @@ async fn run_maintenance(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let (before_bytes, after_bytes) = state.run_maintenance().await?;
-    Ok(Json(json!({ "before_bytes": before_bytes, "after_bytes": after_bytes })))
+    Ok(Json(
+        json!({ "before_bytes": before_bytes, "after_bytes": after_bytes }),
+    ))
 }
 
 async fn clear_cache(
@@ -3157,7 +3243,9 @@ async fn admin_create_user(
         ));
     }
     let backend = AuthBackend::new(state.db.clone());
-    let user = backend.create_user(&body.username, &body.email, &body.password).await?;
+    let user = backend
+        .create_user(&body.username, &body.email, &body.password)
+        .await?;
     for role in &body.roles {
         backend.grant_role(user.id, role, Some(admin.id)).await?;
     }
@@ -3207,12 +3295,9 @@ async fn admin_update_user(
             Some(json!({ "user_id": user_id })),
         )
         .await;
-    Ok(Json(
-        backend
-            .fetch_user_by_id(user_id)
-            .await?
-            .ok_or_else(|| AppError::NotFound("User not found".into()))?,
-    ))
+    Ok(Json(backend.fetch_user_by_id(user_id).await?.ok_or_else(
+        || AppError::NotFound("User not found".into()),
+    )?))
 }
 
 async fn admin_delete_user(
@@ -3221,7 +3306,9 @@ async fn admin_delete_user(
     Path(user_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
     if user_id == admin.id {
-        return Err(AppError::ValidationError("Cannot delete your own account".into()));
+        return Err(AppError::ValidationError(
+            "Cannot delete your own account".into(),
+        ));
     }
     let backend = AuthBackend::new(state.db.clone());
     backend.delete_user(user_id).await?;
@@ -3243,7 +3330,9 @@ async fn admin_grant_role(
     Json(body): Json<AdminGrantRoleRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let backend = AuthBackend::new(state.db.clone());
-    backend.grant_role(user_id, &body.role_slug, Some(admin.id)).await?;
+    backend
+        .grant_role(user_id, &body.role_slug, Some(admin.id))
+        .await?;
     state
         .audit(
             Some(admin.id),
@@ -3360,12 +3449,7 @@ async fn admin_create_role(
         )
         .await?;
     state
-        .audit(
-            Some(admin.id),
-            "admin.role.create",
-            Some(&body.slug),
-            None,
-        )
+        .audit(Some(admin.id), "admin.role.create", Some(&body.slug), None)
         .await;
     Ok(StatusCode::CREATED)
 }
@@ -3385,12 +3469,7 @@ async fn admin_update_role(
         )
         .await?;
     state
-        .audit(
-            Some(admin.id),
-            "admin.role.update",
-            Some(&slug),
-            None,
-        )
+        .audit(Some(admin.id), "admin.role.update", Some(&slug), None)
         .await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -3403,12 +3482,7 @@ async fn admin_delete_role(
     let backend = AuthBackend::new(state.db.clone());
     backend.delete_role(&slug).await?;
     state
-        .audit(
-            Some(admin.id),
-            "admin.role.delete",
-            Some(&slug),
-            None,
-        )
+        .audit(Some(admin.id), "admin.role.delete", Some(&slug), None)
         .await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -3746,7 +3820,9 @@ async fn admin_logs_stream(
                 return None;
             }
             if !sources.is_empty()
-                && !sources.iter().any(|s| s.eq_ignore_ascii_case(&entry.source))
+                && !sources
+                    .iter()
+                    .any(|s| s.eq_ignore_ascii_case(&entry.source))
             {
                 return None;
             }
@@ -3862,7 +3938,11 @@ async fn admin_audit_log_download(
         Some("json") => {
             let json = serde_json::to_string(&entries)
                 .map_err(|e| AppError::InternalServerError(e.to_string()))?;
-            (json, "application/json", format!("kani-audit-{}.json", &today[..10]))
+            (
+                json,
+                "application/json",
+                format!("kani-audit-{}.json", &today[..10]),
+            )
         }
         _ => {
             let mut csv = String::from("id,timestamp,user,action,target,details\n");
@@ -3877,7 +3957,11 @@ async fn admin_audit_log_download(
                     csv_escape(e.details.as_deref().unwrap_or("")),
                 ));
             }
-            (csv, "text/csv; charset=utf-8", format!("kani-audit-{}.csv", &today[..10]))
+            (
+                csv,
+                "text/csv; charset=utf-8",
+                format!("kani-audit-{}.csv", &today[..10]),
+            )
         }
     };
 
@@ -3961,9 +4045,7 @@ async fn library_restore(
                     .and_then(|v| v.parse::<usize>().ok());
                 file_bytes = Some(
                     kani_core::http::collect_bytes_limited(
-                        Box::pin(field.map_err(|e| {
-                            kani_core::error::Error::Other(e.to_string())
-                        })),
+                        Box::pin(field.map_err(|e| kani_core::error::Error::Other(e.to_string()))),
                         content_length,
                         MAX_BACKUP_BYTES,
                     )
@@ -3971,25 +4053,60 @@ async fn library_restore(
                 );
             }
             Some("merge") => {
-                opts.merge = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(false);
+                opts.merge = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(false);
             }
             Some("import_manga") => {
-                opts.import_manga = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(true);
+                opts.import_manga = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(true);
             }
             Some("import_categories") => {
-                opts.import_categories = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(true);
+                opts.import_categories = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(true);
             }
             Some("import_download_rules") => {
-                opts.import_download_rules = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(true);
+                opts.import_download_rules = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(true);
             }
             Some("import_tracking") => {
-                opts.import_tracking = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(true);
+                opts.import_tracking = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(true);
             }
             Some("import_chapter_progress") => {
-                opts.import_chapter_progress = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(false);
+                opts.import_chapter_progress = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(false);
             }
             Some("import_settings") => {
-                opts.import_settings = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(false);
+                opts.import_settings = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(false);
             }
             _ => {}
         }
@@ -4028,9 +4145,7 @@ async fn library_import_tachiyomi(
                     .and_then(|v| v.parse::<usize>().ok());
                 file_bytes = Some(
                     kani_core::http::collect_bytes_limited(
-                        Box::pin(field.map_err(|e| {
-                            kani_core::error::Error::Other(e.to_string())
-                        })),
+                        Box::pin(field.map_err(|e| kani_core::error::Error::Other(e.to_string()))),
                         content_length,
                         MAX_TACHI_BYTES,
                     )
@@ -4038,16 +4153,36 @@ async fn library_import_tachiyomi(
                 );
             }
             Some("import_manga") => {
-                opts.import_manga = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(true);
+                opts.import_manga = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(true);
             }
             Some("import_categories") => {
-                opts.import_categories = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(true);
+                opts.import_categories = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(true);
             }
             Some("import_tracking") => {
-                opts.import_tracking = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(true);
+                opts.import_tracking = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(true);
             }
             Some("import_chapter_progress") => {
-                opts.import_chapter_progress = field.text().await.ok().and_then(|v| v.parse().ok()).unwrap_or(false);
+                opts.import_chapter_progress = field
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(false);
             }
             _ => {}
         }
@@ -4120,7 +4255,14 @@ async fn library_duplicates_scan(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let new_pairs = kani_app::service::dedup::scan_and_persist_duplicates(&state.db).await?;
-    state.audit(Some(user.id), "library.duplicates_scan", None, Some(serde_json::json!({ "new_pairs": new_pairs }))).await;
+    state
+        .audit(
+            Some(user.id),
+            "library.duplicates_scan",
+            None,
+            Some(serde_json::json!({ "new_pairs": new_pairs })),
+        )
+        .await;
     Ok(Json(serde_json::json!({ "new_pairs": new_pairs })))
 }
 
@@ -4151,7 +4293,14 @@ async fn library_merge_duplicate(
     Json(body): Json<MergeDuplicateBody>,
 ) -> Result<impl IntoResponse, AppError> {
     kani_app::service::dedup::merge_manga(&state.db, body.keep_id, body.discard_id).await?;
-    state.audit(Some(user.id), "manga.merge_duplicate", None, Some(serde_json::json!({ "keep": body.keep_id, "discard": body.discard_id }))).await;
+    state
+        .audit(
+            Some(user.id),
+            "manga.merge_duplicate",
+            None,
+            Some(serde_json::json!({ "keep": body.keep_id, "discard": body.discard_id })),
+        )
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -4205,9 +4354,9 @@ async fn serve_chapter_cbz(
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
     let (cbz_path, chapter_title, ..) = state.chapter_cbz_path(id).await?;
-    let bytes = tokio::fs::read(&cbz_path).await.map_err(|_| {
-        AppError::NotFound(format!("Chapter {id} CBZ not found"))
-    })?;
+    let bytes = tokio::fs::read(&cbz_path)
+        .await
+        .map_err(|_| AppError::NotFound(format!("Chapter {id} CBZ not found")))?;
     let safe_name = chapter_title.replace(['/', '\\', '"'], "_");
     let disposition = format!("attachment; filename=\"{safe_name}.cbz\"");
     Ok((

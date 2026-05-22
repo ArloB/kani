@@ -199,7 +199,9 @@ async fn main() {
                             }
                         }
                         kani_shared::DownloadProgressEvent::ChapterCompleted {
-                            chapter_id, successful_pages, ..
+                            chapter_id,
+                            successful_pages,
+                            ..
                         } => {
                             let pc = successful_pages as i64;
                             if let Err(e) = sqlx::query!(
@@ -488,7 +490,10 @@ async fn main() {
             tracing::warn!("Failed to reset in-flight download statuses on shutdown: {e}");
         }
         state.db.close().await;
-        let exit_code = if state.restart_requested.load(std::sync::atomic::Ordering::Relaxed) {
+        let exit_code = if state
+            .restart_requested
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             tracing::info!("Restart requested — exiting with code 42.");
             42
         } else {

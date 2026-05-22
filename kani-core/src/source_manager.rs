@@ -135,7 +135,14 @@ impl OwnedSourceInstance {
         filters: &[kani_shared::types::ActiveFilter],
     ) -> Result<crate::wasm::kani::extension::types::MangaList> {
         let wit_filters = crate::wasm::filter_conversions::to_wit_active_filters(filters);
-        execute_wasm!(self, call_search_manga, query, page, page_size, &wit_filters)
+        execute_wasm!(
+            self,
+            call_search_manga,
+            query,
+            page,
+            page_size,
+            &wit_filters
+        )
     }
 
     /// Calls the `get_manga_details` function in the WASM module.
@@ -154,7 +161,14 @@ impl OwnedSourceInstance {
         page_size: Option<i32>,
         sort: Option<String>,
     ) -> Result<crate::wasm::kani::extension::types::ChapterList> {
-        execute_wasm!(self, call_get_chapter_list, manga_id, page, page_size, sort.as_deref())
+        execute_wasm!(
+            self,
+            call_get_chapter_list,
+            manga_id,
+            page,
+            page_size,
+            sort.as_deref()
+        )
     }
 
     /// Calls the `get_chapter_sort_list` function in the WASM module.

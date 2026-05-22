@@ -24,7 +24,11 @@ pub struct GeneratedCrate {
 pub fn generate(ext: &ValidatedExtension, embedded_bytes: bool) -> GeneratedCrate {
     let cargo_toml = emit_cargo_toml(ext, embedded_bytes);
     let lib_rs = emit_lib_rs(ext, embedded_bytes);
-    GeneratedCrate { id: ext.id.clone(), cargo_toml, lib_rs }
+    GeneratedCrate {
+        id: ext.id.clone(),
+        cargo_toml,
+        lib_rs,
+    }
 }
 
 fn emit_lib_rs(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
@@ -33,7 +37,10 @@ fn emit_lib_rs(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
     parts.push(emit_lib_header(ext, embedded_bytes));
 
     // MangaExtension impl
-    parts.push(format!("impl MangaExtension for {} {{", crate_layout::to_pascal_case(&ext.id)));
+    parts.push(format!(
+        "impl MangaExtension for {} {{",
+        crate_layout::to_pascal_case(&ext.id)
+    ));
     parts.push(format!("fn name(&self) -> &str {{ \"{}\" }}", ext.name));
 
     if let Some(popular) = &ext.popular {
@@ -62,7 +69,8 @@ fn emit_lib_rs(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
         parts.push(
             "fn get_manga_details(&self, _manga_id: &str) -> ExtensionResult<MangaInfo> {\n\
              Err(kani_shared::ExtensionError::NotImplemented)\n\
-             }".into()
+             }"
+            .into(),
         );
     }
 

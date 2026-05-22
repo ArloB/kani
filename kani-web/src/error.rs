@@ -115,16 +115,16 @@ impl AppError {
     /// Optional actionable guidance shown to the user.
     pub fn hint(&self) -> Option<&'static str> {
         match self {
-            Self::FlareSolverrRequired => Some(
-                "This source requires FlareSolverr. Configure it in Settings > Advanced.",
-            ),
+            Self::FlareSolverrRequired => {
+                Some("This source requires FlareSolverr. Configure it in Settings > Advanced.")
+            }
             Self::RateLimitExceeded => Some("Too many requests. Please wait a moment."),
-            Self::SourceAuthRequired(_) => Some(
-                "This source requires login. Configure credentials in source settings.",
-            ),
-            Self::Forbidden(_) => Some(
-                "You don't have permission for this action. Contact an administrator.",
-            ),
+            Self::SourceAuthRequired(_) => {
+                Some("This source requires login. Configure credentials in source settings.")
+            }
+            Self::Forbidden(_) => {
+                Some("You don't have permission for this action. Contact an administrator.")
+            }
             Self::Unauthorized(_) => Some("Please log in to continue."),
             _ => None,
         }

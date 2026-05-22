@@ -4,7 +4,11 @@ use crate::yaml::model::ValidatedExtension;
 
 pub fn emit_cargo_toml(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
     let id = &ext.id;
-    let features = if embedded_bytes { String::new() } else { ", features = [\"builder\"]".into() };
+    let features = if embedded_bytes {
+        String::new()
+    } else {
+        ", features = [\"builder\"]".into()
+    };
     format!(
         r#"[package]
 name = "kani-{id}"
@@ -34,7 +38,11 @@ pub fn emit_lib_header(ext: &ValidatedExtension, embedded_bytes: bool) -> String
     let nsfw = ext.nsfw;
     let unrestricted_http = ext.unrestricted_http;
 
-    let pref_import = if ext.preferences.is_empty() { "" } else { ", preference_list" };
+    let pref_import = if ext.preferences.is_empty() {
+        ""
+    } else {
+        ", preference_list"
+    };
 
     let extract_import = if embedded_bytes {
         "use kani_shared::host_abi::{HttpRequest, extract_raw};"

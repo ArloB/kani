@@ -6,7 +6,9 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, body_json, build_test_app, create_admin, get_req, login, put_json, test_state};
+use common::{
+    authed_get, body_json, build_test_app, create_admin, get_req, login, put_json, test_state,
+};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -96,7 +98,10 @@ async fn get_manga_chapters_returns_empty_for_fresh_db() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert!(
-        body["chapters"].as_array().map(|a| a.is_empty()).unwrap_or(false),
+        body["chapters"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(false),
         "expected empty chapters array, got: {body}"
     );
 }

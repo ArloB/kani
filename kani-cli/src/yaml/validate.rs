@@ -6,16 +6,16 @@ use std::path::Path;
 use chumsky::Parser;
 use kani_shared::ast::Expr;
 
-use crate::dsl::parser as dsl_parser;
-use crate::error::{report_custom_error, report_errors, CliError};
-use super::schema::{
-    EndpointBody, FilterEntry, FilterMappingEntry, HasNextPage, TotalPages,
-    PopularEndpoint, YamlExtension,
-};
 use super::model::{
-    FieldSource, QueryEntry, QueryValue, ValidatedBinding, ValidatedEndpoint,
-    ValidatedExtension, ValidatedField, ValidatedHnp, ValidatedTotalPages, ValidatedPopular,
+    FieldSource, QueryEntry, QueryValue, ValidatedBinding, ValidatedEndpoint, ValidatedExtension,
+    ValidatedField, ValidatedHnp, ValidatedPopular, ValidatedTotalPages,
 };
+use super::schema::{
+    EndpointBody, FilterEntry, FilterMappingEntry, HasNextPage, PopularEndpoint, TotalPages,
+    YamlExtension,
+};
+use crate::dsl::parser as dsl_parser;
+use crate::error::{CliError, report_custom_error, report_errors};
 
 const POPULAR_ARGS: &[&str] = &["page", "page_size", "filters"];
 const SEARCH_ARGS: &[&str] = &["query", "page", "page_size", "filters"];
@@ -39,35 +39,63 @@ pub fn validate(
     let popular = ext.endpoints.popular.as_ref().and_then(|p| {
         match validate_popular(p, &filename, &ext.filters) {
             Ok(vp) => Some(vp),
-            Err(mut errs) => { errors.append(&mut errs); None }
+            Err(mut errs) => {
+                errors.append(&mut errs);
+                None
+            }
         }
     });
 
     let search = ext.endpoints.search.as_ref().and_then(|e| {
         match validate_endpoint(e, "search", SEARCH_ARGS, MANGA_LIST_REQUIRED, &filename) {
             Ok(ve) => Some(ve),
-            Err(mut errs) => { errors.append(&mut errs); None }
+            Err(mut errs) => {
+                errors.append(&mut errs);
+                None
+            }
         }
     });
 
-    let manga_details = ext.endpoints.manga_details.as_ref().and_then(|e| {
-        match validate_endpoint(e, "manga_details", DETAILS_ARGS, DETAILS_REQUIRED, &filename) {
-            Ok(ve) => Some(ve),
-            Err(mut errs) => { errors.append(&mut errs); None }
-        }
-    });
+    let manga_details =
+        ext.endpoints.manga_details.as_ref().and_then(|e| {
+            match validate_endpoint(
+                e,
+                "manga_details",
+                DETAILS_ARGS,
+                DETAILS_REQUIRED,
+                &filename,
+            ) {
+                Ok(ve) => Some(ve),
+                Err(mut errs) => {
+                    errors.append(&mut errs);
+                    None
+                }
+            }
+        });
 
     let chapter_list = ext.endpoints.chapter_list.as_ref().and_then(|e| {
-        match validate_endpoint(e, "chapter_list", CHAPTER_LIST_ARGS, CHAPTER_LIST_REQUIRED, &filename) {
+        match validate_endpoint(
+            e,
+            "chapter_list",
+            CHAPTER_LIST_ARGS,
+            CHAPTER_LIST_REQUIRED,
+            &filename,
+        ) {
             Ok(ve) => Some(ve),
-            Err(mut errs) => { errors.append(&mut errs); None }
+            Err(mut errs) => {
+                errors.append(&mut errs);
+                None
+            }
         }
     });
 
     let pages = ext.endpoints.pages.as_ref().and_then(|e| {
         match validate_endpoint(e, "pages", PAGES_ARGS, PAGES_REQUIRED, &filename) {
             Ok(ve) => Some(ve),
-            Err(mut errs) => { errors.append(&mut errs); None }
+            Err(mut errs) => {
+                errors.append(&mut errs);
+                None
+            }
         }
     });
 
@@ -100,7 +128,10 @@ fn validate_popular(
     _filters: &[FilterEntry],
 ) -> Result<ValidatedPopular, Vec<CliError>> {
     match popular {
-        PopularEndpoint::Delegated { delegate_to, empty_without_filters } => {
+        PopularEndpoint::Delegated {
+            delegate_to,
+            empty_without_filters,
+        } => {
             let valid = ["search", "manga_details", "chapter_list", "pages"];
             if !valid.contains(&delegate_to.as_str()) {
                 return Err(vec![CliError::Other(format!(
@@ -114,9 +145,8 @@ fn validate_popular(
             })
         }
         PopularEndpoint::Full(body) => {
-            let endpoint = validate_endpoint(
-                body, "popular", POPULAR_ARGS, MANGA_LIST_REQUIRED, filename,
-            )?;
+            let endpoint =
+                validate_endpoint(body, "popular", POPULAR_ARGS, MANGA_LIST_REQUIRED, filename)?;
             Ok(ValidatedPopular::Full(Box::new(endpoint)))
         }
     }
@@ -138,40 +168,56 @@ fn validate_endpoint(
             r.clone()
         }
         None => {
-            errors.push(CliError::Other(format!("endpoints.{name}: 'route' is required")));
+            errors.push(CliError::Other(format!(
+                "endpoints.{name}: 'route' is required"
+            )));
             String::new()
         }
     };
 
-    let container = body.container.clone().unwrap_or_else(|| ":root".to_string());
+    let container = body
+        .container
+        .clone()
+        .unwrap_or_else(|| ":root".to_string());
 
-    let headers: Vec<(String, String)> = body.headers.iter()
+    let headers: Vec<(String, String)> = body
+        .headers
+        .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
     let queries = match build_query_entries(&body.queries, name, fn_args) {
         Ok(q) => q,
-        Err(mut errs) => { errors.append(&mut errs); vec![] }
+        Err(mut errs) => {
+            errors.append(&mut errs);
+            vec![]
+        }
     };
 
-    let filter_mapping: Vec<(String, FilterMappingEntry)> = body.filter_mapping.iter()
+    let filter_mapping: Vec<(String, FilterMappingEntry)> = body
+        .filter_mapping
+        .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
     for (key, entry) in &filter_mapping {
         if let FilterMappingEntry::SortPair { key_template, .. } = entry
-            && !key_template.contains("{}") {
-                errors.push(CliError::Other(format!(
-                    "endpoints.{name}.filter_mapping.{key}: sort_pair key_template must contain '{{}}'"
-                )));
-            }
+            && !key_template.contains("{}")
+        {
+            errors.push(CliError::Other(format!(
+                "endpoints.{name}.filter_mapping.{key}: sort_pair key_template must contain '{{}}'"
+            )));
+        }
     }
 
     let mut bindings = Vec::new();
     for (var_name, dsl) in &body.bindings {
         let field_path = format!("{filename}:endpoints.{name}.bindings.{var_name}");
         match parse_dsl(dsl, &field_path) {
-            Ok(expr) => bindings.push(ValidatedBinding { name: var_name.clone(), expr }),
+            Ok(expr) => bindings.push(ValidatedBinding {
+                name: var_name.clone(),
+                expr,
+            }),
             Err(mut errs) => errors.append(&mut errs),
         }
     }
@@ -197,11 +243,18 @@ fn validate_endpoint(
         } else {
             match parse_dsl(dsl, &field_path) {
                 Ok(expr) => FieldSource::Blueprint(expr),
-                Err(mut errs) => { errors.append(&mut errs); continue; }
+                Err(mut errs) => {
+                    errors.append(&mut errs);
+                    continue;
+                }
             }
         };
 
-        fields.push(ValidatedField { name: field_name.clone(), source, optional });
+        fields.push(ValidatedField {
+            name: field_name.clone(),
+            source,
+            optional,
+        });
     }
 
     for req in required_fields {
@@ -223,11 +276,18 @@ fn validate_endpoint(
         } else {
             match parse_dsl(dsl, &field_path) {
                 Ok(expr) => FieldSource::Blueprint(expr),
-                Err(mut errs) => { errors.append(&mut errs); continue; }
+                Err(mut errs) => {
+                    errors.append(&mut errs);
+                    continue;
+                }
             }
         };
 
-        scalars.push(ValidatedField { name: scalar_name.clone(), source, optional });
+        scalars.push(ValidatedField {
+            name: scalar_name.clone(),
+            source,
+            optional,
+        });
     }
 
     let has_next_page = match &body.has_next_page {
@@ -237,7 +297,10 @@ fn validate_endpoint(
             let field_path = format!("{filename}:endpoints.{name}.has_next_page");
             match parse_dsl(dsl, &field_path) {
                 Ok(expr) => ValidatedHnp::Scalar(expr),
-                Err(mut errs) => { errors.append(&mut errs); ValidatedHnp::Default }
+                Err(mut errs) => {
+                    errors.append(&mut errs);
+                    ValidatedHnp::Default
+                }
             }
         }
     };
@@ -249,7 +312,10 @@ fn validate_endpoint(
             let field_path = format!("{filename}:endpoints.{name}.total_pages");
             match parse_dsl(dsl, &field_path) {
                 Ok(expr) => ValidatedTotalPages::Scalar(expr),
-                Err(mut errs) => { errors.append(&mut errs); ValidatedTotalPages::None }
+                Err(mut errs) => {
+                    errors.append(&mut errs);
+                    ValidatedTotalPages::None
+                }
             }
         }
     };
@@ -310,10 +376,13 @@ fn parse_dsl(dsl: &str, field_path: &str) -> Result<Expr, Vec<CliError>> {
     if result.has_errors() {
         let errs: Vec<_> = result.errors().cloned().collect();
         report_errors(field_path, &normalized, errs);
-        return Err(vec![CliError::Other(format!("DSL parse failed in {field_path}"))]);
+        return Err(vec![CliError::Other(format!(
+            "DSL parse failed in {field_path}"
+        ))]);
     }
 
-    let parse_ast = result.into_result()
+    let parse_ast = result
+        .into_result()
         .map_err(|_| vec![CliError::Other(format!("DSL parse failed in {field_path}"))])?;
 
     let expr: Result<Expr, Vec<CliError>> = parse_ast.try_into();
@@ -370,11 +439,13 @@ fn validate_route_vars(route: &str, endpoint: &str, fn_args: &[&str]) -> Vec<Cli
     extract_dollar_vars(route)
         .into_iter()
         .filter(|v| !fn_args.contains(&v.as_str()))
-        .map(|v| CliError::Other(format!(
-            "endpoints.{endpoint}.route: '${v}$' is not available \
+        .map(|v| {
+            CliError::Other(format!(
+                "endpoints.{endpoint}.route: '${v}$' is not available \
              (available args: {})",
-            fn_args.join(", ")
-        )))
+                fn_args.join(", ")
+            ))
+        })
         .collect()
 }
 
@@ -388,7 +459,8 @@ fn build_query_entries(
 
     for (key, value) in queries {
         let trimmed = value.trim();
-        let query_value = if trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() > 2 {
+        let query_value = if trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() > 2
+        {
             let var = &trimmed[1..trimmed.len() - 1];
             if !fn_args.contains(&var) {
                 errors.push(CliError::Other(format!(
@@ -402,8 +474,15 @@ fn build_query_entries(
         } else {
             QueryValue::Static(value.clone())
         };
-        entries.push(QueryEntry { key: key.clone(), value: query_value });
+        entries.push(QueryEntry {
+            key: key.clone(),
+            value: query_value,
+        });
     }
 
-    if errors.is_empty() { Ok(entries) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(entries)
+    } else {
+        Err(errors)
+    }
 }

@@ -7,15 +7,15 @@ pub mod cbz;
 pub mod comic_info;
 pub mod downloader;
 pub mod error;
+pub mod evaluator;
 pub mod file_storage;
 pub mod http;
 pub mod network;
 pub mod source_manager;
 pub mod sources;
 pub mod utilities;
-pub mod wasm;
-pub mod evaluator;
 pub mod v8_process;
+pub mod wasm;
 
 pub use error::Error;
 

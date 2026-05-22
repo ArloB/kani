@@ -1,8 +1,8 @@
 mod parseexpr;
 
-use kani_shared::ast::Op;
-use chumsky::prelude::*;
 use crate::dsl::parseexpr::ParseExpr;
+use chumsky::prelude::*;
+use kani_shared::ast::Op;
 
 type ParserError<'a> = extra::Err<Rich<'a, char>>;
 
@@ -24,9 +24,10 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
     let ws = || {
         let block_comment = just("/*")
             .ignore_then(
-                none_of(['*']).ignored()
+                none_of(['*'])
+                    .ignored()
                     .or(just('*').then_ignore(none_of(['/'])).ignored())
-                    .repeated()
+                    .repeated(),
             )
             .then_ignore(just("*/"))
             .ignored();
@@ -36,9 +37,7 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
             .repeated()
             .at_least(1)
             .ignored();
-        choice((any_ws, block_comment))
-            .repeated()
-            .ignored()
+        choice((any_ws, block_comment)).repeated().ignored()
     };
 
     let ident = text::ident().map(|s: &str| s.to_string()).padded_by(ws());
@@ -53,7 +52,8 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
         .then_ignore(just('"'))
         .padded_by(ws());
 
-    let number = just('-').or_not()
+    let number = just('-')
+        .or_not()
         .then(text::digits(10))
         .then(just('.').ignore_then(text::digits(10)).or_not())
         .to_slice()
@@ -63,7 +63,8 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
     let val_bool = choice((
         text::keyword("true").to(ParseExpr::Bool(true)),
         text::keyword("false").to(ParseExpr::Bool(false)),
-    )).padded_by(ws());
+    ))
+    .padded_by(ws());
 
     let val_null = text::keyword("null").to(ParseExpr::Null).padded_by(ws());
 
@@ -98,26 +99,26 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
     let pref = built_in_str("pref").map(ParseExpr::Pref);
 
     // Terminator: ';' or '\n', padded only by horizontal whitespace so the '\n' isn't eaten.
-    let terminator = choice((
-        just(';').ignored(),
-        just('\n').ignored(),
-    )).padded_by(hws());
+    let terminator = choice((just(';').ignored(), just('\n').ignored())).padded_by(hws());
 
     let expr = recursive(|expr| {
-        let comma_list = expr.clone()
+        let comma_list = expr
+            .clone()
             .separated_by(just(','))
             .allow_trailing()
             .collect::<Vec<_>>();
 
-        let array = comma_list.clone()
+        let array = comma_list
+            .clone()
             .delimited_by(just('['), just(']'))
             .map(ParseExpr::List);
 
         let merge = text::keyword("merge")
             .ignore_then(
-                comma_list.clone()
+                comma_list
+                    .clone()
                     .delimited_by(just('['), just(']'))
-                    .delimited_by(just('('), just(')'))
+                    .delimited_by(just('('), just(')')),
             )
             .map(ParseExpr::Merge);
 
@@ -129,9 +130,9 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
                             .padded_by(ws())
                             .ignore_then(comma_list.clone())
                             .or_not()
-                            .map(|opt| opt.unwrap_or_default())
+                            .map(|opt| opt.unwrap_or_default()),
                     )
-                    .delimited_by(just('('), just(')'))
+                    .delimited_by(just('('), just(')')),
             )
             .map(|(template, args)| ParseExpr::Format { template, args });
 
@@ -144,7 +145,7 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
             .map(|((name, value), body)| ParseExpr::Let {
                 name,
                 value: Box::new(value),
-                body: Box::new(body)
+                body: Box::new(body),
             });
 
         let if_then_else = text::keyword("if")
@@ -159,10 +160,7 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
                 else_: Box::new(else_b),
             });
 
-        let arg_choice = choice((
-            map_literal,
-            expr.clone()
-        ));
+        let arg_choice = choice((map_literal, expr.clone()));
 
         let arg_list = arg_choice
             .separated_by(just(','))
@@ -170,60 +168,102 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
             .collect::<Vec<_>>();
 
         let atom = choice((
-            let_expr, val_self, val_null, val_bool, val_index,
-            dom, json, pref,
-            number, string_literal.map(ParseExpr::Literal),
+            let_expr,
+            val_self,
+            val_null,
+            val_bool,
+            val_index,
+            dom,
+            json,
+            pref,
+            number,
+            string_literal.map(ParseExpr::Literal),
             variable.map(ParseExpr::Var),
-            merge, format, if_then_else, array,
-            expr.clone().delimited_by(just('('), just(')'))
-        )).boxed();
+            merge,
+            format,
+            if_then_else,
+            array,
+            expr.clone().delimited_by(just('('), just(')')),
+        ))
+        .boxed();
 
-        let method_call = ident
-            .then(arg_list.delimited_by(just('('), just(')')));
+        let method_call = ident.then(arg_list.delimited_by(just('('), just(')')));
 
-        let chain = atom.foldl(
-            hws().ignore_then(just('.'))
-                .ignore_then(method_call)
-                .map_with(|(name, args), extra| {
-                    (name, args, extra.span())
-                })
-                .repeated(),
-            |target, (name, args, span)| ParseExpr::MethodCall {
-                target: Box::new(target),
-                name,
-                args,
-                span
-            },
-        ).boxed();
+        let chain = atom
+            .foldl(
+                hws()
+                    .ignore_then(just('.'))
+                    .ignore_then(method_call)
+                    .map_with(|(name, args), extra| (name, args, extra.span()))
+                    .repeated(),
+                |target, (name, args, span)| ParseExpr::MethodCall {
+                    target: Box::new(target),
+                    name,
+                    args,
+                    span,
+                },
+            )
+            .boxed();
 
         let mul_op = choice((just('*').to(Op::Mul), just('/').to(Op::Div)));
-        let mul_expr = chain.clone().foldl(mul_op.then(chain).repeated(), |lhs, (op, rhs)| {
-            ParseExpr::BinaryOperation { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
-        });
+        let mul_expr = chain
+            .clone()
+            .foldl(mul_op.then(chain).repeated(), |lhs, (op, rhs)| {
+                ParseExpr::BinaryOperation {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                }
+            });
 
         let add_op = choice((just('+').to(Op::Add), just('-').to(Op::Sub)));
-        let add_expr = mul_expr.clone().foldl(add_op.then(mul_expr).repeated(), |lhs, (op, rhs)| {
-            ParseExpr::BinaryOperation { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
-        });
+        let add_expr =
+            mul_expr
+                .clone()
+                .foldl(add_op.then(mul_expr).repeated(), |lhs, (op, rhs)| {
+                    ParseExpr::BinaryOperation {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    }
+                });
 
         let cmp_op = choice((
-            just("==").to(Op::Eq), just("!=").to(Op::Ne),
-            just("<=").to(Op::Le), just(">=").to(Op::Ge),
-            just('<').to(Op::Lt), just('>').to(Op::Gt),
+            just("==").to(Op::Eq),
+            just("!=").to(Op::Ne),
+            just("<=").to(Op::Le),
+            just(">=").to(Op::Ge),
+            just('<').to(Op::Lt),
+            just('>').to(Op::Gt),
         ));
-        let cmp_expr = add_expr.clone().foldl(cmp_op.then(add_expr).repeated(), |lhs, (op, rhs)| {
-            ParseExpr::BinaryOperation { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
-        });
+        let cmp_expr =
+            add_expr
+                .clone()
+                .foldl(cmp_op.then(add_expr).repeated(), |lhs, (op, rhs)| {
+                    ParseExpr::BinaryOperation {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    }
+                });
 
-        let and_expr = cmp_expr.clone().foldl(just("&&").to(Op::And).then(cmp_expr).repeated(), |lhs, (op, rhs)| {
-            ParseExpr::BinaryOperation { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
-        });
+        let and_expr = cmp_expr.clone().foldl(
+            just("&&").to(Op::And).then(cmp_expr).repeated(),
+            |lhs, (op, rhs)| ParseExpr::BinaryOperation {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            },
+        );
 
-        
-
-        and_expr.clone().foldl(just("||").to(Op::Or).then(and_expr).repeated(), |lhs, (op, rhs)| {
-            ParseExpr::BinaryOperation { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
-        })
+        and_expr.clone().foldl(
+            just("||").to(Op::Or).then(and_expr).repeated(),
+            |lhs, (op, rhs)| ParseExpr::BinaryOperation {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            },
+        )
     });
 
     expr.then_ignore(end())

@@ -45,33 +45,41 @@ impl V8Process {
             return Err(format!("V8 shim did not signal ready: {line}"));
         }
 
-        Ok(Self { _child: child, stdin, stdout })
+        Ok(Self {
+            _child: child,
+            stdin,
+            stdout,
+        })
     }
 
     fn request(&mut self, action: &str, name: &str, script: &str) -> Result<String, String> {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let msg =
-            serde_json::json!({ "id": id, "action": action, "name": name, "script": script });
+        let msg = serde_json::json!({ "id": id, "action": action, "name": name, "script": script });
         let mut line = serde_json::to_string(&msg).unwrap();
         line.push('\n');
 
         self.stdin
             .write_all(line.as_bytes())
             .map_err(|e| format!("V8 write error: {e}"))?;
-        self.stdin.flush().map_err(|e| format!("V8 flush error: {e}"))?;
+        self.stdin
+            .flush()
+            .map_err(|e| format!("V8 flush error: {e}"))?;
 
         let mut resp = String::new();
         self.stdout
             .read_line(&mut resp)
             .map_err(|e| format!("V8 read error: {e}"))?;
 
-        let val: serde_json::Value = serde_json::from_str(resp.trim())
-            .map_err(|e| format!("V8 bad response: {e}"))?;
+        let val: serde_json::Value =
+            serde_json::from_str(resp.trim()).map_err(|e| format!("V8 bad response: {e}"))?;
 
         if val["ok"].as_bool().unwrap_or(false) {
             Ok(val["value"].as_str().unwrap_or("").to_string())
         } else {
-            Err(val["error"].as_str().unwrap_or("unknown V8 error").to_string())
+            Err(val["error"]
+                .as_str()
+                .unwrap_or("unknown V8 error")
+                .to_string())
         }
     }
 }
@@ -149,8 +157,11 @@ pub fn capture_url_param(
         p.request(
             "capture_token",
             page_url,
-            &format!("{}|{}|{}|{}|{}",
-                url_pattern, param, timeout_ms,
+            &format!(
+                "{}|{}|{}|{}|{}",
+                url_pattern,
+                param,
+                timeout_ms,
                 if force_refresh { 1 } else { 0 },
                 if verbose { 1 } else { 0 },
             ),

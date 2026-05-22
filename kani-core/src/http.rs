@@ -46,16 +46,13 @@ fn compute_delay(headers: Option<&rquest::header::HeaderMap>, attempt: u32) -> s
                 .ok()
                 .map(|secs| secs.min(RETRY_AFTER_CAP_SECS))
                 .or_else(|| {
-                    time::OffsetDateTime::parse(
-                        s,
-                        &time::format_description::well_known::Rfc2822,
-                    )
-                    .ok()
-                    .map(|dt| {
-                        let now = time::OffsetDateTime::now_utc();
-                        (dt - now).whole_seconds().max(0) as u64
-                    })
-                    .map(|secs| secs.min(RETRY_AFTER_CAP_SECS))
+                    time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc2822)
+                        .ok()
+                        .map(|dt| {
+                            let now = time::OffsetDateTime::now_utc();
+                            (dt - now).whole_seconds().max(0) as u64
+                        })
+                        .map(|secs| secs.min(RETRY_AFTER_CAP_SECS))
                 })
         })
         .map(std::time::Duration::from_secs)
@@ -220,7 +217,9 @@ impl SmartClient {
             return false;
         };
         let guard = circuit.open_until.lock().expect("circuit mutex poisoned");
-        guard.map(|until| std::time::Instant::now() < until).unwrap_or(false)
+        guard
+            .map(|until| std::time::Instant::now() < until)
+            .unwrap_or(false)
     }
 
     fn record_success(&self, domain: &str) {
@@ -239,8 +238,8 @@ impl SmartClient {
             .consecutive_failures
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if prev + 1 >= CIRCUIT_OPEN_THRESHOLD {
-            let until = std::time::Instant::now()
-                + std::time::Duration::from_secs(CIRCUIT_COOLDOWN_SECS);
+            let until =
+                std::time::Instant::now() + std::time::Duration::from_secs(CIRCUIT_COOLDOWN_SECS);
             *circuit.open_until.lock().expect("circuit mutex poisoned") = Some(until);
             tracing::warn!(
                 "Circuit opened for {} after {} consecutive failures (cooldown {}s)",
@@ -310,7 +309,10 @@ impl SmartClient {
                     let delay = compute_delay(None, attempt) + jitter();
                     tracing::warn!(
                         "HTTP request failed ({}), retrying in {:?} (attempt {}/{})",
-                        e, delay, attempt + 1, MAX_RETRIES,
+                        e,
+                        delay,
+                        attempt + 1,
+                        MAX_RETRIES,
                     );
                     self.record_failure(&domain);
                     tokio::time::sleep(delay).await;
@@ -329,7 +331,10 @@ impl SmartClient {
                     let delay = compute_delay(Some(resp.headers()), attempt) + jitter();
                     tracing::warn!(
                         "Upstream returned {}, retrying in {:?} (attempt {}/{})",
-                        status.as_u16(), delay, attempt + 1, MAX_RETRIES,
+                        status.as_u16(),
+                        delay,
+                        attempt + 1,
+                        MAX_RETRIES,
                     );
                     tokio::time::sleep(delay).await;
                     current_request = next_req;
@@ -507,7 +512,10 @@ impl SmartClient {
                     let delay = compute_delay(None, retry_count) + jitter();
                     tracing::warn!(
                         "safe_get network error ({}), retrying in {:?} (attempt {}/{})",
-                        e, delay, retry_count + 1, MAX_RETRIES,
+                        e,
+                        delay,
+                        retry_count + 1,
+                        MAX_RETRIES,
                     );
                     self.record_failure(&circuit_domain);
                     retry_count += 1;
@@ -521,7 +529,10 @@ impl SmartClient {
                 let delay = compute_delay(Some(resp.headers()), retry_count) + jitter();
                 tracing::warn!(
                     "safe_get got {}, retrying in {:?} (attempt {}/{})",
-                    resp.status().as_u16(), delay, retry_count + 1, MAX_RETRIES,
+                    resp.status().as_u16(),
+                    delay,
+                    retry_count + 1,
+                    MAX_RETRIES,
                 );
                 self.record_failure(&circuit_domain);
                 retry_count += 1;
@@ -585,7 +596,9 @@ impl SmartClient {
                     }
                 }
 
-                let (cookies, ua) = self.solve_challenge_once(&url, Some(&current_headers)).await?;
+                let (cookies, ua) = self
+                    .solve_challenge_once(&url, Some(&current_headers))
+                    .await?;
 
                 if let Ok(val) = rquest::header::HeaderValue::from_str(&cookies) {
                     solver_headers.insert(rquest::header::COOKIE, val);
@@ -607,9 +620,9 @@ impl SmartClient {
     }
 
     async fn solve_challenge(
-        &self, 
+        &self,
         url: &str,
-        headers: Option<&rquest::header::HeaderMap>
+        headers: Option<&rquest::header::HeaderMap>,
     ) -> Result<(String, String)> {
         let guard = self.solver_url.load();
         let solver_url = guard
@@ -623,7 +636,7 @@ impl SmartClient {
           "url": url,
           "maxTimeout": 60000
         });
-        
+
         if let Some(h) = headers {
             let mut header_map = serde_json::Map::new();
             for (k, v) in h.iter() {
@@ -686,9 +699,9 @@ impl SmartClient {
     }
 
     async fn solve_challenge_once(
-        &self, 
+        &self,
         url: &str,
-        headers: Option<&rquest::header::HeaderMap>
+        headers: Option<&rquest::header::HeaderMap>,
     ) -> Result<(String, String)> {
         let base = url
             .parse::<rquest::Url>()
@@ -886,11 +899,9 @@ impl SmartClient {
             tracing::info!("Proactively refreshing credentials for {}", domain);
             match self.solve_challenge_once(&url, None).await {
                 Ok((cookies, ua)) => self.store_credentials(&url, &cookies, &ua),
-                Err(e) => tracing::warn!(
-                    "Proactive credential refresh failed for {}: {}",
-                    domain,
-                    e
-                ),
+                Err(e) => {
+                    tracing::warn!("Proactive credential refresh failed for {}: {}", domain, e)
+                }
             }
         }
     }
@@ -1205,7 +1216,11 @@ mod tests {
             .await;
 
         let client = SmartClient::new_for_test().unwrap();
-        let req = client.inner().get(format!("{}/hello", server.uri())).build().unwrap();
+        let req = client
+            .inner()
+            .get(format!("{}/hello", server.uri()))
+            .build()
+            .unwrap();
         let resp = client.send_request(req).await.unwrap();
         assert_eq!(resp.status(), rquest::StatusCode::OK);
         let body = resp.text().await.unwrap();
@@ -1311,9 +1326,16 @@ mod tests {
             .await;
 
         let client = SmartClient::new_for_test().unwrap();
-        let req = client.inner().get(format!("{}/page", server.uri())).build().unwrap();
+        let req = client
+            .inner()
+            .get(format!("{}/page", server.uri()))
+            .build()
+            .unwrap();
         let resp = client.send_request(req).await.unwrap();
-        assert!(matches!(resp, SmartResponse::Buffered { .. }), "expected Buffered for text/html");
+        assert!(
+            matches!(resp, SmartResponse::Buffered { .. }),
+            "expected Buffered for text/html"
+        );
         let body = resp.text().await.unwrap();
         assert!(body.contains("hello"));
     }
@@ -1332,7 +1354,11 @@ mod tests {
             .await;
 
         let client = SmartClient::new_for_test().unwrap();
-        let req = client.inner().get(format!("{}/data", server.uri())).build().unwrap();
+        let req = client
+            .inner()
+            .get(format!("{}/data", server.uri()))
+            .build()
+            .unwrap();
         let resp = client.send_request(req).await.unwrap();
         assert!(matches!(resp, SmartResponse::Normal(_)));
     }
@@ -1347,7 +1373,11 @@ mod tests {
             .await;
 
         let client = SmartClient::new_for_test().unwrap();
-        let req = client.inner().get(format!("{}/missing", server.uri())).build().unwrap();
+        let req = client
+            .inner()
+            .get(format!("{}/missing", server.uri()))
+            .build()
+            .unwrap();
         let resp = client.send_request(req).await.unwrap();
         assert_eq!(resp.status(), rquest::StatusCode::NOT_FOUND);
     }
@@ -1362,7 +1392,11 @@ mod tests {
             .await;
 
         let client = SmartClient::new_for_test().unwrap();
-        let req = client.inner().get(format!("{}/err", server.uri())).build().unwrap();
+        let req = client
+            .inner()
+            .get(format!("{}/err", server.uri()))
+            .build()
+            .unwrap();
         let resp = client.send_request(req).await.unwrap();
         assert_eq!(resp.status(), rquest::StatusCode::INTERNAL_SERVER_ERROR);
     }
@@ -1383,7 +1417,11 @@ mod tests {
             .await;
 
         let client = SmartClient::new_for_test().unwrap();
-        let req = client.inner().get(format!("{}/retry", server.uri())).build().unwrap();
+        let req = client
+            .inner()
+            .get(format!("{}/retry", server.uri()))
+            .build()
+            .unwrap();
         let resp = client.send_request(req).await.unwrap();
         assert_eq!(resp.status(), rquest::StatusCode::OK);
     }
@@ -1399,7 +1437,11 @@ mod tests {
             .await;
 
         let client = SmartClient::new_for_test().unwrap();
-        let req = client.inner().get(format!("{}/always429", server.uri())).build().unwrap();
+        let req = client
+            .inner()
+            .get(format!("{}/always429", server.uri()))
+            .build()
+            .unwrap();
         let resp = client.send_request(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 429);
     }
@@ -1410,9 +1452,7 @@ mod tests {
         let dest = format!("{}/dest", server.uri());
         Mock::given(method("GET"))
             .and(path("/redir"))
-            .respond_with(
-                ResponseTemplate::new(301).insert_header("location", dest.as_str()),
-            )
+            .respond_with(ResponseTemplate::new(301).insert_header("location", dest.as_str()))
             .mount(&server)
             .await;
         Mock::given(method("GET"))
@@ -1437,9 +1477,7 @@ mod tests {
             let next = format!("{}/r{}", server.uri(), i + 1);
             Mock::given(method("GET"))
                 .and(path(format!("/r{}", i)))
-                .respond_with(
-                    ResponseTemplate::new(301).insert_header("location", next.as_str()),
-                )
+                .respond_with(ResponseTemplate::new(301).insert_header("location", next.as_str()))
                 .mount(&server)
                 .await;
         }
@@ -1449,7 +1487,10 @@ mod tests {
             panic!("expected error for too many redirects");
         };
         let msg = err.to_string();
-        assert!(msg.contains("too many redirects") || msg.contains("redirect"), "{msg}");
+        assert!(
+            msg.contains("too many redirects") || msg.contains("redirect"),
+            "{msg}"
+        );
     }
 
     #[tokio::test]
@@ -1458,14 +1499,16 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/bad"))
             .respond_with(
-                ResponseTemplate::new(301)
-                    .insert_header("location", "ftp://example.com/file"),
+                ResponseTemplate::new(301).insert_header("location", "ftp://example.com/file"),
             )
             .mount(&server)
             .await;
 
         let client = SmartClient::new_for_test().unwrap();
-        let Err(err) = client.safe_get(&format!("{}/bad", server.uri()), None).await else {
+        let Err(err) = client
+            .safe_get(&format!("{}/bad", server.uri()), None)
+            .await
+        else {
             panic!("expected error for bad redirect scheme");
         };
         assert!(err.to_string().contains("forbidden scheme"), "{err}");

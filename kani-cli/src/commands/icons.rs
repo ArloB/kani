@@ -1,11 +1,11 @@
-use std::path::Path;
-use resvg::usvg;
-use tiny_skia::{Pixmap, Transform};
 use crate::error::CliError;
+use resvg::usvg;
+use std::path::Path;
+use tiny_skia::{Pixmap, Transform};
 
 pub fn run() -> Result<(), CliError> {
     let svg_path = Path::new("static/icons/kani-mark.svg");
-    let out_dir  = Path::new("static/icons");
+    let out_dir = Path::new("static/icons");
     generate_icons(svg_path, out_dir)
 }
 
@@ -48,17 +48,18 @@ fn render_at_size(
     let mut pixmap = Pixmap::new(size, size)
         .ok_or_else(|| CliError::Other(format!("failed to allocate {size}×{size} pixmap")))?;
 
-    let padding  = (size as f32 * safe_zone_ratio).round();
-    let inner    = size as f32 - padding * 2.0;
+    let padding = (size as f32 * safe_zone_ratio).round();
+    let inner = size as f32 - padding * 2.0;
     let svg_size = tree.size();
-    let scale    = inner / svg_size.width().max(svg_size.height());
-    let tx       = padding + (inner - svg_size.width()  * scale) / 2.0;
-    let ty       = padding + (inner - svg_size.height() * scale) / 2.0;
+    let scale = inner / svg_size.width().max(svg_size.height());
+    let tx = padding + (inner - svg_size.width() * scale) / 2.0;
+    let ty = padding + (inner - svg_size.height() * scale) / 2.0;
 
     let transform = Transform::from_scale(scale, scale).post_translate(tx, ty);
     resvg::render(tree, transform, &mut pixmap.as_mut());
 
-    pixmap.save_png(output.as_ref())
+    pixmap
+        .save_png(output.as_ref())
         .map_err(|e| CliError::Other(format!("failed to save PNG: {e}")))?;
 
     println!("  wrote {}  ({}×{})", output.as_ref().display(), size, size);

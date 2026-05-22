@@ -5,7 +5,10 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_delete, authed_get, authed_post, body_json, build_test_app, create_admin, delete_req, get_req, login, test_state};
+use common::{
+    authed_delete, authed_get, authed_post, body_json, build_test_app, create_admin, delete_req,
+    get_req, login, test_state,
+};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -32,10 +35,7 @@ async fn get_library_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    let res = app
-        .oneshot(get_req("/rest/library"))
-        .await
-        .unwrap();
+    let res = app.oneshot(get_req("/rest/library")).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
@@ -62,10 +62,7 @@ async fn get_manga_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    let res = app
-        .oneshot(get_req("/rest/manga/1"))
-        .await
-        .unwrap();
+    let res = app.oneshot(get_req("/rest/manga/1")).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
@@ -139,10 +136,7 @@ async fn delete_manga_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    let res = app
-        .oneshot(delete_req("/rest/manga/1"))
-        .await
-        .unwrap();
+    let res = app.oneshot(delete_req("/rest/manga/1")).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

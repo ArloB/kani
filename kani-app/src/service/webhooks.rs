@@ -22,7 +22,10 @@ pub struct WebhookService {
 
 impl WebhookService {
     pub fn new(db: SqlitePool) -> Self {
-        Self { db, http: rquest::Client::new() }
+        Self {
+            db,
+            http: rquest::Client::new(),
+        }
     }
 }
 
@@ -221,8 +224,8 @@ impl WebhookService {
         .map_err(|e| ServiceError::Internal(e.to_string()))?;
 
         let sig = wh.secret.as_deref().map(|s| {
-            let mut mac = Hmac::<Sha256>::new_from_slice(s.as_bytes())
-                .expect("HMAC accepts any key size");
+            let mut mac =
+                Hmac::<Sha256>::new_from_slice(s.as_bytes()).expect("HMAC accepts any key size");
             mac.update(body.as_bytes());
             format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
         });
@@ -286,7 +289,10 @@ impl WebhookService {
             return Ok(vec![]);
         }
 
-        Ok(webhooks.into_iter().filter(|w| !opted_out_set.contains(&w.id)).collect())
+        Ok(webhooks
+            .into_iter()
+            .filter(|w| !opted_out_set.contains(&w.id))
+            .collect())
     }
 
     // ── CRUD ──────────────────────────────────────────────────────────────────
@@ -348,9 +354,13 @@ impl WebhookService {
                 .await?;
         }
         if body.secret.is_some() {
-            sqlx::query!("UPDATE webhooks SET secret = ? WHERE id = ?", body.secret, id)
-                .execute(&self.db)
-                .await?;
+            sqlx::query!(
+                "UPDATE webhooks SET secret = ? WHERE id = ?",
+                body.secret,
+                id
+            )
+            .execute(&self.db)
+            .await?;
         }
         if let Some(events) = &body.events {
             sqlx::query!("UPDATE webhooks SET events = ? WHERE id = ?", events, id)
@@ -447,7 +457,9 @@ fn validate_events_json(events: &str) -> Result<()> {
     let arr: serde_json::Value = serde_json::from_str(events)
         .map_err(|_| ServiceError::Validation("events must be a JSON array".to_owned()))?;
     if !arr.is_array() {
-        return Err(ServiceError::Validation("events must be a JSON array".to_owned()));
+        return Err(ServiceError::Validation(
+            "events must be a JSON array".to_owned(),
+        ));
     }
     Ok(())
 }

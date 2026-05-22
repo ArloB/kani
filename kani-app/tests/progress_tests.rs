@@ -61,7 +61,10 @@ async fn set_chapter_progress_higher_page_marks_read() {
         )
         .await
         .unwrap();
-    assert!(chapters[0].is_read, "chapter at last page should be marked read");
+    assert!(
+        chapters[0].is_read,
+        "chapter at last page should be marked read"
+    );
 }
 
 #[tokio::test]

@@ -44,7 +44,9 @@ const EPOCH_TICKS: u64 = 50_000;
 
 macro_rules! skip_if_missing {
     ($name:expr) => {{
-        let Some(bytes) = load_wasm($name) else { return };
+        let Some(bytes) = load_wasm($name) else {
+            return;
+        };
         bytes
     }};
 }
@@ -105,7 +107,11 @@ async fn abi_json_imports_return_extracted_fields() {
     // id = get_str("/name"), title = get_i64("/age").to_string()
     assert_eq!(m.id, "Alice", "json get_str");
     assert_eq!(m.title, "30", "json get_i64");
-    assert_eq!(m.cover_url.as_deref(), Some("json-ok"), "json sentinel: active/score/tags/keys all verified");
+    assert_eq!(
+        m.cover_url.as_deref(),
+        Some("json-ok"),
+        "json sentinel: active/score/tags/keys all verified"
+    );
 }
 
 // ── test_abi: utility host imports ───────────────────────────────────────────
@@ -128,7 +134,11 @@ async fn abi_utility_imports_return_decoded_string_and_query_param() {
     // title = url_decode("hello%20world") = "hello world"
     assert_eq!(m.title, "hello world", "url_encode+decode round-trip");
     // cover_url = get_query_param(built_url, "pg") = "5"
-    assert_eq!(m.cover_url.as_deref(), Some("5"), "get_query_param from build_url result");
+    assert_eq!(
+        m.cover_url.as_deref(),
+        Some("5"),
+        "get_query_param from build_url result"
+    );
 }
 
 // ── test_abi: prefs host imports ──────────────────────────────────────────────
@@ -141,7 +151,8 @@ async fn abi_prefs_get_value_returns_injected_preferences() {
     // Inject preferences before calling WASM
     {
         let data = store.data_mut();
-        data.preferences.insert("test_str".into(), "injected_value".into());
+        data.preferences
+            .insert("test_str".into(), "injected_value".into());
         data.preferences.insert("test_bool".into(), "true".into());
         data.preferences.insert("test_i64".into(), "42".into());
         data.preferences.insert("test_f64".into(), "3.14".into());
@@ -160,7 +171,11 @@ async fn abi_prefs_get_value_returns_injected_preferences() {
     assert_eq!(m.id, "injected_value", "prefs get_str");
     // title = prefs::get_bool("test_bool").to_string() = "true"
     assert_eq!(m.title, "true", "prefs get_bool");
-    assert_eq!(m.cover_url.as_deref(), Some("prefs-ok"), "prefs sentinel: raw/missing checks passed");
+    assert_eq!(
+        m.cover_url.as_deref(),
+        Some("prefs-ok"),
+        "prefs sentinel: raw/missing checks passed"
+    );
 }
 
 // ── test_abi: extraction::extract_html ───────────────────────────────────────

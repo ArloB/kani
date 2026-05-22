@@ -21,11 +21,11 @@ const ATOM_XML: &str = "application/atom+xml;profile=opds-catalog; charset=utf-8
 
 pub fn routes(state: AppState) -> Router {
     Router::new()
-        .route("/",             get(opds_root))
-        .route("/catalogue",   get(opds_catalogue))
-        .route("/manga/{id}",  get(opds_manga))
-        .route("/search",      get(opds_search))
-        .route("/opensearch",  get(opds_opensearch))
+        .route("/", get(opds_root))
+        .route("/catalogue", get(opds_catalogue))
+        .route("/manga/{id}", get(opds_manga))
+        .route("/search", get(opds_search))
+        .route("/opensearch", get(opds_opensearch))
         .with_state(state)
 }
 
@@ -45,8 +45,12 @@ struct SearchQuery {
     q: Option<String>,
 }
 
-fn default_page() -> i32 { 1 }
-fn default_page_size() -> i32 { 20 }
+fn default_page() -> i32 {
+    1
+}
+fn default_page_size() -> i32 {
+    20
+}
 
 async fn opds_root(
     auth: AuthSession,
@@ -130,7 +134,10 @@ async fn opds_opensearch(
     let body = state.service.opds_opensearch_description(&base_url);
     (
         StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/opensearchdescription+xml; charset=utf-8")],
+        [(
+            header::CONTENT_TYPE,
+            "application/opensearchdescription+xml; charset=utf-8",
+        )],
         body,
     )
         .into_response()
@@ -147,9 +154,10 @@ async fn opds_authenticate(
 ) -> Option<User> {
     // 1. Valid session
     if let Some(user) = &auth.user
-        && user.is_active {
-            return Some(user.clone());
-        }
+        && user.is_active
+    {
+        return Some(user.clone());
+    }
 
     // 2. Basic auth
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
@@ -170,12 +178,7 @@ async fn opds_authenticate(
 // ─── Response helpers ─────────────────────────────────────────────────────────
 
 fn atom_response(body: String) -> axum::response::Response {
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, ATOM_XML)],
-        body,
-    )
-        .into_response()
+    (StatusCode::OK, [(header::CONTENT_TYPE, ATOM_XML)], body).into_response()
 }
 
 fn opds_401() -> axum::response::Response {

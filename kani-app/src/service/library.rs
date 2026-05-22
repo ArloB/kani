@@ -339,7 +339,10 @@ impl AppService {
         let eff_authors = if record.has_local_people {
             loc_authors
                 .iter()
-                .map(|n| NamedItem { id: 0, name: n.clone() })
+                .map(|n| NamedItem {
+                    id: 0,
+                    name: n.clone(),
+                })
                 .collect()
         } else {
             src_authors.clone()
@@ -347,7 +350,10 @@ impl AppService {
         let eff_artists = if record.has_local_people {
             loc_artists
                 .iter()
-                .map(|n| NamedItem { id: 0, name: n.clone() })
+                .map(|n| NamedItem {
+                    id: 0,
+                    name: n.clone(),
+                })
                 .collect()
         } else {
             src_artists.clone()
@@ -355,7 +361,10 @@ impl AppService {
         let eff_tags = if record.has_local_tags {
             loc_tags
                 .iter()
-                .map(|n| NamedItem { id: 0, name: n.clone() })
+                .map(|n| NamedItem {
+                    id: 0,
+                    name: n.clone(),
+                })
                 .collect()
         } else {
             src_tags.clone()
@@ -452,9 +461,13 @@ impl AppService {
         let manga = convert_to_shared_manga_info(result);
 
         if !force {
-            let hits =
-                crate::service::dedup::find_similar_manga(&self.db, &manga.title, &manga.authors, None)
-                    .await?;
+            let hits = crate::service::dedup::find_similar_manga(
+                &self.db,
+                &manga.title,
+                &manga.authors,
+                None,
+            )
+            .await?;
             if !hits.is_empty() {
                 return Err(ServiceError::PossibleDuplicate(hits));
             }
@@ -650,17 +663,17 @@ impl AppService {
 
         if !ids.cover_overridden
             && let Some(ref url) = manga_info.cover_url
-                && let Err(e) = self
-                    .download_and_store_cover(manga_row_id, url, &ids.base_url)
-                    .await
-            {
-                tracing::warn!(
-                    "Failed to refresh cover for manga {}: {}, scheduling retry",
-                    manga_row_id,
-                    e
-                );
-                self.schedule_cover_retry(manga_row_id).await;
-            }
+            && let Err(e) = self
+                .download_and_store_cover(manga_row_id, url, &ids.base_url)
+                .await
+        {
+            tracing::warn!(
+                "Failed to refresh cover for manga {}: {}, scheduling retry",
+                manga_row_id,
+                e
+            );
+            self.schedule_cover_retry(manga_row_id).await;
+        }
 
         let has_next_page = self
             .fetch_and_store_chapter_page(ids.source_id, &ids.source_manga_id, manga_row_id, 1)
@@ -797,7 +810,11 @@ impl AppService {
                     .unwrap_or(None)
                     .unwrap_or_default();
 
-            struct ChRow { volume: Option<i64>, chapter_number: f64, name: Option<String> }
+            struct ChRow {
+                volume: Option<i64>,
+                chapter_number: f64,
+                name: Option<String>,
+            }
             let ids_json = serde_json::to_string(&new_chapter_ids).unwrap_or_default();
             let chapter_rows: Vec<ChRow> = sqlx::query_as!(
                 ChRow,
@@ -859,7 +876,9 @@ impl AppService {
             // all exclude rules on the axis must pass.
             for axis in 0u8..2 {
                 let axis_rules: Vec<_> = rules.iter().filter(|r| r.axis() == axis).collect();
-                if axis_rules.is_empty() { continue; }
+                if axis_rules.is_empty() {
+                    continue;
+                }
                 let includes: Vec<_> = axis_rules.iter().filter(|r| r.is_include()).collect();
                 let excludes: Vec<_> = axis_rules.iter().filter(|r| !r.is_include()).collect();
                 if !includes.is_empty() && !includes.iter().any(|r| r.passes(chapter)) {
@@ -935,9 +954,15 @@ impl AppService {
                 .collect()
         };
 
-        let scanlator_mode = self.get_scanlator_mode(manga_id).await.unwrap_or_else(|_| "priority".into());
+        let scanlator_mode = self
+            .get_scanlator_mode(manga_id)
+            .await
+            .unwrap_or_else(|_| "priority".into());
 
-        struct PrefEntry { priority: i64, blocked: bool }
+        struct PrefEntry {
+            priority: i64,
+            blocked: bool,
+        }
 
         let prefs: HashMap<String, PrefEntry> = sqlx::query!(
             "SELECT scanlator, priority, blocked FROM scanlator_preferences WHERE manga_id = ?",
@@ -947,7 +972,15 @@ impl AppService {
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|r| (r.scanlator, PrefEntry { priority: r.priority, blocked: r.blocked != 0 }))
+        .map(|r| {
+            (
+                r.scanlator,
+                PrefEntry {
+                    priority: r.priority,
+                    blocked: r.blocked != 0,
+                },
+            )
+        })
         .collect();
 
         if prefs.is_empty() {
@@ -988,13 +1021,16 @@ impl AppService {
 
         // In whitelist mode: only chapters whose scanlator appears in prefs.
         // In priority mode: exclude chapters whose scanlator is explicitly blocked.
-        let rows: Vec<ChapRow> = rows.into_iter().filter(|row| {
-            let scanlator = row.scanlator.as_deref().unwrap_or("");
-            match scanlator_mode.as_str() {
-                "whitelist" => prefs.contains_key(scanlator),
-                _ => !prefs.get(scanlator).is_some_and(|e| e.blocked),
-            }
-        }).collect();
+        let rows: Vec<ChapRow> = rows
+            .into_iter()
+            .filter(|row| {
+                let scanlator = row.scanlator.as_deref().unwrap_or("");
+                match scanlator_mode.as_str() {
+                    "whitelist" => prefs.contains_key(scanlator),
+                    _ => !prefs.get(scanlator).is_some_and(|e| e.blocked),
+                }
+            })
+            .collect();
 
         let mut best: HashMap<OrderedFloat<f64>, (i64, i64)> = HashMap::new();
 
@@ -1045,7 +1081,10 @@ impl AppService {
             let manga_ids: Vec<i64> = ids.iter().map(|(id, _)| *id).collect();
             let _ = state
                 .refresh_tx
-                .send(AppEvent::Refresh(RefreshProgressEvent::Started { total, manga_ids }));
+                .send(AppEvent::Refresh(RefreshProgressEvent::Started {
+                    total,
+                    manga_ids,
+                }));
 
             let mut futures = FuturesUnordered::new();
             for (id, name) in ids {
@@ -1190,9 +1229,12 @@ impl AppService {
 
         // Resize and compress to JPEG on a blocking thread.
         // Falls back to raw bytes if decode/encode fails so the cover is never lost.
-        let final_bytes = tokio::task::spawn_blocking(move || Self::compress_cover_bytes(&bytes, max_dim))
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Cover compress task panicked: {e}")))?;
+        let final_bytes =
+            tokio::task::spawn_blocking(move || Self::compress_cover_bytes(&bytes, max_dim))
+                .await
+                .map_err(|e| {
+                    ServiceError::Internal(format!("Cover compress task panicked: {e}"))
+                })?;
 
         // Always store as JPEG after compression.
         let filename = format!("{}.jpg", manga_row_id);
@@ -1298,9 +1340,12 @@ impl AppService {
         .await?;
 
         if update.authors.is_some() || update.artists.is_some() {
-            sqlx::query!("DELETE FROM manga_local_authors WHERE manga_id = ?", manga_id)
-                .execute(&self.db)
-                .await?;
+            sqlx::query!(
+                "DELETE FROM manga_local_authors WHERE manga_id = ?",
+                manga_id
+            )
+            .execute(&self.db)
+            .await?;
 
             if let Some(authors) = &update.authors {
                 for name in authors {
@@ -1372,9 +1417,12 @@ impl AppService {
             .cover_max_dimension
             .unwrap_or(800) as u32;
 
-        let final_bytes = tokio::task::spawn_blocking(move || Self::compress_cover_bytes(&bytes, max_dim))
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Cover compress task panicked: {e}")))?;
+        let final_bytes =
+            tokio::task::spawn_blocking(move || Self::compress_cover_bytes(&bytes, max_dim))
+                .await
+                .map_err(|e| {
+                    ServiceError::Internal(format!("Cover compress task panicked: {e}"))
+                })?;
 
         let filename = format!("{manga_id}_local.jpg");
         let cover_path = covers_dir.join(&filename);
@@ -1398,31 +1446,26 @@ impl AppService {
     /// Clears the user-uploaded cover override. If the source cover file still exists on disk
     /// it is restored immediately; otherwise `local_cover_path` is set to NULL so the next
     /// refresh re-downloads it.
-    pub async fn clear_manga_cover_override(
-        &self,
-        manga_id: i64,
-        user_id: i64,
-    ) -> Result<()> {
+    pub async fn clear_manga_cover_override(&self, manga_id: i64, user_id: i64) -> Result<()> {
         let library_path = self.settings.read().await.library_path.clone();
 
-        let current_rel = sqlx::query_scalar!(
-            "SELECT local_cover_path FROM manga WHERE id = ?",
-            manga_id
-        )
-        .fetch_optional(&self.db)
-        .await?
-        .flatten();
+        let current_rel =
+            sqlx::query_scalar!("SELECT local_cover_path FROM manga WHERE id = ?", manga_id)
+                .fetch_optional(&self.db)
+                .await?
+                .flatten();
 
         // Delete the _local file if it exists.
         if let Some(ref rel) = current_rel
-            && rel.contains("_local") {
-                let full = library_path.join(rel);
-                match tokio::fs::remove_file(&full).await {
-                    Ok(_) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => tracing::warn!("Failed to delete local cover {full:?}: {e}"),
-                }
+            && rel.contains("_local")
+        {
+            let full = library_path.join(rel);
+            match tokio::fs::remove_file(&full).await {
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => tracing::warn!("Failed to delete local cover {full:?}: {e}"),
             }
+        }
 
         // Restore source cover path if its file exists on disk.
         let source_rel = format!("covers/{manga_id}.jpg");
@@ -1499,19 +1542,21 @@ impl AppService {
     /// Queues a background scan for every manga in the library.
     /// Returns immediately with the count of manga queued.
     pub async fn scan_all_manga(&self) -> Result<usize> {
-        let rows: Vec<(i64, String)> =
-            sqlx::query!("SELECT id, name FROM manga ORDER BY id")
-                .fetch_all(&self.db)
-                .await?
-                .into_iter()
-                .map(|r| (r.id, r.name))
-                .collect();
+        let rows: Vec<(i64, String)> = sqlx::query!("SELECT id, name FROM manga ORDER BY id")
+            .fetch_all(&self.db)
+            .await?
+            .into_iter()
+            .map(|r| (r.id, r.name))
+            .collect();
         let total = rows.len();
         let manga_ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
 
-        let _ = self.refresh_tx.send(AppEvent::Refresh(
-            RefreshProgressEvent::Started { total, manga_ids },
-        ));
+        let _ = self
+            .refresh_tx
+            .send(AppEvent::Refresh(RefreshProgressEvent::Started {
+                total,
+                manga_ids,
+            }));
 
         let service = self.clone();
         tokio::task::spawn(async move {
@@ -1532,9 +1577,12 @@ impl AppService {
                     },
                 ));
             }
-            let _ = service.refresh_tx.send(AppEvent::Refresh(
-                RefreshProgressEvent::Completed { total, failed },
-            ));
+            let _ = service
+                .refresh_tx
+                .send(AppEvent::Refresh(RefreshProgressEvent::Completed {
+                    total,
+                    failed,
+                }));
         });
         Ok(total)
     }

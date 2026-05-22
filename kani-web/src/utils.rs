@@ -11,7 +11,7 @@ pub fn decode_manga_id(encoded: &str) -> String {
 }
 
 pub fn render_description(raw: &str) -> String {
-    use pulldown_cmark::{html, Options, Parser};
+    use pulldown_cmark::{Options, Parser, html};
 
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -26,7 +26,7 @@ pub fn render_description(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
     fn encode(s: &str) -> String {
         URL_SAFE_NO_PAD.encode(s.as_bytes())

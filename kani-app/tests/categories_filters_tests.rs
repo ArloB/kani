@@ -94,7 +94,9 @@ async fn set_manga_categories_replaces_existing() {
         .await
         .unwrap();
     // Replace with only cat_b
-    svc.set_manga_categories(manga_id, vec![cat_b]).await.unwrap();
+    svc.set_manga_categories(manga_id, vec![cat_b])
+        .await
+        .unwrap();
 
     let cats = svc.get_manga_categories(manga_id).await.unwrap();
     assert_eq!(cats.len(), 1);
@@ -108,7 +110,9 @@ async fn set_manga_categories_empty_clears_categories() {
     let src = insert_source(&svc.db, "src").await;
     let manga_id = insert_manga(&svc.db, src, "m1", "Test Manga").await;
 
-    svc.set_manga_categories(manga_id, vec![cat_id]).await.unwrap();
+    svc.set_manga_categories(manga_id, vec![cat_id])
+        .await
+        .unwrap();
     svc.set_manga_categories(manga_id, vec![]).await.unwrap();
 
     let cats = svc.get_manga_categories(manga_id).await.unwrap();

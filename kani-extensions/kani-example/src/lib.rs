@@ -1,7 +1,7 @@
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::{
-    ExtensionResult, MangaExtension, MangaStatus, bindings, wit_types,
-    types::ActiveFilter, to_shared_filters, ext_version,
+    ExtensionResult, MangaExtension, MangaStatus, bindings, ext_version, to_shared_filters,
+    types::ActiveFilter, wit_types,
 };
 use wit_types::{Chapter, ChapterList, ExtensionMetadata, MangaInfo, MangaList, PreferenceSpec};
 
@@ -44,14 +44,23 @@ impl Guest for Example {
         Ok(Example::metadata())
     }
 
-    fn get_popular_manga(page: i32, page_size: i32, filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, String> {
+    fn get_popular_manga(
+        page: i32,
+        page_size: i32,
+        filters: Vec<wit_types::ActiveFilter>,
+    ) -> Result<MangaList, String> {
         let shared = to_shared_filters(filters);
         get_extension()
             .get_popular_manga(page, page_size, &shared)
             .map_err(|e| e.to_string())
     }
 
-    fn search_manga(query: String, page: i32, page_size: i32, filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, String> {
+    fn search_manga(
+        query: String,
+        page: i32,
+        page_size: i32,
+        filters: Vec<wit_types::ActiveFilter>,
+    ) -> Result<MangaList, String> {
         let shared = to_shared_filters(filters);
         get_extension()
             .search_manga(&query, page, page_size, &shared)
@@ -59,9 +68,7 @@ impl Guest for Example {
     }
 
     fn get_filter_list() -> Result<wit_types::FilterList, String> {
-        get_extension()
-            .get_filter_list()
-            .map_err(|e| e.to_string())
+        get_extension().get_filter_list().map_err(|e| e.to_string())
     }
 
     fn get_manga_details(manga_id: String) -> Result<MangaInfo, String> {
@@ -94,12 +101,12 @@ impl Guest for Example {
     }
 
     fn get_preferences() -> Result<Vec<PreferenceSpec>, String> {
-        get_extension()
-            .get_preferences()
-            .map_err(|e| e.to_string())
+        get_extension().get_preferences().map_err(|e| e.to_string())
     }
     fn get_url(manga_id: String) -> Result<String, String> {
-        get_extension().get_url(&manga_id).map_err(|e| e.to_string())
+        get_extension()
+            .get_url(&manga_id)
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -108,8 +115,17 @@ impl MangaExtension for Example {
         "Example"
     }
 
-    fn get_popular_manga(&self, _page: i32, _page_size: i32, _filters: &[ActiveFilter]) -> ExtensionResult<MangaList> {
-        Ok(MangaList { manga: vec![], has_next_page: false, total_pages: None })
+    fn get_popular_manga(
+        &self,
+        _page: i32,
+        _page_size: i32,
+        _filters: &[ActiveFilter],
+    ) -> ExtensionResult<MangaList> {
+        Ok(MangaList {
+            manga: vec![],
+            has_next_page: false,
+            total_pages: None,
+        })
     }
 
     fn search_manga(
@@ -119,7 +135,11 @@ impl MangaExtension for Example {
         _page_size: i32,
         _filters: &[ActiveFilter],
     ) -> ExtensionResult<MangaList> {
-        Ok(MangaList { manga: vec![], has_next_page: false, total_pages: None })
+        Ok(MangaList {
+            manga: vec![],
+            has_next_page: false,
+            total_pages: None,
+        })
     }
 
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
@@ -142,7 +162,11 @@ impl MangaExtension for Example {
         _page_size: Option<i32>,
         _sort: Option<String>,
     ) -> ExtensionResult<ChapterList> {
-        Ok(ChapterList { chapters: vec![], has_next_page: false, total_pages: None })
+        Ok(ChapterList {
+            chapters: vec![],
+            has_next_page: false,
+            total_pages: None,
+        })
     }
 
     fn get_pages(&self, _manga_id: &str, _chapter_id: &str) -> ExtensionResult<Chapter> {
@@ -156,7 +180,7 @@ impl MangaExtension for Example {
     fn get_preferences(&self) -> ExtensionResult<Vec<PreferenceSpec>> {
         Ok(vec![])
     }
-    
+
     fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<wit_types::ChapterSortOption>> {
         Ok(vec![])
     }

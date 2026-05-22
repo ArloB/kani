@@ -1,6 +1,6 @@
-use std::path::Path;
 use crate::error::CliError;
 use crate::yaml::{schema::YamlExtension, validate::validate};
+use std::path::Path;
 
 pub fn run(file: &str) -> Result<(), CliError> {
     let path = Path::new(file);
@@ -18,7 +18,10 @@ pub fn run(file: &str) -> Result<(), CliError> {
             for e in &errors {
                 eprintln!("error: {e}");
             }
-            Err(CliError::Other(format!("{} validation error(s)", errors.len())))
+            Err(CliError::Other(format!(
+                "{} validation error(s)",
+                errors.len()
+            )))
         }
     }
 }

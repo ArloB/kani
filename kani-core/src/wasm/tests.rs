@@ -6,8 +6,8 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::field_reassign_with_default)]
 
-use super::{AllowedHost, HostState, SendHtml, StoredNode};
 use super::kani::extension::{html, json, utility};
+use super::{AllowedHost, HostState, SendHtml, StoredNode};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -96,7 +96,13 @@ fn get_html_doc_returns_node_for_valid_handle() {
     let mut state = HostState::default();
     let send = SendHtml::parse_document("<div>hi</div>");
     let root_id = send.0.lock().unwrap().0.root_element().id();
-    state.html_docs.insert(1, StoredNode { doc: send.0, node_id: root_id });
+    state.html_docs.insert(
+        1,
+        StoredNode {
+            doc: send.0,
+            node_id: root_id,
+        },
+    );
     assert!(state.get_html_doc(1).is_ok());
 }
 
@@ -163,7 +169,13 @@ async fn html_select_returns_list_handle() {
 async fn html_attr_reads_attribute() {
     let mut state = HostState::default();
     let doc = html::Host::parse(&mut state, SIMPLE_HTML.to_string()).unwrap();
-    let val = html::Host::attr(&mut state, doc, "div.card".to_string(), "data-id".to_string()).unwrap();
+    let val = html::Host::attr(
+        &mut state,
+        doc,
+        "div.card".to_string(),
+        "data-id".to_string(),
+    )
+    .unwrap();
     assert_eq!(val, Some("42".to_string()));
 }
 
@@ -171,7 +183,8 @@ async fn html_attr_reads_attribute() {
 async fn html_attr_returns_none_for_missing() {
     let mut state = HostState::default();
     let doc = html::Host::parse(&mut state, SIMPLE_HTML.to_string()).unwrap();
-    let val = html::Host::attr(&mut state, doc, "p".to_string(), "nonexistent".to_string()).unwrap();
+    let val =
+        html::Host::attr(&mut state, doc, "p".to_string(), "nonexistent".to_string()).unwrap();
     assert_eq!(val, None);
 }
 
@@ -213,7 +226,9 @@ async fn html_children_returns_list() {
     let mut state = HostState::default();
     let doc = html::Host::parse(&mut state, SIMPLE_HTML.to_string()).unwrap();
     // Drill down: select div.card, get its children (p and span)
-    let card = html::Host::first(&mut state, doc, "div.card".to_string()).unwrap().unwrap();
+    let card = html::Host::first(&mut state, doc, "div.card".to_string())
+        .unwrap()
+        .unwrap();
     let children = html::Host::children(&mut state, card).unwrap();
     let len = html::Host::list_len(&mut state, children).unwrap();
     assert_eq!(len, 2); // <p> and <span>
@@ -340,7 +355,8 @@ async fn json_object_keys_returns_field_names() {
 async fn json_object_get_returns_child_handle() {
     let mut state = HostState::default();
     let h = json::Host::parse(&mut state, br#"{"nested":{"x":1}}"#.to_vec()).unwrap();
-    let child = json::Host::object_get(&mut state, h, "".to_string(), "nested".to_string()).unwrap();
+    let child =
+        json::Host::object_get(&mut state, h, "".to_string(), "nested".to_string()).unwrap();
     assert!(child.is_some());
     let x = json::Host::get_i64(&mut state, child.unwrap(), "/x".to_string()).unwrap();
     assert_eq!(x, Some(1));
@@ -369,14 +385,16 @@ async fn json_to_string_serializes_value() {
 #[test]
 fn utility_date_parse_rfc3339_epoch() {
     let mut state = HostState::default();
-    let ts = utility::Host::date_parse_rfc3339(&mut state, "1970-01-01T00:00:00Z".to_string()).unwrap();
+    let ts =
+        utility::Host::date_parse_rfc3339(&mut state, "1970-01-01T00:00:00Z".to_string()).unwrap();
     assert_eq!(ts, 0);
 }
 
 #[test]
 fn utility_date_parse_rfc3339_known_date() {
     let mut state = HostState::default();
-    let ts = utility::Host::date_parse_rfc3339(&mut state, "2024-01-01T00:00:00Z".to_string()).unwrap();
+    let ts =
+        utility::Host::date_parse_rfc3339(&mut state, "2024-01-01T00:00:00Z".to_string()).unwrap();
     assert!(ts > 0);
 }
 
@@ -393,7 +411,8 @@ fn utility_resolve_url_relative_path() {
         &mut state,
         "https://example.com/manga/".to_string(),
         "chapter/1".to_string(),
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(resolved, "https://example.com/manga/chapter/1");
 }
 
@@ -404,7 +423,8 @@ fn utility_resolve_url_absolute_overrides_base() {
         &mut state,
         "https://example.com/some/path".to_string(),
         "https://other.com/new".to_string(),
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(resolved, "https://other.com/new");
 }
 
@@ -414,8 +434,12 @@ fn utility_build_url_appends_query_params() {
     let url = utility::Host::build_url(
         &mut state,
         "https://example.com/search".to_string(),
-        vec![("q".to_string(), "manga".to_string()), ("page".to_string(), "1".to_string())],
-    ).unwrap();
+        vec![
+            ("q".to_string(), "manga".to_string()),
+            ("page".to_string(), "1".to_string()),
+        ],
+    )
+    .unwrap();
     assert!(url.contains("q=manga"));
     assert!(url.contains("page=1"));
 }
@@ -462,7 +486,10 @@ fn utility_encode_form_produces_form_data() {
     let mut state = HostState::default();
     let out = utility::Host::encode_form(
         &mut state,
-        vec![("a".to_string(), "1".to_string()), ("b".to_string(), "hello world".to_string())],
+        vec![
+            ("a".to_string(), "1".to_string()),
+            ("b".to_string(), "hello world".to_string()),
+        ],
     );
     assert!(out.contains("a=1"));
     assert!(out.contains("b=hello+world") || out.contains("b=hello%20world"));

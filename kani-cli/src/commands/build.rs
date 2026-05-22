@@ -1,7 +1,7 @@
+use crate::error::CliError;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use crate::error::CliError;
 
 const DEV_EXTENSIONS: &[&str] = &["kani-example", "kani-test-abi"];
 
@@ -64,15 +64,23 @@ pub fn run(
     Ok(())
 }
 
-fn build_one(name: &str, set_version: Option<&str>, out_dir: &Path, debug: bool) -> Result<(), CliError> {
+fn build_one(
+    name: &str,
+    set_version: Option<&str>,
+    out_dir: &Path,
+    debug: bool,
+) -> Result<(), CliError> {
     let profile = if debug { "wasm-debug" } else { "wasm-release" };
     println!("── Building {name} [{profile}]");
 
     let mut cargo_args = vec![
         "build",
-        "--target", "wasm32-unknown-unknown",
-        "--profile", profile,
-        "-p", name,
+        "--target",
+        "wasm32-unknown-unknown",
+        "--profile",
+        profile,
+        "-p",
+        name,
     ];
     // Temporary storage so the string outlives the vec push
     let version_config;
@@ -92,17 +100,17 @@ fn build_one(name: &str, set_version: Option<&str>, out_dir: &Path, debug: bool)
 
     let mut ext_id = name.to_string();
 
-    if metadata_output.status.success() &&
-        let Ok(json) = serde_json::from_slice::<serde_json::Value>(&metadata_output.stdout) &&
-        let Some(pkg) = json["packages"]
+    if metadata_output.status.success()
+        && let Ok(json) = serde_json::from_slice::<serde_json::Value>(&metadata_output.stdout)
+        && let Some(pkg) = json["packages"]
             .as_array()
-            .and_then(|pkgs| pkgs.iter().find(|p| p["name"] == name)) &&
-        let Some(id) = pkg["metadata"]["id"]
+            .and_then(|pkgs| pkgs.iter().find(|p| p["name"] == name))
+        && let Some(id) = pkg["metadata"]["id"]
             .as_str()
             .or_else(|| pkg["metadata"]["kani"]["id"].as_str())
-                {
-                    ext_id = id.to_string();
-                }
+    {
+        ext_id = id.to_string();
+    }
 
     fs::create_dir_all(out_dir)?;
 
@@ -118,7 +126,12 @@ fn build_one(name: &str, set_version: Option<&str>, out_dir: &Path, debug: bool)
     if is_available("wasm-opt") {
         println!("   running wasm-opt");
         let tmp = tmp_path(&dest);
-        let mut wasm_opt_args = vec!["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "--enable-sign-ext"];
+        let mut wasm_opt_args = vec![
+            "-Oz",
+            "--enable-bulk-memory",
+            "--enable-nontrapping-float-to-int",
+            "--enable-sign-ext",
+        ];
         if debug {
             wasm_opt_args.push("--debuginfo");
         }

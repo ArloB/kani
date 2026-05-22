@@ -19,18 +19,20 @@
 //!   get_manga_details("error-paths")   → invalid-handle error return verification
 
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
-use kani_shared::{
-    ExtensionError, ExtensionResult, MangaExtension, MangaStatus, bindings, wit_types,
-    types::ActiveFilter, to_shared_filters, ext_version,
-    host_abi::{extract, prefs},
-    ast::{BlueprintBuilder, Expr},
-};
+use kani_shared::bindings::kani::extension::{json, prefs as prefs_raw};
 use kani_shared::html;
 use kani_shared::utility;
-use kani_shared::bindings::kani::extension::{json, prefs as prefs_raw};
+use kani_shared::{
+    ExtensionError, ExtensionResult, MangaExtension, MangaStatus,
+    ast::{BlueprintBuilder, Expr},
+    bindings, ext_version,
+    host_abi::{extract, prefs},
+    to_shared_filters,
+    types::ActiveFilter,
+    wit_types,
+};
 use wit_types::{
-    Chapter, ChapterList, ExtensionMetadata, MangaInfo, MangaList, MangaListItem,
-    PreferenceSpec,
+    Chapter, ChapterList, ExtensionMetadata, MangaInfo, MangaList, MangaListItem, PreferenceSpec,
 };
 
 #[cfg(target_family = "wasm")]
@@ -72,7 +74,11 @@ fn item(id: &str, title: &str, cover: Option<&str>) -> MangaListItem {
 }
 
 fn list(items: Vec<MangaListItem>) -> MangaList {
-    MangaList { manga: items, has_next_page: false, total_pages: None }
+    MangaList {
+        manga: items,
+        has_next_page: false,
+        total_pages: None,
+    }
 }
 
 // ── HTML host imports (page = 1) ─────────────────────────────────────────────
@@ -92,7 +98,10 @@ fn test_html_imports() -> ExtensionResult<MangaList> {
     let list_h = html::select(doc, ".card").map_err(ExtensionError::Other)?;
     let len = html::list_len(list_h).map_err(ExtensionError::Other)?;
     if len != 1 {
-        return Err(ExtensionError::Other(format!("expected list_len=1, got {}", len)));
+        return Err(ExtensionError::Other(format!(
+            "expected list_len=1, got {}",
+            len
+        )));
     }
     let elem = html::list_get(list_h, 0).map_err(ExtensionError::Other)?;
 
@@ -118,7 +127,10 @@ fn test_html_imports() -> ExtensionResult<MangaList> {
     let child_list = html::children(elem).map_err(ExtensionError::Other)?;
     let child_len = html::list_len(child_list).map_err(ExtensionError::Other)?;
     if child_len < 2 {
-        return Err(ExtensionError::Other(format!("expected >=2 children, got {}", child_len)));
+        return Err(ExtensionError::Other(format!(
+            "expected >=2 children, got {}",
+            child_len
+        )));
     }
 
     // drop everything
@@ -128,7 +140,11 @@ fn test_html_imports() -> ExtensionResult<MangaList> {
     html::drop_doc(first_h);
     html::drop_doc(doc);
 
-    let cover = if outer.is_some() { "html-ok" } else { "no-outer-html" };
+    let cover = if outer.is_some() {
+        "html-ok"
+    } else {
+        "no-outer-html"
+    };
     Ok(list(vec![item(&id_val, &title_val, Some(cover))]))
 }
 
@@ -174,7 +190,9 @@ fn test_json_imports() -> ExtensionResult<MangaList> {
 
     // array_get → child handle → read via get_str
     let tag0_h = json::array_get(h, "/tags", 0).map_err(ExtensionError::Other)?;
-    let tag0 = json::get_str(tag0_h, "").map_err(ExtensionError::Other)?.unwrap_or_default();
+    let tag0 = json::get_str(tag0_h, "")
+        .map_err(ExtensionError::Other)?
+        .unwrap_or_default();
     json::drop_json(tag0_h);
 
     // object_keys
@@ -211,12 +229,11 @@ fn test_json_imports() -> ExtensionResult<MangaList> {
 
 fn test_utility_imports() -> ExtensionResult<MangaList> {
     // date_parse (time-crate format descriptor)
-    let ts1 = utility::date_parse("2024-01-15", "[year]-[month]-[day]")
-        .map_err(ExtensionError::Other)?;
+    let ts1 =
+        utility::date_parse("2024-01-15", "[year]-[month]-[day]").map_err(ExtensionError::Other)?;
 
     // date_parse_rfc3339
-    let ts2 = utility::date_parse_rfc3339("2024-01-15T00:00:00Z")
-        .map_err(ExtensionError::Other)?;
+    let ts2 = utility::date_parse_rfc3339("2024-01-15T00:00:00Z").map_err(ExtensionError::Other)?;
 
     if ts1 != ts2 {
         return Err(ExtensionError::Other(format!(
@@ -226,13 +243,16 @@ fn test_utility_imports() -> ExtensionResult<MangaList> {
     }
 
     // resolve_url
-    let _resolved = utility::resolve_url("https://example.com/a/b", "/c")
-        .map_err(ExtensionError::Other)?;
+    let _resolved =
+        utility::resolve_url("https://example.com/a/b", "/c").map_err(ExtensionError::Other)?;
 
     // build_url
     let built = utility::build_url(
         "https://example.com",
-        &[("pg".to_string(), "5".to_string()), ("sort".to_string(), "asc".to_string())],
+        &[
+            ("pg".to_string(), "5".to_string()),
+            ("sort".to_string(), "asc".to_string()),
+        ],
     )
     .map_err(ExtensionError::Other)?;
 
@@ -254,8 +274,8 @@ fn test_utility_imports() -> ExtensionResult<MangaList> {
 
     Ok(list(vec![item(
         "util-ok",
-        &decoded,              // "hello world"
-        pg_val.as_deref(),     // Some("5")
+        &decoded,          // "hello world"
+        pg_val.as_deref(), // Some("5")
     )]))
 }
 
@@ -273,15 +293,17 @@ fn test_prefs_imports() -> ExtensionResult<MangaList> {
     let _f64_val = prefs::get_f64("test_f64");
     let missing_empty = prefs::get_str("missing_key");
 
-    let all_ok = raw_str.is_some()
-        && raw_missing.is_none()
-        && missing_empty.is_empty();
+    let all_ok = raw_str.is_some() && raw_missing.is_none() && missing_empty.is_empty();
 
-    let cover = if all_ok { Some("prefs-ok") } else { Some("prefs-fail") };
+    let cover = if all_ok {
+        Some("prefs-ok")
+    } else {
+        Some("prefs-fail")
+    };
 
     Ok(list(vec![item(
-        &str_val,               // host-injected "injected_value"
-        &bool_val.to_string(),  // "true"
+        &str_val,              // host-injected "injected_value"
+        &bool_val.to_string(), // "true"
         cover,
     )]))
 }
@@ -299,7 +321,7 @@ fn test_extract_html() -> ExtensionResult<MangaList> {
     let doc = html::parse(EXTRACT_HTML).map_err(ExtensionError::Other)?;
 
     let bp = BlueprintBuilder::new(".item")
-        .field("id",   Expr::self_ref().attr("data-id"))
+        .field("id", Expr::self_ref().attr("data-id"))
         .field("name", Expr::self_ref().first(".name").text())
         .build();
 
@@ -309,12 +331,14 @@ fn test_extract_html() -> ExtensionResult<MangaList> {
     html::drop_doc(doc);
 
     if result.rows_len() == 0 {
-        return Err(ExtensionError::Other("extract_html returned no rows".into()));
+        return Err(ExtensionError::Other(
+            "extract_html returned no rows".into(),
+        ));
     }
 
     let mut items = Vec::new();
     for row in result.rows_iter() {
-        let id   = row.get_str("/id").unwrap_or_default();
+        let id = row.get_str("/id").unwrap_or_default();
         let name = row.get_str("/name").unwrap_or_default();
         items.push(item(&id, &name, None));
     }
@@ -335,7 +359,7 @@ fn test_extract_json() -> ExtensionResult<MangaList> {
     let h = json::parse(EXTRACT_JSON).map_err(ExtensionError::ParseError)?;
 
     let bp = BlueprintBuilder::new("/items")
-        .field("id",    Expr::self_ref().ptr("/manga_id").str_val())
+        .field("id", Expr::self_ref().ptr("/manga_id").str_val())
         .field("title", Expr::self_ref().ptr("/manga_title").str_val())
         .build();
 
@@ -345,12 +369,14 @@ fn test_extract_json() -> ExtensionResult<MangaList> {
     json::drop_json(h);
 
     if result.rows_len() == 0 {
-        return Err(ExtensionError::Other("extract_json returned no rows".into()));
+        return Err(ExtensionError::Other(
+            "extract_json returned no rows".into(),
+        ));
     }
 
     let mut items = Vec::new();
     for row in result.rows_iter() {
-        let id    = row.get_str("/id").unwrap_or_default();
+        let id = row.get_str("/id").unwrap_or_default();
         let title = row.get_str("/title").unwrap_or_default();
         items.push(item(&id, &title, None));
     }
@@ -363,27 +389,27 @@ fn test_extract_json() -> ExtensionResult<MangaList> {
 fn test_error_paths() -> ExtensionResult<MangaInfo> {
     // All of these must return Err for invalid handles
     let invalid_list: i32 = 9999;
-    let invalid_doc:  i32 = 9998;
+    let invalid_doc: i32 = 9998;
     let invalid_json: i32 = 9997;
 
-    let list_get_err    = html::list_get(invalid_list, 0).is_err();
-    let attr_err        = html::attr(invalid_doc, "", "data-id").is_err();
-    let text_err        = html::text(invalid_doc, "").is_err();
-    let inner_html_err  = html::inner_html(invalid_doc).is_err();
-    let outer_html_err  = html::outer_html(invalid_doc).is_err();
-    let first_err       = html::first(invalid_doc, "div").is_err();
-    let children_err    = html::children(invalid_doc).is_err();
-    let select_err      = html::select(invalid_doc, "div").is_err();
+    let list_get_err = html::list_get(invalid_list, 0).is_err();
+    let attr_err = html::attr(invalid_doc, "", "data-id").is_err();
+    let text_err = html::text(invalid_doc, "").is_err();
+    let inner_html_err = html::inner_html(invalid_doc).is_err();
+    let outer_html_err = html::outer_html(invalid_doc).is_err();
+    let first_err = html::first(invalid_doc, "div").is_err();
+    let children_err = html::children(invalid_doc).is_err();
+    let select_err = html::select(invalid_doc, "div").is_err();
 
-    let json_get_str_err  = json::get_str(invalid_json, "/x").is_err();
-    let json_get_i64_err  = json::get_i64(invalid_json, "/x").is_err();
-    let json_get_f64_err  = json::get_f64(invalid_json, "/x").is_err();
+    let json_get_str_err = json::get_str(invalid_json, "/x").is_err();
+    let json_get_i64_err = json::get_i64(invalid_json, "/x").is_err();
+    let json_get_f64_err = json::get_f64(invalid_json, "/x").is_err();
     let json_get_bool_err = json::get_bool(invalid_json, "/x").is_err();
-    let json_arr_len_err  = json::array_len(invalid_json, "/x").is_err();
-    let json_arr_get_err  = json::array_get(invalid_json, "/x", 0).is_err();
+    let json_arr_len_err = json::array_len(invalid_json, "/x").is_err();
+    let json_arr_get_err = json::array_get(invalid_json, "/x", 0).is_err();
     let json_obj_keys_err = json::object_keys(invalid_json, "").is_err();
-    let json_obj_get_err  = json::object_get(invalid_json, "", "k").is_err();
-    let json_to_str_err   = json::to_string(invalid_json).is_err();
+    let json_obj_get_err = json::object_get(invalid_json, "", "k").is_err();
+    let json_to_str_err = json::to_string(invalid_json).is_err();
 
     let all_ok = list_get_err
         && attr_err
@@ -407,7 +433,14 @@ fn test_error_paths() -> ExtensionResult<MangaInfo> {
         id: "error-paths".to_string(),
         title: "ErrorPaths".to_string(),
         cover_url: None,
-        description: Some(if all_ok { "error-paths-ok" } else { "error-paths-fail" }.to_string()),
+        description: Some(
+            if all_ok {
+                "error-paths-ok"
+            } else {
+                "error-paths-fail"
+            }
+            .to_string(),
+        ),
         authors: vec![],
         artists: vec![],
         status: MangaStatus::Unknown,
@@ -450,7 +483,9 @@ impl Guest for TestAbi {
     }
 
     fn get_manga_details(manga_id: String) -> Result<MangaInfo, String> {
-        get_extension().get_manga_details(&manga_id).map_err(|e| e.to_string())
+        get_extension()
+            .get_manga_details(&manga_id)
+            .map_err(|e| e.to_string())
     }
 
     fn get_chapter_list(
@@ -465,11 +500,15 @@ impl Guest for TestAbi {
     }
 
     fn get_chapter_sort_list() -> Result<Vec<wit_types::ChapterSortOption>, String> {
-        get_extension().get_chapter_sort_list().map_err(|e| e.to_string())
+        get_extension()
+            .get_chapter_sort_list()
+            .map_err(|e| e.to_string())
     }
 
     fn get_pages(manga_id: String, chapter_id: String) -> Result<Chapter, String> {
-        get_extension().get_pages(&manga_id, &chapter_id).map_err(|e| e.to_string())
+        get_extension()
+            .get_pages(&manga_id, &chapter_id)
+            .map_err(|e| e.to_string())
     }
 
     fn get_preferences() -> Result<Vec<PreferenceSpec>, String> {
@@ -477,7 +516,9 @@ impl Guest for TestAbi {
     }
 
     fn get_url(manga_id: String) -> Result<String, String> {
-        get_extension().get_url(&manga_id).map_err(|e| e.to_string())
+        get_extension()
+            .get_url(&manga_id)
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -498,7 +539,11 @@ impl MangaExtension for TestAbi {
             1 => test_html_imports(),
             2 => test_json_imports(),
             3 => test_utility_imports(),
-            _ => Ok(MangaList { manga: vec![], has_next_page: false, total_pages: None }),
+            _ => Ok(MangaList {
+                manga: vec![],
+                has_next_page: false,
+                total_pages: None,
+            }),
         }
     }
 
@@ -510,10 +555,14 @@ impl MangaExtension for TestAbi {
         _filters: &[ActiveFilter],
     ) -> ExtensionResult<MangaList> {
         match query {
-            "prefs"        => test_prefs_imports(),
+            "prefs" => test_prefs_imports(),
             "extract-html" => test_extract_html(),
             "extract-json" => test_extract_json(),
-            _ => Ok(MangaList { manga: vec![], has_next_page: false, total_pages: None }),
+            _ => Ok(MangaList {
+                manga: vec![],
+                has_next_page: false,
+                total_pages: None,
+            }),
         }
     }
 
@@ -531,7 +580,11 @@ impl MangaExtension for TestAbi {
         _page_size: Option<i32>,
         _sort: Option<String>,
     ) -> ExtensionResult<ChapterList> {
-        Ok(ChapterList { chapters: vec![], has_next_page: false, total_pages: None })
+        Ok(ChapterList {
+            chapters: vec![],
+            has_next_page: false,
+            total_pages: None,
+        })
     }
 
     fn get_pages(&self, _manga_id: &str, _chapter_id: &str) -> ExtensionResult<Chapter> {

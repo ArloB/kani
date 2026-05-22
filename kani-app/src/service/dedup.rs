@@ -67,15 +67,12 @@ pub async fn find_similar_manga(
     authors: &[String],
     exclude_manga_id: Option<i64>,
 ) -> Result<Vec<SimilarMangaHit>> {
-    let total: i64 =
-        sqlx::query_scalar!("SELECT COUNT(*) FROM manga WHERE is_orphaned = FALSE")
-            .fetch_one(pool)
-            .await?;
+    let total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM manga WHERE is_orphaned = FALSE")
+        .fetch_one(pool)
+        .await?;
 
     if total > 5_000 {
-        tracing::warn!(
-            "Library has {total} manga — skipping duplicate check (threshold: 5000)"
-        );
+        tracing::warn!("Library has {total} manga — skipping duplicate check (threshold: 5000)");
         return Ok(vec![]);
     }
 
@@ -127,10 +124,7 @@ pub async fn find_similar_manga(
 
                 authors.iter().any(|a| {
                     db_authors.iter().any(|db_a| {
-                        strsim::jaro_winkler(
-                            &a.to_lowercase(),
-                            &db_a.to_lowercase(),
-                        ) >= 0.80
+                        strsim::jaro_winkler(&a.to_lowercase(), &db_a.to_lowercase()) >= 0.80
                     })
                 })
             } else {
@@ -147,7 +141,11 @@ pub async fn find_similar_manga(
         }
     }
 
-    hits.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.similarity
+            .partial_cmp(&a.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Ok(hits)
 }
 
@@ -158,9 +156,13 @@ pub async fn record_duplicates_for_manga(pool: &SqlitePool, new_manga_id: i64) -
     struct TitleRow {
         name: String,
     }
-    let row = sqlx::query_as!(TitleRow, "SELECT name FROM manga WHERE id = ?", new_manga_id)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query_as!(
+        TitleRow,
+        "SELECT name FROM manga WHERE id = ?",
+        new_manga_id
+    )
+    .fetch_optional(pool)
+    .await?;
     let Some(row) = row else { return Ok(()) };
 
     let authors: Vec<String> = sqlx::query_scalar!(
@@ -290,15 +292,12 @@ pub async fn dismiss_duplicate_pair(
 /// Existing rows (including dismissed ones) are left untouched via INSERT OR IGNORE.
 /// Returns the number of new pairs recorded.
 pub async fn scan_and_persist_duplicates(pool: &SqlitePool) -> Result<u32> {
-    let total: i64 =
-        sqlx::query_scalar!("SELECT COUNT(*) FROM manga WHERE is_orphaned = FALSE")
-            .fetch_one(pool)
-            .await?;
+    let total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM manga WHERE is_orphaned = FALSE")
+        .fetch_one(pool)
+        .await?;
 
     if total > 5_000 {
-        tracing::warn!(
-            "Library has {total} manga — duplicate scan skipped (threshold: 5000)"
-        );
+        tracing::warn!("Library has {total} manga — duplicate scan skipped (threshold: 5000)");
         return Ok(0);
     }
 
@@ -307,19 +306,20 @@ pub async fn scan_and_persist_duplicates(pool: &SqlitePool) -> Result<u32> {
         name: String,
     }
 
-    let all = sqlx::query_as!(
-        Row,
-        "SELECT id, name FROM manga WHERE is_orphaned = FALSE"
-    )
-    .fetch_all(pool)
-    .await?;
+    let all = sqlx::query_as!(Row, "SELECT id, name FROM manga WHERE is_orphaned = FALSE")
+        .fetch_all(pool)
+        .await?;
 
     let mut new_pairs: u32 = 0;
     let mut seen: std::collections::HashSet<(i64, i64)> = Default::default();
 
     for a in &all {
         let norm_a = normalise_title(&a.name);
-        let first_word = norm_a.split_whitespace().next().unwrap_or(&norm_a).to_string();
+        let first_word = norm_a
+            .split_whitespace()
+            .next()
+            .unwrap_or(&norm_a)
+            .to_string();
 
         for b in &all {
             if b.id <= a.id {
@@ -357,9 +357,9 @@ pub async fn scan_and_persist_duplicates(pool: &SqlitePool) -> Result<u32> {
             .unwrap_or_default();
 
             let author_match = authors_a.iter().any(|aa| {
-                authors_b.iter().any(|ab| {
-                    strsim::jaro_winkler(&aa.to_lowercase(), &ab.to_lowercase()) >= 0.80
-                })
+                authors_b
+                    .iter()
+                    .any(|ab| strsim::jaro_winkler(&aa.to_lowercase(), &ab.to_lowercase()) >= 0.80)
             });
 
             let affected = sqlx::query!(
@@ -476,7 +476,10 @@ mod tests {
 
     #[test]
     fn strips_leading_an() {
-        assert_eq!(normalise_title("An Adventure"), normalise_title("Adventure"));
+        assert_eq!(
+            normalise_title("An Adventure"),
+            normalise_title("Adventure")
+        );
     }
 
     #[test]
@@ -491,17 +494,26 @@ mod tests {
 
     #[test]
     fn strips_vol_suffix() {
-        assert_eq!(normalise_title("My Manga, Vol. 3"), normalise_title("My Manga"));
+        assert_eq!(
+            normalise_title("My Manga, Vol. 3"),
+            normalise_title("My Manga")
+        );
     }
 
     #[test]
     fn strips_volume_suffix() {
-        assert_eq!(normalise_title("My Manga, Volume 1"), normalise_title("My Manga"));
+        assert_eq!(
+            normalise_title("My Manga, Volume 1"),
+            normalise_title("My Manga")
+        );
     }
 
     #[test]
     fn strips_ch_suffix() {
-        assert_eq!(normalise_title("My Manga Ch. 5"), normalise_title("My Manga"));
+        assert_eq!(
+            normalise_title("My Manga Ch. 5"),
+            normalise_title("My Manga")
+        );
     }
 
     #[test]

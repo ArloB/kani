@@ -1,7 +1,7 @@
+use crate::dsl::parser;
+use crate::error::{CliError, report_custom_error, report_errors};
 use chumsky::Parser;
 use kani_shared::ast::Expr;
-use crate::dsl::parser;
-use crate::error::{report_custom_error, report_errors, CliError};
 
 pub fn run(expression: &str) -> Result<(), CliError> {
     let result = parser().parse(expression);
@@ -9,7 +9,9 @@ pub fn run(expression: &str) -> Result<(), CliError> {
     if result.has_errors() {
         let errs: Vec<_> = result.errors().cloned().collect();
         report_errors("<stdin>", expression, errs);
-        return Err(CliError::Other("DSL parsing failed (see above)".to_string()));
+        return Err(CliError::Other(
+            "DSL parsing failed (see above)".to_string(),
+        ));
     }
 
     let parse_ast = result.into_result().unwrap();
@@ -28,7 +30,7 @@ pub fn run(expression: &str) -> Result<(), CliError> {
 
         return Err(CliError::Other("Validation Error (see above)".to_string()));
     }
-    
+
     let expr: Expr = ast_raw.unwrap();
 
     println!("{expr:#?}");

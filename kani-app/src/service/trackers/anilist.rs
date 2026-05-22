@@ -199,7 +199,8 @@ impl ExternalTracker for AnilistTracker {
             .map_err(|e| ServiceError::Internal(format!("AniList search parse failed: {e}")))?;
 
         if let Some(errors) = resp.errors
-        && let Some(first) = errors.first() {
+            && let Some(first) = errors.first()
+        {
             return Err(ServiceError::Internal(format!(
                 "AniList API error: {}",
                 first.message
@@ -273,7 +274,8 @@ impl ExternalTracker for AnilistTracker {
             .map_err(|e| ServiceError::Internal(format!("AniList update parse failed: {e}")))?;
 
         if let Some(errors) = resp.errors
-        && let Some(first) = errors.first() {
+            && let Some(first) = errors.first()
+        {
             return Err(ServiceError::Internal(format!(
                 "AniList API error: {}",
                 first.message

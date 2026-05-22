@@ -135,13 +135,10 @@ impl SourceInstance {
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
         let provider = bindings.kani_extension_manga_provider();
-        let raw_result = provider
-            .call_get_metadata(&mut *store)
-            .await
-            .map_err(|e| {
-                tracing::error!(target: "wasm", "trap in call_get_metadata: {e:#}");
-                Error::Internal(format!("WASM function call failed: {e:#}"))
-            });
+        let raw_result = provider.call_get_metadata(&mut *store).await.map_err(|e| {
+            tracing::error!(target: "wasm", "trap in call_get_metadata: {e:#}");
+            Error::Internal(format!("WASM function call failed: {e:#}"))
+        });
 
         store.data_mut().clear_all();
         let inner = raw_result?;

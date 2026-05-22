@@ -13,15 +13,21 @@ pub fn emit_request_block(
     let mut lines = Vec::new();
 
     let ctor = match method.to_uppercase().as_str() {
-        "POST"   => "post",
-        "PUT"    => "put",
+        "POST" => "post",
+        "PUT" => "put",
         "DELETE" => "delete",
-        _        => "get",
+        _ => "get",
     };
 
     let url_expr = emit_route_format(route, "self.base_url");
-    let mutability = if filter_mapping.is_empty() { "" } else { "mut " };
-    lines.push(format!("let {mutability}req = HttpRequest::{ctor}({url_expr})"));
+    let mutability = if filter_mapping.is_empty() {
+        ""
+    } else {
+        "mut "
+    };
+    lines.push(format!(
+        "let {mutability}req = HttpRequest::{ctor}({url_expr})"
+    ));
 
     for (k, v) in headers {
         lines.push(format!("    .header(\"{}\", \"{}\")", k, v));
@@ -30,7 +36,7 @@ pub fn emit_request_block(
     for entry in queries {
         let val = match &entry.value {
             QueryValue::Static(s) => format!("\"{}\"", s),
-            QueryValue::Arg(name)  => name.clone(),
+            QueryValue::Arg(name) => name.clone(),
         };
         lines.push(format!("    .query(\"{}\", {})", entry.key, val));
     }
@@ -60,13 +66,22 @@ pub fn emit_request_block(
                     lines.push("            _ => {}".into());
                     lines.push("        },".into());
                 }
-                FilterMappingEntry::SortPair { key_template, direction_param, .. } => {
+                FilterMappingEntry::SortPair {
+                    key_template,
+                    direction_param,
+                    ..
+                } => {
                     lines.push(format!("        \"{group}\" => match &f.state {{"));
                     lines.push("            FilterState::Selection { value, .. } => {".into());
-                    lines.push("                if let Some((key_part, dir)) = value.split_once(':') {".into());
+                    lines.push(
+                        "                if let Some((key_part, dir)) = value.split_once(':') {"
+                            .into(),
+                    );
                     lines.push(format!("                    req = req.query(&format!(\"{key_template}\", key_part), dir);"));
                     if let Some(dir_param) = direction_param {
-                        lines.push(format!("                    req = req.query(\"{dir_param}\", dir);"));
+                        lines.push(format!(
+                            "                    req = req.query(\"{dir_param}\", dir);"
+                        ));
                     }
                     lines.push("                }".into());
                     lines.push("            }".into());
@@ -93,12 +108,20 @@ pub fn emit_route_format(route: &str, base_url_expr: &str) -> String {
 
     while i < bytes.len() {
         match bytes[i] {
-            b'{' => { fmt.push_str("{{"); i += 1; }
-            b'}' => { fmt.push_str("}}"); i += 1; }
+            b'{' => {
+                fmt.push_str("{{");
+                i += 1;
+            }
+            b'}' => {
+                fmt.push_str("}}");
+                i += 1;
+            }
             b'$' => {
                 let start = i + 1;
                 let mut end = start;
-                while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+                while end < bytes.len()
+                    && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_')
+                {
                     end += 1;
                 }
                 if end < bytes.len() && bytes[end] == b'$' && end > start {

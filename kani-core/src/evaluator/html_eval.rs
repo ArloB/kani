@@ -1,11 +1,11 @@
+use crate::evaluator::shared::{Env, Value, eval_common_expr, fetch_body};
+use crate::wasm::StoredNode;
+use kani_shared::ast::{Blueprint, Expr, OffsetType};
+use scraper::{Element, Selector};
 use std::cell::Ref;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use scraper::{Element, Selector};
-use kani_shared::ast::{Blueprint, Expr, OffsetType};
-use crate::evaluator::shared::{Env, Value, eval_common_expr, fetch_body};
-use crate::wasm::StoredNode;
 
 pub async fn extract_html(
     state: &mut crate::wasm::HostState,
@@ -23,7 +23,14 @@ pub async fn extract_html(
         env.set(&format!("$pref:{}", k), Value::Str(v.clone()));
     }
     for binding in &blueprint.bindings {
-        let val = eval_html_expr(&binding.expr, &doc, None, env.clone(), &state.selector_cache).await?;
+        let val = eval_html_expr(
+            &binding.expr,
+            &doc,
+            None,
+            env.clone(),
+            &state.selector_cache,
+        )
+        .await?;
         env.set(&binding.name, val);
     }
 
@@ -31,10 +38,15 @@ pub async fn extract_html(
 
     let mut scalars = serde_json::Map::new();
     for scalar in &blueprint.scalars {
-        let val = eval_html_expr(&scalar.expr, &doc, None, env.clone(), &state.selector_cache).await?;
+        let val =
+            eval_html_expr(&scalar.expr, &doc, None, env.clone(), &state.selector_cache).await?;
         match val.to_json() {
-            Some(v)                 => { scalars.insert(scalar.name.clone(), v); }
-            None if scalar.optional => { scalars.insert(scalar.name.clone(), serde_json::Value::Null); }
+            Some(v) => {
+                scalars.insert(scalar.name.clone(), v);
+            }
+            None if scalar.optional => {
+                scalars.insert(scalar.name.clone(), serde_json::Value::Null);
+            }
             None => return Err(format!("Required scalar '{}' produced null", scalar.name)),
         }
     }
@@ -43,10 +55,21 @@ pub async fn extract_html(
     for (index, element) in container_elements.iter().enumerate() {
         let mut row = serde_json::Map::new();
         for field in &blueprint.fields {
-            let val = eval_html_expr(&field.expr, &doc, Some((element, index)), env.clone(), &state.selector_cache).await?;
+            let val = eval_html_expr(
+                &field.expr,
+                &doc,
+                Some((element, index)),
+                env.clone(),
+                &state.selector_cache,
+            )
+            .await?;
             match val.to_json() {
-                Some(v)                => { row.insert(field.name.clone(), v); }
-                None if field.optional => { row.insert(field.name.clone(), serde_json::Value::Null); }
+                Some(v) => {
+                    row.insert(field.name.clone(), v);
+                }
+                None if field.optional => {
+                    row.insert(field.name.clone(), serde_json::Value::Null);
+                }
                 None => return Err(format!("Required field '{}' produced null", field.name)),
             }
         }
@@ -62,7 +85,9 @@ pub async fn extract_html_paginated(
     page_size: i32,
     blueprint: &Blueprint,
 ) -> Result<serde_json::Value, String> {
-    let pagination = blueprint.pagination.as_ref()
+    let pagination = blueprint
+        .pagination
+        .as_ref()
         .ok_or("paginated_extract_html called on blueprint without PaginationConfig")?;
 
     let native_size = pagination.native_page_size;
@@ -79,11 +104,13 @@ pub async fn extract_html_paginated(
         if let Some(req) = &mut chunk_bp.request {
             let offset_value = match &pagination.offset_type {
                 OffsetType::ItemOffset => current_chunk_offset.to_string(),
-                OffsetType::PageNumber { start } =>
-                    (current_chunk_offset / native_size + *start as usize).to_string(),
+                OffsetType::PageNumber { start } => {
+                    (current_chunk_offset / native_size + *start as usize).to_string()
+                }
             };
             req.queries.retain(|(k, _)| k != &pagination.offset_param);
-            req.queries.push((pagination.offset_param.clone(), offset_value));
+            req.queries
+                .push((pagination.offset_param.clone(), offset_value));
         }
 
         let chunk_result = extract_html(state, None, &chunk_bp).await?;
@@ -92,7 +119,11 @@ pub async fn extract_html_paginated(
         let rows = chunk_result["rows"].as_array().unwrap_or(&empty);
         let chunk_len = rows.len();
 
-        let skip = if current_chunk_offset == first_chunk_offset { offset_in_first_chunk } else { 0 };
+        let skip = if current_chunk_offset == first_chunk_offset {
+            offset_in_first_chunk
+        } else {
+            0
+        };
         let available = chunk_len.saturating_sub(skip);
         let to_take = available.min(remaining);
 
@@ -134,13 +165,18 @@ fn eval_html_expr<'a>(
     Box::pin(async move {
         if let Some(result) = eval_common_expr(expression, env.clone(), &|e, env| {
             eval_html_expr(e, doc, current, env, cache)
-        }).await {
+        })
+        .await
+        {
             return result;
         }
 
         match expression {
             Expr::SelfRef => current
-                .map(|(n, _)| Value::HtmlElement { doc: n.doc.clone(), node_id: n.node_id })
+                .map(|(n, _)| Value::HtmlElement {
+                    doc: n.doc.clone(),
+                    node_id: n.node_id,
+                })
                 .ok_or_else(|| "SelfRef used outside of a container loop".into()),
 
             Expr::Index => current
@@ -148,83 +184,135 @@ fn eval_html_expr<'a>(
                 .ok_or_else(|| "Index used outside of a container loop".into()),
 
             Expr::Dom(selector) => {
-                let sel   = get_or_cache_selector(cache, selector)?;
+                let sel = get_or_cache_selector(cache, selector)?;
                 let guard = doc.doc.lock().map_err(|_| "HTML document lock poisoned")?;
-                Ok(guard.0.select(&sel).next()
-                    .map_or(Value::Null, |el| Value::HtmlElement { doc: doc.doc.clone(), node_id: el.id() }))
+                Ok(guard
+                    .0
+                    .select(&sel)
+                    .next()
+                    .map_or(Value::Null, |el| Value::HtmlElement {
+                        doc: doc.doc.clone(),
+                        node_id: el.id(),
+                    }))
             }
 
             Expr::Attr { target, name } => {
-                match eval_html_expr(target, doc, current, env, cache).await?.into_html_element("attr")? {
+                match eval_html_expr(target, doc, current, env, cache)
+                    .await?
+                    .into_html_element("attr")?
+                {
                     None => Ok(Value::Null),
-                    Some(node) => node.with_element(|el|
-                        Ok(el.attr(name).map(|a| Value::Str(a.to_string())).unwrap_or(Value::Null))
-                    ),
+                    Some(node) => node.with_element(|el| {
+                        Ok(el
+                            .attr(name)
+                            .map(|a| Value::Str(a.to_string()))
+                            .unwrap_or(Value::Null))
+                    }),
                 }
             }
 
             Expr::Text { target } => {
-                match eval_html_expr(target, doc, current, env, cache).await?.into_html_element("text")? {
+                match eval_html_expr(target, doc, current, env, cache)
+                    .await?
+                    .into_html_element("text")?
+                {
                     None => Ok(Value::Null),
                     Some(node) => node.with_element(|el| Ok(Value::Str(el.text().collect()))),
                 }
             }
 
             Expr::InnerHtml { target } => {
-                match eval_html_expr(target, doc, current, env, cache).await?.into_html_element("inner_html")? {
+                match eval_html_expr(target, doc, current, env, cache)
+                    .await?
+                    .into_html_element("inner_html")?
+                {
                     None => Ok(Value::Null),
                     Some(node) => node.with_element(|el| Ok(Value::Str(el.inner_html()))),
                 }
             }
 
             Expr::Select { target, selector } => {
-                match eval_html_expr(target, doc, current, env, cache).await?.into_html_element("select")? {
+                match eval_html_expr(target, doc, current, env, cache)
+                    .await?
+                    .into_html_element("select")?
+                {
                     None => Ok(Value::Null),
                     Some(node) => {
                         let sel = get_or_cache_selector(cache, selector)?;
-                        node.with_element(|el| Ok(Value::List(
-                            el.select(&sel)
-                                .map(|e| Value::HtmlElement { doc: node.doc.clone(), node_id: e.id() })
-                                .collect()
-                        )))
+                        node.with_element(|el| {
+                            Ok(Value::List(
+                                el.select(&sel)
+                                    .map(|e| Value::HtmlElement {
+                                        doc: node.doc.clone(),
+                                        node_id: e.id(),
+                                    })
+                                    .collect(),
+                            ))
+                        })
                     }
                 }
             }
 
             Expr::First { target, selector } => {
-                match eval_html_expr(target, doc, current, env, cache).await?.into_html_element("first")? {
+                match eval_html_expr(target, doc, current, env, cache)
+                    .await?
+                    .into_html_element("first")?
+                {
                     None => Ok(Value::Null),
                     Some(node) => {
                         let sel = get_or_cache_selector(cache, selector)?;
-                        node.with_element(|el| Ok(
-                            el.select(&sel).next()
-                                .map_or(Value::Null, |e| Value::HtmlElement { doc: node.doc.clone(), node_id: e.id() })
-                        ))
+                        node.with_element(|el| {
+                            Ok(el
+                                .select(&sel)
+                                .next()
+                                .map_or(Value::Null, |e| Value::HtmlElement {
+                                    doc: node.doc.clone(),
+                                    node_id: e.id(),
+                                }))
+                        })
                     }
                 }
             }
 
             Expr::HasClass { target, class } => {
-                match eval_html_expr(target, doc, current, env, cache).await?.into_html_element("has_class")? {
+                match eval_html_expr(target, doc, current, env, cache)
+                    .await?
+                    .into_html_element("has_class")?
+                {
                     None => Ok(Value::Null),
-                    Some(node) => node.with_element(|el|
-                        Ok(Value::Bool(el.has_class(&class.as_str().into(), scraper::CaseSensitivity::CaseSensitive)))
-                    ),
+                    Some(node) => node.with_element(|el| {
+                        Ok(Value::Bool(el.has_class(
+                            &class.as_str().into(),
+                            scraper::CaseSensitivity::CaseSensitive,
+                        )))
+                    }),
                 }
             }
 
             Expr::Children { target } => {
-                match eval_html_expr(target, doc, current, env, cache).await?.into_html_element("children")? {
+                match eval_html_expr(target, doc, current, env, cache)
+                    .await?
+                    .into_html_element("children")?
+                {
                     None => Ok(Value::Null),
-                    Some(node) => node.with_element(|el| Ok(Value::List(
-                        el.children().filter_map(scraper::ElementRef::wrap)
-                            .map(|child| Value::HtmlElement { doc: node.doc.clone(), node_id: child.id() })
-                            .collect()
-                    ))),
+                    Some(node) => node.with_element(|el| {
+                        Ok(Value::List(
+                            el.children()
+                                .filter_map(scraper::ElementRef::wrap)
+                                .map(|child| Value::HtmlElement {
+                                    doc: node.doc.clone(),
+                                    node_id: child.id(),
+                                })
+                                .collect(),
+                        ))
+                    }),
                 }
             }
 
-            _ => Err(format!("Unhandled expression in HTML evaluator: {:?}", expression)),
+            _ => Err(format!(
+                "Unhandled expression in HTML evaluator: {:?}",
+                expression
+            )),
         }
     })
 }
@@ -243,15 +331,23 @@ fn get_or_cache_selector<'a>(
     Ok(Ref::map(cache.borrow(), |m| m.get(selector).unwrap()))
 }
 
-
 async fn fetch_and_parse_html(
     state: &mut crate::wasm::HostState,
     req: &kani_shared::ast::RequestDef,
 ) -> Result<StoredNode, String> {
     let html_str = fetch_body(state, req).await?;
-    let node     = crate::wasm::SendHtml::parse_document(&html_str);
-    let root_id  = node.0.lock().map_err(|_| "HTML document lock poisoned")?.0.root_element().id();
-    Ok(StoredNode { doc: node.0, node_id: root_id })
+    let node = crate::wasm::SendHtml::parse_document(&html_str);
+    let root_id = node
+        .0
+        .lock()
+        .map_err(|_| "HTML document lock poisoned")?
+        .0
+        .root_element()
+        .id();
+    Ok(StoredNode {
+        doc: node.0,
+        node_id: root_id,
+    })
 }
 
 fn select_all(
@@ -263,12 +359,18 @@ fn select_all(
         return Ok(vec![node.clone()]);
     }
 
-    let sel   = get_or_cache_selector(cache, container)?;
+    let sel = get_or_cache_selector(cache, container)?;
     let guard = node.doc.lock().map_err(|_| "HTML document lock poisoned")?;
-    Ok(match scraper::ElementRef::wrap(guard.0.tree.get(node.node_id).unwrap()) {
-        Some(el) => el.select(&sel)
-            .map(|e| StoredNode { doc: node.doc.clone(), node_id: e.id() })
-            .collect(),
-        None => vec![],
-    })
+    Ok(
+        match scraper::ElementRef::wrap(guard.0.tree.get(node.node_id).unwrap()) {
+            Some(el) => el
+                .select(&sel)
+                .map(|e| StoredNode {
+                    doc: node.doc.clone(),
+                    node_id: e.id(),
+                })
+                .collect(),
+            None => vec![],
+        },
+    )
 }

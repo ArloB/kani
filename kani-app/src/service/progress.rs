@@ -1,7 +1,12 @@
 use super::*;
 
 impl AppService {
-    pub async fn set_chapter_progress(&self, user_id: i64, chapter_id: i64, page: i64) -> Result<()> {
+    pub async fn set_chapter_progress(
+        &self,
+        user_id: i64,
+        chapter_id: i64,
+        page: i64,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             INSERT INTO user_chapter_tracking (user_id, chapter_id, last_page_read, is_read, last_read_at)
@@ -28,7 +33,12 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn set_chapter_read_status(&self, user_id: i64, chapter_ids: Vec<i64>, is_read: bool) -> Result<()> {
+    pub async fn set_chapter_read_status(
+        &self,
+        user_id: i64,
+        chapter_ids: Vec<i64>,
+        is_read: bool,
+    ) -> Result<()> {
         let json_chapter_ids = serde_json::to_string(&chapter_ids)
             .map_err(|e| ServiceError::Internal(e.to_string()))?;
 
@@ -55,9 +65,14 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn set_manga_status(&self, user_id: i64, manga_id: i64, status: kani_shared::types::MangaTrackingStatus) -> Result<()> {
-        let status_int = status as i64;        
-        
+    pub async fn set_manga_status(
+        &self,
+        user_id: i64,
+        manga_id: i64,
+        status: kani_shared::types::MangaTrackingStatus,
+    ) -> Result<()> {
+        let status_int = status as i64;
+
         sqlx::query!(
             r#"
             INSERT INTO user_manga_tracking (user_id, manga_id, status) 
@@ -75,7 +90,11 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn get_chapter_progress(&self, user_id: i64, chapter_id: i64) -> Result<Option<(i64, bool)>> {
+    pub async fn get_chapter_progress(
+        &self,
+        user_id: i64,
+        chapter_id: i64,
+    ) -> Result<Option<(i64, bool)>> {
         let row = sqlx::query!(
             r#"
             SELECT last_page_read, is_read as "is_read: bool"
@@ -130,7 +149,12 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn set_reading_direction(&self, user_id: i64, manga_id: i64, direction: &str) -> Result<()> {
+    pub async fn set_reading_direction(
+        &self,
+        user_id: i64,
+        manga_id: i64,
+        direction: &str,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             INSERT INTO user_manga_tracking (user_id, manga_id, reading_direction)
@@ -147,7 +171,11 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn get_manga_tracking(&self, user_id: i64, manga_id: i64) -> Result<kani_shared::types::MangaTracking> {
+    pub async fn get_manga_tracking(
+        &self,
+        user_id: i64,
+        manga_id: i64,
+    ) -> Result<kani_shared::types::MangaTracking> {
         let tracking = sqlx::query!(
             r#"
             SELECT status, score,
@@ -185,24 +213,31 @@ impl AppService {
         .fetch_one(&self.db)
         .await?;
 
-        let (status, score, tracking_enabled, notify_new_chapters, reading_direction) = match tracking {
-            Some(row) => {
-                let status = match row.status {
-                    0 => Some(kani_shared::types::MangaTrackingStatus::Reading),
-                    1 => Some(kani_shared::types::MangaTrackingStatus::OnHold),
-                    2 => Some(kani_shared::types::MangaTrackingStatus::Dropped),
-                    3 => Some(kani_shared::types::MangaTrackingStatus::PlanToRead),
-                    4 => Some(kani_shared::types::MangaTrackingStatus::Completed),
-                    5 => Some(kani_shared::types::MangaTrackingStatus::Rereading),
-                    _ => None,
-                };
-                (status, row.score, row.tracking_enabled, row.notify_new_chapters.unwrap_or(true), row.reading_direction)
-            }
-            None => {
-                let default = self.settings.read().await.default_tracking_enabled;
-                (None, None, default, true, None)
-            }
-        };
+        let (status, score, tracking_enabled, notify_new_chapters, reading_direction) =
+            match tracking {
+                Some(row) => {
+                    let status = match row.status {
+                        0 => Some(kani_shared::types::MangaTrackingStatus::Reading),
+                        1 => Some(kani_shared::types::MangaTrackingStatus::OnHold),
+                        2 => Some(kani_shared::types::MangaTrackingStatus::Dropped),
+                        3 => Some(kani_shared::types::MangaTrackingStatus::PlanToRead),
+                        4 => Some(kani_shared::types::MangaTrackingStatus::Completed),
+                        5 => Some(kani_shared::types::MangaTrackingStatus::Rereading),
+                        _ => None,
+                    };
+                    (
+                        status,
+                        row.score,
+                        row.tracking_enabled,
+                        row.notify_new_chapters.unwrap_or(true),
+                        row.reading_direction,
+                    )
+                }
+                None => {
+                    let default = self.settings.read().await.default_tracking_enabled;
+                    (None, None, default, true, None)
+                }
+            };
 
         Ok(kani_shared::types::MangaTracking {
             status,

@@ -1,9 +1,9 @@
 use crate::error::AppError;
 use crate::logging::LogHandle;
+use bytes::Bytes;
 use kani_app::AppService;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use bytes::Bytes;
 
 pub type Result<T, E = AppError> = std::result::Result<T, E>;
 
@@ -43,9 +43,7 @@ impl AppState {
             proxy_coalesce: moka::future::Cache::builder()
                 .max_capacity(50 * 1024 * 1024)
                 .time_to_live(std::time::Duration::from_secs(30))
-                .weigher(|_k, v: &Arc<(Bytes, String)>| {
-                    v.0.len().min(u32::MAX as usize) as u32
-                })
+                .weigher(|_k, v: &Arc<(Bytes, String)>| v.0.len().min(u32::MAX as usize) as u32)
                 .build(),
             boot_id: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

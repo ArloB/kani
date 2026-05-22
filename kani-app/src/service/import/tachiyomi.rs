@@ -106,10 +106,7 @@ fn map_reading_status(tachi_status: i32) -> i64 {
 // ── AppService methods ────────────────────────────────────────────────────────
 
 impl AppService {
-    pub async fn preview_tachiyomi_backup(
-        &self,
-        data: &[u8],
-    ) -> Result<TachiyomiPreview> {
+    pub async fn preview_tachiyomi_backup(&self, data: &[u8]) -> Result<TachiyomiPreview> {
         let backup = decode_backup(data)?;
 
         let mut source_counts: std::collections::HashMap<i64, u32> = Default::default();
@@ -210,7 +207,11 @@ impl AppService {
 
         let mut new_manga_ids: Vec<i64> = Vec::new();
 
-        let total_manga = if opts.import_manga { backup.backup_manga.len() as u32 } else { 0 };
+        let total_manga = if opts.import_manga {
+            backup.backup_manga.len() as u32
+        } else {
+            0
+        };
         if total_manga > 0 {
             let _ = self.refresh_tx.send(AppEvent::ImportStarted {
                 origin: "tachiyomi".into(),
@@ -244,7 +245,8 @@ impl AppService {
                         kani_hint, m.source, m.title
                     ));
                     let proxy = self.make_tachi_backup_manga(m);
-                    let source_hint = kani_name.map(|s| s.to_string())
+                    let source_hint = kani_name
+                        .map(|s| s.to_string())
                         .unwrap_or_else(|| format!("Tachiyomi:{}", m.source));
                     self.save_pending_import_tachiyomi(user_id, &proxy, &source_hint, None, None)
                         .await?;
@@ -277,13 +279,9 @@ impl AppService {
                 } else {
                     vec![m.author.clone()]
                 };
-                let hits = crate::service::dedup::find_similar_manga(
-                    &self.db,
-                    &m.title,
-                    &authors,
-                    None,
-                )
-                .await?;
+                let hits =
+                    crate::service::dedup::find_similar_manga(&self.db, &m.title, &authors, None)
+                        .await?;
 
                 if !hits.is_empty() {
                     let proxy = self.make_tachi_backup_manga(m);
@@ -310,8 +308,16 @@ impl AppService {
                 let mut tx = self.db.begin().await?;
 
                 let status = map_publication_status(m.status);
-                let description = if m.description.is_empty() { None } else { Some(&m.description) };
-                let cover_url = if m.thumbnail_url.is_empty() { None } else { Some(&m.thumbnail_url) };
+                let description = if m.description.is_empty() {
+                    None
+                } else {
+                    Some(&m.description)
+                };
+                let cover_url = if m.thumbnail_url.is_empty() {
+                    None
+                } else {
+                    Some(&m.thumbnail_url)
+                };
 
                 let id = sqlx::query_scalar!(
                     "INSERT INTO manga (source_id, source_manga_id, name, description, cover_url, status) \
@@ -342,28 +348,39 @@ impl AppService {
 
                 // authors / artists → manga_people
                 for (name, role) in [(&m.author, "author"), (&m.artist, "artist")] {
-                    if name.is_empty() { continue; }
+                    if name.is_empty() {
+                        continue;
+                    }
                     sqlx::query!("INSERT OR IGNORE INTO people (name) VALUES (?)", name)
-                        .execute(&mut *tx).await?;
+                        .execute(&mut *tx)
+                        .await?;
                     sqlx::query!(
                         "INSERT OR IGNORE INTO manga_people (manga_id, role, person_id) \
                          SELECT ?, ?, id FROM people WHERE name = ?",
-                        id, role, name
+                        id,
+                        role,
+                        name
                     )
-                    .execute(&mut *tx).await?;
+                    .execute(&mut *tx)
+                    .await?;
                 }
 
                 // genre → tags + manga_tags
                 for genre in &m.genre {
-                    if genre.is_empty() { continue; }
+                    if genre.is_empty() {
+                        continue;
+                    }
                     sqlx::query!("INSERT OR IGNORE INTO tags (name) VALUES (?)", genre)
-                        .execute(&mut *tx).await?;
+                        .execute(&mut *tx)
+                        .await?;
                     sqlx::query!(
                         "INSERT OR IGNORE INTO manga_tags (manga_id, tag_id) \
                          SELECT ?, id FROM tags WHERE name = ?",
-                        id, genre
+                        id,
+                        genre
                     )
-                    .execute(&mut *tx).await?;
+                    .execute(&mut *tx)
+                    .await?;
                 }
 
                 tx.commit().await?;
@@ -372,57 +389,81 @@ impl AppService {
 
             // user_manga_tracking
             if opts.import_tracking
-                && let Some(t) = m.tracking.first() {
-                    let kani_status = map_reading_status(t.status);
-                    let score: Option<f64> = if t.score > 0.0 { Some(t.score as f64) } else { None };
-                    sqlx::query!(
-                        "INSERT OR REPLACE INTO user_manga_tracking \
+                && let Some(t) = m.tracking.first()
+            {
+                let kani_status = map_reading_status(t.status);
+                let score: Option<f64> = if t.score > 0.0 {
+                    Some(t.score as f64)
+                } else {
+                    None
+                };
+                sqlx::query!(
+                    "INSERT OR REPLACE INTO user_manga_tracking \
                          (user_id, manga_id, status, score) VALUES (?, ?, ?, ?)",
-                        user_id, manga_id, kani_status, score
-                    )
-                    .execute(&self.db)
-                    .await?;
-                }
+                    user_id,
+                    manga_id,
+                    kani_status,
+                    score
+                )
+                .execute(&self.db)
+                .await?;
+            }
 
             // tracker_manga_mappings — link AniList / MAL entries
             for t in &m.tracking {
-                let Some(tracker_name) = tachiyomi_sync_id_to_tracker_name(t.sync_id) else { continue };
-                
+                let Some(tracker_name) = tachiyomi_sync_id_to_tracker_name(t.sync_id) else {
+                    continue;
+                };
+
                 // Check the new 'media_id' first, fallback to the deprecated 'media_id_int' if it's 0
                 let remote_id_val = if t.media_id != 0 {
                     t.media_id
                 } else {
-                    t.media_id_int as i64 
+                    t.media_id_int as i64
                 };
-            
+
                 let remote_id = if remote_id_val != 0 {
                     remote_id_val.to_string()
                 } else {
                     // Fall back to last path segment of tracking_url (renamed from track_url)
-                    t.tracking_url.trim_end_matches('/').rsplit('/').next()
+                    t.tracking_url
+                        .trim_end_matches('/')
+                        .rsplit('/')
+                        .next()
                         .filter(|s| s.chars().all(|c| c.is_ascii_digit()))
                         .map(|s| s.to_string())
                         .unwrap_or_default()
                 };
-                
-                if remote_id.is_empty() { continue; }
-                
+
+                if remote_id.is_empty() {
+                    continue;
+                }
+
                 // Ensure the tracker row exists (it may not if the admin hasn't configured it)
-                sqlx::query!("INSERT OR IGNORE INTO trackers (name) VALUES (?)", tracker_name)
-                    .execute(&self.db).await?;
-                    
+                sqlx::query!(
+                    "INSERT OR IGNORE INTO trackers (name) VALUES (?)",
+                    tracker_name
+                )
+                .execute(&self.db)
+                .await?;
+
                 let tracker_id: Option<i64> =
                     sqlx::query_scalar!("SELECT id FROM trackers WHERE name = ?", tracker_name)
-                        .fetch_optional(&self.db).await?
+                        .fetch_optional(&self.db)
+                        .await?
                         .flatten();
-                        
+
                 if let Some(tid) = tracker_id {
                     sqlx::query!(
                         "INSERT OR IGNORE INTO tracker_manga_mappings \
                          (user_id, tracker_id, manga_id, tracker_manga_id) VALUES (?, ?, ?, ?)",
-                        user_id, tid, manga_id, remote_id
+                        user_id,
+                        tid,
+                        manga_id,
+                        remote_id
                     )
-                    .execute(&self.db).await?;
+                    .execute(&self.db)
+                    .await?;
                 }
             }
 
@@ -456,13 +497,11 @@ impl AppService {
             if opts.import_chapter_progress {
                 // For newly inserted manga, fetch chapters from the source first so that
                 // source_chapter_id values exist in the chapters table for progress matching.
-                if is_new
-                    && let Err(e) = self.fetch_and_store_chapters_silent(manga_id).await {
-                        result.warnings.push(format!(
-                            "Could not fetch chapters for '{}': {}",
-                            m.title, e
-                        ));
-                    }
+                if is_new && let Err(e) = self.fetch_and_store_chapters_silent(manga_id).await {
+                    result
+                        .warnings
+                        .push(format!("Could not fetch chapters for '{}': {}", m.title, e));
+                }
                 for ch in &m.chapters {
                     if !ch.read && ch.last_page_read == 0 {
                         continue;
@@ -552,7 +591,11 @@ impl AppService {
 
         let tracking = m.tracking.first().map(|t| BackupMangaTracking {
             status: map_reading_status(t.status),
-            score: if t.score > 0.0 { Some(t.score as f64) } else { None },
+            score: if t.score > 0.0 {
+                Some(t.score as f64)
+            } else {
+                None
+            },
         });
 
         KaniBackupManga {

@@ -1,14 +1,17 @@
 // Emit Rust source for a BlueprintBuilder chain from a ValidatedEndpoint.
 
-use kani_shared::ast::{BlueprintBuilder, OffsetType};
+use super::expr::emit_expr;
 use crate::yaml::model::{FieldSource, ValidatedEndpoint, ValidatedHnp};
 use crate::yaml::schema::YamlOffsetType;
-use super::expr::emit_expr;
+use kani_shared::ast::{BlueprintBuilder, OffsetType};
 
 pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
     let mut lines = Vec::new();
 
-    lines.push(format!("let bp = BlueprintBuilder::new(\"{}\")", ep.container));
+    lines.push(format!(
+        "let bp = BlueprintBuilder::new(\"{}\")",
+        ep.container
+    ));
 
     // Attach request (replaced by `let mut req` from emit_request_block and then `.request(req)`)
     lines.push("    .request(req)".into());
@@ -23,7 +26,11 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
         match &f.source {
             FieldSource::Blueprint(expr) => {
                 let method = if f.optional { "field_opt" } else { "field" };
-                lines.push(format!("    .{method}(\"{}\", {})", f.name, emit_expr(expr)));
+                lines.push(format!(
+                    "    .{method}(\"{}\", {})",
+                    f.name,
+                    emit_expr(expr)
+                ));
             }
             FieldSource::FnArg(_) => { /* not added to blueprint */ }
         }
@@ -34,7 +41,11 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
         match &s.source {
             FieldSource::Blueprint(expr) => {
                 let method = if s.optional { "scalar_opt" } else { "scalar" };
-                lines.push(format!("    .{method}(\"{}\", {})", s.name, emit_expr(expr)));
+                lines.push(format!(
+                    "    .{method}(\"{}\", {})",
+                    s.name,
+                    emit_expr(expr)
+                ));
             }
             FieldSource::FnArg(_) => {}
         }
@@ -42,7 +53,10 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
 
     // has_next_page scalar (if DSL-driven)
     if let ValidatedHnp::Scalar(expr) = &ep.has_next_page {
-        lines.push(format!("    .scalar(\"has_next_page\", {})", emit_expr(expr)));
+        lines.push(format!(
+            "    .scalar(\"has_next_page\", {})",
+            emit_expr(expr)
+        ));
     }
 
     // Pagination
@@ -116,7 +130,9 @@ pub fn emit_blueprint_bytes(ep: &ValidatedEndpoint) -> String {
     if let Some(pag) = &ep.pagination {
         let offset_type = match pag.offset_type {
             YamlOffsetType::Item => OffsetType::ItemOffset,
-            YamlOffsetType::Page => OffsetType::PageNumber { start: pag.page_start },
+            YamlOffsetType::Page => OffsetType::PageNumber {
+                start: pag.page_start,
+            },
         };
         builder = builder.paginated(pag.native_page_size, &pag.offset_param, offset_type);
     }

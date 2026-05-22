@@ -20,12 +20,14 @@ pub async fn estimate_path_migration(current: &Path, new: &Path) -> Result<Migra
         return Err(ServiceError::Validation("path contains null byte".into()));
     }
 
-    let canonical_current = dunce::canonicalize(current)
-        .map_err(|_| ServiceError::Validation("source path does not exist or is inaccessible".into()))?;
+    let canonical_current = dunce::canonicalize(current).map_err(|_| {
+        ServiceError::Validation("source path does not exist or is inaccessible".into())
+    })?;
 
     let new_parent = new.parent().unwrap_or(new);
-    let canonical_new_parent = dunce::canonicalize(new_parent)
-        .map_err(|_| ServiceError::Validation("destination parent directory does not exist".into()))?;
+    let canonical_new_parent = dunce::canonicalize(new_parent).map_err(|_| {
+        ServiceError::Validation("destination parent directory does not exist".into())
+    })?;
 
     let new_last = new.file_name().unwrap_or_default();
     let canonical_new = canonical_new_parent.join(new_last);
@@ -130,10 +132,14 @@ async fn run_migration(
             .execute(&service.db)
             .await?;
             service.settings.write().await.wasm_storage_path = new.to_path_buf();
-            tracing::info!("WASM storage path updated to {new:?}; loaded sources unchanged in memory");
+            tracing::info!(
+                "WASM storage path updated to {new:?}; loaded sources unchanged in memory"
+            );
         }
         other => {
-            return Err(ServiceError::Validation(format!("unknown path field: {other}")));
+            return Err(ServiceError::Validation(format!(
+                "unknown path field: {other}"
+            )));
         }
     }
 
@@ -172,7 +178,17 @@ async fn copy_tree(
     let mut bytes_copied: u64 = 0;
     let mut files_since_last: u32 = 0;
     let mut bytes_since_last: u64 = 0;
-    copy_dir(service, field, src, dst, total_bytes, &mut bytes_copied, &mut files_since_last, &mut bytes_since_last).await
+    copy_dir(
+        service,
+        field,
+        src,
+        dst,
+        total_bytes,
+        &mut bytes_copied,
+        &mut files_since_last,
+        &mut bytes_since_last,
+    )
+    .await
 }
 
 // Box::pin required to make async recursion compile
@@ -204,7 +220,17 @@ fn copy_dir<'a>(
             let dest = dst.join(&name);
 
             if file_type.is_dir() {
-                copy_dir(service, field, &entry_path, &dest, total_bytes, bytes_copied, files_since_last, bytes_since_last).await?;
+                copy_dir(
+                    service,
+                    field,
+                    &entry_path,
+                    &dest,
+                    total_bytes,
+                    bytes_copied,
+                    files_since_last,
+                    bytes_since_last,
+                )
+                .await?;
             } else if file_type.is_file() {
                 let copied = tokio::fs::copy(&entry_path, &dest).await?;
                 *bytes_copied += copied;

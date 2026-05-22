@@ -235,7 +235,7 @@ impl AppService {
         let page_count = pages.len();
 
         let db_clone = self.db.clone();
-        let pc_i64 = page_count as i64; 
+        let pc_i64 = page_count as i64;
 
         tokio::spawn(async move {
             let result = sqlx::query!(
@@ -247,12 +247,20 @@ impl AppService {
             .await;
 
             if let Err(e) = result {
-                tracing::warn!("Opportunistic page_count update failed for chapter {}: {}", chapter_id, e);
+                tracing::warn!(
+                    "Opportunistic page_count update failed for chapter {}: {}",
+                    chapter_id,
+                    e
+                );
             }
         });
 
-        let prev_chapter_id = self.adjacent_chapter_id(manga_id, chapter_number, false).await?;
-        let next_chapter_id = self.adjacent_chapter_id(manga_id, chapter_number, true).await?;
+        let prev_chapter_id = self
+            .adjacent_chapter_id(manga_id, chapter_number, false)
+            .await?;
+        let next_chapter_id = self
+            .adjacent_chapter_id(manga_id, chapter_number, true)
+            .await?;
 
         let last_page_read = self
             .get_chapter_progress(user_id, chapter_id)
@@ -283,8 +291,12 @@ impl AppService {
     ) -> Result<Option<i64>> {
         let scanlator_mode = self.get_scanlator_mode(manga_id).await?;
         let scanlator_filter = match scanlator_mode.as_str() {
-            "whitelist" => " AND EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator)",
-            _ => " AND NOT EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator AND sp.blocked = 1)",
+            "whitelist" => {
+                " AND EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator)"
+            }
+            _ => {
+                " AND NOT EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator AND sp.blocked = 1)"
+            }
         };
         let (cmp, order) = if next { (">", "ASC") } else { ("<", "DESC") };
         let sql = format!(

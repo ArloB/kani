@@ -5,9 +5,9 @@ use crate::bindings::kani::extension::types as wit_types;
 // ── Host-only imports ───────────────────────────────────────────────────────
 
 #[cfg(feature = "host")]
-use serde::{Deserialize, Deserializer, Serialize};
-#[cfg(feature = "host")]
 use serde::de::{self, SeqAccess, Visitor};
+#[cfg(feature = "host")]
+use serde::{Deserialize, Deserializer, Serialize};
 #[cfg(feature = "host")]
 use std::fmt;
 
@@ -97,9 +97,10 @@ impl From<FilterState> for wit_types::FilterState {
 impl From<wit_types::FilterState> for FilterState {
     fn from(s: wit_types::FilterState) -> Self {
         match s {
-            wit_types::FilterState::Selection(opt) => {
-                FilterState::Selection { name: opt.name, value: opt.value }
-            }
+            wit_types::FilterState::Selection(opt) => FilterState::Selection {
+                name: opt.name,
+                value: opt.value,
+            },
             wit_types::FilterState::Checkbox(b) => FilterState::Checkbox(b),
             wit_types::FilterState::TextInput(s) => FilterState::TextInput(s),
             wit_types::FilterState::Multiselect(values) => FilterState::Multiselect(values),
@@ -120,7 +121,10 @@ pub struct ActiveFilter {
 pub fn to_shared_filters(filters: Vec<wit_types::ActiveFilter>) -> Vec<ActiveFilter> {
     filters
         .into_iter()
-        .map(|f| ActiveFilter { filter_name: f.filter_name, state: f.state.into() })
+        .map(|f| ActiveFilter {
+            filter_name: f.filter_name,
+            state: f.state.into(),
+        })
         .collect()
 }
 
@@ -989,9 +993,7 @@ impl DownloadRuleKind {
                 let cutoff = now - (*days as i64) * 86_400;
                 chapter.uploaded_at.is_none_or(|t| t >= cutoff)
             }
-            Self::PublishedAfter(epoch) => {
-                chapter.uploaded_at.is_none_or(|t| t >= *epoch)
-            }
+            Self::PublishedAfter(epoch) => chapter.uploaded_at.is_none_or(|t| t >= *epoch),
         }
     }
 }
@@ -1281,7 +1283,9 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
 
-    fn json_rt<T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(v: &T) {
+    fn json_rt<T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(
+        v: &T,
+    ) {
         let s = serde_json::to_string(v).unwrap();
         let back: T = serde_json::from_str(&s).unwrap();
         assert_eq!(*v, back);
@@ -1292,13 +1296,17 @@ mod tests {
     #[test]
     fn manga_status_json_variants_are_lowercase() {
         for (status, expected) in [
-            (MangaStatus::Ongoing,   "\"ongoing\""),
+            (MangaStatus::Ongoing, "\"ongoing\""),
             (MangaStatus::Completed, "\"completed\""),
-            (MangaStatus::Hiatus,    "\"hiatus\""),
+            (MangaStatus::Hiatus, "\"hiatus\""),
             (MangaStatus::Cancelled, "\"cancelled\""),
-            (MangaStatus::Unknown,   "\"unknown\""),
+            (MangaStatus::Unknown, "\"unknown\""),
         ] {
-            assert_eq!(serde_json::to_string(&status).unwrap(), expected, "serialise {status:?}");
+            assert_eq!(
+                serde_json::to_string(&status).unwrap(),
+                expected,
+                "serialise {status:?}"
+            );
             let back: MangaStatus = serde_json::from_str(expected).unwrap();
             assert_eq!(status, back, "deserialise {expected}");
         }
@@ -1320,11 +1328,11 @@ mod tests {
 
     #[test]
     fn manga_status_into_i64_all_variants() {
-        assert_eq!(i64::from(MangaStatus::Ongoing),   0i64);
+        assert_eq!(i64::from(MangaStatus::Ongoing), 0i64);
         assert_eq!(i64::from(MangaStatus::Completed), 1i64);
-        assert_eq!(i64::from(MangaStatus::Hiatus),    2i64);
+        assert_eq!(i64::from(MangaStatus::Hiatus), 2i64);
         assert_eq!(i64::from(MangaStatus::Cancelled), 3i64);
-        assert_eq!(i64::from(MangaStatus::Unknown),   4i64);
+        assert_eq!(i64::from(MangaStatus::Unknown), 4i64);
     }
 
     // ── FilterState ──────────────────────────────────────────────────────────
@@ -1332,7 +1340,10 @@ mod tests {
     #[test]
     fn filter_state_json_round_trip_all_variants() {
         for v in &[
-            FilterState::Selection { name: "Genre".into(), value: "action".into() },
+            FilterState::Selection {
+                name: "Genre".into(),
+                value: "action".into(),
+            },
             FilterState::Checkbox(true),
             FilterState::Checkbox(false),
             FilterState::TextInput("naruto".into()),
@@ -1346,7 +1357,10 @@ mod tests {
 
     #[test]
     fn active_filter_json_round_trip() {
-        json_rt(&ActiveFilter { filter_name: "genre".into(), state: FilterState::Checkbox(false) });
+        json_rt(&ActiveFilter {
+            filter_name: "genre".into(),
+            state: FilterState::Checkbox(false),
+        });
     }
 
     // ── MangaListItem ─────────────────────────────────────────────────────────
@@ -1373,7 +1387,12 @@ mod tests {
     #[test]
     fn manga_list_json_round_trip() {
         json_rt(&MangaList {
-            manga: vec![MangaListItem { id: "1".into(), title: "A".into(), cover_url: None, new_chapter_count: 0 }],
+            manga: vec![MangaListItem {
+                id: "1".into(),
+                title: "A".into(),
+                cover_url: None,
+                new_chapter_count: 0,
+            }],
             has_next_page: true,
             total_pages: Some(5),
         });
@@ -1389,10 +1408,19 @@ mod tests {
             cover_url: None,
             description: Some("Dark fantasy".into()),
             description_html: None,
-            authors: vec![NamedItem { id: 1, name: "Kentaro Miura".into() }],
-            artists: vec![NamedItem { id: 2, name: "Studio Gaga".into() }],
+            authors: vec![NamedItem {
+                id: 1,
+                name: "Kentaro Miura".into(),
+            }],
+            artists: vec![NamedItem {
+                id: 2,
+                name: "Studio Gaga".into(),
+            }],
             status: MangaStatus::Ongoing,
-            tags: vec![NamedItem { id: 3, name: "Action".into() }],
+            tags: vec![NamedItem {
+                id: 3,
+                name: "Action".into(),
+            }],
         });
     }
 
@@ -1446,7 +1474,11 @@ mod tests {
 
     #[test]
     fn chapter_list_json_round_trip() {
-        json_rt(&ChapterList { chapters: vec![], has_next_page: false, total_pages: None });
+        json_rt(&ChapterList {
+            chapters: vec![],
+            has_next_page: false,
+            total_pages: None,
+        });
     }
 
     // ── ChapterSortOrder ──────────────────────────────────────────────────────
@@ -1518,24 +1550,37 @@ mod tests {
     fn download_progress_event_json_round_trip_all_variants() {
         for ev in &[
             DownloadProgressEvent::ChapterStarted {
-                chapter_id: 1, chapter_name: "Ch1".into(),
-                manga_id: 10, manga_title: "Manga".into(), total_pages: 20,
+                chapter_id: 1,
+                chapter_name: "Ch1".into(),
+                manga_id: 10,
+                manga_title: "Manga".into(),
+                total_pages: 20,
             },
             DownloadProgressEvent::PageCompleted {
-                chapter_id: 1, chapter_name: "Ch1".into(), page_index: 5,
+                chapter_id: 1,
+                chapter_name: "Ch1".into(),
+                page_index: 5,
             },
             DownloadProgressEvent::ChapterCompleted {
-                chapter_id: 1, chapter_name: "Ch1".into(),
-                manga_id: 10, manga_title: "Manga".into(), successful_pages: 20,
+                chapter_id: 1,
+                chapter_name: "Ch1".into(),
+                manga_id: 10,
+                manga_title: "Manga".into(),
+                successful_pages: 20,
             },
             DownloadProgressEvent::ChapterFailed {
-                chapter_id: 1, chapter_name: "Ch1".into(), error: "timeout".into(),
+                chapter_id: 1,
+                chapter_name: "Ch1".into(),
+                error: "timeout".into(),
             },
             DownloadProgressEvent::ChapterCancelled {
-                chapter_id: 1, chapter_name: "Ch1".into(),
+                chapter_id: 1,
+                chapter_name: "Ch1".into(),
             },
             DownloadProgressEvent::ChapterDeferred {
-                chapter_id: 1, chapter_name: "Ch1".into(), reason: "rate limited".into(),
+                chapter_id: 1,
+                chapter_name: "Ch1".into(),
+                reason: "rate limited".into(),
             },
         ] {
             json_rt(ev);
@@ -1583,7 +1628,12 @@ mod tests {
         assert!(!DownloadRuleKind::ExcludeFractional.is_include());
     }
 
-    fn ch_row(language: &str, title: Option<&str>, number: f64, uploaded_at: Option<i64>) -> ChapterFilterRow {
+    fn ch_row(
+        language: &str,
+        title: Option<&str>,
+        number: f64,
+        uploaded_at: Option<i64>,
+    ) -> ChapterFilterRow {
         ChapterFilterRow {
             id: 1,
             scanlator: None,
@@ -1684,12 +1734,12 @@ mod tests {
 
     #[test]
     fn manga_tracking_status_repr_values() {
-        assert_eq!(MangaTrackingStatus::Reading    as i64, 0);
-        assert_eq!(MangaTrackingStatus::OnHold     as i64, 1);
-        assert_eq!(MangaTrackingStatus::Dropped    as i64, 2);
+        assert_eq!(MangaTrackingStatus::Reading as i64, 0);
+        assert_eq!(MangaTrackingStatus::OnHold as i64, 1);
+        assert_eq!(MangaTrackingStatus::Dropped as i64, 2);
         assert_eq!(MangaTrackingStatus::PlanToRead as i64, 3);
-        assert_eq!(MangaTrackingStatus::Completed  as i64, 4);
-        assert_eq!(MangaTrackingStatus::Rereading  as i64, 5);
+        assert_eq!(MangaTrackingStatus::Completed as i64, 4);
+        assert_eq!(MangaTrackingStatus::Rereading as i64, 5);
     }
 
     // ── SettingsUpdate ────────────────────────────────────────────────────────
@@ -1719,7 +1769,9 @@ mod tests {
             registration_enabled: true,
             cover_max_dimension: Some(512),
         }));
-        json_rt(&SettingsUpdate::Tracking(TrackingSettings { default_tracking_enabled: true }));
+        json_rt(&SettingsUpdate::Tracking(TrackingSettings {
+            default_tracking_enabled: true,
+        }));
         json_rt(&SettingsUpdate::Email(EmailSettings {
             email_enabled: false,
             email_provider: "smtp".into(),

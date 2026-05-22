@@ -4,7 +4,10 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, authed_post, body_array, body_json, build_test_app, create_admin, create_regular_user, get_req, login, post_json, test_state};
+use common::{
+    authed_get, authed_post, body_array, body_json, build_test_app, create_admin,
+    create_regular_user, get_req, login, post_json, test_state,
+};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -29,10 +32,7 @@ async fn list_sources_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    let res = app
-        .oneshot(get_req("/rest/sources"))
-        .await
-        .unwrap();
+    let res = app.oneshot(get_req("/rest/sources")).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
@@ -95,7 +95,10 @@ async fn add_source_returns_201_for_admin() {
 
     assert_eq!(res.status(), StatusCode::CREATED);
     let body = body_json(res).await;
-    assert!(body["id"].is_number(), "response must contain numeric id, got: {body}");
+    assert!(
+        body["id"].is_number(),
+        "response must contain numeric id, got: {body}"
+    );
 
     // Verify it appears in the list.
     let list_res = app
@@ -131,10 +134,7 @@ async fn get_source_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    let res = app
-        .oneshot(get_req("/rest/sources/1"))
-        .await
-        .unwrap();
+    let res = app.oneshot(get_req("/rest/sources/1")).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

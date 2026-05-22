@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::error::CliError;
+use std::path::Path;
 
 pub fn run(name: &str) -> Result<(), CliError> {
     let filename = format!("{name}.yaml");
@@ -10,7 +10,8 @@ pub fn run(name: &str) -> Result<(), CliError> {
     }
 
     let id = name.replace(' ', "-").to_lowercase();
-    let struct_name = id.split('-')
+    let struct_name = id
+        .split('-')
         .map(|p| {
             let mut c = p.chars();
             match c.next() {

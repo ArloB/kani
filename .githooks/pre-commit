@@ -1,0 +1,9 @@
+#!/bin/sh
+# Auto-format staged Rust files before committing.
+# Activate with: git config core.hooksPath .githooks
+
+STAGED_RS=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
+[ -z "$STAGED_RS" ] && exit 0
+
+cargo fmt --all
+printf '%s\n' "$STAGED_RS" | tr '\n' '\0' | xargs -0 git add

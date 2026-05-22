@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
+use crate::codegen;
 use crate::error::CliError;
 use crate::yaml::{schema::YamlExtension, validate::validate};
-use crate::codegen;
+use std::path::{Path, PathBuf};
 
 pub fn run(file: &str, force: bool, embedded_bytes: bool) -> Result<PathBuf, CliError> {
     let path = Path::new(file);
@@ -14,7 +14,10 @@ pub fn run(file: &str, force: bool, embedded_bytes: bool) -> Result<PathBuf, Cli
         for e in &errors {
             eprintln!("error: {e}");
         }
-        CliError::Other(format!("{} validation error(s) — generation aborted", errors.len()))
+        CliError::Other(format!(
+            "{} validation error(s) — generation aborted",
+            errors.len()
+        ))
     })?;
 
     let generated = codegen::generate(&validated, embedded_bytes);

@@ -130,6 +130,12 @@ async fn update_settings_does_not_affect_unrelated_fields() {
 
     let s = svc.get_settings().await;
     assert!(s.auto_scan, "scan setting should be unchanged");
-    assert_eq!(s.scan_interval_minutes, 30, "scan interval should be unchanged");
-    assert_eq!(s.concurrent_page_downloads, 8, "download setting should be updated");
+    assert_eq!(
+        s.scan_interval_minutes, 30,
+        "scan interval should be unchanged"
+    );
+    assert_eq!(
+        s.concurrent_page_downloads, 8,
+        "download setting should be updated"
+    );
 }

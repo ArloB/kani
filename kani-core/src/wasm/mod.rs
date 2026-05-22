@@ -121,10 +121,12 @@ impl StoredNode {
         F: FnOnce(scraper::ElementRef) -> std::result::Result<Option<T>, String>,
     {
         let guard = self.doc.lock().map_err(|_| "HTML document lock poisoned")?;
-        Ok(match scraper::ElementRef::wrap(guard.0.tree.get(self.node_id).unwrap()) {
-            Some(el) => f(el)?,
-            None => None,
-        })
+        Ok(
+            match scraper::ElementRef::wrap(guard.0.tree.get(self.node_id).unwrap()) {
+                Some(el) => f(el)?,
+                None => None,
+            },
+        )
     }
 }
 
@@ -202,18 +204,24 @@ impl HostState {
                 }
             }
             AllowedHost::Unrestricted => Ok(()),
-            AllowedHost::MetadataOnly => Err("HTTP requests are not permitted on metadata-only instances.".into()),
+            AllowedHost::MetadataOnly => {
+                Err("HTTP requests are not permitted on metadata-only instances.".into())
+            }
         }
     }
 
     /// Returns a reference to the JSON document for `handle`, or an error string.
     pub fn get_json(&self, handle: i32) -> std::result::Result<&serde_json::Value, String> {
-        self.json_docs.get(&handle).ok_or_else(|| "Invalid JSON handle".to_string())
+        self.json_docs
+            .get(&handle)
+            .ok_or_else(|| "Invalid JSON handle".to_string())
     }
 
     /// Returns a reference to the HTML document node for `handle`, or an error string.
     pub fn get_html_doc(&self, handle: i32) -> std::result::Result<&StoredNode, String> {
-        self.html_docs.get(&handle).ok_or_else(|| "Document not found".to_string())
+        self.html_docs
+            .get(&handle)
+            .ok_or_else(|| "Document not found".to_string())
     }
 
     /// Returns a reference to the compiled selector, parsing and caching it on
@@ -322,9 +330,10 @@ pub mod filter_conversions {
             match s {
                 wit::FilterState::Checkbox(c) => FilterState::Checkbox(c),
                 wit::FilterState::TextInput(t) => FilterState::TextInput(t),
-                wit::FilterState::Selection(opt) => {
-                    FilterState::Selection { name: opt.name, value: opt.value }
-                }
+                wit::FilterState::Selection(opt) => FilterState::Selection {
+                    name: opt.name,
+                    value: opt.value,
+                },
                 wit::FilterState::Multiselect(values) => FilterState::Multiselect(values),
             }
         }
@@ -344,9 +353,12 @@ pub mod filter_conversions {
     }
 
     pub fn to_wit_active_filters(filters: &[ActiveFilter]) -> Vec<wit::ActiveFilter> {
-        filters.iter().map(|f| wit::ActiveFilter {
-            filter_name: f.filter_name.clone(),
-            state: f.state.clone().into(),
-        }).collect()
+        filters
+            .iter()
+            .map(|f| wit::ActiveFilter {
+                filter_name: f.filter_name.clone(),
+                state: f.state.clone().into(),
+            })
+            .collect()
     }
 }

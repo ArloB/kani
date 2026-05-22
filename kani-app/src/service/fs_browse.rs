@@ -17,8 +17,12 @@ pub fn browse_directory(raw_path: &str) -> Result<FsBrowseResult, ServiceError> 
     }
 
     let canonical = dunce::canonicalize(raw_path).map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => ServiceError::NotFound(format!("path not found: {raw_path}")),
-        std::io::ErrorKind::PermissionDenied => ServiceError::Validation("permission denied".into()),
+        std::io::ErrorKind::NotFound => {
+            ServiceError::NotFound(format!("path not found: {raw_path}"))
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            ServiceError::Validation("permission denied".into())
+        }
         _ => ServiceError::Validation("path is inaccessible".into()),
     })?;
 
@@ -28,16 +32,19 @@ pub fn browse_directory(raw_path: &str) -> Result<FsBrowseResult, ServiceError> 
 
     let mut dirs = Vec::new();
     let read_dir = std::fs::read_dir(&canonical).map_err(|e| match e.kind() {
-        std::io::ErrorKind::PermissionDenied => ServiceError::Validation("permission denied".into()),
+        std::io::ErrorKind::PermissionDenied => {
+            ServiceError::Validation("permission denied".into())
+        }
         _ => ServiceError::Internal("unable to read directory".into()),
     })?;
 
     for entry in read_dir.flatten() {
         let Ok(ft) = entry.file_type() else { continue };
         if ft.is_dir()
-            && let Some(name) = entry.file_name().to_str() {
-                dirs.push(name.to_owned());
-            }
+            && let Some(name) = entry.file_name().to_str()
+        {
+            dirs.push(name.to_owned());
+        }
     }
     dirs.sort_by_key(|a| a.to_lowercase());
 
@@ -60,7 +67,9 @@ pub fn create_directory(parent_raw: &str, name: &str) -> Result<PathBuf, Service
         return Err(ServiceError::Validation("path contains null byte".into()));
     }
     if name.is_empty() {
-        return Err(ServiceError::Validation("directory name cannot be empty".into()));
+        return Err(ServiceError::Validation(
+            "directory name cannot be empty".into(),
+        ));
     }
     if name.contains('/') || name.contains('\\') {
         return Err(ServiceError::Validation(
@@ -69,7 +78,9 @@ pub fn create_directory(parent_raw: &str, name: &str) -> Result<PathBuf, Service
     }
 
     let canonical_parent = dunce::canonicalize(parent_raw).map_err(|e| match e.kind() {
-        std::io::ErrorKind::PermissionDenied => ServiceError::Validation("permission denied".into()),
+        std::io::ErrorKind::PermissionDenied => {
+            ServiceError::Validation("permission denied".into())
+        }
         _ => ServiceError::Validation("parent directory is inaccessible".into()),
     })?;
 
@@ -88,7 +99,9 @@ pub fn create_directory(parent_raw: &str, name: &str) -> Result<PathBuf, Service
         std::io::ErrorKind::AlreadyExists => {
             ServiceError::Validation("directory already exists".into())
         }
-        std::io::ErrorKind::PermissionDenied => ServiceError::Validation("permission denied".into()),
+        std::io::ErrorKind::PermissionDenied => {
+            ServiceError::Validation("permission denied".into())
+        }
         _ => ServiceError::Internal("unable to create directory".into()),
     })?;
 

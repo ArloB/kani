@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lettre::{
-    message::{header::ContentType, Mailbox},
-    transport::smtp::authentication::Credentials,
     AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
+    message::{Mailbox, header::ContentType},
+    transport::smtp::authentication::Credentials,
 };
 
 use crate::models::Settings;
@@ -13,7 +13,13 @@ use crate::models::Settings;
 /// Implement this trait to add a new email provider.
 #[async_trait]
 pub trait EmailTransport: Send + Sync {
-    async fn send(&self, from: &str, to: &str, subject: &str, html_body: &str) -> Result<(), String>;
+    async fn send(
+        &self,
+        from: &str,
+        to: &str,
+        subject: &str,
+        html_body: &str,
+    ) -> Result<(), String>;
 }
 
 /// General-purpose email service. Holds a provider backend and the configured from-address.
@@ -39,11 +45,16 @@ impl EmailService {
                 return None;
             }
         };
-        Some(Self { transport, from_address: s.email_from_address.clone() })
+        Some(Self {
+            transport,
+            from_address: s.email_from_address.clone(),
+        })
     }
 
     pub async fn send(&self, to: &str, subject: &str, html: &str) -> Result<(), String> {
-        self.transport.send(&self.from_address, to, subject, html).await
+        self.transport
+            .send(&self.from_address, to, subject, html)
+            .await
     }
 }
 
@@ -55,11 +66,23 @@ struct SmtpEmailTransport {
 
 impl SmtpEmailTransport {
     fn from_config(cfg: &serde_json::Value) -> Option<Self> {
-        let host = cfg.get("host").and_then(|v| v.as_str()).filter(|h| !h.is_empty())?;
+        let host = cfg
+            .get("host")
+            .and_then(|v| v.as_str())
+            .filter(|h| !h.is_empty())?;
         let port = cfg.get("port").and_then(|v| v.as_u64()).unwrap_or(587) as u16;
-        let username = cfg.get("username").and_then(|v| v.as_str()).unwrap_or_default();
-        let password = cfg.get("password").and_then(|v| v.as_str()).unwrap_or_default();
-        let tls_mode = cfg.get("tls_mode").and_then(|v| v.as_str()).unwrap_or("starttls");
+        let username = cfg
+            .get("username")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let password = cfg
+            .get("password")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let tls_mode = cfg
+            .get("tls_mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("starttls");
 
         let creds = if !username.is_empty() {
             Some(Credentials::new(username.to_string(), password.to_string()))
@@ -85,8 +108,7 @@ impl SmtpEmailTransport {
                 b.build()
             }
             _ => {
-                let mut b =
-                    AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host).ok()?;
+                let mut b = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host).ok()?;
                 b = b.port(port);
                 if let Some(c) = creds {
                     b = b.credentials(c);
@@ -108,8 +130,9 @@ impl EmailTransport for SmtpEmailTransport {
         subject: &str,
         html_body: &str,
     ) -> Result<(), String> {
-        let from_mb: Mailbox =
-            from.parse().map_err(|e| format!("Invalid from address: {e}"))?;
+        let from_mb: Mailbox = from
+            .parse()
+            .map_err(|e| format!("Invalid from address: {e}"))?;
         let to_mb: Mailbox = to.parse().map_err(|e| format!("Invalid to address: {e}"))?;
 
         let message = lettre::Message::builder()
@@ -120,7 +143,11 @@ impl EmailTransport for SmtpEmailTransport {
             .body(html_body.to_string())
             .map_err(|e| format!("Failed to build email: {e}"))?;
 
-        self.inner.send(message).await.map(|_| ()).map_err(|e| e.to_string())
+        self.inner
+            .send(message)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 }
 

@@ -134,9 +134,9 @@ fn parse_zip_backup(data: &[u8]) -> Result<BackupData> {
 
     let mut json_bytes = Vec::new();
     {
-        let mut file = archive.by_name("backup.json").map_err(|_| {
-            ServiceError::Validation("ZIP does not contain backup.json".into())
-        })?;
+        let mut file = archive
+            .by_name("backup.json")
+            .map_err(|_| ServiceError::Validation("ZIP does not contain backup.json".into()))?;
         file.read_to_end(&mut json_bytes)
             .map_err(ServiceError::Io)?;
     }
@@ -159,15 +159,13 @@ fn build_zip(backup: &BackupData) -> Result<Vec<u8>> {
     let cursor = Cursor::new(buf);
     let mut zip = ZipWriter::new(cursor);
 
-    let opts = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     zip.start_file("backup.json", opts)
         .map_err(|e| ServiceError::Internal(e.to_string()))?;
-    let json = serde_json::to_vec_pretty(backup)
-        .map_err(|e| ServiceError::Internal(e.to_string()))?;
-    zip.write_all(&json)
-        .map_err(ServiceError::Io)?;
+    let json =
+        serde_json::to_vec_pretty(backup).map_err(|e| ServiceError::Internal(e.to_string()))?;
+    zip.write_all(&json).map_err(ServiceError::Io)?;
 
     zip.start_file("VERSION", opts)
         .map_err(|e| ServiceError::Internal(e.to_string()))?;
@@ -326,17 +324,16 @@ impl AppService {
             });
         }
 
-        let categories: Vec<BackupCategory> = sqlx::query!(
-            "SELECT name, sort_order FROM categories ORDER BY sort_order"
-        )
-        .fetch_all(&self.db)
-        .await?
-        .into_iter()
-        .map(|r| BackupCategory {
-            name: r.name,
-            sort_order: r.sort_order,
-        })
-        .collect();
+        let categories: Vec<BackupCategory> =
+            sqlx::query!("SELECT name, sort_order FROM categories ORDER BY sort_order")
+                .fetch_all(&self.db)
+                .await?
+                .into_iter()
+                .map(|r| BackupCategory {
+                    name: r.name,
+                    sort_order: r.sort_order,
+                })
+                .collect();
 
         let s = self.settings.read().await;
         let settings = Some(BackupSettings {
@@ -381,19 +378,28 @@ impl AppService {
         let mut tx = self.db.begin().await?;
 
         if !opts.merge {
-            sqlx::query!("DELETE FROM user_chapter_tracking WHERE user_id = ?", user_id)
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query!(
+                "DELETE FROM user_chapter_tracking WHERE user_id = ?",
+                user_id
+            )
+            .execute(&mut *tx)
+            .await?;
             sqlx::query!("DELETE FROM user_manga_tracking WHERE user_id = ?", user_id)
                 .execute(&mut *tx)
                 .await?;
             if opts.import_manga {
-                sqlx::query!("DELETE FROM manga_categories").execute(&mut *tx).await?;
-                sqlx::query!("DELETE FROM download_rules").execute(&mut *tx).await?;
+                sqlx::query!("DELETE FROM manga_categories")
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query!("DELETE FROM download_rules")
+                    .execute(&mut *tx)
+                    .await?;
                 sqlx::query!("DELETE FROM manga").execute(&mut *tx).await?;
             }
             if opts.import_categories {
-                sqlx::query!("DELETE FROM categories").execute(&mut *tx).await?;
+                sqlx::query!("DELETE FROM categories")
+                    .execute(&mut *tx)
+                    .await?;
             }
         }
 
@@ -423,7 +429,11 @@ impl AppService {
 
         let mut new_manga_ids: Vec<i64> = Vec::new();
 
-        let total_manga = if opts.import_manga { backup.manga.len() as u32 } else { 0 };
+        let total_manga = if opts.import_manga {
+            backup.manga.len() as u32
+        } else {
+            0
+        };
         if total_manga > 0 {
             let _ = self.refresh_tx.send(AppEvent::ImportStarted {
                 origin: "kani_backup".into(),
@@ -478,13 +488,9 @@ impl AppService {
             } else {
                 // Fuzzy duplicate check
                 let authors: Vec<String> = vec![];
-                let hits = crate::service::dedup::find_similar_manga(
-                    &self.db,
-                    &m.name,
-                    &authors,
-                    None,
-                )
-                .await?;
+                let hits =
+                    crate::service::dedup::find_similar_manga(&self.db, &m.name, &authors, None)
+                        .await?;
                 if !hits.is_empty() {
                     self.save_pending_import_for_user(
                         user_id,
@@ -554,18 +560,19 @@ impl AppService {
 
             // user_manga_tracking
             if opts.import_tracking
-                && let Some(ref tr) = m.tracking {
-                    sqlx::query!(
-                        "INSERT OR REPLACE INTO user_manga_tracking (user_id, manga_id, status, score) \
+                && let Some(ref tr) = m.tracking
+            {
+                sqlx::query!(
+                    "INSERT OR REPLACE INTO user_manga_tracking (user_id, manga_id, status, score) \
                          VALUES (?, ?, ?, ?)",
-                        user_id,
-                        manga_id,
-                        tr.status,
-                        tr.score
-                    )
-                    .execute(&self.db)
-                    .await?;
-                }
+                    user_id,
+                    manga_id,
+                    tr.status,
+                    tr.score
+                )
+                .execute(&self.db)
+                .await?;
+            }
 
             // user_chapter_tracking
             if opts.import_chapter_progress && !m.chapter_progress.is_empty() {
@@ -615,19 +622,20 @@ impl AppService {
 
         // Settings
         if opts.import_settings
-            && let Some(ref s) = backup.settings {
-                sqlx::query!(
-                    "UPDATE settings SET scan_interval_minutes = ?, auto_scan = ?, \
+            && let Some(ref s) = backup.settings
+        {
+            sqlx::query!(
+                "UPDATE settings SET scan_interval_minutes = ?, auto_scan = ?, \
                      concurrent_page_downloads = ?, concurrent_manga_downloads = ? \
                      WHERE id = 'singleton'",
-                    s.scan_interval_minutes,
-                    s.auto_scan,
-                    s.concurrent_page_downloads,
-                    s.concurrent_manga_downloads
-                )
-                .execute(&self.db)
-                .await?;
-            }
+                s.scan_interval_minutes,
+                s.auto_scan,
+                s.concurrent_page_downloads,
+                s.concurrent_manga_downloads
+            )
+            .execute(&self.db)
+            .await?;
+        }
 
         if !new_manga_ids.is_empty() {
             let pool = self.db.clone();
@@ -696,5 +704,4 @@ impl AppService {
         .await?;
         Ok(())
     }
-
 }

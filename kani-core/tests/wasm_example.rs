@@ -41,7 +41,9 @@ const EPOCH_TICKS: u64 = 50_000;
 
 macro_rules! skip_if_missing {
     ($name:expr) => {{
-        let Some(bytes) = load_wasm($name) else { return };
+        let Some(bytes) = load_wasm($name) else {
+            return;
+        };
         bytes
     }};
 }
@@ -260,7 +262,10 @@ async fn example_get_url_returns_default_not_implemented_error() {
         .expect("WASM call trapped");
 
     // kani-example inherits the default MangaExtension::get_url which returns Err
-    assert!(result.is_err(), "kani-example should return Err for get_url");
+    assert!(
+        result.is_err(),
+        "kani-example should return Err for get_url"
+    );
     let err = result.unwrap_err();
     assert!(
         err.contains("not implemented") || err.contains("get_url"),
@@ -329,11 +334,31 @@ async fn example_no_handles_allocated_for_any_call() {
     let provider = instance.kani_extension_manga_provider();
 
     // All kani-example calls use no host imports and allocate no handles
-    provider.call_get_popular_manga(&mut store, 1, 20, &[]).await.unwrap().unwrap();
-    provider.call_search_manga(&mut store, "q", 1, 20, &[]).await.unwrap().unwrap();
-    provider.call_get_manga_details(&mut store, "id").await.unwrap().unwrap();
-    provider.call_get_chapter_list(&mut store, "id", 1, None, None).await.unwrap().unwrap();
-    provider.call_get_pages(&mut store, "m", "c").await.unwrap().unwrap();
+    provider
+        .call_get_popular_manga(&mut store, 1, 20, &[])
+        .await
+        .unwrap()
+        .unwrap();
+    provider
+        .call_search_manga(&mut store, "q", 1, 20, &[])
+        .await
+        .unwrap()
+        .unwrap();
+    provider
+        .call_get_manga_details(&mut store, "id")
+        .await
+        .unwrap()
+        .unwrap();
+    provider
+        .call_get_chapter_list(&mut store, "id", 1, None, None)
+        .await
+        .unwrap()
+        .unwrap();
+    provider
+        .call_get_pages(&mut store, "m", "c")
+        .await
+        .unwrap()
+        .unwrap();
 
     let state = store.data();
     assert!(state.html_docs.is_empty(), "html_docs should be empty");

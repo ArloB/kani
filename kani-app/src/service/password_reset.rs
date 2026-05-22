@@ -1,7 +1,7 @@
 use crate::error::{Result, ServiceError};
+use crate::service::AppService;
 use crate::service::email::{generate_token, hash_token};
 use crate::service::email_templates;
-use crate::service::AppService;
 
 impl AppService {
     /// Requests a password reset for the given email address.
@@ -78,9 +78,8 @@ impl AppService {
         .fetch_optional(&self.db)
         .await?;
 
-        let row = row.ok_or_else(|| {
-            ServiceError::Validation("Token is invalid or has expired.".into())
-        })?;
+        let row =
+            row.ok_or_else(|| ServiceError::Validation("Token is invalid or has expired.".into()))?;
 
         Ok((row.user_id, row.email))
     }
@@ -98,7 +97,9 @@ impl AppService {
         )
         .fetch_optional(&self.db)
         .await?
-        .ok_or_else(|| ServiceError::Validation("Token is invalid or has already been used.".into()))?;
+        .ok_or_else(|| {
+            ServiceError::Validation("Token is invalid or has already been used.".into())
+        })?;
         Ok(row.user_id)
     }
 
@@ -142,7 +143,8 @@ impl AppService {
         let (subject, html) = email_templates::password_reset_email(&user.username, &reset_url);
         self.send_email_bg(user.email.clone(), subject, html);
 
-        let (notif_subject, notif_html) = email_templates::admin_password_reset_email(&user.username);
+        let (notif_subject, notif_html) =
+            email_templates::admin_password_reset_email(&user.username);
         self.send_email_bg(user.email, notif_subject, notif_html);
 
         self.audit(

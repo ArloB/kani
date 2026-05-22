@@ -68,10 +68,17 @@ pub async fn create_admin(state: &AppState) -> (&'static str, &'static str) {
 }
 
 /// Create a standard (non-admin) user and return (username, password).
-pub async fn create_regular_user(state: &AppState, username: &'static str) -> (&'static str, &'static str) {
+pub async fn create_regular_user(
+    state: &AppState,
+    username: &'static str,
+) -> (&'static str, &'static str) {
     let backend = AuthBackend::new(state.db.clone());
     backend
-        .create_user(username, &format!("{}@test.local", username), "Password1234!")
+        .create_user(
+            username,
+            &format!("{}@test.local", username),
+            "Password1234!",
+        )
         .await
         .unwrap();
     (username, "Password1234!")

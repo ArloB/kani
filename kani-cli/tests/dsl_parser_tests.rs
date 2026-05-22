@@ -6,7 +6,9 @@ use kani_cli::dsl::parser;
 use kani_shared::ast::{Expr, Op};
 
 fn parse_ok(input: &str) -> Expr {
-    let parse_expr = parser().parse(input).into_result()
+    let parse_expr = parser()
+        .parse(input)
+        .into_result()
         .unwrap_or_else(|e| panic!("parse failed for {:?}: {:?}", input, e));
     Expr::try_from(parse_expr)
         .unwrap_or_else(|e| panic!("conversion failed for {:?}: {:?}", input, e))
@@ -72,12 +74,18 @@ fn parse_dom() {
 
 #[test]
 fn parse_json() {
-    assert_eq!(parse_ok(r#"json("/data/id")"#), Expr::Json("/data/id".into()));
+    assert_eq!(
+        parse_ok(r#"json("/data/id")"#),
+        Expr::Json("/data/id".into())
+    );
 }
 
 #[test]
 fn parse_pref() {
-    assert_eq!(parse_ok(r#"pref("language")"#), Expr::Pref("language".into()));
+    assert_eq!(
+        parse_ok(r#"pref("language")"#),
+        Expr::Pref("language".into())
+    );
 }
 
 #[test]
@@ -90,13 +98,24 @@ fn parse_var() {
 #[test]
 fn parse_text_method() {
     let expr = parse_ok(r#"self.text()"#);
-    assert_eq!(expr, Expr::Text { target: Box::new(Expr::SelfRef) });
+    assert_eq!(
+        expr,
+        Expr::Text {
+            target: Box::new(Expr::SelfRef)
+        }
+    );
 }
 
 #[test]
 fn parse_attr_method() {
     let expr = parse_ok(r#"self.attr("href")"#);
-    assert_eq!(expr, Expr::Attr { target: Box::new(Expr::SelfRef), name: "href".into() });
+    assert_eq!(
+        expr,
+        Expr::Attr {
+            target: Box::new(Expr::SelfRef),
+            name: "href".into()
+        }
+    );
 }
 
 #[test]
@@ -104,7 +123,11 @@ fn parse_trim_method() {
     let expr = parse_ok(r#"self.text().trim()"#);
     assert_eq!(
         expr,
-        Expr::Trim { target: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }) }
+        Expr::Trim {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            })
+        }
     );
 }
 
@@ -113,7 +136,11 @@ fn parse_lower_method() {
     let expr = parse_ok(r#"self.text().lower()"#);
     assert_eq!(
         expr,
-        Expr::Lower { target: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }) }
+        Expr::Lower {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            })
+        }
     );
 }
 
@@ -155,7 +182,11 @@ fn parse_parse_float() {
     let expr = parse_ok(r#"self.text().parse_float()"#);
     assert_eq!(
         expr,
-        Expr::ParseFloat { target: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }) }
+        Expr::ParseFloat {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            })
+        }
     );
 }
 
@@ -164,7 +195,11 @@ fn parse_parse_int() {
     let expr = parse_ok(r#"self.text().parse_int()"#);
     assert_eq!(
         expr,
-        Expr::ParseInt { target: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }) }
+        Expr::ParseInt {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            })
+        }
     );
 }
 
@@ -173,7 +208,10 @@ fn parse_select_method() {
     let expr = parse_ok(r#"self.select("a.link")"#);
     assert_eq!(
         expr,
-        Expr::Select { target: Box::new(Expr::SelfRef), selector: "a.link".into() }
+        Expr::Select {
+            target: Box::new(Expr::SelfRef),
+            selector: "a.link".into()
+        }
     );
 }
 
@@ -182,7 +220,10 @@ fn parse_first_method() {
     let expr = parse_ok(r#"self.first("h1")"#);
     assert_eq!(
         expr,
-        Expr::First { target: Box::new(Expr::SelfRef), selector: "h1".into() }
+        Expr::First {
+            target: Box::new(Expr::SelfRef),
+            selector: "h1".into()
+        }
     );
 }
 
@@ -192,7 +233,9 @@ fn parse_replace_method() {
     assert_eq!(
         expr,
         Expr::Replace {
-            target: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }),
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            }),
             from: "foo".into(),
             to: "bar".into(),
         }
@@ -205,7 +248,9 @@ fn parse_fallback_method() {
     assert_eq!(
         expr,
         Expr::Fallback {
-            target: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }),
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            }),
             default: Box::new(Expr::Literal("unknown".into())),
         }
     );
@@ -216,7 +261,12 @@ fn parse_matches_method() {
     let expr = parse_ok(r#"self.text().matches("[0-9]+")"#);
     assert_eq!(
         expr,
-        Expr::Matches { target: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }), pattern: "[0-9]+".into() }
+        Expr::Matches {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            }),
+            pattern: "[0-9]+".into()
+        }
     );
 }
 
@@ -230,7 +280,9 @@ fn parse_map_method() {
                 target: Box::new(Expr::SelfRef),
                 selector: "li".into(),
             }),
-            transform: Box::new(Expr::Text { target: Box::new(Expr::Var("$item".into())) }),
+            transform: Box::new(Expr::Text {
+                target: Box::new(Expr::Var("$item".into()))
+            }),
         }
     );
 }
@@ -245,7 +297,9 @@ fn parse_filter_method() {
                 target: Box::new(Expr::SelfRef),
                 selector: "li".into(),
             }),
-            filter: Box::new(Expr::Text { target: Box::new(Expr::Var("$item".into())) }),
+            filter: Box::new(Expr::Text {
+                target: Box::new(Expr::Var("$item".into()))
+            }),
         }
     );
 }
@@ -271,7 +325,9 @@ fn parse_starts_with() {
     assert_eq!(
         expr,
         Expr::StartsWith {
-            target: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }),
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            }),
             prefix: "http".into(),
         }
     );
@@ -283,7 +339,9 @@ fn parse_ends_with() {
     assert_eq!(
         expr,
         Expr::EndsWith {
-            target: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }),
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            }),
             suffix: ".jpg".into(),
         }
     );
@@ -295,7 +353,10 @@ fn parse_resolve_url() {
     assert_eq!(
         expr,
         Expr::ResolveUrl {
-            target: Box::new(Expr::Attr { target: Box::new(Expr::SelfRef), name: "src".into() }),
+            target: Box::new(Expr::Attr {
+                target: Box::new(Expr::SelfRef),
+                name: "src".into()
+            }),
             base: Box::new(Expr::Literal("https://example.com".into())),
         }
     );
@@ -307,7 +368,9 @@ fn parse_lookup_method() {
     assert_eq!(
         expr,
         Expr::Lookup {
-            target: Box::new(Expr::Text { target: Box::new(Expr::SelfRef) }),
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            }),
             table: vec![("a".into(), "b".into()), ("c".into(), "d".into())],
         }
     );
@@ -320,7 +383,9 @@ fn parse_json_str() {
     let expr = parse_ok(r#"json("/data/id").str()"#);
     assert_eq!(
         expr,
-        Expr::JsonStr { target: Box::new(Expr::Json("/data/id".into())) }
+        Expr::JsonStr {
+            target: Box::new(Expr::Json("/data/id".into()))
+        }
     );
 }
 
@@ -329,7 +394,9 @@ fn parse_json_int() {
     let expr = parse_ok(r#"json("/data/count").int()"#);
     assert_eq!(
         expr,
-        Expr::JsonInt { target: Box::new(Expr::Json("/data/count".into())) }
+        Expr::JsonInt {
+            target: Box::new(Expr::Json("/data/count".into()))
+        }
     );
 }
 
@@ -352,7 +419,11 @@ fn parse_binary_add() {
     let expr = parse_ok("1 + 2");
     assert_eq!(
         expr,
-        Expr::BinaryOperation { op: Op::Add, lhs: Box::new(Expr::Number(1.0)), rhs: Box::new(Expr::Number(2.0)) }
+        Expr::BinaryOperation {
+            op: Op::Add,
+            lhs: Box::new(Expr::Number(1.0)),
+            rhs: Box::new(Expr::Number(2.0))
+        }
     );
 }
 
@@ -374,7 +445,11 @@ fn parse_binary_and() {
     let expr = parse_ok("true && false");
     assert_eq!(
         expr,
-        Expr::BinaryOperation { op: Op::And, lhs: Box::new(Expr::Bool(true)), rhs: Box::new(Expr::Bool(false)) }
+        Expr::BinaryOperation {
+            op: Op::And,
+            lhs: Box::new(Expr::Bool(true)),
+            rhs: Box::new(Expr::Bool(false))
+        }
     );
 }
 
@@ -383,7 +458,11 @@ fn parse_binary_or() {
     let expr = parse_ok("true || false");
     assert_eq!(
         expr,
-        Expr::BinaryOperation { op: Op::Or, lhs: Box::new(Expr::Bool(true)), rhs: Box::new(Expr::Bool(false)) }
+        Expr::BinaryOperation {
+            op: Op::Or,
+            lhs: Box::new(Expr::Bool(true)),
+            rhs: Box::new(Expr::Bool(false))
+        }
     );
 }
 
@@ -423,7 +502,10 @@ fn parse_format_expr() {
     let expr = parse_ok(r#"format("hello {}", "world")"#);
     assert_eq!(
         expr,
-        Expr::Format { template: "hello {}".into(), args: vec![Expr::Literal("world".into())] }
+        Expr::Format {
+            template: "hello {}".into(),
+            args: vec![Expr::Literal("world".into())]
+        }
     );
 }
 
@@ -433,7 +515,9 @@ fn parse_merge_expr() {
     assert_eq!(
         expr,
         Expr::Merge(vec![
-            Expr::Text { target: Box::new(Expr::SelfRef) },
+            Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            },
             Expr::Literal("extra".into()),
         ])
     );
@@ -473,12 +557,20 @@ fn parse_error_empty_input() {
 
 #[test]
 fn convert_error_unknown_method() {
-    let parse_expr = parser().parse(r#"self.nonexistent_method()"#)
+    let parse_expr = parser()
+        .parse(r#"self.nonexistent_method()"#)
         .into_result()
         .expect("should parse as a method call");
     let err = Expr::try_from(parse_expr).expect_err("should fail conversion");
-    let msg = err.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
-    assert!(msg.contains("nonexistent_method") || msg.contains("Unknown method"), "got: {msg}");
+    let msg = err
+        .iter()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        msg.contains("nonexistent_method") || msg.contains("Unknown method"),
+        "got: {msg}"
+    );
 }
 
 #[test]
@@ -488,5 +580,8 @@ fn convert_error_map_literal_outside_lookup() {
     // If it can even be built via a workaround, conversion should fail.
     // The simplest test: validate that a "Known good" lookup works.
     let expr = parse_ok(r#"self.text().lookup({"x": "y"})"#);
-    assert!(matches!(expr, Expr::Lookup { .. }), "lookup with map literal should succeed");
+    assert!(
+        matches!(expr, Expr::Lookup { .. }),
+        "lookup with map literal should succeed"
+    );
 }

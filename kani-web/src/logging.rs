@@ -55,32 +55,41 @@ impl LogHandle {
             .iter()
             .filter(|e| {
                 if !level_filter.is_empty()
-                    && !level_filter.iter().any(|l| l.eq_ignore_ascii_case(&e.level))
+                    && !level_filter
+                        .iter()
+                        .any(|l| l.eq_ignore_ascii_case(&e.level))
                 {
                     return false;
                 }
                 if !source_filter.is_empty()
-                    && !source_filter.iter().any(|s| s.eq_ignore_ascii_case(&e.source))
+                    && !source_filter
+                        .iter()
+                        .any(|s| s.eq_ignore_ascii_case(&e.source))
                 {
                     return false;
                 }
                 if let Some(s) = search
-                    && !s.is_empty() {
-                        let s_lower = s.to_lowercase();
-                        if !e.message.to_lowercase().contains(&s_lower)
-                            && !e.target.to_lowercase().contains(&s_lower)
-                        {
-                            return false;
-                        }
+                    && !s.is_empty()
+                {
+                    let s_lower = s.to_lowercase();
+                    if !e.message.to_lowercase().contains(&s_lower)
+                        && !e.target.to_lowercase().contains(&s_lower)
+                    {
+                        return false;
                     }
+                }
                 if let Some(from_str) = from
-                    && !from_str.is_empty() && e.timestamp.as_str() < from_str {
-                        return false;
-                    }
+                    && !from_str.is_empty()
+                    && e.timestamp.as_str() < from_str
+                {
+                    return false;
+                }
                 if let Some(to_str) = to
-                    && !to_str.is_empty() && e.timestamp.as_str() > to_str {
-                        return false;
-                    }
+                    && !to_str.is_empty()
+                    && e.timestamp.as_str() > to_str
+                {
+                    return false;
+                }
                 true
             })
             .collect();
@@ -124,7 +133,12 @@ impl RingBufferLayer {
             capacity,
             broadcast_tx: tx,
         });
-        (Self { handle: handle.clone() }, handle)
+        (
+            Self {
+                handle: handle.clone(),
+            },
+            handle,
+        )
     }
 }
 

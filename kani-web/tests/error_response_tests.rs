@@ -4,7 +4,10 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, authed_post, body_json, build_test_app, create_admin, create_regular_user, get_req, login, post_json, test_state};
+use common::{
+    authed_get, authed_post, body_json, build_test_app, create_admin, create_regular_user, get_req,
+    login, post_json, test_state,
+};
 use tower::ServiceExt;
 
 // ── 404 Not Found ────────────────────────────────────────────────────────────
@@ -51,10 +54,7 @@ async fn unauthenticated_library_request_returns_401_with_json() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    let res = app
-        .oneshot(get_req("/rest/library"))
-        .await
-        .unwrap();
+    let res = app.oneshot(get_req("/rest/library")).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     let body = body_json(res).await;
@@ -97,7 +97,10 @@ async fn regular_user_accessing_admin_endpoint_returns_403() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let body = body_json(res).await;
     assert_eq!(body["code"], serde_json::json!("forbidden"));
-    assert!(body["hint"].is_string(), "forbidden errors must include a hint");
+    assert!(
+        body["hint"].is_string(),
+        "forbidden errors must include a hint"
+    );
 }
 
 // ── 400 Bad Request / Validation ─────────────────────────────────────────────

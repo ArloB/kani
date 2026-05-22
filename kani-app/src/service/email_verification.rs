@@ -1,7 +1,7 @@
 use crate::error::{Result, ServiceError};
+use crate::service::AppService;
 use crate::service::email::{generate_token, hash_token};
 use crate::service::email_templates;
-use crate::service::AppService;
 
 impl AppService {
     /// Sends a verification email to the user. No-op if email is disabled or already verified.
@@ -42,7 +42,8 @@ impl AppService {
         .await?;
 
         let verify_url = format!("{}/verify-email?token={}", settings.app_url, raw_token);
-        let (subject, html) = email_templates::email_verification_email(&user.username, &verify_url);
+        let (subject, html) =
+            email_templates::email_verification_email(&user.username, &verify_url);
         self.send_email_bg(user.email, subject, html);
 
         Ok(())
@@ -76,13 +77,8 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
-        self.audit(
-            Some(row.user_id),
-            "auth.email_verified",
-            None,
-            None,
-        )
-        .await;
+        self.audit(Some(row.user_id), "auth.email_verified", None, None)
+            .await;
 
         Ok(())
     }

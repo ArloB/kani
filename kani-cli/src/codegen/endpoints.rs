@@ -1,13 +1,18 @@
 // Emit per-endpoint MangaExtension trait method bodies.
 
-use crate::yaml::model::{FieldSource, ValidatedEndpoint, ValidatedHnp, ValidatedPopular, ValidatedTotalPages};
-use crate::yaml::schema::ResponseType;
 use super::blueprint::{emit_blueprint_bytes, emit_blueprint_chain};
 use super::request::emit_request_block;
+use crate::yaml::model::{
+    FieldSource, ValidatedEndpoint, ValidatedHnp, ValidatedPopular, ValidatedTotalPages,
+};
+use crate::yaml::schema::ResponseType;
 
 pub fn emit_popular(popular: &ValidatedPopular, embedded_bytes: bool) -> String {
     match popular {
-        ValidatedPopular::Delegated { delegate_to, empty_without_filters } => {
+        ValidatedPopular::Delegated {
+            delegate_to,
+            empty_without_filters,
+        } => {
             let guard = if *empty_without_filters {
                 "    if filters.is_empty() {\n        return Ok(MangaList { manga: vec![], has_next_page: false, total_pages: None });\n    }\n"
             } else {
@@ -43,17 +48,19 @@ pub fn emit_search(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String {
 }
 
 pub fn emit_manga_details(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String {
-    let req_block = emit_request_block(
-        &ep.route, &ep.method, &ep.headers, &ep.queries, &[],
-    );
+    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[]);
 
     let row_assembly = emit_manga_info_assembly(ep);
 
     if embedded_bytes {
         let bp_bytes = emit_blueprint_bytes(ep);
         let fetch = match ep.response_type {
-            ResponseType::Html => "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;",
-            ResponseType::Json => "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;",
+            ResponseType::Html => {
+                "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
+            }
+            ResponseType::Json => {
+                "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;"
+            }
         };
         format!(
             "fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {{\n\
@@ -83,9 +90,7 @@ pub fn emit_manga_details(ep: &ValidatedEndpoint, embedded_bytes: bool) -> Strin
 }
 
 pub fn emit_chapter_list(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String {
-    let req_block = emit_request_block(
-        &ep.route, &ep.method, &ep.headers, &ep.queries, &[],
-    );
+    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[]);
 
     let hnp = emit_hnp_expr_static(&ep.has_next_page);
     let tp = emit_total_pages_static(&ep.total_pages);
@@ -94,8 +99,12 @@ pub fn emit_chapter_list(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String
     if embedded_bytes {
         let bp_bytes = emit_blueprint_bytes(ep);
         let fetch = match ep.response_type {
-            ResponseType::Html => "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;",
-            ResponseType::Json => "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;",
+            ResponseType::Html => {
+                "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
+            }
+            ResponseType::Json => {
+                "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;"
+            }
         };
         format!(
             "fn get_chapter_list(&self, manga_id: &str, _page: i32, _page_size: Option<i32>, _sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
@@ -137,17 +146,19 @@ pub fn emit_chapter_list(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String
 }
 
 pub fn emit_pages(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String {
-    let req_block = emit_request_block(
-        &ep.route, &ep.method, &ep.headers, &ep.queries, &[],
-    );
+    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[]);
 
     let row_assembly = emit_pages_assembly(ep);
 
     if embedded_bytes {
         let bp_bytes = emit_blueprint_bytes(ep);
         let fetch = match ep.response_type {
-            ResponseType::Html => "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;",
-            ResponseType::Json => "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;",
+            ResponseType::Html => {
+                "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
+            }
+            ResponseType::Json => {
+                "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;"
+            }
         };
         format!(
             "fn get_pages(&self, _manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter> {{\n\
@@ -195,7 +206,11 @@ fn emit_manga_list_method(
     embedded_bytes: bool,
 ) -> String {
     let req_block = emit_request_block(
-        &ep.route, &ep.method, &ep.headers, &ep.queries, &ep.filter_mapping,
+        &ep.route,
+        &ep.method,
+        &ep.headers,
+        &ep.queries,
+        &ep.filter_mapping,
     );
     let row_assembly = emit_manga_list_item_assembly(ep);
 
@@ -209,10 +224,18 @@ fn emit_manga_list_method(
             )
         } else {
             let fetch = match ep.response_type {
-                ResponseType::Html => "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;",
-                ResponseType::Json => "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;",
+                ResponseType::Html => {
+                    "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
+                }
+                ResponseType::Json => {
+                    "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;"
+                }
             };
-            (fetch.to_string(), emit_hnp_expr_static(&ep.has_next_page), emit_total_pages_static(&ep.total_pages))
+            (
+                fetch.to_string(),
+                emit_hnp_expr_static(&ep.has_next_page),
+                emit_total_pages_static(&ep.total_pages),
+            )
         };
         format!(
             "fn {method_name}(&self, {params}) -> ExtensionResult<MangaList> {{\n\
@@ -229,7 +252,8 @@ fn emit_manga_list_method(
         )
     } else {
         let bp_chain = emit_blueprint_chain(ep);
-        let (extract_call, hnp_line, tp_line): (String, String, String) = if ep.pagination.is_some() {
+        let (extract_call, hnp_line, tp_line): (String, String, String) = if ep.pagination.is_some()
+        {
             (
                 "extract::paginated_html(page, page_size, &bp)?".to_string(),
                 emit_hnp_scalar(&ep.has_next_page),
@@ -240,7 +264,11 @@ fn emit_manga_list_method(
                 ResponseType::Json => "extract::json(None, &bp)?",
                 ResponseType::Html => "extract::html(None, &bp)?",
             };
-            (fn_name.to_string(), emit_hnp_expr_static(&ep.has_next_page), emit_total_pages_static(&ep.total_pages))
+            (
+                fn_name.to_string(),
+                emit_hnp_expr_static(&ep.has_next_page),
+                emit_total_pages_static(&ep.total_pages),
+            )
         };
         format!(
             "fn {method_name}(&self, {params}) -> ExtensionResult<MangaList> {{\n\
@@ -268,22 +296,25 @@ fn emit_manga_list_item_assembly(ep: &ValidatedEndpoint) -> String {
         };
         fields.push(format!("            {}: {accessor}", f.name));
     }
-    format!(
-        "Some(MangaListItem {{\n{}\n        }})",
-        fields.join(",\n")
-    )
+    format!("Some(MangaListItem {{\n{}\n        }})", fields.join(",\n"))
 }
 
 fn manga_list_item_accessor(name: &str, optional: bool) -> String {
     match name {
         "id" | "title" => {
-            if optional { format!("row.get_str(\"/{name}\")") }
-            else { format!("row.require_str(\"/{name}\").ok()?") }
+            if optional {
+                format!("row.get_str(\"/{name}\")")
+            } else {
+                format!("row.require_str(\"/{name}\").ok()?")
+            }
         }
         "cover_url" => "row.get_str(\"/cover_url\")".into(),
         other => {
-            if optional { format!("row.get_str(\"/{other}\")") }
-            else { format!("row.require_str(\"/{other}\").ok()?") }
+            if optional {
+                format!("row.get_str(\"/{other}\")")
+            } else {
+                format!("row.require_str(\"/{other}\").ok()?")
+            }
         }
     }
 }
@@ -322,16 +353,21 @@ fn emit_manga_info_assembly(ep: &ValidatedEndpoint) -> String {
 fn manga_info_field_accessor(name: &str, optional: bool) -> String {
     match name {
         "id" | "title" => {
-            if optional { format!("row.get_str(\"/{name}\")") }
-            else { format!("row.require_str(\"/{name}\")?") }
+            if optional {
+                format!("row.get_str(\"/{name}\")")
+            } else {
+                format!("row.require_str(\"/{name}\")?")
+            }
         }
         "description" | "cover_url" => format!("row.get_str(\"/{name}\")"),
         "status" => "status".into(),
-        "authors" | "artists" | "tags" =>
-            format!("row.get_array_of_strings(\"/{name}\")"),
+        "authors" | "artists" | "tags" => format!("row.get_array_of_strings(\"/{name}\")"),
         other => {
-            if optional { format!("row.get_str(\"/{other}\")") }
-            else { format!("row.require_str(\"/{other}\")?") }
+            if optional {
+                format!("row.get_str(\"/{other}\")")
+            } else {
+                format!("row.require_str(\"/{other}\")?")
+            }
         }
     }
 }
@@ -346,15 +382,12 @@ fn emit_chapter_info_assembly(ep: &ValidatedEndpoint) -> String {
         };
         fields.push(format!("        {}: {accessor}", f.name));
     }
-    format!(
-        "Some(ChapterInfo {{\n{}\n    }})",
-        fields.join(",\n")
-    )
+    format!("Some(ChapterInfo {{\n{}\n    }})", fields.join(",\n"))
 }
 
 fn chapter_info_field_accessor(name: &str) -> String {
     match name {
-        "id"    => "row.require_str(\"/id\").ok()?".into(),
+        "id" => "row.require_str(\"/id\").ok()?".into(),
         "number" => "row.get_f64(\"/number\").unwrap_or(0.0)".into(),
         "title" | "scanlator" => format!("row.get_str(\"/{name}\")"),
         "volume" => "row.get_i64(\"/volume\").map(|v| v as i32)".into(),
@@ -374,17 +407,14 @@ fn emit_pages_assembly(ep: &ValidatedEndpoint) -> String {
         };
         fields.push(format!("        {}: {accessor}", f.name));
     }
-    format!(
-        "Some(Page {{\n{}\n    }})",
-        fields.join(",\n")
-    )
+    format!("Some(Page {{\n{}\n    }})", fields.join(",\n"))
 }
 
 fn pages_field_accessor(name: &str) -> String {
     match name {
-        "url"   => "row.require_str(\"/url\").ok()?".into(),
+        "url" => "row.require_str(\"/url\").ok()?".into(),
         "index" => "row.get_i64(\"/index\").unwrap_or(i as i64) as i32".into(),
-        other   => format!("row.get_str(\"/{other}\").unwrap_or_default()"),
+        other => format!("row.get_str(\"/{other}\").unwrap_or_default()"),
     }
 }
 
@@ -393,9 +423,10 @@ fn pages_field_accessor(name: &str) -> String {
 /// For paginated endpoints, read `has_next_page` from the scalar output.
 fn emit_hnp_scalar(hnp: &ValidatedHnp) -> String {
     match hnp {
-        ValidatedHnp::Static(b)  => b.to_string(),
-        ValidatedHnp::Default | ValidatedHnp::Scalar(_) =>
-            "rows.get_scalar_bool(\"has_next_page\")".into(),
+        ValidatedHnp::Static(b) => b.to_string(),
+        ValidatedHnp::Default | ValidatedHnp::Scalar(_) => {
+            "rows.get_scalar_bool(\"has_next_page\")".into()
+        }
     }
 }
 
@@ -403,9 +434,8 @@ fn emit_hnp_scalar(hnp: &ValidatedHnp) -> String {
 fn emit_hnp_expr_static(hnp: &ValidatedHnp) -> String {
     match hnp {
         ValidatedHnp::Static(b) => b.to_string(),
-        ValidatedHnp::Default   => "false".into(),
-        ValidatedHnp::Scalar(_) =>
-            "rows.get_scalar_bool(\"has_next_page\")".into(),
+        ValidatedHnp::Default => "false".into(),
+        ValidatedHnp::Scalar(_) => "rows.get_scalar_bool(\"has_next_page\")".into(),
     }
 }
 
@@ -413,9 +443,10 @@ fn emit_hnp_expr_static(hnp: &ValidatedHnp) -> String {
 fn emit_total_pages_scalar(tp: &ValidatedTotalPages) -> String {
     match tp {
         ValidatedTotalPages::Static(n) => format!("Some({n}u32)"),
-        ValidatedTotalPages::None      => "None".into(),
-        ValidatedTotalPages::Scalar(_) =>
-            "rows.get_scalar_i64(\"total_pages\").map(|n| n as u32)".into(),
+        ValidatedTotalPages::None => "None".into(),
+        ValidatedTotalPages::Scalar(_) => {
+            "rows.get_scalar_i64(\"total_pages\").map(|n| n as u32)".into()
+        }
     }
 }
 
@@ -423,8 +454,9 @@ fn emit_total_pages_scalar(tp: &ValidatedTotalPages) -> String {
 fn emit_total_pages_static(tp: &ValidatedTotalPages) -> String {
     match tp {
         ValidatedTotalPages::Static(n) => format!("Some({n}u32)"),
-        ValidatedTotalPages::None      => "None".into(),
-        ValidatedTotalPages::Scalar(_) =>
-            "rows.get_scalar_i64(\"total_pages\").map(|n| n as u32)".into(),
+        ValidatedTotalPages::None => "None".into(),
+        ValidatedTotalPages::Scalar(_) => {
+            "rows.get_scalar_i64(\"total_pages\").map(|n| n as u32)".into()
+        }
     }
 }

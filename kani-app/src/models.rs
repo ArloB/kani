@@ -223,25 +223,37 @@ impl TryFrom<DownloadRuleRow> for DownloadRule {
             "title_contains" => DownloadRuleKind::TitleContains(row.value),
             "title_excludes" => DownloadRuleKind::TitleExcludes(row.value),
             "chapter_number_min" => {
-                let n: f64 = row.value.parse().map_err(|_| format!("Bad f64: {}", row.value))?;
+                let n: f64 = row
+                    .value
+                    .parse()
+                    .map_err(|_| format!("Bad f64: {}", row.value))?;
                 DownloadRuleKind::ChapterNumberMin(n)
             }
             "chapter_number_max" => {
-                let n: f64 = row.value.parse().map_err(|_| format!("Bad f64: {}", row.value))?;
+                let n: f64 = row
+                    .value
+                    .parse()
+                    .map_err(|_| format!("Bad f64: {}", row.value))?;
                 DownloadRuleKind::ChapterNumberMax(n)
             }
             "exclude_fractional" => DownloadRuleKind::ExcludeFractional,
             "max_age_days" => {
-                let n: i32 = row.value.parse().map_err(|_| format!("Bad i32: {}", row.value))?;
+                let n: i32 = row
+                    .value
+                    .parse()
+                    .map_err(|_| format!("Bad i32: {}", row.value))?;
                 DownloadRuleKind::MaxAgeDays(n)
             }
             "published_after" => {
-                let n: i64 = row.value.parse().map_err(|_| format!("Bad i64: {}", row.value))?;
+                let n: i64 = row
+                    .value
+                    .parse()
+                    .map_err(|_| format!("Bad i64: {}", row.value))?;
                 DownloadRuleKind::PublishedAfter(n)
             }
             // Scanlator rules were migrated to scanlator_preferences — skip silently.
             "scanlator_include" | "scanlator_exclude" => {
-                return Err(format!("Migrated rule type skipped: {}", row.rule_type))
+                return Err(format!("Migrated rule type skipped: {}", row.rule_type));
             }
             other => return Err(format!("Unknown rule_type in DB: {}", other)),
         };

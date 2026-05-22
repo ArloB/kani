@@ -1,6 +1,6 @@
 use crate::error::Result;
-use crate::service::encryption::PREFIX;
 use crate::service::AppService;
+use crate::service::encryption::PREFIX;
 use kani_shared::types::CredentialEncryptionStatus;
 use sqlx::Row;
 
@@ -15,52 +15,54 @@ impl AppService {
         let mut plaintext_count: i64 = 0;
 
         // 1. email_provider_config
-        let email_config: String = sqlx::query_scalar(
-            "SELECT email_provider_config FROM settings WHERE id='singleton'",
-        )
-        .fetch_one(&self.db)
-        .await
-        .unwrap_or_default();
+        let email_config: String =
+            sqlx::query_scalar("SELECT email_provider_config FROM settings WHERE id='singleton'")
+                .fetch_one(&self.db)
+                .await
+                .unwrap_or_default();
 
         if !email_config.is_empty() && !email_config.starts_with(PREFIX) {
             plaintext_count += 1;
         }
 
         // 2. tracker_app_config.client_secret
-        let secret_rows = sqlx::query(
-            "SELECT client_secret FROM tracker_app_config",
-        )
-        .fetch_all(&self.db)
-        .await
-        .unwrap_or_default();
+        let secret_rows = sqlx::query("SELECT client_secret FROM tracker_app_config")
+            .fetch_all(&self.db)
+            .await
+            .unwrap_or_default();
 
         for row in &secret_rows {
             let secret: Option<String> = row.try_get("client_secret").ok().flatten();
             if let Some(s) = secret
-                && !s.is_empty() && !s.starts_with(PREFIX) {
-                    plaintext_count += 1;
-                }
+                && !s.is_empty()
+                && !s.starts_with(PREFIX)
+            {
+                plaintext_count += 1;
+            }
         }
 
         // 3. user_tracker_credentials access_token + refresh_token
-        let token_rows = sqlx::query(
-            "SELECT access_token, refresh_token FROM user_tracker_credentials",
-        )
-        .fetch_all(&self.db)
-        .await
-        .unwrap_or_default();
+        let token_rows =
+            sqlx::query("SELECT access_token, refresh_token FROM user_tracker_credentials")
+                .fetch_all(&self.db)
+                .await
+                .unwrap_or_default();
 
         for row in &token_rows {
             let at: Option<String> = row.try_get("access_token").ok().flatten();
             let rt: Option<String> = row.try_get("refresh_token").ok().flatten();
             if let Some(t) = at
-                && !t.is_empty() && !t.starts_with(PREFIX) {
-                    plaintext_count += 1;
-                }
+                && !t.is_empty()
+                && !t.starts_with(PREFIX)
+            {
+                plaintext_count += 1;
+            }
             if let Some(t) = rt
-                && !t.is_empty() && !t.starts_with(PREFIX) {
-                    plaintext_count += 1;
-                }
+                && !t.is_empty()
+                && !t.starts_with(PREFIX)
+            {
+                plaintext_count += 1;
+            }
         }
 
         Ok(CredentialEncryptionStatus {
@@ -76,12 +78,11 @@ impl AppService {
         };
 
         // 1. email_provider_config
-        let email_config: String = sqlx::query_scalar(
-            "SELECT email_provider_config FROM settings WHERE id='singleton'",
-        )
-        .fetch_one(&self.db)
-        .await
-        .unwrap_or_default();
+        let email_config: String =
+            sqlx::query_scalar("SELECT email_provider_config FROM settings WHERE id='singleton'")
+                .fetch_one(&self.db)
+                .await
+                .unwrap_or_default();
 
         if !email_config.is_empty() && !email_config.starts_with(PREFIX) {
             let encrypted = cipher.encrypt(&email_config);
@@ -93,28 +94,26 @@ impl AppService {
         }
 
         // 2. tracker_app_config.client_secret
-        let secret_rows = sqlx::query(
-            "SELECT tracker_id, client_secret FROM tracker_app_config",
-        )
-        .fetch_all(&self.db)
-        .await?;
+        let secret_rows = sqlx::query("SELECT tracker_id, client_secret FROM tracker_app_config")
+            .fetch_all(&self.db)
+            .await?;
 
         let mut secrets_migrated = 0u32;
         for row in &secret_rows {
             let tracker_id: i64 = row.try_get("tracker_id")?;
             let secret: Option<String> = row.try_get("client_secret").ok().flatten();
             if let Some(s) = secret
-                && !s.is_empty() && !s.starts_with(PREFIX) {
-                    let encrypted = cipher.encrypt(&s);
-                    sqlx::query(
-                        "UPDATE tracker_app_config SET client_secret=? WHERE tracker_id=?",
-                    )
+                && !s.is_empty()
+                && !s.starts_with(PREFIX)
+            {
+                let encrypted = cipher.encrypt(&s);
+                sqlx::query("UPDATE tracker_app_config SET client_secret=? WHERE tracker_id=?")
                     .bind(&encrypted)
                     .bind(tracker_id)
                     .execute(&self.db)
                     .await?;
-                    secrets_migrated += 1;
-                }
+                secrets_migrated += 1;
+            }
         }
 
         // 3. user_tracker_credentials
@@ -130,15 +129,29 @@ impl AppService {
             let at: Option<String> = row.try_get("access_token").ok().flatten();
             let rt: Option<String> = row.try_get("refresh_token").ok().flatten();
 
-            let at_needs = at.as_deref().map(|t| !t.is_empty() && !t.starts_with(PREFIX)).unwrap_or(false);
-            let rt_needs = rt.as_deref().map(|t| !t.is_empty() && !t.starts_with(PREFIX)).unwrap_or(false);
+            let at_needs = at
+                .as_deref()
+                .map(|t| !t.is_empty() && !t.starts_with(PREFIX))
+                .unwrap_or(false);
+            let rt_needs = rt
+                .as_deref()
+                .map(|t| !t.is_empty() && !t.starts_with(PREFIX))
+                .unwrap_or(false);
 
             if at_needs || rt_needs {
                 let new_at = at.as_deref().map(|t| {
-                    if t.starts_with(PREFIX) { t.to_string() } else { cipher.encrypt(t) }
+                    if t.starts_with(PREFIX) {
+                        t.to_string()
+                    } else {
+                        cipher.encrypt(t)
+                    }
                 });
                 let new_rt = rt.as_deref().map(|t| {
-                    if t.starts_with(PREFIX) { t.to_string() } else { cipher.encrypt(t) }
+                    if t.starts_with(PREFIX) {
+                        t.to_string()
+                    } else {
+                        cipher.encrypt(t)
+                    }
                 });
                 sqlx::query(
                     "UPDATE user_tracker_credentials SET access_token=?, refresh_token=? WHERE user_id=? AND tracker_id=?",

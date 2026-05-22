@@ -1,7 +1,7 @@
-use kani_shared::ast::Expr;
 use crate::yaml::schema::{
     FilterEntry, FilterMappingEntry, PaginationCfg, PreferenceEntry, ResponseType,
 };
+use kani_shared::ast::Expr;
 
 /// A fully-validated extension with all DSL strings compiled into `Expr` trees.
 pub struct ValidatedExtension {
@@ -24,7 +24,10 @@ pub struct ValidatedExtension {
 }
 
 pub enum ValidatedPopular {
-    Delegated { delegate_to: String, empty_without_filters: bool },
+    Delegated {
+        delegate_to: String,
+        empty_without_filters: bool,
+    },
     Full(Box<ValidatedEndpoint>),
 }
 

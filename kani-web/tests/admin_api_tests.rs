@@ -3,7 +3,10 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, authed_post, body_array, body_json, build_test_app, create_admin, create_regular_user, get_req, login, post_json, test_state};
+use common::{
+    authed_get, authed_post, body_array, body_json, build_test_app, create_admin,
+    create_regular_user, get_req, login, post_json, test_state,
+};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -20,7 +23,10 @@ async fn admin_list_users_returns_200_for_admin() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let users = body_array(res).await;
-    assert!(!users.is_empty(), "at least the admin user should be listed");
+    assert!(
+        !users.is_empty(),
+        "at least the admin user should be listed"
+    );
 }
 
 #[tokio::test]
@@ -45,10 +51,7 @@ async fn admin_list_users_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    let res = app
-        .oneshot(get_req("/rest/admin/users"))
-        .await
-        .unwrap();
+    let res = app.oneshot(get_req("/rest/admin/users")).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
@@ -155,10 +158,7 @@ async fn admin_audit_log_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    let res = app
-        .oneshot(get_req("/rest/admin/audit-log"))
-        .await
-        .unwrap();
+    let res = app.oneshot(get_req("/rest/admin/audit-log")).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

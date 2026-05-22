@@ -33,18 +33,25 @@ impl AppService {
                     continue;
                 };
 
-                let token =
-                    match get_access_token(&self.db, tracker_id, user_id, tracker, self.encryption.as_deref()).await {
-                        Ok(t) => t,
-                        Err(e) => {
-                            tracing::warn!(
-                                "Skipping sync for tracker {} ({}): {e}",
-                                tracker_id,
-                                tracker.name()
-                            );
-                            continue;
-                        }
-                    };
+                let token = match get_access_token(
+                    &self.db,
+                    tracker_id,
+                    user_id,
+                    tracker,
+                    self.encryption.as_deref(),
+                )
+                .await
+                {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::warn!(
+                            "Skipping sync for tracker {} ({}): {e}",
+                            tracker_id,
+                            tracker.name()
+                        );
+                        continue;
+                    }
+                };
 
                 let remote = match tracker.get_status(&token, &tracker_manga_id).await {
                     Ok(s) => s,
@@ -70,22 +77,26 @@ impl AppService {
             if let Some(s) = status {
                 let registry = self.tracker_registry.read().await;
                 if let Some(tracker) = registry.get(tracker_id)
-                && let Err(e) = tracker
-                    .update_status(&access_token, &tracker_manga_id, s, score, chapters_read)
-                    .await
+                    && let Err(e) = tracker
+                        .update_status(&access_token, &tracker_manga_id, s, score, chapters_read)
+                        .await
                 {
                     tracing::warn!("Failed to push to {}: {e}", tracker.name());
                 }
             }
 
             // Pull forward remote state if local is behind.
-            if remote.status.is_some() && local.status.is_none()
-            && let Some(s) = remote.status {
+            if remote.status.is_some()
+                && local.status.is_none()
+                && let Some(s) = remote.status
+            {
                 self.set_manga_status(user_id, manga_id, s).await?;
             }
 
-            if remote.score.is_some() && local.score.is_none()
-            && let Some(s) = remote.score {
+            if remote.score.is_some()
+                && local.score.is_none()
+                && let Some(s) = remote.score
+            {
                 self.set_manga_score(user_id, manga_id, s).await?;
             }
 

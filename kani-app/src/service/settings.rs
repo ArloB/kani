@@ -107,8 +107,7 @@ impl AppService {
                 )
                 .execute(&self.db)
                 .await?;
-                self.settings.write().await.default_tracking_enabled =
-                    s.default_tracking_enabled;
+                self.settings.write().await.default_tracking_enabled = s.default_tracking_enabled;
                 self.audit(Some(user_id), "settings.update.tracking", None, None)
                     .await;
             }
@@ -152,8 +151,12 @@ impl AppService {
             }
             SettingsUpdate::Email(s) => {
                 // If the incoming config contains placeholder values, restore from DB.
-                let config_plain =
-                    restore_masked_email_config(&s.email_provider_config, &self.db, self.encryption.as_deref()).await?;
+                let config_plain = restore_masked_email_config(
+                    &s.email_provider_config,
+                    &self.db,
+                    self.encryption.as_deref(),
+                )
+                .await?;
                 // Encrypt before writing to DB; keep plaintext in memory.
                 let config_to_db = crate::service::encryption::maybe_encrypt(
                     self.encryption.as_deref(),
@@ -208,31 +211,21 @@ impl AppService {
     }
 
     pub async fn toggle_auto_scan_manga(&self, manga_id: i64, enabled: bool) -> Result<()> {
-        sqlx::query!(
-            "UPDATE manga SET auto_scan=? WHERE id=?",
-            enabled,
-            manga_id
-        )
-        .execute(&self.db)
-        .await?;
+        sqlx::query!("UPDATE manga SET auto_scan=? WHERE id=?", enabled, manga_id)
+            .execute(&self.db)
+            .await?;
         Ok(())
     }
 
     /// Runs WAL checkpoint + VACUUM and returns (before_bytes, after_bytes).
     pub async fn run_maintenance(&self) -> Result<(u64, u64)> {
         let db_path = std::path::Path::new("kani.db");
-        let before = std::fs::metadata(db_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let before = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
         sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
             .execute(&self.db)
             .await?;
-        sqlx::query("VACUUM")
-            .execute(&self.db)
-            .await?;
-        let after = std::fs::metadata(db_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        sqlx::query("VACUUM").execute(&self.db).await?;
+        let after = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
         Ok((before, after))
     }
 
@@ -250,18 +243,17 @@ impl AppService {
     }
 
     pub async fn update_manga_notes(&self, manga_id: i64, notes: Option<String>) -> Result<()> {
-        sqlx::query!(
-            "UPDATE manga SET notes = ? WHERE id = ?",
-            notes,
-            manga_id
-        )
-        .execute(&self.db)
-        .await?;
+        sqlx::query!("UPDATE manga SET notes = ? WHERE id = ?", notes, manga_id)
+            .execute(&self.db)
+            .await?;
         Ok(())
     }
 
     pub async fn send_test_email_to(&self, to: &str) -> std::result::Result<(), String> {
-        let mailer = self.mailer().await.ok_or_else(|| "Email is not configured or disabled.".to_string())?;
+        let mailer = self
+            .mailer()
+            .await
+            .ok_or_else(|| "Email is not configured or disabled.".to_string())?;
         let (subject, html) = crate::service::email_templates::test_email();
         mailer.send(to, &subject, &html).await
     }
@@ -277,11 +269,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn toggle_download_all_preferred(
-        &self,
-        manga_id: i64,
-        enabled: bool,
-    ) -> Result<()> {
+    pub async fn toggle_download_all_preferred(&self, manga_id: i64, enabled: bool) -> Result<()> {
         sqlx::query!(
             "UPDATE manga SET download_all_preferred_only=? WHERE id=?",
             enabled,
@@ -312,9 +300,10 @@ pub(crate) fn mask_email_config(config_json: &str) -> String {
     if let Some(obj) = v.as_object_mut() {
         for &key in MASKED_KEYS {
             if let Some(val) = obj.get_mut(key)
-                && val.as_str().is_some_and(|s| !s.is_empty()) {
-                    *val = serde_json::Value::String(PLACEHOLDER.to_string());
-                }
+                && val.as_str().is_some_and(|s| !s.is_empty())
+            {
+                *val = serde_json::Value::String(PLACEHOLDER.to_string());
+            }
         }
     }
     serde_json::to_string(&v).unwrap_or_else(|_| config_json.to_string())
@@ -332,29 +321,27 @@ async fn restore_masked_email_config(
     };
 
     let has_placeholder = incoming_val.as_object().is_some_and(|obj| {
-        MASKED_KEYS.iter().any(|&k| {
-            obj.get(k).and_then(serde_json::Value::as_str) == Some(PLACEHOLDER)
-        })
+        MASKED_KEYS
+            .iter()
+            .any(|&k| obj.get(k).and_then(serde_json::Value::as_str) == Some(PLACEHOLDER))
     });
 
     if !has_placeholder {
         return Ok(incoming.to_string());
     }
 
-    let stored_json: Option<String> = sqlx::query_scalar!(
-        "SELECT email_provider_config FROM settings WHERE id='singleton'"
-    )
-    .fetch_optional(db)
-    .await?;
+    let stored_json: Option<String> =
+        sqlx::query_scalar!("SELECT email_provider_config FROM settings WHERE id='singleton'")
+            .fetch_optional(db)
+            .await?;
 
     // Decrypt the stored config before doing placeholder substitution.
     let stored_plain = match stored_json.as_deref() {
         None | Some("") => String::new(),
-        Some(raw) => crate::service::encryption::maybe_decrypt(cipher, raw)
-            .unwrap_or_else(|e| {
-                tracing::warn!("Cannot decrypt stored email_provider_config for restore: {e}");
-                raw.to_string()
-            }),
+        Some(raw) => crate::service::encryption::maybe_decrypt(cipher, raw).unwrap_or_else(|e| {
+            tracing::warn!("Cannot decrypt stored email_provider_config for restore: {e}");
+            raw.to_string()
+        }),
     };
 
     let stored_val: serde_json::Value = if stored_plain.is_empty() {
@@ -367,10 +354,8 @@ async fn restore_masked_email_config(
         (incoming_val.as_object_mut(), stored_val.as_object())
     {
         for &key in MASKED_KEYS {
-            let is_placeholder = incoming_obj
-                .get(key)
-                .and_then(serde_json::Value::as_str)
-                == Some(PLACEHOLDER);
+            let is_placeholder =
+                incoming_obj.get(key).and_then(serde_json::Value::as_str) == Some(PLACEHOLDER);
             if is_placeholder {
                 let real = stored_obj
                     .get(key)

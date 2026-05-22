@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use crate::{ActiveFilter, FilterState};
 use crate::host_abi::HttpRequest;
+use crate::{ActiveFilter, FilterState};
+use std::collections::HashMap;
 
 /// Controls how [`FilterState::Multiselect`] values are serialised as query parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,10 +62,12 @@ impl ApplyFilters for HttpRequest {
         fmt: ArrayFormat,
     ) -> Self {
         for f in filters {
-            let (group, action) = f.filter_name
+            let (group, action) = f
+                .filter_name
                 .split_once(':')
                 .unwrap_or((&f.filter_name, ""));
-            let param = mapping.iter()
+            let param = mapping
+                .iter()
                 .find(|(g, _)| *g == group)
                 .map_or(group, |(_, p)| p);
 
@@ -127,7 +129,8 @@ impl<'a> FilterGroups<'a> {
     pub fn from(filters: &'a [ActiveFilter]) -> Self {
         let mut groups: HashMap<&'a str, Vec<&'a ActiveFilter>> = HashMap::new();
         for f in filters {
-            let group = f.filter_name
+            let group = f
+                .filter_name
                 .split_once(':')
                 .map_or(f.filter_name.as_str(), |(g, _)| g);
             groups.entry(group).or_default().push(f);
@@ -164,7 +167,11 @@ impl<'a> FilterGroups<'a> {
     pub fn selection_value(&self, group: &str) -> Option<&'a str> {
         self.get(group).iter().find_map(|f| {
             if let FilterState::Selection { value, .. } = &f.state {
-                if !value.is_empty() { Some(value.as_str()) } else { None }
+                if !value.is_empty() {
+                    Some(value.as_str())
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -190,7 +197,11 @@ impl<'a> FilterGroups<'a> {
     pub fn text_value(&self, group: &str) -> Option<&'a str> {
         self.get(group).iter().find_map(|f| {
             if let FilterState::TextInput(s) = &f.state {
-                if !s.is_empty() { Some(s.as_str()) } else { None }
+                if !s.is_empty() {
+                    Some(s.as_str())
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -203,7 +214,10 @@ mod tests {
     use super::*;
 
     fn active(name: &str, state: FilterState) -> ActiveFilter {
-        ActiveFilter { filter_name: name.to_string(), state }
+        ActiveFilter {
+            filter_name: name.to_string(),
+            state,
+        }
     }
 
     fn queries(req: HttpRequest) -> Vec<(String, String)> {
@@ -214,22 +228,45 @@ mod tests {
 
     #[test]
     fn multiselect_repeated() {
-        let filters = vec![active("genre", FilterState::Multiselect(vec!["action".into(), "romance".into()]))];
+        let filters = vec![active(
+            "genre",
+            FilterState::Multiselect(vec!["action".into(), "romance".into()]),
+        )];
         let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
-        assert_eq!(q, vec![("genre".into(), "action".into()), ("genre".into(), "romance".into())]);
+        assert_eq!(
+            q,
+            vec![
+                ("genre".into(), "action".into()),
+                ("genre".into(), "romance".into())
+            ]
+        );
     }
 
     #[test]
     fn multiselect_bracket() {
-        let filters = vec![active("tag", FilterState::Multiselect(vec!["a".into(), "b".into()]))];
-        let q = queries(HttpRequest::get("http://x.com").apply_filters_fmt(&filters, ArrayFormat::Bracket));
-        assert_eq!(q, vec![("tag[]".into(), "a".into()), ("tag[]".into(), "b".into())]);
+        let filters = vec![active(
+            "tag",
+            FilterState::Multiselect(vec!["a".into(), "b".into()]),
+        )];
+        let q = queries(
+            HttpRequest::get("http://x.com").apply_filters_fmt(&filters, ArrayFormat::Bracket),
+        );
+        assert_eq!(
+            q,
+            vec![("tag[]".into(), "a".into()), ("tag[]".into(), "b".into())]
+        );
     }
 
     #[test]
     fn multiselect_comma_separated() {
-        let filters = vec![active("tag", FilterState::Multiselect(vec!["a".into(), "b".into(), "c".into()]))];
-        let q = queries(HttpRequest::get("http://x.com").apply_filters_fmt(&filters, ArrayFormat::CommaSeparated));
+        let filters = vec![active(
+            "tag",
+            FilterState::Multiselect(vec!["a".into(), "b".into(), "c".into()]),
+        )];
+        let q = queries(
+            HttpRequest::get("http://x.com")
+                .apply_filters_fmt(&filters, ArrayFormat::CommaSeparated),
+        );
         assert_eq!(q, vec![("tag".into(), "a,b,c".into())]);
     }
 
@@ -277,29 +314,54 @@ mod tests {
 
     #[test]
     fn selection_nonempty() {
-        let filters = vec![active("type", FilterState::Selection { name: "Type".into(), value: "manga".into() })];
+        let filters = vec![active(
+            "type",
+            FilterState::Selection {
+                name: "Type".into(),
+                value: "manga".into(),
+            },
+        )];
         let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
         assert_eq!(q, vec![("type".into(), "manga".into())]);
     }
 
     #[test]
     fn selection_empty_skipped() {
-        let filters = vec![active("type", FilterState::Selection { name: "Type".into(), value: String::new() })];
+        let filters = vec![active(
+            "type",
+            FilterState::Selection {
+                name: "Type".into(),
+                value: String::new(),
+            },
+        )];
         let q = queries(HttpRequest::get("http://x.com").apply_filters(&filters));
         assert!(q.is_empty());
     }
 
     #[test]
     fn mapped_translates_name() {
-        let filters = vec![active("genre", FilterState::Multiselect(vec!["action".into()]))];
-        let q = queries(HttpRequest::get("http://x.com").apply_filters_mapped(&filters, &[("genre", "type")]));
+        let filters = vec![active(
+            "genre",
+            FilterState::Multiselect(vec!["action".into()]),
+        )];
+        let q = queries(
+            HttpRequest::get("http://x.com").apply_filters_mapped(&filters, &[("genre", "type")]),
+        );
         assert_eq!(q, vec![("type".into(), "action".into())]);
     }
 
     #[test]
     fn mapped_fallthrough_unmapped_group() {
-        let filters = vec![active("sort", FilterState::Selection { name: "Sort".into(), value: "latest".into() })];
-        let q = queries(HttpRequest::get("http://x.com").apply_filters_mapped(&filters, &[("genre", "type")]));
+        let filters = vec![active(
+            "sort",
+            FilterState::Selection {
+                name: "Sort".into(),
+                value: "latest".into(),
+            },
+        )];
+        let q = queries(
+            HttpRequest::get("http://x.com").apply_filters_mapped(&filters, &[("genre", "type")]),
+        );
         assert_eq!(q, vec![("sort".into(), "latest".into())]);
     }
 
@@ -307,7 +369,10 @@ mod tests {
 
     #[test]
     fn groups_has_any() {
-        let filters = vec![active("genre", FilterState::Multiselect(vec!["action".into()]))];
+        let filters = vec![active(
+            "genre",
+            FilterState::Multiselect(vec!["action".into()]),
+        )];
         let fg = FilterGroups::from(&filters);
         assert!(fg.has_any("genre"));
         assert!(!fg.has_any("type"));
@@ -315,7 +380,10 @@ mod tests {
 
     #[test]
     fn groups_multiselect_values() {
-        let filters = vec![active("genre", FilterState::Multiselect(vec!["a".into(), "b".into()]))];
+        let filters = vec![active(
+            "genre",
+            FilterState::Multiselect(vec!["a".into(), "b".into()]),
+        )];
         let fg = FilterGroups::from(&filters);
         assert_eq!(fg.multiselect_values("genre"), vec!["a", "b"]);
         assert!(fg.multiselect_values("other").is_empty());
@@ -323,7 +391,13 @@ mod tests {
 
     #[test]
     fn groups_selection_value() {
-        let filters = vec![active("sort", FilterState::Selection { name: "Sort".into(), value: "latest".into() })];
+        let filters = vec![active(
+            "sort",
+            FilterState::Selection {
+                name: "Sort".into(),
+                value: "latest".into(),
+            },
+        )];
         let fg = FilterGroups::from(&filters);
         assert_eq!(fg.selection_value("sort"), Some("latest"));
         assert_eq!(fg.selection_value("other"), None);

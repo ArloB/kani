@@ -3,7 +3,9 @@
 
 mod common;
 use axum::http::StatusCode;
-use common::{authed_get, authed_patch, body_json, build_test_app, create_admin, get_req, login, test_state};
+use common::{
+    authed_get, authed_patch, body_json, build_test_app, create_admin, get_req, login, test_state,
+};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -21,7 +23,10 @@ async fn get_settings_returns_200_for_authed_user() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     // Settings object always contains auto_scan.
-    assert!(body.get("auto_scan").is_some(), "settings must include auto_scan");
+    assert!(
+        body.get("auto_scan").is_some(),
+        "settings must include auto_scan"
+    );
 }
 
 #[tokio::test]
@@ -29,10 +34,7 @@ async fn get_settings_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    let res = app
-        .oneshot(get_req("/rest/settings"))
-        .await
-        .unwrap();
+    let res = app.oneshot(get_req("/rest/settings")).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }

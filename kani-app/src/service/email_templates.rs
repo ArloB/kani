@@ -76,7 +76,10 @@ pub fn admin_password_reset_email(username: &str) -> (String, String) {
 <p>An administrator has initiated a password reset for your account. You should receive a separate email with a reset link shortly.</p>
 <p>If you did not request this, please contact your administrator.</p>"#
     );
-    (subject, base_layout("Admin-initiated password reset", &body))
+    (
+        subject,
+        base_layout("Admin-initiated password reset", &body),
+    )
 }
 
 pub fn welcome_email(username: &str) -> (String, String) {

@@ -17,7 +17,12 @@ pub enum DeviceProfile {
     KoboClara,
     KoboLibra,
     KoboSage,
-    Custom { width: u32, height: u32, grayscale: bool, gamma: f32 },
+    Custom {
+        width: u32,
+        height: u32,
+        grayscale: bool,
+        gamma: f32,
+    },
 }
 
 impl DeviceProfile {
@@ -25,10 +30,10 @@ impl DeviceProfile {
         match self {
             Self::Standard => None,
             Self::KindlePaperwhite => Some((1236, 1648)),
-            Self::KindleScribe     => Some((1860, 2480)),
-            Self::KoboClara        => Some((1072, 1448)),
-            Self::KoboLibra        => Some((1264, 1680)),
-            Self::KoboSage         => Some((1440, 1920)),
+            Self::KindleScribe => Some((1860, 2480)),
+            Self::KoboClara => Some((1072, 1448)),
+            Self::KoboLibra => Some((1264, 1680)),
+            Self::KoboSage => Some((1440, 1920)),
             Self::Custom { width, height, .. } => Some((*width, *height)),
         }
     }
@@ -55,34 +60,46 @@ impl std::str::FromStr for DeviceProfile {
     fn from_str(s: &str) -> std::result::Result<Self, ()> {
         Ok(match s {
             "kindle-pw" | "kindle-paperwhite" => Self::KindlePaperwhite,
-            "kindle-scribe"                   => Self::KindleScribe,
-            "kobo-clara"                      => Self::KoboClara,
-            "kobo-libra"                      => Self::KoboLibra,
-            "kobo-sage"                       => Self::KoboSage,
-            _                                 => Self::Standard,
+            "kindle-scribe" => Self::KindleScribe,
+            "kobo-clara" => Self::KoboClara,
+            "kobo-libra" => Self::KoboLibra,
+            "kobo-sage" => Self::KoboSage,
+            _ => Self::Standard,
         })
     }
 }
 
 // ─── KCC options ─────────────────────────────────────────────────────────────
 
-pub enum KccFormat { Epub, Mobi, Cbz }
+pub enum KccFormat {
+    Epub,
+    Mobi,
+    Cbz,
+}
 
 impl KccFormat {
     fn as_str(&self) -> &'static str {
-        match self { Self::Epub => "EPUB", Self::Mobi => "MOBI", Self::Cbz => "CBZ" }
+        match self {
+            Self::Epub => "EPUB",
+            Self::Mobi => "MOBI",
+            Self::Cbz => "CBZ",
+        }
     }
 
     pub fn mime(&self) -> &'static str {
         match self {
             Self::Epub => "application/epub+zip",
             Self::Mobi => "application/x-mobipocket-ebook",
-            Self::Cbz  => "application/x-cbz",
+            Self::Cbz => "application/x-cbz",
         }
     }
 
     pub fn ext(&self) -> &'static str {
-        match self { Self::Epub => "epub", Self::Mobi => "mobi", Self::Cbz => "cbz" }
+        match self {
+            Self::Epub => "epub",
+            Self::Mobi => "mobi",
+            Self::Cbz => "cbz",
+        }
     }
 }
 
@@ -91,15 +108,15 @@ impl std::str::FromStr for KccFormat {
     fn from_str(s: &str) -> std::result::Result<Self, ()> {
         Ok(match s.to_uppercase().as_str() {
             "MOBI" => Self::Mobi,
-            "CBZ"  => Self::Cbz,
-            _      => Self::Epub,
+            "CBZ" => Self::Cbz,
+            _ => Self::Epub,
         })
     }
 }
 
 pub struct KccOptions {
-    pub format:     KccFormat,
-    pub profile:    String,
+    pub format: KccFormat,
+    pub profile: String,
     pub manga_mode: bool,
 }
 
@@ -113,15 +130,11 @@ impl AppService {
         chapter_id: i64,
         profile: DeviceProfile,
     ) -> Result<(Vec<u8>, String)> {
-        let (cbz_path, chapter_title, manga_id, _) =
-            self.chapter_cbz_path(chapter_id).await?;
+        let (cbz_path, chapter_title, manga_id, _) = self.chapter_cbz_path(chapter_id).await?;
 
-        let manga_name = sqlx::query_scalar!(
-            "SELECT name FROM manga WHERE id = ?",
-            manga_id
-        )
-        .fetch_one(&self.db)
-        .await?;
+        let manga_name = sqlx::query_scalar!("SELECT name FROM manga WHERE id = ?", manga_id)
+            .fetch_one(&self.db)
+            .await?;
 
         let filename = format!("{manga_name} - {chapter_title}.epub");
         let bytes = tokio::task::spawn_blocking(move || {
@@ -139,15 +152,11 @@ impl AppService {
         chapter_id: i64,
         profile: DeviceProfile,
     ) -> Result<(Vec<u8>, String)> {
-        let (cbz_path, chapter_title, manga_id, _) =
-            self.chapter_cbz_path(chapter_id).await?;
+        let (cbz_path, chapter_title, manga_id, _) = self.chapter_cbz_path(chapter_id).await?;
 
-        let manga_name = sqlx::query_scalar!(
-            "SELECT name FROM manga WHERE id = ?",
-            manga_id
-        )
-        .fetch_one(&self.db)
-        .await?;
+        let manga_name = sqlx::query_scalar!("SELECT name FROM manga WHERE id = ?", manga_id)
+            .fetch_one(&self.db)
+            .await?;
 
         let filename = format!("{manga_name} - {chapter_title}.kepub.epub");
         let bytes = tokio::task::spawn_blocking(move || {
@@ -173,33 +182,31 @@ impl AppService {
             ));
         }
 
-        let (cbz_path, chapter_title, manga_id, _) =
-            self.chapter_cbz_path(chapter_id).await?;
+        let (cbz_path, chapter_title, manga_id, _) = self.chapter_cbz_path(chapter_id).await?;
 
-        let manga_name = sqlx::query_scalar!(
-            "SELECT name FROM manga WHERE id = ?",
-            manga_id
-        )
-        .fetch_one(&self.db)
-        .await?;
+        let manga_name = sqlx::query_scalar!("SELECT name FROM manga WHERE id = ?", manga_id)
+            .fetch_one(&self.db)
+            .await?;
 
         let tmp = tempfile::TempDir::new()
             .map_err(|e| ServiceError::Internal(format!("TempDir: {e}")))?;
 
         let mut cmd = tokio::process::Command::new("kcc-c2e");
-        cmd.arg("-p").arg(&opts.profile)
-           .arg("-f").arg(opts.format.as_str())
-           .arg("-o").arg(tmp.path());
-        if opts.manga_mode { cmd.arg("-m"); }
+        cmd.arg("-p")
+            .arg(&opts.profile)
+            .arg("-f")
+            .arg(opts.format.as_str())
+            .arg("-o")
+            .arg(tmp.path());
+        if opts.manga_mode {
+            cmd.arg("-m");
+        }
         cmd.arg(&cbz_path);
 
-        let out = tokio::time::timeout(
-            std::time::Duration::from_secs(300),
-            cmd.output(),
-        )
-        .await
-        .map_err(|_| ServiceError::Internal("KCC timed out after 5 minutes".into()))?
-        .map_err(|e| ServiceError::Internal(format!("KCC process error: {e}")))?;
+        let out = tokio::time::timeout(std::time::Duration::from_secs(300), cmd.output())
+            .await
+            .map_err(|_| ServiceError::Internal("KCC timed out after 5 minutes".into()))?
+            .map_err(|e| ServiceError::Internal(format!("KCC process error: {e}")))?;
 
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -212,17 +219,15 @@ impl AppService {
             .map_err(ServiceError::Io)?
             .filter_map(|e| e.ok())
             .find(|e| {
-                e.path().extension()
+                e.path()
+                    .extension()
                     .and_then(|x| x.to_str())
                     .map(|x| x.eq_ignore_ascii_case(ext))
                     .unwrap_or(false)
             })
-            .ok_or_else(|| ServiceError::Internal(
-                format!("KCC produced no .{ext} output file")
-            ))?;
+            .ok_or_else(|| ServiceError::Internal(format!("KCC produced no .{ext} output file")))?;
 
-        let bytes = std::fs::read(output_file.path())
-            .map_err(ServiceError::Io)?;
+        let bytes = std::fs::read(output_file.path()).map_err(ServiceError::Io)?;
         let filename = format!("{manga_name} - {chapter_title}.{ext}");
 
         Ok((bytes, filename, mime))
@@ -246,15 +251,19 @@ impl AppService {
 // ─── EPUB builder ────────────────────────────────────────────────────────────
 
 struct ComicInfo {
-    writer:       Option<String>,
-    summary:      Option<String>,
+    writer: Option<String>,
+    summary: Option<String>,
     language_iso: Option<String>,
 }
 
 fn parse_comic_info(xml_bytes: &[u8]) -> ComicInfo {
     use quick_xml::{Reader, events::Event};
 
-    let mut info = ComicInfo { writer: None, summary: None, language_iso: None };
+    let mut info = ComicInfo {
+        writer: None,
+        summary: None,
+        language_iso: None,
+    };
     let mut reader = Reader::from_reader(xml_bytes);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -268,10 +277,10 @@ fn parse_comic_info(xml_bytes: &[u8]) -> ComicInfo {
             Ok(Event::Text(e)) => {
                 let text = e.xml_content().map(|c| c.into_owned()).unwrap_or_default();
                 match current_tag.as_str() {
-                    "Writer"      => info.writer       = Some(text),
-                    "Summary"     => info.summary      = Some(text),
+                    "Writer" => info.writer = Some(text),
+                    "Summary" => info.summary = Some(text),
                     "LanguageISO" => info.language_iso = Some(text),
-                    _             => {}
+                    _ => {}
                 }
             }
             Ok(Event::Eof) | Err(_) => break,
@@ -289,8 +298,8 @@ fn build_epub_zip(
     profile: &DeviceProfile,
 ) -> Result<Vec<u8>> {
     let file = std::fs::File::open(cbz_path).map_err(ServiceError::Io)?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| ServiceError::Internal(format!("Open CBZ: {e}")))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| ServiceError::Internal(format!("Open CBZ: {e}")))?;
 
     let mut comic_info_bytes: Option<Vec<u8>> = None;
     let mut images: Vec<(String, Vec<u8>)> = Vec::new();
@@ -326,7 +335,11 @@ fn build_epub_zip(
     let comic_info = comic_info_bytes
         .as_deref()
         .map(parse_comic_info)
-        .unwrap_or(ComicInfo { writer: None, summary: None, language_iso: None });
+        .unwrap_or(ComicInfo {
+            writer: None,
+            summary: None,
+            language_iso: None,
+        });
 
     let author = comic_info.writer.as_deref().unwrap_or(manga_name);
 
@@ -449,12 +462,20 @@ fn apply_gamma(img: DynamicImage, gamma: f32) -> DynamicImage {
     let rgba = img.into_rgba8();
     let (w, h) = rgba.dimensions();
     let inv = 1.0 / gamma;
-    let lut: [u8; 256] = std::array::from_fn(|i| {
-        ((i as f32 / 255.0).powf(inv) * 255.0).round() as u8
-    });
+    let lut: [u8; 256] =
+        std::array::from_fn(|i| ((i as f32 / 255.0).powf(inv) * 255.0).round() as u8);
     let mut out: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(w, h);
     for (x, y, px) in rgba.enumerate_pixels() {
-        out.put_pixel(x, y, Rgba([lut[px[0] as usize], lut[px[1] as usize], lut[px[2] as usize], px[3]]));
+        out.put_pixel(
+            x,
+            y,
+            Rgba([
+                lut[px[0] as usize],
+                lut[px[1] as usize],
+                lut[px[2] as usize],
+                px[3],
+            ]),
+        );
     }
     DynamicImage::ImageRgba8(out)
 }
@@ -498,9 +519,7 @@ fn kepub_transform(epub_bytes: Vec<u8>, profile: &DeviceProfile) -> Result<Vec<u
             writer
                 .start_file(&name, opts)
                 .map_err(|e| ServiceError::Internal(format!("KEPUB write: {e}")))?;
-            writer
-                .write_all(&patched)
-                .map_err(ServiceError::Io)?;
+            writer.write_all(&patched).map_err(ServiceError::Io)?;
         }
         writer
             .finish()
@@ -570,7 +589,10 @@ mod tests {
 
     #[test]
     fn kindle_paperwhite_dimensions() {
-        assert_eq!(DeviceProfile::KindlePaperwhite.dimensions(), Some((1236, 1648)));
+        assert_eq!(
+            DeviceProfile::KindlePaperwhite.dimensions(),
+            Some((1236, 1648))
+        );
     }
 
     #[test]
@@ -590,7 +612,12 @@ mod tests {
 
     #[test]
     fn custom_profile_values() {
-        let p = DeviceProfile::Custom { width: 800, height: 600, grayscale: false, gamma: 2.2 };
+        let p = DeviceProfile::Custom {
+            width: 800,
+            height: 600,
+            grayscale: false,
+            gamma: 2.2,
+        };
         assert_eq!(p.dimensions(), Some((800, 600)));
         assert!(!p.grayscale());
         assert!((p.gamma().unwrap() - 2.2).abs() < f32::EPSILON);
@@ -744,7 +771,8 @@ mod tests {
 
     #[test]
     fn parse_comic_info_extracts_summary() {
-        let xml = b"<?xml version=\"1.0\"?><ComicInfo><Summary>A great story.</Summary></ComicInfo>";
+        let xml =
+            b"<?xml version=\"1.0\"?><ComicInfo><Summary>A great story.</Summary></ComicInfo>";
         let info = parse_comic_info(xml);
         assert_eq!(info.summary.as_deref(), Some("A great story."));
     }

@@ -340,22 +340,14 @@ impl AuthBackend {
         email: Option<&str>,
     ) -> Result<(), AppError> {
         if let Some(un) = username {
-            sqlx::query!(
-                "UPDATE users SET username = ? WHERE id = ?",
-                un,
-                user_id
-            )
-            .execute(&self.db)
-            .await?;
+            sqlx::query!("UPDATE users SET username = ? WHERE id = ?", un, user_id)
+                .execute(&self.db)
+                .await?;
         }
         if let Some(em) = email {
-            sqlx::query!(
-                "UPDATE users SET email = ? WHERE id = ?",
-                em,
-                user_id
-            )
-            .execute(&self.db)
-            .await?;
+            sqlx::query!("UPDATE users SET email = ? WHERE id = ?", em, user_id)
+                .execute(&self.db)
+                .await?;
         }
         Ok(())
     }
@@ -374,8 +366,8 @@ impl AuthBackend {
         user_id: i64,
         new_password: &str,
     ) -> Result<(), AppError> {
-        let hash = crate::auth::hash_password(new_password)
-            .map_err(|e| AppError::Other(e.to_string()))?;
+        let hash =
+            crate::auth::hash_password(new_password).map_err(|e| AppError::Other(e.to_string()))?;
         let change_id = fresh_change_id();
         sqlx::query!(
             "UPDATE users SET password_hash = ?, change_id = ? WHERE id = ?",
@@ -475,12 +467,9 @@ impl AuthBackend {
             .await?;
         }
         // Replace permissions wholesale
-        sqlx::query!(
-            "DELETE FROM role_permissions WHERE role_slug = ?",
-            slug
-        )
-        .execute(&self.db)
-        .await?;
+        sqlx::query!("DELETE FROM role_permissions WHERE role_slug = ?", slug)
+            .execute(&self.db)
+            .await?;
         for perm in permissions {
             sqlx::query!(
                 "INSERT OR IGNORE INTO role_permissions (role_slug, permission) VALUES (?, ?)",

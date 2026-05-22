@@ -1,10 +1,12 @@
 #![allow(clippy::unwrap_used)]
 // YAML validation tests: accept valid YAML, reject invalid with expected errors.
 
-use std::path::Path;
 use kani_cli::yaml::{schema::YamlExtension, validate};
+use std::path::Path;
 
-fn validate_str(yaml: &str) -> Result<kani_cli::yaml::model::ValidatedExtension, Vec<kani_cli::error::CliError>> {
+fn validate_str(
+    yaml: &str,
+) -> Result<kani_cli::yaml::model::ValidatedExtension, Vec<kani_cli::error::CliError>> {
     let path = Path::new("test.yaml");
     let ext: YamlExtension = serde_yaml::from_str(yaml).expect("fixture must parse as YAML");
     validate::validate(&ext, yaml, path)
@@ -16,12 +18,17 @@ fn assert_valid(yaml: &str) {
 
 fn assert_invalid_containing(yaml: &str, needle: &str) {
     match validate_str(yaml) {
-        Ok(_) => panic!("expected validation error containing '{}' but validation passed", needle),
+        Ok(_) => panic!(
+            "expected validation error containing '{}' but validation passed",
+            needle
+        ),
         Err(errs) => {
             let messages: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
             assert!(
                 messages.iter().any(|m| m.contains(needle)),
-                "expected an error containing '{}', got: {:?}", needle, messages
+                "expected an error containing '{}', got: {:?}",
+                needle,
+                messages
             );
         }
     }
@@ -31,17 +38,20 @@ fn assert_invalid_containing(yaml: &str, needle: &str) {
 
 #[test]
 fn valid_minimal_extension() {
-    assert_valid(r#"
+    assert_valid(
+        r#"
 id: minimal
 name: Minimal
 version: "0.1.0"
 base_url: "https://example.com"
-"#);
+"#,
+    );
 }
 
 #[test]
 fn valid_popular_endpoint() {
-    assert_valid(r#"
+    assert_valid(
+        r#"
 id: pop-test
 name: PopTest
 version: "0.1.0"
@@ -53,12 +63,14 @@ endpoints:
     fields:
       id: 'self.attr("href")'
       title: 'self.text()'
-"#);
+"#,
+    );
 }
 
 #[test]
 fn valid_delegated_popular() {
-    assert_valid(r#"
+    assert_valid(
+        r#"
 id: delegate-test
 name: DelegateTest
 version: "0.1.0"
@@ -75,12 +87,14 @@ endpoints:
     fields:
       id: 'self.attr("href")'
       title: 'self.text()'
-"#);
+"#,
+    );
 }
 
 #[test]
 fn valid_search_endpoint() {
-    assert_valid(r#"
+    assert_valid(
+        r#"
 id: search-test
 name: SearchTest
 version: "0.1.0"
@@ -94,12 +108,14 @@ endpoints:
     fields:
       id: 'self.attr("href")'
       title: 'self.text()'
-"#);
+"#,
+    );
 }
 
 #[test]
 fn valid_manga_details_all_required_fields() {
-    assert_valid(r#"
+    assert_valid(
+        r#"
 id: details-test
 name: DetailsTest
 version: "0.1.0"
@@ -112,12 +128,14 @@ endpoints:
       id: '"$manga_id$"'
       title: 'dom("h1").text()'
       status: 'dom(".status").text()'
-"#);
+"#,
+    );
 }
 
 #[test]
 fn valid_chapter_list() {
-    assert_valid(r#"
+    assert_valid(
+        r#"
 id: chapters-test
 name: ChaptersTest
 version: "0.1.0"
@@ -128,12 +146,14 @@ endpoints:
     container: ".chapter"
     fields:
       id: 'self.attr("data-id")'
-"#);
+"#,
+    );
 }
 
 #[test]
 fn valid_pages() {
-    assert_valid(r#"
+    assert_valid(
+        r#"
 id: pages-test
 name: PagesTest
 version: "0.1.0"
@@ -145,7 +165,8 @@ endpoints:
     fields:
       index: "index()"
       url: 'self.attr("src")'
-"#);
+"#,
+    );
 }
 
 #[test]
@@ -160,7 +181,8 @@ fn valid_full_example_fixture() {
 
 #[test]
 fn invalid_popular_missing_title() {
-    assert_invalid_containing(r#"
+    assert_invalid_containing(
+        r#"
 id: err-test
 name: ErrTest
 version: "0.1.0"
@@ -171,12 +193,15 @@ endpoints:
     container: ".item"
     fields:
       id: 'self.attr("href")'
-"#, "title");
+"#,
+        "title",
+    );
 }
 
 #[test]
 fn invalid_popular_missing_id() {
-    assert_invalid_containing(r#"
+    assert_invalid_containing(
+        r#"
 id: err-test
 name: ErrTest
 version: "0.1.0"
@@ -187,12 +212,15 @@ endpoints:
     container: ".item"
     fields:
       title: 'self.text()'
-"#, "id");
+"#,
+        "id",
+    );
 }
 
 #[test]
 fn invalid_manga_details_missing_status() {
-    assert_invalid_containing(r#"
+    assert_invalid_containing(
+        r#"
 id: err-test
 name: ErrTest
 version: "0.1.0"
@@ -204,12 +232,15 @@ endpoints:
     fields:
       id: '"$manga_id$"'
       title: 'dom("h1").text()'
-"#, "status");
+"#,
+        "status",
+    );
 }
 
 #[test]
 fn invalid_pages_missing_url() {
-    assert_invalid_containing(r#"
+    assert_invalid_containing(
+        r#"
 id: err-test
 name: ErrTest
 version: "0.1.0"
@@ -220,12 +251,15 @@ endpoints:
     container: "img"
     fields:
       index: "index()"
-"#, "url");
+"#,
+        "url",
+    );
 }
 
 #[test]
 fn invalid_pages_missing_index() {
-    assert_invalid_containing(r#"
+    assert_invalid_containing(
+        r#"
 id: err-test
 name: ErrTest
 version: "0.1.0"
@@ -236,14 +270,17 @@ endpoints:
     container: "img"
     fields:
       url: 'self.attr("src")'
-"#, "index");
+"#,
+        "index",
+    );
 }
 
 // ── Invalid: missing route ────────────────────────────────────────────────────
 
 #[test]
 fn invalid_endpoint_missing_route() {
-    assert_invalid_containing(r#"
+    assert_invalid_containing(
+        r#"
 id: err-test
 name: ErrTest
 version: "0.1.0"
@@ -254,14 +291,17 @@ endpoints:
     fields:
       id: 'self.attr("href")'
       title: 'self.text()'
-"#, "route");
+"#,
+        "route",
+    );
 }
 
 // ── Invalid: unknown route variable ──────────────────────────────────────────
 
 #[test]
 fn invalid_route_unknown_variable() {
-    assert_invalid_containing(r#"
+    assert_invalid_containing(
+        r#"
 id: err-test
 name: ErrTest
 version: "0.1.0"
@@ -273,14 +313,17 @@ endpoints:
     fields:
       id: 'self.attr("href")'
       title: 'self.text()'
-"#, "unknown_var");
+"#,
+        "unknown_var",
+    );
 }
 
 // ── Invalid: bad DSL expression ───────────────────────────────────────────────
 
 #[test]
 fn invalid_dsl_parse_error() {
-    assert_invalid_containing(r#"
+    assert_invalid_containing(
+        r#"
 id: err-test
 name: ErrTest
 version: "0.1.0"
@@ -292,14 +335,17 @@ endpoints:
     fields:
       id: '!!invalid dsl !!'
       title: 'self.text()'
-"#, "DSL parse failed");
+"#,
+        "DSL parse failed",
+    );
 }
 
 // ── Invalid: delegated popular with bad target ────────────────────────────────
 
 #[test]
 fn invalid_delegated_popular_bad_target() {
-    assert_invalid_containing(r#"
+    assert_invalid_containing(
+        r#"
 id: err-test
 name: ErrTest
 version: "0.1.0"
@@ -307,5 +353,7 @@ base_url: "https://example.com"
 endpoints:
   popular:
     delegate_to: popular
-"#, "delegate_to");
+"#,
+        "delegate_to",
+    );
 }

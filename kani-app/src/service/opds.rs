@@ -15,28 +15,40 @@ impl AppService {
         let updated = now_rfc3339();
         let mut w = Utf8Writer::new();
         w.decl();
-        w.open("feed", &[
-            ("xmlns",      "http://www.w3.org/2005/Atom"),
-            ("xmlns:opds", "http://opds-spec.org/2010/catalog"),
-        ]);
-        w.leaf("id",      &[], "urn:kani:root");
-        w.leaf("title",   &[], "Kani Manga Reader");
+        w.open(
+            "feed",
+            &[
+                ("xmlns", "http://www.w3.org/2005/Atom"),
+                ("xmlns:opds", "http://opds-spec.org/2010/catalog"),
+            ],
+        );
+        w.leaf("id", &[], "urn:kani:root");
+        w.leaf("title", &[], "Kani Manga Reader");
         w.leaf("updated", &[], &updated);
-        w.self_close("link", &[
-            ("rel",  "self"),
-            ("href", &format!("{base_url}/opds")),
-            ("type", ATOM_PROFILE),
-        ]);
-        w.self_close("link", &[
-            ("rel",  "start"),
-            ("href", &format!("{base_url}/opds")),
-            ("type", ATOM_PROFILE),
-        ]);
-        w.self_close("link", &[
-            ("rel",  "search"),
-            ("href", &format!("{base_url}/opds/search")),
-            ("type", "application/opensearchdescription+xml"),
-        ]);
+        w.self_close(
+            "link",
+            &[
+                ("rel", "self"),
+                ("href", &format!("{base_url}/opds")),
+                ("type", ATOM_PROFILE),
+            ],
+        );
+        w.self_close(
+            "link",
+            &[
+                ("rel", "start"),
+                ("href", &format!("{base_url}/opds")),
+                ("type", ATOM_PROFILE),
+            ],
+        );
+        w.self_close(
+            "link",
+            &[
+                ("rel", "search"),
+                ("href", &format!("{base_url}/opds/search")),
+                ("type", "application/opensearchdescription+xml"),
+            ],
+        );
         // Catalogue entry
         nav_entry(
             &mut w,
@@ -60,61 +72,103 @@ impl AppService {
     ) -> Result<String> {
         let (manga_list, has_next, _) = self
             .get_library_filtered(
-                0, page, page_size, search.clone(), None, None, None, None, None, None,
-                false, false, None, MangaSortOrder::default(),
+                0,
+                page,
+                page_size,
+                search.clone(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                false,
+                None,
+                MangaSortOrder::default(),
             )
             .await?;
 
         let updated = now_rfc3339();
         let mut w = Utf8Writer::new();
         w.decl();
-        w.open("feed", &[
-            ("xmlns",      "http://www.w3.org/2005/Atom"),
-            ("xmlns:opds", "http://opds-spec.org/2010/catalog"),
-        ]);
-        w.leaf("id",      &[], "urn:kani:catalogue");
-        w.leaf("title",   &[], "Kani Library");
+        w.open(
+            "feed",
+            &[
+                ("xmlns", "http://www.w3.org/2005/Atom"),
+                ("xmlns:opds", "http://opds-spec.org/2010/catalog"),
+            ],
+        );
+        w.leaf("id", &[], "urn:kani:catalogue");
+        w.leaf("title", &[], "Kani Library");
         w.leaf("updated", &[], &updated);
-        w.self_close("link", &[
-            ("rel",  "self"),
-            ("href", &catalogue_href(base_url, page, page_size, search.as_deref())),
-            ("type", ATOM_PROFILE),
-        ]);
-        w.self_close("link", &[
-            ("rel",  "start"),
-            ("href", &format!("{base_url}/opds")),
-            ("type", ATOM_PROFILE),
-        ]);
-        if page > 1 {
-            w.self_close("link", &[
-                ("rel",  "previous"),
-                ("href", &catalogue_href(base_url, page - 1, page_size, search.as_deref())),
+        w.self_close(
+            "link",
+            &[
+                ("rel", "self"),
+                (
+                    "href",
+                    &catalogue_href(base_url, page, page_size, search.as_deref()),
+                ),
                 ("type", ATOM_PROFILE),
-            ]);
+            ],
+        );
+        w.self_close(
+            "link",
+            &[
+                ("rel", "start"),
+                ("href", &format!("{base_url}/opds")),
+                ("type", ATOM_PROFILE),
+            ],
+        );
+        if page > 1 {
+            w.self_close(
+                "link",
+                &[
+                    ("rel", "previous"),
+                    (
+                        "href",
+                        &catalogue_href(base_url, page - 1, page_size, search.as_deref()),
+                    ),
+                    ("type", ATOM_PROFILE),
+                ],
+            );
         }
         if has_next {
-            w.self_close("link", &[
-                ("rel",  "next"),
-                ("href", &catalogue_href(base_url, page + 1, page_size, search.as_deref())),
-                ("type", ATOM_PROFILE),
-            ]);
+            w.self_close(
+                "link",
+                &[
+                    ("rel", "next"),
+                    (
+                        "href",
+                        &catalogue_href(base_url, page + 1, page_size, search.as_deref()),
+                    ),
+                    ("type", ATOM_PROFILE),
+                ],
+            );
         }
 
         for m in &manga_list {
             w.open("entry", &[]);
-            w.leaf("id",      &[], &format!("urn:kani:manga:{}", m.id));
-            w.leaf("title",   &[], &m.name);
+            w.leaf("id", &[], &format!("urn:kani:manga:{}", m.id));
+            w.leaf("title", &[], &m.name);
             w.leaf("updated", &[], &updated);
-            w.self_close("link", &[
-                ("rel",  "http://opds-spec.org/image"),
-                ("href", &format!("{base_url}/rest/manga/{}/cover", m.id)),
-                ("type", "image/jpeg"),
-            ]);
-            w.self_close("link", &[
-                ("rel",  "subsection"),
-                ("href", &format!("{base_url}/opds/manga/{}", m.id)),
-                ("type", ATOM_PROFILE),
-            ]);
+            w.self_close(
+                "link",
+                &[
+                    ("rel", "http://opds-spec.org/image"),
+                    ("href", &format!("{base_url}/rest/manga/{}/cover", m.id)),
+                    ("type", "image/jpeg"),
+                ],
+            );
+            w.self_close(
+                "link",
+                &[
+                    ("rel", "subsection"),
+                    ("href", &format!("{base_url}/opds/manga/{}", m.id)),
+                    ("type", ATOM_PROFILE),
+                ],
+            );
             w.close("entry");
         }
 
@@ -128,49 +182,70 @@ impl AppService {
 
         let (chapters, _, _) = self
             .get_local_chapters(
-                manga_id, 1, 500, ChapterSortOrder::default(), 0,
-                Some(true), None, None,
+                manga_id,
+                1,
+                500,
+                ChapterSortOrder::default(),
+                0,
+                Some(true),
+                None,
+                None,
             )
             .await?;
 
         let updated = now_rfc3339();
         let mut w = Utf8Writer::new();
         w.decl();
-        w.open("feed", &[
-            ("xmlns",      "http://www.w3.org/2005/Atom"),
-            ("xmlns:opds", "http://opds-spec.org/2010/catalog"),
-        ]);
-        w.leaf("id",      &[], &format!("urn:kani:manga:{manga_id}"));
-        w.leaf("title",   &[], &manga.name);
+        w.open(
+            "feed",
+            &[
+                ("xmlns", "http://www.w3.org/2005/Atom"),
+                ("xmlns:opds", "http://opds-spec.org/2010/catalog"),
+            ],
+        );
+        w.leaf("id", &[], &format!("urn:kani:manga:{manga_id}"));
+        w.leaf("title", &[], &manga.name);
         w.leaf("updated", &[], &updated);
-        w.self_close("link", &[
-            ("rel",  "self"),
-            ("href", &format!("{base_url}/opds/manga/{manga_id}")),
-            ("type", ATOM_PROFILE),
-        ]);
-        w.self_close("link", &[
-            ("rel",  "start"),
-            ("href", &format!("{base_url}/opds")),
-            ("type", ATOM_PROFILE),
-        ]);
-        w.self_close("link", &[
-            ("rel",  "http://opds-spec.org/image"),
-            ("href", &format!("{base_url}/rest/manga/{manga_id}/cover")),
-            ("type", "image/jpeg"),
-        ]);
+        w.self_close(
+            "link",
+            &[
+                ("rel", "self"),
+                ("href", &format!("{base_url}/opds/manga/{manga_id}")),
+                ("type", ATOM_PROFILE),
+            ],
+        );
+        w.self_close(
+            "link",
+            &[
+                ("rel", "start"),
+                ("href", &format!("{base_url}/opds")),
+                ("type", ATOM_PROFILE),
+            ],
+        );
+        w.self_close(
+            "link",
+            &[
+                ("rel", "http://opds-spec.org/image"),
+                ("href", &format!("{base_url}/rest/manga/{manga_id}/cover")),
+                ("type", "image/jpeg"),
+            ],
+        );
 
         for ch in &chapters {
             let title = chapter_display_title(ch);
             w.open("entry", &[]);
-            w.leaf("id",      &[], &format!("urn:kani:chapter:{}", ch.id));
-            w.leaf("title",   &[], &title);
+            w.leaf("id", &[], &format!("urn:kani:chapter:{}", ch.id));
+            w.leaf("title", &[], &title);
             w.leaf("updated", &[], &updated);
-            w.self_close("link", &[
-                ("rel",   "http://opds-spec.org/acquisition"),
-                ("href",  &format!("{base_url}/rest/chapters/{}/cbz", ch.id)),
-                ("type",  "application/x-cbz"),
-                ("title", &title),
-            ]);
+            w.self_close(
+                "link",
+                &[
+                    ("rel", "http://opds-spec.org/acquisition"),
+                    ("href", &format!("{base_url}/rest/chapters/{}/cbz", ch.id)),
+                    ("type", "application/x-cbz"),
+                    ("title", &title),
+                ],
+            );
             w.close("entry");
         }
 
@@ -179,12 +254,7 @@ impl AppService {
     }
 
     /// Search results feed.
-    pub async fn opds_search_feed(
-        &self,
-        query: &str,
-        page: i32,
-        base_url: &str,
-    ) -> Result<String> {
+    pub async fn opds_search_feed(&self, query: &str, page: i32, base_url: &str) -> Result<String> {
         self.opds_catalogue_feed(page, 20, Some(query.to_owned()), base_url)
             .await
     }
@@ -241,15 +311,18 @@ fn chapter_display_title(ch: &kani_shared::types::Chapter) -> String {
 
 fn nav_entry(w: &mut Utf8Writer, id: &str, title: &str, content: &str, updated: &str, href: &str) {
     w.open("entry", &[]);
-    w.leaf("id",      &[], id);
-    w.leaf("title",   &[], title);
+    w.leaf("id", &[], id);
+    w.leaf("title", &[], title);
     w.leaf("updated", &[], updated);
     w.leaf("content", &[("type", "text")], content);
-    w.self_close("link", &[
-        ("rel",  "subsection"),
-        ("href", href),
-        ("type", ATOM_PROFILE),
-    ]);
+    w.self_close(
+        "link",
+        &[
+            ("rel", "subsection"),
+            ("href", href),
+            ("type", ATOM_PROFILE),
+        ],
+    );
     w.close("entry");
 }
 
@@ -261,12 +334,13 @@ struct Utf8Writer {
 
 impl Utf8Writer {
     fn new() -> Self {
-        Self { writer: Writer::new(Cursor::new(Vec::new())) }
+        Self {
+            writer: Writer::new(Cursor::new(Vec::new())),
+        }
     }
 
     fn finish(self) -> String {
-        String::from_utf8(self.writer.into_inner().into_inner())
-            .unwrap_or_default()
+        String::from_utf8(self.writer.into_inner().into_inner()).unwrap_or_default()
     }
 
     fn decl(&mut self) {

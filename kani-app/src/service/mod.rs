@@ -25,10 +25,6 @@ use trackers::TrackerRegistry;
 
 mod audit;
 pub mod backup;
-pub mod fs_browse;
-pub mod path_migration;
-pub mod export;
-pub mod opds;
 mod categories;
 mod chapters;
 mod cover;
@@ -39,12 +35,16 @@ pub mod email;
 pub mod email_templates;
 pub mod email_verification;
 pub mod encryption;
+pub mod export;
 mod filters;
+pub mod fs_browse;
 pub mod import;
 mod library;
 mod migration;
-pub mod pending_imports;
+pub mod opds;
 pub mod password_reset;
+pub mod path_migration;
+pub mod pending_imports;
 mod preferences;
 mod progress;
 mod scanlators;
@@ -212,12 +212,13 @@ impl AppService {
         }
         tracing::info!("Sources scanned and registered");
 
-        let sources = sqlx::query_as!(Source,
+        let sources = sqlx::query_as!(
+            Source,
             "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http \
              FROM sources WHERE enabled = 1 AND deleted_at IS NULL"
         )
-            .fetch_all(&pool)
-            .await?;
+        .fetch_all(&pool)
+        .await?;
 
         for source in sources {
             let bytes = tokio::fs::read(
@@ -332,13 +333,11 @@ impl AppService {
             email_verification_required: false,
         };
 
-        let smart_client = kani_core::http::SmartClient::new(None)
-            .expect("SmartClient::new failed in test");
-        let proxy_client = kani_core::http::SmartClient::new(None)
-            .expect("proxy SmartClient::new failed in test");
-        let wasm_runtime = Arc::new(
-            WasmRuntime::new(1).expect("WasmRuntime::new failed in test"),
-        );
+        let smart_client =
+            kani_core::http::SmartClient::new(None).expect("SmartClient::new failed in test");
+        let proxy_client =
+            kani_core::http::SmartClient::new(None).expect("proxy SmartClient::new failed in test");
+        let wasm_runtime = Arc::new(WasmRuntime::new(1).expect("WasmRuntime::new failed in test"));
         let downloader = DownloaderManager::new(smart_client.clone(), 1, 1, 0, 0, 4)
             .await
             .expect("DownloaderManager::new failed in test");
@@ -384,9 +383,10 @@ impl AppService {
         tokio::spawn(async move {
             let guard = svc.read().await;
             if let Some(mailer) = guard.as_ref()
-                && let Err(e) = mailer.send(&to, &subject, &html).await {
-                    tracing::warn!("Email send failed to {to}: {e}");
-                }
+                && let Err(e) = mailer.send(&to, &subject, &html).await
+            {
+                tracing::warn!("Email send failed to {to}: {e}");
+            }
         });
     }
 
@@ -458,16 +458,19 @@ impl AppService {
                     continue;
                 }
                 let exclude_completed = settings_snap.scan_exclude_completed;
-                let category_ids: Vec<i64> = serde_json::from_str(
-                    &settings_snap.auto_download_category_ids,
-                ).unwrap_or_default();
+                let category_ids: Vec<i64> =
+                    serde_json::from_str(&settings_snap.auto_download_category_ids)
+                        .unwrap_or_default();
                 drop(settings_snap);
 
                 // Pre-fetch manga in nominated auto-download categories.
-                let category_manga_ids: std::collections::HashSet<i64> = if category_ids.is_empty() {
+                let category_manga_ids: std::collections::HashSet<i64> = if category_ids.is_empty()
+                {
                     std::collections::HashSet::new()
                 } else {
-                    let placeholders = category_ids.iter().enumerate()
+                    let placeholders = category_ids
+                        .iter()
+                        .enumerate()
                         .map(|(i, _)| format!("?{}", i + 1))
                         .collect::<Vec<_>>()
                         .join(",");
@@ -479,13 +482,21 @@ impl AppService {
                     for id in &category_ids {
                         q = q.bind(*id);
                     }
-                    q.fetch_all(&state.db).await.unwrap_or_default().into_iter().collect()
+                    q.fetch_all(&state.db)
+                        .await
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect()
                 };
 
                 let manga_to_scan: Vec<(i64, bool)> = {
                     let base = "SELECT m.id, m.auto_download FROM manga m \
                                 WHERE m.auto_scan = true";
-                    let completed_clause = if exclude_completed { " AND m.status != 1" } else { "" };
+                    let completed_clause = if exclude_completed {
+                        " AND m.status != 1"
+                    } else {
+                        ""
+                    };
                     let sql = format!("{base}{completed_clause}");
                     sqlx::query_as::<_, (i64, bool)>(&sql)
                         .fetch_all(&state.db)
@@ -589,7 +600,9 @@ impl AppService {
                 }
 
                 let ids: Vec<i64> = state.cover_retry_queue.lock().await.drain().collect();
-                if ids.is_empty() { continue; }
+                if ids.is_empty() {
+                    continue;
+                }
 
                 tracing::info!("Retrying cover downloads for {} manga", ids.len());
                 for manga_id in ids {
@@ -611,8 +624,7 @@ impl AppService {
         let client = self.smart_client.clone();
         let token = self.shutdown_token.clone();
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(20 * 60));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(20 * 60));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tokio::select! {

@@ -65,7 +65,10 @@ async fn restore_backup_unknown_source_adds_pending_import() {
         .await
         .unwrap();
 
-    assert_eq!(result.imported_manga, 0, "source unknown → should not import");
+    assert_eq!(
+        result.imported_manga, 0,
+        "source unknown → should not import"
+    );
     assert_eq!(result.pending_imports_added, 1);
     assert_eq!(result.skipped_manga, 1);
     assert!(!result.warnings.is_empty());
@@ -90,7 +93,9 @@ async fn restore_backup_preserves_category_assignment() {
     let manga_id = insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
 
     let cat_id = svc.create_category("Action", 0).await.unwrap();
-    svc.set_manga_categories(manga_id, vec![cat_id]).await.unwrap();
+    svc.set_manga_categories(manga_id, vec![cat_id])
+        .await
+        .unwrap();
 
     let zip = svc.export_backup(1, false).await.unwrap();
 
@@ -109,7 +114,11 @@ async fn restore_backup_preserves_category_assignment() {
             .unwrap();
 
     let cats = svc.get_manga_categories(restored_manga_id).await.unwrap();
-    assert_eq!(cats.len(), 1, "category assignment should survive export+restore");
+    assert_eq!(
+        cats.len(),
+        1,
+        "category assignment should survive export+restore"
+    );
 }
 
 #[tokio::test]
@@ -139,5 +148,8 @@ async fn restore_backup_merge_mode_keeps_existing_manga() {
         .fetch_one(&svc.db)
         .await
         .unwrap();
-    assert_eq!(count, 2, "both original and post-export manga should remain");
+    assert_eq!(
+        count, 2,
+        "both original and post-export manga should remain"
+    );
 }

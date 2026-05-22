@@ -199,11 +199,10 @@ impl AppService {
 
     /// Cancels all in-progress downloads across all manga.
     pub async fn cancel_all_global_downloads(&self) -> Result<()> {
-        let chapter_ids: Vec<i64> = sqlx::query_scalar!(
-            "SELECT id FROM chapters WHERE download_status = 1"
-        )
-        .fetch_all(&self.db)
-        .await?;
+        let chapter_ids: Vec<i64> =
+            sqlx::query_scalar!("SELECT id FROM chapters WHERE download_status = 1")
+                .fetch_all(&self.db)
+                .await?;
 
         for id in chapter_ids {
             let was_cancelled = self.downloader.cancel_download(id).await;
@@ -331,7 +330,9 @@ impl AppService {
         match &kind {
             LanguageInclude(_) | LanguageExclude(_) | TitleContains(_) | TitleExcludes(_) => {
                 if value.trim().is_empty() {
-                    return Err(ServiceError::Validation("Rule value cannot be empty".into()));
+                    return Err(ServiceError::Validation(
+                        "Rule value cannot be empty".into(),
+                    ));
                 }
             }
             _ => {}
@@ -374,7 +375,9 @@ impl AppService {
         match &kind {
             LanguageInclude(_) | LanguageExclude(_) | TitleContains(_) | TitleExcludes(_) => {
                 if value.trim().is_empty() {
-                    return Err(ServiceError::Validation("Rule value cannot be empty".into()));
+                    return Err(ServiceError::Validation(
+                        "Rule value cannot be empty".into(),
+                    ));
                 }
             }
             _ => {}
@@ -388,30 +391,21 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn reorder_download_rules(
-        &self,
-        manga_id: i64,
-        ordered_ids: Vec<i64>,
-    ) -> Result<()> {
+    pub async fn reorder_download_rules(&self, manga_id: i64, ordered_ids: Vec<i64>) -> Result<()> {
         for (priority, id) in ordered_ids.iter().enumerate() {
             let p = priority as i64;
-            sqlx::query(
-                "UPDATE download_rules SET priority=? WHERE id=? AND manga_id=?",
-            )
-            .bind(p)
-            .bind(id)
-            .bind(manga_id)
-            .execute(&self.db)
-            .await?;
+            sqlx::query("UPDATE download_rules SET priority=? WHERE id=? AND manga_id=?")
+                .bind(p)
+                .bind(id)
+                .bind(manga_id)
+                .execute(&self.db)
+                .await?;
         }
         Ok(())
     }
 
     /// Returns the N most recently downloaded chapters (download_status = 2).
-    pub async fn get_download_history(
-        &self,
-        limit: i64,
-    ) -> Result<Vec<serde_json::Value>> {
+    pub async fn get_download_history(&self, limit: i64) -> Result<Vec<serde_json::Value>> {
         let rows = sqlx::query!(
             "SELECT c.id, c.name, c.chapter_number, c.volume, c.manga_id, m.name as manga_title, c.downloaded_at
              FROM chapters c

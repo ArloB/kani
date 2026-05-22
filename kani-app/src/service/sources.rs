@@ -155,11 +155,7 @@ impl AppService {
         };
 
         let t0 = std::time::Instant::now();
-        let result = source_manager
-            .lease_instance()
-            .await?
-            .get_metadata()
-            .await;
+        let result = source_manager.lease_instance().await?.get_metadata().await;
         let elapsed = t0.elapsed().as_millis() as u64;
         match result {
             Ok(r) => {
@@ -265,8 +261,14 @@ impl AppService {
             .await;
         let elapsed = t0.elapsed().as_millis() as u64;
         match result {
-            Ok(r) => { self.record_source_success(id, elapsed).await; Ok(r) }
-            Err(e) => { self.record_source_error(id).await; Err(ServiceError::Core(e)) }
+            Ok(r) => {
+                self.record_source_success(id, elapsed).await;
+                Ok(r)
+            }
+            Err(e) => {
+                self.record_source_error(id).await;
+                Err(ServiceError::Core(e))
+            }
         }
     }
 
@@ -355,27 +357,36 @@ impl AppService {
         let sort_key = sort.clone().unwrap_or_default();
 
         self.cache
-            .get_or_fetch_chapter_list(id, &manga_id_d.clone(), page, page_size, &sort_key, async move {
-                let source_manager = {
-                    let sources = sources.read().await;
-                    sources
-                        .get(&id)
-                        .cloned()
-                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
-                };
-                let result = source_manager
-                    .lease_instance()
-                    .await?
-                    .get_chapter_list(&manga_id_d, page, Some(page_size), sort)
-                    .await?;
-                serde_json::to_string(&result)
-                    .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
-            })
+            .get_or_fetch_chapter_list(
+                id,
+                &manga_id_d.clone(),
+                page,
+                page_size,
+                &sort_key,
+                async move {
+                    let source_manager = {
+                        let sources = sources.read().await;
+                        sources.get(&id).cloned().ok_or_else(|| {
+                            ServiceError::NotFound(format!("Source {id} not found"))
+                        })?
+                    };
+                    let result = source_manager
+                        .lease_instance()
+                        .await?
+                        .get_chapter_list(&manga_id_d, page, Some(page_size), sort)
+                        .await?;
+                    serde_json::to_string(&result)
+                        .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                },
+            )
             .await
             .map_err(unwrap_cache_err)
     }
 
-    pub async fn get_chapter_sort_list(&self, id: i64) -> Result<Vec<kani_shared::types::ChapterSortOption>> {
+    pub async fn get_chapter_sort_list(
+        &self,
+        id: i64,
+    ) -> Result<Vec<kani_shared::types::ChapterSortOption>> {
         self.require_source_active(id).await?;
         let source_manager = {
             let sources = self.sources.read().await;
@@ -391,7 +402,10 @@ impl AppService {
             .await?;
         Ok(wit_opts
             .into_iter()
-            .map(|o| kani_shared::types::ChapterSortOption { id: o.id, name: o.name })
+            .map(|o| kani_shared::types::ChapterSortOption {
+                id: o.id,
+                name: o.name,
+            })
             .collect())
     }
 
@@ -446,7 +460,9 @@ impl AppService {
                 let source_name = source_name.clone();
 
                 tokio::spawn(async move {
-                    let result = state.search_manga(source_id, &q, page, page_size, None).await;
+                    let result = state
+                        .search_manga(source_id, &q, page, page_size, None)
+                        .await;
                     (source_id, source_name, result)
                 })
             })
@@ -581,11 +597,8 @@ impl AppService {
                     .map_err(ServiceError::Core)?;
 
                 let (raw_meta, schema) = {
-                    let mut inst = kani_core::sources::SourceInstance::new(
-                        smart_client.clone(),
-                        None,
-                        false,
-                    );
+                    let mut inst =
+                        kani_core::sources::SourceInstance::new(smart_client.clone(), None, false);
                     inst.load(wasm_runtime.engine(), &component, wasm_runtime.linker())
                         .await
                         .map_err(ServiceError::Core)?;
@@ -606,7 +619,11 @@ impl AppService {
                 };
 
                 let canonical_id = metadata.id.clone();
-                let initially_enabled = if metadata.unrestricted_http { 0i64 } else { 1i64 };
+                let initially_enabled = if metadata.unrestricted_http {
+                    0i64
+                } else {
+                    1i64
+                };
 
                 // Helper: rename the wasm file on disk if the filename differs from the canonical id.
                 let rename_file = |current_filename: &str| {
@@ -628,7 +645,9 @@ impl AppService {
                     if existing.version != metadata.version {
                         tracing::warn!(
                             "Source '{}' version changed: DB has '{}', loaded '{}'",
-                            canonical_id, existing.version, metadata.version
+                            canonical_id,
+                            existing.version,
+                            metadata.version
                         );
                     }
                     let version_changed = existing.version != metadata.version;
@@ -652,15 +671,26 @@ impl AppService {
                             )
                             .execute(db)
                             .await?;
-                            tracing::info!("Re-activated previously deleted source '{}'", canonical_id);
+                            tracing::info!(
+                                "Re-activated previously deleted source '{}'",
+                                canonical_id
+                            );
                         } else {
                             tracing::debug!("Synced metadata for source '{}'", canonical_id);
                         }
                     }
                     let (src, dst, needs_rename) = rename_file(&filename);
-                    if needs_rename && src.exists() && !dst.exists() &&
-                    let Err(e) = tokio::fs::rename(&src, &dst).await {
-                        tracing::warn!("Failed to rename {} → {}: {}", src.display(), dst.display(), e);
+                    if needs_rename
+                        && src.exists()
+                        && !dst.exists()
+                        && let Err(e) = tokio::fs::rename(&src, &dst).await
+                    {
+                        tracing::warn!(
+                            "Failed to rename {} → {}: {}",
+                            src.display(),
+                            dst.display(),
+                            e
+                        );
                     }
                     continue;
                 }
@@ -687,8 +717,17 @@ impl AppService {
                     .await?;
 
                     let (src, dst, needs_rename) = rename_file(&filename);
-                    if needs_rename && src.exists() && !dst.exists() && let Err(e) = tokio::fs::rename(&src, &dst).await {
-                        tracing::warn!("Failed to rename {} → {}: {}", src.display(), dst.display(), e);
+                    if needs_rename
+                        && src.exists()
+                        && !dst.exists()
+                        && let Err(e) = tokio::fs::rename(&src, &dst).await
+                    {
+                        tracing::warn!(
+                            "Failed to rename {} → {}: {}",
+                            src.display(),
+                            dst.display(),
+                            e
+                        );
                     }
 
                     tracing::info!("Migrated source '{}' → '{}'", filename, canonical_id);
@@ -712,9 +751,17 @@ impl AppService {
                 }
 
                 let (src, dst, needs_rename) = rename_file(&filename);
-                if needs_rename && src.exists() && !dst.exists() &&
-                let Err(e) = tokio::fs::rename(&src, &dst).await {
-                    tracing::warn!("Failed to rename {} → {}: {}", src.display(), dst.display(), e);
+                if needs_rename
+                    && src.exists()
+                    && !dst.exists()
+                    && let Err(e) = tokio::fs::rename(&src, &dst).await
+                {
+                    tracing::warn!(
+                        "Failed to rename {} → {}: {}",
+                        src.display(),
+                        dst.display(),
+                        e
+                    );
                 }
 
                 tracing::info!("Registered new source: {}", canonical_id);

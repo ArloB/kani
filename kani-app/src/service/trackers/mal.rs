@@ -194,10 +194,7 @@ impl ExternalTracker for MalTracker {
             .map(|n| TrackerMangaResult {
                 tracker_manga_id: n.node.id.to_string(),
                 title: n.node.title,
-                cover_url: n
-                    .node
-                    .main_picture
-                    .and_then(|p| p.large.or(p.medium)),
+                cover_url: n.node.main_picture.and_then(|p| p.large.or(p.medium)),
             })
             .collect())
     }
@@ -211,7 +208,10 @@ impl ExternalTracker for MalTracker {
         chapters_read: i64,
     ) -> Result<()> {
         let mut params = vec![
-            ("status".to_string(), Self::map_status_to_mal(status).to_string()),
+            (
+                "status".to_string(),
+                Self::map_status_to_mal(status).to_string(),
+            ),
             ("num_chapters_read".to_string(), chapters_read.to_string()),
         ];
 
@@ -225,7 +225,10 @@ impl ExternalTracker for MalTracker {
 
         let resp = self
             .http
-            .patch(format!("{}/manga/{}/my_list_status", API_URL, tracker_manga_id))
+            .patch(format!(
+                "{}/manga/{}/my_list_status",
+                API_URL, tracker_manga_id
+            ))
             .bearer_auth(access_token)
             .form(&params)
             .send()
@@ -234,9 +237,7 @@ impl ExternalTracker for MalTracker {
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(ServiceError::Internal(format!(
-                "MAL update failed: {text}"
-            )));
+            return Err(ServiceError::Internal(format!("MAL update failed: {text}")));
         }
 
         Ok(())
@@ -261,10 +262,7 @@ impl ExternalTracker for MalTracker {
 
         match resp.my_list_status {
             Some(entry) => {
-                let mut status = entry
-                    .status
-                    .as_deref()
-                    .and_then(Self::map_status_from_mal);
+                let mut status = entry.status.as_deref().and_then(Self::map_status_from_mal);
 
                 // If MAL says "reading" and is_rereading is true, map to Rereading.
                 if matches!(status, Some(MangaTrackingStatus::Reading))

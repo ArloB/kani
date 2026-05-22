@@ -1,5 +1,5 @@
 use clap::Parser;
-use kani_cli::commands::{run, Cli};
+use kani_cli::commands::{Cli, run};
 
 fn main() {
     let cli = Cli::parse();
