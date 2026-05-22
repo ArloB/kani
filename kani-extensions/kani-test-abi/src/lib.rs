@@ -91,10 +91,8 @@ const HTML_DOC: &str = r#"<html><body>
 </body></html>"#;
 
 fn test_html_imports() -> ExtensionResult<MangaList> {
-    // parse
     let doc = html::parse(HTML_DOC).map_err(ExtensionError::Other)?;
 
-    // select → list_len → list_get
     let list_h = html::select(doc, ".card").map_err(ExtensionError::Other)?;
     let len = html::list_len(list_h).map_err(ExtensionError::Other)?;
     if len != 1 {
@@ -105,25 +103,20 @@ fn test_html_imports() -> ExtensionResult<MangaList> {
     }
     let elem = html::list_get(list_h, 0).map_err(ExtensionError::Other)?;
 
-    // attr — empty selector reads the element's own attribute
     let id_val = html::attr(elem, "", "data-id")
         .map_err(ExtensionError::Other)?
         .unwrap_or_default();
 
-    // text — CSS selector descends into children
     let title_val = html::text(elem, ".title")
         .map_err(ExtensionError::Other)?
         .unwrap_or_default();
 
-    // first
     let first_opt = html::first(doc, ".card").map_err(ExtensionError::Other)?;
     let first_h = first_opt.ok_or_else(|| ExtensionError::Other("first returned None".into()))?;
 
-    // inner_html / outer_html
     let _inner = html::inner_html(elem).map_err(ExtensionError::Other)?;
     let outer = html::outer_html(elem).map_err(ExtensionError::Other)?;
 
-    // children
     let child_list = html::children(elem).map_err(ExtensionError::Other)?;
     let child_len = html::list_len(child_list).map_err(ExtensionError::Other)?;
     if child_len < 2 {
@@ -133,7 +126,6 @@ fn test_html_imports() -> ExtensionResult<MangaList> {
         )));
     }
 
-    // drop everything
     html::drop_list(list_h);
     html::drop_list(child_list);
     html::drop_doc(elem);
@@ -160,52 +152,42 @@ const JSON_DOC: &[u8] = br#"{
 }"#;
 
 fn test_json_imports() -> ExtensionResult<MangaList> {
-    // parse
     let h = json::parse(JSON_DOC).map_err(ExtensionError::ParseError)?;
 
-    // get_str
     let name = json::get_str(h, "/name")
         .map_err(ExtensionError::Other)?
         .unwrap_or_default();
 
-    // get_i64
     let age = json::get_i64(h, "/age")
         .map_err(ExtensionError::Other)?
         .unwrap_or(0);
 
-    // get_bool
     let active = json::get_bool(h, "/active")
         .map_err(ExtensionError::Other)?
         .unwrap_or(false);
 
-    // get_f64
     let score = json::get_f64(h, "/score")
         .map_err(ExtensionError::Other)?
         .unwrap_or(0.0);
 
-    // array_len
     let tag_count = json::array_len(h, "/tags")
         .map_err(ExtensionError::Other)?
         .unwrap_or(0);
 
-    // array_get → child handle → read via get_str
     let tag0_h = json::array_get(h, "/tags", 0).map_err(ExtensionError::Other)?;
     let tag0 = json::get_str(tag0_h, "")
         .map_err(ExtensionError::Other)?
         .unwrap_or_default();
     json::drop_json(tag0_h);
 
-    // object_keys
     let keys = json::object_keys(h, "").map_err(ExtensionError::Other)?;
 
-    // object_get → nested child handle
     let nested_opt = json::object_get(h, "", "nested").map_err(ExtensionError::Other)?;
     if let Some(nested_h) = nested_opt {
         let _val = json::get_str(nested_h, "/key").map_err(ExtensionError::Other)?;
         json::drop_json(nested_h);
     }
 
-    // to_string (validates full serialization round-trip)
     let json_str = json::to_string(h).map_err(ExtensionError::Other)?;
 
     json::drop_json(h);
@@ -232,7 +214,6 @@ fn test_utility_imports() -> ExtensionResult<MangaList> {
     let ts1 =
         utility::date_parse("2024-01-15", "[year]-[month]-[day]").map_err(ExtensionError::Other)?;
 
-    // date_parse_rfc3339
     let ts2 = utility::date_parse_rfc3339("2024-01-15T00:00:00Z").map_err(ExtensionError::Other)?;
 
     if ts1 != ts2 {
@@ -242,11 +223,9 @@ fn test_utility_imports() -> ExtensionResult<MangaList> {
         )));
     }
 
-    // resolve_url
     let _resolved =
         utility::resolve_url("https://example.com/a/b", "/c").map_err(ExtensionError::Other)?;
 
-    // build_url
     let built = utility::build_url(
         "https://example.com",
         &[
@@ -256,11 +235,9 @@ fn test_utility_imports() -> ExtensionResult<MangaList> {
     )
     .map_err(ExtensionError::Other)?;
 
-    // url_encode / url_decode
     let encoded = utility::url_encode("hello world");
     let decoded = utility::url_decode(&encoded).map_err(ExtensionError::Other)?;
 
-    // get_query_param
     let pg_val = utility::get_query_param(&built, "pg");
 
     // encode_form (just verify it doesn't error; content depends on url-encoding impl)
@@ -282,11 +259,9 @@ fn test_utility_imports() -> ExtensionResult<MangaList> {
 // ── Prefs host imports (query = "prefs") ─────────────────────────────────────
 
 fn test_prefs_imports() -> ExtensionResult<MangaList> {
-    // Raw WIT import
     let raw_str = prefs_raw::get_value("test_str");
     let raw_missing = prefs_raw::get_value("missing_key");
 
-    // host_abi wrappers
     let str_val = prefs::get_str("test_str");
     let bool_val = prefs::get_bool("test_bool");
     let _i64_val = prefs::get_i64("test_i64");

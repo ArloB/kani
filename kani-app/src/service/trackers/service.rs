@@ -74,11 +74,9 @@ impl AppService {
             .get(tracker_id)
             .ok_or_else(|| ServiceError::NotFound(format!("Tracker {tracker_id} not found")))?;
 
-        // Generate CSRF state token.
         let state_bytes: [u8; 32] = rand::random();
         let state_token = hex::encode(state_bytes);
 
-        // For PKCE providers: generate code_verifier + S256 code_challenge.
         let (code_verifier, code_challenge) = if tracker.requires_pkce() {
             let verifier_bytes: [u8; 32] = rand::random();
             let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
@@ -203,7 +201,6 @@ impl AppService {
         client_id: &str,
         client_secret: Option<&str>,
     ) -> Result<()> {
-        // Verify tracker row exists (seeded on startup).
         let exists = sqlx::query_scalar!("SELECT COUNT(*) FROM trackers WHERE id = ?", tracker_id)
             .fetch_one(&self.db)
             .await

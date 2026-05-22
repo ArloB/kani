@@ -22,7 +22,6 @@ pub fn run(file: &str, force: bool, embedded_bytes: bool) -> Result<PathBuf, Cli
 
     let generated = codegen::generate(&validated, embedded_bytes);
 
-    // Determine output directory: kani-extensions/kani-<id>/ relative to workspace root
     let workspace_root = path
         .parent()
         .unwrap_or(Path::new("."))

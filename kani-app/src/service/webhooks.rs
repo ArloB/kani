@@ -338,7 +338,6 @@ impl WebhookService {
     }
 
     pub async fn update_webhook(&self, id: i64, body: UpdateWebhookBody) -> Result<WebhookRow> {
-        // Verify exists first.
         self.get_by_id(id).await?;
 
         if let Some(ref url) = body.url {

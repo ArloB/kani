@@ -8,7 +8,6 @@ use kani_shared::types::{DownloadSettings, ScanSettings, SettingsUpdate};
 async fn get_settings_reflects_initial_values() {
     let svc = test_service().await;
     let s = svc.get_settings().await;
-    // Defaults from new_for_test
     assert_eq!(s.concurrent_page_downloads, 4);
     assert_eq!(s.max_retries, 3);
     assert!(!s.auto_scan);
@@ -101,7 +100,6 @@ async fn update_download_settings_rejects_invalid_page_concurrency() {
 async fn update_settings_does_not_affect_unrelated_fields() {
     let svc = test_service().await;
 
-    // Set scan settings first
     svc.update_settings(
         SettingsUpdate::Scan(ScanSettings {
             auto_scan: true,

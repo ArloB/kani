@@ -93,7 +93,6 @@ async fn set_manga_categories_replaces_existing() {
     svc.set_manga_categories(manga_id, vec![cat_a, cat_b])
         .await
         .unwrap();
-    // Replace with only cat_b
     svc.set_manga_categories(manga_id, vec![cat_b])
         .await
         .unwrap();
@@ -125,7 +124,6 @@ async fn reorder_categories_updates_sort_order() {
     let id_a = svc.create_category("A", 0).await.unwrap();
     let id_b = svc.create_category("B", 1).await.unwrap();
 
-    // Swap: B first, A second
     svc.reorder_categories(vec![id_b, id_a]).await.unwrap();
 
     let cats = svc.list_categories().await.unwrap();

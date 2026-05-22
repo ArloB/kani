@@ -198,3 +198,58 @@ pub async fn body_json(res: axum::response::Response) -> serde_json::Value {
 pub async fn body_array(res: axum::response::Response) -> Vec<serde_json::Value> {
     body_json(res).await.as_array().cloned().unwrap_or_default()
 }
+
+/// Build a testable axum router with both REST and OPDS routes mounted.
+/// OPDS handles its own auth per-handler; the auth_guard exempts /opds paths.
+pub async fn build_test_app_with_opds(state: AppState) -> Router {
+    let session_store = SqliteStore::new(state.db.clone());
+    session_store.migrate().await.unwrap();
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_secure(false)
+        .with_http_only(true)
+        .with_same_site(SameSite::Lax);
+    let auth_backend = AuthBackend::new(state.db.clone());
+    let auth_layer = AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
+
+    Router::new()
+        .nest("/rest", kani_web::rest::routes(state.clone()))
+        .nest("/opds", kani_web::opds::routes(state))
+        .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
+        .layer(auth_layer)
+}
+
+/// Insert a minimal source row into the given pool; returns its id.
+pub async fn insert_source(pool: &sqlx::SqlitePool, name: &str) -> i64 {
+    sqlx::query_scalar("INSERT INTO sources (name, version) VALUES (?, '0.1') RETURNING id")
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Insert a minimal manga row (status 0 = Unknown) into the given pool; returns its id.
+pub async fn insert_manga(
+    pool: &sqlx::SqlitePool,
+    source_id: i64,
+    source_manga_id: &str,
+    name: &str,
+) -> i64 {
+    sqlx::query_scalar(
+        "INSERT INTO manga (source_id, source_manga_id, name, status) \
+         VALUES (?, ?, ?, 0) RETURNING id",
+    )
+    .bind(source_id)
+    .bind(source_manga_id)
+    .bind(name)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Build a Basic-auth `Authorization` header value for the given credentials.
+pub fn basic_auth(username: &str, password: &str) -> String {
+    use base64::Engine as _;
+    let encoded =
+        base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
+    format!("Basic {encoded}")
+}

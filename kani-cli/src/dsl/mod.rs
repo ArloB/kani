@@ -4,6 +4,8 @@ use crate::dsl::parseexpr::ParseExpr;
 use chumsky::prelude::*;
 use kani_shared::ast::Op;
 
+pub use self::parseexpr::SpannedParseExpr;
+
 type ParserError<'a> = extra::Err<Rich<'a, char>>;
 
 // DSL parser: converts expression strings into kani_shared::ast::Expr trees.
@@ -12,7 +14,11 @@ type ParserError<'a> = extra::Err<Rich<'a, char>>;
 //   - yaml codegen (src/codegen/mod.rs) to compile DSL fields in YAML blueprints
 //   - `kani-cli dsl "<expr>"` for interactive inspection
 //
-pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
+// Returns `SpannedParseExpr` — a newtype wrapping `(ParseExpr, SimpleSpan)` —
+// so the conversion to `Expr` via `TryFrom<SpannedParseExpr>` can report
+// accurate source positions for top-level errors (e.g. a bare map literal
+// outside `.lookup()`).
+pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a>> {
     // Horizontal-only whitespace (spaces and tabs) — safe in contexts where '\n' is significant.
     let hws = || {
         any::<&str, ParserError>()
@@ -266,5 +272,6 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, ParseExpr, ParserError<'a>> {
         )
     });
 
-    expr.then_ignore(end())
+    expr.map_with(|e, extra| SpannedParseExpr(e, extra.span()))
+        .then_ignore(end())
 }

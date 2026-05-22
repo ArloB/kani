@@ -180,7 +180,6 @@ impl AppService {
             warnings: vec![],
         };
 
-        // Build Tachiyomi category index → Kani category id map
         let mut tachi_cat_map: std::collections::HashMap<i32, i64> = Default::default();
 
         if opts.import_categories {
@@ -262,7 +261,6 @@ impl AppService {
                 }
             };
 
-            // Exact match check via URL (used as source_manga_id)
             let existing_id: Option<i64> = sqlx::query_scalar!(
                 "SELECT id FROM manga WHERE source_id = ? AND source_manga_id = ?",
                 source_id,
@@ -332,7 +330,6 @@ impl AppService {
                 .fetch_one(&mut *tx)
                 .await?;
 
-                // manga_categories
                 for &cat_idx in &m.categories {
                     if let Some(&cat_id) = tachi_cat_map.get(&cat_idx) {
                         sqlx::query!(
@@ -346,7 +343,6 @@ impl AppService {
                     }
                 }
 
-                // authors / artists → manga_people
                 for (name, role) in [(&m.author, "author"), (&m.artist, "artist")] {
                     if name.is_empty() {
                         continue;
@@ -365,7 +361,6 @@ impl AppService {
                     .await?;
                 }
 
-                // genre → tags + manga_tags
                 for genre in &m.genre {
                     if genre.is_empty() {
                         continue;
@@ -387,7 +382,6 @@ impl AppService {
                 (id, true)
             };
 
-            // user_manga_tracking
             if opts.import_tracking
                 && let Some(t) = m.tracking.first()
             {
@@ -409,7 +403,6 @@ impl AppService {
                 .await?;
             }
 
-            // tracker_manga_mappings — link AniList / MAL entries
             for t in &m.tracking {
                 let Some(tracker_name) = tachiyomi_sync_id_to_tracker_name(t.sync_id) else {
                     continue;
@@ -493,7 +486,6 @@ impl AppService {
                 .await?;
             }
 
-            // user_chapter_tracking
             if opts.import_chapter_progress {
                 // For newly inserted manga, fetch chapters from the source first so that
                 // source_chapter_id values exist in the chapters table for progress matching.

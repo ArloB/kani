@@ -463,7 +463,6 @@ impl AppService {
                         .unwrap_or_default();
                 drop(settings_snap);
 
-                // Pre-fetch manga in nominated auto-download categories.
                 let category_manga_ids: std::collections::HashSet<i64> = if category_ids.is_empty()
                 {
                     std::collections::HashSet::new()
@@ -563,7 +562,6 @@ impl AppService {
                     }
                 }
 
-                // Clean up orphaned chapters that have not been downloaded.
                 if let Err(e) = sqlx::query!(
                     "DELETE FROM chapters WHERE is_orphaned = true AND download_status != 2"
                 )
@@ -610,7 +608,6 @@ impl AppService {
                         Ok(()) => tracing::info!("Cover retry succeeded for manga {manga_id}"),
                         Err(e) => {
                             tracing::debug!("Cover retry failed for manga {manga_id}: {e}");
-                            // Re-enqueue so it is retried again next cycle.
                             state.cover_retry_queue.lock().await.insert(manga_id);
                         }
                     }

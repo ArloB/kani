@@ -148,7 +148,6 @@ async fn abi_prefs_get_value_returns_injected_preferences() {
     let bytes = skip_if_missing!("kani-test-abi");
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
-    // Inject preferences before calling WASM
     {
         let data = store.data_mut();
         data.preferences
@@ -368,7 +367,6 @@ async fn abi_handles_are_cleaned_up_after_each_call() {
         "html_lists should be empty after HTML test"
     );
 
-    // Run the JSON test
     provider
         .call_get_popular_manga(&mut store, 2, 20, &[])
         .await

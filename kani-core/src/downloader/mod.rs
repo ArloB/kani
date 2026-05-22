@@ -217,7 +217,6 @@ impl DownloaderManager {
 
         let mut state = self.queue.lock().await;
 
-        // Remove from pending queue if it's there
         if let Some(pos) = state
             .queue
             .iter()
@@ -227,7 +226,6 @@ impl DownloaderManager {
             return true;
         }
 
-        // If it's currently active, send the cancel signal
         if let Some(tx) = state.active_tasks.remove(&chapter_id) {
             let _ = tx.send(());
             return true;
@@ -861,7 +859,6 @@ mod tests {
     #[tokio::test]
     async fn cancel_already_completed_chapter_returns_false() {
         let mgr = make_manager().await;
-        // Insert a fake completed entry into active map.
         mgr.active.write().await.insert(
             42,
             ActiveDownloadState {
@@ -883,7 +880,6 @@ mod tests {
     async fn subscribe_returns_receiver() {
         let mgr = make_manager().await;
         let mut rx = mgr.subscribe();
-        // Receiver starts with no messages.
         assert!(rx.try_recv().is_err());
     }
 
@@ -1035,7 +1031,6 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify ComicInfo.xml is present in the archive
         let file = std::fs::File::open(&cbz_path).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
         let entry_names: Vec<String> = (0..archive.len())

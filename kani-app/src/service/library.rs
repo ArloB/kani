@@ -92,7 +92,6 @@ impl AppService {
 
         let offset = (page - 1).max(0) * page_size;
 
-        // Determine whether we need the user_manga_tracking join.
         let need_umt = sort_by.needs_tracking_join()
             || reading_status_filter.is_some()
             || hide_completed_status;
@@ -1455,7 +1454,6 @@ impl AppService {
                 .await?
                 .flatten();
 
-        // Delete the _local file if it exists.
         if let Some(ref rel) = current_rel
             && rel.contains("_local")
         {
@@ -1467,7 +1465,6 @@ impl AppService {
             }
         }
 
-        // Restore source cover path if its file exists on disk.
         let source_rel = format!("covers/{manga_id}.jpg");
         let source_path = library_path.join(&source_rel);
         let restored_path: Option<String> = match tokio::fs::metadata(&source_path).await {

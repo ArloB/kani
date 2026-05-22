@@ -1,4 +1,4 @@
-// Constant boilerplate strings for generated extension source.
+//! Constant boilerplate strings for generated extension source.
 
 /// Default MangaExtension stub methods emitted when an endpoint is absent.
 pub const MANGA_EXT_STUB_SORT: &str = r#"

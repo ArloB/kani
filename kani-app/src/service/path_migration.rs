@@ -104,7 +104,6 @@ async fn run_migration(
         total_bytes,
     });
 
-    // Phase A: copy tree
     if let Err(e) = copy_tree(service, field, current, new, total_bytes).await {
         if let Err(cleanup_err) = tokio::fs::remove_dir_all(new).await {
             tracing::warn!("Rollback cleanup failed for {new:?}: {cleanup_err}");
@@ -112,7 +111,6 @@ async fn run_migration(
         return Err(e);
     }
 
-    // Phase B: update DB + in-memory setting
     let new_str = new.to_string_lossy();
     match field {
         "library_path" => {
@@ -155,7 +153,6 @@ async fn run_migration(
         )
         .await;
 
-    // Phase C: remove old tree (best-effort)
     if let Err(e) = tokio::fs::remove_dir_all(current).await {
         tracing::warn!("Could not remove old directory {current:?} after migration: {e}");
     }

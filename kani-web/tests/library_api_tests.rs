@@ -26,7 +26,6 @@ async fn get_library_returns_empty_list_for_fresh_db() {
 
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
-    // Fresh DB has no manga.
     assert_eq!(body["items"], serde_json::json!([]));
 }
 

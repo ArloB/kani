@@ -625,7 +625,6 @@ impl AppService {
                     1i64
                 };
 
-                // Helper: rename the wasm file on disk if the filename differs from the canonical id.
                 let rename_file = |current_filename: &str| {
                     let src = wasm_storage_path.join(format!("{current_filename}.wasm"));
                     let dst = wasm_storage_path.join(format!("{canonical_id}.wasm"));
@@ -695,7 +694,6 @@ impl AppService {
                     continue;
                 }
 
-                // Check for legacy record by filename or display name, migrate if found.
                 let legacy = sqlx::query!(
                     "SELECT id FROM sources WHERE name = ? OR name = ? LIMIT 1",
                     filename,
@@ -734,7 +732,6 @@ impl AppService {
                     continue;
                 }
 
-                // New source — insert with canonical id.
                 let result = sqlx::query!(
                     "INSERT INTO sources (name, version, base_url, enabled, unrestricted_http) VALUES (?, ?, ?, ?, ?)",
                     canonical_id,

@@ -30,7 +30,6 @@ async fn normalise_title_removes_volume_suffix() {
 async fn normalise_title_collapses_punctuation_and_whitespace() {
     assert_eq!(normalise_title("Dragon-Ball!"), "dragon ball");
     assert_eq!(normalise_title("One.Piece"), "one piece");
-    // Multiple spaces collapsed.
     assert_eq!(normalise_title("Attack  on  Titan"), "attack on titan");
 }
 
@@ -96,7 +95,6 @@ async fn find_similar_manga_excludes_the_given_id() {
         !hit_ids.contains(&id1),
         "the excluded manga should not appear in results"
     );
-    // id2 ("Dragon Ball Z") is still similar enough to appear.
     assert!(hit_ids.contains(&id2));
 }
 

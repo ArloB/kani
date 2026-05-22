@@ -1,4 +1,4 @@
-// Emit Rust source for the HTTP request block of an endpoint method.
+//! Emit Rust source for the HTTP request block of an endpoint method.
 
 use crate::yaml::model::{QueryEntry, QueryValue};
 use crate::yaml::schema::FilterMappingEntry;
@@ -41,7 +41,6 @@ pub fn emit_request_block(
         lines.push(format!("    .query(\"{}\", {})", entry.key, val));
     }
 
-    // Terminate the method chain
     let last = lines.pop().expect("at least one line");
     lines.push(format!("{last};"));
 

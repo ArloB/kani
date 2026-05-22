@@ -96,7 +96,6 @@ async fn credential_store_persists_access_token() {
     .unwrap();
     assert_eq!(stored, "my-access-token");
 
-    // list_trackers_status should now show linked = true for this tracker.
     let items = svc.list_trackers_status(user_id).await.unwrap();
     let anilist = items.iter().find(|i| i.name == "AniList").unwrap();
     assert!(anilist.linked);
@@ -110,25 +109,21 @@ async fn mapping_set_get_delete_round_trips() {
     let manga_id = insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
     let tid = tracker_id(&svc, "AniList").await;
 
-    // No mapping initially.
     let none = get_mapping(&svc.db, user_id, tid, manga_id).await.unwrap();
     assert!(none.is_none());
 
-    // Set → get.
     set_mapping(&svc.db, user_id, tid, manga_id, "anilist-123")
         .await
         .unwrap();
     let found = get_mapping(&svc.db, user_id, tid, manga_id).await.unwrap();
     assert_eq!(found.as_deref(), Some("anilist-123"));
 
-    // Overwrite via upsert.
     set_mapping(&svc.db, user_id, tid, manga_id, "anilist-456")
         .await
         .unwrap();
     let updated = get_mapping(&svc.db, user_id, tid, manga_id).await.unwrap();
     assert_eq!(updated.as_deref(), Some("anilist-456"));
 
-    // Delete → None.
     delete_mapping(&svc.db, user_id, tid, manga_id)
         .await
         .unwrap();
@@ -177,7 +172,6 @@ async fn set_and_get_tracker_config_round_trips() {
     let svc = test_service().await;
     let tid = tracker_id(&svc, "AniList").await;
 
-    // Initially no config.
     let none = svc.get_tracker_config(tid).await.unwrap();
     assert!(none.is_none());
 
@@ -191,7 +185,6 @@ async fn set_and_get_tracker_config_round_trips() {
     assert_eq!(client_id, "client-id-123");
     assert!(has_secret);
 
-    // After config, the tracker should appear as configured.
     let items = svc.list_trackers_status(1).await.unwrap();
     let anilist = items.iter().find(|i| i.name == "AniList").unwrap();
     assert!(anilist.configured);

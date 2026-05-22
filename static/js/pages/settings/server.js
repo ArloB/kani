@@ -8,6 +8,46 @@ import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.j
 
 /** @param {HTMLElement} el */
 export function mount(el) {
+  // ── Server info ───────────────────────────────────────────────────────────
+  // Show the OPDS catalog URL so users can point e-reader apps at it.
+
+  const infoGroup = mkSettingsGroup('Integrations');
+  const infoCard  = mkSettingsGroupCard(infoGroup);
+
+  const opdsBase = `${window.location.origin}/opds`;
+  const opdsInput = document.createElement('input');
+  opdsInput.type = 'text';
+  opdsInput.readOnly = true;
+  opdsInput.value = opdsBase;
+  opdsInput.className = 'input input-sm font-mono text-xs w-56 select-all cursor-pointer';
+  opdsInput.title = 'Click to select';
+  opdsInput.addEventListener('click', () => opdsInput.select());
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'btn-ghost btn-sm';
+  copyBtn.textContent = 'Copy';
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(opdsBase);
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+    } catch { /* clipboard not available */ }
+  });
+
+  const opdsControl = document.createElement('div');
+  opdsControl.className = 'flex items-center gap-2';
+  opdsControl.appendChild(opdsInput);
+  opdsControl.appendChild(copyBtn);
+
+  infoCard.appendChild(mkSettingsRow({
+    label: 'OPDS catalog',
+    description: 'Point an e-reader app (Panels, Chunky, Moon+, KOReader…) at this URL for OPDS access to your library. Supports HTTP Basic auth.',
+    control: opdsControl,
+  }));
+
+  el.appendChild(infoGroup);
+
   // ── Admin actions ─────────────────────────────────────────────────────────
 
   const adminGroup = mkSettingsGroup('Admin actions');

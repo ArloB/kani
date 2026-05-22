@@ -75,7 +75,6 @@ async fn get_tracker_config_returns_200_for_admin() {
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
-    // Determine the AniList tracker id.
     let list_res = app
         .clone()
         .oneshot(authed_get("/rest/trackers", &cookie))

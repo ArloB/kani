@@ -49,7 +49,6 @@ async fn get_local_chapters_returns_inserted_chapters() {
         .await
         .unwrap();
     assert_eq!(chapters.len(), 2);
-    // Descending order: ch2 first
     assert!((chapters[0].number - 2.0).abs() < f64::EPSILON);
     assert!((chapters[1].number - 1.0).abs() < f64::EPSILON);
 }

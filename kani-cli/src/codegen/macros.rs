@@ -1,4 +1,4 @@
-// Emit `filter_list!` and `preference_list!` macro invocations from schema entries.
+//! Emit `filter_list!` and `preference_list!` macro invocations from schema entries.
 
 use crate::yaml::schema::{
     FilterDefault, FilterEntry, FilterKind, FilterOption, FilterSemantic, PrefOption,

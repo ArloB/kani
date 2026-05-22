@@ -239,7 +239,6 @@ impl AppService {
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_else(|_| "unknown".into());
 
-        // All manga with source names
         let rows = sqlx::query!(
             "SELECT m.id, m.source_manga_id, m.name, m.status, m.auto_download, m.auto_scan,
                     m.scanlator_mode, s.name AS source_name
@@ -403,7 +402,6 @@ impl AppService {
             }
         }
 
-        // Insert / ensure categories exist, build name→id map
         let mut cat_map: std::collections::HashMap<String, i64> = Default::default();
         if opts.import_categories {
             for cat in &backup.categories {
@@ -440,7 +438,6 @@ impl AppService {
                 total: total_manga,
             });
         }
-        // Process manga one at a time (each may do a fuzzy scan)
         for (processed, m) in (1_u32..).zip(backup.manga.iter()) {
             if !opts.import_manga {
                 break;
@@ -474,7 +471,6 @@ impl AppService {
                 }
             };
 
-            // Exact match check
             let existing_id: Option<i64> = sqlx::query_scalar!(
                 "SELECT id FROM manga WHERE source_id = ? AND source_manga_id = ?",
                 source_id,
@@ -486,7 +482,6 @@ impl AppService {
             let manga_id = if let Some(id) = existing_id {
                 id
             } else {
-                // Fuzzy duplicate check
                 let authors: Vec<String> = vec![];
                 let hits =
                     crate::service::dedup::find_similar_manga(&self.db, &m.name, &authors, None)
@@ -527,7 +522,6 @@ impl AppService {
                 .fetch_one(&mut *tx)
                 .await?;
 
-                // manga_categories
                 for cat_name in &m.categories {
                     if let Some(&cat_id) = cat_map.get(cat_name) {
                         sqlx::query!(
@@ -540,7 +534,6 @@ impl AppService {
                     }
                 }
 
-                // download_rules
                 if opts.import_download_rules {
                     for rule in &m.download_rules {
                         sqlx::query!(
@@ -558,7 +551,6 @@ impl AppService {
                 id
             };
 
-            // user_manga_tracking
             if opts.import_tracking
                 && let Some(ref tr) = m.tracking
             {
@@ -574,7 +566,6 @@ impl AppService {
                 .await?;
             }
 
-            // user_chapter_tracking
             if opts.import_chapter_progress && !m.chapter_progress.is_empty() {
                 for cp in &m.chapter_progress {
                     let chapter_id: Option<i64> = sqlx::query_scalar!(
@@ -620,7 +611,6 @@ impl AppService {
             });
         }
 
-        // Settings
         if opts.import_settings
             && let Some(ref s) = backup.settings
         {

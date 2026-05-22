@@ -1,5 +1,5 @@
-// Emit Rust builder-chain source code from an `Expr` tree.
-// The output calls `kani_shared::ast::Expr::*` constructors and chained methods.
+//! Emit Rust builder-chain source code from an `Expr` tree.
+//! The output calls `kani_shared::ast::Expr::*` constructors and chained methods.
 
 use kani_shared::ast::{Expr, Op};
 
@@ -17,7 +17,6 @@ pub fn emit_expr(expr: &Expr) -> String {
         Expr::Json(ptr) => format!("Expr::json_root(\"{}\")", escape(ptr)),
         Expr::Pref(key) => format!("Expr::pref(\"{}\")", escape(key)),
 
-        // Single-target chain methods
         Expr::Attr { target, name } => format!("{}.attr(\"{}\")", e(target), escape(name)),
         Expr::Text { target } => format!("{}.text()", e(target)),
         Expr::InnerHtml { target } => format!("{}.inner_html()", e(target)),

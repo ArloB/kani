@@ -307,7 +307,6 @@ async fn example_instantiate_pre_and_call() {
     let mut store = rt.create_store();
     store.set_epoch_deadline(EPOCH_TICKS);
 
-    // Use the pre-linked instance to create a live instance
     let instance = pre
         .instantiate_async(&mut store)
         .await

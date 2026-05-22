@@ -98,7 +98,6 @@ async fn main() {
         tracing::error!("Failed to ensure default user: {}", e);
     }
 
-    // Initialise HTTP logging toggle from persisted setting.
     kani_web::HTTP_LOGGING_ENABLED.store(
         state.get_settings().await.http_request_logging,
         std::sync::atomic::Ordering::Relaxed,

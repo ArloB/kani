@@ -64,7 +64,6 @@ async fn patch_settings_scan_updates_interval() {
 
     assert_eq!(res.status(), StatusCode::OK);
 
-    // Read back and confirm the new value.
     let get_res = app
         .oneshot(authed_get("/rest/settings", &cookie))
         .await

@@ -49,7 +49,6 @@ impl AppService {
                 ("type", "application/opensearchdescription+xml"),
             ],
         );
-        // Catalogue entry
         nav_entry(
             &mut w,
             "urn:kani:catalogue",

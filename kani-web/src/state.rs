@@ -65,7 +65,6 @@ impl std::ops::Deref for AppState {
     }
 }
 
-// Re-export for main.rs which uses kani_web::state::chapter_name
 pub use kani_app::chapter_name;
 
 #[cfg(test)]

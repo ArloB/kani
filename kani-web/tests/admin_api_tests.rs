@@ -82,7 +82,6 @@ async fn admin_create_user_returns_201_for_admin() {
     let body = body_json(res).await;
     assert_eq!(body["username"], serde_json::json!("newuser"));
 
-    // Verify the new user now appears in the list.
     let list_res = app
         .oneshot(authed_get("/rest/admin/users", &cookie))
         .await

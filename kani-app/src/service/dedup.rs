@@ -35,7 +35,6 @@ pub fn normalise_title(title: &str) -> String {
         .or_else(|| lower.strip_prefix("an "))
         .unwrap_or(&lower);
 
-    // Remove vol/chapter suffixes
     let no_suffix = {
         let patterns = [", vol.", " vol.", ", volume ", " volume ", ", ch.", " ch."];
         let mut s = stripped.to_string();
@@ -48,7 +47,6 @@ pub fn normalise_title(title: &str) -> String {
         s
     };
 
-    // Keep only alphanumeric and spaces, collapse whitespace
     no_suffix
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { ' ' })

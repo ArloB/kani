@@ -575,10 +575,6 @@ fn convert_error_unknown_method() {
 
 #[test]
 fn convert_error_map_literal_outside_lookup() {
-    // A bare map literal is a parser error (atom doesn't include it at top level)
-    // but let's confirm at least the method-level path errors correctly.
-    // If it can even be built via a workaround, conversion should fail.
-    // The simplest test: validate that a "Known good" lookup works.
     let expr = parse_ok(r#"self.text().lookup({"x": "y"})"#);
     assert!(
         matches!(expr, Expr::Lookup { .. }),

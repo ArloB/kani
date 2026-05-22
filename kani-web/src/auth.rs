@@ -466,7 +466,6 @@ impl AuthBackend {
             .execute(&self.db)
             .await?;
         }
-        // Replace permissions wholesale
         sqlx::query!("DELETE FROM role_permissions WHERE role_slug = ?", slug)
             .execute(&self.db)
             .await?;
@@ -1005,7 +1004,6 @@ mod tests {
             .create_user("mia", "mia@test.com", "pass")
             .await
             .unwrap();
-        // Revoke the default 'user' role
         backend.revoke_role(user.id, "user").await.unwrap();
         let updated = backend
             .fetch_user_by_identity("mia")

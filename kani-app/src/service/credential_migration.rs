@@ -14,7 +14,6 @@ impl AppService {
     pub async fn get_encryption_status(&self) -> Result<CredentialEncryptionStatus> {
         let mut plaintext_count: i64 = 0;
 
-        // 1. email_provider_config
         let email_config: String =
             sqlx::query_scalar("SELECT email_provider_config FROM settings WHERE id='singleton'")
                 .fetch_one(&self.db)
@@ -25,7 +24,6 @@ impl AppService {
             plaintext_count += 1;
         }
 
-        // 2. tracker_app_config.client_secret
         let secret_rows = sqlx::query("SELECT client_secret FROM tracker_app_config")
             .fetch_all(&self.db)
             .await
@@ -41,7 +39,6 @@ impl AppService {
             }
         }
 
-        // 3. user_tracker_credentials access_token + refresh_token
         let token_rows =
             sqlx::query("SELECT access_token, refresh_token FROM user_tracker_credentials")
                 .fetch_all(&self.db)
@@ -77,7 +74,6 @@ impl AppService {
             return Ok(());
         };
 
-        // 1. email_provider_config
         let email_config: String =
             sqlx::query_scalar("SELECT email_provider_config FROM settings WHERE id='singleton'")
                 .fetch_one(&self.db)
@@ -93,7 +89,6 @@ impl AppService {
             // In-memory stays plaintext (the settings struct was already decrypted on startup).
         }
 
-        // 2. tracker_app_config.client_secret
         let secret_rows = sqlx::query("SELECT tracker_id, client_secret FROM tracker_app_config")
             .fetch_all(&self.db)
             .await?;
@@ -116,7 +111,6 @@ impl AppService {
             }
         }
 
-        // 3. user_tracker_credentials
         let token_rows = sqlx::query(
             "SELECT user_id, tracker_id, access_token, refresh_token FROM user_tracker_credentials",
         )

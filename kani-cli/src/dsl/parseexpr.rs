@@ -2,9 +2,16 @@ use crate::error::CliError;
 use chumsky::prelude::SimpleSpan;
 use kani_shared::ast::{Expr, Op};
 
+/// A `ParseExpr` paired with its source span, produced at the parse boundary.
+///
+/// Using a newtype (rather than embedding spans in every `ParseExpr` variant)
+/// keeps internal types clean while giving the conversion to `Expr` access to
+/// source positions for accurate error reporting.
+#[derive(Debug, Clone)]
+pub struct SpannedParseExpr(pub(super) ParseExpr, pub(super) SimpleSpan);
+
 #[derive(Debug, Clone)]
 pub enum ParseExpr {
-    // TODO: Add spans to all relevant types
     SelfRef,
     Dom(String),
     Json(String),
@@ -288,7 +295,6 @@ impl TryFrom<ParseExpr> for Expr {
                         delimiter: d.clone()
                     }),
 
-                    // Recursive Method Calls
                     ("map", [tr]) => {
                         accumulate!(target_res, Expr::try_from(tr.clone()) => |t, tr| Expr::Map { target: t, transform: tr })
                     }
@@ -331,6 +337,28 @@ impl TryFrom<ParseExpr> for Expr {
                     }
                 }
             }
+        }
+    }
+}
+
+// ─── Spanned conversion ───────────────────────────────────────────────────────
+
+/// Conversion from `SpannedParseExpr` — the type produced at the parse boundary.
+///
+/// This is the entry point for callers of `dsl::parser()`. The outer span is
+/// used for accurate source positions in top-level errors (e.g. a bare map
+/// literal outside `.lookup()`). All other variants delegate to the inner
+/// `TryFrom<ParseExpr>` implementation which uses embedded spans where available.
+impl TryFrom<SpannedParseExpr> for Expr {
+    type Error = Vec<CliError>;
+
+    fn try_from(SpannedParseExpr(value, span): SpannedParseExpr) -> Result<Self, Self::Error> {
+        match value {
+            ParseExpr::MapLiteral(_) => Err(vec![CliError::DslConversion {
+                message: "Map literals '{...}' can only be used inside .lookup()".to_string(),
+                span: span.into_range(),
+            }]),
+            other => Expr::try_from(other),
         }
     }
 }

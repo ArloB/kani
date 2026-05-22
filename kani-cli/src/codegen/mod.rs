@@ -1,4 +1,4 @@
-// Rust code generation from a ValidatedExtension.
+//! Rust code generation from a ValidatedExtension.
 
 pub mod blueprint;
 pub mod crate_layout;
@@ -36,7 +36,6 @@ fn emit_lib_rs(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
 
     parts.push(emit_lib_header(ext, embedded_bytes));
 
-    // MangaExtension impl
     parts.push(format!(
         "impl MangaExtension for {} {{",
         crate_layout::to_pascal_case(&ext.id)
@@ -105,7 +104,6 @@ fn emit_lib_rs(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
 
     parts.push(MANGA_EXT_STUB_SORT.into());
 
-    // filter_list and preference_list
     parts.push(format!(
         "fn get_filter_list(&self) -> ExtensionResult<wit_types::FilterList> {{\n{}\n}}",
         emit_filter_list(&ext.filters)

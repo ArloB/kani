@@ -100,7 +100,6 @@ async fn add_source_returns_201_for_admin() {
         "response must contain numeric id, got: {body}"
     );
 
-    // Verify it appears in the list.
     let list_res = app
         .oneshot(authed_get("/rest/sources", &cookie))
         .await
@@ -162,7 +161,6 @@ async fn get_source_returns_200_for_authed_user() {
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
-    // Create a source first so there is something to fetch.
     let create_res = app
         .clone()
         .oneshot(authed_post(

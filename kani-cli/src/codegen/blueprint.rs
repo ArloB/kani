@@ -1,4 +1,4 @@
-// Emit Rust source for a BlueprintBuilder chain from a ValidatedEndpoint.
+//! Emit Rust source for a BlueprintBuilder chain from a ValidatedEndpoint.
 
 use super::expr::emit_expr;
 use crate::yaml::model::{FieldSource, ValidatedEndpoint, ValidatedHnp};
@@ -16,12 +16,10 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
     // Attach request (replaced by `let mut req` from emit_request_block and then `.request(req)`)
     lines.push("    .request(req)".into());
 
-    // Bindings
     for b in &ep.bindings {
         lines.push(format!("    .bind(\"{}\", {})", b.name, emit_expr(&b.expr)));
     }
 
-    // Fields
     for f in &ep.fields {
         match &f.source {
             FieldSource::Blueprint(expr) => {
@@ -36,7 +34,6 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
         }
     }
 
-    // Scalars
     for s in &ep.scalars {
         match &s.source {
             FieldSource::Blueprint(expr) => {
@@ -51,7 +48,6 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
         }
     }
 
-    // has_next_page scalar (if DSL-driven)
     if let ValidatedHnp::Scalar(expr) = &ep.has_next_page {
         lines.push(format!(
             "    .scalar(\"has_next_page\", {})",
@@ -59,7 +55,6 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
         ));
     }
 
-    // Pagination
     if let Some(pag) = &ep.pagination {
         let offset_type = match pag.offset_type {
             YamlOffsetType::Item => "OffsetType::ItemOffset".into(),
@@ -82,7 +77,6 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
 #[allow(dead_code)]
 pub fn emit_blueprint_chain_no_request(ep: &ValidatedEndpoint) -> String {
     let src = emit_blueprint_chain(ep);
-    // Remove the `.request(req)` line
     src.lines()
         .filter(|l| !l.trim().starts_with(".request(req)"))
         .collect::<Vec<_>>()

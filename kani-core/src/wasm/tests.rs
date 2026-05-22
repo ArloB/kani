@@ -25,7 +25,6 @@ async fn handle_capacity_ok_when_empty() {
 #[tokio::test]
 async fn handle_capacity_err_at_max() {
     let mut state = HostState::default();
-    // fill up with JSON docs up to MAX_HANDLES
     for i in 0..super::MAX_HANDLES as i32 {
         state.json_docs.insert(i, serde_json::Value::Null);
     }
@@ -35,7 +34,6 @@ async fn handle_capacity_err_at_max() {
 #[tokio::test]
 async fn handle_capacity_counts_all_types() {
     let mut state = HostState::default();
-    // Each map contributes to the total
     state.json_docs.insert(1, serde_json::Value::Null);
     state.html_lists.insert(2, vec![]);
     // 2 handles → well below max
@@ -69,7 +67,6 @@ fn unrestricted_allows_any_host() {
 
 #[test]
 fn metadata_only_rejects_all() {
-    // default() sets MetadataOnly
     let state = HostState::default();
     let err = state.check_allowed_host("example.com").unwrap_err();
     assert!(err.contains("not permitted"));
@@ -117,9 +114,7 @@ fn get_html_doc_errors_on_missing_handle() {
 #[test]
 fn selector_cache_miss_then_hit() {
     let mut state = HostState::default();
-    // first call: cache miss, parses and inserts
     let _sel = state.get_or_parse_selector("div.card").unwrap();
-    // second call: cache hit, same entry
     assert!(state.get_or_parse_selector("div.card").is_ok());
     assert_eq!(state.selector_cache.borrow().len(), 1);
 }
@@ -225,7 +220,6 @@ async fn html_first_returns_none_for_no_match() {
 async fn html_children_returns_list() {
     let mut state = HostState::default();
     let doc = html::Host::parse(&mut state, SIMPLE_HTML.to_string()).unwrap();
-    // Drill down: select div.card, get its children (p and span)
     let card = html::Host::first(&mut state, doc, "div.card".to_string())
         .unwrap()
         .unwrap();

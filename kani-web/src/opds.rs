@@ -152,14 +152,12 @@ async fn opds_authenticate(
     headers: &HeaderMap,
     state: &AppState,
 ) -> Option<User> {
-    // 1. Valid session
     if let Some(user) = &auth.user
         && user.is_active
     {
         return Some(user.clone());
     }
 
-    // 2. Basic auth
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let encoded = value.strip_prefix("Basic ")?;
     let decoded = BASE64_STANDARD.decode(encoded).ok()?;

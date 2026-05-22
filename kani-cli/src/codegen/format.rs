@@ -1,4 +1,4 @@
-// Post-process generated Rust source through `rustfmt` if available.
+//! Post-process generated Rust source through `rustfmt` if available.
 
 pub fn try_rustfmt(source: &str) -> String {
     let result = std::process::Command::new("rustfmt")

@@ -7,7 +7,6 @@ impl AppService {
     pub async fn sync_manga_trackers(&self, user_id: i64, manga_id: i64) -> Result<()> {
         let local = self.get_manga_tracking(user_id, manga_id).await?;
 
-        // Respect the per-manga (or global default) tracking toggle.
         if !local.tracking_enabled {
             return Ok(());
         }
@@ -26,7 +25,6 @@ impl AppService {
                 continue;
             };
 
-            // Re-acquire read lock for each tracker call.
             let (access_token, remote) = {
                 let registry = self.tracker_registry.read().await;
                 let Some(tracker) = registry.get(tracker_id) else {
@@ -85,7 +83,6 @@ impl AppService {
                 }
             }
 
-            // Pull forward remote state if local is behind.
             if remote.status.is_some()
                 && local.status.is_none()
                 && let Some(s) = remote.status

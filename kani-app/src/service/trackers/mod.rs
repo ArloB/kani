@@ -101,7 +101,6 @@ impl TrackerRegistry {
     pub async fn new(db: &SqlitePool, cipher: Option<&CredentialCipher>) -> Result<Self> {
         let mut trackers: HashMap<i64, Box<dyn ExternalTracker>> = HashMap::new();
 
-        // AniList: needs client_id + client_secret.
         let anilist_id = Self::ensure_tracker_row(db, "AniList").await?;
         let anilist = Self::load_tracker_config(db, "AniList", cipher).await?;
         let anilist_creds = anilist
@@ -118,7 +117,6 @@ impl TrackerRegistry {
             );
         }
 
-        // MAL: needs only client_id (public PKCE client).
         let mal_id = Self::ensure_tracker_row(db, "MyAnimeList").await?;
         let mal = Self::load_tracker_config(db, "MyAnimeList", cipher).await?;
         let mal_client_id = mal

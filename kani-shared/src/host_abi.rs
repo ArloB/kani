@@ -8,7 +8,6 @@ use crate::{
     bindings::kani::extension::{html, http, json, utility},
 };
 
-// Re-export common types
 pub use http::Method as HttpMethod;
 pub type DocumentHandle = html::DocHandle;
 pub type ListHandle = html::ListHandle;

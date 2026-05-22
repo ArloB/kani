@@ -1,4 +1,4 @@
-// Semantic validation: DSL parsing, variable references, and required field checks.
+//! Semantic validation: DSL parsing, variable references, and required field checks.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;

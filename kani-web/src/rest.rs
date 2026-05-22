@@ -150,7 +150,6 @@ where
 
 pub fn routes(state: AppState) -> Router {
     Router::new()
-        // ── Auth (public) ────────────────────────────────────────────────
         .route("/auth/login", post(auth_login))
         .route("/auth/logout", post(auth_logout))
         .route("/auth/me", get(auth_me))
@@ -173,11 +172,8 @@ pub fn routes(state: AppState) -> Router {
         )
         .route("/auth/verify-email", post(verify_email))
         .route("/auth/resend-verification", post(resend_verification))
-        // ── Image proxy — mounted separately with its own rate limit ────
-        // ── Server-sent events ───────────────────────────────────────────
         .route("/events", get(combined_sse))
         .route("/boot_id", get(get_boot_id))
-        // ── Source admin CRUD ────────────────────────────────────────────
         .route("/sources", get(list_sources).post(add_source))
         .route("/sources/health", get(get_sources_health))
         .route("/sources/active_ids", get(get_active_source_ids))
@@ -186,11 +182,9 @@ pub fn routes(state: AppState) -> Router {
             get(get_source).patch(update_source).delete(delete_source),
         )
         .route("/sources/{id}/metadata", get(get_metadata))
-        // WASM installation
         .route("/sources/{id}/wasm", post(upload_wasm))
         .route("/sources/{id}/wasm/fetch", post(fetch_wasm))
         .route("/sources/{id}/reload", post(reload_source_handler))
-        // Source browse/search
         .route(
             "/sources/{id}/popular/{page}/{page_size}",
             get(get_popular_manga),
@@ -217,9 +211,7 @@ pub fn routes(state: AppState) -> Router {
             "/sources/{id}/toggle_favourite",
             patch(toggle_source_favourite),
         )
-        // Source filters
         .route("/sources/{id}/filters", get(get_source_filters))
-        // Source preferences
         .route("/sources/{id}/preference_schema", get(get_pref_schema))
         .route("/sources/{id}/preferences", get(get_source_preferences))
         .route(
@@ -238,12 +230,10 @@ pub fn routes(state: AppState) -> Router {
             "/sources/{id}/preferences/{key}/toggle_select",
             post(toggle_pref_select_item),
         )
-        // ── Library ──────────────────────────────────────────────────────
         .route("/library", get(get_library_filtered))
         .route("/library/scan-all", post(scan_all_library))
         .route("/library/continue_reading", get(get_continue_reading_shelf))
         .route("/library/{page}/{order}", get(get_library)) // legacy Leptos compat
-        // Backup / Restore
         .route("/library/backup", get(library_backup))
         .route(
             "/library/backup/preview",
@@ -253,7 +243,6 @@ pub fn routes(state: AppState) -> Router {
             "/library/restore",
             post(library_restore).route_layer(DefaultBodyLimit::max(MAX_BACKUP_BYTES)),
         )
-        // Tachiyomi import
         .route(
             "/library/import/tachiyomi/preview",
             post(library_tachiyomi_preview).route_layer(DefaultBodyLimit::max(MAX_TACHI_BYTES)),
@@ -262,7 +251,6 @@ pub fn routes(state: AppState) -> Router {
             "/library/import/tachiyomi",
             post(library_import_tachiyomi).route_layer(DefaultBodyLimit::max(MAX_TACHI_BYTES)),
         )
-        // Pending imports
         .route("/library/pending-imports", get(library_pending_imports))
         .route(
             "/library/pending-imports/{id}",
@@ -272,9 +260,7 @@ pub fn routes(state: AppState) -> Router {
             "/library/pending-imports/{id}/resolve",
             post(library_resolve_pending_import),
         )
-        // Orphaned manga
         .route("/library/orphaned", get(library_orphaned))
-        // Duplicates
         .route("/library/duplicates", get(library_duplicates))
         .route("/library/duplicates/merge", post(library_merge_duplicate))
         .route("/library/duplicates/scan", post(library_duplicates_scan))
@@ -284,7 +270,6 @@ pub fn routes(state: AppState) -> Router {
         )
         .route("/recent_updates", get(get_recent_updates))
         .route("/global_search", get(global_search_handler))
-        // ── Manga ────────────────────────────────────────────────────────
         .route("/manga/{id}", get(get_manga).delete(delete_manga))
         .route(
             "/manga/{id}/cover",
@@ -316,7 +301,6 @@ pub fn routes(state: AppState) -> Router {
         .route("/manga/{id}/seen", patch(mark_manga_seen))
         .route("/manga/{id}/preview_migration", post(preview_migration))
         .route("/manga/{id}/migrate", post(migrate_manga_handler))
-        // Download rules
         .route(
             "/manga/{id}/download_rules",
             get(get_download_rules).post(add_download_rule),
@@ -333,7 +317,6 @@ pub fn routes(state: AppState) -> Router {
             "/manga/{id}/download_rules/preview",
             post(preview_download_rules),
         )
-        // Scanlator preferences
         .route(
             "/manga/{id}/scanlator_preferences",
             get(get_scanlator_prefs).post(set_scanlator_pref),
@@ -345,7 +328,6 @@ pub fn routes(state: AppState) -> Router {
         )
         .route("/manga/{id}/scanlators", get(get_chapter_scanlators))
         .route("/manga/{id}/languages", get(get_chapter_languages))
-        // Categories
         .route("/categories", get(list_categories).post(create_category))
         .route("/categories/reorder", put(reorder_categories))
         .route(
@@ -356,14 +338,12 @@ pub fn routes(state: AppState) -> Router {
             "/manga/{id}/categories",
             get(get_manga_categories).put(set_manga_categories),
         )
-        // ── Chapters ─────────────────────────────────────────────────────
         .route("/downloads/history", get(get_download_history))
         .route("/chapter/{id}/download", post(start_download))
         .route("/chapter/{id}/delete", delete(delete_downloaded))
         .route("/chapter/{id}/cancel", post(cancel_download))
         .route("/chapter/{id}/pages", get(get_chapter_page_manifest))
         .route("/chapter/{id}/page/{page_num}", get(serve_chapter_page))
-        // ── Progress tracking ────────────────────────────────────────
         .route("/chapter/{id}/progress", put(set_chapter_progress_handler))
         .route(
             "/chapters/read_status",
@@ -381,7 +361,6 @@ pub fn routes(state: AppState) -> Router {
             "/manga/{id}/chapters/mark_up_to",
             post(mark_chapters_up_to_handler),
         )
-        // ── External trackers ────────────────────────────────────────
         .route("/trackers", get(list_trackers))
         .route("/trackers/{id}/auth_url", get(get_tracker_auth_url))
         .route("/trackers/{id}/callback", get(tracker_oauth_callback))
@@ -403,19 +382,15 @@ pub fn routes(state: AppState) -> Router {
         )
         .route("/trackers/sync", post(sync_all_trackers))
         .route("/manga/{id}/sync", post(sync_manga_trackers))
-        // ── Filters ──────────────────────────────────────────────────────
         .route("/filters/tags", get(get_filter_tags))
         .route("/filters/authors", get(get_filter_authors))
         .route("/filters/artists", get(get_filter_artists))
-        // ── Settings & scan ──────────────────────────────────────────────
         .route("/settings", get(get_settings).patch(update_settings))
         .route("/scan/toggle_auto", post(toggle_auto_scan))
         .route("/refresh/start", post(start_refresh_all_rest))
         .route("/refresh/status", get(get_refresh_status))
-        // ── Server control ───────────────────────────────────────────────
         .route("/server/stop", post(server_stop))
         .route("/server/restart", post(server_restart))
-        // ── Admin — user management ──────────────────────────────────────
         .route(
             "/admin/users",
             get(admin_list_users).post(admin_create_user),
@@ -427,7 +402,6 @@ pub fn routes(state: AppState) -> Router {
         .route("/admin/users/{id}/roles", post(admin_grant_role))
         .route("/admin/users/{id}/roles/{role}", delete(admin_revoke_role))
         .route("/admin/users/{id}/activity", get(admin_user_activity))
-        // ── Admin — role management ──────────────────────────────────────
         .route(
             "/admin/roles",
             get(admin_list_roles).post(admin_create_role),
@@ -452,28 +426,22 @@ pub fn routes(state: AppState) -> Router {
             "/admin/credentials/encrypt",
             post(migrate_credentials_handler),
         )
-        // ── Admin — logs & audit ─────────────────────────────────────────
         .route("/admin/logs", get(admin_logs))
         .route("/admin/logs/stream", get(admin_logs_stream))
         .route("/admin/logs/download", get(admin_logs_download))
         .route("/admin/audit-log", get(admin_audit_log))
         .route("/admin/audit-log/download", get(admin_audit_log_download))
-        // ── Reading statistics ───────────────────────────────────────────
         .route("/stats", get(reading_stats))
         .route("/downloads/active", delete(cancel_all_global_downloads))
-        // ── CBZ / Export ─────────────────────────────────────────────────
         .route("/chapters/{id}/cbz", get(serve_chapter_cbz))
         .route("/chapters/{id}/export/epub", get(export_epub))
         .route("/chapters/{id}/export/kepub", get(export_kepub))
         .route("/chapters/{id}/export/kcc", get(export_kcc))
-        // ── Filesystem browser & path migration ──────────────────────────
         .route("/admin/fs/browse", get(fs_browse_handler))
         .route("/admin/fs/mkdir", post(fs_mkdir_handler))
         .route("/admin/path/estimate", post(path_migrate_estimate_handler))
         .route("/admin/path/migrate", post(path_migrate_handler))
-        // ── System capabilities ──────────────────────────────────────────
         .route("/system/capabilities", get(system_capabilities))
-        // ── Webhooks ─────────────────────────────────────────────────────
         .route("/webhooks", get(list_webhooks).post(create_webhook))
         .route(
             "/webhooks/{id}",
@@ -946,7 +914,6 @@ async fn image_proxy(
         .and_then(|u| u.host_str().map(|h| h.to_string()))
         .unwrap_or_else(|| url.clone());
 
-    // Per-host throttle: enforce a minimum 100ms gap between requests to the same upstream host.
     const MIN_HOST_REQUEST_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
     let throttle_mutex = state
         .proxy_throttle
@@ -967,7 +934,6 @@ async fn image_proxy(
         *last = std::time::Instant::now();
     }
 
-    // Coalesced fetch: concurrent requests for the same URL share one upstream fetch.
     let fetched: Arc<(bytes::Bytes, String)> = state
         .proxy_coalesce
         .try_get_with(url.clone(), {
@@ -1814,7 +1780,6 @@ async fn get_local_manga_details(
         "scanlator_mode":              d.manga.scanlator_mode,
         "download_all_preferred_only": d.manga.download_all_preferred_only,
         "notes":                       d.manga.notes,
-        // Override fields for the edit panel
         "cover_overridden":            d.manga.cover_overridden,
         "local_name":                  d.manga.local_name,
         "local_description":           d.manga.local_description,
@@ -1824,7 +1789,6 @@ async fn get_local_manga_details(
         "local_tags":                  d.local_tags,
         "has_local_people":            d.has_local_people,
         "has_local_tags":              d.has_local_tags,
-        // Raw source values for the "restore" affordance
         "source_name":                 d.manga.name,
         "source_description":          d.manga.description,
         "source_status":               i64::from(d.manga.status),
@@ -3686,7 +3650,6 @@ mod tests {
         let (app, user, pass) = test_router().await;
         let cookie = login_and_get_cookie(app.clone(), &user, &pass).await;
 
-        // Logout.
         let logout = axum::http::Request::builder()
             .method("POST")
             .uri("/auth/logout")

@@ -58,7 +58,6 @@ pub fn sanitize_filename(name: &str) -> String {
 /// Resolves `target` and asserts it remains under `root`.
 /// Fails if `target` does not yet exist — use the parent dir for new files.
 pub fn assert_within_root(root: &Path, target: &Path) -> Result<PathBuf> {
-    // Resolve the full canonical path cleanly
     let full = if target.exists() {
         dunce::canonicalize(target)?
     } else {
@@ -206,7 +205,6 @@ mod tests {
     #[test]
     fn rejects_dotdot_traversal() {
         let dir = tempdir().unwrap();
-        // Construct a path that climbs out with `..`
         let escape = dir.path().join("..").join("escape.txt");
 
         let result = assert_within_root(dir.path(), &escape);

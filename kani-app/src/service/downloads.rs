@@ -43,7 +43,6 @@ impl AppService {
     }
 
     pub async fn download_all_chapters(&self, manga_id: i64) -> Result<()> {
-        // Collect all undownloaded, non-orphaned chapter ids for this manga.
         let candidate_ids: Vec<i64> = sqlx::query_scalar!(
             "SELECT id FROM chapters \
              WHERE manga_id = ? AND download_status = 0 AND is_orphaned = 0",
@@ -60,9 +59,6 @@ impl AppService {
             return Ok(());
         }
 
-        // If download_all_preferred_only is set, apply scanlator preferences and
-        // download rules so that only one version of each chapter is downloaded
-        // (the preferred scanlator, or the first if no preference is configured).
         let preferred_only = sqlx::query_scalar!(
             "SELECT download_all_preferred_only FROM manga WHERE id = ?",
             manga_id

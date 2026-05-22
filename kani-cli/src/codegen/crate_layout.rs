@@ -1,4 +1,4 @@
-// Emit Cargo.toml and the lib.rs header / footer for a generated extension crate.
+//! Emit Cargo.toml and the lib.rs header / footer for a generated extension crate.
 
 use crate::yaml::model::ValidatedExtension;
 

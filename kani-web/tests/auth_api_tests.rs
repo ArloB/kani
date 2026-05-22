@@ -98,7 +98,6 @@ async fn logout_invalidates_session() {
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
-    // Logout
     let res = app
         .clone()
         .oneshot(authed_post(
@@ -110,7 +109,6 @@ async fn logout_invalidates_session() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // Subsequent /auth/me with the same cookie should now return 401.
     let res = app
         .clone()
         .oneshot(authed_get("/rest/auth/me", &cookie))

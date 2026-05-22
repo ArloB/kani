@@ -1,4 +1,4 @@
-// Emit per-endpoint MangaExtension trait method bodies.
+//! Emit per-endpoint MangaExtension trait method bodies.
 
 use super::blueprint::{emit_blueprint_bytes, emit_blueprint_chain};
 use super::request::emit_request_block;

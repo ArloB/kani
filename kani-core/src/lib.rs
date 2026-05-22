@@ -24,7 +24,6 @@ pub use error::Error;
 pub static HTTP_LOGGING_ENABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
 
-// Re-export wasmtime for downstream crates
 pub use wasmtime;
 
 /// Host-side WIT-generated `PreferenceSpec` (with serde derives).

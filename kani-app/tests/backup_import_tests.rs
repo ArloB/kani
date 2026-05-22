@@ -42,7 +42,6 @@ async fn restore_backup_reimports_manga_after_wipe() {
     assert_eq!(result.skipped_manga, 0);
     assert_eq!(result.pending_imports_added, 0);
 
-    // The manga should still exist in the DB.
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM manga")
         .fetch_one(&svc.db)
         .await
