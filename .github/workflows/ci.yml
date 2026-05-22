@@ -60,7 +60,7 @@ jobs:
 
       - name: Check sqlx offline data
         env:
-          DATABASE_URL: sqlite:ci-check.db
+          DATABASE_URL: sqlite:///tmp/kani-ci-check.db
           SQLX_OFFLINE: "false"
         run: |
           cargo sqlx migrate run
