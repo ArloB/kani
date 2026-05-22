@@ -28,12 +28,12 @@ jobs:
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: wasm-tools, wasm-opt, nextest
+          tool: wasm-tools, wasm-opt, nextest, cargo-binstall
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: sqlx-cli
-          fallback: cargo-install
+      - name: Install sqlx-cli
+        # cargo-binstall downloads a pre-built binary from sqlx's GitHub releases
+        # instead of compiling from source, saving several minutes per run.
+        run: cargo binstall sqlx-cli --no-confirm --no-symlinks
 
       - name: Cache kani-cli binary
         uses: actions/cache@v4
