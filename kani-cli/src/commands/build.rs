@@ -118,7 +118,7 @@ fn build_one(name: &str, set_version: Option<&str>, out_dir: &Path, debug: bool)
     if is_available("wasm-opt") {
         println!("   running wasm-opt");
         let tmp = tmp_path(&dest);
-        let mut wasm_opt_args = vec!["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"];
+        let mut wasm_opt_args = vec!["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "--enable-sign-ext"];
         if debug {
             wasm_opt_args.push("--debuginfo");
         }

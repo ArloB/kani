@@ -2,6 +2,7 @@ name: Coverage
 
 on:
   push:
+    branches: [main, develop]
   pull_request:
 
 env:
@@ -26,10 +27,7 @@ jobs:
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: wasm-tools
-
-      - name: Install wasm-opt (binaryen)
-        run: sudo apt-get install -y binaryen
+          tool: wasm-tools, wasm-opt
 
       # Build dev/test WASM extensions so kani-core WASM tests are included
       # in coverage (they skip gracefully if the WASM binaries are missing).
@@ -39,7 +37,8 @@ jobs:
       - name: Collect coverage
         run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
 
-      - uses: actions/upload-artifact@v4
+      - uses: codecov/codecov-action@v5
         with:
-          name: lcov
-          path: lcov.info
+          files: lcov.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}

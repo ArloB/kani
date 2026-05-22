@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT code_verifier, tracker_id, redirect_uri, created_at\n           FROM oauth_pkce_state\n           WHERE state = ?",
+  "query": "SELECT code_verifier, tracker_id, redirect_uri\n           FROM oauth_pkce_state\n           WHERE state = ? AND created_at >= datetime('now', '-10 minutes')",
   "describe": {
     "columns": [
       {
@@ -17,11 +17,6 @@
         "name": "redirect_uri",
         "ordinal": 2,
         "type_info": "Text"
-      },
-      {
-        "name": "created_at",
-        "ordinal": 3,
-        "type_info": "Datetime"
       }
     ],
     "parameters": {
@@ -30,9 +25,8 @@
     "nullable": [
       true,
       false,
-      false,
       false
     ]
   },
-  "hash": "14bc07e9bc4efa0ff8a1629aebff80f65fef355854c6f310244f5c4ad9176de3"
+  "hash": "cdcd5922854bfeb8e26f813cb20837d43d85b5fea5b31540066d74f97a4e8ff8"
 }
