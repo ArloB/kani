@@ -328,12 +328,12 @@ impl AppService {
         };
         // String-valued rules must be non-empty.
         match &kind {
-            LanguageInclude(_) | LanguageExclude(_) | TitleContains(_) | TitleExcludes(_) => {
-                if value.trim().is_empty() {
-                    return Err(ServiceError::Validation(
-                        "Rule value cannot be empty".into(),
-                    ));
-                }
+            LanguageInclude(_) | LanguageExclude(_) | TitleContains(_) | TitleExcludes(_)
+                if value.trim().is_empty() =>
+            {
+                return Err(ServiceError::Validation(
+                    "Rule value cannot be empty".into(),
+                ));
             }
             _ => {}
         }
@@ -373,12 +373,12 @@ impl AppService {
             PublishedAfter(ts) => ("published_after", ts.to_string()),
         };
         match &kind {
-            LanguageInclude(_) | LanguageExclude(_) | TitleContains(_) | TitleExcludes(_) => {
-                if value.trim().is_empty() {
-                    return Err(ServiceError::Validation(
-                        "Rule value cannot be empty".into(),
-                    ));
-                }
+            LanguageInclude(_) | LanguageExclude(_) | TitleContains(_) | TitleExcludes(_)
+                if value.trim().is_empty() =>
+            {
+                return Err(ServiceError::Validation(
+                    "Rule value cannot be empty".into(),
+                ));
             }
             _ => {}
         }

@@ -151,7 +151,7 @@ impl AppService {
             });
         }
 
-        sources.sort_by(|a, b| b.manga_count.cmp(&a.manga_count));
+        sources.sort_by_key(|b| std::cmp::Reverse(b.manga_count));
 
         Ok(TachiyomiPreview {
             total_manga: backup.backup_manga.len() as u32,

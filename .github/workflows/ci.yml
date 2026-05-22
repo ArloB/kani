@@ -24,15 +24,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Only persist the cache on main-branch pushes; PR runs restore but don't
-          # write, so they can't thrash the slots that develop/main depend on.
           save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
 
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-tools, wasm-opt, nextest
 
-      # sqlx-cli has no prebuilt binary for x86_64 via cargo-binstall; compile it.
       - uses: taiki-e/install-action@v2
         with:
           tool: sqlx-cli
@@ -49,29 +46,18 @@ jobs:
         if: steps.kani-cli-cache.outputs.cache-hit != 'true'
         run: cargo build --release -p kani-cli
 
-      # kani-example and kani-test-abi are excluded from --all builds.
-      # Build them explicitly so the kani-core WASM integration tests can load them.
       - name: Build dev/test WASM extensions
         run: ./target/release/kani-cli build --dev
 
       - name: Format check
         run: cargo fmt --check
 
-      # --workspace is intentionally omitted: extension crates are WASM-only and their
-      # WIT ABI symbol names (containing ':' and '#') are rejected by the GNU ld version
-      # script when linking for the native target. default-members in Cargo.toml excludes
-      # them; --workspace would override that and re-include them.
-      # nextest runs each test binary in a separate process and streams output as tests
-      # complete; it doesn't run doctests (those are rare in this codebase).
       - name: Test
         run: cargo nextest run --locked
 
-      # No --all-targets: test targets relax some lints deliberately.
       - name: Clippy
         run: cargo clippy --locked -- -D warnings
 
-      # Verify committed .sqlx query metadata is current with the schema.
-      # SQLX_OFFLINE is overridden here so the macros reconnect to the live DB.
       - name: Check sqlx offline data
         env:
           DATABASE_URL: sqlite:ci-check.db

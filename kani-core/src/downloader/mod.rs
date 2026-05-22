@@ -658,7 +658,7 @@ impl DownloaderManager {
 
             let active_for_stream = active.clone();
 
-            let mut stream = stream::iter(pages.into_iter())
+            let mut stream = stream::iter(pages)
                 .map(|page| {
                     let client = client.clone();
                     let base_url = base_url.clone();
