@@ -3,7 +3,6 @@ name: Coverage
 on:
   push:
     branches: [main, develop]
-  pull_request:
 
 env:
   SQLX_OFFLINE: "true"
@@ -22,20 +21,35 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
 
       - uses: taiki-e/install-action@cargo-llvm-cov
 
       - uses: taiki-e/install-action@v2
         with:
-          tool: wasm-tools, wasm-opt
+          tool: wasm-tools, wasm-opt, nextest
+
+      - name: Cache kani-cli binary
+        uses: actions/cache@v4
+        id: kani-cli-cache
+        with:
+          path: target/release/kani-cli
+          key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
+
+      - name: Build kani-cli
+        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
+        run: cargo build --release -p kani-cli
 
       # Build dev/test WASM extensions so kani-core WASM tests are included
       # in coverage (they skip gracefully if the WASM binaries are missing).
       - name: Build dev/test WASM extensions
-        run: cargo run -p kani-cli -- build --dev
+        run: ./target/release/kani-cli build --dev
 
+      # --workspace omitted for the same reason as in ci.yml: extension crates are
+      # WASM-only and fail to link for the native target. default-members excludes them.
       - name: Collect coverage
-        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --locked --lcov --output-path lcov.info
 
       - uses: codecov/codecov-action@v5
         with:

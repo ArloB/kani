@@ -157,7 +157,7 @@ mod tests {
             .await
             .unwrap();
         assert!(path.exists());
-        assert!(!path.to_string_lossy().contains('/'));
+        assert_eq!(path.parent(), Some(dir.path()));
     }
 
     #[tokio::test]

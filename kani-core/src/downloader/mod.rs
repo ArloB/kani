@@ -288,10 +288,16 @@ impl DownloaderManager {
                 .map_err(|e| crate::error::Error::Other(format!("Zip error: {}", e)))?;
         }
 
-        zip_writer
+        // close() writes the central directory + EOCD into tokio::fs::File's write
+        // buffer, but does not call flush() on the underlying writer. tokio::fs::File
+        // Drop schedules the OS close on a thread pool without blocking, so those bytes
+        // can be lost before the caller reads the file back. Flush explicitly here.
+        let mut file = zip_writer
             .close()
             .await
-            .map_err(|e| crate::error::Error::Other(format!("Zip error: {}", e)))?;
+            .map_err(|e| crate::error::Error::Other(format!("Zip error: {}", e)))?
+            .into_inner();
+        file.flush().await?;
 
         Ok(())
     }
