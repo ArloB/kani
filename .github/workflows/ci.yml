@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -41,7 +41,7 @@ jobs:
         run: cargo binstall sqlx-cli --no-confirm --no-symlinks
 
       - name: Cache kani-cli binary
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: kani-cli-cache
         with:
           path: target/release/kani-cli
@@ -52,7 +52,7 @@ jobs:
         run: cargo build --release -p kani-cli
 
       - name: Cache WASM extensions
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: wasm-cache
         with:
           path: wasm_sources/

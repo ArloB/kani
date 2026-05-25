@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -39,7 +39,7 @@ jobs:
           tool: wasm-tools, wasm-opt, nextest
 
       - name: Cache kani-cli binary
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: kani-cli-cache
         with:
           path: target/release/kani-cli
@@ -50,7 +50,7 @@ jobs:
         run: cargo build --release -p kani-cli
 
       - name: Cache WASM extensions
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: wasm-cache
         with:
           path: wasm_sources/
@@ -63,7 +63,7 @@ jobs:
       - name: Collect coverage
         run: cargo llvm-cov nextest --locked --lcov --output-path lcov.info
 
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v6
         with:
           files: lcov.info
           fail_ci_if_error: true

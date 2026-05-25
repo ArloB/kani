@@ -17,7 +17,7 @@ jobs:
     name: Warm Rust cache
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -30,4 +30,4 @@ jobs:
           cache-on-failure: true
 
       - name: Build workspace (populate cache)
-        run: cargo build --workspace --locked
+        run: cargo build --locked
