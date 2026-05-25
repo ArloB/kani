@@ -634,7 +634,7 @@ impl AppService {
                 // Already registered under the canonical id — sync metadata, re-activate if
                 // soft-deleted, and ensure the file is named correctly.
                 let by_id = sqlx::query!(
-                    "SELECT id, version, base_url, unrestricted_http, deleted_at FROM sources WHERE name = ?",
+                    "SELECT id, version, base_url, unrestricted_http, mihon_source_id, deleted_at FROM sources WHERE name = ?",
                     canonical_id
                 )
                 .fetch_optional(db)
@@ -652,13 +652,20 @@ impl AppService {
                     let version_changed = existing.version != metadata.version;
                     let base_url_changed = existing.base_url != metadata.base_url;
                     let http_changed = existing.unrestricted_http != metadata.unrestricted_http;
+                    let mihon_changed = existing.mihon_source_id != metadata.mihon_source_id;
                     let was_deleted = existing.deleted_at.is_some();
-                    if version_changed || base_url_changed || http_changed || was_deleted {
+                    if version_changed
+                        || base_url_changed
+                        || http_changed
+                        || mihon_changed
+                        || was_deleted
+                    {
                         sqlx::query!(
-                            "UPDATE sources SET version = ?, base_url = ?, unrestricted_http = ?, deleted_at = NULL WHERE id = ?",
+                            "UPDATE sources SET version = ?, base_url = ?, unrestricted_http = ?, mihon_source_id = ?, deleted_at = NULL WHERE id = ?",
                             metadata.version,
                             metadata.base_url,
                             metadata.unrestricted_http,
+                            metadata.mihon_source_id,
                             existing.id
                         )
                         .execute(db)
@@ -704,11 +711,12 @@ impl AppService {
 
                 if let Some(row) = legacy {
                     sqlx::query!(
-                        "UPDATE sources SET name = ?, version = ?, base_url = ?, unrestricted_http = ? WHERE id = ?",
+                        "UPDATE sources SET name = ?, version = ?, base_url = ?, unrestricted_http = ?, mihon_source_id = ? WHERE id = ?",
                         canonical_id,
                         metadata.version,
                         metadata.base_url,
                         metadata.unrestricted_http,
+                        metadata.mihon_source_id,
                         row.id
                     )
                     .execute(db)
@@ -733,12 +741,13 @@ impl AppService {
                 }
 
                 let result = sqlx::query!(
-                    "INSERT INTO sources (name, version, base_url, enabled, unrestricted_http) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO sources (name, version, base_url, enabled, unrestricted_http, mihon_source_id) VALUES (?, ?, ?, ?, ?, ?)",
                     canonical_id,
                     metadata.version,
                     metadata.base_url,
                     initially_enabled,
                     metadata.unrestricted_http,
+                    metadata.mihon_source_id,
                 )
                 .execute(db)
                 .await?;

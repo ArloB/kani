@@ -69,6 +69,44 @@ pub struct TachiyomiImportResult {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/// Resolve a Mihon/Tachiyomi source ID to a Kani source.
+///
+/// First queries the DB for a source with a matching `mihon_source_id` (set when a
+/// WASM extension is installed). Falls back to the hardcoded name-map in
+/// `tachiyomi_sources.rs` for extensions that pre-date the declarative field.
+///
+/// Returns `(Option<kani_source_id>, Option<display_name>)`.
+async fn resolve_kani_source(
+    db: &sqlx::SqlitePool,
+    mihon_id: i64,
+) -> Result<(Option<i64>, Option<String>)> {
+    // Primary: match by the mihon_source_id column stored in the sources table.
+    let by_mihon = sqlx::query!(
+        "SELECT id, name FROM sources WHERE mihon_source_id = ? AND deleted_at IS NULL",
+        mihon_id
+    )
+    .fetch_optional(db)
+    .await?;
+
+    if let Some(row) = by_mihon {
+        return Ok((Some(row.id), Some(row.name)));
+    }
+
+    // Fallback: hardcoded name map for sources without a mihon_source_id yet.
+    let kani_name = tachiyomi_source_to_kani_name(mihon_id);
+    if let Some(name) = kani_name {
+        let id = sqlx::query_scalar!(
+            "SELECT id FROM sources WHERE name = ? AND deleted_at IS NULL",
+            name
+        )
+        .fetch_optional(db)
+        .await?;
+        Ok((id, Some(name.to_string())))
+    } else {
+        Ok((None, None))
+    }
+}
+
 fn decode_backup(data: &[u8]) -> Result<Backup> {
     let mut gz = GzDecoder::new(data);
     let mut buf = Vec::new();
@@ -126,18 +164,8 @@ impl AppService {
 
         let mut sources = Vec::new();
         for (&source_id, &count) in &source_counts {
-            let kani_name = tachiyomi_source_to_kani_name(source_id);
-            let found = if let Some(name) = kani_name {
-                sqlx::query_scalar!(
-                    "SELECT id FROM sources WHERE name = ? AND deleted_at IS NULL",
-                    name
-                )
-                .fetch_optional(&self.db)
-                .await?
-                .is_some()
-            } else {
-                false
-            };
+            let (kani_db_id, display_name) = resolve_kani_source(&self.db, source_id).await?;
+            let found = kani_db_id.is_some();
 
             if !found {
                 pending_estimate += count;
@@ -145,7 +173,7 @@ impl AppService {
 
             sources.push(TachiyomiSourceSummary {
                 source_id,
-                source_name: kani_name.unwrap_or("Unknown").to_string(),
+                source_name: display_name.unwrap_or_else(|| "Unknown".to_string()),
                 manga_count: count,
                 found,
             });
@@ -222,31 +250,19 @@ impl AppService {
                 break;
             }
 
-            let kani_name = tachiyomi_source_to_kani_name(m.source);
+            let (resolved_id, display_name) = resolve_kani_source(&self.db, m.source).await?;
 
-            let source_id: Option<i64> = if let Some(name) = kani_name {
-                sqlx::query_scalar!(
-                    "SELECT id FROM sources WHERE name = ? AND deleted_at IS NULL",
-                    name
-                )
-                .fetch_optional(&self.db)
-                .await?
-            } else {
-                None
-            };
-
-            let source_id = match source_id {
+            let source_id = match resolved_id {
                 Some(id) => id,
                 None => {
-                    let kani_hint = kani_name.unwrap_or("Unknown");
+                    let kani_hint = display_name.as_deref().unwrap_or("Unknown");
                     result.warnings.push(format!(
                         "Source '{}' (Tachiyomi ID {}) not installed — '{}' saved to pending imports",
                         kani_hint, m.source, m.title
                     ));
                     let proxy = self.make_tachi_backup_manga(m);
-                    let source_hint = kani_name
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| format!("Tachiyomi:{}", m.source));
+                    let source_hint =
+                        display_name.unwrap_or_else(|| format!("Tachiyomi:{}", m.source));
                     self.save_pending_import_tachiyomi(user_id, &proxy, &source_hint, None, None)
                         .await?;
                     result.pending_imports_added += 1;
@@ -283,7 +299,7 @@ impl AppService {
 
                 if !hits.is_empty() {
                     let proxy = self.make_tachi_backup_manga(m);
-                    let source_hint = kani_name.unwrap_or("Unknown").to_string();
+                    let source_hint = display_name.as_deref().unwrap_or("Unknown").to_string();
                     self.save_pending_import_tachiyomi(
                         user_id,
                         &proxy,

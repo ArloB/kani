@@ -99,6 +99,32 @@ pub fn validate(
         }
     });
 
+    // Validate filter IDs: non-empty, no whitespace, no leading/trailing ':', at most one ':'.
+    for filter in &ext.filters {
+        let id = &filter.id;
+        if id.is_empty() {
+            errors.push(CliError::Other(format!(
+                "filters: filter ID must not be empty (filter name: '{}')",
+                filter.name
+            )));
+        } else if id.chars().any(|c| c.is_whitespace()) {
+            errors.push(CliError::Other(format!(
+                "filters: filter ID '{}' must not contain whitespace",
+                id
+            )));
+        } else if id.starts_with(':') || id.ends_with(':') {
+            errors.push(CliError::Other(format!(
+                "filters: filter ID '{}' must not start or end with ':'",
+                id
+            )));
+        } else if id.chars().filter(|&c| c == ':').count() > 1 {
+            errors.push(CliError::Other(format!(
+                "filters: filter ID '{}' must contain at most one ':' separator",
+                id
+            )));
+        }
+    }
+
     if errors.is_empty() {
         Ok(ValidatedExtension {
             id: ext.id.clone(),
@@ -116,6 +142,7 @@ pub fn validate(
             filters: ext.filters.clone(),
             preferences: ext.preferences.clone(),
             get_url: ext.get_url.clone(),
+            mihon_source_id: ext.mihon_source_id,
         })
     } else {
         Err(errors)

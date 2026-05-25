@@ -21,6 +21,8 @@ pub struct ValidatedExtension {
     pub preferences: Vec<PreferenceEntry>,
     /// Optional URL template, e.g. `"https://example.com/manga/$manga_id$"`.
     pub get_url: Option<String>,
+    /// Optional Mihon/Tachiyomi source ID for cross-app import matching.
+    pub mihon_source_id: Option<i64>,
 }
 
 pub enum ValidatedPopular {

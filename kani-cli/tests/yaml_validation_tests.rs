@@ -357,3 +357,134 @@ endpoints:
         "delegate_to",
     );
 }
+
+// ── Filter ID validation ──────────────────────────────────────────────────────
+
+const FILTER_BASE: &str = r#"
+id: filter-test
+name: FilterTest
+version: "0.1.0"
+base_url: "https://example.com"
+"#;
+
+#[test]
+fn valid_filter_id_flat() {
+    assert_valid(&format!(
+        r#"{}
+filters:
+  - id: sort
+    name: Sort
+    type: select
+    options:
+      - name: Newest
+        value: new
+"#,
+        FILTER_BASE
+    ));
+}
+
+#[test]
+fn valid_filter_id_with_colon() {
+    assert_valid(&format!(
+        r#"{}
+filters:
+  - id: "sort:by"
+    name: Sort
+    type: select
+    options:
+      - name: Newest
+        value: new
+"#,
+        FILTER_BASE
+    ));
+}
+
+#[test]
+fn valid_mihon_source_id() {
+    assert_valid(&format!(
+        r#"{}
+mihon_source_id: 2499283573021220255
+"#,
+        FILTER_BASE
+    ));
+}
+
+#[test]
+fn invalid_filter_id_empty() {
+    assert_invalid_containing(
+        &format!(
+            r#"{}
+filters:
+  - id: ""
+    name: Sort
+    type: select
+"#,
+            FILTER_BASE
+        ),
+        "must not be empty",
+    );
+}
+
+#[test]
+fn invalid_filter_id_whitespace() {
+    assert_invalid_containing(
+        &format!(
+            r#"{}
+filters:
+  - id: "sort by"
+    name: Sort
+    type: select
+"#,
+            FILTER_BASE
+        ),
+        "whitespace",
+    );
+}
+
+#[test]
+fn invalid_filter_id_leading_colon() {
+    assert_invalid_containing(
+        &format!(
+            r#"{}
+filters:
+  - id: ":sort"
+    name: Sort
+    type: select
+"#,
+            FILTER_BASE
+        ),
+        "must not start or end",
+    );
+}
+
+#[test]
+fn invalid_filter_id_trailing_colon() {
+    assert_invalid_containing(
+        &format!(
+            r#"{}
+filters:
+  - id: "sort:"
+    name: Sort
+    type: select
+"#,
+            FILTER_BASE
+        ),
+        "must not start or end",
+    );
+}
+
+#[test]
+fn invalid_filter_id_multiple_colons() {
+    assert_invalid_containing(
+        &format!(
+            r#"{}
+filters:
+  - id: "sort:by:date"
+    name: Sort
+    type: select
+"#,
+            FILTER_BASE
+        ),
+        "at most one",
+    );
+}

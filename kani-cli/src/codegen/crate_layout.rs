@@ -37,6 +37,10 @@ pub fn emit_lib_header(ext: &ValidatedExtension, embedded_bytes: bool) -> String
     let language = &ext.language;
     let nsfw = ext.nsfw;
     let unrestricted_http = ext.unrestricted_http;
+    let mihon_source_id = match ext.mihon_source_id {
+        Some(n) => format!("Some({n}_i64)"),
+        None => "None".to_string(),
+    };
 
     let pref_import = if ext.preferences.is_empty() {
         ""
@@ -90,6 +94,7 @@ impl {struct_name} {{
             language:         "{language}".to_string(),
             nsfw:             {nsfw},
             unrestricted_http: {unrestricted_http},
+            mihon_source_id:  {mihon_source_id},
         }}
     }}
 }}

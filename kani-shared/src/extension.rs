@@ -104,4 +104,7 @@ pub struct ExtensionMetadata {
     pub language: String,
     pub nsfw: bool,
     pub unrestricted_http: bool,
+    /// Optional Mihon/Tachiyomi source ID for cross-app import matching.
+    #[cfg_attr(feature = "host", serde(default))]
+    pub mihon_source_id: Option<i64>,
 }

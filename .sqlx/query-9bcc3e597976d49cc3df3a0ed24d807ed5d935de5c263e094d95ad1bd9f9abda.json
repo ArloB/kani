@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, version, base_url, unrestricted_http, deleted_at FROM sources WHERE name = ?",
+  "query": "SELECT id, version, base_url, unrestricted_http, mihon_source_id, deleted_at FROM sources WHERE name = ?",
   "describe": {
     "columns": [
       {
@@ -24,8 +24,13 @@
         "type_info": "Bool"
       },
       {
-        "name": "deleted_at",
+        "name": "mihon_source_id",
         "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 5,
         "type_info": "Datetime"
       }
     ],
@@ -37,8 +42,9 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "dbb19267ce977c4a2b7edab3b7080df7aab682c02a4743d274adb65b52af560a"
+  "hash": "9bcc3e597976d49cc3df3a0ed24d807ed5d935de5c263e094d95ad1bd9f9abda"
 }

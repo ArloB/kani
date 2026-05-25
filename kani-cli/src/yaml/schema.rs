@@ -21,6 +21,9 @@ pub struct YamlExtension {
     pub preferences: Vec<PreferenceEntry>,
     /// Optional URL template for manga canonical URL. Use `$manga_id$` as placeholder.
     pub get_url: Option<String>,
+    /// Optional Mihon/Tachiyomi source ID for cross-app import matching.
+    #[serde(default)]
+    pub mihon_source_id: Option<i64>,
 }
 
 fn default_language() -> String {

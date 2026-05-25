@@ -150,6 +150,7 @@ interface types {
         language: string,
         nsfw: bool,
         unrestricted-http: bool,
+        mihon-source-id: option<s64>,
     }
 
     enum filter-type-tag {
