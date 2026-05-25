@@ -2,7 +2,7 @@
 // Sources page — sidebar list of sources (desktop), full list (mobile).
 
 import * as api from '../api.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, deferredSkeleton } from '../utils.js';
 import { hasPermission } from '../state.js';
 import { skeletonSourceList } from '../components/skeletons.js';
 import { createErrorState } from '../components/error-state.js';
@@ -12,6 +12,7 @@ import { h, render } from 'preact';
 import htm from 'htm';
 import { mountIntoModalRoot } from '../components/modal.js';
 import { SourcesSidebar, AddSourceModal, consumePendingSourceId } from '../components/sources-sidebar.js';
+import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 const html = htm.bind(h);
 
 /** @type {HTMLElement | null} */
@@ -20,6 +21,16 @@ let _asideEl = null;
 /** @param {HTMLElement} container */
 export async function init(container) {
   document.title = 'Sources - Kani';
+
+  const _headerActions = (() => {
+    if (!hasPermission('source:install')) return undefined;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-primary btn-sm';
+    btn.textContent = 'Add source';
+    return btn;
+  })();
+  setPageHeader({ crumbs: [{ label: 'Sources' }], actions: _headerActions });
 
   if (!hasPermission('source:browse')) {
     container.innerHTML = '';
@@ -32,8 +43,8 @@ export async function init(container) {
 
       <!-- Sidebar (lg+) — SourcesSidebar mounts here -->
       <aside
-        class="hidden lg:flex flex-col w-60 shrink-0 border-r border-border bg-surface sticky top-14 overflow-hidden"
-        style="height: calc(100vh - 3.5rem); margin-bottom: -1.5rem"
+        class="hidden lg:flex flex-col w-72 shrink-0 border-r border-border-subtle sticky overflow-y-auto"
+        style="top:var(--header-h);height:calc(100vh - var(--header-h));"
         aria-label="Sources"
       ></aside>
 
@@ -41,25 +52,19 @@ export async function init(container) {
       <div class="flex-1 min-w-0">
 
         <!-- Mobile source list (hidden on lg+) -->
-        <div class="lg:hidden max-w-[1400px] mx-auto px-4 md:px-6 py-4 md:pt-6 md:pb-0 flex flex-col gap-4">
-          <h1 class="text-2xl font-semibold text-text">Sources</h1>
+        <div class="lg:hidden max-w-page mx-auto px-4 md:px-6 py-4 md:pt-6 md:pb-0 flex flex-col gap-4">
           <input
             type="search"
-            class="input w-full max-w-sm js-mobile-search"
+            class="input input-sm w-full max-w-sm js-mobile-search"
             placeholder="Filter sources…"
             aria-label="Filter sources"
           />
           <div class="js-mobile-list flex flex-col divide-y divide-border-subtle" aria-live="polite"></div>
-          ${hasPermission('source:install') ? `
-            <div class="pt-2 border-t border-border-subtle">
-              <button type="button" class="btn-primary btn-sm js-open-add-source">Add source</button>
-            </div>
-          ` : ''}
         </div>
 
         <!-- Desktop "select a source" prompt -->
-        <div class="hidden lg:flex flex-col items-center justify-center min-h-[400px] gap-3 text-text-muted">
-          <span class="[&_svg]:w-8 [&_svg]:h-8 opacity-30" aria-hidden="true">${iconCube}</span>
+        <div class="hidden lg:flex flex-col items-center justify-center min-h-96 gap-3 text-text-muted">
+          <span class="icon-xl opacity-30" aria-hidden="true">${iconCube}</span>
           <p class="text-sm">Select a source from the sidebar to browse.</p>
         </div>
 
@@ -75,8 +80,8 @@ export async function init(container) {
 
   let allSources = /** @type {any[]} */ ([]);
 
-  // Show skeleton while loading
-  mobileList.innerHTML = skeletonSourceList(5);
+  // Show skeleton only if sources take > 150 ms to load
+  const cancelSkeleton = deferredSkeleton(() => { mobileList.innerHTML = skeletonSourceList(5); });
 
   /** @param {string} query */
   function _renderMobile(query) {
@@ -118,7 +123,7 @@ export async function init(container) {
       starBtn.className = [
         'shrink-0 p-1.5 rounded-md transition-colors',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent',
-        '[&_svg]:w-4 [&_svg]:h-4',
+        'icon-sm',
         starred ? 'text-accent' : 'text-text-faint',
       ].join(' ');
       starBtn.setAttribute('aria-label', starred ? 'Unfavourite' : 'Favourite');
@@ -156,7 +161,6 @@ export async function init(container) {
   function _mountSidebar() {
     render(html`<${SourcesSidebar}
       sources=${allSources}
-      canInstall=${hasPermission('source:install')}
       onCreated=${_refresh}
     />`, _asideEl);
   }
@@ -178,20 +182,22 @@ export async function init(container) {
   try {
     sources = await api.getSources();
   } catch {
+    cancelSkeleton();
     mobileList.innerHTML = '';
     mobileList.appendChild(createErrorState({ message: 'Failed to load sources.', onRetry: () => init(container) }));
     return;
   }
 
+  cancelSkeleton();
   allSources = Array.isArray(sources) ? sources : [];
   _renderMobile('');
   _mountSidebar();
 
   mobileSearch?.addEventListener('input', () => _renderMobile(mobileSearch.value));
 
-  // ── Mobile add source ────────────────────────────────────────────────────
+  // ── Add source modal ─────────────────────────────────────────────────────
 
-  if (hasPermission('source:install')) {
+  if (hasPermission('source:install') && _headerActions) {
     let _modalOpen = false;
     const _setOpen = (open) => {
       _modalOpen = open;
@@ -203,13 +209,13 @@ export async function init(container) {
         />
       `);
     };
-    container.querySelector('.js-open-add-source')
-      ?.addEventListener('click', () => _setOpen(true));
+    _headerActions.addEventListener('click', () => _setOpen(true));
   }
 }
 
 /** @param {HTMLElement} container */
 export function destroy(container) {
+  clearPageHeader();
   const pendingId = consumePendingSourceId();
   if (pendingId !== null) api.deleteSource(pendingId).catch(() => {});
   if (_asideEl) render(null, _asideEl);

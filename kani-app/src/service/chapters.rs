@@ -1,7 +1,8 @@
 use super::*;
 
 impl AppService {
-    /// Returns a paginated chapter list for a manga. Returns (chapters, has_next_page).
+    /// Returns a paginated chapter list for a manga. Returns (chapters, has_next_page, total_pages).
+    #[allow(clippy::too_many_arguments)]
     pub async fn get_local_chapters(
         &self,
         manga_id: i64,
@@ -12,7 +13,7 @@ impl AppService {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
-    ) -> Result<(Vec<kani_shared::types::Chapter>, bool)> {
+    ) -> Result<(Vec<kani_shared::types::Chapter>, bool, Option<u32>)> {
         let limit = (page_size as i64) + 1;
         let offset = ((page - 1).max(0) as i64) * (page_size as i64);
 
@@ -33,16 +34,19 @@ impl AppService {
                       uct.is_read, uct.last_page_read
                FROM chapters c
                LEFT JOIN scanlator_preferences sp
-                   ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator AND sp.manga_id = ?
+                   ON sp.manga_id = c.manga_id AND sp.manga_id = ?
+                   AND (c.scanlator = sp.scanlator OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
                LEFT JOIN user_chapter_tracking uct
                    ON uct.chapter_id = c.id AND uct.user_id = ?
                WHERE c.manga_id = ?{extra}
+                 AND c.is_orphaned = false
                  AND (? IS NULL OR c.scanlator = ?)
                ORDER BY {}, COALESCE(sp.priority, -1) DESC
                LIMIT ? OFFSET ?"#,
             sort_order.to_sql_order()
         );
 
+        let scanlator_for_count = filter_scanlator.clone();
         let mut rows = sqlx::query_as::<_, crate::models::ChapterRow>(&sql)
             .bind(manga_id)
             .bind(user_id)
@@ -77,12 +81,28 @@ impl AppService {
             })
             .collect();
 
-        Ok((chapters, has_next_page))
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM chapters c \
+             LEFT JOIN user_chapter_tracking uct ON uct.chapter_id = c.id AND uct.user_id = ? \
+             WHERE c.manga_id = ?{extra} AND (? IS NULL OR c.scanlator = ?)"
+        );
+        let total_count: i64 = sqlx::query_scalar(&count_sql)
+            .bind(user_id)
+            .bind(manga_id)
+            .bind(scanlator_for_count.clone())
+            .bind(scanlator_for_count)
+            .fetch_one(&self.db)
+            .await?;
+        let ps = page_size as i64;
+        let total_pages = Some(((total_count + ps - 1) / ps).max(0) as u32);
+
+        Ok((chapters, has_next_page, total_pages))
     }
 
     /// Returns all chapter IDs for a manga matching the given filters (no pagination).
     /// When `preferred_only` is true, applies scanlator preferences and download rules
     /// to return one preferred version per chapter number (undownloaded chapters only).
+    #[allow(clippy::too_many_arguments)]
     pub async fn get_chapter_ids(
         &self,
         manga_id: i64,
@@ -115,10 +135,12 @@ impl AppService {
             r#"SELECT c.id
                FROM chapters c
                LEFT JOIN scanlator_preferences sp
-                   ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator AND sp.manga_id = ?
+                   ON sp.manga_id = c.manga_id AND sp.manga_id = ?
+                   AND (c.scanlator = sp.scanlator OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
                LEFT JOIN user_chapter_tracking uct
                    ON uct.chapter_id = c.id AND uct.user_id = ?
                WHERE c.manga_id = ?{extra}
+                 AND c.is_orphaned = false
                  AND (? IS NULL OR c.scanlator = ?)
                ORDER BY {}, COALESCE(sp.priority, -1) DESC"#,
             sort_order.to_sql_order()
@@ -213,7 +235,7 @@ impl AppService {
         let page_count = pages.len();
 
         let db_clone = self.db.clone();
-        let pc_i64 = page_count as i64; 
+        let pc_i64 = page_count as i64;
 
         tokio::spawn(async move {
             let result = sqlx::query!(
@@ -225,12 +247,20 @@ impl AppService {
             .await;
 
             if let Err(e) = result {
-                tracing::warn!("Opportunistic page_count update failed for chapter {}: {}", chapter_id, e);
+                tracing::warn!(
+                    "Opportunistic page_count update failed for chapter {}: {}",
+                    chapter_id,
+                    e
+                );
             }
         });
 
-        let prev_chapter_id = self.adjacent_chapter_id(manga_id, chapter_number, false).await?;
-        let next_chapter_id = self.adjacent_chapter_id(manga_id, chapter_number, true).await?;
+        let prev_chapter_id = self
+            .adjacent_chapter_id(manga_id, chapter_number, false)
+            .await?;
+        let next_chapter_id = self
+            .adjacent_chapter_id(manga_id, chapter_number, true)
+            .await?;
 
         let last_page_read = self
             .get_chapter_progress(user_id, chapter_id)
@@ -261,8 +291,12 @@ impl AppService {
     ) -> Result<Option<i64>> {
         let scanlator_mode = self.get_scanlator_mode(manga_id).await?;
         let scanlator_filter = match scanlator_mode.as_str() {
-            "whitelist" => " AND EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator)",
-            _ => " AND NOT EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator AND sp.blocked = 1)",
+            "whitelist" => {
+                " AND EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator)"
+            }
+            _ => {
+                " AND NOT EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator AND sp.blocked = 1)"
+            }
         };
         let (cmp, order) = if next { (">", "ASC") } else { ("<", "DESC") };
         let sql = format!(

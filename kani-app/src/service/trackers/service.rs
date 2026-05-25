@@ -2,9 +2,9 @@ use base64::Engine;
 use sha2::Digest;
 
 use super::{
-    TrackerMangaResult, consume_pkce_state, delete_credentials, delete_tracker_app_config,
-    get_access_token, get_mapping, get_tracker_app_config, set_tracker_app_config,
-    store_credentials, store_pkce_state, TrackerRegistry,
+    TrackerMangaResult, TrackerRegistry, consume_pkce_state, delete_credentials,
+    delete_tracker_app_config, get_access_token, get_mapping, get_tracker_app_config,
+    set_tracker_app_config, store_credentials, store_pkce_state,
 };
 use crate::error::{Result, ServiceError};
 use crate::service::AppService;
@@ -37,9 +37,9 @@ impl AppService {
         let mut items = Vec::new();
 
         for row in rows {
-            let tracker_id = row.id.ok_or_else(|| {
-                ServiceError::Internal("tracker row missing id".into())
-            })?;
+            let tracker_id = row
+                .id
+                .ok_or_else(|| ServiceError::Internal("tracker row missing id".into()))?;
             let configured = registry.trackers.contains_key(&tracker_id);
             let linked = sqlx::query_scalar!(
                 "SELECT COUNT(*) FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?",
@@ -74,15 +74,12 @@ impl AppService {
             .get(tracker_id)
             .ok_or_else(|| ServiceError::NotFound(format!("Tracker {tracker_id} not found")))?;
 
-        // Generate CSRF state token.
         let state_bytes: [u8; 32] = rand::random();
         let state_token = hex::encode(state_bytes);
 
-        // For PKCE providers: generate code_verifier + S256 code_challenge.
         let (code_verifier, code_challenge) = if tracker.requires_pkce() {
             let verifier_bytes: [u8; 32] = rand::random();
-            let verifier =
-                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
+            let verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(verifier_bytes);
             let hash = sha2::Sha256::digest(verifier.as_bytes());
             let challenge =
                 base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash.as_slice());
@@ -114,11 +111,9 @@ impl AppService {
         code: &str,
         state: &str,
     ) -> Result<()> {
-        let pkce = consume_pkce_state(&self.db, state)
-            .await?
-            .ok_or_else(|| {
-                ServiceError::Validation("OAuth state is invalid or has expired".into())
-            })?;
+        let pkce = consume_pkce_state(&self.db, state).await?.ok_or_else(|| {
+            ServiceError::Validation("OAuth state is invalid or has expired".into())
+        })?;
 
         if pkce.tracker_id != tracker_id {
             return Err(ServiceError::Validation(
@@ -136,7 +131,14 @@ impl AppService {
                 .await?
         };
 
-        store_credentials(&self.db, user_id, tracker_id, &tokens).await?;
+        store_credentials(
+            &self.db,
+            user_id,
+            tracker_id,
+            &tokens,
+            self.encryption.as_deref(),
+        )
+        .await?;
         Ok(())
     }
 
@@ -156,8 +158,14 @@ impl AppService {
         let tracker = registry
             .get(tracker_id)
             .ok_or_else(|| ServiceError::NotFound(format!("Tracker {tracker_id} not found")))?;
-        let access_token =
-            get_access_token(&self.db, tracker_id, user_id, tracker).await?;
+        let access_token = get_access_token(
+            &self.db,
+            tracker_id,
+            user_id,
+            tracker,
+            self.encryption.as_deref(),
+        )
+        .await?;
         let results = tracker.search_manga(&access_token, query).await?;
         Ok(results)
     }
@@ -182,10 +190,7 @@ impl AppService {
     }
 
     /// Get tracker app config (client_id + whether secret is set). Never returns the secret.
-    pub async fn get_tracker_config(
-        &self,
-        tracker_id: i64,
-    ) -> Result<Option<(String, bool)>> {
+    pub async fn get_tracker_config(&self, tracker_id: i64) -> Result<Option<(String, bool)>> {
         get_tracker_app_config(&self.db, tracker_id).await
     }
 
@@ -196,20 +201,25 @@ impl AppService {
         client_id: &str,
         client_secret: Option<&str>,
     ) -> Result<()> {
-        // Verify tracker row exists (seeded on startup).
-        let exists =
-            sqlx::query_scalar!("SELECT COUNT(*) FROM trackers WHERE id = ?", tracker_id)
-                .fetch_one(&self.db)
-                .await
-                .unwrap_or(0)
-                > 0;
+        let exists = sqlx::query_scalar!("SELECT COUNT(*) FROM trackers WHERE id = ?", tracker_id)
+            .fetch_one(&self.db)
+            .await
+            .unwrap_or(0)
+            > 0;
         if !exists {
             return Err(ServiceError::NotFound(format!(
                 "Tracker {tracker_id} not found"
             )));
         }
 
-        set_tracker_app_config(&self.db, tracker_id, client_id, client_secret).await?;
+        set_tracker_app_config(
+            &self.db,
+            tracker_id,
+            client_id,
+            client_secret,
+            self.encryption.as_deref(),
+        )
+        .await?;
         self.reload_tracker_registry().await
     }
 
@@ -221,7 +231,8 @@ impl AppService {
 
     /// Rebuild the tracker registry in-place (hot-reload after credential changes).
     pub async fn reload_tracker_registry(&self) -> Result<()> {
-        *self.tracker_registry.write().await = TrackerRegistry::new(&self.db).await?;
+        *self.tracker_registry.write().await =
+            TrackerRegistry::new(&self.db, self.encryption.as_deref()).await?;
         Ok(())
     }
 }

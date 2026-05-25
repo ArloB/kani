@@ -1,30 +1,53 @@
+#![allow(clippy::approx_constant)]
+
 #[cfg(test)]
 mod helpers {
-    use kani_shared::ast::*;
     use crate::evaluator::html_eval::extract_html;
     use crate::evaluator::json_eval::extract_json;
     use crate::wasm::{HostState, SendHtml, StoredNode};
+    use kani_shared::ast::*;
 
     // ── Expression constructors ───────────────────────────────────────────────
 
-    pub fn lit(s: &str) -> Expr { Expr::Literal(s.into()) }
-    pub fn num(n: f64) -> Expr { Expr::Number(n) }
-    pub fn var(name: &str) -> Expr { Expr::Var(name.into()) }
+    pub fn lit(s: &str) -> Expr {
+        Expr::Literal(s.into())
+    }
+    pub fn num(n: f64) -> Expr {
+        Expr::Number(n)
+    }
+    pub fn var(name: &str) -> Expr {
+        Expr::Var(name.into())
+    }
 
     pub fn binop(op: Op, lhs: Expr, rhs: Expr) -> Expr {
-        Expr::BinaryOperation { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }
+        Expr::BinaryOperation {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        }
     }
 
     pub fn field(name: &str, expr: Expr) -> FieldDef {
-        FieldDef { name: name.into(), expr, optional: false }
+        FieldDef {
+            name: name.into(),
+            expr,
+            optional: false,
+        }
     }
 
     pub fn opt_field(name: &str, expr: Expr) -> FieldDef {
-        FieldDef { name: name.into(), expr, optional: true }
+        FieldDef {
+            name: name.into(),
+            expr,
+            optional: true,
+        }
     }
 
     pub fn bind(name: &str, expr: Expr) -> Binding {
-        Binding { name: name.into(), expr }
+        Binding {
+            name: name.into(),
+            expr,
+        }
     }
 
     // ── JSON evaluation helpers ───────────────────────────────────────────────
@@ -40,7 +63,14 @@ mod helpers {
         let handle = state.next_doc_handle;
         state.next_doc_handle += 1;
         state.json_docs.insert(handle, value);
-        let bp = Blueprint { request: None, container: container.into(), fields, bindings, scalars: vec![], pagination: None };
+        let bp = Blueprint {
+            request: None,
+            container: container.into(),
+            fields,
+            bindings,
+            scalars: vec![],
+            pagination: None,
+        };
         let out = extract_json(&mut state, Some(handle), &bp).await.unwrap();
         out["rows"].as_array().unwrap().clone()
     }
@@ -84,8 +114,21 @@ mod helpers {
         let root_id = parsed.0.lock().unwrap().0.root_element().id();
         let handle = state.next_doc_handle;
         state.next_doc_handle += 1;
-        state.html_docs.insert(handle, StoredNode { doc: parsed.0, node_id: root_id });
-        let bp = Blueprint { request: None, container: container.into(), fields, bindings, scalars: vec![], pagination: None };
+        state.html_docs.insert(
+            handle,
+            StoredNode {
+                doc: parsed.0,
+                node_id: root_id,
+            },
+        );
+        let bp = Blueprint {
+            request: None,
+            container: container.into(),
+            fields,
+            bindings,
+            scalars: vec![],
+            pagination: None,
+        };
         let out = extract_html(&mut state, Some(handle), &bp).await.unwrap();
         out["rows"].as_array().unwrap().clone()
     }
@@ -273,16 +316,41 @@ mod shared_tests {
 
     #[tokio::test]
     async fn and_truth_table() {
-        let tt = json_eval(binop(Op::And, binop(Op::Eq, lit("a"), lit("a")), binop(Op::Eq, lit("b"), lit("b")))).await;
-        let tf = json_eval(binop(Op::And, binop(Op::Eq, lit("a"), lit("a")), binop(Op::Eq, lit("a"), lit("b")))).await;
-        let ff = json_eval(binop(Op::And, binop(Op::Eq, lit("a"), lit("b")), binop(Op::Eq, lit("a"), lit("b")))).await;
+        let tt = json_eval(binop(
+            Op::And,
+            binop(Op::Eq, lit("a"), lit("a")),
+            binop(Op::Eq, lit("b"), lit("b")),
+        ))
+        .await;
+        let tf = json_eval(binop(
+            Op::And,
+            binop(Op::Eq, lit("a"), lit("a")),
+            binop(Op::Eq, lit("a"), lit("b")),
+        ))
+        .await;
+        let ff = json_eval(binop(
+            Op::And,
+            binop(Op::Eq, lit("a"), lit("b")),
+            binop(Op::Eq, lit("a"), lit("b")),
+        ))
+        .await;
         assert_eq!((tt, tf, ff), (true.into(), false.into(), false.into()));
     }
 
     #[tokio::test]
     async fn or_truth_table() {
-        let ft = json_eval(binop(Op::Or, binop(Op::Eq, lit("a"), lit("b")), binop(Op::Eq, lit("a"), lit("a")))).await;
-        let ff = json_eval(binop(Op::Or, binop(Op::Eq, lit("a"), lit("b")), binop(Op::Eq, lit("c"), lit("d")))).await;
+        let ft = json_eval(binop(
+            Op::Or,
+            binop(Op::Eq, lit("a"), lit("b")),
+            binop(Op::Eq, lit("a"), lit("a")),
+        ))
+        .await;
+        let ff = json_eval(binop(
+            Op::Or,
+            binop(Op::Eq, lit("a"), lit("b")),
+            binop(Op::Eq, lit("c"), lit("d")),
+        ))
+        .await;
         assert_eq!((ft, ff), (true.into(), false.into()));
     }
 
@@ -291,7 +359,10 @@ mod shared_tests {
     #[tokio::test]
     async fn split_and_at_positive() {
         let expr = Expr::At {
-            target: Box::new(Expr::Split { target: Box::new(lit("a/b/c")), delimiter: "/".into() }),
+            target: Box::new(Expr::Split {
+                target: Box::new(lit("a/b/c")),
+                delimiter: "/".into(),
+            }),
             index: 1,
         };
         assert_eq!(json_eval(expr).await, "b");
@@ -300,7 +371,10 @@ mod shared_tests {
     #[tokio::test]
     async fn at_negative_index() {
         let expr = Expr::At {
-            target: Box::new(Expr::Split { target: Box::new(lit("a/b/c")), delimiter: "/".into() }),
+            target: Box::new(Expr::Split {
+                target: Box::new(lit("a/b/c")),
+                delimiter: "/".into(),
+            }),
             index: -1,
         };
         assert_eq!(json_eval(expr).await, "c");
@@ -308,80 +382,146 @@ mod shared_tests {
 
     #[tokio::test]
     async fn at_out_of_bounds_is_null() {
-        let rows = json_rows("{}", "", vec![opt_field("v", Expr::At {
-            target: Box::new(Expr::Split { target: Box::new(lit("a/b")), delimiter: "/".into() }),
-            index: 10,
-        })], vec![]).await;
+        let rows = json_rows(
+            "{}",
+            "",
+            vec![opt_field(
+                "v",
+                Expr::At {
+                    target: Box::new(Expr::Split {
+                        target: Box::new(lit("a/b")),
+                        delimiter: "/".into(),
+                    }),
+                    index: 10,
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["v"], serde_json::Value::Null);
     }
 
     #[tokio::test]
     async fn replace_all_occurrences() {
-        let expr = Expr::Replace { target: Box::new(lit("aXbXc")), from: "X".into(), to: "-".into() };
+        let expr = Expr::Replace {
+            target: Box::new(lit("aXbXc")),
+            from: "X".into(),
+            to: "-".into(),
+        };
         assert_eq!(json_eval(expr).await, "a-b-c");
     }
 
     #[tokio::test]
     async fn trim() {
-        assert_eq!(json_eval(Expr::Trim { target: Box::new(lit("  hello  ")) }).await, "hello");
+        assert_eq!(
+            json_eval(Expr::Trim {
+                target: Box::new(lit("  hello  "))
+            })
+            .await,
+            "hello"
+        );
     }
 
     #[tokio::test]
     async fn lower() {
-        assert_eq!(json_eval(Expr::Lower { target: Box::new(lit("HELLO World")) }).await, "hello world");
+        assert_eq!(
+            json_eval(Expr::Lower {
+                target: Box::new(lit("HELLO World"))
+            })
+            .await,
+            "hello world"
+        );
     }
 
     #[tokio::test]
     async fn prepend() {
-        let expr = Expr::Prepend { target: Box::new(lit(" world")), prefix: Box::new(lit("hello")) };
+        let expr = Expr::Prepend {
+            target: Box::new(lit(" world")),
+            prefix: Box::new(lit("hello")),
+        };
         assert_eq!(json_eval(expr).await, "hello world");
     }
 
     #[tokio::test]
     async fn append() {
-        let expr = Expr::Append { target: Box::new(lit("hello")), suffix: Box::new(lit(" world")) };
+        let expr = Expr::Append {
+            target: Box::new(lit("hello")),
+            suffix: Box::new(lit(" world")),
+        };
         assert_eq!(json_eval(expr).await, "hello world");
     }
 
     #[tokio::test]
     async fn starts_with_true() {
-        let v = json_eval(Expr::StartsWith { target: Box::new(lit("Chapter 1")), prefix: "Chapter".into() }).await;
+        let v = json_eval(Expr::StartsWith {
+            target: Box::new(lit("Chapter 1")),
+            prefix: "Chapter".into(),
+        })
+        .await;
         assert_eq!(v, true);
     }
 
     #[tokio::test]
     async fn starts_with_false() {
-        let v = json_eval(Expr::StartsWith { target: Box::new(lit("Vol. 1")), prefix: "Chapter".into() }).await;
+        let v = json_eval(Expr::StartsWith {
+            target: Box::new(lit("Vol. 1")),
+            prefix: "Chapter".into(),
+        })
+        .await;
         assert_eq!(v, false);
     }
 
     #[tokio::test]
     async fn ends_with_true() {
-        let v = json_eval(Expr::EndsWith { target: Box::new(lit("cover.jpg")), suffix: ".jpg".into() }).await;
+        let v = json_eval(Expr::EndsWith {
+            target: Box::new(lit("cover.jpg")),
+            suffix: ".jpg".into(),
+        })
+        .await;
         assert_eq!(v, true);
     }
 
     #[tokio::test]
     async fn slice_from_start() {
-        let v = json_eval(Expr::Slice { target: Box::new(lit("hello world")), start: 0, end: Some(5) }).await;
+        let v = json_eval(Expr::Slice {
+            target: Box::new(lit("hello world")),
+            start: 0,
+            end: Some(5),
+        })
+        .await;
         assert_eq!(v, "hello");
     }
 
     #[tokio::test]
     async fn slice_to_end_no_end() {
-        let v = json_eval(Expr::Slice { target: Box::new(lit("hello world")), start: 6, end: None }).await;
+        let v = json_eval(Expr::Slice {
+            target: Box::new(lit("hello world")),
+            start: 6,
+            end: None,
+        })
+        .await;
         assert_eq!(v, "world");
     }
 
     #[tokio::test]
     async fn slice_negative_start() {
-        let v = json_eval(Expr::Slice { target: Box::new(lit("hello")), start: -3, end: None }).await;
+        let v = json_eval(Expr::Slice {
+            target: Box::new(lit("hello")),
+            start: -3,
+            end: None,
+        })
+        .await;
         assert_eq!(v, "llo");
     }
 
     #[tokio::test]
     async fn slice_inverted_range_empty() {
-        let v = json_eval(Expr::Slice { target: Box::new(lit("hello")), start: 3, end: Some(1) }).await;
+        let v = json_eval(Expr::Slice {
+            target: Box::new(lit("hello")),
+            start: 3,
+            end: Some(1),
+        })
+        .await;
         assert_eq!(v, "");
     }
 
@@ -389,40 +529,68 @@ mod shared_tests {
 
     #[tokio::test]
     async fn matches_true() {
-        let v = json_eval(Expr::Matches { target: Box::new(lit("Chapter 42")), pattern: r"Chapter\s+\d+".into() }).await;
+        let v = json_eval(Expr::Matches {
+            target: Box::new(lit("Chapter 42")),
+            pattern: r"Chapter\s+\d+".into(),
+        })
+        .await;
         assert_eq!(v, true);
     }
 
     #[tokio::test]
     async fn matches_false() {
-        let v = json_eval(Expr::Matches { target: Box::new(lit("Vol. 1")), pattern: r"Chapter\s+\d+".into() }).await;
+        let v = json_eval(Expr::Matches {
+            target: Box::new(lit("Vol. 1")),
+            pattern: r"Chapter\s+\d+".into(),
+        })
+        .await;
         assert_eq!(v, false);
     }
 
     #[tokio::test]
     async fn capture_group_0_full_match() {
         let v = json_eval(Expr::At {
-            target: Box::new(Expr::Capture { target: Box::new(lit("Chapter 42")), pattern: r"Chapter (\d+)".into() }),
+            target: Box::new(Expr::Capture {
+                target: Box::new(lit("Chapter 42")),
+                pattern: r"Chapter (\d+)".into(),
+            }),
             index: 0,
-        }).await;
+        })
+        .await;
         assert_eq!(v, "Chapter 42");
     }
 
     #[tokio::test]
     async fn capture_group_1() {
         let v = json_eval(Expr::At {
-            target: Box::new(Expr::Capture { target: Box::new(lit("Chapter 42")), pattern: r"Chapter (\d+)".into() }),
+            target: Box::new(Expr::Capture {
+                target: Box::new(lit("Chapter 42")),
+                pattern: r"Chapter (\d+)".into(),
+            }),
             index: 1,
-        }).await;
+        })
+        .await;
         assert_eq!(v, "42");
     }
 
     #[tokio::test]
     async fn capture_no_match_returns_empty_list() {
-        let rows = json_rows("{}", "", vec![opt_field("v", Expr::At {
-            target: Box::new(Expr::Capture { target: Box::new(lit("Vol. 1")), pattern: r"Chapter (\d+)".into() }),
-            index: 0,
-        })], vec![]).await;
+        let rows = json_rows(
+            "{}",
+            "",
+            vec![opt_field(
+                "v",
+                Expr::At {
+                    target: Box::new(Expr::Capture {
+                        target: Box::new(lit("Vol. 1")),
+                        pattern: r"Chapter (\d+)".into(),
+                    }),
+                    index: 0,
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["v"], serde_json::Value::Null);
     }
 
@@ -435,7 +603,8 @@ mod shared_tests {
                 pattern: r"Chapter (\d+)(\.\d+)?".into(),
             }),
             index: 2,
-        }).await;
+        })
+        .await;
         assert_eq!(v, serde_json::Value::Null);
     }
 
@@ -443,25 +612,37 @@ mod shared_tests {
 
     #[tokio::test]
     async fn parse_float() {
-        let v = json_eval(Expr::ParseFloat { target: Box::new(lit("3.14")) }).await;
+        let v = json_eval(Expr::ParseFloat {
+            target: Box::new(lit("3.14")),
+        })
+        .await;
         assert!((v.as_f64().unwrap() - 3.14).abs() < 1e-9);
     }
 
     #[tokio::test]
     async fn parse_int() {
-        let v = json_eval(Expr::ParseInt { target: Box::new(lit("42")) }).await;
+        let v = json_eval(Expr::ParseInt {
+            target: Box::new(lit("42")),
+        })
+        .await;
         assert_eq!(v.as_i64().unwrap(), 42);
     }
 
     #[tokio::test]
     async fn parse_int_negative() {
-        let v = json_eval(Expr::ParseInt { target: Box::new(lit("-7")) }).await;
+        let v = json_eval(Expr::ParseInt {
+            target: Box::new(lit("-7")),
+        })
+        .await;
         assert_eq!(v.as_i64().unwrap(), -7);
     }
 
     #[tokio::test]
     async fn parse_float_invalid_errors() {
-        let err = json_eval_err(Expr::ParseFloat { target: Box::new(lit("abc")) }).await;
+        let err = json_eval_err(Expr::ParseFloat {
+            target: Box::new(lit("abc")),
+        })
+        .await;
         assert!(err.contains("Invalid float"));
     }
 
@@ -469,13 +650,19 @@ mod shared_tests {
 
     #[tokio::test]
     async fn date_parse_rfc3339_epoch() {
-        let v = json_eval(Expr::DateParseRfc3339 { target: Box::new(lit("1970-01-01T00:00:00Z")) }).await;
+        let v = json_eval(Expr::DateParseRfc3339 {
+            target: Box::new(lit("1970-01-01T00:00:00Z")),
+        })
+        .await;
         assert_eq!(v.as_i64().unwrap(), 0);
     }
 
     #[tokio::test]
     async fn date_parse_rfc3339_known_timestamp() {
-        let v = json_eval(Expr::DateParseRfc3339 { target: Box::new(lit("2024-01-15T12:00:00Z")) }).await;
+        let v = json_eval(Expr::DateParseRfc3339 {
+            target: Box::new(lit("2024-01-15T12:00:00Z")),
+        })
+        .await;
         assert!(v.as_i64().unwrap() > 0);
     }
 
@@ -484,13 +671,17 @@ mod shared_tests {
         let v = json_eval(Expr::DateParse {
             target: Box::new(lit("1970-01-01")),
             format: "[year]-[month]-[day]".into(),
-        }).await;
+        })
+        .await;
         assert_eq!(v.as_i64().unwrap(), 0);
     }
 
     #[tokio::test]
     async fn date_parse_rfc3339_invalid_errors() {
-        let err = json_eval_err(Expr::DateParseRfc3339 { target: Box::new(lit("not-a-date")) }).await;
+        let err = json_eval_err(Expr::DateParseRfc3339 {
+            target: Box::new(lit("not-a-date")),
+        })
+        .await;
         assert!(err.contains("Invalid RFC3339"));
     }
 
@@ -498,19 +689,28 @@ mod shared_tests {
 
     #[tokio::test]
     async fn fallback_on_null() {
-        let expr = Expr::Fallback { target: Box::new(Expr::Null), default: Box::new(lit("default")) };
+        let expr = Expr::Fallback {
+            target: Box::new(Expr::Null),
+            default: Box::new(lit("default")),
+        };
         assert_eq!(json_eval(expr).await, "default");
     }
 
     #[tokio::test]
     async fn fallback_on_empty_string() {
-        let expr = Expr::Fallback { target: Box::new(lit("")), default: Box::new(lit("fallback")) };
+        let expr = Expr::Fallback {
+            target: Box::new(lit("")),
+            default: Box::new(lit("fallback")),
+        };
         assert_eq!(json_eval(expr).await, "fallback");
     }
 
     #[tokio::test]
     async fn fallback_passes_through_value() {
-        let expr = Expr::Fallback { target: Box::new(lit("real")), default: Box::new(lit("default")) };
+        let expr = Expr::Fallback {
+            target: Box::new(lit("real")),
+            default: Box::new(lit("default")),
+        };
         assert_eq!(json_eval(expr).await, "real");
     }
 
@@ -520,17 +720,29 @@ mod shared_tests {
     async fn lookup_hit() {
         let expr = Expr::Lookup {
             target: Box::new(lit("publishing")),
-            table: vec![("publishing".into(), "ongoing".into()), ("finished".into(), "completed".into())],
+            table: vec![
+                ("publishing".into(), "ongoing".into()),
+                ("finished".into(), "completed".into()),
+            ],
         };
         assert_eq!(json_eval(expr).await, "ongoing");
     }
 
     #[tokio::test]
     async fn lookup_miss_returns_null_not_error() {
-        let rows = json_rows("{}", "", vec![opt_field("v", Expr::Lookup {
-            target: Box::new(lit("unknown")),
-            table: vec![("publishing".into(), "ongoing".into())],
-        })], vec![]).await;
+        let rows = json_rows(
+            "{}",
+            "",
+            vec![opt_field(
+                "v",
+                Expr::Lookup {
+                    target: Box::new(lit("unknown")),
+                    table: vec![("publishing".into(), "ongoing".into())],
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["v"], serde_json::Value::Null);
     }
 
@@ -563,7 +775,10 @@ mod shared_tests {
             target: Box::new(lit("image.jpg")),
             base: Box::new(lit("https://example.com/manga/abc/")),
         };
-        assert_eq!(json_eval(expr).await, "https://example.com/manga/abc/image.jpg");
+        assert_eq!(
+            json_eval(expr).await,
+            "https://example.com/manga/abc/image.jpg"
+        );
     }
 
     // ── Concat / List ─────────────────────────────────────────────────────────
@@ -576,7 +791,13 @@ mod shared_tests {
 
     #[tokio::test]
     async fn list_literal_produces_array() {
-        let rows = json_rows("{}", "", vec![field("v", Expr::List(vec![lit("x"), lit("y"), lit("z")]))], vec![]).await;
+        let rows = json_rows(
+            "{}",
+            "",
+            vec![field("v", Expr::List(vec![lit("x"), lit("y"), lit("z")]))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["v"], serde_json::json!(["x", "y", "z"]));
     }
 
@@ -613,7 +834,9 @@ mod shared_tests {
     async fn map_exposes_index() {
         let expr = Expr::Map {
             target: Box::new(Expr::List(vec![lit("a"), lit("b")])),
-            transform: Box::new(Expr::ToString { target: Box::new(var("$index")) }),
+            transform: Box::new(Expr::ToString {
+                target: Box::new(var("$index")),
+            }),
         };
         let rows = json_rows("{}", "", vec![field("v", expr)], vec![]).await;
         assert_eq!(rows[0]["v"], serde_json::json!(["0", "1"]));
@@ -623,7 +846,10 @@ mod shared_tests {
     async fn flat_map_flattens_sublists() {
         let expr = Expr::FlatMap {
             target: Box::new(Expr::List(vec![lit("a,b"), lit("c,d")])),
-            transform: Box::new(Expr::Split { target: Box::new(var("$item")), delimiter: ",".into() }),
+            transform: Box::new(Expr::Split {
+                target: Box::new(var("$item")),
+                delimiter: ",".into(),
+            }),
         };
         let rows = json_rows("{}", "", vec![field("v", expr)], vec![]).await;
         assert_eq!(rows[0]["v"], serde_json::json!(["a", "b", "c", "d"]));
@@ -632,8 +858,15 @@ mod shared_tests {
     #[tokio::test]
     async fn filter_keeps_matching_items() {
         let expr = Expr::Filter {
-            target: Box::new(Expr::List(vec![lit("apple"), lit("banana"), lit("apricot")])),
-            filter: Box::new(Expr::StartsWith { target: Box::new(var("$item")), prefix: "a".into() }),
+            target: Box::new(Expr::List(vec![
+                lit("apple"),
+                lit("banana"),
+                lit("apricot"),
+            ])),
+            filter: Box::new(Expr::StartsWith {
+                target: Box::new(var("$item")),
+                prefix: "a".into(),
+            }),
         };
         let rows = json_rows("{}", "", vec![field("v", expr)], vec![]).await;
         assert_eq!(rows[0]["v"], serde_json::json!(["apple", "apricot"]));
@@ -644,7 +877,10 @@ mod shared_tests {
         // Lookup returns Null for non-matching → should be treated as false
         let expr = Expr::Filter {
             target: Box::new(Expr::List(vec![lit("a"), lit("b"), lit("a")])),
-            filter: Box::new(Expr::Matches { target: Box::new(var("$item")), pattern: "^a$".into() }),
+            filter: Box::new(Expr::Matches {
+                target: Box::new(var("$item")),
+                pattern: "^a$".into(),
+            }),
         };
         let rows = json_rows("{}", "", vec![field("v", expr)], vec![]).await;
         assert_eq!(rows[0]["v"], serde_json::json!(["a", "a"]));
@@ -720,35 +956,66 @@ mod shared_tests {
 
     #[tokio::test]
     async fn to_string_int() {
-        let expr = Expr::ToString { target: Box::new(Expr::ParseInt { target: Box::new(lit("42")) }) };
+        let expr = Expr::ToString {
+            target: Box::new(Expr::ParseInt {
+                target: Box::new(lit("42")),
+            }),
+        };
         assert_eq!(json_eval(expr).await, "42");
     }
 
     #[tokio::test]
     async fn to_string_float_whole_no_trailing_zero() {
-        assert_eq!(json_eval(Expr::ToString { target: Box::new(num(3.0)) }).await, "3");
+        assert_eq!(
+            json_eval(Expr::ToString {
+                target: Box::new(num(3.0))
+            })
+            .await,
+            "3"
+        );
     }
 
     #[tokio::test]
     async fn to_string_float_decimal() {
-        assert_eq!(json_eval(Expr::ToString { target: Box::new(num(3.14)) }).await, "3.14");
+        assert_eq!(
+            json_eval(Expr::ToString {
+                target: Box::new(num(3.14))
+            })
+            .await,
+            "3.14"
+        );
     }
 
     #[tokio::test]
     async fn to_string_bool_true() {
-        let expr = Expr::ToString { target: Box::new(binop(Op::Eq, lit("a"), lit("a"))) };
+        let expr = Expr::ToString {
+            target: Box::new(binop(Op::Eq, lit("a"), lit("a"))),
+        };
         assert_eq!(json_eval(expr).await, "true");
     }
 
     #[tokio::test]
     async fn to_string_bool_false() {
-        let expr = Expr::ToString { target: Box::new(binop(Op::Eq, lit("a"), lit("b"))) };
+        let expr = Expr::ToString {
+            target: Box::new(binop(Op::Eq, lit("a"), lit("b"))),
+        };
         assert_eq!(json_eval(expr).await, "false");
     }
 
     #[tokio::test]
     async fn to_string_null_propagates() {
-        let rows = json_rows("{}", "", vec![opt_field("v", Expr::ToString { target: Box::new(Expr::Null) })], vec![]).await;
+        let rows = json_rows(
+            "{}",
+            "",
+            vec![opt_field(
+                "v",
+                Expr::ToString {
+                    target: Box::new(Expr::Null),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["v"], serde_json::Value::Null);
     }
 
@@ -774,7 +1041,10 @@ mod shared_tests {
 
     #[tokio::test]
     async fn join_empty_list() {
-        let expr = Expr::Join { target: Box::new(Expr::List(vec![])), delimiter: ", ".into() };
+        let expr = Expr::Join {
+            target: Box::new(Expr::List(vec![])),
+            delimiter: ", ".into(),
+        };
         assert_eq!(json_eval(expr).await, "");
     }
 
@@ -804,17 +1074,39 @@ mod html_tests {
     use super::helpers::*;
     use kani_shared::ast::*;
 
-    fn dom(selector: &str) -> Expr { Expr::Dom(selector.into()) }
-    fn attr(target: Expr, name: &str) -> Expr { Expr::Attr { target: Box::new(target), name: name.into() } }
-    fn text(target: Expr) -> Expr { Expr::Text { target: Box::new(target) } }
-    fn select(target: Expr, selector: &str) -> Expr { Expr::Select { target: Box::new(target), selector: selector.into() } }
-    fn first(target: Expr, selector: &str) -> Expr { Expr::First { target: Box::new(target), selector: selector.into() } }
+    fn attr(target: Expr, name: &str) -> Expr {
+        Expr::Attr {
+            target: Box::new(target),
+            name: name.into(),
+        }
+    }
+    fn text(target: Expr) -> Expr {
+        Expr::Text {
+            target: Box::new(target),
+        }
+    }
+    fn select(target: Expr, selector: &str) -> Expr {
+        Expr::Select {
+            target: Box::new(target),
+            selector: selector.into(),
+        }
+    }
+    fn first(target: Expr, selector: &str) -> Expr {
+        Expr::First {
+            target: Box::new(target),
+            selector: selector.into(),
+        }
+    }
 
     #[tokio::test]
     async fn container_iterates_matching_elements() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("id", attr(Expr::SelfRef, "data-id")),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field("id", attr(Expr::SelfRef, "data-id"))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["id"], "manga-123");
         assert_eq!(rows[1]["id"], "manga-456");
@@ -822,45 +1114,78 @@ mod html_tests {
 
     #[tokio::test]
     async fn index_in_container() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("idx", Expr::ToString { target: Box::new(Expr::Index) }),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field(
+                "idx",
+                Expr::ToString {
+                    target: Box::new(Expr::Index),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["idx"], "0");
         assert_eq!(rows[1]["idx"], "1");
     }
 
     #[tokio::test]
     async fn attr_existing() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("id", attr(Expr::SelfRef, "data-id")),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field("id", attr(Expr::SelfRef, "data-id"))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["id"], "manga-123");
     }
 
     #[tokio::test]
     async fn attr_missing_on_one_element_optional() {
         // data-src is only on the first article's img
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            opt_field("src", attr(first(Expr::SelfRef, "img"), "data-src")),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![opt_field(
+                "src",
+                attr(first(Expr::SelfRef, "img"), "data-src"),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["src"], "https://cdn.example.com/123.jpg");
         assert_eq!(rows[1]["src"], serde_json::Value::Null);
     }
 
     #[tokio::test]
     async fn text_content() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("title", text(first(Expr::SelfRef, "h2.title"))),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field("title", text(first(Expr::SelfRef, "h2.title")))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["title"], "Test Manga");
         assert_eq!(rows[1]["title"], "Another Title");
     }
 
     #[tokio::test]
     async fn inner_html() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("tags_html", Expr::InnerHtml { target: Box::new(first(Expr::SelfRef, "div.tags")) }),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field(
+                "tags_html",
+                Expr::InnerHtml {
+                    target: Box::new(first(Expr::SelfRef, "div.tags")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         // Should contain the <a> tags
         let s = rows[0]["tags_html"].as_str().unwrap();
         assert!(s.contains("<a"));
@@ -870,52 +1195,88 @@ mod html_tests {
     #[tokio::test]
     async fn select_returns_list_of_elements() {
         // Use map to get text from each tag
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("tags", Expr::Map {
-                target: Box::new(select(Expr::SelfRef, "a.tag")),
-                transform: Box::new(text(var("$item"))),
-            }),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field(
+                "tags",
+                Expr::Map {
+                    target: Box::new(select(Expr::SelfRef, "a.tag")),
+                    transform: Box::new(text(var("$item"))),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["tags"], serde_json::json!(["Action", "Adventure"]));
         assert_eq!(rows[1]["tags"], serde_json::json!(["Romance"]));
     }
 
     #[tokio::test]
     async fn first_element() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("first_tag", text(first(Expr::SelfRef, "a.tag"))),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field("first_tag", text(first(Expr::SelfRef, "a.tag")))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["first_tag"], "Action");
         assert_eq!(rows[1]["first_tag"], "Romance");
     }
 
     #[tokio::test]
     async fn first_returns_null_when_no_match() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            opt_field("v", first(Expr::SelfRef, "span.nonexistent")),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![opt_field("v", first(Expr::SelfRef, "span.nonexistent"))],
+            vec![],
+        )
+        .await;
         // first returns None when no match, which means Value::Null
         assert_eq!(rows[0]["v"], serde_json::Value::Null);
     }
 
     #[tokio::test]
     async fn has_class_true() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("active", Expr::HasClass { target: Box::new(Expr::SelfRef), class: "active".into() }),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field(
+                "active",
+                Expr::HasClass {
+                    target: Box::new(Expr::SelfRef),
+                    class: "active".into(),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["active"], true);
         assert_eq!(rows[1]["active"], false);
     }
 
     #[tokio::test]
     async fn children_of_element() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("tag_count", Expr::ToString { target: Box::new(Expr::Fold {
-                target: Box::new(Expr::Children { target: Box::new(first(Expr::SelfRef, "div.tags")) }),
-                base: Box::new(num(0.0)),
-                transform: Box::new(binop(Op::Add, var("$acc"), num(1.0))),
-            })}),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field(
+                "tag_count",
+                Expr::ToString {
+                    target: Box::new(Expr::Fold {
+                        target: Box::new(Expr::Children {
+                            target: Box::new(first(Expr::SelfRef, "div.tags")),
+                        }),
+                        base: Box::new(num(0.0)),
+                        transform: Box::new(binop(Op::Add, var("$acc"), num(1.0))),
+                    }),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["tag_count"], "2");
         assert_eq!(rows[1]["tag_count"], "1");
     }
@@ -923,79 +1284,114 @@ mod html_tests {
     #[tokio::test]
     async fn dom_from_document_root() {
         // Bindings use dom() which queries from the document root, not the container element
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("title", text(first(Expr::SelfRef, "h2.title"))),
-        ], vec![
-            bind("$page_title", text(Expr::Dom("h2.title".into()))),
-        ]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field("title", text(first(Expr::SelfRef, "h2.title")))],
+            vec![bind("$page_title", text(Expr::Dom("h2.title".into())))],
+        )
+        .await;
         // $page_title is bound but not used in fields — just ensuring bindings run without error
         assert_eq!(rows.len(), 2);
     }
 
     #[tokio::test]
     async fn binding_available_in_all_rows() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("suffix", Expr::Append {
-                target: Box::new(attr(Expr::SelfRef, "data-id")),
-                suffix: Box::new(var("$suffix")),
-            }),
-        ], vec![
-            bind("$suffix", lit("_item")),
-        ]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field(
+                "suffix",
+                Expr::Append {
+                    target: Box::new(attr(Expr::SelfRef, "data-id")),
+                    suffix: Box::new(var("$suffix")),
+                },
+            )],
+            vec![bind("$suffix", lit("_item"))],
+        )
+        .await;
         assert_eq!(rows[0]["suffix"], "manga-123_item");
         assert_eq!(rows[1]["suffix"], "manga-456_item");
     }
 
     #[tokio::test]
     async fn capture_chapter_number() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("chapter", Expr::ParseFloat {
-                target: Box::new(Expr::At {
-                    target: Box::new(Expr::Capture {
-                        target: Box::new(text(first(Expr::SelfRef, "span.chapter"))),
-                        pattern: r"Chapter (\d+(?:\.\d+)?)".into(),
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field(
+                "chapter",
+                Expr::ParseFloat {
+                    target: Box::new(Expr::At {
+                        target: Box::new(Expr::Capture {
+                            target: Box::new(text(first(Expr::SelfRef, "span.chapter"))),
+                            pattern: r"Chapter (\d+(?:\.\d+)?)".into(),
+                        }),
+                        index: 1,
                     }),
-                    index: 1,
-                }),
-            }),
-        ], vec![]).await;
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert!((rows[0]["chapter"].as_f64().unwrap() - 42.0).abs() < 1e-9);
         assert!((rows[1]["chapter"].as_f64().unwrap() - 1.5).abs() < 1e-9);
     }
 
     #[tokio::test]
     async fn if_conditional_on_class() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("kind", Expr::If {
-                condition: Box::new(Expr::HasClass { target: Box::new(Expr::SelfRef), class: "active".into() }),
-                then: Box::new(lit("featured")),
-                else_: Box::new(lit("regular")),
-            }),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field(
+                "kind",
+                Expr::If {
+                    condition: Box::new(Expr::HasClass {
+                        target: Box::new(Expr::SelfRef),
+                        class: "active".into(),
+                    }),
+                    then: Box::new(lit("featured")),
+                    else_: Box::new(lit("regular")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["kind"], "featured");
         assert_eq!(rows[1]["kind"], "regular");
     }
 
     #[tokio::test]
     async fn join_tag_texts() {
-        let rows = html_rows(MANGA_HTML, "article.manga-card", vec![
-            field("tags", Expr::Join {
-                target: Box::new(Expr::Map {
-                    target: Box::new(select(Expr::SelfRef, "a.tag")),
-                    transform: Box::new(text(var("$item"))),
-                }),
-                delimiter: ", ".into(),
-            }),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "article.manga-card",
+            vec![field(
+                "tags",
+                Expr::Join {
+                    target: Box::new(Expr::Map {
+                        target: Box::new(select(Expr::SelfRef, "a.tag")),
+                        transform: Box::new(text(var("$item"))),
+                    }),
+                    delimiter: ", ".into(),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["tags"], "Action, Adventure");
         assert_eq!(rows[1]["tags"], "Romance");
     }
 
     #[tokio::test]
     async fn no_container_matches_empty_result() {
-        let rows = html_rows(MANGA_HTML, "div.nonexistent", vec![
-            field("x", lit("val")),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGA_HTML,
+            "div.nonexistent",
+            vec![field("x", lit("val"))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows.len(), 0);
     }
 }
@@ -1010,16 +1406,30 @@ mod json_tests {
     use kani_shared::ast::*;
 
     fn ptr(target: Expr, pointer: &str) -> Expr {
-        Expr::JsonPtr { target: Box::new(target), pointer: pointer.into() }
+        Expr::JsonPtr {
+            target: Box::new(target),
+            pointer: pointer.into(),
+        }
     }
 
-    fn json(pointer: &str) -> Expr { Expr::Json(pointer.into()) }
+    fn json(pointer: &str) -> Expr {
+        Expr::Json(pointer.into())
+    }
 
     #[tokio::test]
     async fn array_container_iterates_elements() {
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            field("id", Expr::JsonStr { target: Box::new(ptr(Expr::SelfRef, "/id")) }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "/data",
+            vec![field(
+                "id",
+                Expr::JsonStr {
+                    target: Box::new(ptr(Expr::SelfRef, "/id")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["id"], "manga-1");
         assert_eq!(rows[1]["id"], "manga-2");
@@ -1027,88 +1437,159 @@ mod json_tests {
 
     #[tokio::test]
     async fn json_pointer_root_navigation() {
-        let rows = json_rows(MANGA_JSON, "", vec![
-            field("total", Expr::JsonInt { target: Box::new(json("/meta/total")) }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "",
+            vec![field(
+                "total",
+                Expr::JsonInt {
+                    target: Box::new(json("/meta/total")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["total"].as_i64().unwrap(), 2);
     }
 
     #[tokio::test]
     async fn json_ptr_chained() {
-        let rows = json_rows(MANGA_JSON, "", vec![
-            field("status", Expr::JsonStr { target: Box::new(ptr(json("/data"), "/0/attributes/status")) }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "",
+            vec![field(
+                "status",
+                Expr::JsonStr {
+                    target: Box::new(ptr(json("/data"), "/0/attributes/status")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["status"], "ongoing");
     }
 
     #[tokio::test]
     async fn json_str() {
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            field("status", Expr::JsonStr {
-                target: Box::new(ptr(Expr::SelfRef, "/attributes/status")),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "/data",
+            vec![field(
+                "status",
+                Expr::JsonStr {
+                    target: Box::new(ptr(Expr::SelfRef, "/attributes/status")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["status"], "ongoing");
         assert_eq!(rows[1]["status"], "completed");
     }
 
     #[tokio::test]
     async fn json_int() {
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            field("count", Expr::JsonInt {
-                target: Box::new(ptr(Expr::SelfRef, "/attributes/chapterCount")),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "/data",
+            vec![field(
+                "count",
+                Expr::JsonInt {
+                    target: Box::new(ptr(Expr::SelfRef, "/attributes/chapterCount")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["count"].as_i64().unwrap(), 42);
         assert_eq!(rows[1]["count"].as_i64().unwrap(), 10);
     }
 
     #[tokio::test]
     async fn json_float() {
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            field("rating", Expr::JsonFloat {
-                target: Box::new(ptr(Expr::SelfRef, "/attributes/rating")),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "/data",
+            vec![field(
+                "rating",
+                Expr::JsonFloat {
+                    target: Box::new(ptr(Expr::SelfRef, "/attributes/rating")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert!((rows[0]["rating"].as_f64().unwrap() - 8.5).abs() < 1e-9);
     }
 
     #[tokio::test]
     async fn json_bool() {
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            field("adult", Expr::JsonBool {
-                target: Box::new(ptr(Expr::SelfRef, "/attributes/adult")),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "/data",
+            vec![field(
+                "adult",
+                Expr::JsonBool {
+                    target: Box::new(ptr(Expr::SelfRef, "/attributes/adult")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["adult"], false);
         assert_eq!(rows[1]["adult"], true);
     }
 
     #[tokio::test]
     async fn json_ptr_missing_returns_null() {
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            opt_field("v", Expr::JsonStr {
-                target: Box::new(ptr(Expr::SelfRef, "/attributes/nonexistent")),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "/data",
+            vec![opt_field(
+                "v",
+                Expr::JsonStr {
+                    target: Box::new(ptr(Expr::SelfRef, "/attributes/nonexistent")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["v"], serde_json::Value::Null);
     }
 
     #[tokio::test]
     async fn array_len() {
-        let rows = json_rows(MANGA_JSON, "", vec![
-            field("count", Expr::ToString {
-                target: Box::new(Expr::ArrayLen { target: Box::new(json("/data")) }),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "",
+            vec![field(
+                "count",
+                Expr::ToString {
+                    target: Box::new(Expr::ArrayLen {
+                        target: Box::new(json("/data")),
+                    }),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["count"], "2");
     }
 
     #[tokio::test]
     async fn json_keys() {
-        let rows = json_rows(MANGA_JSON, "", vec![
-            field("keys", Expr::JsonKeys { target: Box::new(json("/data/0/attributes/title")) }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "",
+            vec![field(
+                "keys",
+                Expr::JsonKeys {
+                    target: Box::new(json("/data/0/attributes/title")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         let keys = rows[0]["keys"].as_array().unwrap();
         assert!(keys.iter().any(|k| k == "en"));
         assert!(keys.iter().any(|k| k == "ja"));
@@ -1117,91 +1598,136 @@ mod json_tests {
     #[tokio::test]
     async fn json_get_dynamic_key() {
         // Simulate `json("/data/0/attributes/title").get("en")`
-        let rows = json_rows(MANGA_JSON, "", vec![
-            field("title", Expr::JsonStr {
-                target: Box::new(Expr::JsonGet {
-                    target: Box::new(json("/data/0/attributes/title")),
-                    key: Box::new(Expr::Literal("en".into())),
-                }),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "",
+            vec![field(
+                "title",
+                Expr::JsonStr {
+                    target: Box::new(Expr::JsonGet {
+                        target: Box::new(json("/data/0/attributes/title")),
+                        key: Box::new(Expr::Literal("en".into())),
+                    }),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["title"], "Test Manga");
     }
 
     #[tokio::test]
     async fn json_get_with_variable_key() {
         // Bind $lang = "ja", then use it as a dynamic key
-        let rows = json_rows(MANGA_JSON, "", vec![
-            field("title", Expr::JsonStr {
-                target: Box::new(Expr::JsonGet {
-                    target: Box::new(json("/data/0/attributes/title")),
-                    key: Box::new(Expr::Var("$lang".into())),
-                }),
-            }),
-        ], vec![bind("$lang", Expr::Literal("ja".into()))]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "",
+            vec![field(
+                "title",
+                Expr::JsonStr {
+                    target: Box::new(Expr::JsonGet {
+                        target: Box::new(json("/data/0/attributes/title")),
+                        key: Box::new(Expr::Var("$lang".into())),
+                    }),
+                },
+            )],
+            vec![bind("$lang", Expr::Literal("ja".into()))],
+        )
+        .await;
         assert_eq!(rows[0]["title"], "テスト漫画");
     }
 
     #[tokio::test]
     async fn json_get_missing_key_returns_null() {
-        let rows = json_rows(MANGA_JSON, "", vec![
-            opt_field("v", Expr::JsonStr {
-                target: Box::new(Expr::JsonGet {
-                    target: Box::new(json("/data/0/attributes/title")),
-                    key: Box::new(Expr::Literal("fr".into())),
-                }),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "",
+            vec![opt_field(
+                "v",
+                Expr::JsonStr {
+                    target: Box::new(Expr::JsonGet {
+                        target: Box::new(json("/data/0/attributes/title")),
+                        key: Box::new(Expr::Literal("fr".into())),
+                    }),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["v"], serde_json::Value::Null);
     }
 
     #[tokio::test]
     async fn json_find_locates_first_match() {
-        let rows = json_rows(MANGA_JSON, "", vec![
-            field("filename", Expr::JsonStr {
-                target: Box::new(Expr::JsonPtr {
-                    target: Box::new(Expr::JsonFind {
-                        target: Box::new(json("/relationships")),
-                        key: Box::new(Expr::Literal("type".into())),
-                        value: Box::new(Expr::Literal("cover_art".into())),
+        let rows = json_rows(
+            MANGA_JSON,
+            "",
+            vec![field(
+                "filename",
+                Expr::JsonStr {
+                    target: Box::new(Expr::JsonPtr {
+                        target: Box::new(Expr::JsonFind {
+                            target: Box::new(json("/relationships")),
+                            key: Box::new(Expr::Literal("type".into())),
+                            value: Box::new(Expr::Literal("cover_art".into())),
+                        }),
+                        pointer: "/attributes/fileName".into(),
                     }),
-                    pointer: "/attributes/fileName".into(),
-                }),
-            }),
-        ], vec![]).await;
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["filename"], "cover1.jpg");
     }
 
     #[tokio::test]
     async fn json_find_no_match_returns_null() {
-        let rows = json_rows(MANGA_JSON, "", vec![
-            opt_field("v", Expr::JsonFind {
-                target: Box::new(json("/relationships")),
-                key: Box::new(Expr::Literal("type".into())),
-                value: Box::new(Expr::Literal("publisher".into())),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "",
+            vec![opt_field(
+                "v",
+                Expr::JsonFind {
+                    target: Box::new(json("/relationships")),
+                    key: Box::new(Expr::Literal("type".into())),
+                    value: Box::new(Expr::Literal("publisher".into())),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["v"], serde_json::Value::Null);
     }
 
     #[tokio::test]
     async fn binding_evaluated_before_iteration() {
         // Bind the cover_art relationship once, use it in each row
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            field("cover_file", Expr::Fallback {
-                target: Box::new(Expr::JsonStr {
-                    target: Box::new(Expr::JsonPtr {
-                        target: Box::new(Expr::Var("$cover".into())),
-                        pointer: "/attributes/fileName".into(),
+        let rows = json_rows(
+            MANGA_JSON,
+            "/data",
+            vec![field(
+                "cover_file",
+                Expr::Fallback {
+                    target: Box::new(Expr::JsonStr {
+                        target: Box::new(Expr::JsonPtr {
+                            target: Box::new(Expr::Var("$cover".into())),
+                            pointer: "/attributes/fileName".into(),
+                        }),
                     }),
-                }),
-                default: Box::new(Expr::Literal("unknown.jpg".into())),
-            }),
-        ], vec![bind("$cover", Expr::JsonFind {
-            target: Box::new(Expr::Json("/relationships".into())),
-            key: Box::new(Expr::Literal("type".into())),
-            value: Box::new(Expr::Literal("cover_art".into())),
-        })]).await;
+                    default: Box::new(Expr::Literal("unknown.jpg".into())),
+                },
+            )],
+            vec![bind(
+                "$cover",
+                Expr::JsonFind {
+                    target: Box::new(Expr::Json("/relationships".into())),
+                    key: Box::new(Expr::Literal("type".into())),
+                    value: Box::new(Expr::Literal("cover_art".into())),
+                },
+            )],
+        )
+        .await;
         // Both rows use the same binding
         assert_eq!(rows[0]["cover_file"], "cover1.jpg");
         assert_eq!(rows[1]["cover_file"], "cover1.jpg");
@@ -1209,61 +1735,89 @@ mod json_tests {
 
     #[tokio::test]
     async fn index_in_json_container() {
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            field("pos", Expr::Index),
-        ], vec![]).await;
+        let rows = json_rows(MANGA_JSON, "/data", vec![field("pos", Expr::Index)], vec![]).await;
         assert_eq!(rows[0]["pos"].as_i64().unwrap(), 0);
         assert_eq!(rows[1]["pos"].as_i64().unwrap(), 1);
     }
 
     #[tokio::test]
     async fn self_ref_in_json_container() {
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            field("id", Expr::JsonStr { target: Box::new(ptr(Expr::SelfRef, "/id")) }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "/data",
+            vec![field(
+                "id",
+                Expr::JsonStr {
+                    target: Box::new(ptr(Expr::SelfRef, "/id")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["id"], "manga-1");
     }
 
     #[tokio::test]
     async fn map_over_json_array() {
-        let rows = json_rows(MANGA_JSON, "", vec![
-            field("ids", Expr::Map {
-                target: Box::new(json("/data")),
-                transform: Box::new(Expr::JsonStr {
-                    target: Box::new(ptr(var("$item"), "/id")),
-                }),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "",
+            vec![field(
+                "ids",
+                Expr::Map {
+                    target: Box::new(json("/data")),
+                    transform: Box::new(Expr::JsonStr {
+                        target: Box::new(ptr(var("$item"), "/id")),
+                    }),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["ids"], serde_json::json!(["manga-1", "manga-2"]));
     }
 
     #[tokio::test]
     async fn json_if_conditional_on_field() {
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            field("label", Expr::If {
-                condition: Box::new(Expr::JsonBool {
-                    target: Box::new(ptr(Expr::SelfRef, "/attributes/adult")),
-                }),
-                then: Box::new(lit("nsfw")),
-                else_: Box::new(lit("safe")),
-            }),
-        ], vec![]).await;
+        let rows = json_rows(
+            MANGA_JSON,
+            "/data",
+            vec![field(
+                "label",
+                Expr::If {
+                    condition: Box::new(Expr::JsonBool {
+                        target: Box::new(ptr(Expr::SelfRef, "/attributes/adult")),
+                    }),
+                    then: Box::new(lit("nsfw")),
+                    else_: Box::new(lit("safe")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["label"], "safe");
         assert_eq!(rows[1]["label"], "nsfw");
     }
 
     #[tokio::test]
     async fn chapter_count_to_string() {
-        let rows = json_rows(MANGA_JSON, "/data", vec![
-            field("display", Expr::Append {
-                target: Box::new(Expr::ToString {
-                    target: Box::new(Expr::JsonInt {
-                        target: Box::new(ptr(Expr::SelfRef, "/attributes/chapterCount")),
+        let rows = json_rows(
+            MANGA_JSON,
+            "/data",
+            vec![field(
+                "display",
+                Expr::Append {
+                    target: Box::new(Expr::ToString {
+                        target: Box::new(Expr::JsonInt {
+                            target: Box::new(ptr(Expr::SelfRef, "/attributes/chapterCount")),
+                        }),
                     }),
-                }),
-                suffix: Box::new(lit(" chapters")),
-            }),
-        ], vec![]).await;
+                    suffix: Box::new(lit(" chapters")),
+                },
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["display"], "42 chapters");
         assert_eq!(rows[1]["display"], "10 chapters");
     }
@@ -1281,40 +1835,160 @@ mod extension_integration_tests {
     use kani_shared::ast::*;
 
     // ── Local constructor shortcuts ───────────────────────────────────────────
-    fn attr(target: Expr, name: &str) -> Expr { Expr::Attr  { target: Box::new(target), name: name.into() } }
-    fn text(target: Expr)             -> Expr { Expr::Text  { target: Box::new(target) } }
-    fn first(target: Expr, sel: &str) -> Expr { Expr::First { target: Box::new(target), selector: sel.into() } }
-    fn select(target: Expr, sel: &str)-> Expr { Expr::Select{ target: Box::new(target), selector: sel.into() } }
-    fn dom(sel: &str)                 -> Expr { Expr::Dom(sel.into()) }
-    fn split(target: Expr, d: &str)   -> Expr { Expr::Split { target: Box::new(target), delimiter: d.into() } }
-    fn at(target: Expr, idx: i32)     -> Expr { Expr::At    { target: Box::new(target), index: idx } }
-    fn trim(target: Expr)             -> Expr { Expr::Trim  { target: Box::new(target) } }
-    fn lower(target: Expr)            -> Expr { Expr::Lower { target: Box::new(target) } }
-    fn fallback(t: Expr, d: Expr)     -> Expr { Expr::Fallback { target: Box::new(t), default: Box::new(d) } }
-    fn map(target: Expr, body: Expr)  -> Expr { Expr::Map   { target: Box::new(target), transform: Box::new(body) } }
-    fn filter(target: Expr, pred: Expr)->Expr { Expr::Filter{ target: Box::new(target), filter: Box::new(pred) } }
-    fn join(target: Expr, d: &str)    -> Expr { Expr::Join  { target: Box::new(target), delimiter: d.into() } }
-    fn matches(target: Expr, p: &str) -> Expr { Expr::Matches { target: Box::new(target), pattern: p.into() } }
-    fn capture(target: Expr, p: &str) -> Expr { Expr::Capture { target: Box::new(target), pattern: p.into() } }
-    fn parse_float(target: Expr)      -> Expr { Expr::ParseFloat { target: Box::new(target) } }
-    fn to_string_e(target: Expr)      -> Expr { Expr::ToString { target: Box::new(target) } }
+    fn attr(target: Expr, name: &str) -> Expr {
+        Expr::Attr {
+            target: Box::new(target),
+            name: name.into(),
+        }
+    }
+    fn text(target: Expr) -> Expr {
+        Expr::Text {
+            target: Box::new(target),
+        }
+    }
+    fn first(target: Expr, sel: &str) -> Expr {
+        Expr::First {
+            target: Box::new(target),
+            selector: sel.into(),
+        }
+    }
+    fn select(target: Expr, sel: &str) -> Expr {
+        Expr::Select {
+            target: Box::new(target),
+            selector: sel.into(),
+        }
+    }
+    fn dom(sel: &str) -> Expr {
+        Expr::Dom(sel.into())
+    }
+    fn split(target: Expr, d: &str) -> Expr {
+        Expr::Split {
+            target: Box::new(target),
+            delimiter: d.into(),
+        }
+    }
+    fn at(target: Expr, idx: i32) -> Expr {
+        Expr::At {
+            target: Box::new(target),
+            index: idx,
+        }
+    }
+    fn trim(target: Expr) -> Expr {
+        Expr::Trim {
+            target: Box::new(target),
+        }
+    }
+    fn lower(target: Expr) -> Expr {
+        Expr::Lower {
+            target: Box::new(target),
+        }
+    }
+    fn fallback(t: Expr, d: Expr) -> Expr {
+        Expr::Fallback {
+            target: Box::new(t),
+            default: Box::new(d),
+        }
+    }
+    fn map(target: Expr, body: Expr) -> Expr {
+        Expr::Map {
+            target: Box::new(target),
+            transform: Box::new(body),
+        }
+    }
+    fn filter(target: Expr, pred: Expr) -> Expr {
+        Expr::Filter {
+            target: Box::new(target),
+            filter: Box::new(pred),
+        }
+    }
+    fn join(target: Expr, d: &str) -> Expr {
+        Expr::Join {
+            target: Box::new(target),
+            delimiter: d.into(),
+        }
+    }
+    fn matches(target: Expr, p: &str) -> Expr {
+        Expr::Matches {
+            target: Box::new(target),
+            pattern: p.into(),
+        }
+    }
+    fn capture(target: Expr, p: &str) -> Expr {
+        Expr::Capture {
+            target: Box::new(target),
+            pattern: p.into(),
+        }
+    }
+    fn parse_float(target: Expr) -> Expr {
+        Expr::ParseFloat {
+            target: Box::new(target),
+        }
+    }
+    fn to_string_e(target: Expr) -> Expr {
+        Expr::ToString {
+            target: Box::new(target),
+        }
+    }
     fn lookup(target: Expr, table: Vec<(&str, &str)>) -> Expr {
-        Expr::Lookup { target: Box::new(target), table: table.into_iter().map(|(k,v)| (k.into(), v.into())).collect() }
+        Expr::Lookup {
+            target: Box::new(target),
+            table: table
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+        }
     }
     fn if_expr(cond: Expr, then: Expr, else_: Expr) -> Expr {
-        Expr::If { condition: Box::new(cond), then: Box::new(then), else_: Box::new(else_) }
+        Expr::If {
+            condition: Box::new(cond),
+            then: Box::new(then),
+            else_: Box::new(else_),
+        }
     }
 
-    fn json(ptr: &str) -> Expr { Expr::Json(ptr.into()) }
-    fn ptr_e(target: Expr, p: &str) -> Expr { Expr::JsonPtr  { target: Box::new(target), pointer: p.into() } }
-    fn jstr(target: Expr)           -> Expr { Expr::JsonStr  { target: Box::new(target) } }
-    fn jint(target: Expr)           -> Expr { Expr::JsonInt  { target: Box::new(target) } }
-    fn get(target: Expr, key: Expr) -> Expr { Expr::JsonGet  { target: Box::new(target), key: Box::new(key) } }
-    fn find(target: Expr, key: Expr, value: Expr) -> Expr {
-        Expr::JsonFind { target: Box::new(target), key: Box::new(key), value: Box::new(value) }
+    fn json(ptr: &str) -> Expr {
+        Expr::Json(ptr.into())
     }
-    fn append(t: Expr, s: Expr) -> Expr { Expr::Append { target: Box::new(t), suffix: Box::new(s) } }
-    fn rfc3339(target: Expr) -> Expr { Expr::DateParseRfc3339 { target: Box::new(target) } }
+    fn ptr_e(target: Expr, p: &str) -> Expr {
+        Expr::JsonPtr {
+            target: Box::new(target),
+            pointer: p.into(),
+        }
+    }
+    fn jstr(target: Expr) -> Expr {
+        Expr::JsonStr {
+            target: Box::new(target),
+        }
+    }
+    fn jint(target: Expr) -> Expr {
+        Expr::JsonInt {
+            target: Box::new(target),
+        }
+    }
+    fn get(target: Expr, key: Expr) -> Expr {
+        Expr::JsonGet {
+            target: Box::new(target),
+            key: Box::new(key),
+        }
+    }
+    fn find(target: Expr, key: Expr, value: Expr) -> Expr {
+        Expr::JsonFind {
+            target: Box::new(target),
+            key: Box::new(key),
+            value: Box::new(value),
+        }
+    }
+    fn append(t: Expr, s: Expr) -> Expr {
+        Expr::Append {
+            target: Box::new(t),
+            suffix: Box::new(s),
+        }
+    }
+    fn rfc3339(target: Expr) -> Expr {
+        Expr::DateParseRfc3339 {
+            target: Box::new(target),
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Mangapill (HTML scraper)
@@ -1340,9 +2014,16 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn mangapill_search_id_from_href() {
         // self.first("a").attr("href").split("/").at(2)
-        let rows = html_rows(MANGAPILL_SEARCH_HTML, ".grid.gap-3 > div", vec![
-            field("id", at(split(attr(first(Expr::SelfRef, "a"), "href"), "/"), 2)),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGAPILL_SEARCH_HTML,
+            ".grid.gap-3 > div",
+            vec![field(
+                "id",
+                at(split(attr(first(Expr::SelfRef, "a"), "href"), "/"), 2),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["id"], "1234");
         assert_eq!(rows[1]["id"], "5678");
     }
@@ -1350,12 +2031,19 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn mangapill_search_cover_fallback_to_src() {
         // fallback(img[data-src], img[src])
-        let rows = html_rows(MANGAPILL_SEARCH_HTML, ".grid.gap-3 > div", vec![
-            field("cover", fallback(
-                attr(first(Expr::SelfRef, "img"), "data-src"),
-                attr(first(Expr::SelfRef, "img"), "src"),
-            )),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGAPILL_SEARCH_HTML,
+            ".grid.gap-3 > div",
+            vec![field(
+                "cover",
+                fallback(
+                    attr(first(Expr::SelfRef, "img"), "data-src"),
+                    attr(first(Expr::SelfRef, "img"), "src"),
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["cover"], "https://cdn.mangapill.com/1234.jpg");
         // second card has no data-src → falls back to src
         assert_eq!(rows[1]["cover"], "https://cdn.mangapill.com/5678.jpg");
@@ -1363,9 +2051,13 @@ mod extension_integration_tests {
 
     #[tokio::test]
     async fn mangapill_search_title() {
-        let rows = html_rows(MANGAPILL_SEARCH_HTML, ".grid.gap-3 > div", vec![
-            field("title", text(first(Expr::SelfRef, ".line-clamp-2"))),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGAPILL_SEARCH_HTML,
+            ".grid.gap-3 > div",
+            vec![field("title", text(first(Expr::SelfRef, ".line-clamp-2")))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["title"], "Action Hero");
         assert_eq!(rows[1]["title"], "Romance Story");
     }
@@ -1390,63 +2082,89 @@ mod extension_integration_tests {
 
     #[tokio::test]
     async fn mangapill_details_title() {
-        let rows = html_rows(MANGAPILL_DETAILS_HTML, ":root", vec![
-            field("title", text(dom("h1.font-bold"))),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGAPILL_DETAILS_HTML,
+            ":root",
+            vec![field("title", text(dom("h1.font-bold")))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["title"], "One Piece");
     }
 
     #[tokio::test]
     async fn mangapill_details_description() {
-        let rows = html_rows(MANGAPILL_DETAILS_HTML, ":root", vec![
-            field("desc", text(dom("p.text-sm"))),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGAPILL_DETAILS_HTML,
+            ":root",
+            vec![field("desc", text(dom("p.text-sm")))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["desc"], "A story about pirates.");
     }
 
     #[tokio::test]
     async fn mangapill_details_cover() {
-        let rows = html_rows(MANGAPILL_DETAILS_HTML, ":root", vec![
-            field("cover", attr(dom("img"), "data-src")),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGAPILL_DETAILS_HTML,
+            ":root",
+            vec![field("cover", attr(dom("img"), "data-src"))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["cover"], "https://cdn.mangapill.com/op.jpg");
     }
 
     #[tokio::test]
     async fn mangapill_details_status_lookup() {
-        let rows = html_rows(MANGAPILL_DETAILS_HTML, ":root", vec![
-            field("status",
+        let rows = html_rows(
+            MANGAPILL_DETAILS_HTML,
+            ":root",
+            vec![field(
+                "status",
                 fallback(
-                    lookup(lower(trim(text(dom(".status-val")))),
+                    lookup(
+                        lower(trim(text(dom(".status-val")))),
                         vec![
-                            ("publishing",       "ongoing"),
-                            ("finished",         "completed"),
-                            ("on hiatus",        "hiatus"),
-                            ("discontinued",     "cancelled"),
-                            ("not yet published","hiatus"),
-                        ]
+                            ("publishing", "ongoing"),
+                            ("finished", "completed"),
+                            ("on hiatus", "hiatus"),
+                            ("discontinued", "cancelled"),
+                            ("not yet published", "hiatus"),
+                        ],
                     ),
                     lit("unknown"),
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["status"], "ongoing");
     }
 
     #[tokio::test]
     async fn mangapill_details_tags_join() {
         // self.select("div.mb-3 a.text-sm").map($item.text().trim()).filter($item.matches("[^\s]")).join(", ")
-        let rows = html_rows(MANGAPILL_DETAILS_HTML, ":root", vec![
-            field("tags",
+        let rows = html_rows(
+            MANGAPILL_DETAILS_HTML,
+            ":root",
+            vec![field(
+                "tags",
                 join(
                     filter(
-                        map(select(Expr::SelfRef, "div.mb-3 a.text-sm"), trim(text(var("$item")))),
+                        map(
+                            select(Expr::SelfRef, "div.mb-3 a.text-sm"),
+                            trim(text(var("$item"))),
+                        ),
                         matches(var("$item"), r"[^\s]"),
                     ),
                     ", ",
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["tags"], "Action, Adventure");
     }
 
@@ -1461,9 +2179,13 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn mangapill_chapter_id_from_href() {
         // self.attr("href").split("/").at(2)
-        let rows = html_rows(MANGAPILL_CHAPTER_HTML, "div.grid a.border", vec![
-            field("id", at(split(attr(Expr::SelfRef, "href"), "/"), 2)),
-        ], vec![]).await;
+        let rows = html_rows(
+            MANGAPILL_CHAPTER_HTML,
+            "div.grid a.border",
+            vec![field("id", at(split(attr(Expr::SelfRef, "href"), "/"), 2))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["id"], "1234567");
         assert_eq!(rows[1]["id"], "1234568");
     }
@@ -1474,17 +2196,25 @@ mod extension_integration_tests {
         //     .fallback(self.text().trim().split(" ").at(-1))
         //     .parse_float().fallback(0.0)
         let chapter_text = trim(text(Expr::SelfRef));
-        let rows = html_rows(MANGAPILL_CHAPTER_HTML, "div.grid a.border", vec![
-            field("number",
+        let rows = html_rows(
+            MANGAPILL_CHAPTER_HTML,
+            "div.grid a.border",
+            vec![field(
+                "number",
                 fallback(
                     parse_float(fallback(
-                        at(capture(chapter_text.clone(), r"Chapter\s+(\d+(?:\.\d+)?)"), 1),
+                        at(
+                            capture(chapter_text.clone(), r"Chapter\s+(\d+(?:\.\d+)?)"),
+                            1,
+                        ),
                         at(split(chapter_text.clone(), " "), -1),
                     )),
                     num(0.0),
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert!((rows[0]["number"].as_f64().unwrap() - 42.0).abs() < 1e-9);
         assert!((rows[1]["number"].as_f64().unwrap() - 1.5).abs() < 1e-9);
         assert!((rows[2]["number"].as_f64().unwrap() - 1.0).abs() < 1e-9);
@@ -1497,12 +2227,18 @@ mod extension_integration_tests {
 
     #[tokio::test]
     async fn mangapill_pages_url_and_index() {
-        let rows = html_rows(MANGAPILL_PAGES_HTML, "img.js-page", vec![
-            field("url",   attr(Expr::SelfRef, "data-src")),
-            field("index", to_string_e(Expr::Index)),
-        ], vec![]).await;
-        assert_eq!(rows[0]["url"],   "https://cdn.mangapill.com/p/001.jpg");
-        assert_eq!(rows[1]["url"],   "https://cdn.mangapill.com/p/002.jpg");
+        let rows = html_rows(
+            MANGAPILL_PAGES_HTML,
+            "img.js-page",
+            vec![
+                field("url", attr(Expr::SelfRef, "data-src")),
+                field("index", to_string_e(Expr::Index)),
+            ],
+            vec![],
+        )
+        .await;
+        assert_eq!(rows[0]["url"], "https://cdn.mangapill.com/p/001.jpg");
+        assert_eq!(rows[1]["url"], "https://cdn.mangapill.com/p/002.jpg");
         assert_eq!(rows[0]["index"], "0");
         assert_eq!(rows[1]["index"], "1");
     }
@@ -1525,19 +2261,35 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn weebcentral_search_id_from_href() {
         // self.first("a.line-clamp-1").attr("href").split("/").at(-2)
-        let rows = html_rows(WC_SEARCH_HTML, "body > article", vec![
-            field("id", at(split(attr(first(Expr::SelfRef, "a.line-clamp-1"), "href"), "/"), -2)),
-        ], vec![]).await;
+        let rows = html_rows(
+            WC_SEARCH_HTML,
+            "body > article",
+            vec![field(
+                "id",
+                at(
+                    split(attr(first(Expr::SelfRef, "a.line-clamp-1"), "href"), "/"),
+                    -2,
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["id"], "01JKABCDEF");
         assert_eq!(rows[1]["id"], "01JKGHIJKL");
     }
 
     #[tokio::test]
     async fn weebcentral_search_title_and_cover() {
-        let rows = html_rows(WC_SEARCH_HTML, "body > article", vec![
-            field("title", text(first(Expr::SelfRef, "a.line-clamp-1"))),
-            field("cover", attr(first(Expr::SelfRef, "img"), "src")),
-        ], vec![]).await;
+        let rows = html_rows(
+            WC_SEARCH_HTML,
+            "body > article",
+            vec![
+                field("title", text(first(Expr::SelfRef, "a.line-clamp-1"))),
+                field("cover", attr(first(Expr::SelfRef, "img"), "src")),
+            ],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["title"], "Dungeon Hero");
         assert_eq!(rows[0]["cover"], "https://cdn.weebcentral.com/covers/1.jpg");
     }
@@ -1563,40 +2315,59 @@ mod extension_integration_tests {
 
     #[tokio::test]
     async fn weebcentral_details_title() {
-        let rows = html_rows(WC_DETAILS_HTML, ":root", vec![
-            field("title", text(dom("h1.hidden"))),
-        ], vec![]).await;
+        let rows = html_rows(
+            WC_DETAILS_HTML,
+            ":root",
+            vec![field("title", text(dom("h1.hidden")))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["title"], "Spirit Blade Chronicle");
     }
 
     #[tokio::test]
     async fn weebcentral_details_description() {
-        let rows = html_rows(WC_DETAILS_HTML, ":root", vec![
-            field("desc", text(dom(".whitespace-pre-wrap"))),
-        ], vec![]).await;
+        let rows = html_rows(
+            WC_DETAILS_HTML,
+            ":root",
+            vec![field("desc", text(dom(".whitespace-pre-wrap")))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["desc"], "A sword saint travels the land.");
     }
 
     #[tokio::test]
     async fn weebcentral_details_status() {
-        let rows = html_rows(WC_DETAILS_HTML, ":root", vec![
-            field("status", text(dom("ul.flex-col li:nth-child(4) a"))),
-        ], vec![]).await;
+        let rows = html_rows(
+            WC_DETAILS_HTML,
+            ":root",
+            vec![field("status", text(dom("ul.flex-col li:nth-child(4) a")))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["status"], "Ongoing");
     }
 
     #[tokio::test]
     async fn weebcentral_details_authors_as_list() {
         // ul.flex-col li:first-child span a → map text → join
-        let rows = html_rows(WC_DETAILS_HTML, ":root", vec![
-            field("authors",
+        let rows = html_rows(
+            WC_DETAILS_HTML,
+            ":root",
+            vec![field(
+                "authors",
                 join(
-                    map(select(Expr::SelfRef, "ul.flex-col li:first-child span a"),
-                        text(var("$item"))),
+                    map(
+                        select(Expr::SelfRef, "ul.flex-col li:first-child span a"),
+                        text(var("$item")),
+                    ),
                     ", ",
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["authors"], "John Doe, Jane Smith");
     }
 
@@ -1618,9 +2389,16 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn weebcentral_chapter_id_last_segment() {
         // self.first("a").attr("href").split("/").at(-1)
-        let rows = html_rows(WC_CHAPTERS_HTML, "body > div", vec![
-            field("id", at(split(attr(first(Expr::SelfRef, "a"), "href"), "/"), -1)),
-        ], vec![]).await;
+        let rows = html_rows(
+            WC_CHAPTERS_HTML,
+            "body > div",
+            vec![field(
+                "id",
+                at(split(attr(first(Expr::SelfRef, "a"), "href"), "/"), -1),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["id"], "01JKCH0001");
         assert_eq!(rows[1]["id"], "01JKCH0002");
     }
@@ -1628,11 +2406,19 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn weebcentral_chapter_number_last_word() {
         // self.first("span.gap-2 span").text().split(" ").at(-1).parse_float()
-        let rows = html_rows(WC_CHAPTERS_HTML, "body > div", vec![
-            field("number",
-                parse_float(at(split(text(first(Expr::SelfRef, "span.gap-2 span")), " "), -1))
-            ),
-        ], vec![]).await;
+        let rows = html_rows(
+            WC_CHAPTERS_HTML,
+            "body > div",
+            vec![field(
+                "number",
+                parse_float(at(
+                    split(text(first(Expr::SelfRef, "span.gap-2 span")), " "),
+                    -1,
+                )),
+            )],
+            vec![],
+        )
+        .await;
         assert!((rows[0]["number"].as_f64().unwrap() - 1.0).abs() < 1e-9);
         assert!((rows[1]["number"].as_f64().unwrap() - 2.0).abs() < 1e-9);
     }
@@ -1640,9 +2426,16 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn weebcentral_chapter_date_rfc3339() {
         // self.first("time").attr("datetime").date_parse_rfc3339()
-        let rows = html_rows(WC_CHAPTERS_HTML, "body > div", vec![
-            field("date", rfc3339(attr(first(Expr::SelfRef, "time"), "datetime"))),
-        ], vec![]).await;
+        let rows = html_rows(
+            WC_CHAPTERS_HTML,
+            "body > div",
+            vec![field(
+                "date",
+                rfc3339(attr(first(Expr::SelfRef, "time"), "datetime")),
+            )],
+            vec![],
+        )
+        .await;
         // 2024-03-15T12:00:00+00:00 → unix timestamp 1710504000
         assert_eq!(rows[0]["date"].as_i64().unwrap(), 1710504000);
     }
@@ -1656,12 +2449,18 @@ mod extension_integration_tests {
 
     #[tokio::test]
     async fn weebcentral_pages_src_and_index() {
-        let rows = html_rows(WC_PAGES_HTML, "section img", vec![
-            field("url",   attr(Expr::SelfRef, "src")),
-            field("index", to_string_e(Expr::Index)),
-        ], vec![]).await;
-        assert_eq!(rows[0]["url"],   "https://cdn.weebcentral.com/p/001.jpg");
-        assert_eq!(rows[1]["url"],   "https://cdn.weebcentral.com/p/002.jpg");
+        let rows = html_rows(
+            WC_PAGES_HTML,
+            "section img",
+            vec![
+                field("url", attr(Expr::SelfRef, "src")),
+                field("index", to_string_e(Expr::Index)),
+            ],
+            vec![],
+        )
+        .await;
+        assert_eq!(rows[0]["url"], "https://cdn.weebcentral.com/p/001.jpg");
+        assert_eq!(rows[1]["url"], "https://cdn.weebcentral.com/p/002.jpg");
         assert_eq!(rows[0]["index"], "0");
     }
 
@@ -1706,9 +2505,13 @@ mod extension_integration_tests {
 
     #[tokio::test]
     async fn mangadex_popular_id() {
-        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
-            field("id", jstr(ptr_e(Expr::SelfRef, "/id"))),
-        ], vec![]).await;
+        let rows = json_rows(
+            MD_POPULAR_JSON,
+            "/data",
+            vec![field("id", jstr(ptr_e(Expr::SelfRef, "/id")))],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["id"], "uuid-manga-1");
         assert_eq!(rows[1]["id"], "uuid-manga-2");
     }
@@ -1716,14 +2519,19 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn mangadex_localized_title_en_fallback_ja_ro() {
         // json("/title").get("en").str().fallback(get("ja-ro").str())
-        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
-            field("title",
+        let rows = json_rows(
+            MD_POPULAR_JSON,
+            "/data",
+            vec![field(
+                "title",
                 fallback(
                     jstr(get(ptr_e(Expr::SelfRef, "/attributes/title"), lit("en"))),
                     jstr(get(ptr_e(Expr::SelfRef, "/attributes/title"), lit("ja-ro"))),
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["title"], "Blue Lock");
         // manga-2 has no "en" title, falls back to "ja-ro"
         assert_eq!(rows[1]["title"], "Chainsaw Man");
@@ -1732,8 +2540,11 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn mangadex_cover_url_from_relationships_find() {
         // json("/relationships").find("type","cover_art").ptr("/attributes/fileName").str()
-        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
-            field("cover_file",
+        let rows = json_rows(
+            MD_POPULAR_JSON,
+            "/data",
+            vec![field(
+                "cover_file",
                 jstr(ptr_e(
                     find(
                         ptr_e(Expr::SelfRef, "/relationships"),
@@ -1741,9 +2552,11 @@ mod extension_integration_tests {
                         lit("cover_art"),
                     ),
                     "/attributes/fileName",
-                ))
-            ),
-        ], vec![]).await;
+                )),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["cover_file"], "blue-lock.jpg");
         assert_eq!(rows[1]["cover_file"], "csm.jpg");
     }
@@ -1751,8 +2564,11 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn mangadex_tags_map_and_join() {
         // json("/attributes/tags").map($item.ptr("/attributes/name").get("en").str()).filter(...).join(", ")
-        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
-            field("tags",
+        let rows = json_rows(
+            MD_POPULAR_JSON,
+            "/data",
+            vec![field(
+                "tags",
                 join(
                     filter(
                         map(
@@ -1769,9 +2585,11 @@ mod extension_integration_tests {
                         },
                     ),
                     ", ",
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["tags"], "Sports, Action");
         assert_eq!(rows[1]["tags"], "Action");
     }
@@ -1779,8 +2597,11 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn mangadex_authors_from_relationships() {
         // json("/data/0/relationships").map($item: if type=="author" then name else null).filter(!=null)
-        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
-            field("authors",
+        let rows = json_rows(
+            MD_POPULAR_JSON,
+            "/data",
+            vec![field(
+                "authors",
                 join(
                     filter(
                         map(
@@ -1802,28 +2623,35 @@ mod extension_integration_tests {
                         },
                     ),
                     ", ",
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["authors"], "Muneyuki Kaneshiro");
         assert_eq!(rows[1]["authors"], "");
     }
 
     #[tokio::test]
     async fn mangadex_status_lookup() {
-        let rows = json_rows(MD_POPULAR_JSON, "/data", vec![
-            field("status",
+        let rows = json_rows(
+            MD_POPULAR_JSON,
+            "/data",
+            vec![field(
+                "status",
                 lookup(
                     jstr(ptr_e(Expr::SelfRef, "/attributes/status")),
                     vec![
-                        ("ongoing",   "ongoing"),
+                        ("ongoing", "ongoing"),
                         ("completed", "completed"),
-                        ("hiatus",    "hiatus"),
+                        ("hiatus", "hiatus"),
                         ("cancelled", "cancelled"),
                     ],
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["status"], "ongoing");
         assert_eq!(rows[1]["status"], "completed");
     }
@@ -1850,32 +2678,45 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn mangadex_chapter_number_parse_float() {
         // json("/attributes/chapter").str().parse_float().fallback(0.0)
-        let rows = json_rows(MD_CHAPTER_JSON, "/data", vec![
-            field("number",
+        let rows = json_rows(
+            MD_CHAPTER_JSON,
+            "/data",
+            vec![field(
+                "number",
                 fallback(
                     parse_float(jstr(ptr_e(Expr::SelfRef, "/attributes/chapter"))),
                     num(0.0),
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert!((rows[0]["number"].as_f64().unwrap() - 42.0).abs() < 1e-9);
     }
 
     #[tokio::test]
     async fn mangadex_chapter_date_rfc3339() {
-        let rows = json_rows(MD_CHAPTER_JSON, "/data", vec![
-            field("date",
-                rfc3339(jstr(ptr_e(Expr::SelfRef, "/attributes/createdAt")))
-            ),
-        ], vec![]).await;
+        let rows = json_rows(
+            MD_CHAPTER_JSON,
+            "/data",
+            vec![field(
+                "date",
+                rfc3339(jstr(ptr_e(Expr::SelfRef, "/attributes/createdAt"))),
+            )],
+            vec![],
+        )
+        .await;
         // 2024-01-15T08:00:00+00:00 → unix 1705305600
         assert_eq!(rows[0]["date"].as_i64().unwrap(), 1705305600);
     }
 
     #[tokio::test]
     async fn mangadex_scanlator_from_relationships_find() {
-        let rows = json_rows(MD_CHAPTER_JSON, "/data", vec![
-            field("scanlator",
+        let rows = json_rows(
+            MD_CHAPTER_JSON,
+            "/data",
+            vec![field(
+                "scanlator",
                 jstr(ptr_e(
                     find(
                         ptr_e(Expr::SelfRef, "/relationships"),
@@ -1883,9 +2724,11 @@ mod extension_integration_tests {
                         lit("scanlation_group"),
                     ),
                     "/attributes/name",
-                ))
-            ),
-        ], vec![]).await;
+                )),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["scanlator"], "ScanGroup A");
     }
 
@@ -1901,26 +2744,36 @@ mod extension_integration_tests {
     async fn mangadex_pages_construct_url() {
         // binding: $base = json("/baseUrl").str(), $hash = json("/chapter/hash").str()
         // field:   url = $base.append("/data/").append($hash).append("/").append($item)
-        let rows = json_rows(MD_AT_HOME_JSON, "/chapter/data", vec![
-            field("url",
-                append(
+        let rows = json_rows(
+            MD_AT_HOME_JSON,
+            "/chapter/data",
+            vec![
+                field(
+                    "url",
                     append(
                         append(
-                            append(var("$base"), lit("/data/")),
-                            var("$hash"),
+                            append(append(var("$base"), lit("/data/")), var("$hash")),
+                            lit("/"),
                         ),
-                        lit("/"),
+                        jstr(Expr::SelfRef),
                     ),
-                    jstr(Expr::SelfRef),
-                )
-            ),
-            field("index", to_string_e(Expr::Index)),
-        ], vec![
-            bind("$base", jstr(json("/baseUrl"))),
-            bind("$hash", jstr(json("/chapter/hash"))),
-        ]).await;
-        assert_eq!(rows[0]["url"], "https://uploads.mangadex.org/data/abc123def456/001-x1.jpg");
-        assert_eq!(rows[1]["url"], "https://uploads.mangadex.org/data/abc123def456/002-x2.jpg");
+                ),
+                field("index", to_string_e(Expr::Index)),
+            ],
+            vec![
+                bind("$base", jstr(json("/baseUrl"))),
+                bind("$hash", jstr(json("/chapter/hash"))),
+            ],
+        )
+        .await;
+        assert_eq!(
+            rows[0]["url"],
+            "https://uploads.mangadex.org/data/abc123def456/001-x1.jpg"
+        );
+        assert_eq!(
+            rows[1]["url"],
+            "https://uploads.mangadex.org/data/abc123def456/002-x2.jpg"
+        );
         assert_eq!(rows[2]["index"], "2");
     }
 
@@ -1940,30 +2793,50 @@ mod extension_integration_tests {
 
     #[tokio::test]
     async fn comix_list_id_and_title() {
-        let rows = json_rows(COMIX_LIST_JSON, "/result/items", vec![
-            field("id",    jstr(ptr_e(Expr::SelfRef, "/hash_id"))),
-            field("title", jstr(ptr_e(Expr::SelfRef, "/title"))),
-        ], vec![]).await;
-        assert_eq!(rows[0]["id"],    "abc123");
+        let rows = json_rows(
+            COMIX_LIST_JSON,
+            "/result/items",
+            vec![
+                field("id", jstr(ptr_e(Expr::SelfRef, "/hash_id"))),
+                field("title", jstr(ptr_e(Expr::SelfRef, "/title"))),
+            ],
+            vec![],
+        )
+        .await;
+        assert_eq!(rows[0]["id"], "abc123");
         assert_eq!(rows[0]["title"], "Hero Academia");
-        assert_eq!(rows[1]["id"],    "def456");
+        assert_eq!(rows[1]["id"], "def456");
     }
 
     #[tokio::test]
     async fn comix_optional_cover_url() {
         // poster/large present for item 0, missing for item 1
-        let rows = json_rows(COMIX_LIST_JSON, "/result/items", vec![
-            opt_field("cover", jstr(ptr_e(Expr::SelfRef, "/poster/large"))),
-        ], vec![]).await;
+        let rows = json_rows(
+            COMIX_LIST_JSON,
+            "/result/items",
+            vec![opt_field(
+                "cover",
+                jstr(ptr_e(Expr::SelfRef, "/poster/large")),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["cover"], "https://cdn.comix.to/ha.jpg");
         assert_eq!(rows[1]["cover"], serde_json::Value::Null);
     }
 
     #[tokio::test]
     async fn comix_pagination_last_page() {
-        let rows = json_rows(COMIX_LIST_JSON, "", vec![
-            field("last_page", to_string_e(jint(json("/result/pagination/last_page")))),
-        ], vec![]).await;
+        let rows = json_rows(
+            COMIX_LIST_JSON,
+            "",
+            vec![field(
+                "last_page",
+                to_string_e(jint(json("/result/pagination/last_page"))),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["last_page"], "5");
     }
 
@@ -1985,55 +2858,77 @@ mod extension_integration_tests {
 
     #[tokio::test]
     async fn comix_details_title_and_description() {
-        let rows = json_rows(COMIX_DETAIL_JSON, "", vec![
-            field("title", jstr(json("/result/title"))),
-            field("desc",  jstr(json("/result/synopsis"))),
-        ], vec![]).await;
+        let rows = json_rows(
+            COMIX_DETAIL_JSON,
+            "",
+            vec![
+                field("title", jstr(json("/result/title"))),
+                field("desc", jstr(json("/result/synopsis"))),
+            ],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["title"], "Hero Academia");
-        assert_eq!(rows[0]["desc"],  "A story of heroes.");
+        assert_eq!(rows[0]["desc"], "A story of heroes.");
     }
 
     #[tokio::test]
     async fn comix_details_status_lookup() {
-        let rows = json_rows(COMIX_DETAIL_JSON, "", vec![
-            field("status",
-                lookup(jstr(json("/result/status")),
+        let rows = json_rows(
+            COMIX_DETAIL_JSON,
+            "",
+            vec![field(
+                "status",
+                lookup(
+                    jstr(json("/result/status")),
                     vec![
-                        ("RELEASING",     "ongoing"),
-                        ("FINISHED",      "completed"),
-                        ("HIATUS",        "hiatus"),
-                        ("DISCONTINUED",  "cancelled"),
-                    ]
-                )
-            ),
-        ], vec![]).await;
+                        ("RELEASING", "ongoing"),
+                        ("FINISHED", "completed"),
+                        ("HIATUS", "hiatus"),
+                        ("DISCONTINUED", "cancelled"),
+                    ],
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["status"], "ongoing");
     }
 
     #[tokio::test]
     async fn comix_details_tags_from_genre_array() {
         // iterate /result/genre, map /title → join
-        let rows = json_rows(COMIX_DETAIL_JSON, "", vec![
-            field("tags",
+        let rows = json_rows(
+            COMIX_DETAIL_JSON,
+            "",
+            vec![field(
+                "tags",
                 join(
                     map(json("/result/genre"), jstr(ptr_e(var("$item"), "/title"))),
                     ", ",
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["tags"], "Action, School Life");
     }
 
     #[tokio::test]
     async fn comix_details_authors() {
-        let rows = json_rows(COMIX_DETAIL_JSON, "", vec![
-            field("authors",
+        let rows = json_rows(
+            COMIX_DETAIL_JSON,
+            "",
+            vec![field(
+                "authors",
                 join(
                     map(json("/result/author"), jstr(ptr_e(var("$item"), "/title"))),
                     ", ",
-                )
-            ),
-        ], vec![]).await;
+                ),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["authors"], "Kohei Horikoshi");
     }
 
@@ -2057,17 +2952,33 @@ mod extension_integration_tests {
     #[tokio::test]
     async fn comix_chapter_id_as_string() {
         // chapter_id is an integer → to_string
-        let rows = json_rows(COMIX_CHAPTER_JSON, "/result/items", vec![
-            field("id", to_string_e(Expr::JsonInt { target: Box::new(ptr_e(Expr::SelfRef, "/chapter_id")) })),
-        ], vec![]).await;
+        let rows = json_rows(
+            COMIX_CHAPTER_JSON,
+            "/result/items",
+            vec![field(
+                "id",
+                to_string_e(Expr::JsonInt {
+                    target: Box::new(ptr_e(Expr::SelfRef, "/chapter_id")),
+                }),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["id"], "98765");
     }
 
     #[tokio::test]
     async fn comix_chapter_scanlator() {
-        let rows = json_rows(COMIX_CHAPTER_JSON, "/result/items", vec![
-            field("scanlator", jstr(ptr_e(Expr::SelfRef, "/scanlation_group/name"))),
-        ], vec![]).await;
+        let rows = json_rows(
+            COMIX_CHAPTER_JSON,
+            "/result/items",
+            vec![field(
+                "scanlator",
+                jstr(ptr_e(Expr::SelfRef, "/scanlation_group/name")),
+            )],
+            vec![],
+        )
+        .await;
         assert_eq!(rows[0]["scanlator"], "OfficialRip");
     }
 }

@@ -1,0 +1,170 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required FROM settings",
+  "describe": {
+    "columns": [
+      {
+        "name": "flaresolverr_url",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "library_path",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "wasm_storage_path",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "concurrent_page_downloads",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "chapter_queue_size",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_retries",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "initial_retry_delay_ms",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_wasm_instances",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "auto_scan",
+        "ordinal": 8,
+        "type_info": "Bool"
+      },
+      {
+        "name": "scan_interval_minutes",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "scan_exclude_completed",
+        "ordinal": 10,
+        "type_info": "Bool"
+      },
+      {
+        "name": "auto_download_category_id",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "auto_download_category_ids",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "concurrent_manga_downloads",
+        "ordinal": 13,
+        "type_info": "Integer"
+      },
+      {
+        "name": "default_tracking_enabled",
+        "ordinal": 14,
+        "type_info": "Bool"
+      },
+      {
+        "name": "http_request_logging",
+        "ordinal": 15,
+        "type_info": "Bool"
+      },
+      {
+        "name": "browser_debug_logging",
+        "ordinal": 16,
+        "type_info": "Bool"
+      },
+      {
+        "name": "registration_enabled",
+        "ordinal": 17,
+        "type_info": "Bool"
+      },
+      {
+        "name": "cover_max_dimension",
+        "ordinal": 18,
+        "type_info": "Integer"
+      },
+      {
+        "name": "email_enabled",
+        "ordinal": 19,
+        "type_info": "Bool"
+      },
+      {
+        "name": "email_provider",
+        "ordinal": 20,
+        "type_info": "Text"
+      },
+      {
+        "name": "email_provider_config",
+        "ordinal": 21,
+        "type_info": "Text"
+      },
+      {
+        "name": "email_from_address",
+        "ordinal": 22,
+        "type_info": "Text"
+      },
+      {
+        "name": "app_url",
+        "ordinal": 23,
+        "type_info": "Text"
+      },
+      {
+        "name": "password_reset_enabled",
+        "ordinal": 24,
+        "type_info": "Bool"
+      },
+      {
+        "name": "email_verification_required",
+        "ordinal": 25,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "63dd95d0541c1a9feb51d4e941d0946ba66adcff73814f032084888bfa18558c"
+}

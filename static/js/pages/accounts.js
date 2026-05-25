@@ -1,328 +1,29 @@
 // @ts-check
-// Accounts page — user and role management for admins.
+// Accounts page — user and role management (master-detail layout).
 
+import { h, render } from 'preact';
+import { useState, useEffect } from 'preact/hooks';
+import htm from 'htm';
 import * as api from '../api.js';
 import { hasPermission } from '../state.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, openConfirm, formatDate } from '../utils.js';
 import { showToast } from '../components/toast.js';
-import { iconPencil, iconX } from '../icons.js';
+import { Modal, mountIntoModalRoot } from '../components/modal.js';
+import { mountMasterDetail } from '../components/master-detail.js';
 import { renderTabs } from '../components/tabs.js';
+import { iconPencil, iconX, iconAccounts } from '../icons.js';
+import { ActivityFeed } from '../components/activity-feed.js';
+import { setPageHeader, clearPageHeader } from '../components/app-header.js';
+const html = htm.bind(h);
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
 /** @type {any[]} */ let _users = [];
 /** @type {any[]} */ let _roles = [];
-/** @type {'users' | 'roles'} */ let _activeTab = 'users';
 /** @type {HTMLElement | null} */ let _container = null;
-
-// ── Init ──────────────────────────────────────────────────────────────────────
-
-/** @param {HTMLElement} container */
-export async function init(container) {
-  document.title = 'Accounts - Kani';
-  _container = container;
-  _activeTab = 'users';
-
-  if (!hasPermission('user:manage')) {
-    container.innerHTML = `
-      <div class="max-w-2xl mx-auto px-4 py-12 text-center">
-        <p class="text-text-muted">You do not have permission to manage accounts.</p>
-      </div>
-    `;
-    return;
-  }
-
-  container.innerHTML = `
-    <div class="max-w-5xl mx-auto px-4 md:px-6 py-6 flex flex-col gap-6">
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <h1 class="text-2xl font-semibold text-text">Accounts</h1>
-          <p class="text-sm text-text-muted mt-0.5">Manage users and roles.</p>
-        </div>
-      </div>
-
-      <!-- Tab bar -->
-      <div class="js-tabs"></div>
-
-      <!-- Panel -->
-      <div class="js-panel"></div>
-    </div>
-  `;
-
-  // Tab bar
-  const tabsEl = /** @type {HTMLElement} */ (container.querySelector('.js-tabs'));
-  renderTabs(tabsEl, {
-    tabs: [
-      { id: 'users', name: 'Users' },
-      { id: 'roles', name: 'Roles' },
-    ],
-    activeId: _activeTab,
-    onSelect: (id) => {
-      _activeTab = /** @type {'users' | 'roles'} */ (id);
-      _renderActiveTab();
-    },
-  });
-
-  // Load data and render
-  await _reload();
-}
-
-/** @param {HTMLElement} container */
-export function destroy(container) {
-  _container = null;
-  _users = [];
-  _roles = [];
-}
-
-// ── Data loading ──────────────────────────────────────────────────────────────
-
-async function _reload() {
-  const [usersRes, rolesRes] = await Promise.allSettled([
-    api.adminListUsers(),
-    api.adminListRoles(),
-  ]);
-  _users = usersRes.status === 'fulfilled' ? usersRes.value ?? [] : [];
-  _roles = rolesRes.status === 'fulfilled' ? rolesRes.value ?? [] : [];
-  _renderActiveTab();
-}
-
-function _renderActiveTab() {
-  if (!_container) return;
-  const panel = /** @type {HTMLElement} */ (_container.querySelector('.js-panel'));
-  if (!panel) return;
-
-  panel.innerHTML = '';
-  if (_activeTab === 'users') {
-    _renderUsersPanel(panel);
-  } else {
-    _renderRolesPanel(panel);
-  }
-}
-
-// ── Users panel ───────────────────────────────────────────────────────────────
-
-/** @param {HTMLElement} panel */
-function _renderUsersPanel(panel) {
-  // Header row: heading + Add user button
-  const header = document.createElement('div');
-  header.className = 'flex items-center justify-between gap-4 mb-4';
-  header.innerHTML = `<h2 class="text-base font-semibold text-text">Users</h2>`;
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'btn-primary btn-sm';
-  addBtn.textContent = '+ Add user';
-  addBtn.addEventListener('click', () => _showUserModal(null));
-  header.appendChild(addBtn);
-  panel.appendChild(header);
-
-  if (_users.length === 0) {
-    panel.innerHTML += '<p class="text-sm text-text-muted">No users found.</p>';
-    return;
-  }
-
-  const table = document.createElement('div');
-  table.className = 'bg-surface-2 rounded-xl overflow-hidden';
-
-  // Table header
-  const thead = document.createElement('div');
-  thead.className = 'grid grid-cols-[1fr_1fr_auto_auto] gap-4 px-4 py-2 border-b border-border-subtle text-xs font-semibold uppercase tracking-wide text-text-muted';
-  thead.innerHTML = `<span>Username</span><span>Email</span><span>Status</span><span></span>`;
-  table.appendChild(thead);
-
-  for (const user of _users) {
-    const row = document.createElement('div');
-    row.className = 'grid grid-cols-[1fr_1fr_auto_auto] gap-4 px-4 py-3 items-center border-b border-border-subtle last:border-0 hover:bg-surface-alt transition-colors';
-
-    const usernameEl = document.createElement('div');
-    usernameEl.className = 'flex flex-col gap-0.5 min-w-0';
-    usernameEl.innerHTML = `
-      <span class="text-sm font-medium text-text truncate">${escapeHtml(user.username)}</span>
-      <span class="text-xs text-text-muted truncate">${user.roles?.join(', ') ?? ''}</span>
-    `;
-
-    const emailEl = document.createElement('span');
-    emailEl.className = 'text-sm text-text-muted truncate';
-    emailEl.textContent = user.email;
-
-    const statusEl = document.createElement('span');
-    statusEl.className = `text-xs px-2 py-0.5 rounded-full font-medium ${user.is_active ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'}`;
-    statusEl.textContent = user.is_active ? 'Active' : 'Inactive';
-
-    const actions = document.createElement('div');
-    actions.className = 'flex items-center gap-1';
-
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.className = 'btn-icon';
-    editBtn.setAttribute('aria-label', `Edit ${user.username}`);
-    editBtn.innerHTML = iconPencil;
-    editBtn.addEventListener('click', () => _showUserModal(user));
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'btn-icon text-danger';
-    deleteBtn.setAttribute('aria-label', `Delete ${user.username}`);
-    deleteBtn.innerHTML = iconX;
-    deleteBtn.addEventListener('click', async () => {
-      if (!confirm(`Delete user "${user.username}"? This cannot be undone.`)) return;
-      deleteBtn.disabled = true;
-      try {
-        await api.adminDeleteUser(user.id);
-        showToast(`User "${user.username}" deleted.`);
-        await _reload();
-      } catch (e) {
-        showToast(e?.message ?? 'Failed to delete user.', { type: 'error' });
-        deleteBtn.disabled = false;
-      }
-    });
-
-    actions.appendChild(editBtn);
-    actions.appendChild(deleteBtn);
-
-    row.appendChild(usernameEl);
-    row.appendChild(emailEl);
-    row.appendChild(statusEl);
-    row.appendChild(actions);
-    table.appendChild(row);
-  }
-
-  panel.appendChild(table);
-}
-
-// ── User modal ────────────────────────────────────────────────────────────────
-
-/** @param {any | null} user — null for create, object for edit */
-function _showUserModal(user) {
-  const isEdit = user != null;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-bg/70 backdrop-blur-sm p-4';
-
-  const dialog = document.createElement('div');
-  dialog.className = 'bg-surface rounded-2xl shadow-xl w-full max-w-md flex flex-col gap-0 overflow-hidden';
-  dialog.setAttribute('role', 'dialog');
-  dialog.setAttribute('aria-modal', 'true');
-  dialog.setAttribute('aria-label', isEdit ? `Edit ${user.username}` : 'Add user');
-
-  const roleOptions = _roles.map(r =>
-    `<label class="flex items-center gap-2 text-sm text-text">
-      <input type="checkbox" value="${escapeHtml(r.slug)}" ${user?.roles?.includes(r.slug) ? 'checked' : ''}>
-      ${escapeHtml(r.slug)}${r.description ? ` <span class="text-xs text-text-muted">— ${escapeHtml(r.description)}</span>` : ''}
-    </label>`
-  ).join('');
-
-  dialog.innerHTML = `
-    <div class="px-6 py-4 border-b border-border-subtle flex items-center justify-between gap-4">
-      <h2 class="text-base font-semibold text-text">${isEdit ? `Edit ${escapeHtml(user.username)}` : 'Add user'}</h2>
-      <button type="button" class="btn-icon js-close" aria-label="Close">${iconX}</button>
-    </div>
-    <div class="px-6 py-5 flex flex-col gap-4 overflow-y-auto">
-      <div class="flex flex-col gap-1.5">
-        <label class="text-sm font-medium text-text" for="modal-username">Username</label>
-        <input type="text" id="modal-username" class="input js-username" value="${escapeHtml(user?.username ?? '')}" autocomplete="off">
-      </div>
-      <div class="flex flex-col gap-1.5">
-        <label class="text-sm font-medium text-text" for="modal-email">Email</label>
-        <input type="email" id="modal-email" class="input js-email" value="${escapeHtml(user?.email ?? '')}">
-      </div>
-      <div class="flex flex-col gap-1.5">
-        <label class="text-sm font-medium text-text" for="modal-password">${isEdit ? 'New password (leave blank to keep)' : 'Password'}</label>
-        <input type="password" id="modal-password" class="input js-password" autocomplete="new-password" placeholder="${isEdit ? 'Leave blank to keep current' : 'Min 8 characters'}">
-      </div>
-      ${isEdit ? `
-      <div class="flex flex-col gap-1.5">
-        <label class="text-sm font-medium text-text">Status</label>
-        <label class="flex items-center gap-2 text-sm text-text cursor-pointer">
-          <input type="checkbox" class="js-is-active" ${user.is_active ? 'checked' : ''}>
-          Active
-        </label>
-      </div>` : ''}
-      <div class="flex flex-col gap-1.5">
-        <label class="text-sm font-medium text-text">Roles</label>
-        <div class="flex flex-col gap-2 js-roles">${roleOptions}</div>
-      </div>
-      <span class="js-modal-error text-sm text-danger hidden"></span>
-    </div>
-    <div class="px-6 py-4 border-t border-border-subtle flex items-center justify-end gap-3">
-      <button type="button" class="btn-secondary btn-sm js-cancel">Cancel</button>
-      <button type="button" class="btn-primary btn-sm js-save">${isEdit ? 'Save changes' : 'Create user'}</button>
-    </div>
-  `;
-
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
-
-  const closeModal = () => { if (overlay.parentNode) document.body.removeChild(overlay); };
-
-  dialog.querySelector('.js-close')?.addEventListener('click', closeModal);
-  dialog.querySelector('.js-cancel')?.addEventListener('click', closeModal);
-  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
-
-  const usernameEl = /** @type {HTMLInputElement} */ (dialog.querySelector('.js-username'));
-  const emailEl    = /** @type {HTMLInputElement} */ (dialog.querySelector('.js-email'));
-  const passwordEl = /** @type {HTMLInputElement} */ (dialog.querySelector('.js-password'));
-  const isActiveEl = /** @type {HTMLInputElement|null} */ (dialog.querySelector('.js-is-active'));
-  const errorEl    = /** @type {HTMLElement} */ (dialog.querySelector('.js-modal-error'));
-  const saveBtn    = /** @type {HTMLButtonElement} */ (dialog.querySelector('.js-save'));
-
-  saveBtn.addEventListener('click', async () => {
-    const username = usernameEl.value.trim();
-    const email    = emailEl.value.trim();
-    const password = passwordEl.value;
-
-    if (!username) { _showModalError(errorEl, 'Username is required.'); return; }
-    if (!email)    { _showModalError(errorEl, 'Email is required.'); return; }
-    if (!isEdit && !password) { _showModalError(errorEl, 'Password is required.'); return; }
-    if (password && password.length < 8) { _showModalError(errorEl, 'Password must be at least 8 characters.'); return; }
-
-    // Collect selected roles
-    const selectedRoles = [...dialog.querySelectorAll('.js-roles input:checked')]
-      .map(el => /** @type {HTMLInputElement} */ (el).value);
-
-    saveBtn.disabled = true;
-    errorEl.classList.add('hidden');
-
-    try {
-      if (isEdit) {
-        // Update user fields
-        const patch = {};
-        if (username !== user.username) patch.username = username;
-        if (email !== user.email) patch.email = email;
-        if (isActiveEl) patch.is_active = isActiveEl.checked;
-        if (password) patch.password = password;
-        if (Object.keys(patch).length) await api.adminUpdateUser(user.id, patch);
-
-        // Sync roles: grant missing, revoke extras
-        const currentRoles = user.roles ?? [];
-        for (const r of selectedRoles) {
-          if (!currentRoles.includes(r)) await api.adminGrantRole(user.id, r);
-        }
-        for (const r of currentRoles) {
-          if (!selectedRoles.includes(r)) await api.adminRevokeRole(user.id, r);
-        }
-        showToast('User updated.');
-      } else {
-        const created = await api.adminCreateUser({ username, email, password, roles: selectedRoles });
-        showToast(`User "${created.username}" created.`);
-      }
-      closeModal();
-      await _reload();
-    } catch (e) {
-      _showModalError(errorEl, e?.message ?? 'Failed to save.');
-      saveBtn.disabled = false;
-    }
-  });
-
-  usernameEl.focus();
-}
-
-/** @param {HTMLElement} el @param {string} msg */
-function _showModalError(el, msg) {
-  el.textContent = msg;
-  el.classList.remove('hidden');
-}
-
-// ── Roles panel ───────────────────────────────────────────────────────────────
+/** @type {(() => void) | null} */ let _destroyMasterDetail = null;
+/** @type {'users' | 'roles'} */ let _activeTab = 'users';
+/** @type {any | null} */ let _selected = null;
 
 // All known permissions (mirrors permissions.rs)
 const ALL_PERMISSIONS = [
@@ -334,187 +35,695 @@ const ALL_PERMISSIONS = [
   'server:manage',
 ];
 
-/** @param {HTMLElement} panel */
-function _renderRolesPanel(panel) {
-  const header = document.createElement('div');
-  header.className = 'flex items-center justify-between gap-4 mb-4';
-  header.innerHTML = `<h2 class="text-base font-semibold text-text">Roles</h2>`;
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'btn-primary btn-sm';
-  addBtn.textContent = '+ Add role';
-  addBtn.addEventListener('click', () => _showRoleModal(null));
-  header.appendChild(addBtn);
-  panel.appendChild(header);
+// ── Init ──────────────────────────────────────────────────────────────────────
 
-  if (_roles.length === 0) {
-    panel.innerHTML += '<p class="text-sm text-text-muted">No roles found.</p>';
+/** @param {HTMLElement} container */
+export async function init(container) {
+  document.title = 'Accounts - Kani';
+  _container = container;
+  _activeTab = 'users';
+  _selected = null;
+
+  // Set breadcrumb early, before data loads
+  setPageHeader({ crumbs: [{ label: 'Accounts' }] });
+
+  if (!hasPermission('user:manage')) {
+    container.innerHTML = `
+      <div class="flex flex-col items-center justify-center gap-3 py-20 text-text-muted">
+        <p class="text-base font-medium text-text">Access denied</p>
+        <p class="text-sm">You do not have permission to manage accounts.</p>
+      </div>
+    `;
     return;
   }
 
-  const list = document.createElement('div');
-  list.className = 'flex flex-col gap-4';
+  // Content area — full height master-detail (below global header)
+  const contentEl = document.createElement('div');
+  contentEl.style.cssText = 'display:flex;flex-direction:column;overflow:hidden;height:calc(100vh - var(--header-h));';
 
-  for (const role of _roles) {
-    const card = document.createElement('div');
-    card.className = 'bg-surface-2 rounded-xl overflow-hidden';
+  container.innerHTML = '';
+  container.appendChild(contentEl);
 
-    const cardHeader = document.createElement('div');
-    cardHeader.className = 'flex items-center justify-between gap-4 px-4 py-3 border-b border-border-subtle';
+  await _reload();
 
-    const nameEl = document.createElement('div');
-    nameEl.className = 'flex flex-col gap-0.5';
-    nameEl.innerHTML = `
-      <span class="text-sm font-semibold text-text">${escapeHtml(role.slug)}</span>
-      ${role.parent ? `<span class="text-xs text-text-muted">Inherits: ${escapeHtml(role.parent)}</span>` : ''}
-      ${role.description ? `<span class="text-xs text-text-muted">${escapeHtml(role.description)}</span>` : ''}
-    `;
+  // Restore tab + selection from URL
+  const _qs = new URLSearchParams(location.search);
+  const _tabParam = _qs.get('tab');
+  if (_tabParam === 'roles') _activeTab = 'roles';
+  const _userParam  = _qs.get('user');
+  const _roleParam  = _qs.get('role');
+  if (_userParam) _selected = _users.find(u => u.id === Number(_userParam)) ?? null;
+  if (_roleParam) _selected = _roles.find(r => r.slug === _roleParam) ?? null;
 
-    const actions = document.createElement('div');
-    actions.className = 'flex items-center gap-1';
+  _mountMasterDetail(contentEl);
+  _updateHeaderActions();
+}
 
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.className = 'btn-icon';
-    editBtn.setAttribute('aria-label', `Edit role ${role.slug}`);
-    editBtn.innerHTML = iconPencil;
-    editBtn.addEventListener('click', () => _showRoleModal(role));
+/** @param {HTMLElement} container */
+export function destroy(container) {
+  clearPageHeader();
+  mountIntoModalRoot(null);
+  _destroyMasterDetail?.();
+  _destroyMasterDetail = null;
+  _container = null;
+  _users = [];
+  _roles = [];
+  _activeTab = 'users';
+  _selected = null;
+}
 
-    if (role.slug !== 'user' && role.slug !== 'admin') {
-      const deleteBtn = document.createElement('button');
-      deleteBtn.type = 'button';
-      deleteBtn.className = 'btn-icon text-danger';
-      deleteBtn.setAttribute('aria-label', `Delete role ${role.slug}`);
-      deleteBtn.innerHTML = iconX;
-      deleteBtn.addEventListener('click', async () => {
-        if (!confirm(`Delete role "${role.slug}"?`)) return;
-        deleteBtn.disabled = true;
-        try {
-          await api.adminDeleteRole(role.slug);
-          showToast(`Role "${role.slug}" deleted.`);
-          await _reload();
-        } catch (e) {
-          showToast(e?.message ?? 'Failed to delete role.', { type: 'error' });
-          deleteBtn.disabled = false;
-        }
-      });
-      actions.appendChild(deleteBtn);
-    }
-
-    actions.insertBefore(editBtn, actions.firstChild);
-    cardHeader.appendChild(nameEl);
-    cardHeader.appendChild(actions);
-    card.appendChild(cardHeader);
-
-    // Permissions list
-    const permsEl = document.createElement('div');
-    permsEl.className = 'px-4 py-3 flex flex-wrap gap-1.5';
-    if (role.permissions.length === 0) {
-      permsEl.innerHTML = '<span class="text-xs text-text-faint italic">No direct permissions</span>';
+function _updateHeaderActions() {
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'btn-primary btn-sm';
+  addBtn.textContent = _activeTab === 'users' ? '+ Add user' : '+ Add role';
+  addBtn.addEventListener('click', () => {
+    if (_activeTab === 'users') {
+      _showUserModal(null, async () => { await _reload(); _rerenderList(); });
     } else {
-      for (const perm of role.permissions) {
-        const badge = document.createElement('span');
-        badge.className = 'text-xs px-2 py-0.5 rounded bg-surface-alt text-text-muted font-mono';
-        badge.textContent = perm;
-        permsEl.appendChild(badge);
-      }
+      _showRoleModal(null, async () => { await _reload(); _rerenderList(); });
     }
-    card.appendChild(permsEl);
-    list.appendChild(card);
+  });
+
+  const tabLabel = _activeTab === 'users' ? 'Users' : 'Roles';
+  const crumbs = [{ label: 'Accounts', href: '/accounts' }];
+  if (_selected) {
+    crumbs.push({ label: tabLabel, href: '/accounts?tab=' + _activeTab });
+    crumbs.push({ label: _activeTab === 'users' ? _selected.username : _selected.slug });
+  } else {
+    crumbs.push({ label: tabLabel });
   }
 
-  panel.appendChild(list);
+  setPageHeader({ crumbs, actions: addBtn });
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────────
+
+async function _reload() {
+  const [usersRes, rolesRes] = await Promise.allSettled([
+    api.adminListUsers(),
+    api.adminListRoles(),
+  ]);
+  _users = usersRes.status === 'fulfilled' ? usersRes.value ?? [] : [];
+  _roles = rolesRes.status === 'fulfilled' ? rolesRes.value ?? [] : [];
+}
+
+// ── Master-detail shell ───────────────────────────────────────────────────────
+
+/** @type {HTMLElement | null} */ let _listEl = null;
+/** @type {HTMLElement | null} */ let _detailEl = null;
+
+/** Re-renders the list pane (called after data changes). */
+function _rerenderList() {
+  if (_listEl) _renderList(_listEl);
+}
+
+/** @param {HTMLElement} el */
+function _mountMasterDetail(el) {
+  const { listEl, detailEl, destroy } = mountMasterDetail(el);
+  _destroyMasterDetail = destroy;
+  _listEl = listEl;
+  _detailEl = detailEl;
+
+  _renderList(listEl);
+  _renderDetail(detailEl);
+}
+
+/** @param {HTMLElement} detailEl */
+function _renderDetail(detailEl) {
+  if (!_selected) {
+    detailEl.innerHTML = `
+      <div class="flex flex-col items-center justify-center gap-3 h-full py-20 text-text-muted">
+        <span class="icon-2xl opacity-30" aria-hidden="true">${iconAccounts}</span>
+        <p class="text-sm">Select a ${_activeTab === 'users' ? 'user' : 'role'} to view details</p>
+      </div>
+    `;
+    return;
+  }
+  if (_activeTab === 'users') {
+    _renderUserDetail(detailEl, _selected);
+  } else {
+    _renderRoleDetail(detailEl, _selected);
+  }
+}
+
+/** @param {HTMLElement} listEl */
+function _renderList(listEl) {
+  listEl.innerHTML = '';
+
+  // Header with tabs
+  const headerEl = document.createElement('div');
+  headerEl.className = 'list-pane-header';
+
+  const tabsEl = document.createElement('div');
+  renderTabs(tabsEl, {
+    tabs: [
+      { id: 'users', name: 'Users', count: _users.length },
+      { id: 'roles', name: 'Roles', count: _roles.length },
+    ],
+    activeId: _activeTab,
+    stretch: true,
+    onSelect: (id) => {
+      _activeTab = /** @type {'users' | 'roles'} */ (id);
+      _selected = null;
+      history.pushState(null, '', '/accounts?tab=' + id);
+      _updateHeaderActions();
+      _renderList(listEl);
+      if (_detailEl) _renderDetail(_detailEl);
+    },
+  });
+  headerEl.appendChild(tabsEl);
+
+  // Search
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.className = 'input input-sm';
+  searchInput.placeholder = `Search...`;
+  headerEl.appendChild(searchInput);
+  listEl.appendChild(headerEl);
+
+  // List body
+  const bodyEl = document.createElement('div');
+  bodyEl.className = 'list-pane-body';
+
+  const items = _activeTab === 'users' ? _users : _roles;
+  let filter = '';
+
+  function renderItems() {
+    bodyEl.innerHTML = '';
+    const filtered = filter
+      ? items.filter(i => (i.username ?? i.slug ?? '').toLowerCase().includes(filter.toLowerCase()))
+      : items;
+
+    if (filtered.length === 0) {
+      bodyEl.innerHTML = '<p class="text-sm text-text-muted px-3 py-4">No results.</p>';
+      return;
+    }
+
+    for (const item of filtered) {
+      const div = document.createElement('div');
+      const isActive = _selected != null && (
+        _activeTab === 'users' ? _selected.id   === item.id
+                               : _selected.slug === item.slug
+      );
+      div.className = 'list-item' + (isActive ? ' active' : '');
+
+      if (_activeTab === 'users') {
+        const initial = (item.username ?? '?')[0].toUpperCase();
+        div.innerHTML = `
+          <div class="flex items-center gap-3 border-b border-border-subtle last:border-0 w-full">
+            <span class="avatar" aria-hidden="true">${escapeHtml(initial)}</span>
+            <span class="flex flex-col min-w-0 flex-1">
+              <span class="li-title truncate">${escapeHtml(item.username)}</span>
+              <span class="li-sub truncate">${item.roles?.join(', ') ?? ''}</span>
+            </span>
+            <span class="${item.is_active ? 'badge badge-success' : 'badge badge-danger'} shrink-0">${item.is_active ? 'Active' : 'Inactive'}</span>
+          </div>
+        `;
+      } else {
+        const isSystemRole = item.slug === 'user' || item.slug === 'admin';
+        div.innerHTML = `
+          <span class="flex flex-col min-w-0 flex-1">
+            <span class="li-title font-mono truncate flex items-center gap-2">
+              ${escapeHtml(item.slug)}
+              ${isSystemRole ? '<span class="badge badge-muted text-2xs shrink-0">System</span>' : ''}
+            </span>
+            <span class="li-sub truncate">${escapeHtml(item.description ?? `${item.permissions?.length ?? 0} permissions`)}</span>
+          </span>
+        `;
+      }
+
+      div.addEventListener('click', () => {
+        _selected = item;
+        const params = new URLSearchParams();
+        params.set('tab', _activeTab);
+        if (_activeTab === 'users') params.set('user', String(item.id));
+        else params.set('role', item.slug);
+        history.pushState(null, '', '/accounts?' + params.toString());
+        _renderList(listEl);
+        _updateHeaderActions();
+        if (_detailEl) _renderDetail(_detailEl);
+      });
+      bodyEl.appendChild(div);
+    }
+  }
+
+  renderItems();
+  searchInput.addEventListener('input', () => {
+    filter = searchInput.value;
+    renderItems();
+  });
+
+  listEl.appendChild(bodyEl);
+}
+
+// ── User detail ───────────────────────────────────────────────────────────────
+
+/**
+ * @param {HTMLElement} el
+ * @param {any} user
+ */
+function _renderUserDetail(el, user) {
+  // Effective permissions: union of all roles' permissions
+  const effectivePerms = new Map();
+  for (const roleName of (user.roles ?? [])) {
+    const role = _roles.find(r => r.slug === roleName);
+    for (const perm of (role?.permissions ?? [])) {
+      if (!effectivePerms.has(perm)) effectivePerms.set(perm, roleName);
+    }
+  }
+
+  el.innerHTML = `
+    <div class="p-6 flex flex-col gap-5 min-h-0">
+      <!-- User header -->
+      <div class="flex items-start gap-4">
+        <span class="avatar xl" aria-hidden="true">${escapeHtml((user.username ?? '?')[0].toUpperCase())}</span>
+        <div class="flex flex-col gap-1 flex-1 min-w-0">
+          <h2 class="text-lg font-semibold text-text truncate">${escapeHtml(user.username)}</h2>
+          <p class="meta">${escapeHtml(user.email ?? '')} · Created ${formatDate(user.created_at) || 'unknown'}</p>
+        </div>
+        <div class="flex items-center gap-1 shrink-0">
+          <button type="button" class="btn-ghost btn-sm js-edit-user">Edit</button>
+          <button type="button" class="btn-danger btn-sm js-delete-user">Delete</button>
+        </div>
+      </div>
+
+      <!-- Identity card -->
+      <div class="detail-card">
+        <div class="detail-card-head">Identity</div>
+        <div class="kv"><span class="k">Username</span><span class="v">${escapeHtml(user.username)}</span></div>
+        <div class="kv"><span class="k">Email</span><span class="v">${escapeHtml(user.email ?? '—')}</span></div>
+        <div class="kv"><span class="k">Status</span><span class="v">
+          <span class="${user.is_active ? 'badge badge-success' : 'badge badge-danger'}">${user.is_active ? 'Active' : 'Inactive'}</span>
+        </span></div>
+        <div class="kv"><span class="k">Created</span><span class="v">${escapeHtml(formatDate(user.created_at) || '—')}</span></div>
+      </div>
+
+      <!-- Roles card -->
+      <div class="detail-card">
+        <div class="detail-card-head">
+          <span>Roles</span>
+        </div>
+        <div class="p-3 flex flex-wrap gap-2">
+          ${(user.roles ?? []).map(r => `<span class="badge badge-muted font-mono">${escapeHtml(r)}</span>`).join('') || '<span class="meta p-1">No roles assigned.</span>'}
+        </div>
+      </div>
+
+      <!-- Effective permissions card -->
+      <div class="detail-card">
+        <div class="detail-card-head">Effective permissions — ${effectivePerms.size}</div>
+        <div>
+          ${[...effectivePerms.entries()].map(([perm, via]) => `
+            <div class="flex items-center justify-between gap-3 px-3 py-2 border-b border-border-subtle last:border-0 text-sm">
+              <span class="font-mono text-xs text-text">${escapeHtml(perm)}</span>
+              <span class="meta shrink-0">via ${escapeHtml(via)}</span>
+            </div>
+          `).join('') || '<p class="meta px-3 py-3">No permissions.</p>'}
+        </div>
+      </div>
+
+      <!-- Activity feed card -->
+      <div class="detail-card">
+        <div class="detail-card-head">Recent activity</div>
+        <div class="js-activity-feed"></div>
+      </div>
+    </div>
+  `;
+
+  el.querySelector('.js-edit-user')?.addEventListener('click', () => {
+    _showUserModal(user, async () => {
+      await _reload();
+      _selected = _users.find(u => u.id === user.id) ?? null;
+      _rerenderList();
+      if (_detailEl && _selected) _renderUserDetail(_detailEl, _selected);
+    });
+  });
+
+  el.querySelector('.js-delete-user')?.addEventListener('click', async () => {
+    if (!(await openConfirm({ title: 'Delete user', message: `Delete "${user.username}"? This cannot be undone.`, danger: true }))) return;
+    try {
+      await api.adminDeleteUser(user.id);
+      showToast(`User "${user.username}" deleted.`);
+      await _reload();
+      _selected = null;
+      _rerenderList();
+      if (_detailEl) _renderDetail(_detailEl);
+    } catch (e) {
+      showToast(e?.message ?? 'Failed to delete user.', { type: 'error' });
+    }
+  });
+
+  // Mount activity feed
+  const feedEl = /** @type {HTMLElement} */ (el.querySelector('.js-activity-feed'));
+  /** @type {Array<{ at: string, kind: string, description: string }>} */
+  let _activityEvents = [];
+  let _activityLoading = true;
+  let _activityError = /** @type {string|null} */ (null);
+
+  function _renderFeed() {
+    render(html`<${ActivityFeed}
+      events=${_activityEvents}
+      loading=${_activityLoading}
+      error=${_activityError}
+    />`, feedEl);
+  }
+
+  async function _loadActivity() {
+    _activityLoading = true;
+    _renderFeed();
+    try {
+      const data = await api.getUserActivity(user.id, { limit: 20 });
+      _activityEvents = (data.events ?? []).map(/** @param {any} e */ e => ({
+        at: e.created_at,
+        kind: e.action,
+        description: [e.target, e.details].filter(Boolean).join(' — ') || e.action,
+      }));
+      _activityError = null;
+    } catch {
+      _activityError = 'Failed to load activity.';
+    }
+    _activityLoading = false;
+    _renderFeed();
+  }
+
+  _renderFeed();
+  _loadActivity();
+}
+
+// ── Role detail ───────────────────────────────────────────────────────────────
+
+/**
+ * @param {HTMLElement} el
+ * @param {any} role
+ */
+function _renderRoleDetail(el, role) {
+  const usersWithRole = _users.filter(u => u.roles?.includes(role.slug));
+  const isProtected = role.slug === 'user' || role.slug === 'admin';
+
+  // Build inherited permissions from parent role chain
+  const directPerms = new Set(role.permissions ?? []);
+  /** @type {Map<string, string>} */
+  const inheritedPerms = new Map();
+  let parentSlug = role.parent;
+  while (parentSlug) {
+    const parentRole = _roles.find(r => r.slug === parentSlug);
+    if (!parentRole) break;
+    for (const perm of (parentRole.permissions ?? [])) {
+      if (!directPerms.has(perm) && !inheritedPerms.has(perm)) {
+        inheritedPerms.set(perm, parentSlug);
+      }
+    }
+    parentSlug = parentRole.parent;
+  }
+
+  const directChips = [...directPerms].map(p =>
+    `<span class="badge badge-muted font-mono">${escapeHtml(p)}</span>`
+  ).join('');
+
+  const inheritedChips = [...inheritedPerms.entries()].map(([p, via]) =>
+    `<span class="badge badge-muted font-mono opacity-60 italic" title="Inherited from ${escapeHtml(via)}">${escapeHtml(p)}</span>`
+  ).join('');
+
+  const inheritedSection = inheritedChips ? `
+    <div class="flex items-center gap-2 px-3 py-1.5 border-t border-border-subtle">
+      <span class="text-2xs uppercase tracking-wide font-semibold text-text-faint">Inherited</span>
+    </div>
+    <div class="px-3 pb-3 flex flex-wrap gap-1.5">${inheritedChips}</div>
+  ` : '';
+
+  const usersChips = usersWithRole.map(u => `
+    <button type="button" class="badge badge-muted gap-1.5 hover:bg-surface-3 transition-colors js-user-badge"
+            data-user-id="${u.id}">
+      <span class="avatar" style="width:16px;height:16px;font-size:8px" aria-hidden="true">${escapeHtml((u.username ?? '?')[0].toUpperCase())}</span>
+      <span class="font-mono text-xs">${escapeHtml(u.username)}</span>
+    </button>
+  `).join('');
+
+  el.innerHTML = `
+    <div class="p-6 flex flex-col gap-5 min-h-0">
+      <!-- Role header -->
+      <div class="flex items-start gap-4">
+        <div class="flex flex-col gap-1 flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h2 class="text-lg font-semibold text-text font-mono">${escapeHtml(role.slug)}</h2>
+            ${isProtected ? '<span class="badge badge-muted text-2xs">System role</span>' : ''}
+          </div>
+          <p class="meta">${role.permissions?.length ?? 0} permissions${role.parent ? ` · inherits from ${escapeHtml(role.parent)}` : ''}</p>
+          ${role.description ? `<p class="text-sm text-text-muted mt-0.5">${escapeHtml(role.description)}</p>` : ''}
+        </div>
+        <div class="flex items-center gap-1 shrink-0">
+          <button type="button" class="btn-ghost btn-sm js-edit-role">Edit</button>
+          ${!isProtected ? '<button type="button" class="btn-danger btn-sm js-delete-role">Delete</button>' : ''}
+        </div>
+      </div>
+
+      <!-- Permissions card -->
+      <div class="detail-card">
+        <div class="detail-card-head">Permissions — ${directPerms.size + inheritedPerms.size}</div>
+        <div class="p-3 flex flex-wrap gap-1.5">
+          ${directChips || '<span class="meta p-1">No direct permissions.</span>'}
+        </div>
+        ${inheritedSection}
+      </div>
+
+      <!-- Users with this role -->
+      <div class="detail-card">
+        <div class="detail-card-head">Users with this role — ${usersWithRole.length}</div>
+        <div class="p-3 flex flex-wrap gap-1.5">
+          ${usersChips || '<p class="meta p-1">No users have this role.</p>'}
+        </div>
+      </div>
+    </div>
+  `;
+
+  el.querySelector('.js-edit-role')?.addEventListener('click', () => {
+    _showRoleModal(role, async () => {
+      await _reload();
+      const refreshed = _roles.find(r => r.slug === role.slug);
+      _selected = refreshed ?? null;
+      _rerenderList();
+      if (_detailEl && _selected) _renderRoleDetail(_detailEl, _selected);
+    });
+  });
+
+  el.querySelector('.js-delete-role')?.addEventListener('click', async () => {
+    if (!(await openConfirm({ title: 'Delete role', message: `Delete role "${role.slug}"? This cannot be undone.`, danger: true }))) return;
+    try {
+      await api.adminDeleteRole(role.slug);
+      showToast(`Role "${role.slug}" deleted.`);
+      await _reload();
+      _selected = null;
+      _rerenderList();
+      if (_detailEl) _renderDetail(_detailEl);
+    } catch (e) {
+      showToast(e?.message ?? 'Failed to delete role.', { type: 'error' });
+    }
+  });
+
+  // Clicking a user badge jumps to Users tab and selects that user
+  for (const btn of el.querySelectorAll('.js-user-badge')) {
+    btn.addEventListener('click', () => {
+      const userId = Number(/** @type {HTMLElement} */ (btn).dataset.userId);
+      const user = _users.find(u => u.id === userId);
+      if (!user) return;
+      _activeTab = 'users';
+      _selected = user;
+      _updateHeaderActions();
+      if (_listEl) _renderList(_listEl);
+      if (_detailEl) _renderUserDetail(_detailEl, user);
+    });
+  }
+}
+
+// ── User modal ────────────────────────────────────────────────────────────────
+
+/**
+ * @param {any | null} user
+ * @param {() => void} onSaved
+ */
+function _showUserModal(user, onSaved) {
+  const isEdit = user != null;
+
+  function UserModal({ onClose }) {
+    const [username, setUsername] = useState(user?.username ?? '');
+    const [email, setEmail]       = useState(user?.email ?? '');
+    const [password, setPassword] = useState('');
+    const [isActive, setIsActive] = useState(user?.is_active ?? true);
+    const [roles, setRoles]       = useState(/** @type {string[]} */ (user?.roles ?? []));
+    const [error, setError]       = useState('');
+    const [saving, setSaving]     = useState(false);
+
+    const toggleRole = (slug) =>
+      setRoles(prev => prev.includes(slug) ? prev.filter(r => r !== slug) : [...prev, slug]);
+
+    const save = async () => {
+      if (!username.trim()) { setError('Username is required.'); return; }
+      if (!email.trim())    { setError('Email is required.'); return; }
+      if (!isEdit && !password) { setError('Password is required.'); return; }
+      if (!isEdit && password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+      setSaving(true); setError('');
+      try {
+        if (isEdit) {
+          const patch = /** @type {Record<string, any>} */ ({});
+          if (username.trim() !== user.username) patch.username = username.trim();
+          if (email.trim() !== user.email)       patch.email    = email.trim();
+          patch.is_active = isActive;
+          if (Object.keys(patch).length) await api.adminUpdateUser(user.id, patch);
+          const cur = user.roles ?? [];
+          for (const r of roles) if (!cur.includes(r)) await api.adminGrantRole(user.id, r);
+          for (const r of cur)   if (!roles.includes(r)) await api.adminRevokeRole(user.id, r);
+          showToast('User updated.');
+        } else {
+          const created = await api.adminCreateUser({ username: username.trim(), email: email.trim(), password, roles });
+          showToast(`User "${created.username}" created.`);
+        }
+        onClose();
+        await onSaved();
+      } catch (e) {
+        setError(e?.message ?? 'Failed to save.');
+        setSaving(false);
+      }
+    };
+
+    return html`
+      <${Modal} open=${true} onClose=${onClose} title=${isEdit ? `Edit ${user.username}` : 'Add user'}
+        footer=${html`
+          <button class="btn-ghost btn-sm" onClick=${onClose}>Cancel</button>
+          <button class="btn-primary btn-sm" onClick=${save} disabled=${saving}>
+            ${saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create user'}
+          </button>
+        `}
+      >
+        <div class="flex flex-col gap-4">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium text-text" for="modal-username">Username</label>
+            <input id="modal-username" type="text" class="input" value=${username}
+              onInput=${(e) => setUsername(e.target.value)} autocomplete="off" />
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium text-text" for="modal-email">Email</label>
+            <input id="modal-email" type="email" class="input" value=${email}
+              onInput=${(e) => setEmail(e.target.value)} />
+          </div>
+          ${!isEdit && html`
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium text-text" for="modal-password">Password</label>
+              <input id="modal-password" type="password" class="input" value=${password}
+                onInput=${(e) => setPassword(e.target.value)} autocomplete="new-password" placeholder="Min 8 characters" />
+            </div>
+          `}
+          ${isEdit && html`
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium text-text">Status</label>
+              <label class="flex items-center gap-2 text-sm text-text cursor-pointer">
+                <input type="checkbox" checked=${isActive} onChange=${(e) => setIsActive(e.target.checked)} />
+                Active
+              </label>
+            </div>
+          `}
+          <div class="flex flex-col gap-1.5">
+            <span class="text-sm font-medium text-text">Roles</span>
+            <div class="flex flex-col gap-2">
+              ${_roles.map(r => html`
+                <label key=${r.slug} class="flex items-center gap-2 text-sm text-text cursor-pointer">
+                  <input type="checkbox" checked=${roles.includes(r.slug)}
+                    onChange=${() => toggleRole(r.slug)} />
+                  ${r.slug}
+                  ${r.description && html`<span class="text-xs text-text-muted">— ${r.description}</span>`}
+                </label>
+              `)}
+            </div>
+          </div>
+          ${error && html`<p class="text-sm text-danger">${error}</p>`}
+        </div>
+      </${Modal}>
+    `;
+  }
+
+  const unmount = mountIntoModalRoot(html`<${UserModal} onClose=${() => unmount()} />`);
 }
 
 // ── Role modal ────────────────────────────────────────────────────────────────
 
-/** @param {any | null} role */
-function _showRoleModal(role) {
+/**
+ * @param {any | null} role
+ * @param {() => void} onSaved
+ */
+function _showRoleModal(role, onSaved) {
   const isEdit = role != null;
-  const isProtected = role?.slug === 'user' || role?.slug === 'admin';
 
-  const overlay = document.createElement('div');
-  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-bg/70 backdrop-blur-sm p-4';
+  function RoleModal({ onClose }) {
+    const [slug, setSlug]         = useState(role?.slug ?? '');
+    const [description, setDesc]  = useState(role?.description ?? '');
+    const [perms, setPerms]       = useState(/** @type {string[]} */ (role?.permissions ?? []));
+    const [error, setError]       = useState('');
+    const [saving, setSaving]     = useState(false);
 
-  const dialog = document.createElement('div');
-  dialog.className = 'bg-surface rounded-2xl shadow-xl w-full max-w-md flex flex-col gap-0 overflow-hidden max-h-[90vh]';
-  dialog.setAttribute('role', 'dialog');
-  dialog.setAttribute('aria-modal', 'true');
-  dialog.setAttribute('aria-label', isEdit ? `Edit role ${role.slug}` : 'Add role');
+    const togglePerm = (perm) =>
+      setPerms(prev => prev.includes(perm) ? prev.filter(p => p !== perm) : [...prev, perm]);
 
-  const permCheckboxes = ALL_PERMISSIONS.map(perm =>
-    `<label class="flex items-center gap-2 text-sm text-text cursor-pointer">
-      <input type="checkbox" value="${perm}" class="js-perm" ${role?.permissions?.includes(perm) ? 'checked' : ''}>
-      <span class="font-mono text-xs">${perm}</span>
-    </label>`
-  ).join('');
-
-  dialog.innerHTML = `
-    <div class="px-6 py-4 border-b border-border-subtle flex items-center justify-between gap-4 shrink-0">
-      <h2 class="text-base font-semibold text-text">${isEdit ? `Edit role: ${escapeHtml(role.slug)}` : 'Add role'}</h2>
-      <button type="button" class="btn-icon js-close" aria-label="Close">${iconX}</button>
-    </div>
-    <div class="px-6 py-5 flex flex-col gap-4 overflow-y-auto">
-      ${!isEdit ? `
-      <div class="flex flex-col gap-1.5">
-        <label class="text-sm font-medium text-text" for="modal-role-slug">Slug</label>
-        <input type="text" id="modal-role-slug" class="input js-slug font-mono" placeholder="e.g. moderator" autocomplete="off">
-      </div>` : ''}
-      <div class="flex flex-col gap-1.5">
-        <label class="text-sm font-medium text-text" for="modal-role-desc">Description</label>
-        <input type="text" id="modal-role-desc" class="input js-description" value="${escapeHtml(role?.description ?? '')}" placeholder="Short description">
-      </div>
-      <div class="flex flex-col gap-2">
-        <label class="text-sm font-medium text-text">Permissions ${isProtected ? '<span class="text-xs text-text-muted font-normal">(protected role — changes will be saved)</span>' : ''}</label>
-        <div class="flex flex-col gap-1.5 js-permissions">${permCheckboxes}</div>
-      </div>
-      <span class="js-modal-error text-sm text-danger hidden"></span>
-    </div>
-    <div class="px-6 py-4 border-t border-border-subtle flex items-center justify-end gap-3 shrink-0">
-      <button type="button" class="btn-secondary btn-sm js-cancel">Cancel</button>
-      <button type="button" class="btn-primary btn-sm js-save">${isEdit ? 'Save changes' : 'Create role'}</button>
-    </div>
-  `;
-
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
-
-  const closeModal = () => { if (overlay.parentNode) document.body.removeChild(overlay); };
-
-  dialog.querySelector('.js-close')?.addEventListener('click', closeModal);
-  dialog.querySelector('.js-cancel')?.addEventListener('click', closeModal);
-  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
-
-  const slugEl    = /** @type {HTMLInputElement|null} */ (dialog.querySelector('.js-slug'));
-  const descEl    = /** @type {HTMLInputElement} */ (dialog.querySelector('.js-description'));
-  const errorEl   = /** @type {HTMLElement} */ (dialog.querySelector('.js-modal-error'));
-  const saveBtn   = /** @type {HTMLButtonElement} */ (dialog.querySelector('.js-save'));
-
-  saveBtn.addEventListener('click', async () => {
-    const description = descEl.value.trim() || null;
-    const selectedPerms = [...dialog.querySelectorAll('.js-perm:checked')]
-      .map(el => /** @type {HTMLInputElement} */ (el).value);
-
-    saveBtn.disabled = true;
-    errorEl.classList.add('hidden');
-
-    try {
-      if (isEdit) {
-        await api.adminUpdateRole(role.slug, { description: description ?? undefined, permissions: selectedPerms });
-        showToast(`Role "${role.slug}" updated.`);
-      } else {
-        const slug = slugEl?.value.trim() ?? '';
-        if (!slug) { _showModalError(errorEl, 'Slug is required.'); saveBtn.disabled = false; return; }
-        await api.adminCreateRole({ slug, description: description ?? undefined, permissions: selectedPerms });
-        showToast(`Role "${slug}" created.`);
+    const save = async () => {
+      setSaving(true); setError('');
+      try {
+        const desc = description.trim() || null;
+        if (isEdit) {
+          await api.adminUpdateRole(role.slug, { description: desc ?? undefined, permissions: perms });
+          showToast(`Role "${role.slug}" updated.`);
+        } else {
+          const s = slug.trim();
+          if (!s) { setError('Slug is required.'); setSaving(false); return; }
+          await api.adminCreateRole({ slug: s, description: desc ?? undefined, permissions: perms });
+          showToast(`Role "${s}" created.`);
+        }
+        onClose();
+        await onSaved();
+      } catch (e) {
+        setError(e?.message ?? 'Failed to save.');
+        setSaving(false);
       }
-      closeModal();
-      await _reload();
-    } catch (e) {
-      _showModalError(errorEl, e?.message ?? 'Failed to save.');
-      saveBtn.disabled = false;
-    }
-  });
+    };
 
-  (slugEl ?? descEl)?.focus();
+    return html`
+      <${Modal} open=${true} onClose=${onClose}
+        title=${isEdit ? `Edit role: ${role.slug}` : 'Add role'}
+        footer=${html`
+          <button class="btn-ghost btn-sm" onClick=${onClose}>Cancel</button>
+          <button class="btn-primary btn-sm" onClick=${save} disabled=${saving}>
+            ${saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create role'}
+          </button>
+        `}
+      >
+        <div class="flex flex-col gap-4">
+          ${!isEdit && html`
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium text-text" for="modal-role-slug">Slug</label>
+              <input id="modal-role-slug" type="text" class="input font-mono"
+                value=${slug} onInput=${(e) => setSlug(e.target.value)}
+                placeholder="e.g. moderator" autocomplete="off" />
+            </div>
+          `}
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium text-text" for="modal-role-desc">Description</label>
+            <input id="modal-role-desc" type="text" class="input" value=${description}
+              onInput=${(e) => setDesc(e.target.value)} placeholder="Short description" />
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <span class="text-sm font-medium text-text">Permissions</span>
+            <div class="flex flex-col gap-1.5">
+              ${ALL_PERMISSIONS.map(perm => html`
+                <label key=${perm} class="flex items-center gap-2 text-sm text-text cursor-pointer">
+                  <input type="checkbox" checked=${perms.includes(perm)}
+                    onChange=${() => togglePerm(perm)} />
+                  <span class="font-mono text-xs">${perm}</span>
+                </label>
+              `)}
+            </div>
+          </div>
+          ${error && html`<p class="text-sm text-danger">${error}</p>`}
+        </div>
+      </${Modal}>
+    `;
+  }
+
+  const unmount = mountIntoModalRoot(html`<${RoleModal} onClose=${() => unmount()} />`);
 }

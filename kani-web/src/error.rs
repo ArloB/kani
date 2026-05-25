@@ -83,6 +83,15 @@ pub enum AppError {
 
     #[error("Source requires authentication: {0}")]
     SourceAuthRequired(String),
+
+    #[error("Source {0} is disabled")]
+    SourceDisabled(i64),
+
+    #[error("Possible duplicate")]
+    PossibleDuplicate(Vec<kani_app::SimilarMangaHit>),
+
+    #[error("Email error: {0}")]
+    EmailError(String),
 }
 
 impl AppError {
@@ -97,6 +106,8 @@ impl AppError {
             Self::FlareSolverrRequired => "flaresolverr_required",
             Self::RateLimitExceeded => "rate_limited",
             Self::SourceAuthRequired(_) => "source_auth_required",
+            Self::SourceDisabled(_) => "source_disabled",
+            Self::EmailError(_) => "email_error",
             _ => "internal_error",
         }
     }
@@ -104,16 +115,16 @@ impl AppError {
     /// Optional actionable guidance shown to the user.
     pub fn hint(&self) -> Option<&'static str> {
         match self {
-            Self::FlareSolverrRequired => Some(
-                "This source requires FlareSolverr. Configure it in Settings > Advanced.",
-            ),
+            Self::FlareSolverrRequired => {
+                Some("This source requires FlareSolverr. Configure it in Settings > Advanced.")
+            }
             Self::RateLimitExceeded => Some("Too many requests. Please wait a moment."),
-            Self::SourceAuthRequired(_) => Some(
-                "This source requires login. Configure credentials in source settings.",
-            ),
-            Self::Forbidden(_) => Some(
-                "You don't have permission for this action. Contact an administrator.",
-            ),
+            Self::SourceAuthRequired(_) => {
+                Some("This source requires login. Configure credentials in source settings.")
+            }
+            Self::Forbidden(_) => {
+                Some("You don't have permission for this action. Contact an administrator.")
+            }
             Self::Unauthorized(_) => Some("Please log in to continue."),
             _ => None,
         }
@@ -241,6 +252,25 @@ impl IntoResponse for AppError {
             Self::FlareSolverrRequired => (StatusCode::BAD_GATEWAY, self.to_string()),
             Self::RateLimitExceeded => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
             Self::SourceAuthRequired(msg) => (StatusCode::UNAUTHORIZED, msg.clone()),
+            Self::SourceDisabled(id) => {
+                tracing::debug!("Request to disabled source {id}");
+                let body = Json(json!({
+                    "error": format!("Source {id} is disabled"),
+                    "code": "source_disabled",
+                    "disabled": true,
+                    "source_id": id,
+                    "hint": null,
+                }));
+                return (StatusCode::CONFLICT, body).into_response();
+            }
+            Self::PossibleDuplicate(hits) => {
+                let body = Json(json!({
+                    "status": "possible_duplicate",
+                    "suggestions": hits,
+                }));
+                return (StatusCode::CONFLICT, body).into_response();
+            }
+            Self::EmailError(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg.clone()),
         };
 
         let body = Json(json!({
@@ -269,6 +299,7 @@ impl From<kani_app::ServiceError> for AppError {
     fn from(e: kani_app::ServiceError) -> Self {
         match e {
             kani_app::ServiceError::NotFound(s) => Self::NotFound(s),
+            kani_app::ServiceError::SourceDisabled(id) => Self::SourceDisabled(id),
             kani_app::ServiceError::Conflict(s) => Self::Conflict(s),
             kani_app::ServiceError::Internal(s) => Self::InternalServerError(s),
             kani_app::ServiceError::Validation(s) => Self::ValidationError(s),
@@ -279,6 +310,7 @@ impl From<kani_app::ServiceError> for AppError {
             kani_app::ServiceError::Io(e) => Self::IoError(e),
             kani_app::ServiceError::TryFromInt(e) => Self::TryFromIntError(e),
             kani_app::ServiceError::RequestError(e) => Self::RequestError(e),
+            kani_app::ServiceError::PossibleDuplicate(hits) => Self::PossibleDuplicate(hits),
         }
     }
 }
