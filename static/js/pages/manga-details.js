@@ -224,20 +224,24 @@ export async function init(container, params) {
   container.appendChild(wrap);
 
   const _fromSourceId = new URLSearchParams(location.search).get('from_source');
-  const crumbs = _isLocal
-    ? (_fromSourceId && source
-        ? [
-            { label: 'Sources', href: '/sources' },
-            { label: source.name, href: `/source/${source.id}` },
-            { label: 'Library', href: `/source/${source.id}` },
-            { label: info?.title ?? 'Manga' },
-          ]
-        : [{ label: 'Library', href: '/' }, { label: info?.title ?? 'Manga' }])
-    : [
+  // Breadcrumbs are mutually exclusive: either we came from the library
+  // or from a source — never both at once.
+  const _mangaTitle = info?.title ?? 'Manga';
+  let crumbs;
+  if (!_fromSourceId && _isLocal) {
+    // Direct navigation from the library
+    crumbs = [{ label: 'Library', href: '/library' }, { label: _mangaTitle }];
+  } else if (source) {
+    // Navigated from a source (browsing or via source link on a library entry)
+    crumbs = [
       { label: 'Sources', href: '/sources' },
-      { label: source?.name ?? 'Source', href: `/source/${_sid}` },
-      { label: info?.title ?? 'Manga' },
+      { label: source.name, href: `/source/${source.id}` },
+      { label: _mangaTitle },
     ];
+  } else {
+    // Direct link / unknown origin
+    crumbs = [{ label: _mangaTitle }];
+  }
   const _headerActions = (() => {
     if (!_sourceUrl) return undefined;
     const a = document.createElement('a');

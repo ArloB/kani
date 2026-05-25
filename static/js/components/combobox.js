@@ -268,7 +268,11 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
 // ── Multi-select ──────────────────────────────────────────────────────────────
 
 function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
-  const selectedIds = /** @type {number[]} */ (Array.isArray(value) ? value : []);
+  const [selectedIds, setSelectedIds] = useState(/** @type {number[]} */ (Array.isArray(value) ? value : []));
+
+  useEffect(() => {
+    setSelectedIds(Array.isArray(value) ? /** @type {number[]} */ (value) : []);
+  }, [value]);
 
   const [inputText, setInputText] = useState('');
   const [open, setOpen] = useState(false);
@@ -372,8 +376,11 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
   useEffect(() => () => _renderPopover(null), []);
 
   function _toggle(opt) {
-    const idx = selectedIds.indexOf(opt.id);
-    onChange(idx === -1 ? [...selectedIds, opt.id] : selectedIds.filter(id => id !== opt.id));
+    const next = selectedIds.indexOf(opt.id) === -1
+      ? [...selectedIds, opt.id]
+      : selectedIds.filter(id => id !== opt.id);
+    setSelectedIds(next);
+    onChange(/** @type {any} */ (next));
   }
 
   function _scrollTo(idx) {

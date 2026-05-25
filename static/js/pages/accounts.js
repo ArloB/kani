@@ -105,10 +105,13 @@ function _updateHeaderActions() {
     }
   });
 
-  const crumbs = [{ label: 'Accounts', href: '/accounts?tab=users' }];
+  const tabLabel = _activeTab === 'users' ? 'Users' : 'Roles';
+  const crumbs = [{ label: 'Accounts', href: '/accounts' }];
   if (_selected) {
-    crumbs.push({ label: _activeTab === 'users' ? 'Users' : 'Roles', href: '/accounts?tab=' + _activeTab });
+    crumbs.push({ label: tabLabel, href: '/accounts?tab=' + _activeTab });
     crumbs.push({ label: _activeTab === 'users' ? _selected.username : _selected.slug });
+  } else {
+    crumbs.push({ label: tabLabel });
   }
 
   setPageHeader({ crumbs, actions: addBtn });

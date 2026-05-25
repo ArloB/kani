@@ -55,6 +55,12 @@ const _state = {
 
   /** Per-manga browser notification opt-out. True = notify (default). */
   mangaNotifyPrefs: /** @type {Map<number, boolean>} */ (new Map()),
+
+  /**
+   * Incremented per source when a source preference is changed.
+   * Source browse/search pages subscribe to this to invalidate their results.
+   */
+  sourcePreferenceVersion: /** @type {Map<number, number>} */ (new Map()),
 };
 
 /**

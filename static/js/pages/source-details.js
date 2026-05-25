@@ -46,6 +46,8 @@ let _destroyPaginationPopular = null;
 let _destroyLibPagination = null;
 /** @type {(() => void) | null} */
 let _unsubSourcesInvalidation = null;
+/** @type {(() => void) | null} */
+let _unsubPrefVersion = null;
 /** @type {IntersectionObserver | null} */
 let _sentinelObserver = null;
 /** @type {HTMLElement | null} */
@@ -838,6 +840,24 @@ export async function init(container, { id }) {
 
   // Re-fetch sidebar when any source is enabled/disabled (e.g. from Settings tab)
   _unsubSourcesInvalidation = subscribe('sourcesInvalidation', _refreshSidebar);
+
+  // Re-fetch browse/search results when a preference changes for this source.
+  let _prevPrefVersion = /** @type {number | undefined} */ (undefined);
+  _unsubPrefVersion = subscribe('sourcePreferenceVersion', (/** @type {Map<number, number>} */ map) => {
+    const v = map.get(_sourceId);
+    if (v === undefined || v === _prevPrefVersion) return;
+    _prevPrefVersion = v;
+    // Re-fetch whichever content tab is currently active.
+    const popularGridEl = _popularPanelEl?.querySelector('.js-popular-grid');
+    const popularPaginEl = _popularPanelEl?.querySelector('.js-popular-pagination');
+    const searchGridEl = _searchPanelEl?.querySelector('.js-search-grid');
+    const searchPaginEl = _searchPanelEl?.querySelector('.js-search-pagination');
+    if (_activeTab === 'popular' && popularGridEl && popularPaginEl) {
+      _fetch(/** @type {HTMLElement} */ (popularGridEl), /** @type {HTMLElement} */ (popularPaginEl), false);
+    } else if (_activeTab === 'search' && searchGridEl && searchPaginEl) {
+      _fetch(/** @type {HTMLElement} */ (searchGridEl), /** @type {HTMLElement} */ (searchPaginEl), true);
+    }
+  });
 }
 
 // ── Settings tab ──────────────────────────────────────────────────────────────
@@ -1170,6 +1190,8 @@ export function destroy(container) {
   _filterModalDestroy = null;
   _unsubSourcesInvalidation?.();
   _unsubSourcesInvalidation = null;
+  _unsubPrefVersion?.();
+  _unsubPrefVersion = null;
   mountIntoModalRoot(null);
   _addSourceBtn = null;
   clearPageHeader();

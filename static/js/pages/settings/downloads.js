@@ -1,10 +1,15 @@
 // @ts-check
 // Settings — Downloads section.
 
+import { h, render } from 'preact';
+import htm from 'htm';
 import * as api from '../../api.js';
 import { getLocal, setLocal } from '../../utils.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
+import { Combobox } from '../../components/combobox.js';
+const html = htm.bind(h);
+
 
 /**
  * @param {HTMLElement} el
@@ -33,39 +38,33 @@ export function mount(el, settings) {
     serverCard.appendChild(mkSettingsRow({ label: f.label, description: f.desc, control: input }));
   }
 
-  // Category auto-download checkboxes (populated async)
+  // Category auto-download — multi-select combobox (populated async)
   const catContainer = document.createElement('div');
-  catContainer.className = 'flex flex-col gap-1.5 text-sm';
+  catContainer.className = 'w-64';
   catContainer.innerHTML = '<p class="text-text-muted text-xs">Loading…</p>';
   /** @type {number[]} */
   let _selectedCatIds = Array.isArray(settings?.auto_download_category_ids)
     ? settings.auto_download_category_ids
     : [];
+
   api.getCategories().then(cats => {
-    catContainer.innerHTML = '';
-    if (!Array.isArray(cats) || cats.length === 0) {
+    const options = Array.isArray(cats)
+      ? cats.map(c => ({ id: c.id, name: c.name }))
+      : [];
+    if (options.length === 0) {
       catContainer.innerHTML = '<p class="text-text-muted text-xs">No categories defined.</p>';
       return;
     }
-    for (const cat of cats) {
-      const label = document.createElement('label');
-      label.className = 'flex items-center gap-2 cursor-pointer';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.className = 'rounded';
-      cb.value = String(cat.id);
-      cb.checked = _selectedCatIds.includes(cat.id);
-      cb.addEventListener('change', () => {
-        if (cb.checked) {
-          if (!_selectedCatIds.includes(cat.id)) _selectedCatIds = [..._selectedCatIds, cat.id];
-        } else {
-          _selectedCatIds = _selectedCatIds.filter(id => id !== cat.id);
-        }
-      });
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(cat.name));
-      catContainer.appendChild(label);
-    }
+    catContainer.innerHTML = '';
+    render(html`
+      <${Combobox}
+        options=${options}
+        value=${_selectedCatIds}
+        onChange=${(/** @type {number[]} */ ids) => { _selectedCatIds = ids; }}
+        multiple=${true}
+        placeholder="Select categories…"
+      />
+    `, catContainer);
   }).catch(() => { catContainer.innerHTML = '<p class="text-text-muted text-xs">Failed to load.</p>'; });
   serverCard.appendChild(mkSettingsRow({
     label: 'Auto-download categories',
@@ -163,7 +162,7 @@ export function mount(el, settings) {
   });
 
   return {
-    destroy() { el.innerHTML = ''; },
+    destroy() { render(null, catContainer); el.innerHTML = ''; },
     isDirty() { return JSON.stringify(buildPayload()) !== JSON.stringify(lastSaved); },
   };
 }
