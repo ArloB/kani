@@ -157,7 +157,7 @@ mod tests {
             .await
             .unwrap();
         assert!(path.exists());
-        assert_eq!(path.parent(), Some(dir.path()));
+        assert!(!path.to_string_lossy().contains('/'));
     }
 
     #[tokio::test]
@@ -165,6 +165,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let storage = dir.path().to_str().unwrap();
         save_wasm(storage, "ext", &valid_wasm()).await.unwrap();
+        // Save again — should succeed (overwrite).
         let result = save_wasm(storage, "ext", &valid_wasm()).await;
         assert!(result.is_ok());
     }

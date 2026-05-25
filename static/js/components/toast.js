@@ -8,7 +8,7 @@ function _getContainer() {
   if (!_container) {
     _container = document.createElement('div');
     _container.id = 'toast-container';
-    _container.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-toast pointer-events-none';
+    _container.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-[2000] pointer-events-none';
     _container.setAttribute('aria-live', 'polite');
     _container.setAttribute('aria-atomic', 'false');
     document.body.appendChild(_container);
@@ -34,7 +34,7 @@ export function showToast(message, { type = 'info', duration = 3000 } = {}) {
   const toast = document.createElement('div');
   toast.className = [
     'pointer-events-auto px-5 py-3 rounded-md text-sm shadow-md',
-    'max-w-sm text-center transition-opacity duration-300',
+    'max-w-[360px] text-center transition-opacity duration-300',
     typeClasses[type] ?? typeClasses.info,
   ].join(' ');
   toast.setAttribute('role', 'status');

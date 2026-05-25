@@ -1,7 +1,7 @@
-use crate::evaluator::shared::{Env, Value, eval_common_expr, fetch_body};
-use kani_shared::ast::{Blueprint, Expr};
 use std::future::Future;
 use std::pin::Pin;
+use kani_shared::ast::{Blueprint, Expr};
+use crate::evaluator::shared::{Env, Value, eval_common_expr, fetch_body};
 
 pub async fn extract_json(
     state: &mut crate::wasm::HostState,
@@ -34,19 +34,15 @@ pub async fn extract_json(
     // (used for details endpoints where the document root is the container).
     let items: Vec<&serde_json::Value> = match container_val.as_array() {
         Some(arr) => arr.iter().collect(),
-        None => vec![container_val],
+        None      => vec![container_val],
     };
 
     let mut scalars = serde_json::Map::new();
     for scalar in &blueprint.scalars {
         let val = eval_json_expr(&scalar.expr, &doc, None, env.clone()).await?;
         match val.to_json() {
-            Some(v) => {
-                scalars.insert(scalar.name.clone(), v);
-            }
-            None if scalar.optional => {
-                scalars.insert(scalar.name.clone(), serde_json::Value::Null);
-            }
+            Some(v)                 => { scalars.insert(scalar.name.clone(), v); }
+            None if scalar.optional => { scalars.insert(scalar.name.clone(), serde_json::Value::Null); }
             None => return Err(format!("Required scalar '{}' produced null", scalar.name)),
         }
     }
@@ -57,12 +53,8 @@ pub async fn extract_json(
         for field in &blueprint.fields {
             let val = eval_json_expr(&field.expr, &doc, Some((item, index)), env.clone()).await?;
             match val.to_json() {
-                Some(v) => {
-                    row.insert(field.name.clone(), v);
-                }
-                None if field.optional => {
-                    row.insert(field.name.clone(), serde_json::Value::Null);
-                }
+                Some(v)                => { row.insert(field.name.clone(), v); }
+                None if field.optional => { row.insert(field.name.clone(), serde_json::Value::Null); }
                 None => return Err(format!("Required field '{}' produced null", field.name)),
             }
         }
@@ -85,17 +77,14 @@ fn eval_json_expr<'a>(
     Box::pin(async move {
         if let Some(result) = eval_common_expr(expression, env.clone(), &|e, env| {
             eval_json_expr(e, doc, current, env)
-        })
-        .await
-        {
+        }).await {
             return result;
         }
 
         match expression {
-            Expr::Json(pointer) => Ok(doc
-                .pointer(pointer)
-                .map(|v| Value::Json(v.clone()))
-                .unwrap_or(Value::Null)),
+            Expr::Json(pointer) => Ok(
+                doc.pointer(pointer).map(|v| Value::Json(v.clone())).unwrap_or(Value::Null)
+            ),
 
             Expr::SelfRef => current
                 .map(|(n, _)| Value::Json((*n).clone()))
@@ -105,85 +94,64 @@ fn eval_json_expr<'a>(
                 .map(|(_, i)| Value::Int(i as i64))
                 .ok_or_else(|| "Index used outside of a container loop".into()),
 
-            Expr::JsonPtr { target, pointer } => eval_json_expr(target, doc, current, env)
-                .await
-                .and_then(|v| v.into_json("ptr"))
-                .map(|v| {
-                    v.pointer(pointer)
-                        .map(|v| Value::Json(v.clone()))
-                        .unwrap_or(Value::Null)
-                }),
+            Expr::JsonPtr { target, pointer } =>
+                eval_json_expr(target, doc, current, env).await
+                    .and_then(|v| v.into_json("ptr"))
+                    .map(|v| v.pointer(pointer).map(|v| Value::Json(v.clone())).unwrap_or(Value::Null)),
 
-            Expr::JsonStr { target } => eval_json_expr(target, doc, current, env)
-                .await
-                .and_then(|v| v.into_json("str"))
-                .map(|v| {
-                    v.as_str()
-                        .map(|s| Value::Str(s.to_owned()))
-                        .unwrap_or(Value::Null)
-                }),
+            Expr::JsonStr { target } =>
+                eval_json_expr(target, doc, current, env).await
+                    .and_then(|v| v.into_json("str"))
+                    .map(|v| v.as_str().map(|s| Value::Str(s.to_owned())).unwrap_or(Value::Null)),
 
-            Expr::JsonInt { target } => eval_json_expr(target, doc, current, env)
-                .await
-                .and_then(|v| v.into_json("int"))
-                .map(|v| v.as_i64().map(Value::Int).unwrap_or(Value::Null)),
+            Expr::JsonInt { target } =>
+                eval_json_expr(target, doc, current, env).await
+                    .and_then(|v| v.into_json("int"))
+                    .map(|v| v.as_i64().map(Value::Int).unwrap_or(Value::Null)),
 
-            Expr::JsonFloat { target } => eval_json_expr(target, doc, current, env)
-                .await
-                .and_then(|v| v.into_json("float"))
-                .map(|v| v.as_f64().map(Value::Num).unwrap_or(Value::Null)),
+            Expr::JsonFloat { target } =>
+                eval_json_expr(target, doc, current, env).await
+                    .and_then(|v| v.into_json("float"))
+                    .map(|v| v.as_f64().map(Value::Num).unwrap_or(Value::Null)),
 
-            Expr::JsonBool { target } => eval_json_expr(target, doc, current, env)
-                .await
-                .and_then(|v| v.into_json("bool"))
-                .map(|v| v.as_bool().map(Value::Bool).unwrap_or(Value::Null)),
+            Expr::JsonBool { target } =>
+                eval_json_expr(target, doc, current, env).await
+                    .and_then(|v| v.into_json("bool"))
+                    .map(|v| v.as_bool().map(Value::Bool).unwrap_or(Value::Null)),
 
-            Expr::ArrayLen { target } => eval_json_expr(target, doc, current, env)
-                .await
-                .and_then(|v| v.into_json("array_len"))
-                .map(|v| Value::Int(v.as_array().map(|a| a.len() as i64).unwrap_or(0))),
+            Expr::ArrayLen { target } =>
+                eval_json_expr(target, doc, current, env).await
+                    .and_then(|v| v.into_json("array_len"))
+                    .map(|v| Value::Int(v.as_array().map(|a| a.len() as i64).unwrap_or(0))),
 
-            Expr::JsonKeys { target } => eval_json_expr(target, doc, current, env)
-                .await
-                .and_then(|v| v.into_json("keys"))
-                .map(|v| {
-                    Value::List(
+            Expr::JsonKeys { target } =>
+                eval_json_expr(target, doc, current, env).await
+                    .and_then(|v| v.into_json("keys"))
+                    .map(|v| Value::List(
                         v.as_object()
                             .map(|o| o.keys().map(|k| Value::Str(k.clone())).collect())
-                            .unwrap_or_default(),
-                    )
-                }),
+                            .unwrap_or_default()
+                    )),
 
             Expr::JsonGet { target, key } => {
-                let val = eval_json_expr(target, doc, current, env.clone())
-                    .await
+                let val = eval_json_expr(target, doc, current, env.clone()).await
                     .and_then(|v| v.into_json("get"))?;
-                let key_str = eval_json_expr(key, doc, current, env)
-                    .await
+                let key_str = eval_json_expr(key, doc, current, env).await
                     .and_then(|v| v.into_str("get"))?;
-                Ok(val
-                    .get(&key_str)
-                    .map(|v| Value::Json(v.clone()))
-                    .unwrap_or(Value::Null))
+                Ok(val.get(&key_str).map(|v| Value::Json(v.clone())).unwrap_or(Value::Null))
             }
 
             Expr::JsonFind { target, key, value } => {
-                let arr = eval_json_expr(target, doc, current, env.clone())
-                    .await
+                let arr = eval_json_expr(target, doc, current, env.clone()).await
                     .and_then(|v| v.into_json("find"))?;
-                let key_str = eval_json_expr(key, doc, current, env.clone())
-                    .await
+                let key_str = eval_json_expr(key, doc, current, env.clone()).await
                     .and_then(|v| v.into_str("find"))?;
-                let val_str = eval_json_expr(value, doc, current, env)
-                    .await
+                let val_str = eval_json_expr(value, doc, current, env).await
                     .and_then(|v| v.into_str("find"))?;
-                Ok(arr
-                    .as_array()
-                    .and_then(|items| {
-                        items.iter().find(|item| {
-                            item.get(&key_str).and_then(|v| v.as_str()) == Some(val_str.as_str())
-                        })
-                    })
+                Ok(arr.as_array()
+                    .and_then(|items| items.iter().find(|item| {
+                        item.get(&key_str).and_then(|v| v.as_str()) == Some(val_str.as_str())
+                    }))
                     .map(|v| Value::Json(v.clone()))
                     .unwrap_or(Value::Null))
             }
@@ -198,15 +166,11 @@ fn eval_json_expr<'a>(
             }
 
             Expr::JsonFold { target } => {
-                let items = eval_json_expr(target, doc, current, env)
-                    .await
+                let items = eval_json_expr(target, doc, current, env).await
                     .and_then(|v| v.into_list("json_fold"))?;
                 let mut merged: Option<serde_json::Value> = None;
                 for item in items {
                     let v = item.into_json("json_fold")?;
-                    if v.is_null() {
-                        continue;
-                    }
                     merged = Some(match merged {
                         None => v,
                         Some(acc) => json_merge_two(acc, v)?,
@@ -215,10 +179,7 @@ fn eval_json_expr<'a>(
                 Ok(merged.map(Value::Json).unwrap_or(Value::Null))
             }
 
-            _ => Err(format!(
-                "Unhandled expression in JSON evaluator: {:?}",
-                expression
-            )),
+            _ => Err(format!("Unhandled expression in JSON evaluator: {:?}", expression)),
         }
     })
 }
@@ -235,9 +196,7 @@ fn json_merge_two(a: serde_json::Value, b: serde_json::Value) -> Result<serde_js
     use serde_json::Value as J;
     match (a, b) {
         (J::Object(mut ma), J::Object(mb)) => {
-            for (k, v) in mb {
-                ma.insert(k, v);
-            }
+            for (k, v) in mb { ma.insert(k, v); }
             Ok(J::Object(ma))
         }
         (J::Array(mut va), J::Array(vb)) => {
@@ -246,8 +205,7 @@ fn json_merge_two(a: serde_json::Value, b: serde_json::Value) -> Result<serde_js
         }
         (a, b) => Err(format!(
             "json_merge: cannot merge {} with {}",
-            a.type_str(),
-            b.type_str()
+            a.type_str(), b.type_str()
         )),
     }
 }

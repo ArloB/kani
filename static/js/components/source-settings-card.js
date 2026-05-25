@@ -9,7 +9,6 @@ import { Modal } from './modal.js';
 import { PreferenceRow } from './preference-row.js';
 import { iconWarning, iconStarFilled, iconStarOutline } from '../icons.js';
 import { Icon } from './icon.js';
-import { showToast, showApiError } from './toast.js';
 const html = htm.bind(h);
 
 /**
@@ -31,6 +30,8 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
   const [installOpen, setInstallOpen] = useState(false);
   const [wasmUrl, setWasmUrl] = useState('');
   const [wasmFetching, setWasmFetching] = useState(false);
+  const [wasmError, setWasmError] = useState(/** @type {string|null} */ (null));
+  const [wasmSuccess, setWasmSuccess] = useState(false);
 
   const [schema, setSchema] = useState(/** @type {any[]} */ ([]));
   const [liveValues, setLiveValues] = useState(/** @type {Record<string,any>} */ ({}));
@@ -45,7 +46,7 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
         setSchema(Array.isArray(schemaRes) ? schemaRes : []);
         setLiveValues(prefsRes && typeof prefsRes === 'object' ? prefsRes : {});
       })
-      .catch(e => showApiError(e))
+      .catch(e => console.error('Failed to load prefs:', e))
       .finally(() => setPrefsLoading(false));
   }, [modalOpen, sid]);
 
@@ -58,9 +59,7 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
     try {
       await api.toggleSourceEnabled(sid, val);
       setEnabled(val);
-    } catch (e) {
-      showApiError(e);
-    }
+    } catch { /* revert on error */ }
   }
 
   async function toggleStarred(val) {
@@ -81,13 +80,14 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
 
   async function handleFetchWasm() {
     setWasmFetching(true);
+    setWasmError(null);
+    setWasmSuccess(false);
     try {
       await api.fetchWasm(sid, wasmUrl);
+      setWasmSuccess(true);
       setWasmUrl('');
-      setInstallOpen(false);
-      showToast('Extension installed successfully.', { type: 'success' });
     } catch (e) {
-      showApiError(e);
+      setWasmError(e?.message ?? 'Fetch failed');
     } finally {
       setWasmFetching(false);
     }
@@ -230,6 +230,8 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
               onClick=${handleFetchWasm}
             >${wasmFetching ? 'Fetching…' : 'Fetch'}</button>
           </div>
+          ${wasmError && html`<p class="text-sm text-danger">${wasmError}</p>`}
+          ${wasmSuccess && html`<p class="text-sm text-success">WASM installed successfully.</p>`}
         </div>
       `}
 

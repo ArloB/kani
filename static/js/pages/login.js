@@ -2,7 +2,6 @@
 // Login page — username/password form, submits as JSON to /rest/auth/login.
 
 import { iconX } from '../icons.js';
-import { getPasswordResetEnabled, getRegistrationEnabled } from '../api.js';
 
 /** @param {HTMLElement} container */
 export function init(container) {
@@ -22,7 +21,7 @@ export function init(container) {
           aria-live="assertive"
           id="login-error"
         >
-          <span aria-hidden="true" class="shrink-0 icon-sm">${iconX}</span>
+          <span aria-hidden="true" class="shrink-0 [&_svg]:w-4 [&_svg]:h-4">${iconX}</span>
           <span id="login-error-msg"></span>
         </div>
 
@@ -54,12 +53,6 @@ export function init(container) {
           </div>
           <button type="submit" class="btn-primary w-full h-11 mt-2" id="login-submit">Sign in</button>
         </form>
-        <p class="text-center text-sm text-text-muted hidden" id="login-forgot-link">
-          <a href="/forgot-password" class="text-accent hover:underline">Forgot password?</a>
-        </p>
-        <p class="text-center text-sm text-text-muted hidden" id="login-register-link">
-          Don't have an account? <a href="/register" class="text-accent hover:underline">Create one</a>
-        </p>
       </div>
     </div>
   `;
@@ -68,24 +61,6 @@ export function init(container) {
   const btn    = /** @type {HTMLButtonElement} */ (container.querySelector('#login-submit'));
   const errBox = /** @type {HTMLElement}       */ (container.querySelector('#login-error'));
   const errMsg = /** @type {HTMLElement}       */ (container.querySelector('#login-error-msg'));
-
-  // Show register link if registration is enabled
-  getRegistrationEnabled()
-    .then(d => {
-      if (d?.enabled) {
-        container.querySelector('#login-register-link')?.classList.remove('hidden');
-      }
-    })
-    .catch(() => {});
-
-  // Show forgot password link if password reset is enabled
-  getPasswordResetEnabled()
-    .then(d => {
-      if (d?.enabled) {
-        container.querySelector('#login-forgot-link')?.classList.remove('hidden');
-      }
-    })
-    .catch(() => {});
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();

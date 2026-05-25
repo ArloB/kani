@@ -34,16 +34,6 @@ pub struct FetchWasmRequest {
 // (rest.rs, tests) continues to compile unchanged.
 pub use kani_app::models::{DownloadRuleRow, LibraryManga, Manga, Settings};
 
-#[derive(serde::Deserialize, Debug)]
-pub struct UpdateLocalMetadataRequest {
-    pub local_name: Option<String>,
-    pub local_description: Option<String>,
-    pub local_status: Option<i64>,
-    pub authors: Option<Vec<String>>,
-    pub artists: Option<Vec<String>>,
-    pub tags: Option<Vec<String>>,
-}
-
 #[derive(garde::Validate, Deserialize, Debug)]
 pub struct SearchMangaRequest {
     #[garde(inner(length(max = 200)))]
@@ -186,21 +176,6 @@ pub struct AddDownloadRuleRequest {
 }
 
 #[derive(serde::Deserialize, Debug)]
-pub struct UpdateDownloadRuleRequest {
-    pub kind: kani_shared::DownloadRuleKind,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct ReorderDownloadRulesRequest {
-    pub ordered_ids: Vec<i64>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct PreviewDownloadRulesRequest {
-    pub kinds: Vec<kani_shared::DownloadRuleKind>,
-}
-
-#[derive(serde::Deserialize, Debug)]
 pub struct SetScanlatorPrefRequest {
     pub scanlator: String,
     pub priority: i64,
@@ -265,33 +240,6 @@ pub struct ToggleAutoDownloadRequest {
     pub enabled: bool,
 }
 
-/// Body for `POST /manga/scan`. Either scan all manga or a specific list.
-#[derive(serde::Deserialize, Debug)]
-#[serde(untagged)]
-pub enum ScanMangaRequest {
-    /// Scan specific manga by ID.
-    Ids { ids: Vec<i64> },
-    /// Scan all manga in the library. Send `{ "ids": "all" }`.
-    All { ids: ScanAll },
-}
-
-/// Sentinel value — used in `ScanMangaRequest::All`.
-#[derive(Debug)]
-pub struct ScanAll;
-
-impl<'de> serde::Deserialize<'de> for ScanAll {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        if s == "all" {
-            Ok(ScanAll)
-        } else {
-            Err(serde::de::Error::custom(format!(
-                "expected \"all\", got {s:?}"
-            )))
-        }
-    }
-}
-
 #[derive(serde::Deserialize, Debug)]
 pub struct PreviewMigrationRequest {
     pub target_source_id: i64,
@@ -333,8 +281,6 @@ pub struct SetMangaTrackingRequest {
     pub status: Option<kani_shared::types::MangaTrackingStatus>,
     pub score: Option<f64>,
     pub tracking_enabled: Option<bool>,
-    pub notify_new_chapters: Option<bool>,
-    pub reading_direction: Option<String>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -420,128 +366,4 @@ pub struct AdminCreateRoleRequest {
 pub struct AdminUpdateRoleRequest {
     pub description: Option<String>,
     pub permissions: Option<Vec<String>>,
-}
-
-// ── Admin logs queries ────────────────────────────────────────────────────────
-
-#[derive(garde::Validate, serde::Deserialize, Debug, Default)]
-pub struct LogsQuery {
-    /// Comma-separated levels, e.g. "error,warn". Empty = all levels.
-    #[garde(skip)]
-    pub level: Option<String>,
-    /// Comma-separated source tags, e.g. "app,http". Empty = all sources.
-    #[garde(skip)]
-    pub source: Option<String>,
-    #[garde(skip)]
-    pub from: Option<String>,
-    #[garde(skip)]
-    pub to: Option<String>,
-    #[garde(skip)]
-    pub search: Option<String>,
-    #[garde(range(min = 1))]
-    pub page: Option<i32>,
-    #[garde(range(min = 1, max = 500))]
-    pub page_size: Option<i32>,
-    /// "json" | "text" — only used by the download endpoint.
-    #[garde(skip)]
-    pub format: Option<String>,
-}
-
-#[derive(garde::Validate, serde::Deserialize, Debug, Default)]
-pub struct AuditLogQuery {
-    #[garde(skip)]
-    pub user_id: Option<i64>,
-    #[garde(skip)]
-    pub action: Option<String>,
-    #[garde(skip)]
-    pub from: Option<String>,
-    #[garde(skip)]
-    pub to: Option<String>,
-    #[garde(skip)]
-    pub search: Option<String>,
-    #[garde(range(min = 1))]
-    pub page: Option<i32>,
-    #[garde(range(min = 1, max = 200))]
-    pub page_size: Option<i32>,
-    /// "json" | "csv" — only used by the download endpoint.
-    #[garde(skip)]
-    pub format: Option<String>,
-}
-
-// ── Password reset / email verification request types ─────────────────────────
-
-#[derive(serde::Deserialize, Debug)]
-pub struct PasswordResetRequestBody {
-    pub email: String,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct PasswordResetConfirmBody {
-    pub token: String,
-    pub new_password: String,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct TokenQuery {
-    pub token: String,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct SendTestEmailBody {
-    pub to: String,
-}
-
-// ── Reading stats query ───────────────────────────────────────────────────────
-
-#[derive(garde::Validate, serde::Deserialize, Debug)]
-pub struct StatsQuery {
-    /// Number of days for the daily_activity window. Default 90.
-    #[garde(range(min = 1, max = 365))]
-    pub period: Option<i32>,
-    /// Reserved: comma-separated list of stat blocks to compute.
-    #[garde(skip)]
-    pub metrics: Option<String>,
-}
-
-// ── Filesystem browser ────────────────────────────────────────────────────────
-
-#[derive(garde::Validate, serde::Deserialize, Debug)]
-pub struct FsBrowseQuery {
-    #[garde(length(min = 1, max = 4096))]
-    pub path: String,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct FsMkdirBody {
-    pub path: String,
-    pub name: String,
-}
-
-#[derive(serde::Serialize, Debug)]
-pub struct FsBrowseResponse {
-    pub path: String,
-    pub segments: Vec<String>,
-    pub dirs: Vec<String>,
-    pub drives: Vec<String>,
-}
-
-#[derive(serde::Serialize, Debug)]
-pub struct FsMkdirResponse {
-    pub path: String,
-}
-
-// ── Path migration ────────────────────────────────────────────────────────────
-
-#[derive(serde::Deserialize, Debug)]
-pub struct PathMigrateBody {
-    pub field: String,
-    pub new_path: String,
-}
-
-#[derive(serde::Serialize, Debug)]
-pub struct PathMigrateEstimateResponse {
-    pub current_bytes: u64,
-    pub available_bytes: u64,
-    pub can_migrate: bool,
-    pub reason: Option<String>,
 }

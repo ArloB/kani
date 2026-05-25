@@ -28,7 +28,7 @@ export function skeletonSourceList(count = 6) {
       <div class="skeleton h-3 w-1/2 rounded"></div>
       <div class="skeleton h-8 w-24 rounded-md"></div>
     </div>`;
-  return `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">${card.repeat(count)}</div>`; /* justified: auto-fill grid, no token equivalent */
+  return `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">${card.repeat(count)}</div>`;
 }
 
 /**
@@ -56,11 +56,11 @@ export function skeletonMangaHero() {
 
   // 10 chapter rows with a gap between them to suggest separators
   const listRows = Array.from({ length: 10 }, () =>
-    `<div class="skeleton h-14 w-full rounded-md"></div>`
+    `<div class="skeleton h-[56px] w-full rounded-md"></div>`
   ).join('');
 
   return `
-    <div class="max-w-page w-full mx-auto px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6 md:gap-8">
+    <div class="max-w-[1400px] w-full mx-auto px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6 md:gap-8">
       <div class="skeleton h-4 w-44 rounded"></div>
       <div class="flex flex-col md:flex-row gap-6 md:gap-8 md:items-start">
 
@@ -68,7 +68,7 @@ export function skeletonMangaHero() {
         <div class="w-full flex flex-col gap-3 md:w-1/4 md:shrink-0">
           <!-- Mobile: cover(35%) + meta side by side; Desktop: cover full-width above meta -->
           <div class="flex flex-row items-start gap-3 md:flex-col md:gap-3">
-            <div class="skeleton rounded-xl w-1/3 md:w-full shrink-0 md:shrink"
+            <div class="skeleton rounded-xl w-[35%] md:w-full shrink-0 md:shrink"
                  style="aspect-ratio:2/3"></div>
             <div class="flex-1 md:flex-none min-w-0 flex flex-col gap-2 pt-1 md:pt-0 md:w-full">
               ${metaRows}
@@ -114,7 +114,7 @@ export function skeletonSearchResults(count = 3) {
  */
 export function skeletonUpdateList(count = 4) {
   const rows = Array.from({ length: 3 }, () =>
-    `<div class="skeleton h-10 w-full rounded"></div>`
+    `<div class="skeleton h-[38px] w-full rounded"></div>`
   ).join('');
   const group = `
     <div class="flex flex-col gap-2 bg-surface border border-border rounded-xl p-4">

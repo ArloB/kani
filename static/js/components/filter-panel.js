@@ -56,7 +56,7 @@ export function mountFilterModal(triggerBtn, modalRoot, { filterDefs, activeFilt
     if (count > 0) {
       if (!badge) {
         badge = document.createElement('span');
-        badge.className = 'js-filter-badge inline-flex items-center justify-center w-4 h-4 text-2xs font-bold rounded-full bg-accent text-white ml-1.5';
+        badge.className = 'js-filter-badge inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold rounded-full bg-accent text-white ml-1.5';
         triggerBtn.appendChild(badge);
       }
       badge.textContent = String(count);
@@ -70,11 +70,11 @@ export function mountFilterModal(triggerBtn, modalRoot, { filterDefs, activeFilt
     draft = { ...committed };
 
     const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 bg-scrim z-modal flex items-end sm:items-center justify-center p-0 sm:p-4';
+    overlay.className = 'fixed inset-0 bg-black/50 z-[9000] flex items-end sm:items-center justify-center p-0 sm:p-4';
     overlayEl = overlay;
 
     const dialog = document.createElement('div');
-    dialog.className = 'bg-surface rounded-t-2xl sm:rounded-xl w-full sm:max-w-lg max-h-sheet flex flex-col shadow-xl overflow-hidden';
+    dialog.className = 'bg-surface rounded-t-2xl sm:rounded-xl w-full sm:max-w-lg max-h-[85vh] flex flex-col shadow-xl overflow-hidden';
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     dialog.setAttribute('aria-label', 'Filters');

@@ -2,7 +2,6 @@
 
 use crate::error::{Error, Result};
 use crate::wasm::{AllowedHost, HostState};
-use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use wasmtime::Store;
 use wasmtime::component::Linker;
@@ -23,10 +22,7 @@ macro_rules! execute_wasm {
         let provider = $self.bindings.kani_extension_manga_provider();
         let raw_result = provider.$method(&mut $self.store $(, $args)*)
             .await
-            .map_err(|e| {
-                tracing::error!(target: "wasm", "trap in {}: {e:#}", stringify!($method));
-                $crate::error::Error::Internal(format!("WASM function call failed: {e:#}"))
-            });
+            .map_err(|e| $crate::error::Error::Internal(format!("WASM function call failed: {}", e)));
 
         $self.store.data_mut().clear_all();
         let inner = raw_result?;
@@ -74,11 +70,7 @@ impl SourceInstance {
 
         let mut store = Store::new(
             engine,
-            HostState::new(
-                self.smart_client.clone(),
-                allowed_host,
-                Arc::new(Mutex::new(None)),
-            )?,
+            HostState::new(self.smart_client.clone(), allowed_host)?,
         );
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
@@ -135,10 +127,10 @@ impl SourceInstance {
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
         let provider = bindings.kani_extension_manga_provider();
-        let raw_result = provider.call_get_metadata(&mut *store).await.map_err(|e| {
-            tracing::error!(target: "wasm", "trap in call_get_metadata: {e:#}");
-            Error::Internal(format!("WASM function call failed: {e:#}"))
-        });
+        let raw_result = provider
+            .call_get_metadata(&mut *store)
+            .await
+            .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)));
 
         store.data_mut().clear_all();
         let inner = raw_result?;
@@ -170,10 +162,7 @@ impl SourceInstance {
         let raw_result = provider
             .call_get_preferences(&mut *store)
             .await
-            .map_err(|e| {
-                tracing::error!(target: "wasm", "trap in call_get_preferences: {e:#}");
-                Error::Internal(format!("WASM function call failed: {e:#}"))
-            });
+            .map_err(|e| Error::Internal(format!("WASM function call failed: {}", e)));
 
         store.data_mut().clear_all();
         let inner = raw_result?;

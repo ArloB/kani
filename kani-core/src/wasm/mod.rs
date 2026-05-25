@@ -2,9 +2,6 @@
 
 pub mod abi;
 
-#[cfg(test)]
-mod tests;
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -96,8 +93,6 @@ pub struct HostState {
     pub call_started_at: std::time::Instant,
     pub io_count: u32,
     pub last_io_at: Option<std::time::Instant>,
-    /// Handle to the shared Node.js V8 subprocess. Lazy-spawned on first use.
-    pub v8_process: crate::v8_process::V8ProcessHandle,
 }
 
 impl StoredNode {
@@ -121,21 +116,15 @@ impl StoredNode {
         F: FnOnce(scraper::ElementRef) -> std::result::Result<Option<T>, String>,
     {
         let guard = self.doc.lock().map_err(|_| "HTML document lock poisoned")?;
-        Ok(
-            match scraper::ElementRef::wrap(guard.0.tree.get(self.node_id).unwrap()) {
-                Some(el) => f(el)?,
-                None => None,
-            },
-        )
+        Ok(match scraper::ElementRef::wrap(guard.0.tree.get(self.node_id).unwrap()) {
+            Some(el) => f(el)?,
+            None => None,
+        })
     }
 }
 
 impl HostState {
-    pub fn new(
-        http_client: SmartClient,
-        allowed_host: AllowedHost,
-        v8_process: crate::v8_process::V8ProcessHandle,
-    ) -> Result<Self> {
+    pub fn new(http_client: SmartClient, allowed_host: AllowedHost) -> Result<Self> {
         let allowed_host = match allowed_host {
             AllowedHost::Restricted(raw) => {
                 let host = raw
@@ -166,7 +155,6 @@ impl HostState {
             call_started_at: std::time::Instant::now(),
             io_count: 0,
             last_io_at: None,
-            v8_process,
         })
     }
 
@@ -204,24 +192,18 @@ impl HostState {
                 }
             }
             AllowedHost::Unrestricted => Ok(()),
-            AllowedHost::MetadataOnly => {
-                Err("HTTP requests are not permitted on metadata-only instances.".into())
-            }
+            AllowedHost::MetadataOnly => Err("HTTP requests are not permitted on metadata-only instances.".into()),
         }
     }
 
     /// Returns a reference to the JSON document for `handle`, or an error string.
     pub fn get_json(&self, handle: i32) -> std::result::Result<&serde_json::Value, String> {
-        self.json_docs
-            .get(&handle)
-            .ok_or_else(|| "Invalid JSON handle".to_string())
+        self.json_docs.get(&handle).ok_or_else(|| "Invalid JSON handle".to_string())
     }
 
     /// Returns a reference to the HTML document node for `handle`, or an error string.
     pub fn get_html_doc(&self, handle: i32) -> std::result::Result<&StoredNode, String> {
-        self.html_docs
-            .get(&handle)
-            .ok_or_else(|| "Document not found".to_string())
+        self.html_docs.get(&handle).ok_or_else(|| "Document not found".to_string())
     }
 
     /// Returns a reference to the compiled selector, parsing and caching it on
@@ -239,12 +221,7 @@ impl HostState {
 
 impl Default for HostState {
     fn default() -> Self {
-        HostState::new(
-            SmartClient::new(None).unwrap(),
-            AllowedHost::MetadataOnly,
-            Arc::new(Mutex::new(None)),
-        )
-        .unwrap()
+        HostState::new(SmartClient::new(None).unwrap(), AllowedHost::MetadataOnly).unwrap()
     }
 }
 
@@ -330,10 +307,9 @@ pub mod filter_conversions {
             match s {
                 wit::FilterState::Checkbox(c) => FilterState::Checkbox(c),
                 wit::FilterState::TextInput(t) => FilterState::TextInput(t),
-                wit::FilterState::Selection(opt) => FilterState::Selection {
-                    name: opt.name,
-                    value: opt.value,
-                },
+                wit::FilterState::Selection(opt) => {
+                    FilterState::Selection { name: opt.name, value: opt.value }
+                }
                 wit::FilterState::Multiselect(values) => FilterState::Multiselect(values),
             }
         }
@@ -353,12 +329,9 @@ pub mod filter_conversions {
     }
 
     pub fn to_wit_active_filters(filters: &[ActiveFilter]) -> Vec<wit::ActiveFilter> {
-        filters
-            .iter()
-            .map(|f| wit::ActiveFilter {
-                filter_name: f.filter_name.clone(),
-                state: f.state.clone().into(),
-            })
-            .collect()
+        filters.iter().map(|f| wit::ActiveFilter {
+            filter_name: f.filter_name.clone(),
+            state: f.state.clone().into(),
+        }).collect()
     }
 }

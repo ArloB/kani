@@ -10,12 +10,11 @@ import { navigate } from '../router.js';
 import { iconX, iconCheck, iconWarning } from '../icons.js';
 import { formatChapterTitle, formatRelativeTime, getLocalInt, setLocal } from '../utils.js';
 import { Icon } from '../components/icon.js';
-import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 const html = htm.bind(h);
 
 /** @typedef {import('../state.js').ChapterProgress} ChapterProgress */
 
-const HISTORY_SIZES = [5, 10, 25, 50, 100];
+const HISTORY_SIZES = [5, 10, 25, 50];
 const HISTORY_KEY = 'kani_download_history_size';
 
 /** @param {{ entry: ChapterProgress }} props */
@@ -50,7 +49,7 @@ function ActiveRow({ entry }) {
         <button class="btn-ghost btn-sm shrink-0 text-danger" onClick=${handleCancel} aria-label="Cancel">Cancel</button>
       </div>
       <div class="h-1 rounded-full bg-surface-2 overflow-hidden ml-10">
-        <div class="h-full rounded-full bg-accent transition-[width] duration-300" style=${{ width: pct + '%' }}></div>{/* justified: animates only width */}
+        <div class="h-full rounded-full bg-accent transition-[width] duration-300" style=${{ width: pct + '%' }}></div>
       </div>
     </div>
   `;
@@ -75,7 +74,7 @@ function HistoryRow({ entry }) {
 
   return html`
     <div class="flex items-center gap-3 px-4 py-3 border-b border-border-subtle last:border-b-0">
-      <div class=${'shrink-0 w-7 h-7 flex items-center justify-center icon-sm ' + iconColor}>
+      <div class=${'shrink-0 w-7 h-7 flex items-center justify-center [&_svg]:w-4 [&_svg]:h-4 ' + iconColor}>
         ${iconEl}
       </div>
       <div class="flex-1 min-w-0">
@@ -119,12 +118,12 @@ function DownloadsPage() {
     return subscribe('chaptersProgress', syncActive);
   }, []);
 
-  // Seed history from API (re-fetches on size change), then merge new SSE completions
+  // Seed history from API, then merge new completions from SSE
   useEffect(() => {
     /** @type {Set<number>} */
     const seenIds = new Set();
 
-    getDownloadHistory(historySize).then(items => {
+    getDownloadHistory(50).then(items => {
       if (!Array.isArray(items)) return;
       const mapped = items.map(item => ({
         id: item.id,
@@ -156,7 +155,7 @@ function DownloadsPage() {
         setHistory(prev => [...newEntries, ...prev]);
       }
     });
-  }, [historySize]);
+  }, []);
 
   function changeHistorySize(/** @type {number} */ n) {
     setHistorySize(n);
@@ -181,10 +180,13 @@ function DownloadsPage() {
   }
 
   return html`
-    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-6 flex flex-col gap-6">
+    <div class="max-w-2xl mx-auto px-4 md:px-6 py-6 flex flex-col gap-6">
+      <div class="flex flex-col gap-1">
+        <h1 class="text-2xl font-bold text-text">Downloads</h1>
+      </div>
 
       <!-- Tab bar with inline "Show last" control when on History tab -->
-      <div class="flex items-center gap-1 border-b border-border -mb-3 min-h-9" role="tablist">
+      <div class="flex items-center gap-1 border-b border-border -mb-3" role="tablist">
         <${TabBtn} id="active" label="Active" count=${active.length} />
         <${TabBtn} id="history" label="History" count=${0} />
         ${activeTab === 'history' && html`
@@ -218,7 +220,7 @@ function DownloadsPage() {
           <div class="bg-surface border border-border rounded-xl overflow-hidden">
             ${history.length === 0
               ? html`<p class="px-4 py-6 text-sm text-text-muted text-center">No recent downloads.</p>`
-              : history.map(e => html`<${HistoryRow} key=${e.id} entry=${e} />`)
+              : history.slice(0, historySize).map(e => html`<${HistoryRow} key=${e.id} entry=${e} />`)
             }
           </div>
         </div>
@@ -230,12 +232,10 @@ function DownloadsPage() {
 /** @param {HTMLElement} container */
 export async function init(container) {
   document.title = 'Downloads - Kani';
-  setPageHeader({ crumbs: [{ label: 'Downloads' }] });
   render(html`<${DownloadsPage} />`, container);
 }
 
 /** @param {HTMLElement} container */
 export function destroy(container) {
-  clearPageHeader();
   render(null, container);
 }

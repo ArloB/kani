@@ -9,7 +9,6 @@ import * as api from '../api.js';
 import { Modal } from './modal.js';
 import { SidebarNav } from './sidebar-nav.js';
 import { iconStarFilled, iconStarOutline } from '../icons.js';
-import { navigate } from '../router.js';
 const html = htm.bind(h);
 
 // ── Pending source cleanup ─────────────────────────────────────────────────
@@ -180,13 +179,15 @@ export function AddSourceModal({ open, onClose, onCreated }) {
  * @param {{
  *   sources: any[],
  *   activeSourceId?: number,
+ *   canInstall: boolean,
  *   onCreated?: () => void,
  * }} props
  */
-export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
-  const [query, setQuery]     = useState('');
+export function SourcesSidebar({ sources, activeSourceId, canInstall, onCreated }) {
+  const [query, setQuery]         = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
   // Track optimistic starred state per source id; sync when sources prop changes
-  const [starred, setStarred] = useState(() => _buildStarred(sources));
+  const [starred, setStarred]     = useState(() => _buildStarred(sources));
 
   useEffect(() => {
     setStarred(prev => {
@@ -226,7 +227,7 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
     <div class="p-3 border-b border-border-subtle">
       <input
         type="search"
-        class="input input-sm w-full"
+        class="input w-full text-sm"
         placeholder="Filter sources…"
         aria-label="Filter sources"
         value=${query}
@@ -240,58 +241,60 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
         : filtered.map(src => {
             const isActive  = src.id === activeSourceId;
             const isStarred = starred[src.id] ?? false;
-            const initial   = (src.name ?? '?')[0].toUpperCase();
             return html`
-              <div
-                key=${src.id}
-                class=${['list-item group cursor-pointer', isActive ? 'active' : '', !src.enabled ? 'opacity-60' : ''].filter(Boolean).join(' ')}
-                style="padding: 9px 12px; gap: 10px;"
-                role="link"
-                tabIndex=${0}
-                aria-current=${isActive ? 'page' : 'false'}
-                onClick=${(/** @type {MouseEvent} */ e) => {
-                  if (/** @type {HTMLElement} */ (e.target).closest('button')) return;
-                  navigate(`/source/${src.id}`);
-                }}
-                onKeyDown=${(/** @type {KeyboardEvent} */ e) => {
-                  if (e.key === 'Enter') navigate(`/source/${src.id}`);
-                }}
-              >
-                <div class="flex items-center gap-3 border-b border-border-subtle last:border-0 w-full">
-                    <span
-                        class="avatar shrink-0"
-                        style="background:var(--color-surface-3);color:var(--color-text-muted)"
-                        aria-hidden="true"
-                    >${initial}</span>
-                    <span class="flex flex-col min-w-0 flex-1">
-                        <span class="li-title truncate">${src.name}</span>
-                        <span class="li-sub flex items-center gap-1.5">
-                            <span>v${(src.version ?? '').replace('+debug', '')}${src.language ? ` · ${src.language}` : ''}</span>
-                            ${src.version?.includes('+debug') && html`<span class="text-2xs px-1 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none">DEBUG</span>`}
-                            ${!src.enabled && html`<span class="text-2xs px-1 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none">Off</span>`}
-                        </span>
-                    </span>
-                    <button
-                        type="button"
-                        class=${[
-                            'shrink-0 p-1 rounded-md transition-colors icon-xs',
-                            'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent',
-                            isStarred ? 'text-accent' : 'text-text-faint opacity-0 group-hover:opacity-100',
-                        ].join(' ')}
-                        aria-label=${isStarred ? 'Unfavourite' : 'Favourite'}
-                        onClick=${(/** @type {MouseEvent} */ e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            _toggleStar(src.id, isStarred);
-                        }}
-                        dangerouslySetInnerHTML=${{ __html: isStarred ? iconStarFilled : iconStarOutline }}
-                    />
-                </div>
+              <div key=${src.id} class="flex items-center gap-1 pr-2 hover:bg-surface-2 focus-within:bg-surface-2 group">
+                <a
+                  href=${`/source/${src.id}`}
+                  class=${[
+                    'flex-1 flex items-center gap-2 px-3 py-2 text-sm transition-colors',
+                    'focus-visible:outline-none',
+                    isActive
+                      ? 'text-text font-medium'
+                      : (src.enabled ? 'text-text-muted' : 'text-text-faint opacity-60'),
+                  ].join(' ')}
+                  aria-current=${isActive ? 'page' : 'false'}
+                >
+                  <span class="flex-1 truncate">${src.name}</span>
+                  <div class="flex items-center gap-1 shrink-0">
+                    ${!src.enabled && html`<span class="text-[10px] px-1 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none">Off</span>`}
+                    ${src.language && html`<span class="text-xs text-text-faint">${src.language}</span>`}
+                  </div>
+                </a>
+                <button
+                  type="button"
+                  class=${[
+                    'shrink-0 p-1 rounded-md transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent',
+                    '[&_svg]:w-3.5 [&_svg]:h-3.5',
+                    isStarred ? 'text-accent' : 'text-text-faint',
+                  ].join(' ')}
+                  aria-label=${isStarred ? 'Unfavourite' : 'Favourite'}
+                  onClick=${(/** @type {MouseEvent} */ e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    _toggleStar(src.id, isStarred);
+                  }}
+                  dangerouslySetInnerHTML=${{ __html: isStarred ? iconStarFilled : iconStarOutline }}
+                />
               </div>
             `;
           })
       }
     <//>
 
+    ${canInstall && html`
+      <div class="p-3 border-t border-border-subtle">
+        <button
+          type="button"
+          class="btn-primary btn-sm w-full"
+          onClick=${() => setModalOpen(true)}
+        >Add source</button>
+      </div>
+      <${AddSourceModal}
+        open=${modalOpen}
+        onClose=${() => setModalOpen(false)}
+        onCreated=${() => { setModalOpen(false); onCreated?.(); }}
+      />
+    `}
   `;
 }

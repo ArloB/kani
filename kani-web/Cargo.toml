@@ -5,45 +5,47 @@ edition = "2024"
 build = "build.rs"
 
 [dependencies]
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-time = { workspace = true, features = ["formatting", "macros", "parsing"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+urlencoding = "2.1"
+time = { version = "0.3.47", features = ["serde", "formatting", "macros"] }
 paste = "1.0.15"
 kani-shared = { path = "../kani-shared", features = ["ssr"] }
 axum = { version = "0.8", features = ["multipart"] }
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "fs", "macros", "signal"] }
-tokio-util.workspace = true
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
 tower-http = { version = "0.6", features = [
-  "compression-gzip",
-  "compression-br",
+  "compression-full",
   "cors",
   "fs",
   "set-header",
-  "trace",
 ] }
-sqlx.workspace = true
+sqlx = { version = "0.8", features = [
+  "runtime-tokio",
+  "sqlite",
+  "time",
+], default-features = false }
 rquest = { version = "5.1", features = ["json"] }
 rquest-util = "2.2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
-tracing.workspace = true
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 kani-core = { path = "../kani-core" }
 kani-app  = { path = "../kani-app" }
-bytes.workspace = true
-futures.workspace = true
-indexmap.workspace = true
-ordered-float.workspace = true
-moka.workspace = true
+bytes = "1.11.1"
+futures = "0.3.32"
+indexmap = "2.13.0"
+ordered-float = "5.1.0"
+moka = { version = "0.12.14", features = ["future"] }
 chacha20poly1305 = "0.10.1"
 sha2 = "0.10.9"
 hmac = "0.12.1"
 rand = "0.10.0"
-base64.workspace = true
+base64 = "0.22.1"
 hex = "0.4.3"
-uuid = { version = "1", features = ["v4"] }
-dashmap.workspace = true
+dashmap = "6.1.0"
 pulldown-cmark = { version = "0.13.1", default-features = false, features = ["html"] }
 ammonia = "4.1.2"
 axum-login = "0.18"
@@ -57,5 +59,3 @@ tower_governor = "0.6"
 tempfile = "3.27.0"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-kani-app = { path = "../kani-app", features = ["test-util"] }
-moka = { workspace = true }

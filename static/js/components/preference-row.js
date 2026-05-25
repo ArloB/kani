@@ -9,21 +9,7 @@ import { iconX, iconChevronRight, iconChevronLeft } from '../icons.js';
 import { Icon } from './icon.js';
 import { getJsonSafe } from '../utils.js';
 import { Combobox } from './combobox.js';
-import { updateState } from '../state.js';
 const html = htm.bind(h);
-
-/**
- * Increment the per-source preference version so browse/search pages re-fetch
- * after any preference mutation (setPreference, togglePreferenceSelect, etc.).
- * @param {number} sourceId
- */
-function bumpPrefVersion(sourceId) {
-  updateState('sourcePreferenceVersion', (/** @type {Map<number, number>} */ m) => {
-    const nm = new Map(m);
-    nm.set(sourceId, (nm.get(sourceId) ?? 0) + 1);
-    return nm;
-  });
-}
 
 /**
  * @typedef {{
@@ -45,11 +31,9 @@ function bumpPrefVersion(sourceId) {
  *   currentValue: any,
  *   liveValues: Record<string, any>,
  *   onValueChange: (key: string, value: any) => void,
- *   onDirtyChange?: (dirty: boolean) => void,
- *   dirty?: boolean,
  * }} props
  */
-export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, onValueChange, onOpenDetail, onDirtyChange, dirty = false }) {
+export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, onValueChange, onOpenDetail }) {
   // Support both new shape (label, kind as plain string, options as [[label,val],...])
   // and old shape (title, kind as tagged-enum object, options nested inside kind data).
   const key = descriptor.key;
@@ -87,8 +71,6 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
     try {
       await api.setPreference(sourceId, key, String(value));
       onValueChange(key, value);
-      // Bust the source browse/search cache so the next view reflects the new preference.
-      bumpPrefVersion(sourceId);
     } finally {
       setSaving(false);
     }
@@ -187,7 +169,6 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
           for (const v of added) await api.togglePreferenceSelect(sourceId, key, v, true);
           for (const v of removed) await api.togglePreferenceSelect(sourceId, key, v, false);
           onValueChange(key, newVals);
-          bumpPrefVersion(sourceId);
         }}
       />`;
   } else if (kindName === 'MultiValueList') {
@@ -201,7 +182,7 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
           onClick=${() => onOpenDetail(descriptor)}
         >
           ${meta}
-          <div class="shrink-0 flex items-center gap-1.5 text-text-muted icon-sm">
+          <div class="shrink-0 flex items-center gap-1.5 text-text-muted [&_svg]:w-4 [&_svg]:h-4">
             <span class="text-sm">${list.length} item${list.length !== 1 ? 's' : ''}</span>
             <${Icon} svg=${iconChevronRight} />
           </div>
@@ -221,7 +202,6 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
                 onClick=${async () => {
                   await api.removePreferenceItem(sourceId, key, item);
                   onValueChange(key, list.filter((_, j) => j !== i));
-                  bumpPrefVersion(sourceId);
                 }}
               ><${Icon} svg=${iconX} /></button>
             </li>
@@ -239,7 +219,6 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
                 await api.appendPreferenceItem(sourceId, key, mvlInput.trim());
                 onValueChange(key, [...list, mvlInput.trim()]);
                 setMvlInput('');
-                bumpPrefVersion(sourceId);
               }
             }}
           />
@@ -251,7 +230,6 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
               await api.appendPreferenceItem(sourceId, key, mvlInput.trim());
               onValueChange(key, [...list, mvlInput.trim()]);
               setMvlInput('');
-              bumpPrefVersion(sourceId);
             }}
           >Add</button>
         </div>
@@ -262,9 +240,9 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
   }
 
   return html`
-    <div class=${'flex items-start gap-4 py-3' + (dirty ? ' pref-dirty' : '')}>
+    <div class="flex items-start gap-4 py-3">
       ${meta}
-      <div class=${'shrink-0 pref-ctrl' + (dirty ? ' [&_.input]:border-warn [&_select]:border-warn' : '')}>${control}</div>
+      <div class="shrink-0">${control}</div>
     </div>
   `;
 }
@@ -302,7 +280,7 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
 
   const header = html`
     <div class="flex items-start gap-3 pb-4 mb-2 border-b border-border-subtle">
-      <button class="btn-ghost btn-sm shrink-0 flex items-center gap-1 icon-sm" onClick=${onBack}>
+      <button class="btn-ghost btn-sm shrink-0 flex items-center gap-1 [&_svg]:w-4 [&_svg]:h-4" onClick=${onBack}>
         <${Icon} svg=${iconChevronLeft} /> Back
       </button>
       <div class="flex flex-col gap-0.5 min-w-0">
@@ -328,7 +306,6 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
                 onClick=${async () => {
                   await api.removePreferenceItem(sourceId, key, item);
                   onValueChange(key, list.filter((_, j) => j !== i));
-                  bumpPrefVersion(sourceId);
                 }}
               ><${Icon} svg=${iconX} /></button>
             </li>
@@ -346,7 +323,6 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
                 await api.appendPreferenceItem(sourceId, key, mvlInput.trim());
                 onValueChange(key, [...list, mvlInput.trim()]);
                 setMvlInput('');
-                bumpPrefVersion(sourceId);
               }
             }}
           />
@@ -358,7 +334,6 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
               await api.appendPreferenceItem(sourceId, key, mvlInput.trim());
               onValueChange(key, [...list, mvlInput.trim()]);
               setMvlInput('');
-              bumpPrefVersion(sourceId);
             }}
           >Add</button>
         </div>
@@ -386,7 +361,6 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
               for (const v of added) await api.togglePreferenceSelect(sourceId, key, v, true);
               for (const v of removed) await api.togglePreferenceSelect(sourceId, key, v, false);
               onValueChange(key, newVals);
-              bumpPrefVersion(sourceId);
             } finally {
               setSaving(false);
             }

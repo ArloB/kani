@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use wasmtime::Store;
 
@@ -15,8 +15,6 @@ pub struct SourceManager {
     base_url: Option<String>,
     unrestricted_http: bool,
     preferences: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
-    /// Shared Node.js V8 subprocess handle. Lazy-spawned on first use, shared across all leases.
-    v8_process: crate::v8_process::V8ProcessHandle,
 }
 
 impl SourceManager {
@@ -37,7 +35,6 @@ impl SourceManager {
             base_url,
             unrestricted_http,
             preferences: Arc::new(std::sync::RwLock::new(preferences)),
-            v8_process: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -63,11 +60,7 @@ impl SourceManager {
 
         let mut store = Store::new(
             &self.engine,
-            HostState::new(
-                self.smart_client.clone(),
-                allowed_host,
-                Arc::clone(&self.v8_process),
-            )?,
+            HostState::new(self.smart_client.clone(), allowed_host)?,
         );
 
         store.set_epoch_deadline(crate::sources::EPOCH_DEADLINE_TICKS);
@@ -135,14 +128,7 @@ impl OwnedSourceInstance {
         filters: &[kani_shared::types::ActiveFilter],
     ) -> Result<crate::wasm::kani::extension::types::MangaList> {
         let wit_filters = crate::wasm::filter_conversions::to_wit_active_filters(filters);
-        execute_wasm!(
-            self,
-            call_search_manga,
-            query,
-            page,
-            page_size,
-            &wit_filters
-        )
+        execute_wasm!(self, call_search_manga, query, page, page_size, &wit_filters)
     }
 
     /// Calls the `get_manga_details` function in the WASM module.
@@ -161,14 +147,7 @@ impl OwnedSourceInstance {
         page_size: Option<i32>,
         sort: Option<String>,
     ) -> Result<crate::wasm::kani::extension::types::ChapterList> {
-        execute_wasm!(
-            self,
-            call_get_chapter_list,
-            manga_id,
-            page,
-            page_size,
-            sort.as_deref()
-        )
+        execute_wasm!(self, call_get_chapter_list, manga_id, page, page_size, sort.as_deref())
     }
 
     /// Calls the `get_chapter_sort_list` function in the WASM module.
@@ -206,10 +185,5 @@ impl OwnedSourceInstance {
         &mut self,
     ) -> Result<Vec<crate::wasm::kani::extension::types::PreferenceSpec>> {
         execute_wasm!(self, call_get_preferences)
-    }
-
-    /// Calls the `get_url` function in the WASM module.
-    pub async fn get_url(&mut self, manga_id: &str) -> Result<String> {
-        execute_wasm!(self, call_get_url, manga_id)
     }
 }

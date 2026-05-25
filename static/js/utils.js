@@ -119,7 +119,7 @@ export function sleep(ms) {
 export function confirmDialog({ title = 'Are you sure?', message, confirmLabel = 'Confirm', danger = false }) {
   return new Promise(resolve => {
     const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 bg-scrim z-top flex items-center justify-center p-4';
+    overlay.className = 'fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
 
@@ -153,9 +153,6 @@ export function confirmDialog({ title = 'Are you sure?', message, confirmLabel =
   });
 }
 
-/** Preferred alias for new call sites — same promise-returning, focus-trapped confirm dialog. */
-export const openConfirm = confirmDialog;
-
 /**
  * @param {number} val
  * @param {number} min
@@ -177,7 +174,7 @@ export function clamp(val, min, max) {
 export function hasNextPage(result, itemsLength = 0, pageSize = 0) {
   if (result?.has_next_page != null) return Boolean(result.has_next_page);
   if (result?.has_next      != null) return Boolean(result.has_next);
-  return pageSize > 0 && itemsLength > pageSize;
+  return pageSize > 0 && itemsLength === pageSize;
 }
 
 /**
@@ -232,29 +229,4 @@ export function formatRelativeTime(dateInput) {
   if (diffMonth < 12) return diffMonth === 1 ? '1 month ago' : `${diffMonth} months ago`;
   const diffYear = Math.floor(diffMonth / 12);
   return diffYear === 1 ? '1 year ago' : `${diffYear} years ago`;
-}
-
-/**
- * Mounts a skeleton only after a delay, cancelling if real content arrives first.
- * Prevents skeleton flicker on fast connections.
- *
- * @param {() => void} mountFn   — called after `delayMs` if not cancelled
- * @param {number} [delayMs=150]
- * @returns {() => void}         — cancel function; call when real content is ready
- */
-/** Compact relative time: "just now", "5m ago", "3h ago", or a locale date string. */
-export function fmtCompactDate(dateStr) {
-  try {
-    const d = new Date(dateStr + 'Z');
-    const diff = Date.now() - d.getTime();
-    if (diff < 60_000) return 'just now';
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-    return d.toLocaleDateString();
-  } catch { return dateStr; }
-}
-
-export function deferredSkeleton(mountFn, delayMs = 150) {
-  const t = setTimeout(mountFn, delayMs);
-  return () => clearTimeout(t);
 }

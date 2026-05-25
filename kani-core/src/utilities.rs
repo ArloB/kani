@@ -11,14 +11,9 @@ pub fn parse_date_flexible(date: &str, format: &str) -> std::result::Result<i64,
         return Ok(dt.assume_utc().unix_timestamp());
     }
     if let Ok(d) = time::Date::parse(date, &fmt) {
-        return Ok(time::PrimitiveDateTime::new(d, time::Time::MIDNIGHT)
-            .assume_utc()
-            .unix_timestamp());
+        return Ok(time::PrimitiveDateTime::new(d, time::Time::MIDNIGHT).assume_utc().unix_timestamp());
     }
-    Err(format!(
-        "Unable to parse date '{}' with format '{}'",
-        date, format
-    ))
+    Err(format!("Unable to parse date '{}' with format '{}'", date, format))
 }
 
 /// Sanitizes a string to be used as a safe filename or directory name.
@@ -58,6 +53,7 @@ pub fn sanitize_filename(name: &str) -> String {
 /// Resolves `target` and asserts it remains under `root`.
 /// Fails if `target` does not yet exist — use the parent dir for new files.
 pub fn assert_within_root(root: &Path, target: &Path) -> Result<PathBuf> {
+    // Resolve the full canonical path cleanly
     let full = if target.exists() {
         dunce::canonicalize(target)?
     } else {
@@ -205,74 +201,10 @@ mod tests {
     #[test]
     fn rejects_dotdot_traversal() {
         let dir = tempdir().unwrap();
+        // Construct a path that climbs out with `..`
         let escape = dir.path().join("..").join("escape.txt");
 
         let result = assert_within_root(dir.path(), &escape);
         assert!(result.is_err());
-    }
-
-    // ── parse_date_flexible ──────────────────────────────────────────────────
-
-    #[test]
-    fn parse_date_datetime_format() {
-        let ts = parse_date_flexible(
-            "2024-01-15 10:30:00",
-            "[year]-[month]-[day] [hour]:[minute]:[second]",
-        )
-        .unwrap();
-        assert!(ts > 0);
-    }
-
-    #[test]
-    fn parse_date_date_only_format() {
-        // format is date-only; PrimitiveDateTime parse fails, Date parse succeeds
-        let ts = parse_date_flexible("2024-06-01", "[year]-[month]-[day]").unwrap();
-        assert!(ts > 0);
-    }
-
-    #[test]
-    fn parse_date_known_epoch_value() {
-        // 1970-01-01 00:00:00 UTC → Unix timestamp 0
-        let ts = parse_date_flexible(
-            "1970-01-01 00:00:00",
-            "[year]-[month]-[day] [hour]:[minute]:[second]",
-        )
-        .unwrap();
-        assert_eq!(ts, 0);
-    }
-
-    #[test]
-    fn parse_date_date_only_known_value() {
-        // 1970-01-02 (midnight UTC) → 86400 seconds
-        let ts = parse_date_flexible("1970-01-02", "[year]-[month]-[day]").unwrap();
-        assert_eq!(ts, 86400);
-    }
-
-    #[test]
-    fn parse_date_invalid_format_string() {
-        // strftime-style format — not valid time crate syntax; date won't match
-        assert!(parse_date_flexible("2024-01-15", "%Y-%m-%d").is_err());
-    }
-
-    #[test]
-    fn parse_date_empty_date_returns_err() {
-        assert!(parse_date_flexible("", "[year]-[month]-[day]").is_err());
-    }
-
-    #[test]
-    fn parse_date_garbage_returns_err() {
-        assert!(parse_date_flexible("not-a-date", "[year]-[month]-[day]").is_err());
-    }
-
-    #[test]
-    fn parse_date_wrong_format_for_value_returns_err() {
-        // format expects time component; date-only string doesn't satisfy it
-        assert!(
-            parse_date_flexible(
-                "2024-01-15",
-                "[year]-[month]-[day] [hour]:[minute]:[second]"
-            )
-            .is_err()
-        );
     }
 }

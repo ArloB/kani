@@ -40,27 +40,6 @@ const _state = {
 
   /** Server boot_id — compared on SSE reconnect to detect server restarts. */
   bootId: '',
-
-  /** Chapter ids currently being requested for download (prevents double-submit). */
-  inFlightChapters: /** @type {Set<number>} */ (new Set()),
-
-  /** Manga ids whose SSE scan event just fired — briefly non-empty while scan sweeps. */
-  scanningMangaIds: /** @type {Set<number>} */ (new Set()),
-
-  /**
-   * Populated when a scan run completes (via SSE 'completed' event).
-   * @type {{ total: number, failed: number, newChapters: number, perManga: Map<number, number> } | null}
-   */
-  scanResult: null,
-
-  /** Per-manga browser notification opt-out. True = notify (default). */
-  mangaNotifyPrefs: /** @type {Map<number, boolean>} */ (new Map()),
-
-  /**
-   * Incremented per source when a source preference is changed.
-   * Source browse/search pages subscribe to this to invalidate their results.
-   */
-  sourcePreferenceVersion: /** @type {Map<number, number>} */ (new Map()),
 };
 
 /**

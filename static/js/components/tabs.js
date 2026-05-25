@@ -3,7 +3,7 @@
 
 /**
  * @template T
- * @typedef {{ id: T, name: string, count?: number }} Tab
+ * @typedef {{ id: T, name: string }} Tab
  */
 
 /**
@@ -15,20 +15,14 @@
  *   tabs: Tab<T>[],
  *   activeId: T,
  *   onSelect: (id: T) => void,
- *   variant?: 'underline' | 'pill',
- *   stretch?: boolean,
  * }} props
  * @returns {{ update: (activeId: T) => void, destroy: () => void }}
  */
-export function renderTabs(container, { tabs, activeId, onSelect, variant = 'underline', stretch = false }) {
+export function renderTabs(container, { tabs, activeId, onSelect }) {
   let _activeId = activeId;
 
   const bar = document.createElement('div');
-  if (variant === 'pill') {
-    bar.className = 'flex gap-1 p-1 rounded-lg bg-surface-2 border border-border';
-  } else {
-    bar.className = 'flex gap-1 overflow-x-auto [scrollbar-width:none] border-b border-border';
-  }
+  bar.className = 'flex gap-1 overflow-x-auto [scrollbar-width:none] border-b border-border';
   bar.setAttribute('role', 'tablist');
   container.appendChild(bar);
 
@@ -40,19 +34,9 @@ export function renderTabs(container, { tabs, activeId, onSelect, variant = 'und
       btn.type = 'button';
       btn.setAttribute('role', 'tab');
       btn.setAttribute('aria-selected', String(isActive));
-
-      if (variant === 'pill') {
-        btn.className = 'flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex-1 justify-center'
-          + (isActive ? ' bg-surface text-text shadow-sm' : ' text-text-muted hover:text-text');
-      } else {
-        btn.className = 'flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-t-md'
-          + (stretch ? ' flex-1 justify-center' : '')
-          + (isActive ? ' text-accent border-b-2 border-accent' : ' text-text-muted');
-      }
-
-      btn.innerHTML = tab.name
-        + (tab.count != null ? ` <span class="nav-badge">${tab.count}</span>` : '');
-
+      btn.className = 'px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-t-md'
+        + (isActive ? ' text-accent border-b-2 border-accent' : ' text-text-muted');
+      btn.textContent = tab.name;
       btn.addEventListener('click', () => {
         _activeId = tab.id;
         _render();

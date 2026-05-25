@@ -31,32 +31,10 @@ RUN cargo build --release -p kani-web
 # ─── Stage 2: Runtime ────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
 
-# Set INSTALL_KCC=true at build time to include Kindle Comic Converter:
-#   docker compose build --build-arg INSTALL_KCC=true
-# KCC enables MOBI/AZW3 export via the /rest/chapters/{id}/export/kcc endpoint.
-ARG INSTALL_KCC=false
-
-# Set INSTALL_BROWSER=true at build time to include Chromium + puppeteer-core.
-# Required for extensions that use browser-based token capture (e.g. kani-comix).
-# Adds ~250 MB to the image; omit if those extensions are not needed.
-#   docker compose build --build-arg INSTALL_BROWSER=true
-ARG INSTALL_BROWSER=false
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     ca-certificates \
     curl \
-    nodejs \
-    && if [ "$INSTALL_BROWSER" = "true" ]; then \
-        apt-get install -y --no-install-recommends npm chromium; \
-    fi \
-    && if [ "$INSTALL_KCC" = "true" ]; then \
-        apt-get install -y --no-install-recommends python3 python3-pip p7zip-full \
-        && pip3 install --no-cache-dir --break-system-packages KindleComicConverter; \
-    fi \
-    && if [ "$INSTALL_BROWSER" = "true" ]; then \
-        npm install -g puppeteer-core && rm -rf /root/.npm; \
-    fi \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r kani && useradd -r -g kani -d /app kani

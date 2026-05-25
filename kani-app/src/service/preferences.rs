@@ -29,7 +29,6 @@ impl AppService {
     pub async fn set_preference(&self, source_id: i64, key: &str, value: &str) -> Result<()> {
         sqlx::query!("INSERT INTO source_preferences (source_id, key, value) VALUES (?, ?, ?) ON CONFLICT (source_id, key) DO UPDATE SET value = excluded.value", source_id, key, value)
             .execute(&self.db).await?;
-        self.cache.invalidate_source(source_id);
         self.reload_preferences(source_id).await
     }
 
