@@ -7,6 +7,7 @@ impl AppService {
         kani_shared::types::AppSettings {
             flaresolverr_url: s.flaresolverr_url.clone(),
             library_path: s.library_path.to_string_lossy().into_owned(),
+            wasm_storage_path: s.wasm_storage_path.to_string_lossy().into_owned(),
             concurrent_page_downloads: s.concurrent_page_downloads,
             concurrent_manga_downloads: s.concurrent_manga_downloads,
             chapter_queue_size: s.chapter_queue_size,
@@ -15,7 +16,22 @@ impl AppService {
             max_wasm_instances: s.max_wasm_instances,
             auto_scan: s.auto_scan,
             scan_interval_minutes: s.scan_interval_minutes,
+            scan_exclude_completed: s.scan_exclude_completed,
+            auto_download_category_id: s.auto_download_category_id,
+            auto_download_category_ids: serde_json::from_str(&s.auto_download_category_ids)
+                .unwrap_or_default(),
             default_tracking_enabled: s.default_tracking_enabled,
+            http_request_logging: s.http_request_logging,
+            browser_debug_logging: s.browser_debug_logging,
+            registration_enabled: s.registration_enabled,
+            cover_max_dimension: s.cover_max_dimension,
+            email_enabled: s.email_enabled,
+            email_provider: s.email_provider.clone(),
+            email_provider_config: mask_email_config(&s.email_provider_config),
+            email_from_address: s.email_from_address.clone(),
+            app_url: s.app_url.clone(),
+            password_reset_enabled: s.password_reset_enabled,
+            email_verification_required: s.email_verification_required,
         }
     }
 
@@ -38,14 +54,18 @@ impl AppService {
                         "concurrent_manga_downloads must be 1-16".into(),
                     ));
                 }
+                let cat_ids_json = serde_json::to_string(&s.auto_download_category_ids)
+                    .unwrap_or_else(|_| "[]".to_string());
                 sqlx::query!(
                     "UPDATE settings SET concurrent_page_downloads=?, concurrent_manga_downloads=?, \
-                     chapter_queue_size=?, max_retries=?, initial_retry_delay_ms=? WHERE id='singleton'",
+                     chapter_queue_size=?, max_retries=?, initial_retry_delay_ms=?, \
+                     auto_download_category_ids=? WHERE id='singleton'",
                     s.concurrent_page_downloads,
                     s.concurrent_manga_downloads,
                     s.chapter_queue_size,
                     s.max_retries,
-                    s.initial_retry_delay_ms
+                    s.initial_retry_delay_ms,
+                    cat_ids_json
                 )
                 .execute(&self.db)
                 .await?;
@@ -55,6 +75,7 @@ impl AppService {
                 settings.chapter_queue_size = s.chapter_queue_size;
                 settings.max_retries = s.max_retries;
                 settings.initial_retry_delay_ms = s.initial_retry_delay_ms;
+                settings.auto_download_category_ids = cat_ids_json;
                 self.audit(Some(user_id), "settings.update.download", None, None)
                     .await;
             }
@@ -65,15 +86,17 @@ impl AppService {
                     ));
                 }
                 sqlx::query!(
-                    "UPDATE settings SET auto_scan=?, scan_interval_minutes=? WHERE id='singleton'",
+                    "UPDATE settings SET auto_scan=?, scan_interval_minutes=?, scan_exclude_completed=? WHERE id='singleton'",
                     s.auto_scan,
-                    s.scan_interval_minutes
+                    s.scan_interval_minutes,
+                    s.scan_exclude_completed
                 )
                 .execute(&self.db)
                 .await?;
                 let mut settings = self.settings.write().await;
                 settings.auto_scan = s.auto_scan;
                 settings.scan_interval_minutes = s.scan_interval_minutes;
+                settings.scan_exclude_completed = s.scan_exclude_completed;
                 self.audit(Some(user_id), "settings.update.scan", None, None)
                     .await;
             }
@@ -84,18 +107,23 @@ impl AppService {
                 )
                 .execute(&self.db)
                 .await?;
-                self.settings.write().await.default_tracking_enabled =
-                    s.default_tracking_enabled;
+                self.settings.write().await.default_tracking_enabled = s.default_tracking_enabled;
                 self.audit(Some(user_id), "settings.update.tracking", None, None)
                     .await;
             }
             SettingsUpdate::Advanced(s) => {
                 sqlx::query!(
-                    "UPDATE settings SET flaresolverr_url=?, library_path=?, max_wasm_instances=? \
-                     WHERE id='singleton'",
+                    "UPDATE settings SET flaresolverr_url=?, library_path=?, wasm_storage_path=?, \
+                     max_wasm_instances=?, http_request_logging=?, browser_debug_logging=?, \
+                     registration_enabled=?, cover_max_dimension=? WHERE id='singleton'",
                     s.flaresolverr_url,
                     s.library_path,
-                    s.max_wasm_instances
+                    s.wasm_storage_path,
+                    s.max_wasm_instances,
+                    s.http_request_logging,
+                    s.browser_debug_logging,
+                    s.registration_enabled,
+                    s.cover_max_dimension,
                 )
                 .execute(&self.db)
                 .await?;
@@ -103,8 +131,14 @@ impl AppService {
                     let mut settings = self.settings.write().await;
                     settings.flaresolverr_url = s.flaresolverr_url.clone();
                     settings.library_path = s.library_path.clone().into();
+                    settings.wasm_storage_path = s.wasm_storage_path.clone().into();
                     settings.max_wasm_instances = s.max_wasm_instances;
+                    settings.http_request_logging = s.http_request_logging;
+                    settings.browser_debug_logging = s.browser_debug_logging;
+                    settings.registration_enabled = s.registration_enabled;
+                    settings.cover_max_dimension = s.cover_max_dimension;
                 }
+                kani_core::v8_process::set_browser_debug_logging(s.browser_debug_logging);
                 let new_solver = if s.flaresolverr_url.is_empty() {
                     None
                 } else {
@@ -113,6 +147,50 @@ impl AppService {
                 self.smart_client.update_solver_url(new_solver.clone());
                 self.proxy_client.update_solver_url(new_solver);
                 self.audit(Some(user_id), "settings.update.advanced", None, None)
+                    .await;
+            }
+            SettingsUpdate::Email(s) => {
+                // If the incoming config contains placeholder values, restore from DB.
+                let config_plain = restore_masked_email_config(
+                    &s.email_provider_config,
+                    &self.db,
+                    self.encryption.as_deref(),
+                )
+                .await?;
+                // Encrypt before writing to DB; keep plaintext in memory.
+                let config_to_db = crate::service::encryption::maybe_encrypt(
+                    self.encryption.as_deref(),
+                    &config_plain,
+                );
+
+                sqlx::query!(
+                    "UPDATE settings SET email_enabled=?, email_provider=?, email_provider_config=?, \
+                     email_from_address=?, app_url=?, password_reset_enabled=?, \
+                     email_verification_required=? WHERE id='singleton'",
+                    s.email_enabled,
+                    s.email_provider,
+                    config_to_db,
+                    s.email_from_address,
+                    s.app_url,
+                    s.password_reset_enabled,
+                    s.email_verification_required,
+                )
+                .execute(&self.db)
+                .await?;
+
+                {
+                    let mut settings = self.settings.write().await;
+                    settings.email_enabled = s.email_enabled;
+                    settings.email_provider = s.email_provider.clone();
+                    settings.email_provider_config = config_plain; // always plaintext in memory
+                    settings.email_from_address = s.email_from_address;
+                    settings.app_url = s.app_url;
+                    settings.password_reset_enabled = s.password_reset_enabled;
+                    settings.email_verification_required = s.email_verification_required;
+                }
+
+                self.rebuild_email_service().await;
+                self.audit(Some(user_id), "settings.update.email", None, None)
                     .await;
             }
         }
@@ -132,6 +210,54 @@ impl AppService {
         Ok(new_val)
     }
 
+    pub async fn toggle_auto_scan_manga(&self, manga_id: i64, enabled: bool) -> Result<()> {
+        sqlx::query!("UPDATE manga SET auto_scan=? WHERE id=?", enabled, manga_id)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    /// Runs WAL checkpoint + VACUUM and returns (before_bytes, after_bytes).
+    pub async fn run_maintenance(&self) -> Result<(u64, u64)> {
+        let db_path = std::path::Path::new("kani.db");
+        let before = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&self.db)
+            .await?;
+        sqlx::query("VACUUM").execute(&self.db).await?;
+        let after = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
+        Ok((before, after))
+    }
+
+    pub async fn mark_manga_seen(&self, user_id: i64, manga_id: i64) -> Result<()> {
+        sqlx::query!(
+            "INSERT INTO user_manga_tracking (user_id, manga_id, last_seen_at) \
+             VALUES (?1, ?2, CURRENT_TIMESTAMP) \
+             ON CONFLICT (user_id, manga_id) DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP",
+            user_id,
+            manga_id
+        )
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn update_manga_notes(&self, manga_id: i64, notes: Option<String>) -> Result<()> {
+        sqlx::query!("UPDATE manga SET notes = ? WHERE id = ?", notes, manga_id)
+            .execute(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn send_test_email_to(&self, to: &str) -> std::result::Result<(), String> {
+        let mailer = self
+            .mailer()
+            .await
+            .ok_or_else(|| "Email is not configured or disabled.".to_string())?;
+        let (subject, html) = crate::service::email_templates::test_email();
+        mailer.send(to, &subject, &html).await
+    }
+
     pub async fn toggle_auto_download(&self, manga_id: i64, enabled: bool) -> Result<()> {
         sqlx::query!(
             "UPDATE manga SET auto_download=? WHERE id=?",
@@ -143,11 +269,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn toggle_download_all_preferred(
-        &self,
-        manga_id: i64,
-        enabled: bool,
-    ) -> Result<()> {
+    pub async fn toggle_download_all_preferred(&self, manga_id: i64, enabled: bool) -> Result<()> {
         sqlx::query!(
             "UPDATE manga SET download_all_preferred_only=? WHERE id=?",
             enabled,
@@ -157,4 +279,92 @@ impl AppService {
         .await?;
         Ok(())
     }
+}
+
+const PLACEHOLDER: &str = "••••••";
+const MASKED_KEYS: &[&str] = &[
+    "password",
+    "api_key",
+    "secret",
+    "client_secret",
+    "access_token",
+    "refresh_token",
+    "token",
+];
+
+/// Returns a copy of the config JSON with credential values replaced by `PLACEHOLDER`.
+pub(crate) fn mask_email_config(config_json: &str) -> String {
+    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(config_json) else {
+        return config_json.to_string();
+    };
+    if let Some(obj) = v.as_object_mut() {
+        for &key in MASKED_KEYS {
+            if let Some(val) = obj.get_mut(key)
+                && val.as_str().is_some_and(|s| !s.is_empty())
+            {
+                *val = serde_json::Value::String(PLACEHOLDER.to_string());
+            }
+        }
+    }
+    serde_json::to_string(&v).unwrap_or_else(|_| config_json.to_string())
+}
+
+/// If the incoming JSON has `PLACEHOLDER` for any credential key, substitute the stored DB value.
+/// `cipher` is used to decrypt the stored value before substitution.
+async fn restore_masked_email_config(
+    incoming: &str,
+    db: &sqlx::SqlitePool,
+    cipher: Option<&crate::service::encryption::CredentialCipher>,
+) -> Result<String> {
+    let Ok(mut incoming_val) = serde_json::from_str::<serde_json::Value>(incoming) else {
+        return Ok(incoming.to_string());
+    };
+
+    let has_placeholder = incoming_val.as_object().is_some_and(|obj| {
+        MASKED_KEYS
+            .iter()
+            .any(|&k| obj.get(k).and_then(serde_json::Value::as_str) == Some(PLACEHOLDER))
+    });
+
+    if !has_placeholder {
+        return Ok(incoming.to_string());
+    }
+
+    let stored_json: Option<String> =
+        sqlx::query_scalar!("SELECT email_provider_config FROM settings WHERE id='singleton'")
+            .fetch_optional(db)
+            .await?;
+
+    // Decrypt the stored config before doing placeholder substitution.
+    let stored_plain = match stored_json.as_deref() {
+        None | Some("") => String::new(),
+        Some(raw) => crate::service::encryption::maybe_decrypt(cipher, raw).unwrap_or_else(|e| {
+            tracing::warn!("Cannot decrypt stored email_provider_config for restore: {e}");
+            raw.to_string()
+        }),
+    };
+
+    let stored_val: serde_json::Value = if stored_plain.is_empty() {
+        serde_json::Value::default()
+    } else {
+        serde_json::from_str(&stored_plain).unwrap_or_default()
+    };
+
+    if let (Some(incoming_obj), Some(stored_obj)) =
+        (incoming_val.as_object_mut(), stored_val.as_object())
+    {
+        for &key in MASKED_KEYS {
+            let is_placeholder =
+                incoming_obj.get(key).and_then(serde_json::Value::as_str) == Some(PLACEHOLDER);
+            if is_placeholder {
+                let real = stored_obj
+                    .get(key)
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::Value::String(String::new()));
+                incoming_obj.insert(key.to_string(), real);
+            }
+        }
+    }
+
+    Ok(serde_json::to_string(&incoming_val).unwrap_or_else(|_| incoming.to_string()))
 }

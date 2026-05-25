@@ -8,16 +8,16 @@ import htm from 'htm';
 import * as api from '../api.js';
 import { hasPermission, updateState, subscribe } from '../state.js';
 import { navigate } from '../router.js';
-import { setLocal, getLocal, getLocalInt, debounce, hasNextPage, confirmDialog } from '../utils.js';
+import { setLocal, getLocal, getLocalInt, debounce, hasNextPage, confirmDialog, fmtCompactDate } from '../utils.js';
 import { skeletonGrid } from '../components/skeletons.js';
 import { renderPagination } from '../components/pagination.js';
 import { createMangaCard } from '../components/manga-card.js';
-import { Modal } from '../components/modal.js';
-import { SourcesSidebar, consumePendingSourceId } from '../components/sources-sidebar.js';
+import { Modal, mountIntoModalRoot } from '../components/modal.js';
+import { SourcesSidebar, AddSourceModal, consumePendingSourceId } from '../components/sources-sidebar.js';
 import { PreferenceRow, PreferenceDetailView } from '../components/preference-row.js';
 import { Icon } from '../components/icon.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
-import { createBreadcrumb } from '../components/breadcrumb.js';
+import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
 import { mountFilterModal } from '../components/filter-panel.js';
@@ -46,14 +46,16 @@ let _destroyPaginationPopular = null;
 let _destroyLibPagination = null;
 /** @type {(() => void) | null} */
 let _unsubSourcesInvalidation = null;
+/** @type {(() => void) | null} */
+let _unsubPrefVersion = null;
 /** @type {IntersectionObserver | null} */
 let _sentinelObserver = null;
 /** @type {HTMLElement | null} */
 let _settingsMountEl = null;
 /** @type {HTMLElement | null} */
-let _breadcrumbEl = null;
-/** @type {HTMLElement | null} */
 let _asideEl = null;
+/** @type {HTMLButtonElement | null} */
+let _addSourceBtn = null;
 /** @type {HTMLElement | null} */
 let _popularPanelEl = null;
 /** @type {HTMLElement | null} */
@@ -131,8 +133,20 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [activeDescriptor, setActiveDescriptor] = useState(/** @type {any} */ (null));
   const [collapsedGroups, setCollapsedGroups] = useState(/** @type {Set<string>} */ (new Set()));
+  const [health, setHealth] = useState(/** @type {any|null} */ (null));
+  const [healthLoading, setHealthLoading] = useState(true);
+  const [reloading, setReloading] = useState(false);
+  const [reloadMsg, setReloadMsg] = useState(/** @type {'ok'|'err'|null} */ (null));
 
-  // Load preferences on mount
+  // Load preferences and health on mount
+  useEffect(() => {
+    api.getSourcesHealth().then(rows => {
+      if (Array.isArray(rows)) {
+        setHealth(rows.find(r => r.source_id === sid) ?? null);
+      }
+    }).catch(() => {}).finally(() => setHealthLoading(false));
+  }, [sid]);
+
   useEffect(() => {
     Promise.all([api.getPreferenceSchema(sid), api.getPreferences(sid)])
         .then(([schemaRes, prefsRes]) => {
@@ -170,6 +184,20 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
       setEnabled(val);
       onEnabledChange?.(val);
     } catch { /* revert on error */ }
+  }
+
+  async function handleReload() {
+    setReloading(true);
+    setReloadMsg(null);
+    try {
+      await api.reloadSource(sid);
+      setReloadMsg('ok');
+    } catch {
+      setReloadMsg('err');
+    } finally {
+      setReloading(false);
+      setTimeout(() => setReloadMsg(null), 3000);
+    }
   }
 
   async function handleDelete() {
@@ -222,7 +250,7 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
                       aria-expanded=${!isCollapsed}
                     >
                       ${group}
-                      <span class=${'[&_svg]:w-3.5 [&_svg]:h-3.5 transition-transform ' + (isCollapsed ? '' : 'rotate-180')}>
+                      <span class=${'icon-xs transition-transform ' + (isCollapsed ? '' : 'rotate-180')}>
                         <${Icon} svg=${iconChevronDown} />
                       </span>
                     </button>
@@ -305,7 +333,7 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
 
           ${source.unrestricted_http && html`
             <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
-              <div class="flex items-center gap-1.5 text-warn [&_svg]:w-4 [&_svg]:h-4">
+              <div class="flex items-center gap-1.5 text-warn icon-sm">
                 <${Icon} svg=${iconWarning} />
                 <p class="text-sm font-medium">Unrestricted HTTP</p>
               </div>
@@ -316,9 +344,32 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
           <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
             <div class="flex items-center justify-between gap-4">
               <p class="text-sm font-medium text-text">Version</p>
-              <span class="text-sm text-text-muted shrink-0">v${source.version ?? '?'}</span>
+              <span class="flex items-center gap-2 shrink-0">
+                ${source.version?.includes('+debug') && html`
+                  <span class="text-2xs px-1.5 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none" title="Built with debug info — readable WASM backtraces, larger binary">DEBUG</span>
+                `}
+                <span class="text-sm text-text-muted">v${(source.version ?? '?').replace('+debug', '')}</span>
+              </span>
             </div>
           </div>
+
+          ${hasPermission('source:install') && html`
+            <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <p class="text-sm font-medium text-text">Reload extension</p>
+                  <p class="text-xs text-text-muted mt-0.5">Re-reads the WASM from disk and swaps the running instance</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  ${reloadMsg === 'ok' && html`<span class="text-xs text-success">Reloaded</span>`}
+                  ${reloadMsg === 'err' && html`<span class="text-xs text-danger">Failed</span>`}
+                  <button class="btn-ghost btn-sm" disabled=${reloading} onClick=${handleReload}>
+                    ${reloading ? 'Reloading…' : 'Reload'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          `}
 
         </div>
       </div>
@@ -354,6 +405,43 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
     </div>
 
 
+      <!-- 3. Health -->
+      <div class="flex flex-col gap-3">
+        ${mkSectionHdr('Health', 'Extension response times and error history.')}
+        <div class="bg-surface border border-border rounded-xl px-4 md:px-6 py-1">
+          ${healthLoading
+            ? html`<p class="text-sm text-text-muted py-3">Loading…</p>`
+            : health == null
+              ? html`<p class="text-sm text-text-muted py-3">No health data yet.</p>`
+              : html`
+                <div class="flex flex-col divide-y divide-border-subtle">
+                  <div class="flex items-center justify-between gap-4 py-3">
+                    <p class="text-sm text-text">Last success</p>
+                    <span class="text-sm text-text-muted">${health.last_success_at ? fmtCompactDate(health.last_success_at) : '—'}</span>
+                  </div>
+                  <div class="flex items-center justify-between gap-4 py-3">
+                    <p class="text-sm text-text">Last error</p>
+                    <span class="text-sm text-text-muted">${health.last_error_at ? fmtCompactDate(health.last_error_at) : '—'}</span>
+                  </div>
+                  <div class="flex items-center justify-between gap-4 py-3">
+                    <p class="text-sm text-text">Consecutive errors</p>
+                    ${(health.consecutive_error_count ?? 0) >= 3
+                      ? html`<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-danger/20 text-danger">${health.consecutive_error_count}</span>`
+                      : (health.consecutive_error_count ?? 0) > 0
+                        ? html`<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-warn/20 text-warn">${health.consecutive_error_count}</span>`
+                        : html`<span class="text-sm text-success">0</span>`
+                    }
+                  </div>
+                  <div class="flex items-center justify-between gap-4 py-3">
+                    <p class="text-sm text-text">Avg response</p>
+                    <span class="text-sm text-text-muted">${health.avg_response_ms != null ? Math.round(health.avg_response_ms) + ' ms' : '—'}</span>
+                  </div>
+                </div>
+              `
+          }
+        </div>
+      </div>
+
       <!-- 4. Danger Zone -->
       <div class="flex flex-col gap-3">
         ${mkSectionHdr('Danger Zone', 'These actions are difficult or impossible to reverse. Proceed with care.')}
@@ -374,12 +462,14 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
   `;
 }
 
+
 // ── URL state ─────────────────────────────────────────────────────────────────
 
 function _updateUrl() {
   const params = new URLSearchParams();
   params.set('tab', _activeTab);
   if (_page > 1) params.set('page', String(_page));
+  if (_libPage > 1) params.set('lib_page', String(_libPage));
   if (_query) params.set('q', _query);
   for (const [filterId, state] of Object.entries(_filters)) {
     params.set('f_' + filterId, JSON.stringify(state));
@@ -391,8 +481,6 @@ function _updateUrl() {
 // ── Breadcrumb ────────────────────────────────────────────────────────────────
 
 function _updateBreadcrumb() {
-  if (!_breadcrumbEl) return;
-  _breadcrumbEl.innerHTML = '';
   const crumbs = [{ label: 'Sources', href: '/sources' }];
   if (_query) {
     crumbs.push({ label: _sourceName || 'Source', href: `/source/${_sourceId}` });
@@ -400,7 +488,7 @@ function _updateBreadcrumb() {
   } else {
     crumbs.push({ label: _sourceName || 'Source' });
   }
-  _breadcrumbEl.appendChild(createBreadcrumb(crumbs));
+  setPageHeader({ crumbs, actions: _addSourceBtn ?? null });
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -414,11 +502,10 @@ export async function init(container, { id }) {
   _page = 1;
   const _urlParams = new URLSearchParams(location.search);
   _query = _urlParams.get('q') ?? '';
-  _pageSize = getLocalInt('kani_source_page_size', 24);
+  _pageSize = getLocalInt('kani_source_page_size', 18);
   _sourceName = '';
   _sourceEnabled = true;
   _settingsMountEl = null;
-  _breadcrumbEl = null;
   _popularPanelEl = null;
   _searchPanelEl = null;
   _tabsUpdateFn = null;
@@ -442,9 +529,11 @@ export async function init(container, { id }) {
     _activeTab = (_query || _preFilterName) ? 'search' : 'popular';
   }
 
-  // Restore page number from URL
+  // Restore page numbers from URL
   const _pageParam = _urlParams.get('page');
   if (_pageParam) _page = Math.max(1, parseInt(_pageParam, 10) || 1);
+  const _libPageParam = _urlParams.get('lib_page');
+  if (_libPageParam) _libPage = Math.max(1, parseInt(_libPageParam, 10) || 1);
 
   // Stash f_* filter params for async restoration after filter defs load
   _pendingFilterParams = {};
@@ -458,23 +547,31 @@ export async function init(container, { id }) {
     return;
   }
 
+  // Add source button (shown in header for consistency with sources page)
+  if (hasPermission('source:install')) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-primary btn-sm';
+    btn.textContent = 'Add source';
+    _addSourceBtn = btn;
+  } else {
+    _addSourceBtn = null;
+  }
+
   container.innerHTML = `
     <div class="flex">
 
       <!-- Sidebar (lg+) — SourcesSidebar mounts here -->
       <aside
-        class="hidden lg:flex flex-col w-60 shrink-0 border-r border-border bg-surface sticky top-14 overflow-hidden"
-        style="height: calc(100vh - 3.5rem); margin-bottom: -1.5rem"
+        class="hidden lg:flex flex-col w-72 shrink-0 border-r border-border-subtle sticky overflow-y-auto"
+        style="top:var(--header-h);height:calc(100vh - var(--header-h));"
         aria-label="Sources"
       ></aside>
 
       <!-- Main panel -->
       <div class="flex-1 min-w-0 flex flex-col">
 
-        <div class="flex-1 max-w-[1400px] w-full px-4 md:px-6 py-4 md:pt-6 md:pb-0 flex flex-col gap-4">
-          <!-- Breadcrumb -->
-          <div class="js-breadcrumb"></div>
-
+        <div class="flex-1 max-w-page w-full px-4 md:px-6 py-4 md:pt-6 md:pb-0 flex flex-col gap-4">
           <!-- Tab bar -->
           <div class="js-tabs"></div>
 
@@ -483,7 +580,7 @@ export async function init(container, { id }) {
             <div class="flex flex-col gap-4">
               <div class="flex items-end justify-end gap-2">
                 <select class="input w-20 js-popular-page-size" aria-label="Page size">
-                  ${[12, 24, 48].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
+                  ${[18, 27, 36].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
                 </select>
               </div>
               <div class="js-popular-grid" aria-live="polite" aria-busy="false"></div>
@@ -495,8 +592,8 @@ export async function init(container, { id }) {
           <div class="js-panel hidden" data-panel="search">
             <div class="flex flex-col gap-4">
               <div class="flex items-center gap-3 flex-wrap">
-                <div class="relative flex-1 min-w-[200px] max-w-sm">
-                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none [&_svg]:w-4 [&_svg]:h-4" aria-hidden="true">${iconSearch}</span>
+                <div class="relative flex-1 min-w-48 max-w-sm">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none icon-sm" aria-hidden="true">${iconSearch}</span>
                   <input
                     type="search"
                     class="input w-full pl-9 js-search"
@@ -505,7 +602,7 @@ export async function init(container, { id }) {
                   />
                 </div>
                 <select class="input w-20 js-page-size" aria-label="Page size">
-                  ${[12, 24, 48].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
+                  ${[18, 27, 36].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
                 </select>
                 <button type="button" class="js-filter-btn btn-ghost btn-sm flex items-center gap-1.5" aria-label="Open filters" style="display:none">Filters</button>
               </div>
@@ -532,7 +629,6 @@ export async function init(container, { id }) {
   `;
 
   _asideEl = /** @type {HTMLElement} */ (container.querySelector('aside'));
-  _breadcrumbEl    = /** @type {HTMLElement} */ (container.querySelector('.js-breadcrumb'));
   _settingsMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-settings-mount'));
   _popularPanelEl  = /** @type {HTMLElement} */ (container.querySelector('[data-panel="popular"]'));
   _searchPanelEl   = /** @type {HTMLElement} */ (container.querySelector('[data-panel="search"]'));
@@ -548,8 +644,24 @@ export async function init(container, { id }) {
   const libGridEl      = /** @type {HTMLElement} */ (container.querySelector('.js-lib-grid'));
   const libPaginEl     = /** @type {HTMLElement} */ (container.querySelector('.js-lib-pagination'));
 
-  // ── Breadcrumb ──
+  // ── Breadcrumb + header ──
   _updateBreadcrumb();
+
+  // Wire add source button
+  if (_addSourceBtn) {
+    let _addSourceModalOpen = false;
+    const _setAddOpen = (open) => {
+      _addSourceModalOpen = open;
+      mountIntoModalRoot(html`
+        <${AddSourceModal}
+          open=${_addSourceModalOpen}
+          onClose=${() => _setAddOpen(false)}
+          onCreated=${() => { _setAddOpen(false); _refreshSidebar(); }}
+        />
+      `);
+    };
+    _addSourceBtn.addEventListener('click', () => _setAddOpen(true));
+  }
 
   if (_query) searchEl.value = _query;
 
@@ -560,7 +672,7 @@ export async function init(container, { id }) {
     if (!inner) return;
     inner.innerHTML = `
       <div class="flex flex-col items-center justify-center py-20 gap-4 text-center">
-        <span class="[&_svg]:w-8 [&_svg]:h-8 text-warn">${iconWarning}</span>
+        <span class="icon-xl text-warn">${iconWarning}</span>
         <div>
           <p class="text-sm font-medium text-text">This extension is disabled</p>
           <p class="text-xs text-text-muted mt-1">Enable it in the Settings tab to browse manga.</p>
@@ -584,7 +696,6 @@ export async function init(container, { id }) {
     if (tab === 'library') _fetchLibrary(libGridEl, libPaginEl);
     if (tab === 'popular' && !_popularFetched) {
       _popularFetched = true;
-      _page = 1;
       if (!_sourceEnabled) {
         _showDisabledPanel(/** @type {HTMLElement} */ (container.querySelector('[data-panel="popular"]')));
       } else {
@@ -729,6 +840,24 @@ export async function init(container, { id }) {
 
   // Re-fetch sidebar when any source is enabled/disabled (e.g. from Settings tab)
   _unsubSourcesInvalidation = subscribe('sourcesInvalidation', _refreshSidebar);
+
+  // Re-fetch browse/search results when a preference changes for this source.
+  let _prevPrefVersion = /** @type {number | undefined} */ (undefined);
+  _unsubPrefVersion = subscribe('sourcePreferenceVersion', (/** @type {Map<number, number>} */ map) => {
+    const v = map.get(_sourceId);
+    if (v === undefined || v === _prevPrefVersion) return;
+    _prevPrefVersion = v;
+    // Re-fetch whichever content tab is currently active.
+    const popularGridEl = _popularPanelEl?.querySelector('.js-popular-grid');
+    const popularPaginEl = _popularPanelEl?.querySelector('.js-popular-pagination');
+    const searchGridEl = _searchPanelEl?.querySelector('.js-search-grid');
+    const searchPaginEl = _searchPanelEl?.querySelector('.js-search-pagination');
+    if (_activeTab === 'popular' && popularGridEl && popularPaginEl) {
+      _fetch(/** @type {HTMLElement} */ (popularGridEl), /** @type {HTMLElement} */ (popularPaginEl), false);
+    } else if (_activeTab === 'search' && searchGridEl && searchPaginEl) {
+      _fetch(/** @type {HTMLElement} */ (searchGridEl), /** @type {HTMLElement} */ (searchPaginEl), true);
+    }
+  });
 }
 
 // ── Settings tab ──────────────────────────────────────────────────────────────
@@ -779,7 +908,7 @@ async function _mountSettings() {
             } else {
               inner.innerHTML = `
                 <div class="flex flex-col items-center justify-center py-20 gap-4 text-center">
-                  <span class="[&_svg]:w-8 [&_svg]:h-8 text-warn">${iconWarning}</span>
+                  <span class="icon-xl text-warn">${iconWarning}</span>
                   <div>
                     <p class="text-sm font-medium text-text">This extension is disabled</p>
                     <p class="text-xs text-text-muted mt-1">Enable it in the Settings tab to browse manga.</p>
@@ -797,7 +926,7 @@ async function _mountSettings() {
             if (gridEl) {
               gridEl.innerHTML = `
                 <div class="flex flex-col items-center justify-center py-20 gap-4 text-center">
-                  <span class="[&_svg]:w-8 [&_svg]:h-8 text-warn">${iconWarning}</span>
+                  <span class="icon-xl text-warn">${iconWarning}</span>
                   <div>
                     <p class="text-sm font-medium text-text">This extension is disabled</p>
                     <p class="text-xs text-text-muted mt-1">Enable it in the Settings tab to browse manga.</p>
@@ -879,7 +1008,8 @@ async function _fetchLibrary(gridEl, paginEl) {
     const { destroy } = renderPagination(paginEl, {
       page: _libPage,
       hasNext,
-      onPageChange: (p) => { _libPage = p; _libLoaded = false; _fetchLibrary(gridEl, paginEl); window.scrollTo(0, 0); },
+      total: result?.total_pages ?? undefined,
+      onPageChange: (p) => { _libPage = p; _libLoaded = false; _updateUrl(); _fetchLibrary(gridEl, paginEl); window.scrollTo(0, 0); },
     });
     _destroyLibPagination = destroy;
   }
@@ -997,6 +1127,7 @@ async function _fetch(gridEl, paginEl, isSearch) {
     const { destroy } = renderPagination(paginEl, {
       page: _page,
       hasNext,
+      total: result?.total_pages ?? undefined,
       onPageChange: (p) => { _page = p; _updateUrl(); _fetch(gridEl, paginEl, isSearch); window.scrollTo(0, 0); },
     });
     if (isSearch) {
@@ -1055,11 +1186,15 @@ export function destroy(container) {
   _tabsUpdateFn = null;
   if (_asideEl) render(null, _asideEl);
   _asideEl = null;
-  _breadcrumbEl = null;
   _filterModalDestroy?.();
   _filterModalDestroy = null;
   _unsubSourcesInvalidation?.();
   _unsubSourcesInvalidation = null;
+  _unsubPrefVersion?.();
+  _unsubPrefVersion = null;
+  mountIntoModalRoot(null);
+  _addSourceBtn = null;
+  clearPageHeader();
   const pendingId = consumePendingSourceId();
   if (pendingId !== null) api.deleteSource(pendingId).catch(() => {});
   container.innerHTML = '';

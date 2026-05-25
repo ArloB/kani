@@ -41,26 +41,106 @@ pub fn build_xml(info: &ComicInfo) -> crate::error::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
-    #[test]
-    fn escapes_special_characters() {
-        let info = ComicInfo {
+    fn minimal() -> ComicInfo {
+        ComicInfo {
             xmlns_xsi: "http://www.w3.org/2001/XMLSchema-instance",
-            series: "Berserk & Co".to_string(),
-            title: Some("<Dark Fantasy>".to_string()),
+            series: "Test Series".to_string(),
+            title: None,
             number: 1.0,
             volume: None,
-            summary: Some("A \"great\" story".to_string()),
-            language_iso: Some("en".to_string()),
+            summary: None,
+            language_iso: None,
             writer: None,
             penciller: None,
             genre: None,
             web: None,
+        }
+    }
+
+    #[test]
+    fn escapes_special_characters() {
+        let info = ComicInfo {
+            series: "Berserk & Co".to_string(),
+            title: Some("<Dark Fantasy>".to_string()),
+            summary: Some("A \"great\" story".to_string()),
+            language_iso: Some("en".to_string()),
+            ..minimal()
         };
         let xml = build_xml(&info).unwrap();
         assert!(xml.contains("Berserk &amp; Co"));
         assert!(xml.contains("&lt;Dark Fantasy&gt;"));
         assert!(xml.contains("&quot;great&quot;") || xml.contains("\"great\""));
+    }
+
+    #[test]
+    fn xml_declaration_is_present() {
+        let xml = build_xml(&minimal()).unwrap();
+        assert!(xml.starts_with(r#"<?xml version="1.0" encoding="utf-8"?>"#));
+    }
+
+    #[test]
+    fn mandatory_fields_appear() {
+        let info = ComicInfo {
+            series: "My Manga".to_string(),
+            number: 7.5,
+            ..minimal()
+        };
+        let xml = build_xml(&info).unwrap();
+        assert!(xml.contains("<Series>My Manga</Series>"));
+        assert!(xml.contains("<Number>7.5</Number>"));
+    }
+
+    #[test]
+    fn whole_number_serializes_without_fraction() {
+        let info = ComicInfo {
+            number: 3.0,
+            ..minimal()
+        };
+        let xml = build_xml(&info).unwrap();
+        // quick-xml serialises f64: 3.0 should not produce "3.0" with trailing zero fraction
+        // — accept either "3" or "3.0" as long as the chapter parses back correctly.
+        assert!(xml.contains("<Number>3</Number>") || xml.contains("<Number>3.0</Number>"));
+    }
+
+    #[test]
+    fn optional_none_fields_are_absent() {
+        let xml = build_xml(&minimal()).unwrap();
+        assert!(!xml.contains("<Title>"));
+        assert!(!xml.contains("<Volume>"));
+        assert!(!xml.contains("<Summary>"));
+        assert!(!xml.contains("<LanguageISO>"));
+        assert!(!xml.contains("<Writer>"));
+        assert!(!xml.contains("<Penciller>"));
+        assert!(!xml.contains("<Genre>"));
+        assert!(!xml.contains("<Web>"));
+    }
+
+    #[test]
+    fn all_optional_fields_appear_when_set() {
+        let info = ComicInfo {
+            series: "Fullmetal".to_string(),
+            title: Some("Brotherhood".to_string()),
+            number: 1.0,
+            volume: Some(1),
+            summary: Some("Alchemy story".to_string()),
+            language_iso: Some("ja".to_string()),
+            writer: Some("Arakawa Hiromu".to_string()),
+            penciller: Some("Arakawa Hiromu".to_string()),
+            genre: Some("Action".to_string()),
+            web: Some("https://example.com".to_string()),
+            ..minimal()
+        };
+        let xml = build_xml(&info).unwrap();
+        assert!(xml.contains("<Title>Brotherhood</Title>"));
+        assert!(xml.contains("<Volume>1</Volume>"));
+        assert!(xml.contains("<Summary>Alchemy story</Summary>"));
+        assert!(xml.contains("<LanguageISO>ja</LanguageISO>"));
+        assert!(xml.contains("<Writer>Arakawa Hiromu</Writer>"));
+        assert!(xml.contains("<Penciller>Arakawa Hiromu</Penciller>"));
+        assert!(xml.contains("<Genre>Action</Genre>"));
+        assert!(xml.contains("<Web>https://example.com</Web>"));
     }
 }

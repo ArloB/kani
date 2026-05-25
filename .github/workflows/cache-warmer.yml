@@ -1,0 +1,33 @@
+name: Cache Warmer
+
+on:
+  push:
+    branches: [develop]
+
+concurrency:
+  group: cache-warmer
+  cancel-in-progress: true
+
+env:
+  SQLX_OFFLINE: "true"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  warm:
+    name: Warm Rust cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci"
+          cache-on-failure: true
+
+      - name: Build workspace (populate cache)
+        run: cargo build --workspace --locked

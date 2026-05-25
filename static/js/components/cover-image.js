@@ -1,6 +1,8 @@
 // @ts-check
 // Cover image component — manga cover with no-cover fallback.
 
+const MAX_RETRIES = 3;
+
 /**
  * Creates a cover image element. Returns a DOM node ready to insert.
  * @param {{ url?: string | null, alt?: string }} props
@@ -12,18 +14,27 @@ export function createCoverImage({ url, alt = '' }) {
 
   if (url) {
     const img = document.createElement('img');
-    img.src = url;
     img.alt = alt;
     img.loading = 'lazy';
     img.decoding = 'async';
     img.className = 'absolute inset-0 w-full h-full object-cover';
+
+    let retries = 0;
     img.addEventListener('error', () => {
-      img.remove();
-      const fallback = document.createElement('div');
-      fallback.className = 'absolute inset-0 flex items-center justify-center text-xs text-text-muted';
-      fallback.textContent = 'No Cover';
-      wrap.appendChild(fallback);
+      if (retries < MAX_RETRIES) {
+        const delay = 1000 * Math.pow(2, retries) + Math.random() * 1000;
+        retries++;
+        setTimeout(() => { img.src = url; }, delay);
+      } else {
+        img.remove();
+        const fallback = document.createElement('div');
+        fallback.className = 'absolute inset-0 flex items-center justify-center text-xs text-text-muted';
+        fallback.textContent = 'No Cover';
+        wrap.appendChild(fallback);
+      }
     });
+
+    img.src = url;
     wrap.appendChild(img);
   } else {
     const fallback = document.createElement('div');

@@ -3,6 +3,16 @@
 use kani_shared::types::{DownloadRule, DownloadRuleKind, NamedItem, Source};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct SourceHealthRow {
+    pub source_id: i64,
+    pub source_name: String,
+    pub last_success_at: Option<String>,
+    pub last_error_at: Option<String>,
+    pub consecutive_error_count: i64,
+    pub avg_response_ms: Option<f64>,
+}
+
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub struct Settings {
     pub flaresolverr_url: String,
@@ -16,7 +26,21 @@ pub struct Settings {
     pub max_wasm_instances: i64,
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
+    pub scan_exclude_completed: bool,
+    pub auto_download_category_id: Option<i64>,
+    pub auto_download_category_ids: String,
     pub default_tracking_enabled: bool,
+    pub http_request_logging: bool,
+    pub browser_debug_logging: bool,
+    pub registration_enabled: bool,
+    pub cover_max_dimension: Option<i64>,
+    pub email_enabled: bool,
+    pub email_provider: String,
+    pub email_provider_config: String,
+    pub email_from_address: String,
+    pub app_url: String,
+    pub password_reset_enabled: bool,
+    pub email_verification_required: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -57,14 +81,21 @@ pub struct Manga {
     pub name: String,
     pub cover_url: Option<String>,
     pub local_cover_path: Option<String>,
+    pub local_name: Option<String>,
+    pub local_description: Option<String>,
+    pub local_status: Option<i64>,
+    pub cover_overridden: bool,
     pub description: Option<String>,
     pub auto_download: bool,
+    pub auto_scan: bool,
     #[sqlx(try_from = "i64")]
     pub status: kani_shared::MangaStatus,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
     pub scanlator_mode: String,
     pub download_all_preferred_only: bool,
+    pub notes: Option<String>,
+    pub is_orphaned: bool,
 }
 
 /// DB row fetched when listing chapters for a manga.
@@ -93,6 +124,14 @@ pub struct LibraryManga {
     pub cover_url: Option<String>,
     pub local_cover_path: Option<String>,
     pub base_url: String,
+    /// Total matching rows (populated by COUNT(*) OVER() in get_library_filtered).
+    #[sqlx(default)]
+    pub total_count: i64,
+    /// Chapters discovered after the user last viewed this manga.
+    #[sqlx(default)]
+    pub new_chapter_count: i64,
+    #[sqlx(default)]
+    pub is_orphaned: bool,
 }
 
 /// One item in the "continue reading" shelf.
@@ -108,15 +147,70 @@ pub struct ContinueReadingItem {
     pub last_page: i64,
 }
 
+/// Payload for updating local metadata overrides on a manga.
+/// `None` for scalar fields means "no change"; pass an explicit `None`-wrapped `Option<String>`
+/// as `Some(None)` if you need to clear — but the REST layer serialises nulls as `None` directly.
+/// For people/tags lists: `None` = no change, `Some(vec![])` = clear override.
+pub struct LocalMetadataUpdate {
+    pub local_name: Option<String>,
+    pub local_description: Option<String>,
+    pub local_status: Option<i64>,
+    pub authors: Option<Vec<String>>,
+    pub artists: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
+}
+
 /// All data required to render the manga-details page.
 /// URL signing and markdown rendering are left to the HTTP layer.
 pub struct LocalMangaDetails {
     pub manga: Manga,
     pub source: Source,
     pub auto_scan: bool,
+    /// Effective display values — local override applied when present, otherwise source.
     pub authors: Vec<NamedItem>,
     pub artists: Vec<NamedItem>,
     pub tags: Vec<NamedItem>,
+    /// Raw source values from the extension (for the "restore" affordance).
+    pub source_authors: Vec<NamedItem>,
+    pub source_artists: Vec<NamedItem>,
+    pub source_tags: Vec<NamedItem>,
+    /// User-entered local override names (empty when no override is active).
+    pub local_authors: Vec<String>,
+    pub local_artists: Vec<String>,
+    pub local_tags: Vec<String>,
+    pub has_local_people: bool,
+    pub has_local_tags: bool,
+}
+
+/// Orphaned manga — the source they came from has been soft-deleted.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct OrphanedManga {
+    pub id: i64,
+    pub name: String,
+    pub cover_url: Option<String>,
+    pub local_cover_path: Option<String>,
+    pub source_name: String,
+}
+
+/// One item in the pending imports queue.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct PendingImportRow {
+    pub id: i64,
+    pub origin: String,
+    pub title: String,
+    pub source_hint: Option<String>,
+    pub source_manga_id: Option<String>,
+    pub description: Option<String>,
+    pub cover_url: Option<String>,
+    pub authors: Option<String>,
+    pub tags: Option<String>,
+    pub status: Option<i64>,
+    pub tracking: Option<String>,
+    pub chapter_progress: Option<String>,
+    pub possible_duplicate_of: Option<i64>,
+    pub possible_duplicate_title: Option<String>,
+    pub duplicate_similarity: Option<f64>,
+    pub created_at: Option<String>,
 }
 
 impl TryFrom<DownloadRuleRow> for DownloadRule {
@@ -129,25 +223,37 @@ impl TryFrom<DownloadRuleRow> for DownloadRule {
             "title_contains" => DownloadRuleKind::TitleContains(row.value),
             "title_excludes" => DownloadRuleKind::TitleExcludes(row.value),
             "chapter_number_min" => {
-                let n: f64 = row.value.parse().map_err(|_| format!("Bad f64: {}", row.value))?;
+                let n: f64 = row
+                    .value
+                    .parse()
+                    .map_err(|_| format!("Bad f64: {}", row.value))?;
                 DownloadRuleKind::ChapterNumberMin(n)
             }
             "chapter_number_max" => {
-                let n: f64 = row.value.parse().map_err(|_| format!("Bad f64: {}", row.value))?;
+                let n: f64 = row
+                    .value
+                    .parse()
+                    .map_err(|_| format!("Bad f64: {}", row.value))?;
                 DownloadRuleKind::ChapterNumberMax(n)
             }
             "exclude_fractional" => DownloadRuleKind::ExcludeFractional,
             "max_age_days" => {
-                let n: i32 = row.value.parse().map_err(|_| format!("Bad i32: {}", row.value))?;
+                let n: i32 = row
+                    .value
+                    .parse()
+                    .map_err(|_| format!("Bad i32: {}", row.value))?;
                 DownloadRuleKind::MaxAgeDays(n)
             }
             "published_after" => {
-                let n: i64 = row.value.parse().map_err(|_| format!("Bad i64: {}", row.value))?;
+                let n: i64 = row
+                    .value
+                    .parse()
+                    .map_err(|_| format!("Bad i64: {}", row.value))?;
                 DownloadRuleKind::PublishedAfter(n)
             }
             // Scanlator rules were migrated to scanlator_preferences — skip silently.
             "scanlator_include" | "scanlator_exclude" => {
-                return Err(format!("Migrated rule type skipped: {}", row.rule_type))
+                return Err(format!("Migrated rule type skipped: {}", row.rule_type));
             }
             other => return Err(format!("Unknown rule_type in DB: {}", other)),
         };
@@ -157,4 +263,55 @@ impl TryFrom<DownloadRuleRow> for DownloadRule {
             kind,
         })
     }
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct AuditEntry {
+    pub id: i64,
+    pub user_id: Option<i64>,
+    pub username: Option<String>,
+    pub action: String,
+    pub target: Option<String>,
+    pub details: Option<String>,
+    pub created_at: String,
+}
+
+// ── Reading statistics ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct DailyActivity {
+    pub date: String,
+    pub chapters_read: i64,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct MangaReadCount {
+    pub manga_id: i64,
+    pub manga_name: String,
+    pub chapters_read: i64,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct GenreCount {
+    pub genre: String,
+    pub chapters_read: i64,
+}
+
+/// Computed reading statistics for a single user.
+///
+/// All vector fields hold data for the requested period (default 90 days).
+/// Future stat blocks should be added as `#[serde(skip_serializing_if = "Option::is_none")]`
+/// `Option<T>` fields so existing clients are unaffected.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReadingStats {
+    pub total_chapters_read: i64,
+    pub total_manga_read: i64,
+    pub completed_manga: i64,
+    pub current_streak: i64,
+    pub longest_streak: i64,
+    pub daily_activity: Vec<DailyActivity>,
+    pub top_manga: Vec<MangaReadCount>,
+    pub genre_breakdown: Vec<GenreCount>,
 }

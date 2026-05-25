@@ -14,7 +14,8 @@ impl AppService {
         .fetch_all(&self.db)
         .await
         .map_err(ServiceError::Db)?;
-        let prefs = rows.into_iter()
+        let prefs = rows
+            .into_iter()
             .map(|r| kani_shared::types::ScanlatorPreference {
                 id: r.id,
                 manga_id: r.manga_id,

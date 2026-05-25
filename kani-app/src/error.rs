@@ -7,6 +7,9 @@ pub enum ServiceError {
     #[error("Not found: {0}")]
     NotFound(String),
 
+    #[error("Source {0} is disabled")]
+    SourceDisabled(i64),
+
     #[error("Conflict: {0}")]
     Conflict(String),
 
@@ -18,6 +21,9 @@ pub enum ServiceError {
 
     #[error("Other error: {0}")]
     Other(String),
+
+    #[error("Possible duplicate")]
+    PossibleDuplicate(Vec<crate::service::dedup::SimilarMangaHit>),
 
     #[error(transparent)]
     Core(#[from] kani_core::Error),

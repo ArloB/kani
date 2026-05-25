@@ -6,6 +6,10 @@ import { iconChevronLeft, iconChevronRight, iconX, iconMenu } from '../icons.js'
 import { navigate } from '../router.js';
 import { getLocal, setLocal } from '../utils.js';
 import { getState, subscribe } from '../state.js';
+import { registerShortcuts } from '../shortcuts.js';
+
+const BTN_ACTIVE   = 'bg-surface-2 text-text';
+const BTN_INACTIVE = 'text-muted hover:bg-surface-2 hover:text-text';
 
 /** @type {(() => void) | null} */
 let _destroyFn = null;
@@ -137,8 +141,8 @@ export async function init(container, { id }) {
           </div>
 
           <!-- Options -->
-          <div class="px-3 py-4">
-            <p class="text-xs font-medium text-muted uppercase tracking-wide mb-3">Options</p>
+          <div class="px-3 py-4 flex flex-col gap-3">
+            <p class="text-xs font-medium text-muted uppercase tracking-wide">Options</p>
             <label class="flex items-center justify-between gap-3 cursor-pointer">
               <span class="text-sm text-text">Smooth scroll</span>
               <label class="kani-toggle" aria-label="Smooth scroll">
@@ -146,6 +150,28 @@ export async function init(container, { id }) {
                 <span class="kani-toggle__track"></span>
               </label>
             </label>
+            <label class="flex items-center justify-between gap-3 cursor-pointer" id="reader-double-row">
+              <span class="text-sm text-text">Double page</span>
+              <label class="kani-toggle" aria-label="Double page spread">
+                <input id="reader-double-input" type="checkbox" class="kani-toggle__input">
+                <span class="kani-toggle__track"></span>
+              </label>
+            </label>
+            <div>
+              <p class="text-xs text-muted mb-2">Reading direction</p>
+              <div class="flex gap-2">
+                <button id="reader-dir-rtl" class="flex-1 text-sm px-2 py-1.5 rounded-md transition-colors" aria-pressed="false">RTL</button>
+                <button id="reader-dir-ltr" class="flex-1 text-sm px-2 py-1.5 rounded-md transition-colors" aria-pressed="false">LTR</button>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs text-muted mb-2">Image fit</p>
+              <div class="flex gap-2">
+                <button id="reader-fit-both"  class="flex-1 text-sm px-2 py-1.5 rounded-md transition-colors" aria-pressed="false">Both</button>
+                <button id="reader-fit-width" class="flex-1 text-sm px-2 py-1.5 rounded-md transition-colors" aria-pressed="false">Width</button>
+                <button id="reader-fit-height" class="flex-1 text-sm px-2 py-1.5 rounded-md transition-colors" aria-pressed="false">Height</button>
+              </div>
+            </div>
           </div>
 
         </div>
@@ -176,12 +202,26 @@ export async function init(container, { id }) {
   const modeScroll   = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-mode-scroll'));
   const modePaged    = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-mode-paged'));
   const smoothInput  = /** @type {HTMLInputElement}  */ (container.querySelector('#reader-smooth-input'));
+  const doubleInput  = /** @type {HTMLInputElement}  */ (container.querySelector('#reader-double-input'));
+  const doubleRow    = /** @type {HTMLElement}        */ (container.querySelector('#reader-double-row'));
+  const dirRtl       = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-dir-rtl'));
+  const dirLtr       = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-dir-ltr'));
+  const fitBoth      = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-fit-both'));
+  const fitWidth     = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-fit-width'));
+  const fitHeight    = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-fit-height'));
 
   /** @type {string[]} */
   let _pages        = [];
   let _currentPage  = 0;
   let _mode         = /** @type {'scroll'|'paged'} */ (getLocal('kani_reader_mode') === 'paged' ? 'paged' : 'scroll');
   let _smoothScroll = getLocal('kani_reader_smooth') === 'true';
+  let _doublePage   = getLocal('kani_reader_double') === 'true';
+  let _direction    = /** @type {'rtl'|'ltr'} */ (getLocal('kani_reader_direction') === 'ltr' ? 'ltr' : 'rtl');
+  /** @type {'both'|'width'|'height'} */
+  const _fitVal = getLocal('kani_reader_fit') ?? '';
+  let _fit      = /** @type {'both'|'width'|'height'} */ (
+    ['both', 'width', 'height'].includes(_fitVal) ? _fitVal : 'both'
+  );
   let _barsVisible  = false;
   let _panelOpen    = false;
   let _isHovering   = false;
@@ -189,6 +229,7 @@ export async function init(container, { id }) {
   let _mangaId      = /** @type {number|null} */ (null);
   let _progressTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
   let _lastReportedPage = -1;
+  let _preloadDone = false;
 
   function _reportProgress() {
     if (_progressTimer) clearTimeout(_progressTimer);
@@ -201,6 +242,23 @@ export async function init(container, { id }) {
   }
 
   _cleanup.push(() => { if (_progressTimer) clearTimeout(_progressTimer); });
+
+  function _maybePreloadNext() {
+    if (_preloadDone || !_chapterInfo.next_chapter_id) return;
+    const threshold = _mode === 'paged'
+      ? _pages.length - 3
+      : Math.floor(_pages.length * 0.8);
+    if (_currentPage < threshold) return;
+    _preloadDone = true;
+    const nextId = _chapterInfo.next_chapter_id;
+    api.getChapterPages(nextId).then((data) => {
+      if (!Array.isArray(data?.pages)) return;
+      data.pages.slice(0, 3).forEach((p) => {
+        const img = new Image();
+        img.src = api.getChapterPageUrl(nextId, p.index);
+      });
+    }).catch(() => {});
+  }
   /** @type {{ prev_chapter_id?: number|null, next_chapter_id?: number|null }} */
   let _chapterInfo  = {};
   /** @type {IntersectionObserver|null} */
@@ -406,16 +464,69 @@ export async function init(container, { id }) {
     setLocal('kani_reader_smooth', String(_smoothScroll));
   });
 
+  // ── Double-page toggle ────────────────────────────────────────────────────
+
+  function _applyDoublePageVisibility() {
+    doubleRow.style.display = _mode === 'paged' ? '' : 'none';
+  }
+
+  doubleInput.checked = _doublePage;
+  doubleInput.addEventListener('change', () => {
+    _doublePage = doubleInput.checked;
+    setLocal('kani_reader_double', String(_doublePage));
+    _renderPages();
+  });
+
+  // ── Direction buttons ─────────────────────────────────────────────────────
+
+  function _applyDirButtons() {
+    dirRtl.className = `flex-1 text-sm px-2 py-1.5 rounded-md transition-colors ${_direction === 'rtl' ? BTN_ACTIVE : BTN_INACTIVE}`;
+    dirLtr.className = `flex-1 text-sm px-2 py-1.5 rounded-md transition-colors ${_direction === 'ltr' ? BTN_ACTIVE : BTN_INACTIVE}`;
+    dirRtl.setAttribute('aria-pressed', String(_direction === 'rtl'));
+    dirLtr.setAttribute('aria-pressed', String(_direction === 'ltr'));
+  }
+
+  dirRtl.addEventListener('click', () => {
+    _direction = 'rtl'; setLocal('kani_reader_direction', _direction);
+    if (_mangaId) api.setMangaTracking(_mangaId, { reading_direction: 'rtl' }).catch(() => {});
+    _applyDirButtons(); _renderPages();
+  });
+  dirLtr.addEventListener('click', () => {
+    _direction = 'ltr'; setLocal('kani_reader_direction', _direction);
+    if (_mangaId) api.setMangaTracking(_mangaId, { reading_direction: 'ltr' }).catch(() => {});
+    _applyDirButtons(); _renderPages();
+  });
+
+  // ── Fit buttons ───────────────────────────────────────────────────────────
+
+  function _applyFitButtons() {
+    fitBoth.className   = `flex-1 text-sm px-2 py-1.5 rounded-md transition-colors ${_fit === 'both'   ? BTN_ACTIVE : BTN_INACTIVE}`;
+    fitWidth.className  = `flex-1 text-sm px-2 py-1.5 rounded-md transition-colors ${_fit === 'width'  ? BTN_ACTIVE : BTN_INACTIVE}`;
+    fitHeight.className = `flex-1 text-sm px-2 py-1.5 rounded-md transition-colors ${_fit === 'height' ? BTN_ACTIVE : BTN_INACTIVE}`;
+    fitBoth.setAttribute('aria-pressed',   String(_fit === 'both'));
+    fitWidth.setAttribute('aria-pressed',  String(_fit === 'width'));
+    fitHeight.setAttribute('aria-pressed', String(_fit === 'height'));
+  }
+
+  fitBoth.addEventListener('click', () => {
+    _fit = 'both';   setLocal('kani_reader_fit', _fit); _applyFitButtons(); _renderPages();
+  });
+  fitWidth.addEventListener('click', () => {
+    _fit = 'width';  setLocal('kani_reader_fit', _fit); _applyFitButtons(); _renderPages();
+  });
+  fitHeight.addEventListener('click', () => {
+    _fit = 'height'; setLocal('kani_reader_fit', _fit); _applyFitButtons(); _renderPages();
+  });
+
   // ── Mode buttons ─────────────────────────────────────────────────────────
 
   function _applyModeButtons() {
     const isScroll = _mode === 'scroll';
-    const on  = 'bg-surface-2 text-text';
-    const off = 'text-muted hover:bg-surface-2 hover:text-text';
-    modeScroll.className = `flex-1 text-sm px-3 py-2 rounded-md transition-colors ${isScroll ? on : off}`;
-    modePaged.className  = `flex-1 text-sm px-3 py-2 rounded-md transition-colors ${!isScroll ? on : off}`;
+    modeScroll.className = `flex-1 text-sm px-3 py-2 rounded-md transition-colors ${isScroll ? BTN_ACTIVE : BTN_INACTIVE}`;
+    modePaged.className  = `flex-1 text-sm px-3 py-2 rounded-md transition-colors ${!isScroll ? BTN_ACTIVE : BTN_INACTIVE}`;
     modeScroll.setAttribute('aria-pressed', String( isScroll));
     modePaged.setAttribute( 'aria-pressed', String(!isScroll));
+    _applyDoublePageVisibility();
   }
 
   modeScroll.addEventListener('click', () => {
@@ -458,7 +569,7 @@ export async function init(container, { id }) {
 
       // Full bar: clickable segments
       const seg = document.createElement('div');
-      seg.className = `flex-1 h-full rounded-[2px] cursor-pointer ${color}`;
+      seg.className = `flex-1 h-full rounded-sm cursor-pointer ${color}`;
       const idx = i;
       seg.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -517,13 +628,31 @@ export async function init(container, { id }) {
       return;
     }
 
+    /** Returns the CSS class string for an image given current fit mode and context. */
+    function _imgClass(ctx = 'scroll') {
+      if (ctx === 'scroll') {
+        if (_fit === 'height') return 'max-h-screen w-auto';
+        if (_fit === 'width')  return 'max-w-full h-auto';
+        return 'max-w-full max-h-screen object-contain'; // both
+      }
+      if (ctx === 'paged-single') {
+        if (_fit === 'height') return 'max-h-full w-auto';
+        if (_fit === 'width')  return 'max-w-full h-auto';
+        return 'max-w-full max-h-full object-contain'; // both
+      }
+      // paged-double: each image shares half the width
+      if (_fit === 'height') return 'max-h-full w-auto';
+      if (_fit === 'width')  return 'max-w-[50vw] h-auto';
+      return 'max-w-[50vw] max-h-full object-contain'; // both
+    }
+
     if (_mode === 'scroll') {
       pagesEl.className = 'flex-1 overflow-y-auto overflow-x-hidden flex flex-col items-center gap-1 py-2';
 
       for (let i = 0; i < _pages.length; i++) {
         const img         = document.createElement('img');
         img.src           = _pages[i];
-        img.className     = 'max-w-full max-h-screen object-contain';
+        img.className     = _imgClass('scroll');
         img.alt           = '';
         img.loading       = 'lazy';
         img.dataset.index = String(i);
@@ -578,6 +707,7 @@ export async function init(container, { id }) {
           _currentPage = Math.min(...visible);
           _renderSegments();
           _reportProgress();
+          _maybePreloadNext();
         }
       }, { root: pagesEl, threshold: 0.1 });
       pagesEl.querySelectorAll('img[data-index]').forEach(img => _scrollObs?.observe(img));
@@ -587,38 +717,58 @@ export async function init(container, { id }) {
       _currentPage = Math.max(0, Math.min(_pages.length - 1, _currentPage));
       pagesEl.className = 'flex-1 overflow-hidden relative flex items-center justify-center';
 
-      const img     = document.createElement('img');
-      img.src       = _pages[_currentPage] ?? '';
-      img.className = 'max-w-full max-h-full object-contain';
-      img.alt       = `Page ${_currentPage + 1}`;
-      img.addEventListener('load', () => {
-        _loaded.add(_currentPage);
-        _failed.delete(_currentPage);
-        _renderSegments();
-      });
-      img.addEventListener('error', () => {
-        const failedPage = _currentPage;
-        _failed.add(failedPage);
-        _loaded.delete(failedPage);
-        _renderSegments();
-        // Error overlay with retry
-        const err = document.createElement('div');
-        err.className = 'absolute inset-0 flex flex-col items-center justify-center gap-3';
-        err.innerHTML = `
-          <p class="text-muted text-sm">Failed to load page ${failedPage + 1}</p>
-          <button class="btn-ghost">Retry</button>
-        `;
-        err.querySelector('button')?.addEventListener('click', () => {
-          _failed.delete(failedPage);
-          _renderPages();
+      /** @param {number} pageIdx @param {string} altText @returns {HTMLImageElement} */
+      function _makePageImg(pageIdx, altText) {
+        const img     = document.createElement('img');
+        img.src       = _pages[pageIdx] ?? '';
+        img.className = _imgClass(_doublePage ? 'paged-double' : 'paged-single');
+        img.alt       = altText;
+        img.addEventListener('load', () => { _loaded.add(pageIdx); _failed.delete(pageIdx); _renderSegments(); });
+        img.addEventListener('error', () => {
+          _failed.add(pageIdx); _loaded.delete(pageIdx); _renderSegments();
+          const err = document.createElement('div');
+          err.className = 'absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none';
+          err.innerHTML = `<p class="text-muted text-sm">Failed to load page ${pageIdx + 1}</p>`;
+          pagesEl.appendChild(err);
         });
-        pagesEl.appendChild(err);
-      });
-      if (img.complete) {
-        if (img.naturalWidth) _loaded.add(_currentPage); else _failed.add(_currentPage);
+        if (img.complete) {
+          if (img.naturalWidth) _loaded.add(pageIdx); else _failed.add(pageIdx);
+        }
+        return img;
       }
-      pagesEl.appendChild(img);
-      _prefetch(_currentPage);
+
+      if (_doublePage && _pages.length > 1) {
+        // Double-page spread: show two adjacent pages side-by-side.
+        // RTL: right page = current, left page = current+1
+        // LTR: left page = current, right page = current+1
+        const leftIdx  = _direction === 'rtl' ? _currentPage + 1 : _currentPage;
+        const rightIdx = _direction === 'rtl' ? _currentPage     : _currentPage + 1;
+        const spread   = document.createElement('div');
+        spread.className = 'flex items-center justify-center gap-0.5 max-w-full max-h-full';
+        if (leftIdx < _pages.length) spread.appendChild(_makePageImg(leftIdx, `Page ${leftIdx + 1}`));
+        if (rightIdx < _pages.length && rightIdx !== leftIdx) spread.appendChild(_makePageImg(rightIdx, `Page ${rightIdx + 1}`));
+        pagesEl.appendChild(spread);
+        _prefetch(_currentPage + 1);
+      } else {
+        const img = _makePageImg(_currentPage, `Page ${_currentPage + 1}`);
+        img.className = _imgClass('paged-single');
+        img.addEventListener('error', () => {
+          const failedPage = _currentPage;
+          const err = document.createElement('div');
+          err.className = 'absolute inset-0 flex flex-col items-center justify-center gap-3';
+          err.innerHTML = `
+            <p class="text-muted text-sm">Failed to load page ${failedPage + 1}</p>
+            <button class="btn-ghost">Retry</button>
+          `;
+          err.querySelector('button')?.addEventListener('click', () => {
+            _failed.delete(failedPage);
+            _renderPages();
+          });
+          pagesEl.appendChild(err);
+        });
+        pagesEl.appendChild(img);
+        _prefetch(_currentPage);
+      }
     }
 
     _renderSegments();
@@ -626,9 +776,12 @@ export async function init(container, { id }) {
 
   // ── Page navigation ───────────────────────────────────────────────────────
 
-  function _goPage(delta) {
+  function _goPage(rawDelta) {
     if (_mode !== 'paged') return;
-    const next = _currentPage + delta;
+    // RTL flips the direction: advancing means going to a lower page number.
+    const delta = _direction === 'rtl' ? -rawDelta : rawDelta;
+    const step  = _doublePage ? 2 : 1;
+    const next  = _currentPage + Math.sign(delta) * step;
 
     if (next < 0) {
       if (_chapterInfo.prev_chapter_id) {
@@ -651,6 +804,7 @@ export async function init(container, { id }) {
 
     _currentPage = next;
     _reportProgress();
+    _maybePreloadNext();
     _renderPages();
   }
 
@@ -667,8 +821,9 @@ export async function init(container, { id }) {
     const third = rect.width / 3;
 
     if (_mode === 'paged') {
-      if (x < third)          { _goPage(-1); return; }
-      if (x > 2 * third)      { _goPage(1);  return; }
+      // In RTL: left zone = forward, right zone = back (consistent with manga convention).
+      if (x < third)     { _goPage(_direction === 'rtl' ? 1 : -1); return; }
+      if (x > 2 * third) { _goPage(_direction === 'rtl' ? -1 : 1); return; }
     }
 
     // Middle zone (or scroll mode anywhere in centre third)
@@ -688,22 +843,26 @@ export async function init(container, { id }) {
   pagesEl.addEventListener('touchstart', (e) => { _touchStartX = e.touches[0].clientX; }, { passive: true });
   pagesEl.addEventListener('touchend',   (e) => {
     const dx = e.changedTouches[0].clientX - _touchStartX;
+    // Swipe left = go forward (next page in LTR, prev page in RTL via _goPage direction flip)
     if (Math.abs(dx) > 50) _goPage(dx < 0 ? 1 : -1);
   });
 
   // ── Keyboard ─────────────────────────────────────────────────────────────
 
-  function _onKeyDown(/** @type {KeyboardEvent} */ e) {
-    if (_panelOpen) {
-      if (e.key === 'Escape') { e.preventDefault(); _closePanel(); }
-      return;
-    }
-    if (e.key === 'Escape')                                  { _navigateToManga(); return; }
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); _goPage(1);  }
-    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); _goPage(-1); }
+  // Panel-open shortcuts (Escape closes panel) bypass ShortcutManager.
+  function _onPanelKeyDown(/** @type {KeyboardEvent} */ e) {
+    if (_panelOpen && e.key === 'Escape') { e.preventDefault(); _closePanel(); }
   }
-  document.addEventListener('keydown', _onKeyDown);
-  _cleanup.push(() => document.removeEventListener('keydown', _onKeyDown));
+  document.addEventListener('keydown', _onPanelKeyDown);
+  _cleanup.push(() => document.removeEventListener('keydown', _onPanelKeyDown));
+
+  _cleanup.push(registerShortcuts('reader', [
+    { key: ['ArrowRight', 'ArrowDown', 'l', 'd'], description: 'Next page',     handler: () => { if (!_panelOpen) _goPage(1);  } },
+    { key: ['ArrowLeft',  'ArrowUp',   'h', 'a'], description: 'Previous page', handler: () => { if (!_panelOpen) _goPage(-1); } },
+    { key: ']', description: 'Next chapter',     handler: () => { if (!_panelOpen && _chapterInfo.next_chapter_id) _navigateChapter(_chapterInfo.next_chapter_id); } },
+    { key: '[', description: 'Previous chapter', handler: () => { if (!_panelOpen && _chapterInfo.prev_chapter_id) _navigateChapter(_chapterInfo.prev_chapter_id); } },
+    { key: 'Escape', description: 'Back to manga', handler: () => { if (!_panelOpen) _navigateToManga(); } },
+  ]));
 
   // Position the panel immediately (before the await) so there is no flash of
   // the desktop default position on mobile before the JS takes effect.
@@ -719,6 +878,16 @@ export async function init(container, { id }) {
       : [];
     _chapterInfo = data ?? {};
     _mangaId     = data?.manga_id ?? null;
+
+    // Load per-manga reading direction, falling back to localStorage
+    if (_mangaId) {
+      try {
+        const tracking = await api.getMangaTracking(_mangaId);
+        if (tracking?.reading_direction === 'ltr' || tracking?.reading_direction === 'rtl') {
+          _direction = tracking.reading_direction;
+        }
+      } catch { /* keep localStorage default */ }
+    }
 
     // Trust server-side progress; -1 means start at last page (used when navigating backwards)
     if (data?.last_page_read != null) {
@@ -746,6 +915,9 @@ export async function init(container, { id }) {
   }
 
   _applyModeButtons();
+  _applyDirButtons();
+  _applyFitButtons();
+  _applyDoublePageVisibility();
   _renderPages();
   if (_pendingBarsVisible) _showBars();
   pagesEl.focus();

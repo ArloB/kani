@@ -1,12 +1,19 @@
-/// Adds `Cache-Control: public, max-age=31536000, immutable` to all `/js/*` and `/css/*`
-/// responses. Only compiled into release builds — dev builds serve files uncached so that
-/// changes are visible immediately without a hard refresh.
-#[cfg(not(debug_assertions))]
+/// Sets `Cache-Control` on all `/js/*` and `/css/*` responses.
+///
+/// Release builds get long-lived immutable caching — filenames are content-hashed.
+/// Debug builds get `no-cache` so the browser always revalidates raw source files.
+/// Without an explicit header the browser applies heuristic caching and can serve a
+/// stale module after an edit, which surfaces as confusing parse errors.
 async fn cache_control_middleware(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     use rquest::header;
+
+    #[cfg(not(debug_assertions))]
+    const CACHE_VALUE: &str = "public, max-age=31536000, immutable";
+    #[cfg(debug_assertions)]
+    const CACHE_VALUE: &str = "no-cache";
 
     let is_static =
         request.uri().path().starts_with("/js/") || request.uri().path().starts_with("/css/");
@@ -14,7 +21,7 @@ async fn cache_control_middleware(
     if is_static {
         response.headers_mut().insert(
             header::CACHE_CONTROL,
-            header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+            header::HeaderValue::from_static(CACHE_VALUE),
         );
     }
     response
@@ -23,7 +30,8 @@ async fn cache_control_middleware(
 #[tokio::main]
 async fn main() {
     use axum::Router;
-    use axum::http::{HeaderValue, Method, header};
+    use axum::http::{HeaderValue, Method, StatusCode, header};
+    use axum::response::IntoResponse;
     use axum_login::{
         AuthManagerLayerBuilder,
         tower_sessions::{SessionManagerLayer, cookie::SameSite},
@@ -36,23 +44,38 @@ async fn main() {
         cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer},
         services::{ServeDir, ServeFile},
         set_header::SetResponseHeaderLayer,
+        trace::TraceLayer,
     };
     use tower_sessions_sqlx_store::SqliteStore;
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new(
-                    "info,axum_login=warn,tower_sessions=warn,tower_sessions_core=warn,sqlx=warn",
-                )
-            }),
+    let buf_cap: usize = std::env::var("KANI_LOG_BUFFER_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000);
+
+    let (ring_layer, log_handle) = kani_web::logging::RingBufferLayer::new(buf_cap);
+
+    const DEFAULT_FILTER: &str =
+        "info,axum_login=warn,tower_sessions=warn,tower_sessions_core=warn,sqlx=warn";
+
+    let make_filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(DEFAULT_FILTER))
+    };
+
+    use tracing_subscriber::prelude::*;
+    tracing_subscriber::registry()
+        .with(ring_layer.with_filter(make_filter()))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+                .with_filter(make_filter()),
         )
-        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
         .init();
 
     tracing::info!("Starting Kani Web Server");
 
-    let state = AppState::new()
+    let state = AppState::new(log_handle)
         .await
         .expect("Failed to initialise AppState");
 
@@ -75,8 +98,15 @@ async fn main() {
         tracing::error!("Failed to ensure default user: {}", e);
     }
 
+    kani_web::HTTP_LOGGING_ENABLED.store(
+        state.get_settings().await.http_request_logging,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
     state.spawn_auto_scan();
     state.spawn_cover_retry();
+    state.spawn_credential_refresh();
+    state.spawn_webhook_listener();
 
     // Rate limiter settings.
     // API: enough for normal UI use while protecting against abuse.
@@ -128,6 +158,7 @@ async fn main() {
 
     let rest_router = rest::routes(state.clone());
     let proxy_router = rest::image_proxy_route(state.clone());
+    let opds_router = kani_web::opds::routes(state.clone());
     let health_router = axum::Router::new()
         .route("/health", axum::routing::get(rest::health))
         .route("/ready", axum::routing::get(rest::ready))
@@ -167,7 +198,9 @@ async fn main() {
                             }
                         }
                         kani_shared::DownloadProgressEvent::ChapterCompleted {
-                            chapter_id, successful_pages, ..
+                            chapter_id,
+                            successful_pages,
+                            ..
                         } => {
                             let pc = successful_pages as i64;
                             if let Err(e) = sqlx::query!(
@@ -183,6 +216,42 @@ async fn main() {
                                     chapter_id,
                                     e
                                 );
+                            } else {
+                                struct ChapterInfo {
+                                    manga_id: i64,
+                                    manga_name: String,
+                                    volume: Option<i64>,
+                                    chapter_number: f64,
+                                    name: Option<String>,
+                                }
+                                if let Ok(Some(info)) = sqlx::query_as!(
+                                    ChapterInfo,
+                                    "SELECT c.manga_id, m.name AS manga_name, \
+                                     c.volume, c.chapter_number, c.name \
+                                     FROM chapters c JOIN manga m ON m.id = c.manga_id \
+                                     WHERE c.id = ?",
+                                    chapter_id
+                                )
+                                .fetch_optional(&db)
+                                .await
+                                {
+                                    let chapter_name = kani_app::chapter_name(
+                                        info.volume,
+                                        info.chapter_number,
+                                        info.name,
+                                    );
+                                    listener_state
+                                        .webhook_service
+                                        .fire(
+                                            kani_app::service::webhooks::WebhookPayload::ChapterDownloaded {
+                                                chapter_id,
+                                                manga_id: info.manga_id,
+                                                manga_name: info.manga_name,
+                                                chapter_name,
+                                            },
+                                        )
+                                        .await;
+                                }
                             }
                         }
                         kani_shared::DownloadProgressEvent::ChapterFailed {
@@ -308,7 +377,40 @@ async fn main() {
         format!("{static_dir}/index.prod.html")
     };
 
+    let manifest_path = format!("{static_dir}/manifest.webmanifest");
+    let sw_path = format!("{static_dir}/sw.js");
+
     let app = Router::new()
+        // PWA — manifest and service worker need explicit Content-Type headers
+        .route("/manifest.webmanifest", axum::routing::get(move || {
+            let p = manifest_path.clone();
+            async move {
+                match tokio::fs::read(&p).await {
+                    Ok(b) => ([(header::CONTENT_TYPE, "application/manifest+json; charset=utf-8")], b).into_response(),
+                    Err(_) => StatusCode::NOT_FOUND.into_response(),
+                }
+            }
+        }))
+        .route("/sw.js", axum::routing::get(move || {
+            let p = sw_path.clone();
+            async move {
+                match tokio::fs::read(&p).await {
+                    Ok(b) => {
+                        let mut h = axum::http::HeaderMap::new();
+                        h.insert(header::CONTENT_TYPE, header::HeaderValue::from_static("application/javascript; charset=utf-8"));
+                        h.insert(
+                            header::HeaderName::from_static("service-worker-allowed"),
+                            header::HeaderValue::from_static("/"),
+                        );
+                        (StatusCode::OK, h, b).into_response()
+                    }
+                    Err(_) => StatusCode::NOT_FOUND.into_response(),
+                }
+            }
+        }))
+        .nest_service("/icons", ServeDir::new(format!("{static_dir}/icons")))
+        // OPDS catalog — auth is handled per-handler (supports Basic auth)
+        .nest("/opds", opds_router)
         .merge(Router::new().nest("/rest", rest_router).layer(GovernorLayer { config: governor_conf }))
         .merge(Router::new().nest("/rest", proxy_router).layer(GovernorLayer { config: proxy_governor_conf }))
         .merge(health_router)
@@ -336,10 +438,23 @@ async fn main() {
                 "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
             ),
         ))
-        .layer(cors_layer);
+        .layer(cors_layer)
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
+                if kani_web::HTTP_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                    tracing::info_span!(
+                        "http",
+                        method = %request.method(),
+                        uri = %request.uri(),
+                        status = tracing::field::Empty,
+                    )
+                } else {
+                    tracing::Span::none()
+                }
+            }),
+        );
 
-    // Cache-Control headers for static assets — release only.
-    #[cfg(not(debug_assertions))]
+    // Cache-Control for static assets: immutable in release, no-cache in debug.
     let app = app.layer(axum::middleware::from_fn(cache_control_middleware));
 
     let bind_addr = std::env::var("KANI_BIND").unwrap_or_else(|_| "0.0.0.0:8242".into());
@@ -374,7 +489,10 @@ async fn main() {
             tracing::warn!("Failed to reset in-flight download statuses on shutdown: {e}");
         }
         state.db.close().await;
-        let exit_code = if state.restart_requested.load(std::sync::atomic::Ordering::Relaxed) {
+        let exit_code = if state
+            .restart_requested
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             tracing::info!("Restart requested — exiting with code 42.");
             42
         } else {

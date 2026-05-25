@@ -71,7 +71,7 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
 
   return html`
     <div
-      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+      class="fixed inset-0 z-modal flex items-center justify-center p-4 bg-scrim"
       onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
@@ -79,7 +79,7 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
         aria-modal="true"
         aria-labelledby=${title ? titleId : undefined}
         tabindex="-1"
-        class=${'relative bg-surface rounded-xl shadow-lg w-full flex flex-col overflow-hidden max-h-[90vh] outline-none ' + (wide ? 'max-w-[800px]' : 'max-w-[600px]')}
+        class=${'relative bg-surface rounded-xl shadow-lg w-full flex flex-col overflow-hidden max-h-modal outline-none ' + (wide ? 'modal-wide' : 'modal-narrow')}
         ref=${dialogRef}
       >
         ${title && html`
@@ -106,4 +106,91 @@ export function mountIntoModalRoot(vnode) {
   if (!root) return () => {};
   render(vnode, root);
   return () => render(null, root);
+}
+
+// ── Imperative helpers ────────────────────────────────────────────────────────
+
+/**
+ * @param {{
+ *   message: string,
+ *   title?: string,
+ *   confirmLabel?: string,
+ *   cancelLabel?: string,
+ *   onResolve: (value: boolean) => void,
+ * }} props
+ */
+function ConfirmModal({ message, title = 'Confirm', confirmLabel = 'Confirm', cancelLabel = 'Cancel', onResolve }) {
+  return html`
+    <${Modal}
+      open=${true}
+      title=${title}
+      onClose=${() => onResolve(false)}
+      footer=${html`
+        <button type="button" class="btn-ghost btn-sm" onClick=${() => onResolve(false)}>${cancelLabel}</button>
+        <button type="button" class="btn-primary btn-sm" onClick=${() => onResolve(true)}>${confirmLabel}</button>
+      `}
+    >
+      <p class="text-sm text-text">${message}</p>
+    </${Modal}>
+  `;
+}
+
+/**
+ * @param {{ message: string, title?: string, closeLabel?: string, onClose: () => void }} props
+ */
+function AlertModal({ message, title = 'Notice', closeLabel = 'OK', onClose }) {
+  return html`
+    <${Modal}
+      open=${true}
+      title=${title}
+      onClose=${onClose}
+      footer=${html`
+        <button type="button" class="btn-primary btn-sm" onClick=${onClose}>${closeLabel}</button>
+      `}
+    >
+      <p class="text-sm text-text">${message}</p>
+    </${Modal}>
+  `;
+}
+
+/**
+ * Shows a confirm dialog using the app modal. Returns a Promise that resolves
+ * to true (confirm) or false (cancel / Escape).
+ * @param {string} message
+ * @param {{ title?: string, confirmLabel?: string, cancelLabel?: string }} [opts]
+ * @returns {Promise<boolean>}
+ */
+export function showConfirm(message, opts = {}) {
+  return new Promise((resolve) => {
+    let cleanup = () => {};
+    cleanup = mountIntoModalRoot(html`
+      <${ConfirmModal}
+        message=${message}
+        title=${opts.title ?? 'Confirm'}
+        confirmLabel=${opts.confirmLabel ?? 'Confirm'}
+        cancelLabel=${opts.cancelLabel ?? 'Cancel'}
+        onResolve=${(v) => { cleanup(); resolve(v); }}
+      />
+    `);
+  });
+}
+
+/**
+ * Shows an alert dialog using the app modal. Returns a Promise that resolves
+ * when the user dismisses it.
+ * @param {string} message
+ * @param {{ title?: string }} [opts]
+ * @returns {Promise<void>}
+ */
+export function showAlert(message, opts = {}) {
+  return new Promise((resolve) => {
+    let cleanup = () => {};
+    cleanup = mountIntoModalRoot(html`
+      <${AlertModal}
+        message=${message}
+        title=${opts.title ?? 'Notice'}
+        onClose=${() => { cleanup(); resolve(); }}
+      />
+    `);
+  });
 }

@@ -1,0 +1,184 @@
+//! Emit Rust builder-chain source code from an `Expr` tree.
+//! The output calls `kani_shared::ast::Expr::*` constructors and chained methods.
+
+use kani_shared::ast::{Expr, Op};
+
+pub fn emit_expr(expr: &Expr) -> String {
+    match expr {
+        Expr::SelfRef => "Expr::self_ref()".into(),
+        Expr::Index => "Expr::index()".into(),
+        Expr::Null => "Expr::null()".into(),
+        Expr::Bool(true) => "Expr::true_val()".into(),
+        Expr::Bool(false) => "Expr::false_val()".into(),
+        Expr::Literal(s) => format!("Expr::lit(\"{}\")", escape(s)),
+        Expr::Number(n) => format!("Expr::num({})", emit_float(*n)),
+        Expr::Var(name) => format!("Expr::var(\"{}\")", escape(name)),
+        Expr::Dom(sel) => format!("Expr::dom(\"{}\")", escape(sel)),
+        Expr::Json(ptr) => format!("Expr::json_root(\"{}\")", escape(ptr)),
+        Expr::Pref(key) => format!("Expr::pref(\"{}\")", escape(key)),
+
+        Expr::Attr { target, name } => format!("{}.attr(\"{}\")", e(target), escape(name)),
+        Expr::Text { target } => format!("{}.text()", e(target)),
+        Expr::InnerHtml { target } => format!("{}.inner_html()", e(target)),
+        Expr::Select { target, selector } => {
+            format!("{}.select(\"{}\")", e(target), escape(selector))
+        }
+        Expr::First { target, selector } => {
+            format!("{}.first(\"{}\")", e(target), escape(selector))
+        }
+        Expr::HasClass { target, class } => {
+            format!("{}.has_class(\"{}\")", e(target), escape(class))
+        }
+        Expr::Children { target } => format!("{}.children()", e(target)),
+        Expr::Split { target, delimiter } => {
+            format!("{}.split(\"{}\")", e(target), escape(delimiter))
+        }
+        Expr::At { target, index } => format!("{}.at({})", e(target), index),
+        Expr::Trim { target } => format!("{}.trim()", e(target)),
+        Expr::Lower { target } => format!("{}.lower()", e(target)),
+        Expr::Not { target } => format!("{}.not()", e(target)),
+        Expr::StringLen { target } => format!("{}.string_len()", e(target)),
+        Expr::ParseFloat { target } => format!("{}.parse_float()", e(target)),
+        Expr::ParseInt { target } => format!("{}.parse_int()", e(target)),
+        Expr::ToString { target } => format!("{}.stringify()", e(target)),
+        Expr::DateParseRfc3339 { target } => format!("{}.date_parse_rfc3339()", e(target)),
+        Expr::ArrayLen { target } => format!("{}.array_len()", e(target)),
+        Expr::JsonKeys { target } => format!("{}.keys()", e(target)),
+        Expr::JsonFold { target } => format!("{}.json_fold()", e(target)),
+        Expr::JsonStr { target } => format!("{}.str_val()", e(target)),
+        Expr::JsonInt { target } => format!("{}.int_val()", e(target)),
+        Expr::JsonFloat { target } => format!("{}.float_val()", e(target)),
+        Expr::JsonBool { target } => format!("{}.bool_val()", e(target)),
+
+        Expr::Replace { target, from, to } => format!(
+            "{}.replace(\"{}\", \"{}\")",
+            e(target),
+            escape(from),
+            escape(to)
+        ),
+        Expr::Slice {
+            target,
+            start,
+            end: None,
+        } => format!("{}.slice({}, None)", e(target), start),
+        Expr::Slice {
+            target,
+            start,
+            end: Some(end),
+        } => format!("{}.slice({}, Some({}))", e(target), start, end),
+        Expr::StartsWith { target, prefix } => {
+            format!("{}.starts_with(\"{}\")", e(target), escape(prefix))
+        }
+        Expr::EndsWith { target, suffix } => {
+            format!("{}.ends_with(\"{}\")", e(target), escape(suffix))
+        }
+        Expr::Matches { target, pattern } => {
+            format!("{}.matches(\"{}\")", e(target), escape(pattern))
+        }
+        Expr::Capture { target, pattern } => {
+            format!("{}.capture(\"{}\")", e(target), escape(pattern))
+        }
+        Expr::DateParse { target, format } => {
+            format!("{}.date_parse(\"{}\")", e(target), escape(format))
+        }
+        Expr::Join { target, delimiter } => {
+            format!("{}.join(\"{}\")", e(target), escape(delimiter))
+        }
+        Expr::JsonPtr { target, pointer } => format!("{}.ptr(\"{}\")", e(target), escape(pointer)),
+
+        Expr::Append { target, suffix } => format!("{}.append({})", e(target), e(suffix)),
+        Expr::Prepend { target, prefix } => format!("{}.prepend({})", e(target), e(prefix)),
+        Expr::Fallback { target, default } => format!("{}.fallback({})", e(target), e(default)),
+        Expr::Map { target, transform } => format!("{}.map({})", e(target), e(transform)),
+        Expr::FlatMap { target, transform } => format!("{}.flat_map({})", e(target), e(transform)),
+        Expr::Filter { target, filter } => format!("{}.filter({})", e(target), e(filter)),
+        Expr::ResolveUrl { target, base } => format!("{}.resolve_url({})", e(target), e(base)),
+        Expr::JsonGet { target, key } => format!("{}.get({})", e(target), e(key)),
+
+        Expr::Lookup { target, table } => {
+            let entries: Vec<String> = table
+                .iter()
+                .map(|(k, v)| format!("(\"{}\", \"{}\")", escape(k), escape(v)))
+                .collect();
+            format!("{}.lookup(vec![{}])", e(target), entries.join(", "))
+        }
+
+        Expr::Fold {
+            target,
+            base,
+            transform,
+        } => format!("{}.fold({}, {})", e(target), e(base), e(transform)),
+        Expr::JsonFind { target, key, value } => {
+            format!("{}.find({}, {})", e(target), e(key), e(value))
+        }
+
+        Expr::BinaryOperation { op, lhs, rhs } => {
+            let method = match op {
+                Op::Add => "add",
+                Op::Sub => "sub",
+                Op::Mul => "mul",
+                Op::Div => "div",
+                Op::Eq => "eq",
+                Op::Ne => "ne",
+                Op::Lt => "lt",
+                Op::Gt => "gt",
+                Op::Le => "le",
+                Op::Ge => "ge",
+                Op::And => "and",
+                Op::Or => "or",
+            };
+            format!("{}.{}({})", e(lhs), method, e(rhs))
+        }
+
+        Expr::If {
+            condition,
+            then,
+            else_,
+        } => format!(
+            "Expr::if_then_else({}, {}, {})",
+            e(condition),
+            e(then),
+            e(else_)
+        ),
+        Expr::Let { name, value, body } => format!(
+            "Expr::let_bind(\"{}\", {}, {})",
+            escape(name),
+            e(value),
+            e(body)
+        ),
+
+        Expr::List(items) => format!("Expr::list(vec![{}])", emit_list(items)),
+        Expr::Concat(parts) => format!("Expr::concat(vec![{}])", emit_list(parts)),
+        Expr::Merge(lists) => format!("Expr::merge(vec![{}])", emit_list(lists)),
+        Expr::JsonArray(items) => format!("Expr::json_array(vec![{}])", emit_list(items)),
+        Expr::Format { template, args } => format!(
+            "Expr::format(\"{}\", vec![{}])",
+            escape(template),
+            emit_list(args)
+        ),
+    }
+}
+
+fn e(expr: &Expr) -> String {
+    emit_expr(expr)
+}
+
+fn emit_list(items: &[Expr]) -> String {
+    items.iter().map(emit_expr).collect::<Vec<_>>().join(", ")
+}
+
+fn emit_float(n: f64) -> String {
+    if n.fract() == 0.0 && n.is_finite() {
+        format!("{n:.1}")
+    } else {
+        format!("{n}")
+    }
+}
+
+pub fn escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}

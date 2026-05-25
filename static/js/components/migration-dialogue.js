@@ -203,7 +203,7 @@ export function MigrationDialogue({
             </div>
             <span class="text-xs text-text text-center line-clamp-2">${currentTitle}</span>
           </div>
-          <span class="text-text-muted [&_svg]:w-6 [&_svg]:h-6 shrink-0"><${Icon} svg=${iconChevronRight} /></span>
+          <span class="text-text-muted icon-lg shrink-0"><${Icon} svg=${iconChevronRight} /></span>
           <div class="flex flex-col items-center gap-2 w-32">
             <strong class="text-xs font-semibold text-text-muted text-center">Loading…</strong>
             <div class="skeleton h-40 w-full rounded-md"></div>
@@ -223,7 +223,7 @@ export function MigrationDialogue({
             </div>
             <span class="text-xs text-text text-center line-clamp-2">${currentTitle}</span>
           </div>
-          <span class="text-text-muted [&_svg]:w-6 [&_svg]:h-6 shrink-0"><${Icon} svg=${iconChevronRight} /></span>
+          <span class="text-text-muted icon-lg shrink-0"><${Icon} svg=${iconChevronRight} /></span>
           <div class="flex flex-col items-center gap-2 w-32">
             <strong class="text-xs font-semibold text-text-muted text-center">${targetTitle}</strong>
             <div class="cover">

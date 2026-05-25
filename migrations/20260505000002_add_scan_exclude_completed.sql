@@ -1,0 +1,1 @@
+ALTER TABLE settings ADD COLUMN scan_exclude_completed BOOLEAN NOT NULL DEFAULT FALSE;
