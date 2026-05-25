@@ -6,7 +6,7 @@ import { getMangaCoverUrl } from '../api.js';
 import { iconEllipsisVertical } from '../icons.js';
 
 /**
- * @typedef {{ id: number, title: string, source_id?: number | null, cover_image_url?: string | null, new_chapter_count?: number, is_orphaned?: boolean }} MangaCardData
+ * @typedef {{ id: number, title: string, source_id?: number | null, cover_image_url?: string | null }} MangaCardData
  */
 
 /**
@@ -43,22 +43,6 @@ export function createMangaCard({ manga, href, badge = null, extraClass = '', on
   titleSpan.textContent = manga.title;
   titleEl.appendChild(titleSpan);
 
-  if (manga.new_chapter_count && manga.new_chapter_count > 0) {
-    const newBadge = document.createElement('span');
-    newBadge.className = 'absolute top-1 left-1 bg-accent text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none z-10';
-    newBadge.textContent = manga.new_chapter_count > 99 ? '99+' : String(manga.new_chapter_count);
-    newBadge.setAttribute('aria-label', `${manga.new_chapter_count} new chapter${manga.new_chapter_count !== 1 ? 's' : ''}`);
-    coverWrap.appendChild(newBadge);
-  }
-
-  if (manga.is_orphaned) {
-    const orphanBadge = document.createElement('span');
-    orphanBadge.className = 'absolute top-1 right-1 bg-warn/20 text-warn text-xs font-semibold px-1.5 py-0.5 rounded leading-none z-10';
-    orphanBadge.textContent = 'Orphaned';
-    orphanBadge.setAttribute('aria-label', 'Source deleted — manga is orphaned');
-    coverWrap.appendChild(orphanBadge);
-  }
-
   coverWrap.appendChild(titleEl);
   link.appendChild(coverWrap);
   if (onCardClick) {
@@ -88,56 +72,6 @@ export function createMangaCard({ manga, href, badge = null, extraClass = '', on
   }
 
   return card;
-}
-
-/**
- * Adds or removes a scan-pending spinner overlay on a card within `root`.
- * @param {number} mangaId
- * @param {boolean} isScanning
- * @param {ParentNode} [root]
- */
-export function setMangaCardScanning(mangaId, isScanning, root = document) {
-  const card = root.querySelector(`[data-manga-id="${mangaId}"]`);
-  if (!card) return;
-  const coverWrap = card.querySelector('.relative');
-  if (!coverWrap) return;
-  const existing = coverWrap.querySelector('.js-scan-spinner');
-  if (isScanning && !existing) {
-    const spinner = document.createElement('div');
-    spinner.className = 'js-scan-spinner absolute top-1 right-1 w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin z-10';
-    coverWrap.appendChild(spinner);
-  } else if (!isScanning && existing) {
-    existing.remove();
-  }
-}
-
-/**
- * Updates the download progress bar overlay on a card within `root`.
- * Pass `pct = null` to remove the bar.
- * @param {number} mangaId
- * @param {number | null} pct  0–100
- * @param {ParentNode} [root]
- */
-export function setMangaCardDownloadProgress(mangaId, pct, root = document) {
-  const card = root.querySelector(`[data-manga-id="${mangaId}"]`);
-  if (!card) return;
-  const coverWrap = card.querySelector('.relative');
-  if (!coverWrap) return;
-  let bar = /** @type {HTMLElement | null} */ (coverWrap.querySelector('.js-dl-bar'));
-  if (pct === null) {
-    bar?.remove();
-    return;
-  }
-  if (!bar) {
-    bar = document.createElement('div');
-    bar.className = 'js-dl-bar absolute bottom-0 left-0 right-0 h-1 bg-black/30 z-10';
-    const fill = document.createElement('div');
-    fill.className = 'js-dl-bar-fill h-full bg-accent transition-[width] duration-300';
-    bar.appendChild(fill);
-    coverWrap.appendChild(bar);
-  }
-  const fill = /** @type {HTMLElement} */ (bar.querySelector('.js-dl-bar-fill'));
-  fill.style.width = `${pct}%`;
 }
 
 /**

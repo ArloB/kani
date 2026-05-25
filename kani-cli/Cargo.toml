@@ -3,16 +3,9 @@ name = "kani-cli"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-name = "kani_cli"
-path = "src/lib.rs"
-
 [[bin]]
 name = "kani-cli"
 path = "src/main.rs"
-
-[dev-dependencies]
-insta = { version = "1", features = ["yaml"] }
 
 [dependencies]
 clap        = { version = "4", features = ["derive"] }
@@ -22,9 +15,6 @@ serde_json  = "1"
 serde_yaml  = "0.9"
 tar         = "0.4"
 flate2      = "1"
-chumsky     = "1.0.0-alpha.8"
+chumsky     = "0.9"
 kani-shared = { path = "../kani-shared", features = ["builder"] }
-reqwest   = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
-ariadne   = "0.6.0"
-resvg     = "0.44"
-tiny-skia = "0.11"
+reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }

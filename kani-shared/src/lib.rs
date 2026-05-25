@@ -39,7 +39,7 @@ pub mod bindings {
 }
 
 pub use bindings::kani::extension::types as wit_types;
-pub use bindings::kani::extension::{html, http, scripting, utility};
+pub use bindings::kani::extension::{html, http, utility};
 
 pub mod extension;
 pub use extension::*;
@@ -51,6 +51,3 @@ pub use encoding::{decode_manga_id, encode_manga_id};
 
 pub mod ast;
 pub use ast::{OffsetType, PaginationConfig};
-
-pub mod filters;
-pub use filters::{ApplyFilters, ArrayFormat, FilterGroups};

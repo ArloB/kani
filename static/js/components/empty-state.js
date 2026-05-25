@@ -17,7 +17,7 @@ export function createEmptyState({ icon, title, subtitle, action }) {
 
   if (icon) {
     const iconEl = document.createElement('span');
-    iconEl.className = 'text-text-muted icon-3xl';
+    iconEl.className = 'text-text-muted [&_svg]:w-12 [&_svg]:h-12';
     iconEl.setAttribute('aria-hidden', 'true');
     iconEl.innerHTML = icon;
     el.appendChild(iconEl);

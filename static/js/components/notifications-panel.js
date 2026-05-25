@@ -105,7 +105,7 @@ function NotificationsPanel() {
       >
         <${Icon} svg=${iconBell} />
         ${badgeCount > 0 && html`
-          <span class="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center text-2xs font-bold bg-accent text-white rounded-full">
+          <span class="absolute -top-1 -right-1 min-w-[1.25rem] h-5 px-1 flex items-center justify-center text-[10px] font-bold bg-accent text-white rounded-full">
             ${badgeCount}
           </span>
         `}
@@ -124,7 +124,7 @@ function NotificationsPanel() {
               class="flex items-center gap-3 px-4 py-3 border-b border-border hover:bg-surface-2 transition-colors shrink-0"
               onClick=${() => setOpen(false)}
             >
-              <span class="shrink-0 icon-sm text-accent"><${Icon} svg=${iconDownload} /></span>
+              <span class="shrink-0 [&_svg]:w-4 [&_svg]:h-4 text-accent"><${Icon} svg=${iconDownload} /></span>
               <span class="flex-1 text-sm text-text">
                 <strong>${activeDownloads}</strong> chapter${activeDownloads !== 1 ? 's' : ''} downloading
               </span>
@@ -139,7 +139,7 @@ function NotificationsPanel() {
               class="flex items-center gap-3 px-4 py-3 border-b border-border hover:bg-surface-2 transition-colors shrink-0"
               onClick=${() => setOpen(false)}
             >
-              <span class="shrink-0 icon-sm text-danger"><${Icon} svg=${iconDownload} /></span>
+              <span class="shrink-0 [&_svg]:w-4 [&_svg]:h-4 text-danger"><${Icon} svg=${iconDownload} /></span>
               <span class="flex-1 text-sm text-text">
                 <strong class="text-danger">${failedDownloads}</strong> download${failedDownloads !== 1 ? 's' : ''} failed
               </span>
@@ -157,9 +157,9 @@ function NotificationsPanel() {
                     const dl = item.dl;
                     return html`
                       <li key=${'dl-' + dl.id} class="flex items-center gap-2 px-4 py-2.5">
-                        <span class="shrink-0 text-success icon-xs"><${Icon} svg=${iconCheck} /></span>
+                        <span class="shrink-0 text-success [&_svg]:w-3.5 [&_svg]:h-3.5"><${Icon} svg=${iconCheck} /></span>
                         <div class="flex-1 min-w-0">
-                          <p class="text-2xs font-semibold uppercase tracking-wide text-text-muted mb-0.5">Chapter Downloaded</p>
+                          <p class="text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-0.5">Chapter Downloaded</p>
                           ${dl.mangaId > 0 && html`
                             <a
                               href=${'/manga/' + dl.mangaId}
@@ -186,9 +186,9 @@ function NotificationsPanel() {
                     return html`
                       <li key=${'scan-' + n.mangaId} class="flex flex-col gap-1 px-4 py-3">
                         <div class="flex items-center gap-3">
-                          <span class="shrink-0 text-accent icon-xs"><${Icon} svg=${iconBell} /></span>
+                          <span class="shrink-0 text-accent [&_svg]:w-3.5 [&_svg]:h-3.5"><${Icon} svg=${iconBell} /></span>
                           <div class="flex-1 min-w-0">
-                            <p class="text-2xs font-semibold uppercase tracking-wide text-text-muted mb-0.5">New Chapter${n.count !== 1 ? 's' : ''}</p>
+                            <p class="text-[10px] font-semibold uppercase tracking-wide text-text-muted mb-0.5">New Chapter${n.count !== 1 ? 's' : ''}</p>
                             <a
                               href=${'/manga/' + n.mangaId}
                               class="text-sm font-medium text-text truncate block hover:text-accent transition-colors"

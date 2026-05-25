@@ -7,10 +7,9 @@ import htm from 'htm';
 import { getState, subscribe, hasPermission } from '../state.js';
 import { formatDate, isChapterDownloaded } from '../utils.js';
 import { downloadChapter, deleteChapter, cancelDownload, setChapterReadStatus, markChaptersUpTo } from '../api.js';
-import { iconCheck, iconDownload, iconCloud, iconCloudCheck } from '../icons.js';
+import { iconCheck, iconDownload } from '../icons.js';
 import { Icon } from './icon.js';
 import { ContextMenu } from './menu.js';
-import { cacheChapter, evictChapter } from '../offline.js';
 const html = htm.bind(h);
 
 /** @typedef {import('../state.js').ChapterProgress} ChapterProgress */
@@ -40,17 +39,14 @@ const OVERSCAN = 5;
  *   mangaId?: number | null,
  *   selectMode?: boolean,
  *   selected?: boolean,
- *   isCached?: boolean,
- *   kccAvailable?: boolean,
  *   onToggleRead?: (id: number, isRead: boolean) => void,
  *   onMarkUpTo?: (chapterNumber: number, isRead: boolean) => void,
  *   onToggleSelect?: (id: number) => void,
  *   onEnterSelectWithChapter?: (id: number) => void,
  *   onDelete?: (id: number) => void,
- *   onCacheChange?: (id: number, cached: boolean) => void,
  * }} props
  */
-function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selected, isCached, kccAvailable, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange }) {
+function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selected, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete }) {
   const [progress, setProgress] = useState(/** @type {ChapterProgress|null} */(null));
   const [isRead, setIsRead] = useState(!!chapter.read);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -125,12 +121,12 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
     } else if (isFailed) {
       statusIndicator = html`<span class="text-danger text-xs shrink-0 font-medium" aria-label="Download failed">!</span>`;
     } else if (downloaded && !isCancelled) {
-      statusIndicator = html`<span class="text-success shrink-0 icon-xs" aria-label="Downloaded"><${Icon} svg=${iconCheck} /></span>`;
+      statusIndicator = html`<span class="text-success shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5" aria-label="Downloaded"><${Icon} svg=${iconCheck} /></span>`;
     } else if (isRead) {
       // Read but not downloaded — show a muted checkmark so the read state is clearly visible
-      statusIndicator = html`<span class="text-text-faint shrink-0 icon-xs" aria-label="Read, not downloaded"><${Icon} svg=${iconCheck} /></span>`;
+      statusIndicator = html`<span class="text-text-faint shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5" aria-label="Read, not downloaded"><${Icon} svg=${iconCheck} /></span>`;
     } else {
-      statusIndicator = html`<span class="text-text-faint shrink-0 icon-xs" aria-label="Not downloaded"><${Icon} svg=${iconDownload} /></span>`;
+      statusIndicator = html`<span class="text-text-faint shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5" aria-label="Not downloaded"><${Icon} svg=${iconDownload} /></span>`;
     }
   }
 
@@ -167,27 +163,6 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
     } catch (err) { console.error('delete failed:', err); }
   }
 
-  async function handleCacheToggle() {
-    if (isCached) {
-      evictChapter(chapter.id);
-      onCacheChange?.(chapter.id, false);
-    } else {
-      const pageCount = Number(/** @type {any} */ (chapter).page_count ?? 0);
-      cacheChapter(chapter.id, pageCount);
-      onCacheChange?.(chapter.id, true);
-    }
-  }
-
-  function handleExportDownload(url) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = '';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setMenuOpen(false);
-  }
-
   async function handleCancel() {
     try { await cancelDownload(chapter.id); } catch (err) { console.error('cancel failed:', err); }
   }
@@ -210,21 +185,6 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
     ...(isFailed && canDownload ? [{ label: 'Retry download', action: handleRetry }] : []),
     ...(!isActive && !isFailed && !downloaded && canDownload ? [{ label: 'Download', action: handleDownload }] : []),
     ...(!isActive && downloaded && !isCancelled && canDelete ? [{ label: 'Delete download', action: handleDelete, danger: true }] : []),
-    // ── Offline caching ───────────────────────────────────────────────────
-    ...(!isActive && downloaded && !isCancelled && ('caches' in window) ? [
-      { divider: /** @type {true} */ (true) },
-      ...(isCached
-        ? [{ label: 'Remove from offline cache', action: handleCacheToggle }]
-        : [{ label: 'Save for offline', action: handleCacheToggle }]),
-    ] : []),
-    // ── Export ────────────────────────────────────────────────────────────
-    ...(!isActive && downloaded && !isCancelled ? [
-      { divider: /** @type {true} */ (true) },
-      { label: 'Export as EPUB', action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/epub`) },
-      { label: 'Export as EPUB (Kindle)', action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/epub?profile=kindle-pw`) },
-      { label: 'Export as KEPUB (Kobo)', action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/kepub?profile=kobo-libra`) },
-      ...(kccAvailable ? [{ label: 'Export as MOBI (Kindle)', action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/kcc?format=MOBI&profile=KPW5&manga=true`) }] : []),
-    ] : []),
   ] : [];
 
   const menuBtn = inLibrary ? html`
@@ -308,16 +268,7 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
           ${chapter.date_uploaded && html`<span>${formatDate(chapter.date_uploaded)}</span>`}
         </div>
       </div>
-      <div class="flex items-center gap-1 shrink-0">
-        ${downloaded && !isActive && !isCancelled && ('caches' in window) && html`
-          <span
-            class=${'icon-xs ' + (isCached ? 'text-accent' : 'text-text-faint')}
-            title=${isCached ? 'Cached for offline' : 'Not cached'}
-            aria-label=${isCached ? 'Cached for offline' : 'Not cached'}
-          >
-            <${Icon} svg=${isCached ? iconCloudCheck : iconCloud} />
-          </span>
-        `}
+      <div class="flex items-center shrink-0">
         ${menuBtn}
       </div>
     </div>
@@ -360,12 +311,9 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
  *   onExitSelect?: () => void,
  *   onEnterSelectWithChapter?: (id: number) => void,
  *   onDelete?: (id: number) => void,
- *   cachedChapterIds?: Set<number>,
- *   kccAvailable?: boolean,
- *   onCacheChange?: (id: number, cached: boolean) => void,
  * }} props
  */
-export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId, height, hasMore, loading, selectMode, selected, canDownload, canDelete, allSelectedProp, onLoadMore, onToggleRead, onMarkUpTo, onToggleSelect, onSelectAll, onFlipSelection, onSelectUndownloaded, onSelectUnread, onBulkRead, onBulkDownload, onBulkDelete, onExitSelect, onEnterSelectWithChapter, onDelete, cachedChapterIds, kccAvailable, onCacheChange }) {
+export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId, height, hasMore, loading, selectMode, selected, canDownload, canDelete, allSelectedProp, onLoadMore, onToggleRead, onMarkUpTo, onToggleSelect, onSelectAll, onFlipSelection, onSelectUndownloaded, onSelectUnread, onBulkRead, onBulkDownload, onBulkDelete, onExitSelect, onEnterSelectWithChapter, onDelete }) {
   const [scrollTop, setScrollTop] = useState(0);
   const sentinelRef = useRef(/** @type {HTMLDivElement | null} */(null));
 
@@ -453,9 +401,6 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
               onToggleSelect=${onToggleSelect}
               onEnterSelectWithChapter=${onEnterSelectWithChapter}
               onDelete=${onDelete}
-              isCached=${cachedChapterIds ? cachedChapterIds.has(ch.id) : false}
-              kccAvailable=${!!kccAvailable}
-              onCacheChange=${onCacheChange}
             />
           `)}
           ${loading ? skeletonRow : (hasMore && html`<div ref=${sentinelRef} class="h-px" />`)}

@@ -50,7 +50,7 @@ export function createUpdateGroup({ group }) {
 
   // Chapter list
   const list = document.createElement('ul');
-  list.className = 'flex flex-col gap-0.5 pl-13'; /* justified: aligns with thumbnail width (48px) + gap */
+  list.className = 'flex flex-col gap-0.5 pl-[52px]';
 
   for (const ch of group.chapters) {
     const item = document.createElement('li');

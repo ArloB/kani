@@ -7,69 +7,12 @@ use std::{collections::HashMap, sync::Arc};
 const MAX_RETRIES: u32 = 3;
 const BASE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 const CREDENTIAL_TTL_SECS: u64 = 3600;
-const RETRY_AFTER_CAP_SECS: u64 = 60;
-const CIRCUIT_OPEN_THRESHOLD: u32 = 5;
-const CIRCUIT_COOLDOWN_SECS: u64 = 30;
-
-pub struct HostCircuit {
-    consecutive_failures: std::sync::atomic::AtomicU32,
-    open_until: std::sync::Mutex<Option<std::time::Instant>>,
-}
-
-impl HostCircuit {
-    fn new() -> Arc<Self> {
-        Arc::new(Self {
-            consecutive_failures: std::sync::atomic::AtomicU32::new(0),
-            open_until: std::sync::Mutex::new(None),
-        })
-    }
-}
-
-/// 429, 502, 504 are retryable. 503 is excluded — it is the Cloudflare challenge signal.
-fn is_retryable(status: rquest::StatusCode) -> bool {
-    matches!(
-        status,
-        rquest::StatusCode::TOO_MANY_REQUESTS
-            | rquest::StatusCode::BAD_GATEWAY
-            | rquest::StatusCode::GATEWAY_TIMEOUT
-    )
-}
-
-/// Parses Retry-After (integer seconds or HTTP-date), caps at RETRY_AFTER_CAP_SECS, falls back to exponential backoff.
-fn compute_delay(headers: Option<&rquest::header::HeaderMap>, attempt: u32) -> std::time::Duration {
-    let backoff = BASE_DELAY * 2u32.pow(attempt);
-    headers
-        .and_then(|h| h.get(rquest::header::RETRY_AFTER))
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| {
-            s.parse::<u64>()
-                .ok()
-                .map(|secs| secs.min(RETRY_AFTER_CAP_SECS))
-                .or_else(|| {
-                    time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc2822)
-                        .ok()
-                        .map(|dt| {
-                            let now = time::OffsetDateTime::now_utc();
-                            (dt - now).whole_seconds().max(0) as u64
-                        })
-                        .map(|secs| secs.min(RETRY_AFTER_CAP_SECS))
-                })
-        })
-        .map(std::time::Duration::from_secs)
-        .unwrap_or(backoff)
-}
-
-fn jitter() -> std::time::Duration {
-    use rand::RngExt;
-    std::time::Duration::from_millis(rand::rng().random_range(0u64..1000))
-}
 
 #[derive(Clone, Default)]
 pub struct CachedCredentials {
     cookies: String,
     user_agent: Option<String>,
     stored_at: Option<std::time::Instant>,
-    challenge_url: Option<String>,
 }
 
 pub enum SmartResponse {
@@ -156,7 +99,6 @@ pub struct SmartClient {
     pub credentials: Arc<ArcSwap<HashMap<String, CachedCredentials>>>,
     solver_url: Arc<ArcSwap<Option<String>>>,
     pub solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    pub host_circuits: Arc<dashmap::DashMap<String, Arc<HostCircuit>>>,
 }
 
 impl SmartClient {
@@ -168,7 +110,6 @@ impl SmartClient {
             .dns_resolver(Arc::new(resolver))
             .pool_idle_timeout(std::time::Duration::from_secs(300))
             .pool_max_idle_per_host(100)
-            .timeout(std::time::Duration::from_secs(35))
             .build()?;
 
         Ok(Self {
@@ -176,7 +117,6 @@ impl SmartClient {
             credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
             solving: Arc::new(dashmap::DashMap::new()),
-            host_circuits: Arc::new(dashmap::DashMap::new()),
         })
     }
 
@@ -184,7 +124,6 @@ impl SmartClient {
         solver_url: Option<String>,
         credentials: Arc<ArcSwap<HashMap<String, CachedCredentials>>>,
         solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-        host_circuits: Arc<dashmap::DashMap<String, Arc<HostCircuit>>>,
     ) -> Result<Self> {
         let resolver = ValidatingResolver::new()?;
         let client = rquest::Client::builder()
@@ -193,7 +132,6 @@ impl SmartClient {
             .dns_resolver(Arc::new(resolver))
             .pool_idle_timeout(std::time::Duration::from_secs(300))
             .pool_max_idle_per_host(100)
-            .timeout(std::time::Duration::from_secs(35))
             .build()?;
 
         Ok(Self {
@@ -201,53 +139,7 @@ impl SmartClient {
             credentials,
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
             solving,
-            host_circuits,
         })
-    }
-
-    fn circuit_for(&self, domain: &str) -> Arc<HostCircuit> {
-        self.host_circuits
-            .entry(domain.to_string())
-            .or_insert_with(HostCircuit::new)
-            .clone()
-    }
-
-    fn is_circuit_open(&self, domain: &str) -> bool {
-        let Some(circuit) = self.host_circuits.get(domain) else {
-            return false;
-        };
-        let guard = circuit.open_until.lock().expect("circuit mutex poisoned");
-        guard
-            .map(|until| std::time::Instant::now() < until)
-            .unwrap_or(false)
-    }
-
-    fn record_success(&self, domain: &str) {
-        let Some(circuit) = self.host_circuits.get(domain) else {
-            return;
-        };
-        circuit
-            .consecutive_failures
-            .store(0, std::sync::atomic::Ordering::Relaxed);
-        *circuit.open_until.lock().expect("circuit mutex poisoned") = None;
-    }
-
-    fn record_failure(&self, domain: &str) {
-        let circuit = self.circuit_for(domain);
-        let prev = circuit
-            .consecutive_failures
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if prev + 1 >= CIRCUIT_OPEN_THRESHOLD {
-            let until =
-                std::time::Instant::now() + std::time::Duration::from_secs(CIRCUIT_COOLDOWN_SECS);
-            *circuit.open_until.lock().expect("circuit mutex poisoned") = Some(until);
-            tracing::warn!(
-                "Circuit opened for {} after {} consecutive failures (cooldown {}s)",
-                domain,
-                prev + 1,
-                CIRCUIT_COOLDOWN_SECS,
-            );
-        }
     }
 
     pub async fn send_request(&self, request: rquest::Request) -> Result<SmartResponse> {
@@ -291,57 +183,45 @@ impl SmartClient {
             }
         }
 
-        if self.is_circuit_open(&domain) {
-            return Err(crate::error::Error::Other(format!(
-                "Circuit open for {domain}: host temporarily unavailable"
-            )));
-        }
-
         let mut current_request = request;
         let mut attempt = 0;
 
         loop {
             let request_clone_for_retry = current_request.try_clone();
 
-            let resp = match self.client.execute(current_request).await {
-                Ok(r) => r,
-                Err(e) if attempt < MAX_RETRIES && request_clone_for_retry.is_some() => {
-                    let delay = compute_delay(None, attempt) + jitter();
-                    tracing::warn!(
-                        "HTTP request failed ({}), retrying in {:?} (attempt {}/{})",
-                        e,
-                        delay,
-                        attempt + 1,
-                        MAX_RETRIES,
-                    );
-                    self.record_failure(&domain);
-                    tokio::time::sleep(delay).await;
-                    current_request = request_clone_for_retry.unwrap();
-                    attempt += 1;
-                    continue;
-                }
-                Err(e) => return Err(e.into()),
-            };
+            let resp = self.client.execute(current_request).await?;
             let status = resp.status();
 
-            if is_retryable(status) {
+            if status == rquest::StatusCode::TOO_MANY_REQUESTS {
                 if attempt < MAX_RETRIES
                     && let Some(next_req) = request_clone_for_retry
                 {
-                    let delay = compute_delay(Some(resp.headers()), attempt) + jitter();
+                    let delay = if let Some(retry_after) =
+                        resp.headers().get(rquest::header::RETRY_AFTER)
+                    {
+                        retry_after
+                            .to_str()
+                            .ok()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .map(std::time::Duration::from_secs)
+                            .unwrap_or_else(|| BASE_DELAY * 2u32.pow(attempt))
+                    } else {
+                        BASE_DELAY * 2u32.pow(attempt)
+                    };
+
                     tracing::warn!(
-                        "Upstream returned {}, retrying in {:?} (attempt {}/{})",
-                        status.as_u16(),
+                        "Received 429 Too Many Requests, retrying in {:?} (attempt {}/{})",
                         delay,
                         attempt + 1,
-                        MAX_RETRIES,
+                        MAX_RETRIES
                     );
                     tokio::time::sleep(delay).await;
+
                     current_request = next_req;
                     attempt += 1;
                     continue;
                 }
-                self.record_failure(&domain);
+
                 return Ok(SmartResponse::Normal(resp));
             }
 
@@ -370,10 +250,8 @@ impl SmartClient {
                     {
                         let url_str = url.as_str().to_string();
                         let resp = self.get_rendered_page_once(&url_str).await?;
-                        self.record_success(&domain);
                         return Ok(resp);
                     } else {
-                        self.record_success(&domain);
                         return Ok(SmartResponse::Buffered {
                             status,
                             url,
@@ -382,7 +260,6 @@ impl SmartClient {
                         });
                     }
                 } else {
-                    self.record_success(&domain);
                     return Ok(SmartResponse::Normal(resp));
                 }
             }
@@ -393,22 +270,22 @@ impl SmartClient {
                 && request_clone_for_retry.is_some()
             {
                 let url = resp.url().as_str().to_string();
-                let cf_domain = url
+                let domain = url
                     .parse::<rquest::Url>()
                     .ok()
                     .and_then(|u| u.host_str().map(base_domain));
 
-                if let Some(ref d) = cf_domain {
+                if let Some(domain) = domain {
                     let mut creds = (**self.credentials.load()).clone();
-                    if creds.remove(d).is_some() {
+                    if creds.remove(&domain).is_some() {
                         tracing::info!(
                             "Stored credentials for {} returned 403, clearing and re-solving",
-                            d
+                            domain
                         );
                         self.credentials.store(Arc::new(creds));
                     }
                 }
-
+                
                 let req_headers = request_clone_for_retry.as_ref().map(|r| r.headers());
                 let (new_cookies, new_ua) = self.solve_challenge_once(&url, req_headers).await?;
 
@@ -424,7 +301,6 @@ impl SmartClient {
                     }
 
                     let resp = self.client.execute(request).await?;
-                    self.record_success(&domain);
                     return Ok(SmartResponse::Normal(resp));
                 }
             }
@@ -448,12 +324,6 @@ impl SmartClient {
         let mut current_url = initial_url.to_string();
         let mut solver_headers = rquest::header::HeaderMap::new();
         let mut solved = false;
-
-        let circuit_domain = initial_url
-            .parse::<rquest::Url>()
-            .ok()
-            .and_then(|u| u.host_str().map(base_domain))
-            .unwrap_or_default();
 
         if let Ok(parsed) = initial_url.parse::<rquest::Url>()
             && let Some(domain) = parsed.host_str().map(base_domain)
@@ -483,16 +353,7 @@ impl SmartClient {
             }
         }
 
-        if self.is_circuit_open(&circuit_domain) {
-            return Err(crate::error::Error::Other(format!(
-                "Circuit open for {circuit_domain}: host temporarily unavailable"
-            )));
-        }
-
-        let mut redirect_count = 0usize;
-        let mut retry_count = 0u32;
-
-        loop {
+        for _ in 0..MAX_REDIRECTS {
             let mut req_builder = self.client.get(&current_url);
             if current_url == initial_url
                 && let Some(ref h) = headers
@@ -503,42 +364,10 @@ impl SmartClient {
                 req_builder = req_builder.headers(solver_headers.clone());
             }
             let req = req_builder.build()?;
-
+            
             let current_headers = req.headers().clone();
 
-            let resp = match self.client.execute(req).await {
-                Ok(r) => r,
-                Err(e) if retry_count < MAX_RETRIES => {
-                    let delay = compute_delay(None, retry_count) + jitter();
-                    tracing::warn!(
-                        "safe_get network error ({}), retrying in {:?} (attempt {}/{})",
-                        e,
-                        delay,
-                        retry_count + 1,
-                        MAX_RETRIES,
-                    );
-                    self.record_failure(&circuit_domain);
-                    retry_count += 1;
-                    tokio::time::sleep(delay).await;
-                    continue;
-                }
-                Err(e) => return Err(e.into()),
-            };
-
-            if is_retryable(resp.status()) && retry_count < MAX_RETRIES {
-                let delay = compute_delay(Some(resp.headers()), retry_count) + jitter();
-                tracing::warn!(
-                    "safe_get got {}, retrying in {:?} (attempt {}/{})",
-                    resp.status().as_u16(),
-                    delay,
-                    retry_count + 1,
-                    MAX_RETRIES,
-                );
-                self.record_failure(&circuit_domain);
-                retry_count += 1;
-                tokio::time::sleep(delay).await;
-                continue;
-            }
+            let resp = self.client.execute(req).await?;
 
             if resp.status().is_redirection() {
                 let location = resp
@@ -566,13 +395,6 @@ impl SmartClient {
                     }
                 }
 
-                redirect_count += 1;
-                if redirect_count >= MAX_REDIRECTS {
-                    return Err(crate::error::Error::Other(format!(
-                        "too many redirects following '{}'",
-                        initial_url
-                    )));
-                }
                 current_url = next.to_string();
             } else if (resp.status() == rquest::StatusCode::FORBIDDEN
                 || resp.status() == rquest::StatusCode::SERVICE_UNAVAILABLE)
@@ -596,9 +418,7 @@ impl SmartClient {
                     }
                 }
 
-                let (cookies, ua) = self
-                    .solve_challenge_once(&url, Some(&current_headers))
-                    .await?;
+                let (cookies, ua) = self.solve_challenge_once(&url, Some(&current_headers)).await?;
 
                 if let Ok(val) = rquest::header::HeaderValue::from_str(&cookies) {
                     solver_headers.insert(rquest::header::COOKIE, val);
@@ -609,10 +429,14 @@ impl SmartClient {
 
                 solved = true;
             } else {
-                self.record_success(&circuit_domain);
                 return Ok(SmartResponse::Normal(resp));
             }
         }
+
+        Err(crate::error::Error::Other(format!(
+            "too many redirects following '{}'",
+            initial_url
+        )))
     }
 
     pub fn inner(&self) -> &rquest::Client {
@@ -620,9 +444,9 @@ impl SmartClient {
     }
 
     async fn solve_challenge(
-        &self,
+        &self, 
         url: &str,
-        headers: Option<&rquest::header::HeaderMap>,
+        headers: Option<&rquest::header::HeaderMap>
     ) -> Result<(String, String)> {
         let guard = self.solver_url.load();
         let solver_url = guard
@@ -636,7 +460,7 @@ impl SmartClient {
           "url": url,
           "maxTimeout": 60000
         });
-
+        
         if let Some(h) = headers {
             let mut header_map = serde_json::Map::new();
             for (k, v) in h.iter() {
@@ -699,9 +523,9 @@ impl SmartClient {
     }
 
     async fn solve_challenge_once(
-        &self,
+        &self, 
         url: &str,
-        headers: Option<&rquest::header::HeaderMap>,
+        headers: Option<&rquest::header::HeaderMap>
     ) -> Result<(String, String)> {
         let base = url
             .parse::<rquest::Url>()
@@ -865,45 +689,9 @@ impl SmartClient {
                 cookies: cookies.to_string(),
                 user_agent: Some(user_agent.to_string()),
                 stored_at: Some(std::time::Instant::now()),
-                challenge_url: Some(url.to_string()),
             },
         );
         self.credentials.store(Arc::new(creds));
-    }
-
-    pub async fn refresh_expiring_credentials(&self) {
-        if self.solver_url.load().is_none() {
-            return;
-        }
-
-        const REFRESH_THRESHOLD_SECS: u64 = 300;
-
-        let domains_to_refresh: Vec<(String, String)> = {
-            let creds = self.credentials.load();
-            creds
-                .iter()
-                .filter_map(|(domain, cred)| {
-                    let age = cred.stored_at?.elapsed().as_secs();
-                    let expiring_soon = age + REFRESH_THRESHOLD_SECS >= CREDENTIAL_TTL_SECS;
-                    let url = cred.challenge_url.clone()?;
-                    if expiring_soon {
-                        Some((domain.clone(), url))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        };
-
-        for (domain, url) in domains_to_refresh {
-            tracing::info!("Proactively refreshing credentials for {}", domain);
-            match self.solve_challenge_once(&url, None).await {
-                Ok((cookies, ua)) => self.store_credentials(&url, &cookies, &ua),
-                Err(e) => {
-                    tracing::warn!("Proactive credential refresh failed for {}: {}", domain, e)
-                }
-            }
-        }
     }
 
     pub fn update_solver_url(&self, url: Option<String>) {
@@ -960,557 +748,4 @@ fn base_domain(host: &str) -> String {
                 .map(|s| s.to_string())
         })
         .unwrap_or_else(|| host.to_string())
-}
-
-/// Test-only constructor: uses Chrome emulation (for HTTP/1.1 compatibility with wiremock) but
-/// omits ValidatingResolver (which blocks 127.0.0.1) and the per-request timeout (which
-/// interacts badly with `#[tokio::test(start_paused = true)]`).
-#[cfg(test)]
-impl SmartClient {
-    pub fn new_for_test() -> Result<Self> {
-        let client = rquest::Client::builder()
-            .emulation(rquest_util::Emulation::Chrome130)
-            .redirect(rquest::redirect::Policy::none())
-            .build()?;
-        Ok(Self {
-            client,
-            credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
-            solver_url: Arc::new(ArcSwap::from_pointee(None)),
-            solving: Arc::new(dashmap::DashMap::new()),
-            host_circuits: Arc::new(dashmap::DashMap::new()),
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used)]
-    use super::*;
-
-    // ── is_retryable ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn retryable_on_429() {
-        assert!(is_retryable(rquest::StatusCode::TOO_MANY_REQUESTS));
-    }
-
-    #[test]
-    fn retryable_on_502() {
-        assert!(is_retryable(rquest::StatusCode::BAD_GATEWAY));
-    }
-
-    #[test]
-    fn retryable_on_504() {
-        assert!(is_retryable(rquest::StatusCode::GATEWAY_TIMEOUT));
-    }
-
-    #[test]
-    fn not_retryable_on_200() {
-        assert!(!is_retryable(rquest::StatusCode::OK));
-    }
-
-    #[test]
-    fn not_retryable_on_400() {
-        assert!(!is_retryable(rquest::StatusCode::BAD_REQUEST));
-    }
-
-    #[test]
-    fn not_retryable_on_403() {
-        assert!(!is_retryable(rquest::StatusCode::FORBIDDEN));
-    }
-
-    #[test]
-    fn not_retryable_on_503() {
-        // 503 is deliberately excluded (Cloudflare challenge signal)
-        assert!(!is_retryable(rquest::StatusCode::SERVICE_UNAVAILABLE));
-    }
-
-    // ── compute_delay ────────────────────────────────────────────────────────
-
-    #[test]
-    fn no_header_gives_exponential_backoff() {
-        // attempt 0 → BASE_DELAY * 2^0 = 5s; attempt 1 → 10s; attempt 2 → 20s
-        let d0 = compute_delay(None, 0);
-        let d1 = compute_delay(None, 1);
-        let d2 = compute_delay(None, 2);
-        assert_eq!(d0, BASE_DELAY);
-        assert_eq!(d1, BASE_DELAY * 2);
-        assert_eq!(d2, BASE_DELAY * 4);
-    }
-
-    #[test]
-    fn retry_after_integer_seconds_used() {
-        let mut headers = rquest::header::HeaderMap::new();
-        headers.insert(
-            rquest::header::RETRY_AFTER,
-            rquest::header::HeaderValue::from_static("10"),
-        );
-        let d = compute_delay(Some(&headers), 0);
-        assert_eq!(d, std::time::Duration::from_secs(10));
-    }
-
-    #[test]
-    fn retry_after_capped_at_max() {
-        let mut headers = rquest::header::HeaderMap::new();
-        // 9999s > RETRY_AFTER_CAP_SECS (60)
-        headers.insert(
-            rquest::header::RETRY_AFTER,
-            rquest::header::HeaderValue::from_static("9999"),
-        );
-        let d = compute_delay(Some(&headers), 0);
-        assert_eq!(d, std::time::Duration::from_secs(RETRY_AFTER_CAP_SECS));
-    }
-
-    #[test]
-    fn empty_headers_falls_back_to_backoff() {
-        let headers = rquest::header::HeaderMap::new();
-        let d = compute_delay(Some(&headers), 0);
-        assert_eq!(d, BASE_DELAY);
-    }
-
-    // ── base_domain ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn base_domain_strips_subdomain() {
-        let d = base_domain("sub.example.com");
-        assert_eq!(d, "example.com");
-    }
-
-    #[test]
-    fn base_domain_preserves_apex() {
-        let d = base_domain("example.com");
-        assert_eq!(d, "example.com");
-    }
-
-    #[test]
-    fn base_domain_is_deterministic_for_ips() {
-        // publicsuffix parses IP octets as domain labels; the exact output is
-        // library-defined — just verify the call doesn't panic and is stable.
-        let first = base_domain("8.8.8.8");
-        let second = base_domain("8.8.8.8");
-        assert_eq!(first, second);
-    }
-
-    // ── SmartResponse (Buffered variant) ─────────────────────────────────────
-
-    #[tokio::test]
-    async fn smart_response_buffered_accessors() {
-        let mut headers = rquest::header::HeaderMap::new();
-        headers.insert(
-            rquest::header::CONTENT_TYPE,
-            rquest::header::HeaderValue::from_static("application/json"),
-        );
-        let resp = SmartResponse::Buffered {
-            status: rquest::StatusCode::OK,
-            url: rquest::Url::parse("https://example.com/test").unwrap(),
-            headers,
-            body: bytes::Bytes::from("hello world"),
-        };
-        assert_eq!(resp.status(), rquest::StatusCode::OK);
-        assert_eq!(resp.url().as_str(), "https://example.com/test");
-        assert!(resp.headers().contains_key(rquest::header::CONTENT_TYPE));
-    }
-
-    #[tokio::test]
-    async fn smart_response_buffered_text() {
-        let resp = SmartResponse::Buffered {
-            status: rquest::StatusCode::OK,
-            url: rquest::Url::parse("https://example.com/").unwrap(),
-            headers: rquest::header::HeaderMap::new(),
-            body: bytes::Bytes::from("test body"),
-        };
-        let text = resp.text().await.unwrap();
-        assert_eq!(text, "test body");
-    }
-
-    #[tokio::test]
-    async fn smart_response_buffered_bytes() {
-        let resp = SmartResponse::Buffered {
-            status: rquest::StatusCode::NOT_FOUND,
-            url: rquest::Url::parse("https://example.com/").unwrap(),
-            headers: rquest::header::HeaderMap::new(),
-            body: bytes::Bytes::from_static(b"\x01\x02\x03"),
-        };
-        let b = resp.bytes().await.unwrap();
-        assert_eq!(&b[..], b"\x01\x02\x03");
-    }
-
-    // ── Circuit breaker ───────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn circuit_starts_closed() {
-        let client = SmartClient::new(None).unwrap();
-        assert!(!client.is_circuit_open("example.com"));
-    }
-
-    #[tokio::test]
-    async fn circuit_opens_after_threshold_failures() {
-        let client = SmartClient::new(None).unwrap();
-        for _ in 0..CIRCUIT_OPEN_THRESHOLD {
-            client.record_failure("example.com");
-        }
-        assert!(client.is_circuit_open("example.com"));
-    }
-
-    #[tokio::test]
-    async fn record_success_resets_failure_counter() {
-        let client = SmartClient::new(None).unwrap();
-        // record failures but not enough to trip the breaker, then clear
-        for _ in 0..CIRCUIT_OPEN_THRESHOLD - 1 {
-            client.record_failure("example.com");
-        }
-        client.record_success("example.com");
-        // after reset, one more failure should not open the circuit
-        client.record_failure("example.com");
-        assert!(!client.is_circuit_open("example.com"));
-    }
-
-    #[tokio::test]
-    async fn record_success_on_unknown_domain_is_noop() {
-        let client = SmartClient::new(None).unwrap();
-        // should not panic or insert an entry
-        client.record_success("never-seen.com");
-        assert!(!client.is_circuit_open("never-seen.com"));
-    }
-
-    #[tokio::test]
-    async fn collect_bytes_limited_rejects_large_content_length() {
-        use futures::stream;
-        let small_chunk = bytes::Bytes::from("hello");
-        // The content-length hint says 1000 but limit is 10 → should reject immediately
-        let s = stream::iter(vec![Ok::<_, crate::error::Error>(small_chunk)]);
-        let err = collect_bytes_limited(s, Some(1000), 10).await.unwrap_err();
-        assert!(err.to_string().contains("exceeds limit"));
-    }
-
-    #[tokio::test]
-    async fn collect_bytes_limited_rejects_oversized_body() {
-        use futures::stream;
-        let big = bytes::Bytes::from(vec![0u8; 20]);
-        let s = stream::iter(vec![Ok::<_, crate::error::Error>(big)]);
-        let err = collect_bytes_limited(s, None, 10).await.unwrap_err();
-        assert!(err.to_string().contains("exceeded limit"));
-    }
-
-    #[tokio::test]
-    async fn collect_bytes_limited_succeeds_within_limit() {
-        use futures::stream;
-        let data = bytes::Bytes::from("hello");
-        let s = stream::iter(vec![Ok::<_, crate::error::Error>(data)]);
-        let result = collect_bytes_limited(s, None, 100).await.unwrap();
-        assert_eq!(&result[..], b"hello");
-    }
-
-    // ── SmartClient integration (wiremock) ───────────────────────────────────
-
-    use wiremock::matchers::{body_partial_json, header, method, path, query_param};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    #[tokio::test]
-    async fn get_request_reaches_server() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/hello"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("world"))
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .get(format!("{}/hello", server.uri()))
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert_eq!(resp.status(), rquest::StatusCode::OK);
-        let body = resp.text().await.unwrap();
-        assert_eq!(body, "world");
-    }
-
-    #[tokio::test]
-    async fn post_request_json_body_reaches_server() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api"))
-            .and(body_partial_json(serde_json::json!({"k": "v"})))
-            .respond_with(ResponseTemplate::new(201))
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .post(format!("{}/api", server.uri()))
-            .json(&serde_json::json!({"k": "v"}))
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert_eq!(resp.status().as_u16(), 201);
-    }
-
-    #[tokio::test]
-    async fn post_request_form_body_reaches_server() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/form"))
-            .and(header("content-type", "application/x-www-form-urlencoded"))
-            .respond_with(ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .post(format!("{}/form", server.uri()))
-            .form(&[("field", "val")])
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert_eq!(resp.status(), rquest::StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn custom_header_forwarded_to_server() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/h"))
-            .and(header("x-custom", "test-val"))
-            .respond_with(ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .get(format!("{}/h", server.uri()))
-            .header("x-custom", "test-val")
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert_eq!(resp.status(), rquest::StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn query_params_forwarded_to_server() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/search"))
-            .and(query_param("q", "manga"))
-            .respond_with(ResponseTemplate::new(200))
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .get(format!("{}/search?q=manga", server.uri()))
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert_eq!(resp.status(), rquest::StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn html_response_is_buffered() {
-        let server = MockServer::start().await;
-        // Use set_body_raw so we control the mime type directly.
-        // set_body_string always sets mime="text/plain" which generate_response
-        // later inserts as Content-Type, overriding any insert_header call.
-        Mock::given(method("GET"))
-            .and(path("/page"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_raw(b"<html><body>hello</body></html>".to_vec(), "text/html"),
-            )
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .get(format!("{}/page", server.uri()))
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert!(
-            matches!(resp, SmartResponse::Buffered { .. }),
-            "expected Buffered for text/html"
-        );
-        let body = resp.text().await.unwrap();
-        assert!(body.contains("hello"));
-    }
-
-    #[tokio::test]
-    async fn json_response_is_normal() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/data"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .insert_header("content-type", "application/json")
-                    .set_body_string(r#"{"ok":true}"#),
-            )
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .get(format!("{}/data", server.uri()))
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert!(matches!(resp, SmartResponse::Normal(_)));
-    }
-
-    #[tokio::test]
-    async fn not_found_404_returns_normal_not_error() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/missing"))
-            .respond_with(ResponseTemplate::new(404))
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .get(format!("{}/missing", server.uri()))
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert_eq!(resp.status(), rquest::StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn server_error_500_returned_as_normal() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/err"))
-            .respond_with(ResponseTemplate::new(500))
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .get(format!("{}/err", server.uri()))
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert_eq!(resp.status(), rquest::StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn retries_on_429_then_succeeds() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/retry"))
-            .respond_with(ResponseTemplate::new(429))
-            .up_to_n_times(2)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/retry"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .get(format!("{}/retry", server.uri()))
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert_eq!(resp.status(), rquest::StatusCode::OK);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn retries_exhausted_returns_last_429() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/always429"))
-            .respond_with(ResponseTemplate::new(429))
-            .expect((1 + MAX_RETRIES) as u64)
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .get(format!("{}/always429", server.uri()))
-            .build()
-            .unwrap();
-        let resp = client.send_request(req).await.unwrap();
-        assert_eq!(resp.status().as_u16(), 429);
-    }
-
-    #[tokio::test]
-    async fn safe_get_follows_redirect() {
-        let server = MockServer::start().await;
-        let dest = format!("{}/dest", server.uri());
-        Mock::given(method("GET"))
-            .and(path("/redir"))
-            .respond_with(ResponseTemplate::new(301).insert_header("location", dest.as_str()))
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/dest"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("final"))
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let resp = client
-            .safe_get(&format!("{}/redir", server.uri()), None)
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), rquest::StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn safe_get_too_many_redirects_returns_error() {
-        let server = MockServer::start().await;
-        // 5 sequential redirects triggers the MAX_REDIRECTS guard
-        for i in 1..=5 {
-            let next = format!("{}/r{}", server.uri(), i + 1);
-            Mock::given(method("GET"))
-                .and(path(format!("/r{}", i)))
-                .respond_with(ResponseTemplate::new(301).insert_header("location", next.as_str()))
-                .mount(&server)
-                .await;
-        }
-
-        let client = SmartClient::new_for_test().unwrap();
-        let Err(err) = client.safe_get(&format!("{}/r1", server.uri()), None).await else {
-            panic!("expected error for too many redirects");
-        };
-        let msg = err.to_string();
-        assert!(
-            msg.contains("too many redirects") || msg.contains("redirect"),
-            "{msg}"
-        );
-    }
-
-    #[tokio::test]
-    async fn safe_get_redirect_to_non_http_scheme_returns_error() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/bad"))
-            .respond_with(
-                ResponseTemplate::new(301).insert_header("location", "ftp://example.com/file"),
-            )
-            .mount(&server)
-            .await;
-
-        let client = SmartClient::new_for_test().unwrap();
-        let Err(err) = client
-            .safe_get(&format!("{}/bad", server.uri()), None)
-            .await
-        else {
-            panic!("expected error for bad redirect scheme");
-        };
-        assert!(err.to_string().contains("forbidden scheme"), "{err}");
-    }
 }

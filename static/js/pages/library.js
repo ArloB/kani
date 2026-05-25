@@ -4,16 +4,16 @@
 import { h, render } from 'preact';
 import htm from 'htm';
 import * as api from '../api.js';
-import { hasPermission, getState, setState, updateState, subscribe } from '../state.js';
+import { hasPermission, getState, subscribe } from '../state.js';
 import { navigate } from '../router.js';
-import { debounce, getLocal, getLocalInt, setLocal, hasNextPage, confirmDialog, formatChapterTitle, deferredSkeleton } from '../utils.js';
+import { debounce, getLocal, getLocalInt, setLocal, hasNextPage, confirmDialog, formatChapterTitle } from '../utils.js';
 
 /** @type {Record<string, number>} */
 const STATUS_VALUES = { ongoing: 0, completed: 1, hiatus: 2, cancelled: 3, unknown: 4 };
 import { Combobox } from '../components/combobox.js';
 import { renderCategoryTabs } from '../components/tabs.js';
 import { renderPagination } from '../components/pagination.js';
-import { renderMangaGrid, createMangaCard, setMangaCardScanning, setMangaCardDownloadProgress } from '../components/manga-card.js';
+import { renderMangaGrid, createMangaCard } from '../components/manga-card.js';
 import { skeletonGrid } from '../components/skeletons.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
@@ -21,7 +21,6 @@ import { createEmptyState } from '../components/empty-state.js';
 import { iconBookOpen, iconChevronDown, iconRefresh, iconSearch } from '../icons.js';
 import { showToast } from '../components/toast.js';
 import { ContextMenu } from '../components/menu.js';
-import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 const html = htm.bind(h);
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -42,8 +41,6 @@ let _pageSize = 0;
 /** @type {AbortController|null} */ let _abort = null;
 /** @type {(() => void)|null} */   let _unsubRefresh = null;
 /** @type {(() => void)|null} */   let _unsubInvalidation = null;
-/** @type {(() => void)|null} */   let _unsubScanning = null;
-/** @type {(() => void)|null} */   let _unsubDownloads = null;
 /** @type {(() => void)|null} */   let _destroyPagination = null;
 /** @type {(() => void)|null} */   let _destroyTabs = null;
 /** @type {IntersectionObserver|null} */ let _sentinelObserver = null;
@@ -55,7 +52,6 @@ let _pageSize = 0;
 /** @type {HTMLElement|null} */    let _container = null;
 /** @type {(() => void)|null} */   let _mountComboboxesFn = null;
 /** @type {(() => void)|null} */   let _updateFilterCountFn = null;
-/** @type {(() => void)|null} */   let _cancelInitSkeleton = null;
 
 // ── Select mode state ──
 let _selectMode = false;
@@ -127,68 +123,28 @@ export async function init(container) {
   _hideCompletedStatus = urlParams.get('hide_completed') === '1';
   _sortOrder  = urlParams.get('sort') ?? 'updated_desc';
 
-  // Build refresh elements for the global header
-  let refreshBtn = /** @type {HTMLButtonElement|null} */ (null);
-  let refreshCircle = /** @type {HTMLElement|null} */ (null);
-  let refreshRing = /** @type {SVGCircleElement|null} */ (null);
-  let refreshPct = /** @type {HTMLElement|null} */ (null);
-
-  if (hasPermission('library:refresh')) {
-    refreshBtn = document.createElement('button');
-    refreshBtn.type = 'button';
-    refreshBtn.className = 'btn-primary btn-sm flex items-center gap-2';
-    refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>Refresh All</span>`;
-
-    const _cw = document.createElement('div');
-    _cw.innerHTML = `<div class="hidden relative w-8 h-8 shrink-0"><svg class="w-full h-full -rotate-90" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="18" fill="none" stroke="var(--color-surface-3)" stroke-width="3.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="var(--color-accent)" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="113.1" style="transition:stroke-dashoffset 0.3s ease"/></svg><span class="absolute inset-0 flex items-center justify-center text-xs font-medium text-text">0%</span></div>`;
-    refreshCircle = /** @type {HTMLElement} */ (_cw.firstElementChild);
-    const _rc = refreshCircle.querySelectorAll('circle');
-    refreshRing = /** @type {SVGCircleElement} */ (_rc[_rc.length - 1]);
-    refreshPct = /** @type {HTMLElement} */ (refreshCircle.querySelector('span'));
-  }
-
-  let scanAllBtn = /** @type {HTMLButtonElement|null} */ (null);
-  if (hasPermission('library:refresh')) {
-    scanAllBtn = document.createElement('button');
-    scanAllBtn.type = 'button';
-    scanAllBtn.className = 'btn-ghost btn-sm';
-    scanAllBtn.textContent = 'Scan all';
-    scanAllBtn.addEventListener('click', async () => {
-      if (scanAllBtn) { scanAllBtn.disabled = true; scanAllBtn.textContent = 'Scanning…'; }
-      // Immediately mark all visible cards as scanning so there's client-side feedback
-      // even before the SSE 'started' event arrives.
-      const visibleIds = Array.from(
-        /** @type {NodeListOf<HTMLElement>} */ (_gridEl?.querySelectorAll('[data-manga-id]') ?? [])
-      ).map(el => parseInt(el.dataset.mangaId ?? '', 10)).filter(n => !isNaN(n));
-      if (visibleIds.length) setState('scanningMangaIds', new Set(visibleIds));
-      try {
-        const { queued } = await api.scanAllLibrary();
-        showToast(`Scan queued for ${queued} manga.`);
-        // Button stays disabled until the SSE 'completed' event re-enables it.
-        // If SSE is unavailable, re-enable after a reasonable timeout.
-        setTimeout(() => {
-          if (scanAllBtn && scanAllBtn.disabled) {
-            scanAllBtn.disabled = false;
-            scanAllBtn.textContent = 'Scan all';
-            setState('scanningMangaIds', new Set());
-          }
-        }, 120_000);
-      } catch (e) {
-        showToast(/** @type {any} */(e)?.message ?? 'Failed to start scan.', { type: 'error' });
-        if (scanAllBtn) { scanAllBtn.disabled = false; scanAllBtn.textContent = 'Scan all'; }
-        setState('scanningMangaIds', new Set());
-      }
-    });
-  }
-
-  const _hdrActions = /** @type {HTMLElement[]} */ ([]);
-  if (scanAllBtn) _hdrActions.push(scanAllBtn);
-  if (refreshBtn) _hdrActions.push(refreshBtn);
-  if (refreshCircle) _hdrActions.push(refreshCircle);
-  setPageHeader({ crumbs: [{ label: 'Library' }], actions: _hdrActions.length ? _hdrActions : null });
-
   container.innerHTML = `
-    <div class="max-w-page mx-auto w-full px-3 sm:px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4">
+    <div class="max-w-[1400px] mx-auto px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4">
+
+      <!-- Header -->
+      <div class="flex items-center justify-between gap-3">
+        <h1 class="text-2xl font-semibold text-text">Library</h1>
+        <div class="flex items-center gap-2">
+          ${hasPermission('library:refresh') ? `
+            <button type="button" class="btn-primary js-refresh-btn flex items-center gap-2">
+              <span class="[&_svg]:w-4 [&_svg]:h-4 shrink-0">${iconRefresh}</span>
+              Refresh All
+            </button>
+            <div class="js-refresh-circle hidden relative w-11 h-11 shrink-0">
+              <svg class="w-full h-full -rotate-90" viewBox="0 0 44 44" aria-hidden="true">
+                <circle cx="22" cy="22" r="18" fill="none" stroke="var(--color-surface-3)" stroke-width="3.5"/>
+                <circle cx="22" cy="22" r="18" fill="none" stroke="var(--color-accent)" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="113.1" class="js-refresh-ring" style="transition: stroke-dashoffset 0.3s ease"/>
+              </svg>
+              <span class="absolute inset-0 flex items-center justify-center text-xs font-medium text-text js-refresh-pct">0%</span>
+            </div>
+          ` : ''}
+        </div>
+      </div>
 
       <!-- Refresh complete message -->
       <p class="js-refresh-msg text-sm text-text-muted text-center md:text-left" style="display:none" aria-live="polite"></p>
@@ -198,7 +154,7 @@ export async function init(container) {
 
       <!-- Search bar (mobile only — on desktop it lives inside the filter bar) -->
       <div class="relative lg:hidden">
-        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none icon-sm" aria-hidden="true">${iconSearch}</span>
+        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none [&_svg]:w-4 [&_svg]:h-4" aria-hidden="true">${iconSearch}</span>
         <input
           type="search"
           class="input js-search w-full pl-9"
@@ -220,7 +176,7 @@ export async function init(container) {
             Filters
             <span class="js-filter-count hidden items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-accent text-white text-xs font-medium"></span>
           </span>
-          <span class="icon-sm transition-transform js-filter-chevron">${iconChevronDown}</span>
+          <span class="[&_svg]:w-4 [&_svg]:h-4 transition-transform js-filter-chevron">${iconChevronDown}</span>
         </button>
         <select class="input js-page-size w-20 shrink-0" aria-label="Items per page">
           ${[12, 24, 48, 96].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
@@ -232,7 +188,7 @@ export async function init(container) {
         <!-- Row 1: Search + Sort + Page size (primary controls, desktop only) -->
         <div class="flex flex-col lg:flex-row lg:items-center gap-2">
           <div class="relative hidden lg:block lg:flex-1">
-            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none icon-sm" aria-hidden="true">${iconSearch}</span>
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none [&_svg]:w-4 [&_svg]:h-4" aria-hidden="true">${iconSearch}</span>
             <input
               type="search"
               class="input js-search pl-9 w-full"
@@ -258,20 +214,20 @@ export async function init(container) {
         </div>
         <!-- Row 2: Filter dropdowns + toggles -->
         <div class="flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-2">
-          <select class="input js-status w-full lg:w-auto lg:min-w-36" aria-label="Status filter">
+          <select class="input js-status w-full lg:w-auto lg:min-w-[140px]" aria-label="Status filter">
             ${['', 'ongoing', 'completed', 'hiatus', 'cancelled', 'unknown'].map(v =>
               `<option value="${v}"${v === (_statusFilter ?? '') ? ' selected' : ''}>${v || 'All statuses'}</option>`
             ).join('')}
           </select>
-          <select class="input js-reading-status w-full lg:w-auto lg:min-w-40" aria-label="Reading status filter">
+          <select class="input js-reading-status w-full lg:w-auto lg:min-w-[150px]" aria-label="Reading status filter">
             <option value="">All reading states</option>
             ${[['0','Reading'],['1','On Hold'],['2','Dropped'],['3','Plan to Read'],['4','Completed'],['5','Rereading']].map(([v,l]) =>
               `<option value="${v}"${String(_readingStatusFilter) === v ? ' selected' : ''}>${l}</option>`
             ).join('')}
           </select>
-          <div class="js-tags-combobox w-full lg:w-auto lg:min-w-36 lg:max-w-48"></div>
-          <div class="js-author-combobox w-full lg:w-auto lg:max-w-44"></div>
-          <div class="js-artist-combobox w-full lg:w-auto lg:max-w-44"></div>
+          <div class="js-tags-combobox w-full lg:w-auto lg:min-w-[140px] lg:max-w-[200px]"></div>
+          <div class="js-author-combobox w-full lg:w-auto lg:max-w-[180px]"></div>
+          <div class="js-artist-combobox w-full lg:w-auto lg:max-w-[180px]"></div>
           <label class="flex items-center gap-3 text-sm text-text cursor-pointer whitespace-nowrap select-none">
             <span>Hide read</span>
             <label class="kani-toggle">
@@ -319,7 +275,11 @@ export async function init(container) {
   const sizeEls          = /** @type {NodeListOf<HTMLSelectElement>} */ (container.querySelectorAll('.js-page-size'));
   const shelfEl          = /** @type {HTMLElement} */ (container.querySelector('.js-shelf'));
   const shelfRowEl       = /** @type {HTMLElement} */ (container.querySelector('.js-shelf-row'));
+  const refreshBtn   = /** @type {HTMLButtonElement|null} */ (container.querySelector('.js-refresh-btn'));
   const refreshMsg   = /** @type {HTMLElement|null} */ (container.querySelector('.js-refresh-msg'));
+  const refreshCircle = /** @type {HTMLElement|null} */ (container.querySelector('.js-refresh-circle'));
+  const refreshRing  = /** @type {SVGCircleElement|null} */ (container.querySelector('.js-refresh-ring'));
+  const refreshPct   = /** @type {HTMLElement|null} */ (container.querySelector('.js-refresh-pct'));
   const filterToggle    = /** @type {HTMLButtonElement} */ (container.querySelector('.js-filter-toggle'));
   const filtersEl       = /** @type {HTMLElement} */ (container.querySelector('.js-filters'));
   const filterCountEl   = /** @type {HTMLElement} */ (container.querySelector('.js-filter-count'));
@@ -398,8 +358,8 @@ export async function init(container) {
     filterToggle.setAttribute('aria-expanded', String(!isExpanded));
   });
 
-  // Show skeleton only if data takes > 150 ms
-  _cancelInitSkeleton = deferredSkeleton(() => { if (_gridEl) _gridEl.innerHTML = skeletonGrid(_pageSize); });
+  // Show skeleton immediately
+  _gridEl.innerHTML = skeletonGrid(_pageSize);
 
   // ── Fetch filter options in parallel ──
   const [tags, authors, artists, categories] = await Promise.allSettled([
@@ -457,7 +417,7 @@ export async function init(container) {
       // Keep the other input in sync
       for (const other of searchEls) { if (other !== searchEl) other.value = searchEl.value; }
       _page = 1;
-      _updateUrl(true);
+      _updateUrl();
       _fetchLibrary();
     }, 300));
   }
@@ -526,8 +486,6 @@ export async function init(container) {
       refreshCircle?.classList.add('hidden');
       if (refreshBtn) { refreshBtn.classList.remove('hidden'); refreshBtn.disabled = false; }
       if (refreshMsg) refreshMsg.style.display = 'none';
-      // Re-enable scan all button if it was left disabled (SSE-driven re-enable).
-      if (scanAllBtn && scanAllBtn.disabled) { scanAllBtn.disabled = false; scanAllBtn.textContent = 'Scan all'; }
     } else if (state.type === 'running') {
       if (refreshBtn) { refreshBtn.classList.add('hidden'); refreshBtn.disabled = true; }
       refreshCircle?.classList.remove('hidden');
@@ -552,7 +510,6 @@ export async function init(container) {
     } else if (state.type === 'done') {
       refreshCircle?.classList.add('hidden');
       if (refreshBtn) { refreshBtn.classList.remove('hidden'); refreshBtn.disabled = false; }
-      if (scanAllBtn && scanAllBtn.disabled) { scanAllBtn.disabled = false; scanAllBtn.textContent = 'Scan all'; }
       if (refreshMsg) { refreshMsg.style.display = ''; refreshMsg.textContent = `Refresh complete — ${state.total} manga updated, ${state.failed} failed.`; }
     }
   }
@@ -569,45 +526,6 @@ export async function init(container) {
     }
   });
 
-  // ── Scan spinner subscription ──
-  let _prevScanningIds = /** @type {Set<number>} */ (new Set());
-  _unsubScanning = subscribe('scanningMangaIds', (/** @type {Set<number>} */ ids) => {
-    if (!_gridEl) return;
-    for (const id of ids) {
-      if (!_prevScanningIds.has(id)) setMangaCardScanning(id, true, _gridEl);
-    }
-    for (const id of _prevScanningIds) {
-      if (!ids.has(id)) setMangaCardScanning(id, false, _gridEl);
-    }
-    _prevScanningIds = ids;
-  });
-
-  // ── Per-manga download progress subscription ──
-  _unsubDownloads = subscribe('chaptersProgress', (/** @type {Map<number, import('../state.js').ChapterProgress>} */ map) => {
-    if (!_gridEl) return;
-    // Aggregate progress by manga: sum pages of in-progress chapters.
-    /** @type {Map<number, { completed: number, total: number }>} */
-    const byManga = new Map();
-    for (const ch of map.values()) {
-      if (ch.status !== 'in_progress') continue;
-      const cur = byManga.get(ch.mangaId) ?? { completed: 0, total: 0 };
-      byManga.set(ch.mangaId, {
-        completed: cur.completed + ch.completedPages,
-        total: cur.total + ch.totalPages,
-      });
-    }
-    // Apply or remove progress bars on visible cards.
-    for (const card of /** @type {NodeListOf<HTMLElement>} */ (_gridEl.querySelectorAll('[data-manga-id]'))) {
-      const id = Number(card.dataset.mangaId);
-      const prog = byManga.get(id);
-      if (prog && prog.total > 0) {
-        setMangaCardDownloadProgress(id, Math.round((prog.completed / prog.total) * 100), _gridEl);
-      } else {
-        setMangaCardDownloadProgress(id, null, _gridEl);
-      }
-    }
-  });
-
   // ── Continue-reading shelf ──
   if (shelfEl && shelfRowEl) {
     api.getContinueReadingShelf(12).then(items => {
@@ -621,7 +539,7 @@ export async function init(container) {
         card.addEventListener('click', e => { e.preventDefault(); navigate(`/reader/${item.chapter_id}`); });
 
         const cover = document.createElement('div');
-        cover.className = 'w-full aspect-[2/3] rounded bg-surface-2 overflow-hidden'; /* justified: manga cover ratio */
+        cover.className = 'w-full aspect-[2/3] rounded bg-surface-2 overflow-hidden';
         const coverSrc = item.local_cover_path
           ? `/rest/manga/${item.manga_id}/cover`
           : item.cover_url ?? null;
@@ -656,7 +574,7 @@ export async function init(container) {
 
 // ── URL sync ──────────────────────────────────────────────────────────────────
 
-function _updateUrl(replace = false) {
+function _updateUrl() {
   const params = new URLSearchParams();
   if (_page > 1)                params.set('page',            String(_page));
   if (_search)                  params.set('search',          _search);
@@ -670,9 +588,7 @@ function _updateUrl(replace = false) {
   if (_hideCompletedStatus)     params.set('hide_completed',  '1');
   if (_sortOrder && _sortOrder !== 'updated_desc') params.set('sort', _sortOrder);
   const qs = params.toString();
-  const url = qs ? '?' + qs : location.pathname;
-  if (replace) history.replaceState(null, '', url);
-  else history.pushState(null, '', url);
+  history.replaceState(null, '', qs ? '?' + qs : location.pathname);
 }
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -723,8 +639,6 @@ function _fetchLibrary() {
       : [];
 
     // Clear old content only once new data is ready — prevents blank-flash flicker
-    _cancelInitSkeleton?.();
-    _cancelInitSkeleton = null;
     if (!isAppend) _gridEl.innerHTML = '';
 
     if (items.length === 0 && !isAppend) {
@@ -744,7 +658,7 @@ function _fetchLibrary() {
         _appendMangaCards(_gridEl, items);
       } else {
         renderMangaGrid(_gridEl, {
-          items: items.map(m => ({ id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0 })),
+          items: items.map(m => ({ id: m.id, title: m.title, cover_image_url: m.cover_url ?? null })),
           getHref: (m) => `/manga/${m.id}`,
           large: true,
           onCardClick: (m) => {
@@ -771,14 +685,11 @@ function _fetchLibrary() {
       const { destroy } = renderPagination(_paginEl, {
         page: _page,
         hasNext,
-        total: result?.total_pages ?? undefined,
         onPageChange: (p) => { _page = p; _updateUrl(); _fetchLibrary(); window.scrollTo(0, 0); },
       });
       _destroyPagination = destroy;
     }
   }).catch(e => {
-    _cancelInitSkeleton?.();
-    _cancelInitSkeleton = null;
     if (e?.name === 'AbortError') return;
     if (!_gridEl) return;
     finishLoading();
@@ -803,7 +714,7 @@ function _appendMangaCards(gridEl, items) {
   }
   for (const m of items) {
     grid.appendChild(createMangaCard({
-      manga: { id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0 },
+      manga: { id: m.id, title: m.title, cover_image_url: m.cover_url ?? null },
       href: `/manga/${m.id}`,
       onCardClick: (manga) => {
         const cardEl = /** @type {HTMLElement} */ (gridEl.querySelector(`[data-manga-id="${manga.id}"]`));
@@ -923,7 +834,7 @@ function _renderBulkBar() {
   const bar = document.createElement('div');
   bar.className = [
     'fixed bottom-0 md:bottom-6 inset-x-0 md:inset-x-auto md:left-1/2 md:-translate-x-1/2',
-    'z-40 md:w-auto md:min-w-96',
+    'z-40 md:w-auto md:min-w-[420px]',
     'bg-surface border border-border-subtle rounded-none md:rounded-2xl shadow-xl',
     'flex items-center gap-2 px-4 py-3 flex-wrap',
   ].join(' ');
@@ -932,7 +843,6 @@ function _renderBulkBar() {
     <span class="text-sm font-medium text-text-muted js-select-count flex-1">0 selected</span>
     <button type="button" class="btn-icon js-select-all" title="Select all visible">All</button>
     <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-download" disabled title="Download all selected">Download</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-scan" disabled title="Scan for new chapters">Scan</button>
     <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-mark-read" disabled>Mark read</button>
     <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-mark-unread" disabled>Mark unread</button>
     <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-categories" disabled>Categories</button>
@@ -962,28 +872,6 @@ function _renderBulkBar() {
       done++;
     }
     showToast(`Download queued for ${done} manga.`);
-    _exitSelectMode();
-  });
-
-  // Scan selected for new chapters
-  bar.querySelector('.js-bulk-scan')?.addEventListener('click', async () => {
-    const ids = [..._selected];
-    const countEl = _bulkBarEl?.querySelector('.js-select-count');
-    // Disable all actions during scan
-    for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (bar.querySelectorAll('.js-bulk-action'))) btn.disabled = true;
-    setState('scanningMangaIds', new Set(ids));
-    let done = 0, newChapters = 0;
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      if (countEl) countEl.textContent = `Scanning ${i + 1} / ${ids.length}…`;
-      try {
-        const res = await api.scanManga(id);
-        done++;
-        newChapters += res?.new_chapters ?? 0;
-      } catch { /* ignore */ }
-      updateState('scanningMangaIds', (/** @type {Set<number>} */ s) => { const n = new Set(s); n.delete(id); return n; });
-    }
-    showToast(`Scan complete: ${newChapters} new chapter${newChapters !== 1 ? 's' : ''} found across ${done} manga.`);
     _exitSelectMode();
   });
 
@@ -1161,17 +1049,12 @@ async function _showBulkCategoryModal(mangaIds) {
 
 /** @param {HTMLElement} container */
 export function destroy(container) {
-  clearPageHeader();
   _abort?.abort();
   _abort = null;
   _unsubRefresh?.();
   _unsubRefresh = null;
   _unsubInvalidation?.();
   _unsubInvalidation = null;
-  _unsubScanning?.();
-  _unsubScanning = null;
-  _unsubDownloads?.();
-  _unsubDownloads = null;
   _destroyPagination?.();
   _destroyPagination = null;
   _sentinelObserver?.disconnect();
@@ -1189,8 +1072,6 @@ export function destroy(container) {
   _container = null;
   _mountComboboxesFn = null;
   _updateFilterCountFn = null;
-  _cancelInitSkeleton?.();
-  _cancelInitSkeleton = null;
   _bulkBarEl?.remove();
   _bulkBarEl = null;
   _closeContextMenu();

@@ -1,12 +1,5 @@
 target
 wasm_sources
-CLAUDE.md
-.claude/
-static/icons/
-# insta snapshot review artifacts (pending acceptance)
-*.snap.new
-# coverage report from cargo-llvm-cov
-lcov.info
 .env
 *.db
 *.db*

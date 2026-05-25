@@ -7,41 +7,7 @@ pub enum AppEvent {
         manga_id: i64,
         manga_name: String,
         count: usize,
-        chapter_ids: Vec<i64>,
         chapter_names: Vec<String>,
-    },
-    ImportStarted {
-        origin: String,
-        total: u32,
-    },
-    ImportProgress {
-        origin: String,
-        completed: u32,
-        total: u32,
-        title: String,
-    },
-    ImportCompleted {
-        origin: String,
-        imported: u32,
-        skipped: u32,
-        pending: u32,
-    },
-    PathMigrationStarted {
-        field: String,
-        total_bytes: u64,
-    },
-    PathMigrationProgress {
-        field: String,
-        bytes_copied: u64,
-        total_bytes: u64,
-    },
-    PathMigrationCompleted {
-        field: String,
-        new_path: String,
-    },
-    PathMigrationFailed {
-        field: String,
-        error: String,
     },
     #[serde(untagged)]
     Refresh(RefreshProgressEvent),
@@ -52,7 +18,6 @@ pub enum AppEvent {
 pub enum RefreshProgressEvent {
     Started {
         total: usize,
-        manga_ids: Vec<i64>,
     },
     MangaRefreshed {
         manga_id: i64,
@@ -66,3 +31,4 @@ pub enum RefreshProgressEvent {
         failed: usize,
     },
 }
+

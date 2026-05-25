@@ -1,4 +1,3 @@
-use crate::models::ReadingStats;
 use dashmap::DashMap;
 use moka::future::Cache;
 use std::future::Future;
@@ -13,8 +12,6 @@ pub struct RequestCache {
     pages: Cache<(i64, String, String), String>,
     search_results: Cache<(i64, String, i32, i32, String), String>,
     pub preference_schema: DashMap<i64, Vec<kani_core::PreferenceSpec>>,
-    /// Reading stats keyed by (user_id, period_days). 10-minute TTL.
-    pub stats: Cache<(i64, i32), Arc<ReadingStats>>,
 }
 
 impl RequestCache {
@@ -46,11 +43,6 @@ impl RequestCache {
                 .support_invalidation_closures()
                 .build(),
             preference_schema: DashMap::new(),
-            stats: Cache::builder()
-                .max_capacity(500)
-                .time_to_live(Duration::from_secs(10 * 60))
-                .support_invalidation_closures()
-                .build(),
         }
     }
 
@@ -100,16 +92,7 @@ impl RequestCache {
         E: Send + Sync + 'static,
     {
         self.chapter_list
-            .try_get_with(
-                (
-                    source_id,
-                    manga_id.to_string(),
-                    page,
-                    page_size,
-                    sort.to_string(),
-                ),
-                init,
-            )
+            .try_get_with((source_id, manga_id.to_string(), page, page_size, sort.to_string()), init)
             .await
     }
 
@@ -127,10 +110,7 @@ impl RequestCache {
         E: Send + Sync + 'static,
     {
         self.search_results
-            .try_get_with(
-                (source_id, query.to_string(), page, page_size, filters_key),
-                init,
-            )
+            .try_get_with((source_id, query.to_string(), page, page_size, filters_key), init)
             .await
     }
 
@@ -153,36 +133,30 @@ impl RequestCache {
             .await
     }
 
-    pub fn get_preference_schema(&self, source_id: i64) -> Option<Vec<kani_core::PreferenceSpec>> {
+    pub fn get_preference_schema(
+        &self,
+        source_id: i64,
+    ) -> Option<Vec<kani_core::PreferenceSpec>> {
         self.preference_schema
             .get(&source_id)
             .map(|r| r.value().clone())
     }
 
-    pub fn insert_preference_schema(&self, source_id: i64, schema: Vec<kani_core::PreferenceSpec>) {
+    pub fn insert_preference_schema(
+        &self,
+        source_id: i64,
+        schema: Vec<kani_core::PreferenceSpec>,
+    ) {
         self.preference_schema.insert(source_id, schema);
     }
 
     pub async fn invalidate_chapter_list_for_manga(&self, source_id: i64, manga_id: &str) {
         let owned = manga_id.to_string();
-        let _ = self.chapter_list.invalidate_entries_if(
-            move |(sid, mid, _page, _page_size, _sort), _| *sid == source_id && *mid == owned,
-        );
-    }
-
-    pub fn invalidate_stats(&self, user_id: i64) {
         let _ = self
-            .stats
-            .invalidate_entries_if(move |(id, _period), _| *id == user_id);
-    }
-
-    pub fn clear_all(&self) {
-        self.manga_details.invalidate_all();
-        self.popular_manga.invalidate_all();
-        self.chapter_list.invalidate_all();
-        self.pages.invalidate_all();
-        self.search_results.invalidate_all();
-        self.stats.invalidate_all();
+            .chapter_list
+            .invalidate_entries_if(move |(sid, mid, _page, _page_size, _sort), _| {
+                *sid == source_id && *mid == owned
+            });
     }
 
     pub fn invalidate_source(&self, source_id: i64) {
@@ -318,7 +292,7 @@ mod tests {
 
         let c = calls.clone();
         let _ = cache
-            .get_or_fetch_chapter_list(1, "m1", 1, 20, "", async move {
+            .get_or_fetch_chapter_list(1, "m1", 1, 20, "".into(), async move {
                 c.fetch_add(1, Ordering::SeqCst);
                 Ok::<_, std::io::Error>("chapters".to_string())
             })

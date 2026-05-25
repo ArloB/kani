@@ -10,51 +10,6 @@ pub enum CliError {
     Http(#[from] reqwest::Error),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Conversion error: {message}")]
-    DslConversion {
-        message: String,
-        span: std::ops::Range<usize>,
-    },
     #[error("{0}")]
     Other(String),
-}
-
-use ariadne::{Color, Label, Report, ReportKind, Source};
-
-pub fn report_errors(filename: &str, source: &str, errors: Vec<chumsky::error::Rich<char>>) {
-    for error in errors {
-        let span = error.span();
-        let range = span.start..span.end;
-
-        Report::build(ReportKind::Error, (filename, range.clone()))
-            .with_message(error.to_string())
-            .with_label(
-                Label::new((filename, range))
-                    .with_message("Found here")
-                    .with_color(Color::Red),
-            )
-            .finish()
-            .eprint((filename, Source::from(source)))
-            .unwrap();
-    }
-}
-
-pub fn report_custom_error(
-    filename: &str,
-    source: &str,
-    message: &str,
-    range: std::ops::Range<usize>,
-) {
-    use ariadne::{Color, Label, Report, ReportKind, Source};
-
-    Report::build(ReportKind::Error, (filename, range.clone()))
-        .with_message("Logic Error")
-        .with_label(
-            Label::new((filename, range))
-                .with_message(message)
-                .with_color(Color::Yellow),
-        )
-        .finish()
-        .eprint((filename, Source::from(source)))
-        .unwrap();
 }

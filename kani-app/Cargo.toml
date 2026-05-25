@@ -8,50 +8,23 @@ build = "build.rs"
 kani-core   = { path = "../kani-core" }
 kani-shared = { path = "../kani-shared", features = ["ssr"] }
 
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-urlencoding.workspace = true
-tokio         = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "process"] }
-tokio-util.workspace = true
-sqlx.workspace = true
+serde         = { version = "1.0", features = ["derive"] }
+serde_json    = "1.0"
+thiserror     = "2.0"
+urlencoding   = "2.1"
+tokio         = { version = "1", features = ["full"] }
+tokio-util    = "0.7"
+sqlx          = { version = "0.8", features = ["runtime-tokio", "sqlite", "time"], default-features = false }
 rquest        = { version = "5.1", features = ["json"] }
-tracing.workspace = true
-futures.workspace = true
-indexmap.workspace = true
-ordered-float.workspace = true
-moka.workspace = true
-dashmap.workspace = true
-time          = { workspace = true, features = ["serde", "formatting", "macros"] }
-base64.workspace = true
+tracing       = "0.1"
+futures       = "0.3"
+indexmap      = "2"
+ordered-float = "5"
+moka          = { version = "0.12", features = ["future"] }
+dashmap       = "6"
+time          = { version = "0.3", features = ["serde"] }
+base64        = "0.22"
 sha2          = "0.10"
-hmac          = "0.12"
-chacha20poly1305 = "0.10.1"
 rand          = "0.10"
 hex           = "0.4"
 async-trait   = "0.1"
-lettre        = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "smtp-transport", "builder"] }
-image         = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
-zip           = "2"
-flate2        = "1"
-prost         = "0.13"
-strsim        = "0.11"
-epub-builder  = "0.7"
-quick-xml     = "0.39.2"
-which         = "6"
-tempfile      = "3"
-fs2           = "0.4"
-dunce         = "1"
-
-[features]
-test-util = []
-
-[dev-dependencies]
-kani-core   = { path = "../kani-core" }
-kani-shared = { path = "../kani-shared", features = ["ssr"] }
-tokio-util  = { workspace = true }
-
-[build-dependencies]
-prost-build = "0.14.3"
-protox = "0.9.1"
-

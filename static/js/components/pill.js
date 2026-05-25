@@ -7,7 +7,7 @@ import { h } from 'preact';
 import htm from 'htm';
 const html = htm.bind(h);
 
-const BASE = 'inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md border max-w-44 select-none';
+const BASE = 'inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md border max-w-[180px] select-none';
 const STATIC = BASE + ' bg-surface-2 border-border text-text';
 const DISMISSABLE = BASE + ' bg-surface-2 border-border text-text cursor-pointer hover:bg-danger/10 hover:border-danger/40 hover:text-danger transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent';
 

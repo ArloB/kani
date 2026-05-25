@@ -6,7 +6,6 @@ pub mod sync;
 pub use service::{TrackerMappingItem, TrackerStatusItem};
 
 use crate::error::{Result, ServiceError};
-use crate::service::encryption::{CredentialCipher, maybe_decrypt, maybe_encrypt};
 use kani_shared::types::MangaTrackingStatus;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -98,11 +97,12 @@ impl TrackerRegistry {
     /// Create a new registry. Checks DB config first, falls back to env vars.
     /// Always ensures rows exist for all known tracker types so the UI can
     /// reference them by stable ID even before credentials are configured.
-    pub async fn new(db: &SqlitePool, cipher: Option<&CredentialCipher>) -> Result<Self> {
+    pub async fn new(db: &SqlitePool) -> Result<Self> {
         let mut trackers: HashMap<i64, Box<dyn ExternalTracker>> = HashMap::new();
 
+        // AniList: needs client_id + client_secret.
         let anilist_id = Self::ensure_tracker_row(db, "AniList").await?;
-        let anilist = Self::load_tracker_config(db, "AniList", cipher).await?;
+        let anilist = Self::load_tracker_config(db, "AniList").await?;
         let anilist_creds = anilist
             .and_then(|(id, secret)| secret.map(|s| (id, s)))
             .or_else(|| {
@@ -117,8 +117,9 @@ impl TrackerRegistry {
             );
         }
 
+        // MAL: needs only client_id (public PKCE client).
         let mal_id = Self::ensure_tracker_row(db, "MyAnimeList").await?;
-        let mal = Self::load_tracker_config(db, "MyAnimeList", cipher).await?;
+        let mal = Self::load_tracker_config(db, "MyAnimeList").await?;
         let mal_client_id = mal
             .map(|(id, _)| id)
             .or_else(|| std::env::var("KANI_MAL_CLIENT_ID").ok());
@@ -144,11 +145,9 @@ impl TrackerRegistry {
     }
 
     /// Load tracker app config from the DB. Returns `(client_id, client_secret)` or None.
-    /// `client_secret` is decrypted if a cipher is provided.
     async fn load_tracker_config(
         db: &SqlitePool,
         name: &str,
-        cipher: Option<&CredentialCipher>,
     ) -> Result<Option<(String, Option<String>)>> {
         let row = sqlx::query!(
             r#"SELECT tac.client_id, tac.client_secret
@@ -159,21 +158,7 @@ impl TrackerRegistry {
         )
         .fetch_optional(db)
         .await?;
-        Ok(row.map(|r| {
-            let secret = r
-                .client_secret
-                .as_deref()
-                .and_then(|s| match maybe_decrypt(cipher, s) {
-                    Ok(plain) => Some(plain),
-                    Err(e) => {
-                        tracing::warn!(
-                            "Cannot decrypt client_secret for {name}: {e}. Treating as unset."
-                        );
-                        None
-                    }
-                });
-            (r.client_id, secret)
-        }))
+        Ok(row.map(|r| (r.client_id, r.client_secret)))
     }
 
     pub fn get(&self, tracker_id: i64) -> Option<&dyn ExternalTracker> {
@@ -198,15 +183,12 @@ pub async fn get_tracker_app_config(
 }
 
 /// Upsert tracker app config. Ensures the tracker row exists first.
-/// `client_secret` is encrypted before storage if a cipher is provided.
 pub async fn set_tracker_app_config(
     db: &SqlitePool,
     tracker_id: i64,
     client_id: &str,
     client_secret: Option<&str>,
-    cipher: Option<&CredentialCipher>,
 ) -> Result<()> {
-    let encrypted_secret = client_secret.map(|s| maybe_encrypt(cipher, s));
     sqlx::query!(
         r#"INSERT INTO tracker_app_config (tracker_id, client_id, client_secret)
            VALUES (?1, ?2, ?3)
@@ -215,7 +197,7 @@ pub async fn set_tracker_app_config(
                client_secret = COALESCE(excluded.client_secret, tracker_app_config.client_secret)"#,
         tracker_id,
         client_id,
-        encrypted_secret,
+        client_secret,
     )
     .execute(db)
     .await?;
@@ -258,9 +240,11 @@ pub async fn store_pkce_state(
     redirect_uri: &str,
 ) -> Result<()> {
     // Prune expired rows (older than 10 minutes) on each write.
-    sqlx::query!("DELETE FROM oauth_pkce_state WHERE created_at < datetime('now', '-10 minutes')")
-        .execute(db)
-        .await?;
+    sqlx::query!(
+        "DELETE FROM oauth_pkce_state WHERE created_at < datetime('now', '-10 minutes')"
+    )
+    .execute(db)
+    .await?;
 
     sqlx::query!(
         r#"INSERT INTO oauth_pkce_state (state, code_verifier, tracker_id, redirect_uri)
@@ -283,13 +267,10 @@ pub struct PkceState {
 }
 
 pub async fn consume_pkce_state(db: &SqlitePool, state: &str) -> Result<Option<PkceState>> {
-    // The expiry check is done in SQL against SQLite's native datetime so that the
-    // format comparison is always correct (the application-level RFC 3339 parse was
-    // unreliable because SQLite stores datetimes as "YYYY-MM-DD HH:MM:SS", not ISO 8601).
     let row = sqlx::query!(
-        r#"SELECT code_verifier, tracker_id, redirect_uri
+        r#"SELECT code_verifier, tracker_id, redirect_uri, created_at
            FROM oauth_pkce_state
-           WHERE state = ? AND created_at >= datetime('now', '-10 minutes')"#,
+           WHERE state = ?"#,
         state
     )
     .fetch_optional(db)
@@ -298,6 +279,20 @@ pub async fn consume_pkce_state(db: &SqlitePool, state: &str) -> Result<Option<P
     let Some(row) = row else {
         return Ok(None);
     };
+
+    // Enforce 10-minute expiry in application logic as a second check.
+    let created = time::OffsetDateTime::parse(
+        &row.created_at.to_string(),
+        &time::format_description::well_known::Rfc3339,
+    )
+    .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+
+    if time::OffsetDateTime::now_utc() - created > time::Duration::minutes(10) {
+        sqlx::query!("DELETE FROM oauth_pkce_state WHERE state = ?", state)
+            .execute(db)
+            .await?;
+        return Ok(None);
+    }
 
     // Delete on consume (single-use).
     sqlx::query!("DELETE FROM oauth_pkce_state WHERE state = ?", state)
@@ -313,23 +308,16 @@ pub async fn consume_pkce_state(db: &SqlitePool, state: &str) -> Result<Option<P
 
 // ── Credential helpers ───────────────────────────────────────────────────────
 
-/// Store OAuth tokens for a user+tracker. Encrypts tokens before storage if a cipher is provided.
 pub async fn store_credentials(
     db: &SqlitePool,
     user_id: i64,
     tracker_id: i64,
     tokens: &TokenResponse,
-    cipher: Option<&CredentialCipher>,
 ) -> Result<()> {
     let expires_str = tokens.expires_at.map(|t| {
         t.format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default()
     });
-    let access_token = maybe_encrypt(cipher, &tokens.access_token);
-    let refresh_token = tokens
-        .refresh_token
-        .as_deref()
-        .map(|t| maybe_encrypt(cipher, t));
     sqlx::query!(
         r#"INSERT INTO user_tracker_credentials (user_id, tracker_id, access_token, refresh_token, expires_at)
            VALUES (?1, ?2, ?3, ?4, ?5)
@@ -339,8 +327,8 @@ pub async fn store_credentials(
                expires_at = excluded.expires_at"#,
         user_id,
         tracker_id,
-        access_token,
-        refresh_token,
+        tokens.access_token,
+        tokens.refresh_token,
         expires_str,
     )
     .execute(db)
@@ -349,13 +337,11 @@ pub async fn store_credentials(
 }
 
 /// Fetch an access token, refreshing automatically if expired.
-/// Decrypts tokens from storage if a cipher is provided.
 pub async fn get_access_token(
     db: &SqlitePool,
     tracker_id: i64,
     user_id: i64,
     tracker: &dyn ExternalTracker,
-    cipher: Option<&CredentialCipher>,
 ) -> Result<String> {
     let row = sqlx::query!(
         "SELECT access_token, refresh_token, expires_at FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?",
@@ -378,25 +364,15 @@ pub async fn get_access_token(
         })
         .unwrap_or(false);
 
-    if needs_refresh {
-        let refresh_plain = row
-            .refresh_token
-            .as_deref()
-            .map(|t| maybe_decrypt(cipher, t))
-            .transpose()
-            .map_err(|e| ServiceError::Internal(format!("Cannot decrypt refresh token: {e}")))?;
-        if let Some(ref refresh) = refresh_plain {
-            let new_tokens = tracker.refresh_token(refresh).await?;
-            store_credentials(db, user_id, tracker_id, &new_tokens, cipher).await?;
-            return Ok(new_tokens.access_token);
-        }
+    if needs_refresh
+    && let Some(ref refresh) = row.refresh_token {
+        let new_tokens = tracker.refresh_token(refresh).await?;
+        store_credentials(db, user_id, tracker_id, &new_tokens).await?;
+        return Ok(new_tokens.access_token);
     }
 
-    let stored = row
-        .access_token
-        .ok_or_else(|| ServiceError::Internal("Missing access token".into()))?;
-    maybe_decrypt(cipher, &stored)
-        .map_err(|e| ServiceError::Internal(format!("Cannot decrypt access token: {e}")))
+    row.access_token
+        .ok_or_else(|| ServiceError::Internal("Missing access token".into()))
 }
 
 pub async fn delete_credentials(db: &SqlitePool, user_id: i64, tracker_id: i64) -> Result<()> {

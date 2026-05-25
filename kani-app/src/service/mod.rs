@@ -23,36 +23,19 @@ use kani_shared::types::{
 };
 use trackers::TrackerRegistry;
 
-mod audit;
-pub mod backup;
 mod categories;
 mod chapters;
 mod cover;
-pub mod credential_migration;
-pub mod dedup;
 mod downloads;
-pub mod email;
-pub mod email_templates;
-pub mod email_verification;
-pub mod encryption;
-pub mod export;
 mod filters;
-pub mod fs_browse;
-pub mod import;
 mod library;
 mod migration;
-pub mod opds;
-pub mod password_reset;
-pub mod path_migration;
-pub mod pending_imports;
 mod preferences;
 mod progress;
 mod scanlators;
 mod settings;
 mod sources;
-mod stats;
 pub mod trackers;
-pub mod webhooks;
 
 #[derive(Clone)]
 pub struct AppService {
@@ -70,40 +53,6 @@ pub struct AppService {
     pub tracker_registry: Arc<tokio::sync::RwLock<TrackerRegistry>>,
     /// Manga IDs whose cover download failed and should be retried.
     pub cover_retry_queue: Arc<tokio::sync::Mutex<HashSet<i64>>>,
-    pub email_service: Arc<tokio::sync::RwLock<Option<email::EmailService>>>,
-    /// Optional authenticated-encryption cipher for credential fields.
-    /// Present when `KANI_SECRET_KEY` or `KANI_SECRET_KEY_FILE` is set at startup.
-    pub encryption: Option<Arc<encryption::CredentialCipher>>,
-    pub webhook_service: webhooks::WebhookService,
-}
-
-/// Load a credential cipher from env vars. Reads `KANI_SECRET_KEY_FILE` first,
-/// then falls back to `KANI_SECRET_KEY`. Returns `None` if neither is set.
-fn load_credential_cipher() -> Option<encryption::CredentialCipher> {
-    let hex = if let Ok(path) = std::env::var("KANI_SECRET_KEY_FILE") {
-        match std::fs::read_to_string(path.trim()) {
-            Ok(s) => s.trim().to_string(),
-            Err(e) => {
-                tracing::error!("KANI_SECRET_KEY_FILE set but could not read file: {e}");
-                return None;
-            }
-        }
-    } else if let Ok(val) = std::env::var("KANI_SECRET_KEY") {
-        val.trim().to_string()
-    } else {
-        return None;
-    };
-
-    match encryption::CredentialCipher::from_hex(&hex) {
-        Ok(c) => {
-            tracing::info!("Credential encryption enabled (KANI_SECRET_KEY loaded)");
-            Some(c)
-        }
-        Err(e) => {
-            tracing::error!("KANI_SECRET_KEY is invalid — credential encryption disabled: {e}");
-            None
-        }
-    }
 }
 
 impl AppService {
@@ -136,21 +85,10 @@ impl AppService {
 
         let mut sources_map = HashMap::new();
 
-        let enc = load_credential_cipher();
-
-        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required FROM settings")
+        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, concurrent_manga_downloads, default_tracking_enabled FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
-        kani_core::v8_process::set_browser_debug_logging(settings.browser_debug_logging);
-
-        // Decrypt email_provider_config so in-memory value is always plaintext.
-        if let Some(ref cipher) = enc {
-            match cipher.decrypt(&settings.email_provider_config) {
-                Ok(plain) => settings.email_provider_config = plain,
-                Err(e) => tracing::warn!("Cannot decrypt email_provider_config on startup: {e}"),
-            }
-        }
 
         if let Ok(dir) = std::env::var("KANI_LIBRARY_DIR") {
             tracing::info!("Library path overridden by KANI_LIBRARY_DIR: {dir}");
@@ -212,13 +150,9 @@ impl AppService {
         }
         tracing::info!("Sources scanned and registered");
 
-        let sources = sqlx::query_as!(
-            Source,
-            "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http \
-             FROM sources WHERE enabled = 1 AND deleted_at IS NULL"
-        )
-        .fetch_all(&pool)
-        .await?;
+        let sources = sqlx::query_as!(Source, "SELECT * FROM sources WHERE enabled = 1")
+            .fetch_all(&pool)
+            .await?;
 
         for source in sources {
             let bytes = tokio::fs::read(
@@ -267,18 +201,13 @@ impl AppService {
             flaresolverr_url,
             global_smart_client.credentials.clone(),
             global_smart_client.solving.clone(),
-            global_smart_client.host_circuits.clone(),
         )?;
         tracing::info!("Proxy client created");
 
         let (refresh_tx, _) = tokio::sync::broadcast::channel(256);
         let refresh_task = Arc::new(tokio::sync::Mutex::new(None));
 
-        let tracker_registry = TrackerRegistry::new(&pool, enc.as_ref()).await?;
-
-        let email_svc = email::EmailService::from_settings(&settings);
-        let enc = enc.map(Arc::new);
-        let webhook_service = webhooks::WebhookService::new(pool.clone());
+        let tracker_registry = TrackerRegistry::new(&pool).await?;
 
         Ok(Self {
             db: pool,
@@ -294,148 +223,7 @@ impl AppService {
             shutdown_token,
             tracker_registry: Arc::new(tokio::sync::RwLock::new(tracker_registry)),
             cover_retry_queue: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
-            email_service: Arc::new(tokio::sync::RwLock::new(email_svc)),
-            encryption: enc,
-            webhook_service,
         })
-    }
-
-    #[cfg(any(test, feature = "test-util"))]
-    pub async fn new_for_test(pool: SqlitePool) -> Self {
-        use crate::models::Settings;
-
-        let settings = Settings {
-            flaresolverr_url: String::new(),
-            library_path: std::env::temp_dir(),
-            wasm_storage_path: std::env::temp_dir(),
-            concurrent_page_downloads: 4,
-            concurrent_manga_downloads: 2,
-            chapter_queue_size: 32,
-            max_retries: 3,
-            initial_retry_delay_ms: 100,
-            max_wasm_instances: 1,
-            auto_scan: false,
-            scan_interval_minutes: 60,
-            scan_exclude_completed: false,
-            auto_download_category_id: None,
-            auto_download_category_ids: "[]".to_string(),
-            default_tracking_enabled: false,
-            http_request_logging: false,
-            browser_debug_logging: false,
-            registration_enabled: true,
-            cover_max_dimension: None,
-            email_enabled: false,
-            email_provider: String::new(),
-            email_provider_config: String::new(),
-            email_from_address: String::new(),
-            app_url: String::new(),
-            password_reset_enabled: false,
-            email_verification_required: false,
-        };
-
-        let smart_client =
-            kani_core::http::SmartClient::new(None).expect("SmartClient::new failed in test");
-        let proxy_client =
-            kani_core::http::SmartClient::new(None).expect("proxy SmartClient::new failed in test");
-        let wasm_runtime = Arc::new(WasmRuntime::new(1).expect("WasmRuntime::new failed in test"));
-        let downloader = DownloaderManager::new(smart_client.clone(), 1, 1, 0, 0, 4)
-            .await
-            .expect("DownloaderManager::new failed in test");
-        let tracker_registry = TrackerRegistry::new(&pool, None)
-            .await
-            .expect("TrackerRegistry::new failed in test");
-        let (refresh_tx, _) = tokio::sync::broadcast::channel(16);
-
-        Self {
-            db: pool.clone(),
-            wasm_runtime,
-            sources: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            settings: Arc::new(tokio::sync::RwLock::new(settings)),
-            downloader,
-            smart_client,
-            proxy_client,
-            refresh_tx,
-            refresh_task: Arc::new(tokio::sync::Mutex::new(None)),
-            cache: RequestCache::new(),
-            shutdown_token: tokio_util::sync::CancellationToken::new(),
-            tracker_registry: Arc::new(tokio::sync::RwLock::new(tracker_registry)),
-            cover_retry_queue: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
-            email_service: Arc::new(tokio::sync::RwLock::new(None)),
-            encryption: None,
-            webhook_service: webhooks::WebhookService::new(pool),
-        }
-    }
-
-    pub async fn rebuild_email_service(&self) {
-        let settings = self.settings.read().await;
-        let svc = email::EmailService::from_settings(&settings);
-        *self.email_service.write().await = svc;
-    }
-
-    /// Returns a clone of the email service if email is enabled and configured.
-    pub async fn mailer(&self) -> Option<email::EmailService> {
-        self.email_service.read().await.clone()
-    }
-
-    /// Spawns a background task to send an email. Logs errors but never fails the caller.
-    pub fn send_email_bg(&self, to: String, subject: String, html: String) {
-        let svc = self.email_service.clone();
-        tokio::spawn(async move {
-            let guard = svc.read().await;
-            if let Some(mailer) = guard.as_ref()
-                && let Err(e) = mailer.send(&to, &subject, &html).await
-            {
-                tracing::warn!("Email send failed to {to}: {e}");
-            }
-        });
-    }
-
-    /// Subscribes to the broadcast channel and dispatches webhook events. Call once from main.
-    pub fn spawn_webhook_listener(&self) {
-        let mut rx = self.refresh_tx.subscribe();
-        let wh = self.webhook_service.clone();
-        let token = self.shutdown_token.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = token.cancelled() => break,
-                    result = rx.recv() => match result {
-                        Ok(event) => {
-                            match event {
-                                AppEvent::NewChapters {
-                                    manga_id,
-                                    manga_name,
-                                    count,
-                                    chapter_ids,
-                                    chapter_names,
-                                } => {
-                                    wh.fire(webhooks::WebhookPayload::ChapterNew {
-                                        manga_id,
-                                        manga_name,
-                                        chapter_count: count,
-                                        chapter_ids,
-                                        chapter_names,
-                                    })
-                                    .await;
-                                }
-                                AppEvent::Refresh(RefreshProgressEvent::Completed { total, failed }) => {
-                                    wh.fire(webhooks::WebhookPayload::ScanCompleted {
-                                        total_scanned: total,
-                                        failed_count: failed,
-                                    })
-                                    .await;
-                                }
-                                _ => {}
-                            }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!("Webhook listener lagged by {n} events");
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    },
-                }
-            }
-        });
     }
 
     /// Spawns the background auto-scan loop. Call once from main after construction.
@@ -453,60 +241,17 @@ impl AppService {
                     _ = tokio::time::sleep(std::time::Duration::from_secs(interval_mins as u64 * 60)) => {}
                 }
 
-                let settings_snap = state.settings.read().await.clone();
-                if !settings_snap.auto_scan {
+                if !state.settings.read().await.auto_scan {
                     continue;
                 }
-                let exclude_completed = settings_snap.scan_exclude_completed;
-                let category_ids: Vec<i64> =
-                    serde_json::from_str(&settings_snap.auto_download_category_ids)
-                        .unwrap_or_default();
-                drop(settings_snap);
 
-                let category_manga_ids: std::collections::HashSet<i64> = if category_ids.is_empty()
-                {
-                    std::collections::HashSet::new()
-                } else {
-                    let placeholders = category_ids
-                        .iter()
-                        .enumerate()
-                        .map(|(i, _)| format!("?{}", i + 1))
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    let sql = format!(
-                        "SELECT DISTINCT manga_id FROM manga_categories WHERE category_id IN ({})",
-                        placeholders
-                    );
-                    let mut q = sqlx::query_scalar::<_, i64>(&sql);
-                    for id in &category_ids {
-                        q = q.bind(*id);
-                    }
-                    q.fetch_all(&state.db)
-                        .await
-                        .unwrap_or_default()
-                        .into_iter()
-                        .collect()
-                };
-
-                let manga_to_scan: Vec<(i64, bool)> = {
-                    let base = "SELECT m.id, m.auto_download FROM manga m \
-                                WHERE m.auto_scan = true";
-                    let completed_clause = if exclude_completed {
-                        " AND m.status != 1"
-                    } else {
-                        ""
-                    };
-                    let sql = format!("{base}{completed_clause}");
-                    sqlx::query_as::<_, (i64, bool)>(&sql)
+                let manga_to_scan: Vec<(i64, bool)> =
+                    sqlx::query_as("SELECT id, auto_download FROM manga")
                         .fetch_all(&state.db)
                         .await
-                        .unwrap_or_default()
-                };
+                        .unwrap_or_default();
 
                 for (manga_db_id, auto_download) in manga_to_scan {
-                    // A manga auto-downloads if manually flagged OR in a nominated category.
-                    let effective_auto_download =
-                        auto_download || category_manga_ids.contains(&manga_db_id);
                     match state.scan_for_new_chapters(manga_db_id).await {
                         Ok(new_ids) if !new_ids.is_empty() => {
                             tracing::info!(
@@ -514,7 +259,7 @@ impl AppService {
                                 new_ids.len(),
                                 manga_db_id
                             );
-                            if effective_auto_download {
+                            if auto_download {
                                 let filtered_ids = state
                                     .filter_chapters_by_rules(manga_db_id, new_ids.clone())
                                     .await;
@@ -562,15 +307,6 @@ impl AppService {
                     }
                 }
 
-                if let Err(e) = sqlx::query!(
-                    "DELETE FROM chapters WHERE is_orphaned = true AND download_status != 2"
-                )
-                .execute(&state.db)
-                .await
-                {
-                    tracing::warn!("Orphan chapter cleanup failed: {}", e);
-                }
-
                 state.retry_missing_covers().await;
             }
         });
@@ -598,9 +334,7 @@ impl AppService {
                 }
 
                 let ids: Vec<i64> = state.cover_retry_queue.lock().await.drain().collect();
-                if ids.is_empty() {
-                    continue;
-                }
+                if ids.is_empty() { continue; }
 
                 tracing::info!("Retrying cover downloads for {} manga", ids.len());
                 for manga_id in ids {
@@ -608,29 +342,9 @@ impl AppService {
                         Ok(()) => tracing::info!("Cover retry succeeded for manga {manga_id}"),
                         Err(e) => {
                             tracing::debug!("Cover retry failed for manga {manga_id}: {e}");
+                            // Re-enqueue so it is retried again next cycle.
                             state.cover_retry_queue.lock().await.insert(manga_id);
                         }
-                    }
-                }
-            }
-        });
-    }
-
-    /// Spawns a background task that proactively refreshes Cloudflare credentials before they expire.
-    pub fn spawn_credential_refresh(&self) {
-        let client = self.smart_client.clone();
-        let token = self.shutdown_token.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(20 * 60));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                tokio::select! {
-                    _ = token.cancelled() => {
-                        tracing::info!("Credential refresh task shutting down");
-                        break;
-                    }
-                    _ = interval.tick() => {
-                        client.refresh_expiring_credentials().await;
                     }
                 }
             }
@@ -719,6 +433,20 @@ pub(crate) fn unwrap_cache_err(e: Arc<ServiceError>) -> ServiceError {
     match Arc::try_unwrap(e) {
         Ok(err) => err,
         Err(arc) => ServiceError::Internal(arc.to_string()),
+    }
+}
+
+fn ext_for_content_type(ct: &str) -> &'static str {
+    if ct.contains("jpeg") || ct.contains("jpg") {
+        "jpg"
+    } else if ct.contains("png") {
+        "png"
+    } else if ct.contains("webp") {
+        "webp"
+    } else if ct.contains("gif") {
+        "gif"
+    } else {
+        "jpg"
     }
 }
 

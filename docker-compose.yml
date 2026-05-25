@@ -1,14 +1,6 @@
 services:
   kani:
-    build:
-      context: .
-      args:
-        # Uncomment to include Chromium + puppeteer-core (~250 MB extra).
-        # Required for browser-based extensions such as kani-comix.
-        # INSTALL_BROWSER: "true"
-
-        # Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
-        # INSTALL_KCC: "true"
+    build: .
     image: kani:latest
     ports:
       - "8242:8242"
@@ -38,24 +30,4 @@ services:
 
       # Override the log level (error, warn, info, debug, trace).
       # RUST_LOG: "info"
-
-      # Set to "false" to disable browser-based extension features at runtime,
-      # even if Chromium is installed (e.g. to reclaim memory on idle servers).
-      # KANI_BROWSER_ENABLED: "false"
-
-      # Override the Chromium binary path if not at the default /usr/bin/chromium.
-      # CHROMIUM_PATH: "/usr/bin/chromium-browser"
-
-      # How long (ms) to keep the Chromium process alive after all pages close.
-      # Defaults to 300000 (5 min). Set to 0 to keep it alive indefinitely.
-      # Lower values save RAM on idle servers at the cost of a ~2 s relaunch delay.
-      # BROWSER_IDLE_TIMEOUT_MS: "120000"
-
-      # Encrypt SMTP password and OAuth tokens at rest using ChaCha20-Poly1305.
-      # Generate a key with: openssl rand -hex 32
-      # Without this variable credentials are stored as plaintext in the database.
-      # KANI_SECRET_KEY: ""
-
-      # Alternative — load the key from a Docker secret (recommended for production):
-      # KANI_SECRET_KEY_FILE: "/run/secrets/kani_secret_key"
     restart: unless-stopped

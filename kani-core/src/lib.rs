@@ -7,23 +7,18 @@ pub mod cbz;
 pub mod comic_info;
 pub mod downloader;
 pub mod error;
-pub mod evaluator;
 pub mod file_storage;
 pub mod http;
 pub mod network;
 pub mod source_manager;
 pub mod sources;
 pub mod utilities;
-pub mod v8_process;
 pub mod wasm;
+pub mod evaluator;
 
 pub use error::Error;
 
-/// Runtime toggle: when `false`, HTTP request log lines are suppressed.
-/// Initialised from settings at startup and updated on settings change.
-pub static HTTP_LOGGING_ENABLED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(true);
-
+// Re-export wasmtime for downstream crates
 pub use wasmtime;
 
 /// Host-side WIT-generated `PreferenceSpec` (with serde derives).
