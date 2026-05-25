@@ -481,6 +481,15 @@ export async function scanAllLibrary() {
   return _req('POST', '/library/scan-all');
 }
 
+/**
+ * Unified scan: scan all library manga or a specific list of IDs.
+ * Emits SSE Started/MangaRefreshed/Completed events identical to scan-all.
+ * @param {number[] | 'all'} idsOrAll
+ */
+export async function scanMangaMultiple(idsOrAll) {
+  return _req('POST', '/manga/scan', { body: { ids: idsOrAll } });
+}
+
 /** @param {number} id @param {boolean} enabled */
 export async function toggleAutoDownload(id, enabled) {
   return _req('POST', `/manga/${id}/toggle_auto_download`, { body: { enabled } });

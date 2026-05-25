@@ -13,13 +13,13 @@ const STATUS_VALUES = { ongoing: 0, completed: 1, hiatus: 2, cancelled: 3, unkno
 import { Combobox } from '../components/combobox.js';
 import { renderCategoryTabs } from '../components/tabs.js';
 import { renderPagination } from '../components/pagination.js';
-import { renderMangaGrid, createMangaCard, setMangaCardScanning, setMangaCardDownloadProgress } from '../components/manga-card.js';
+import { renderMangaGrid, createMangaCard, setMangaCardScanning, setMangaCardDownloadProgress, setNewChapterCount } from '../components/manga-card.js';
 import { skeletonGrid } from '../components/skeletons.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
 import { iconBookOpen, iconChevronDown, iconRefresh, iconSearch } from '../icons.js';
-import { showToast } from '../components/toast.js';
+import { showToast, showApiError } from '../components/toast.js';
 import { ContextMenu } from '../components/menu.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 const html = htm.bind(h);
@@ -44,6 +44,9 @@ let _pageSize = 0;
 /** @type {(() => void)|null} */   let _unsubInvalidation = null;
 /** @type {(() => void)|null} */   let _unsubScanning = null;
 /** @type {(() => void)|null} */   let _unsubDownloads = null;
+/** @type {(() => void)|null} */   let _unsubScanResult = null;
+/** True while a scan triggered from this page is in flight. */
+let _scanInProgress = false;
 /** @type {(() => void)|null} */   let _destroyPagination = null;
 /** @type {(() => void)|null} */   let _destroyTabs = null;
 /** @type {IntersectionObserver|null} */ let _sentinelObserver = null;
@@ -127,24 +130,14 @@ export async function init(container) {
   _hideCompletedStatus = urlParams.get('hide_completed') === '1';
   _sortOrder  = urlParams.get('sort') ?? 'updated_desc';
 
-  // Build refresh elements for the global header
+  // Build refresh button for the global header
   let refreshBtn = /** @type {HTMLButtonElement|null} */ (null);
-  let refreshCircle = /** @type {HTMLElement|null} */ (null);
-  let refreshRing = /** @type {SVGCircleElement|null} */ (null);
-  let refreshPct = /** @type {HTMLElement|null} */ (null);
 
   if (hasPermission('library:refresh')) {
     refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
     refreshBtn.className = 'btn-primary btn-sm flex items-center gap-2';
     refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>Refresh All</span>`;
-
-    const _cw = document.createElement('div');
-    _cw.innerHTML = `<div class="hidden relative w-8 h-8 shrink-0"><svg class="w-full h-full -rotate-90" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="18" fill="none" stroke="var(--color-surface-3)" stroke-width="3.5"/><circle cx="22" cy="22" r="18" fill="none" stroke="var(--color-accent)" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="113.1" stroke-dashoffset="113.1" style="transition:stroke-dashoffset 0.3s ease"/></svg><span class="absolute inset-0 flex items-center justify-center text-xs font-medium text-text">0%</span></div>`;
-    refreshCircle = /** @type {HTMLElement} */ (_cw.firstElementChild);
-    const _rc = refreshCircle.querySelectorAll('circle');
-    refreshRing = /** @type {SVGCircleElement} */ (_rc[_rc.length - 1]);
-    refreshPct = /** @type {HTMLElement} */ (refreshCircle.querySelector('span'));
   }
 
   let scanAllBtn = /** @type {HTMLButtonElement|null} */ (null);
@@ -154,28 +147,26 @@ export async function init(container) {
     scanAllBtn.className = 'btn-ghost btn-sm';
     scanAllBtn.textContent = 'Scan all';
     scanAllBtn.addEventListener('click', async () => {
-      if (scanAllBtn) { scanAllBtn.disabled = true; scanAllBtn.textContent = 'Scanning…'; }
-      // Immediately mark all visible cards as scanning so there's client-side feedback
-      // even before the SSE 'started' event arrives.
-      const visibleIds = Array.from(
-        /** @type {NodeListOf<HTMLElement>} */ (_gridEl?.querySelectorAll('[data-manga-id]') ?? [])
-      ).map(el => parseInt(el.dataset.mangaId ?? '', 10)).filter(n => !isNaN(n));
-      if (visibleIds.length) setState('scanningMangaIds', new Set(visibleIds));
+      if (!scanAllBtn || scanAllBtn.disabled) return;
+      scanAllBtn.disabled = true;
+      _scanInProgress = true;
       try {
-        const { queued } = await api.scanAllLibrary();
-        showToast(`Scan queued for ${queued} manga.`);
-        // Button stays disabled until the SSE 'completed' event re-enables it.
-        // If SSE is unavailable, re-enable after a reasonable timeout.
+        await api.scanMangaMultiple('all');
+        // Card spinners and completion toast are driven by SSE events.
+        // Fallback: re-enable button if SSE never delivers 'completed' within 2 minutes.
         setTimeout(() => {
           if (scanAllBtn && scanAllBtn.disabled) {
             scanAllBtn.disabled = false;
             scanAllBtn.textContent = 'Scan all';
+            _scanInProgress = false;
             setState('scanningMangaIds', new Set());
           }
         }, 120_000);
       } catch (e) {
-        showToast(/** @type {any} */(e)?.message ?? 'Failed to start scan.', { type: 'error' });
-        if (scanAllBtn) { scanAllBtn.disabled = false; scanAllBtn.textContent = 'Scan all'; }
+        showApiError(e);
+        scanAllBtn.disabled = false;
+        scanAllBtn.textContent = 'Scan all';
+        _scanInProgress = false;
         setState('scanningMangaIds', new Set());
       }
     });
@@ -184,14 +175,10 @@ export async function init(container) {
   const _hdrActions = /** @type {HTMLElement[]} */ ([]);
   if (scanAllBtn) _hdrActions.push(scanAllBtn);
   if (refreshBtn) _hdrActions.push(refreshBtn);
-  if (refreshCircle) _hdrActions.push(refreshCircle);
   setPageHeader({ crumbs: [{ label: 'Library' }], actions: _hdrActions.length ? _hdrActions : null });
 
   container.innerHTML = `
     <div class="max-w-page mx-auto w-full px-3 sm:px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4">
-
-      <!-- Refresh complete message -->
-      <p class="js-refresh-msg text-sm text-text-muted text-center md:text-left" style="display:none" aria-live="polite"></p>
 
       <!-- Category tabs (horizontal scroll on mobile) -->
       <div class="js-tabs overflow-x-auto [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"></div>
@@ -319,7 +306,6 @@ export async function init(container) {
   const sizeEls          = /** @type {NodeListOf<HTMLSelectElement>} */ (container.querySelectorAll('.js-page-size'));
   const shelfEl          = /** @type {HTMLElement} */ (container.querySelector('.js-shelf'));
   const shelfRowEl       = /** @type {HTMLElement} */ (container.querySelector('.js-shelf-row'));
-  const refreshMsg   = /** @type {HTMLElement|null} */ (container.querySelector('.js-refresh-msg'));
   const filterToggle    = /** @type {HTMLButtonElement} */ (container.querySelector('.js-filter-toggle'));
   const filtersEl       = /** @type {HTMLElement} */ (container.querySelector('.js-filters'));
   const filterCountEl   = /** @type {HTMLElement} */ (container.querySelector('.js-filter-count'));
@@ -519,41 +505,37 @@ export async function init(container) {
   });
 
   // ── Refresh state subscription ──
-  const CIRCUMFERENCE = 113.1;
 
   function _applyRefreshState(state) {
-    if (state.type === 'idle') {
-      refreshCircle?.classList.add('hidden');
-      if (refreshBtn) { refreshBtn.classList.remove('hidden'); refreshBtn.disabled = false; }
-      if (refreshMsg) refreshMsg.style.display = 'none';
-      // Re-enable scan all button if it was left disabled (SSE-driven re-enable).
-      if (scanAllBtn && scanAllBtn.disabled) { scanAllBtn.disabled = false; scanAllBtn.textContent = 'Scan all'; }
-    } else if (state.type === 'running') {
-      if (refreshBtn) { refreshBtn.classList.add('hidden'); refreshBtn.disabled = true; }
-      refreshCircle?.classList.remove('hidden');
-      const spinning = state.completed === 0;
-      const pct = state.total > 0 ? Math.round((state.completed / state.total) * 100) : 0;
-      const svg = refreshRing?.closest('svg');
-      if (svg) {
-        if (spinning) {
-          svg.classList.remove('-rotate-90');
-          svg.classList.add('dl-ring-spin');
-          refreshRing?.setAttribute('stroke-dasharray', '84.8 28.3');
-          refreshRing?.removeAttribute('stroke-dashoffset');
-        } else {
-          svg.classList.add('-rotate-90');
-          svg.classList.remove('dl-ring-spin');
-          refreshRing?.setAttribute('stroke-dasharray', String(CIRCUMFERENCE));
-          refreshRing?.setAttribute('stroke-dashoffset', String(CIRCUMFERENCE * (1 - pct / 100)));
+    const isRunning = state.type === 'running';
+    const pct = isRunning && state.total > 0 ? Math.round((state.completed / state.total) * 100) : 0;
+
+    if (_scanInProgress) {
+      // A scan is running — progress indicator belongs in Scan All, not Refresh All.
+      if (scanAllBtn) {
+        if (isRunning) {
+          const label = pct > 0 ? `${pct}%` : 'Scanning…';
+          scanAllBtn.innerHTML = `<span class="icon-sm shrink-0 animate-spin">${iconRefresh}</span><span>${label}</span>`;
+          // disabled was already set by the click handler; keep it set.
         }
+        // Reset on done/idle is handled by _unsubScanResult; no action needed here.
       }
-      if (refreshPct) refreshPct.textContent = spinning ? '' : pct + '%';
-      if (refreshMsg) refreshMsg.style.display = 'none';
-    } else if (state.type === 'done') {
-      refreshCircle?.classList.add('hidden');
-      if (refreshBtn) { refreshBtn.classList.remove('hidden'); refreshBtn.disabled = false; }
-      if (scanAllBtn && scanAllBtn.disabled) { scanAllBtn.disabled = false; scanAllBtn.textContent = 'Scan all'; }
-      if (refreshMsg) { refreshMsg.style.display = ''; refreshMsg.textContent = `Refresh complete — ${state.total} manga updated, ${state.failed} failed.`; }
+      // Keep Refresh All in its normal enabled state during a scan.
+      if (refreshBtn) {
+        refreshBtn.disabled = false;
+        refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>Refresh All</span>`;
+      }
+    } else {
+      // A refresh is running (or idle) — progress indicator belongs in Refresh All.
+      if (!refreshBtn) return;
+      if (isRunning) {
+        refreshBtn.disabled = true;
+        const label = pct > 0 ? `${pct}%` : 'Refreshing…';
+        refreshBtn.innerHTML = `<span class="icon-sm shrink-0 animate-spin">${iconRefresh}</span><span>${label}</span>`;
+      } else {
+        refreshBtn.disabled = false;
+        refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>Refresh All</span>`;
+      }
     }
   }
 
@@ -604,6 +586,30 @@ export async function init(container) {
         setMangaCardDownloadProgress(id, Math.round((prog.completed / prog.total) * 100), _gridEl);
       } else {
         setMangaCardDownloadProgress(id, null, _gridEl);
+      }
+    }
+  });
+
+  // ── Scan result subscription (shows toast + badges on SSE 'completed') ──
+  _unsubScanResult = subscribe('scanResult', (/** @type {{ total: number, failed: number, newChapters: number, perManga: Map<number, number> } | null} */ result) => {
+    if (!result || !_scanInProgress) return;
+    _scanInProgress = false;
+    if (scanAllBtn) {
+      scanAllBtn.disabled = false;
+      scanAllBtn.textContent = 'Scan all';
+    }
+
+    // Show completion toast
+    const parts = [`Scanned ${result.total} manga`];
+    if (result.newChapters > 0) parts.push(`${result.newChapters} new chapter${result.newChapters !== 1 ? 's' : ''} found`);
+    else parts.push('no new chapters');
+    if (result.failed > 0) parts.push(`${result.failed} failed`);
+    showToast(parts.join(' — '), { type: result.failed > 0 ? 'warn' : 'success' });
+
+    // Apply new-chapter badges to visible cards
+    if (_gridEl && result.perManga.size > 0) {
+      for (const [mangaId, count] of result.perManga) {
+        setNewChapterCount(mangaId, count, _gridEl);
       }
     }
   });
@@ -967,24 +973,21 @@ function _renderBulkBar() {
 
   // Scan selected for new chapters
   bar.querySelector('.js-bulk-scan')?.addEventListener('click', async () => {
-    const ids = [..._selected];
-    const countEl = _bulkBarEl?.querySelector('.js-select-count');
+    const ids = [..._selected].map(Number);
     // Disable all actions during scan
     for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (bar.querySelectorAll('.js-bulk-action'))) btn.disabled = true;
-    setState('scanningMangaIds', new Set(ids));
-    let done = 0, newChapters = 0;
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      if (countEl) countEl.textContent = `Scanning ${i + 1} / ${ids.length}…`;
-      try {
-        const res = await api.scanManga(id);
-        done++;
-        newChapters += res?.new_chapters ?? 0;
-      } catch { /* ignore */ }
-      updateState('scanningMangaIds', (/** @type {Set<number>} */ s) => { const n = new Set(s); n.delete(id); return n; });
+    _scanInProgress = true;
+    try {
+      await api.scanMangaMultiple(ids);
+      // Card spinners and completion toast driven by SSE events.
+      // Exit select mode so the user can see scan progress on cards.
+      _exitSelectMode();
+    } catch (e) {
+      showApiError(e);
+      _scanInProgress = false;
+      setState('scanningMangaIds', new Set());
+      for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (bar.querySelectorAll('.js-bulk-action'))) btn.disabled = false;
     }
-    showToast(`Scan complete: ${newChapters} new chapter${newChapters !== 1 ? 's' : ''} found across ${done} manga.`);
-    _exitSelectMode();
   });
 
   // Mark as read
@@ -1172,6 +1175,8 @@ export function destroy(container) {
   _unsubScanning = null;
   _unsubDownloads?.();
   _unsubDownloads = null;
+  _unsubScanResult?.();
+  _unsubScanResult = null;
   _destroyPagination?.();
   _destroyPagination = null;
   _sentinelObserver?.disconnect();

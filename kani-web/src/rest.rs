@@ -11,7 +11,7 @@ use crate::{
         LoginRequest, MarkUpToRequest, MigrateMangaRequest, PageQuery, PasswordResetConfirmBody,
         PasswordResetRequestBody, PreviewDownloadRulesRequest, PreviewMigrationRequest, ProxyQuery,
         RenameCategoryRequest, ReorderCategoriesRequest, ReorderDownloadRulesRequest,
-        SearchMangaRequest, SendTestEmailBody, SetChapterProgressRequest,
+        ScanMangaRequest, SearchMangaRequest, SendTestEmailBody, SetChapterProgressRequest,
         SetMangaCategoriesRequest, SetMangaTrackingRequest, SetPreferenceRequest,
         SetReadStatusRequest, SetScanlatorPrefRequest, SetTrackerConfigRequest,
         SetTrackerMappingRequest, ToggleAutoDownloadRequest, ToggleEnabledRequest,
@@ -232,6 +232,7 @@ pub fn routes(state: AppState) -> Router {
         )
         .route("/library", get(get_library_filtered))
         .route("/library/scan-all", post(scan_all_library))
+        .route("/manga/scan", post(scan_manga_multiple))
         .route("/library/continue_reading", get(get_continue_reading_shelf))
         .route("/library/{page}/{order}", get(get_library)) // legacy Leptos compat
         .route("/library/backup", get(library_backup))
@@ -2220,6 +2221,27 @@ async fn scan_all_library(
 ) -> Result<impl IntoResponse, AppError> {
     let queued = state.scan_all_manga().await?;
     Ok(Json(json!({ "queued": queued })))
+}
+
+/// Unified scan endpoint: scan all library manga or a specific list of IDs.
+/// Both paths emit `Started` / `MangaRefreshed` / `Completed` SSE events,
+/// so the frontend can use identical progress handling for both cases.
+///
+/// Body: `{ "ids": "all" }` or `{ "ids": [1, 2, 3] }`
+async fn scan_manga_multiple(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
+    State(state): State<AppState>,
+    Json(body): Json<ScanMangaRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    match body {
+        ScanMangaRequest::All { .. } => {
+            state.scan_all_manga().await?;
+        }
+        ScanMangaRequest::Ids { ids } => {
+            state.scan_manga_ids(ids).await?;
+        }
+    }
+    Ok(StatusCode::ACCEPTED)
 }
 
 async fn get_boot_id(

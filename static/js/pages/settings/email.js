@@ -2,7 +2,8 @@
 // Settings — Email / SMTP section.
 
 import * as api from '../../api.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow, showResult } from './_shared.js';
+import { showToast, showApiError } from '../../components/toast.js';
+import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
 
 /**
  * @param {HTMLElement} el
@@ -138,13 +139,9 @@ export function mount(el, settings) {
   saveBtn.className = 'btn-primary btn-sm';
   saveBtn.textContent = 'Save';
 
-  const saveStatus = document.createElement('span');
-  saveStatus.className = 'text-xs text-text-muted hidden';
-
   const saveWrap = document.createElement('div');
   saveWrap.className = 'flex items-center gap-3';
   saveWrap.appendChild(saveBtn);
-  saveWrap.appendChild(saveStatus);
 
   actionsCard.appendChild(mkSettingsRow({ label: 'Email settings', description: 'Save all email configuration above.', control: saveWrap }));
 
@@ -159,14 +156,10 @@ export function mount(el, settings) {
   testBtn.className = 'btn-ghost btn-sm';
   testBtn.textContent = 'Send test';
 
-  const testStatus = document.createElement('span');
-  testStatus.className = 'text-xs hidden';
-
   const testWrap = document.createElement('div');
   testWrap.className = 'flex items-center gap-2';
   testWrap.appendChild(testInput);
   testWrap.appendChild(testBtn);
-  testWrap.appendChild(testStatus);
 
   actionsCard.appendChild(mkSettingsRow({ label: 'Test email', description: 'Send a test message to verify your configuration.', control: testWrap }));
 
@@ -196,9 +189,9 @@ export function mount(el, settings) {
         },
       });
       _dirty = false;
-      showResult(saveStatus, true, 'Saved');
-    } catch (/** @type {any} */ e) {
-      showResult(saveStatus, false, e?.message ?? 'Save failed');
+      showToast('Saved.', { type: 'success' });
+    } catch (e) {
+      showApiError(e);
     } finally {
       saveBtn.disabled = false;
     }
@@ -206,14 +199,14 @@ export function mount(el, settings) {
 
   testBtn.addEventListener('click', async () => {
     const to = testInput.value.trim();
-    if (!to) { showResult(testStatus, false, 'Enter a recipient'); return; }
+    if (!to) { showToast('Enter a recipient', { type: 'error' }); return; }
     testBtn.disabled = true;
     testBtn.textContent = 'Sending…';
     try {
       await api.sendTestEmail(to);
-      showResult(testStatus, true, 'Sent!');
-    } catch (/** @type {any} */ e) {
-      showResult(testStatus, false, e?.message ?? 'Failed');
+      showToast('Test email sent!', { type: 'success' });
+    } catch (e) {
+      showApiError(e);
     } finally {
       testBtn.disabled = false;
       testBtn.textContent = 'Send test';

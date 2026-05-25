@@ -2,7 +2,8 @@
 // Settings — Scan section.
 
 import * as api from '../../api.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, showResult } from './_shared.js';
+import { showToast, showApiError } from '../../components/toast.js';
+import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
 
 /**
  * @param {HTMLElement} el
@@ -53,12 +54,11 @@ export function mount(el, settings) {
 
   const saveRow = document.createElement('div');
   saveRow.className = 'flex items-center gap-3 px-4 py-3';
-  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-scan-save">Save</button><span class="js-scan-result text-sm hidden"></span>`;
+  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-scan-save">Save</button>`;
   scanCard.appendChild(saveRow);
   el.appendChild(scanGroup);
 
-  const saveBtn  = /** @type {HTMLButtonElement} */ (el.querySelector('.js-scan-save'));
-  const resultEl = /** @type {HTMLElement} */ (el.querySelector('.js-scan-result'));
+  const saveBtn = /** @type {HTMLButtonElement} */ (el.querySelector('.js-scan-save'));
 
   let lastSaved = {
     auto_scan: !!settings?.auto_scan,
@@ -89,9 +89,9 @@ export function mount(el, settings) {
     try {
       await api.updateSettings({ Scan: payload });
       lastSaved = { ...payload };
-      showResult(resultEl, true, 'Saved.');
+      showToast('Saved.', { type: 'success' });
     } catch (e) {
-      showResult(resultEl, false, e?.message ?? 'Failed to save.');
+      showApiError(e);
     } finally {
       saveBtn.disabled = false;
     }

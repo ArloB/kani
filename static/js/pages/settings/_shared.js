@@ -98,15 +98,3 @@ export function mkNumberRow({ label, description, badge, id, value, min, max, on
   return mkSettingsRow({ label, description, badge, control: input });
 }
 
-/**
- * Shows a transient success/error message in `el`.
- * @param {HTMLElement} el
- * @param {boolean} ok
- * @param {string} msg
- */
-export function showResult(el, ok, msg) {
-  el.textContent = msg;
-  el.classList.remove('text-success', 'text-danger', 'hidden');
-  el.classList.add(ok ? 'text-success' : 'text-danger');
-  setTimeout(() => { el.classList.add('hidden'); }, 4000);
-}

@@ -6,7 +6,8 @@ import htm from 'htm';
 import * as api from '../../api.js';
 import { setLocal } from '../../utils.js';
 import { addPendingFields } from '../../components/restart-tray.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow, showResult } from './_shared.js';
+import { showToast, showApiError } from '../../components/toast.js';
+import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
 import { FolderPicker } from '../../components/folder-picker.js';
 import { PathMigrationDialog } from '../../components/path-migration-dialog.js';
 
@@ -161,7 +162,7 @@ export function mount(el, settings, bootId) {
 
   const saveRow = document.createElement('div');
   saveRow.className = 'flex items-center gap-3 px-4 py-3';
-  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-adv-save">Save</button><span class="js-adv-result text-sm hidden"></span>`;
+  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-adv-save">Save</button>`;
   advCard.appendChild(saveRow);
   el.appendChild(advGroup);
 
@@ -236,8 +237,7 @@ export function mount(el, settings, bootId) {
     }
   });
 
-  const saveBtn  = /** @type {HTMLButtonElement} */ (el.querySelector('.js-adv-save'));
-  const resultEl = /** @type {HTMLElement} */ (el.querySelector('.js-adv-result'));
+  const saveBtn = /** @type {HTMLButtonElement} */ (el.querySelector('.js-adv-save'));
 
   let lastSaved = {
     flaresolverr_url: settings?.flaresolverr_url ?? '',
@@ -323,14 +323,14 @@ export function mount(el, settings, bootId) {
       const freshPayload = buildAdvPayload();
       await api.updateSettings({ Advanced: freshPayload });
       lastSaved = { ...freshPayload };
-      showResult(resultEl, true, 'Saved.');
+      showToast('Saved.', { type: 'success' });
       if ((freshPayload.max_wasm_instances ?? null) !== (settings?.max_wasm_instances ?? null)) {
         setLocal('kani_restart_boot_id', bootId);
         addPendingFields(['max_wasm_instances']);
         window.dispatchEvent(new StorageEvent('storage', { key: 'kani_restart_needed' }));
       }
     } catch (e) {
-      showResult(resultEl, false, /** @type {any} */ (e)?.message ?? 'Failed to save.');
+      showApiError(e);
     } finally {
       saveBtn.disabled = false;
     }
@@ -347,10 +347,7 @@ export function mount(el, settings, bootId) {
   maintBtn.type = 'button';
   maintBtn.className = 'btn-ghost btn-sm';
   maintBtn.textContent = 'Run maintenance';
-  const maintResult = document.createElement('span');
-  maintResult.className = 'text-sm hidden';
   maintRow.appendChild(maintBtn);
-  maintRow.appendChild(maintResult);
   maintCard.appendChild(mkSettingsRow({
     label: 'Database maintenance',
     description: 'Run WAL checkpoint and VACUUM to compact the database and reclaim disk space.',
@@ -361,17 +358,14 @@ export function mount(el, settings, bootId) {
   maintBtn.addEventListener('click', async () => {
     maintBtn.disabled = true;
     maintBtn.textContent = 'Running…';
-    maintResult.className = 'text-sm hidden';
     try {
       const res = await api.runMaintenance();
       const freed = (res?.before_bytes ?? 0) - (res?.after_bytes ?? 0);
       const mb = (freed / 1024 / 1024).toFixed(1);
       const msg = freed > 0 ? `Freed ${mb} MB` : 'No space freed';
-      maintResult.textContent = msg;
-      maintResult.className = 'text-sm text-success';
+      showToast(msg, { type: 'success' });
     } catch (e) {
-      maintResult.textContent = /** @type {any} */ (e)?.message ?? 'Failed';
-      maintResult.className = 'text-sm text-error';
+      showApiError(e);
     } finally {
       maintBtn.disabled = false;
       maintBtn.textContent = 'Run maintenance';
@@ -386,10 +380,7 @@ export function mount(el, settings, bootId) {
   dupRescanBtn.type = 'button';
   dupRescanBtn.className = 'btn-ghost btn-sm';
   dupRescanBtn.textContent = 'Rescan for duplicates';
-  const dupRescanResult = document.createElement('span');
-  dupRescanResult.className = 'text-sm hidden';
   dupRescanRow.appendChild(dupRescanBtn);
-  dupRescanRow.appendChild(dupRescanResult);
   maintCard.appendChild(mkSettingsRow({
     label: 'Duplicate detection',
     description: 'Re-run the full-library duplicate scan. New pairs are saved to the Duplicates tab. Dismissed pairs are not re-flagged. May be slow for large libraries.',
@@ -399,15 +390,12 @@ export function mount(el, settings, bootId) {
   dupRescanBtn.addEventListener('click', async () => {
     dupRescanBtn.disabled = true;
     dupRescanBtn.textContent = 'Scanning…';
-    dupRescanResult.className = 'text-sm hidden';
     try {
       const res = await api.rescanDuplicates();
       const n = res?.new_pairs ?? 0;
-      dupRescanResult.textContent = n === 0 ? 'No new duplicates found.' : `Found ${n} new duplicate pair${n === 1 ? '' : 's'}.`;
-      dupRescanResult.className = 'text-sm text-success';
+      showToast(n === 0 ? 'No new duplicates found.' : `Found ${n} new duplicate pair${n === 1 ? '' : 's'}.`, { type: 'success' });
     } catch (e) {
-      dupRescanResult.textContent = /** @type {any} */ (e)?.message ?? 'Failed';
-      dupRescanResult.className = 'text-sm text-danger';
+      showApiError(e);
     } finally {
       dupRescanBtn.disabled = false;
       dupRescanBtn.textContent = 'Rescan for duplicates';

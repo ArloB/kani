@@ -47,6 +47,12 @@ const _state = {
   /** Manga ids whose SSE scan event just fired — briefly non-empty while scan sweeps. */
   scanningMangaIds: /** @type {Set<number>} */ (new Set()),
 
+  /**
+   * Populated when a scan run completes (via SSE 'completed' event).
+   * @type {{ total: number, failed: number, newChapters: number, perManga: Map<number, number> } | null}
+   */
+  scanResult: null,
+
   /** Per-manga browser notification opt-out. True = notify (default). */
   mangaNotifyPrefs: /** @type {Map<number, boolean>} */ (new Map()),
 };

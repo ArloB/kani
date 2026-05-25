@@ -265,6 +265,33 @@ pub struct ToggleAutoDownloadRequest {
     pub enabled: bool,
 }
 
+/// Body for `POST /manga/scan`. Either scan all manga or a specific list.
+#[derive(serde::Deserialize, Debug)]
+#[serde(untagged)]
+pub enum ScanMangaRequest {
+    /// Scan specific manga by ID.
+    Ids { ids: Vec<i64> },
+    /// Scan all manga in the library. Send `{ "ids": "all" }`.
+    All { ids: ScanAll },
+}
+
+/// Sentinel value — used in `ScanMangaRequest::All`.
+#[derive(Debug)]
+pub struct ScanAll;
+
+impl<'de> serde::Deserialize<'de> for ScanAll {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        if s == "all" {
+            Ok(ScanAll)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected \"all\", got {s:?}"
+            )))
+        }
+    }
+}
+
 #[derive(serde::Deserialize, Debug)]
 pub struct PreviewMigrationRequest {
     pub target_source_id: i64,

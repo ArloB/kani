@@ -60,6 +60,7 @@ pub enum RefreshProgressEvent {
         completed: usize,
         total: usize,
         success: bool,
+        new_chapters: u32,
     },
     Completed {
         total: usize,

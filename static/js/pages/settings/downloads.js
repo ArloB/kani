@@ -3,7 +3,8 @@
 
 import * as api from '../../api.js';
 import { getLocal, setLocal } from '../../utils.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow, showResult } from './_shared.js';
+import { showToast, showApiError } from '../../components/toast.js';
+import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
 
 /**
  * @param {HTMLElement} el
@@ -74,12 +75,11 @@ export function mount(el, settings) {
 
   const saveRow = document.createElement('div');
   saveRow.className = 'flex items-center gap-3 px-4 py-3';
-  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-dl-save">Save</button><span class="js-dl-result text-sm hidden"></span>`;
+  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-dl-save">Save</button>`;
   serverCard.appendChild(saveRow);
   el.appendChild(serverGroup);
 
-  const saveBtn  = /** @type {HTMLButtonElement} */ (el.querySelector('.js-dl-save'));
-  const resultEl = /** @type {HTMLElement} */ (el.querySelector('.js-dl-result'));
+  const saveBtn = /** @type {HTMLButtonElement} */ (el.querySelector('.js-dl-save'));
 
   /** @type {Record<string, any>} */
   let lastSaved = {
@@ -109,9 +109,9 @@ export function mount(el, settings) {
     try {
       await api.updateSettings({ Download: payload });
       lastSaved = { ...payload };
-      showResult(resultEl, true, 'Saved.');
+      showToast('Saved.', { type: 'success' });
     } catch (e) {
-      showResult(resultEl, false, e?.message ?? 'Failed to save.');
+      showApiError(e);
     } finally {
       saveBtn.disabled = false;
     }

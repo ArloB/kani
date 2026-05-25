@@ -14,6 +14,9 @@ let _retryCount = 0;
 /** @type {ReturnType<typeof setTimeout> | null} */
 let _retryTimer = null;
 
+/** Accumulates per-manga new chapter counts during a scan run. Reset on each 'started' event. */
+let _scanNewChapters = /** @type {Map<number, number>} */ (new Map());
+
 /**
  * Opens the SSE connection to /rest/events.
  * Call once at app startup. Returns a `disconnect()` function.
@@ -176,6 +179,8 @@ function _handleEvent(data) {
     setState('refreshState', { type: 'running', completed: 0, total: data.total });
     // Mark every manga that will be scanned as "pending" so covers show a spinner.
     setState('scanningMangaIds', new Set((data.manga_ids ?? []).map(Number)));
+    // Reset per-manga chapter accumulator for the new run.
+    _scanNewChapters = new Map();
     return;
   }
 
@@ -186,10 +191,21 @@ function _handleEvent(data) {
     });
     // Remove from pending set — this manga is done.
     updateState('scanningMangaIds', (s) => { const n = new Set(s); n.delete(Number(data.manga_id)); return n; });
+    // Accumulate new chapter counts (non-zero only for scan operations).
+    const nc = Number(data.new_chapters ?? 0);
+    if (nc > 0) _scanNewChapters.set(Number(data.manga_id), nc);
     return;
   }
 
   if (type === 'completed') {
+    const totalNew = [..._scanNewChapters.values()].reduce((a, b) => a + b, 0);
+    setState('scanResult', {
+      total: Number(data.total),
+      failed: Number(data.failed),
+      newChapters: totalNew,
+      perManga: new Map(_scanNewChapters),
+    });
+    _scanNewChapters = new Map();
     setState('refreshState', { type: 'done', total: data.total, failed: data.failed });
     setState('scanningMangaIds', new Set());
     // Increment library invalidation so pages re-fetch

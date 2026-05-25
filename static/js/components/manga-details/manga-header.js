@@ -7,7 +7,7 @@ import { hasPermission, getState, subscribe } from '../../state.js';
 import { navigate } from '../../router.js';
 import { getLocal, setLocal, escapeHtml } from '../../utils.js';
 import { createCoverImage } from '../cover-image.js';
-import { showToast } from '../toast.js';
+import { showToast, showApiError } from '../toast.js';
 import { iconSpinner } from '../../icons.js';
 
 // ── Source filter URL builder ──────────────────────────────────────────────────
@@ -528,8 +528,12 @@ function _renderBtnGroup(btnGroupEl, info, source, ctx) {
         try {
           const res = await onScan();
           const count = res?.new_chapters ?? 0;
-          scanBtn.textContent = count > 0 ? `${count} new chapter${count !== 1 ? 's' : ''}` : 'No new chapters';
-          setTimeout(() => { scanBtn.textContent = 'Scan'; }, 3000);
+          showToast(
+            count > 0 ? `${count} new chapter${count !== 1 ? 's' : ''} found` : 'No new chapters',
+            { type: count > 0 ? 'success' : 'info' },
+          );
+        } catch (e) {
+          showApiError(e);
         } finally { scanBtn.disabled = false; }
       });
       actionRow.appendChild(scanBtn);

@@ -2,7 +2,8 @@
 // Settings — Webhooks section.
 
 import * as api from '../../api.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, showResult } from './_shared.js';
+import { showToast, showApiError } from '../../components/toast.js';
+import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
 import { escapeHtml, confirmDialog } from '../../utils.js';
 
 const ALL_EVENTS = [
@@ -207,23 +208,20 @@ function _mkWebhookRow(wh, reload) {
   testBtn.type = 'button';
   testBtn.className = 'btn-ghost btn-sm text-xs';
   testBtn.textContent = 'Test';
-  const testStatus = document.createElement('span');
-  testStatus.className = 'text-xs hidden';
   testBtn.addEventListener('click', async () => {
     testBtn.disabled = true;
     testBtn.textContent = '…';
     try {
       const r = await api.testWebhook(wh.id);
-      showResult(testStatus, r?.ok ?? true, r?.ok ? '✓ Delivered' : `✗ ${r?.error ?? 'Failed'}`);
-    } catch (/** @type {any} */ e) {
-      showResult(testStatus, false, `✗ ${e?.message ?? 'Failed'}`);
+      showToast(r?.ok ? '✓ Webhook delivered' : `✗ ${r?.error ?? 'Delivery failed'}`, { type: r?.ok ? 'success' : 'error' });
+    } catch (e) {
+      showApiError(e);
     } finally {
       testBtn.disabled = false;
       testBtn.textContent = 'Test';
     }
   });
   controls.appendChild(testBtn);
-  controls.appendChild(testStatus);
 
   // Edit button
   const editBtn = document.createElement('button');
@@ -442,12 +440,8 @@ function _mkForm(existing, onSave, onCancel) {
   cancelBtn.className = 'btn-ghost btn-sm';
   cancelBtn.textContent = 'Cancel';
 
-  const statusEl = document.createElement('span');
-  statusEl.className = 'text-xs hidden';
-
   btnRow.appendChild(saveBtn);
   btnRow.appendChild(cancelBtn);
-  btnRow.appendChild(statusEl);
   form.appendChild(btnRow);
 
   cancelBtn.addEventListener('click', onCancel);
@@ -455,7 +449,7 @@ function _mkForm(existing, onSave, onCancel) {
   saveBtn.addEventListener('click', async () => {
     const url = urlInput.value.trim();
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      showResult(statusEl, false, 'URL must start with http:// or https://');
+      showToast('URL must start with http:// or https://', { type: 'error' });
       return;
     }
 
@@ -476,8 +470,8 @@ function _mkForm(existing, onSave, onCancel) {
     saveBtn.disabled = true;
     try {
       await onSave(data);
-    } catch (/** @type {any} */ e) {
-      showResult(statusEl, false, e?.message ?? 'Failed');
+    } catch (e) {
+      showApiError(e);
       saveBtn.disabled = false;
     }
   });

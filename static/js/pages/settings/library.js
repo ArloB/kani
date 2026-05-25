@@ -6,7 +6,7 @@ import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
 import { openConfirm } from '../../utils.js';
-import { showToast } from '../../components/toast.js';
+import { showToast, showApiError } from '../../components/toast.js';
 import { iconPencil, iconX } from '../../icons.js';
 import { Modal, mountIntoModalRoot } from '../../components/modal.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
@@ -350,7 +350,6 @@ function RestoreModal({ file, preview, onClose }) {
     import_chapter_progress: false,
     import_settings: !!preview.has_settings,
   });
-  const [status, setStatus] = useState(/** @type {{ type: string, text: string } | null} */ (null));
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(/** @type {{ completed: number, total: number, title: string } | null} */ (null));
 
@@ -383,13 +382,12 @@ function RestoreModal({ file, preview, onClose }) {
   async function doImport() {
     setLoading(true);
     setProgress(null);
-    setStatus(null);
     try {
       const r = await api.restoreBackup(file, opts);
-      setStatus({ type: 'success', text: `Done: ${r.imported_manga} manga imported, ${r.pending_imports_added} pending.` });
-      showToast(`Backup restored: ${r.imported_manga} manga imported.`, 'success');
+      showToast(`Backup restored: ${r.imported_manga} manga imported.`, { type: 'success' });
+      onClose();
     } catch (e) {
-      setStatus({ type: 'error', text: `Error: ${e.message}` });
+      showApiError(e);
     } finally {
       setLoading(false);
     }
@@ -398,7 +396,7 @@ function RestoreModal({ file, preview, onClose }) {
   return html`
     <${Modal} open=${true} title="Restore Backup" onClose=${onClose} footer=${html`
       <button type="button" class="btn-ghost btn-sm" onClick=${onClose}>Cancel</button>
-      <button type="button" class="btn-primary btn-sm" disabled=${loading || status?.type === 'success'} onClick=${doImport}>
+      <button type="button" class="btn-primary btn-sm" disabled=${loading} onClick=${doImport}>
         ${loading ? 'Importing…' : 'Import'}
       </button>
     `}>
@@ -442,9 +440,6 @@ function RestoreModal({ file, preview, onClose }) {
             </div>
           </div>
         ` : null}
-        ${status ? html`
-          <p class=${'text-sm ' + (status.type === 'success' ? 'text-success' : 'text-danger')}>${status.text}</p>
-        ` : null}
       </div>
     </${Modal}>
   `;
@@ -458,7 +453,6 @@ function TachiyomiImportModal({ file, preview, onClose }) {
     import_tracking: !!preview.has_tracking,
     import_chapter_progress: false,
   });
-  const [status, setStatus] = useState(/** @type {{ type: string, text: string } | null} */ (null));
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(/** @type {{ completed: number, total: number, title: string } | null} */ (null));
 
@@ -489,13 +483,12 @@ function TachiyomiImportModal({ file, preview, onClose }) {
   async function doImport() {
     setLoading(true);
     setProgress(null);
-    setStatus(null);
     try {
       const r = await api.importTachiyomiBackup(file, opts);
-      setStatus({ type: 'success', text: `Done: ${r.imported_manga} imported, ${r.pending_imports_added} pending.` });
-      showToast(`Import complete: ${r.imported_manga} manga added.`, 'success');
+      showToast(`Import complete: ${r.imported_manga} manga added.`, { type: 'success' });
+      onClose();
     } catch (e) {
-      setStatus({ type: 'error', text: `Error: ${e.message}` });
+      showApiError(e);
     } finally {
       setLoading(false);
     }
@@ -508,7 +501,7 @@ function TachiyomiImportModal({ file, preview, onClose }) {
   return html`
     <${Modal} open=${true} title="Import from Tachiyomi / Mihon" onClose=${onClose} footer=${html`
       <button type="button" class="btn-ghost btn-sm" onClick=${onClose}>Cancel</button>
-      <button type="button" class="btn-primary btn-sm" disabled=${loading || status?.type === 'success'} onClick=${doImport}>
+      <button type="button" class="btn-primary btn-sm" disabled=${loading} onClick=${doImport}>
         ${loading ? 'Importing…' : 'Import'}
       </button>
     `}>
@@ -546,9 +539,6 @@ function TachiyomiImportModal({ file, preview, onClose }) {
                 style=${{ width: progress.total > 0 ? `${Math.round(progress.completed / progress.total * 100)}%` : '0%' }}></div>
             </div>
           </div>
-        ` : null}
-        ${status ? html`
-          <p class=${'text-sm ' + (status.type === 'success' ? 'text-success' : 'text-danger')}>${status.text}</p>
         ` : null}
       </div>
     </${Modal}>

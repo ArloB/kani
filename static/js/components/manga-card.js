@@ -103,12 +103,40 @@ export function setMangaCardScanning(mangaId, isScanning, root = document) {
   if (!coverWrap) return;
   const existing = coverWrap.querySelector('.js-scan-spinner');
   if (isScanning && !existing) {
+    const overlay = document.createElement('div');
+    overlay.className = 'js-scan-spinner absolute inset-0 flex items-center justify-center bg-black/40 rounded-md z-10';
     const spinner = document.createElement('div');
-    spinner.className = 'js-scan-spinner absolute top-1 right-1 w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin z-10';
-    coverWrap.appendChild(spinner);
+    spinner.className = 'w-10 h-10 border-[3px] border-white/30 border-t-white rounded-full animate-spin';
+    overlay.appendChild(spinner);
+    coverWrap.appendChild(overlay);
   } else if (!isScanning && existing) {
     existing.remove();
   }
+}
+
+/**
+ * Sets or removes a "new chapters" badge count on a card.
+ * Pass `count = 0` to remove the badge.
+ * @param {number} mangaId
+ * @param {number} count
+ * @param {ParentNode} [root]
+ */
+export function setNewChapterCount(mangaId, count, root = document) {
+  const card = root.querySelector(`[data-manga-id="${mangaId}"]`);
+  if (!card) return;
+  const coverWrap = card.querySelector('.relative');
+  if (!coverWrap) return;
+  let badge = /** @type {HTMLElement | null} */ (coverWrap.querySelector('.js-new-ch-badge'));
+  if (count <= 0) {
+    badge?.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.className = 'js-new-ch-badge absolute top-1 left-1 z-10 min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-full text-[10px] font-bold bg-accent text-white leading-none';
+    coverWrap.appendChild(badge);
+  }
+  badge.textContent = count > 99 ? '99+' : String(count);
 }
 
 /**

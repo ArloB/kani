@@ -1111,6 +1111,9 @@ impl AppService {
                         completed,
                         total,
                         success,
+                        // start_refresh_all does metadata refresh, not chapter scanning,
+                        // so new_chapters is not meaningful here.
+                        new_chapters: 0,
                     },
                 ));
             }
@@ -1545,6 +1548,32 @@ impl AppService {
             .into_iter()
             .map(|r| (r.id, r.name))
             .collect();
+        let ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
+        let count = ids.len();
+        self.scan_manga_ids_inner(ids).await?;
+        Ok(count)
+    }
+
+    /// Scans a specific list of manga IDs for new chapters, emitting SSE progress
+    /// events compatible with the scan-all event stream. The caller receives
+    /// `Started`, per-manga `MangaRefreshed`, and `Completed` events.
+    pub async fn scan_manga_ids(&self, ids: Vec<i64>) -> Result<()> {
+        self.scan_manga_ids_inner(ids).await
+    }
+
+    async fn scan_manga_ids_inner(&self, ids: Vec<i64>) -> Result<()> {
+        // Resolve manga names for the given IDs.
+        let ids_json = serde_json::to_string(&ids).unwrap_or_default();
+        let rows: Vec<(i64, String)> = sqlx::query!(
+            "SELECT id, name FROM manga WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id",
+            ids_json
+        )
+        .fetch_all(&self.db)
+        .await?
+        .into_iter()
+        .map(|r| (r.id, r.name))
+        .collect();
+
         let total = rows.len();
         let manga_ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
 
@@ -1560,10 +1589,14 @@ impl AppService {
             let mut failed = 0usize;
             for (idx, (id, name)) in rows.into_iter().enumerate() {
                 let completed = idx + 1;
-                let success = service.scan_for_new_chapters(id).await.is_ok();
-                if !success {
-                    failed += 1;
-                }
+                let result = service.scan_for_new_chapters(id).await;
+                let (success, new_chapters) = match result {
+                    Ok(ref ch_ids) => (true, ch_ids.len() as u32),
+                    Err(_) => {
+                        failed += 1;
+                        (false, 0)
+                    }
+                };
                 let _ = service.refresh_tx.send(AppEvent::Refresh(
                     RefreshProgressEvent::MangaRefreshed {
                         manga_id: id,
@@ -1571,6 +1604,7 @@ impl AppService {
                         completed,
                         total,
                         success,
+                        new_chapters,
                     },
                 ));
             }
@@ -1581,7 +1615,7 @@ impl AppService {
                     failed,
                 }));
         });
-        Ok(total)
+        Ok(())
     }
 
     pub async fn fetch_and_store_remaining_chapters(

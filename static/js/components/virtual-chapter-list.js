@@ -11,6 +11,7 @@ import { iconCheck, iconDownload, iconCloud, iconCloudCheck } from '../icons.js'
 import { Icon } from './icon.js';
 import { ContextMenu } from './menu.js';
 import { cacheChapter, evictChapter } from '../offline.js';
+import { showApiError } from './toast.js';
 const html = htm.bind(h);
 
 /** @typedef {import('../state.js').ChapterProgress} ChapterProgress */
@@ -142,7 +143,7 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
       if (onToggleRead) onToggleRead(chapter.id, newRead);
     } catch (err) {
       setIsRead(!newRead);
-      console.error('toggle read failed:', err);
+      showApiError(err);
     }
   }
 
@@ -152,19 +153,19 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
       await markChaptersUpTo(mangaId, chapter.chapter_number, markRead);
       if (onMarkUpTo) onMarkUpTo(chapter.chapter_number, markRead);
     } catch (err) {
-      console.error('mark up to failed:', err);
+      showApiError(err);
     }
   }
 
   async function handleDownload() {
-    try { await downloadChapter(chapter.id); } catch (err) { console.error('download failed:', err); }
+    try { await downloadChapter(chapter.id); } catch (err) { showApiError(err); }
   }
 
   async function handleDelete() {
     try {
       await deleteChapter(chapter.id);
       onDelete?.(chapter.id);
-    } catch (err) { console.error('delete failed:', err); }
+    } catch (err) { showApiError(err); }
   }
 
   async function handleCacheToggle() {
@@ -189,11 +190,11 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
   }
 
   async function handleCancel() {
-    try { await cancelDownload(chapter.id); } catch (err) { console.error('cancel failed:', err); }
+    try { await cancelDownload(chapter.id); } catch (err) { showApiError(err); }
   }
 
   async function handleRetry() {
-    try { await downloadChapter(chapter.id); } catch (err) { console.error('retry failed:', err); }
+    try { await downloadChapter(chapter.id); } catch (err) { showApiError(err); }
   }
 
   /** @type {import('./menu.js').MenuItem[]} */

@@ -131,6 +131,8 @@ async function _fetch(listEl, paginEl) {
   // Group by date, then by manga
   /** @type {Map<string, Map<number, { manga_id: number, manga_title: string, chapters: any[] }>>} */
   const byDate = new Map();
+  /** Tracks the newest timestamp seen for each dateKey so we can sort groups newest-first. */
+  const rawDates = /** @type {Map<string, number>} */ (new Map());
   for (const item of updates) {
     const rawDate = item.discovered_at ?? item.date_uploaded ?? null;
     const dateKey = rawDate ? _relativeDate(rawDate) : 'Unknown date';
@@ -146,11 +148,21 @@ async function _fetch(listEl, paginEl) {
       date_uploaded: rawDate,
       is_downloaded: item.is_downloaded ?? false,
     });
+    // Track newest raw timestamp per date group for sort ordering.
+    const ts = rawDate ? new Date(rawDate).getTime() : 0;
+    if (!rawDates.has(dateKey) || ts > /** @type {number} */ (rawDates.get(dateKey))) {
+      rawDates.set(dateKey, ts);
+    }
   }
 
   const canDownload = hasPermission('chapter:download');
 
-  for (const [dateLabel, mangaMap] of byDate) {
+  // Sort date groups newest-first regardless of Map insertion order.
+  const sortedGroups = [...byDate.entries()].sort(
+    ([a], [b]) => (rawDates.get(b) ?? 0) - (rawDates.get(a) ?? 0),
+  );
+
+  for (const [dateLabel, mangaMap] of sortedGroups) {
     // Date group header
     const dateHeader = document.createElement('div');
     dateHeader.className = 'text-sm font-semibold uppercase tracking-wider text-text-muted mt-6 mb-2 pb-1 border-b border-border-subtle first:mt-2';

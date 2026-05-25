@@ -3,9 +3,9 @@
 
 import * as api from '../../api.js';
 import { escapeHtml, openConfirm } from '../../utils.js';
-import { showToast } from '../../components/toast.js';
+import { showToast, showApiError } from '../../components/toast.js';
 import { hasPermission } from '../../state.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow, showResult } from './_shared.js';
+import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
 
 /**
  * @param {HTMLElement} el
@@ -135,7 +135,6 @@ export function mount(el, settings) {
             <div class="flex items-center gap-2 flex-wrap">
               <button type="button" class="btn-primary btn-sm js-config-save">Save credentials</button>
               ${config?.client_id ? `<button type="button" class="btn-danger btn-sm js-config-delete">Remove credentials</button>` : ''}
-              <span class="js-config-result text-xs hidden"></span>
             </div>
           </div>
         `;
@@ -144,20 +143,19 @@ export function mount(el, settings) {
         const secretEl   = /** @type {HTMLInputElement|null} */ (setupCard.querySelector('.js-client-secret'));
         const saveBtn    = /** @type {HTMLButtonElement} */ (setupCard.querySelector('.js-config-save'));
         const deleteBtn  = /** @type {HTMLButtonElement|null} */ (setupCard.querySelector('.js-config-delete'));
-        const resultEl   = /** @type {HTMLElement} */ (setupCard.querySelector('.js-config-result'));
 
         saveBtn.addEventListener('click', async () => {
           const clientId = clientIdEl.value.trim();
-          if (!clientId) { showResult(resultEl, false, 'Client ID is required.'); return; }
+          if (!clientId) { showToast('Client ID is required.', { type: 'error' }); return; }
           saveBtn.disabled = true;
           try {
             const body = { client_id: clientId };
             if (secretEl?.value) body.client_secret = secretEl.value;
             await api.setTrackerConfig(tracker.id, body);
-            showResult(resultEl, true, 'Saved.');
+            showToast('Saved.', { type: 'success' });
             await _render();
           } catch (e) {
-            showResult(resultEl, false, e?.message ?? 'Failed to save.');
+            showApiError(e);
           } finally {
             saveBtn.disabled = false;
           }
