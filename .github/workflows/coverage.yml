@@ -5,6 +5,10 @@ on:
     branches: [main, develop]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always
@@ -13,6 +17,9 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event.head_commit.committer.email != 'noreply@github.com'
 
     steps:
       - uses: actions/checkout@v4
@@ -20,10 +27,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
+          shared-key: "coverage"
+          cache-on-failure: true
 
       - uses: taiki-e/install-action@cargo-llvm-cov
 
@@ -42,13 +51,17 @@ jobs:
         if: steps.kani-cli-cache.outputs.cache-hit != 'true'
         run: cargo build --release -p kani-cli
 
-      # Build dev/test WASM extensions so kani-core WASM tests are included
-      # in coverage (they skip gracefully if the WASM binaries are missing).
+      - name: Cache WASM extensions
+        uses: actions/cache@v4
+        id: wasm-cache
+        with:
+          path: wasm_sources/
+          key: wasm-${{ runner.os }}-${{ hashFiles('kani-extensions/**', 'kani-shared/**', 'kani-core/wit/**', 'kani-cli/**', 'Cargo.lock') }}
+
       - name: Build dev/test WASM extensions
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: ./target/release/kani-cli build --dev
 
-      # --workspace omitted for the same reason as in ci.yml: extension crates are
-      # WASM-only and fail to link for the native target. default-members excludes them.
       - name: Collect coverage
         run: cargo llvm-cov nextest --locked --lcov --output-path lcov.info
 

@@ -5,6 +5,10 @@ on:
     branches: [main, develop]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always
@@ -13,6 +17,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event.head_commit.committer.email != 'noreply@github.com'
 
     steps:
       - uses: actions/checkout@v4
@@ -24,15 +31,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
+          shared-key: "ci"
+          cache-on-failure: true
+
+      - name: Format check
+        run: cargo fmt --check
 
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-tools, wasm-opt, nextest, cargo-binstall
 
       - name: Install sqlx-cli
-        # cargo-binstall downloads a pre-built binary from sqlx's GitHub releases
-        # instead of compiling from source, saving several minutes per run.
         run: cargo binstall sqlx-cli --no-confirm --no-symlinks
 
       - name: Cache kani-cli binary
@@ -46,17 +55,22 @@ jobs:
         if: steps.kani-cli-cache.outputs.cache-hit != 'true'
         run: cargo build --release -p kani-cli
 
-      - name: Build dev/test WASM extensions
-        run: ./target/release/kani-cli build --dev
+      - name: Cache WASM extensions
+        uses: actions/cache@v4
+        id: wasm-cache
+        with:
+          path: wasm_sources/
+          key: wasm-${{ runner.os }}-${{ hashFiles('kani-extensions/**', 'kani-shared/**', 'kani-core/wit/**', 'kani-cli/**', 'Cargo.lock') }}
 
-      - name: Format check
-        run: cargo fmt --check
+      - name: Build dev/test WASM extensions
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
+        run: ./target/release/kani-cli build --dev
 
       - name: Test
         run: cargo nextest run --locked
 
       - name: Clippy
-        run: cargo clippy --locked -- -D warnings
+        run: cargo clippy --locked --no-deps -- -D warnings
 
       - name: Check sqlx offline data
         env:
