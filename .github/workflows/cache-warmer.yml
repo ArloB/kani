@@ -31,3 +31,14 @@ jobs:
 
       - name: Build workspace (populate cache)
         run: cargo build --locked
+
+      - name: Cache kani-cli binary
+        uses: actions/cache@v5
+        id: kani-cli-cache
+        with:
+          path: target/release/kani-cli
+          key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
+
+      - name: Build kani-cli
+        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
+        run: cargo build --release -p kani-cli
