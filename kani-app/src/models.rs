@@ -56,6 +56,10 @@ pub struct DownloadRuleRow {
 pub struct PageInfo {
     pub index: usize,
     pub filename: String,
+    /// `true` when the server has determined this page is a double-page spread
+    /// (either a wide/landscape single image, or the first half of a split
+    /// portrait scan pair).
+    pub double_page: bool,
 }
 
 /// Manifest returned when opening a downloaded chapter for reading.
@@ -70,6 +74,10 @@ pub struct ChapterPageManifest {
     pub prev_chapter_id: Option<i64>,
     pub next_chapter_id: Option<i64>,
     pub last_page_read: Option<i64>,
+    /// `true` when the CBZ contains server-analysed spread metadata (a
+    /// `<Pages>` block in `ComicInfo.xml`).  When `false`, the reader
+    /// should fall back to client-side edge detection.
+    pub spread_analysed: bool,
 }
 
 /// Full manga row as stored in the database.

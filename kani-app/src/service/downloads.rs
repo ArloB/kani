@@ -270,6 +270,7 @@ impl AppService {
             penciller: record.artists,
             genre: record.tags,
             web: Some(format!("{}/{}", record.base_url, record.source_manga_id)),
+            pages: None, // populated by create_cbz after spread detection
         };
 
         Ok(DownloadTask {

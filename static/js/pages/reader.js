@@ -4,7 +4,7 @@
 import * as api from '../api.js';
 import { iconChevronLeft, iconChevronRight, iconX, iconMenu } from '../icons.js';
 import { navigate } from '../router.js';
-import { getLocal, setLocal } from '../utils.js';
+import { getLocal, setLocal, getLocalJson, setLocalJson } from '../utils.js';
 import { getState, subscribe } from '../state.js';
 import { registerShortcuts } from '../shortcuts.js';
 
@@ -157,6 +157,13 @@ export async function init(container, { id }) {
                 <span class="kani-toggle__track"></span>
               </label>
             </label>
+            <label class="flex items-center justify-between gap-3 cursor-pointer" id="reader-spread-row" style="display:none">
+              <span class="text-sm text-text">Auto-combine spreads</span>
+              <label class="kani-toggle" aria-label="Auto-combine split page spreads">
+                <input id="reader-spread-input" type="checkbox" class="kani-toggle__input">
+                <span class="kani-toggle__track"></span>
+              </label>
+            </label>
             <div>
               <p class="text-xs text-muted mb-2">Reading direction</p>
               <div class="flex gap-2">
@@ -204,6 +211,8 @@ export async function init(container, { id }) {
   const smoothInput  = /** @type {HTMLInputElement}  */ (container.querySelector('#reader-smooth-input'));
   const doubleInput  = /** @type {HTMLInputElement}  */ (container.querySelector('#reader-double-input'));
   const doubleRow    = /** @type {HTMLElement}        */ (container.querySelector('#reader-double-row'));
+  const spreadInput  = /** @type {HTMLInputElement}  */ (container.querySelector('#reader-spread-input'));
+  const spreadRow    = /** @type {HTMLElement}        */ (container.querySelector('#reader-spread-row'));
   const dirRtl       = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-dir-rtl'));
   const dirLtr       = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-dir-ltr'));
   const fitBoth      = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-fit-both'));
@@ -230,6 +239,39 @@ export async function init(container, { id }) {
   let _progressTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
   let _lastReportedPage = -1;
   let _preloadDone = false;
+  let _autoSpread   = getLocal('kani_reader_spread') !== 'false'; // default true
+  /**
+   * @type {Map<number, {w: number, h: number, edgeMatch?: boolean | null}>}
+   * edgeMatch: undefined = not yet checked, null = check in progress, true/false = confirmed result
+   */
+  const _imgDims    = new Map();
+  let _lastLayoutPage = -2;
+
+  /** @type {boolean} */
+  let _hasServerAnalysis = false;
+  /** @type {Set<number>} */
+  let _serverDoublePages = new Set();
+
+
+  let _dimSaveTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
+
+  function _saveDims() {
+    if (_dimSaveTimer) clearTimeout(_dimSaveTimer);
+    _dimSaveTimer = setTimeout(() => {
+      const entries = [];
+      for (const [i, d] of _imgDims) entries.push([i, d.w, d.h]);
+      setLocalJson(`kani_dims_${chapterId}`, entries);
+    }, 500);
+  }
+
+  _cleanup.push(() => { if (_dimSaveTimer) clearTimeout(_dimSaveTimer); });
+
+  function _setDims(idx, w, h) {
+    const prev = _imgDims.get(idx);
+    _imgDims.set(idx, { w, h, edgeMatch: prev?.edgeMatch });
+    _saveDims();
+  }
+
 
   function _reportProgress() {
     if (_progressTimer) clearTimeout(_progressTimer);
@@ -468,12 +510,24 @@ export async function init(container, { id }) {
 
   function _applyDoublePageVisibility() {
     doubleRow.style.display = _mode === 'paged' ? '' : 'none';
+    spreadRow.style.display = '';
   }
 
   doubleInput.checked = _doublePage;
   doubleInput.addEventListener('change', () => {
     _doublePage = doubleInput.checked;
     setLocal('kani_reader_double', String(_doublePage));
+    _applyDoublePageVisibility();
+    _renderPages();
+  });
+
+  // ── Auto-combine spreads toggle ───────────────────────────────────────────
+
+  spreadInput.checked = _autoSpread;
+  spreadInput.addEventListener('change', () => {
+    _autoSpread = spreadInput.checked;
+    setLocal('kani_reader_spread', String(_autoSpread));
+    _lastLayoutPage = -2;
     _renderPages();
   });
 
@@ -489,11 +543,13 @@ export async function init(container, { id }) {
   dirRtl.addEventListener('click', () => {
     _direction = 'rtl'; setLocal('kani_reader_direction', _direction);
     if (_mangaId) api.setMangaTracking(_mangaId, { reading_direction: 'rtl' }).catch(() => {});
+    for (const d of _imgDims.values()) d.edgeMatch = undefined;
     _applyDirButtons(); _renderPages();
   });
   dirLtr.addEventListener('click', () => {
     _direction = 'ltr'; setLocal('kani_reader_direction', _direction);
     if (_mangaId) api.setMangaTracking(_mangaId, { reading_direction: 'ltr' }).catch(() => {});
+    for (const d of _imgDims.values()) d.edgeMatch = undefined;
     _applyDirButtons(); _renderPages();
   });
 
@@ -588,7 +644,7 @@ export async function init(container, { id }) {
           return;
         }
         if (_mode === 'scroll') {
-          pagesEl.querySelector(`img[data-index="${idx}"]`)
+          pagesEl.querySelector(`[data-index="${idx}"]`)
             ?.scrollIntoView({ behavior: _smoothScroll ? 'smooth' : 'instant', block: 'start' });
         } else {
           _currentPage = idx;
@@ -597,6 +653,154 @@ export async function init(container, { id }) {
       });
       segsEl.appendChild(seg);
     }
+  }
+
+  // ── Spread detection ──────────────────────────────────────────────────────
+
+  /**
+   * Returns true if pages `idxA` and `idxA+1` are a split double-page spread
+   * (i.e. a single wide scan split into two portrait-oriented files). Both
+   * image dimensions must already be known via `_imgDims`.
+   * @param {number} idxA
+   */
+  function _isSpreadPair(idxA) {
+    if (!_autoSpread) return false;
+    const idxB = idxA + 1;
+    if (idxB >= _pages.length) return false;
+
+    if (_hasServerAnalysis) {
+      if (!_serverDoublePages.has(idxA)) return false;
+      const a = _imgDims.get(idxA);
+      const b = _imgDims.get(idxB);
+      if (!a || !b) return false;
+      if (a.w / a.h >= 1.2) return false;
+      return true;
+    }
+
+    const a = _imgDims.get(idxA);
+    const b = _imgDims.get(idxB);
+    if (!a || !b) return false;
+    if (a.w >= a.h * 0.95 || b.w >= b.h * 0.95) return false;
+    const ratio = (a.w + b.w) / Math.max(a.h, b.h);
+    if (ratio < 1.2 || ratio > 2.5) return false;
+    if (a.edgeMatch === true)  return true;
+    if (a.edgeMatch === false) return false;
+    if (a.edgeMatch === null)  return false;
+    a.edgeMatch = null;
+    _checkEdgeMatch(idxA);
+    return false;
+  }
+
+  /**
+   * Samples a narrow vertical strip of pixels from the right edge of page `idxA`
+   * and the left edge of page `idxA + 1`. If they're similar (low average diff),
+   * the pages are halves of the same original scan and should be composited.
+   * @param {number} idxA
+   */
+  async function _checkEdgeMatch(idxA) {
+    const STRIP_W  = 32;
+    const SAMPLE_H = 64;
+    try {
+      const [bmpA, bmpB] = await Promise.all([
+        fetch(_pages[idxA]).then(r => r.blob()).then(b => createImageBitmap(b)),
+        fetch(_pages[idxA + 1]).then(r => r.blob()).then(b => createImageBitmap(b)),
+      ]);
+      const [leftBmp, rightBmp] = _direction === 'rtl' ? [bmpB, bmpA] : [bmpA, bmpB];
+      const oc  = new OffscreenCanvas(STRIP_W * 2, SAMPLE_H);
+      const ctx = /** @type {OffscreenCanvasRenderingContext2D} */ (oc.getContext('2d'));
+      ctx.drawImage(leftBmp,  leftBmp.width  - STRIP_W, 0, STRIP_W, leftBmp.height,  0,       0, STRIP_W, SAMPLE_H);
+      ctx.drawImage(rightBmp, 0,                         0, STRIP_W, rightBmp.height, STRIP_W, 0, STRIP_W, SAMPLE_H);
+      const pxA = ctx.getImageData(0,       0, STRIP_W, SAMPLE_H).data;
+      const pxB = ctx.getImageData(STRIP_W, 0, STRIP_W, SAMPLE_H).data;
+
+      /** @param {Uint8ClampedArray} data */
+      const variance = (data) => {
+        let sum = 0, sumSq = 0, n = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const luma = (data[i] * 299 + data[i+1] * 587 + data[i+2] * 114) / 1000;
+          sum += luma; sumSq += luma * luma; n++;
+        }
+        const mean = sum / n;
+        return (sumSq / n) - (mean * mean);
+      };
+      const current = _imgDims.get(idxA);
+      if (!current) return;
+      if (variance(pxA) < 200 || variance(pxB) < 200) {
+        current.edgeMatch = false;
+        return;
+      }
+
+      let diff = 0;
+      for (let y = 0; y < SAMPLE_H; y++) {
+        for (let x = 0; x < STRIP_W; x++) {
+          const iA = (y * STRIP_W + (STRIP_W - 1 - x)) * 4;
+          const iB = (y * STRIP_W + x) * 4;
+          diff += Math.abs(pxA[iA] - pxB[iB]) + Math.abs(pxA[iA+1] - pxB[iB+1]) + Math.abs(pxA[iA+2] - pxB[iB+2]);
+        }
+      }
+      const avgDiff = diff / (SAMPLE_H * STRIP_W * 3);
+      current.edgeMatch = avgDiff < 20;
+
+      if (current.edgeMatch && _mode === 'paged' && _lastLayoutPage !== idxA) {
+        if (_currentPage === idxA) {
+          _lastLayoutPage = idxA;
+          _renderPages();
+        } else if (_currentPage === idxA + 1) {
+          _currentPage    = idxA;
+          _lastLayoutPage = idxA;
+          _renderPages();
+        }
+      }
+    } catch {
+      const current = _imgDims.get(idxA);
+      if (current) current.edgeMatch = false;
+    }
+  }
+
+  /**
+   * Returns true if page `idx` is a pre-combined wide spread (landscape orientation).
+   * In double-page mode such pages are displayed alone rather than paired.
+   * @param {number} idx
+   */
+  function _isWideImage(idx) {
+    const d = _imgDims.get(idx);
+    if (_hasServerAnalysis) {
+      if (!_serverDoublePages.has(idx)) return false;
+      if (!d) return false;
+      return d.w / d.h >= 1.2;
+    }
+    return !!d && d.w / d.h >= 1.2;
+  }
+
+  // ── Page stop navigation ─────────────────────────────────────────────────
+
+  /**
+   * Returns the page index of the next stop after `from` in paged mode.
+   * Accounts for: first-page-alone, wide images, spread pairs.
+   * @param {number} from
+   */
+  function _nextStop(from) {
+    if (_doublePage) {
+      if (from === 0) return 1; // page 0 always shown alone
+      if (_isWideImage(from) || (from + 1 < _pages.length && _isWideImage(from + 1)))
+        return from + 1;
+      return from + 2;
+    }
+    if (_autoSpread && _isSpreadPair(from)) return from + 2;
+    return from + 1;
+  }
+
+  /**
+   * Returns the page index of the previous stop before `from` in paged mode.
+   * Reconstructs the backward path by inverting `_nextStop`.
+   * @param {number} from
+   */
+  function _prevStop(from) {
+    for (let offset = 1; offset <= 2; offset++) {
+      const c = from - offset;
+      if (c >= 0 && _nextStop(c) === from) return c;
+    }
+    return Math.max(0, from - 1); // fallback
   }
 
   // ── Prefetch ─────────────────────────────────────────────────────────────
@@ -608,8 +812,19 @@ export async function init(container, { id }) {
       const url = _pages[prefIdx];
       if (url && !_loaded.has(prefIdx) && !_failed.has(prefIdx)) {
         const img = new Image();
-        img.addEventListener('load',  () => { _loaded.add(prefIdx);  _renderSegments(); });
-        img.addEventListener('error', () => { _failed.add(prefIdx);  _renderSegments(); });
+        img.addEventListener('load', () => {
+          _loaded.add(prefIdx); _renderSegments();
+          if (img.naturalWidth > 0) {
+            _setDims(prefIdx, img.naturalWidth, img.naturalHeight);
+            if (_autoSpread && _mode === 'paged' && !_doublePage &&
+                prefIdx === _currentPage + 1 && _isSpreadPair(_currentPage) &&
+                _lastLayoutPage !== _currentPage) {
+              _lastLayoutPage = _currentPage;
+              _renderPages();
+            }
+          }
+        });
+        img.addEventListener('error', () => { _failed.add(prefIdx); _renderSegments(); });
         img.src = url;
       }
     }
@@ -642,12 +857,59 @@ export async function init(container, { id }) {
       }
       // paged-double: each image shares half the width
       if (_fit === 'height') return 'max-h-full w-auto';
-      if (_fit === 'width')  return 'max-w-[50vw] h-auto';
+      if (_fit === 'width')  return 'max-w-[50vw] max-h-full';
       return 'max-w-[50vw] max-h-full object-contain'; // both
+    }
+
+    /** CSS class for a spread canvas (no object-contain — canvas is already the bitmap). */
+    function _spreadClass() {
+      if (_fit === 'height') return 'max-h-full w-auto';
+      if (_fit === 'width')  return 'max-w-full h-auto';
+      return 'max-w-full max-h-full';
     }
 
     if (_mode === 'scroll') {
       pagesEl.className = 'flex-1 overflow-y-auto overflow-x-hidden flex flex-col items-center gap-1 py-2';
+
+      // Track img elements by page index so we can replace pairs with canvases.
+      /** @type {Map<number, HTMLImageElement>} */
+      const _scrollImgs = new Map();
+
+      /**
+       * If pages idxA and idxA+1 are a spread pair and both are already loaded,
+       * replace both img elements with a single composited canvas in-place.
+       * @param {number} idxA
+       */
+      const _maybeComposite = (idxA) => {
+        if (!_isSpreadPair(idxA)) return;
+        const imgA = _scrollImgs.get(idxA);
+        const imgB = _scrollImgs.get(idxA + 1);
+        if (!imgA || !imgB || !imgA.parentElement) return;
+
+        const [leftImg, rightImg] = _direction === 'rtl' ? [imgB, imgA] : [imgA, imgB];
+        const W = leftImg.naturalWidth + rightImg.naturalWidth;
+        const H = Math.max(leftImg.naturalHeight, rightImg.naturalHeight);
+        const canvas = document.createElement('canvas');
+        canvas.className   = _imgClass('scroll');
+        canvas.dataset.index = String(idxA);
+        canvas.width  = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(leftImg,  0,                   (H - leftImg.naturalHeight)  / 2);
+          ctx.drawImage(rightImg, leftImg.naturalWidth, (H - rightImg.naturalHeight) / 2);
+        }
+        _loaded.add(idxA); _loaded.add(idxA + 1);
+
+        _scrollObs?.unobserve(imgA);
+        _scrollObs?.unobserve(imgB);
+        imgA.replaceWith(canvas);
+        imgB.remove();
+        _scrollImgs.delete(idxA);
+        _scrollImgs.delete(idxA + 1);
+        _scrollObs?.observe(canvas);
+        _renderSegments();
+      };
 
       for (let i = 0; i < _pages.length; i++) {
         const img         = document.createElement('img');
@@ -656,11 +918,24 @@ export async function init(container, { id }) {
         img.alt           = '';
         img.loading       = 'lazy';
         img.dataset.index = String(i);
-        img.addEventListener('load',  () => { _loaded.add(i);  _failed.delete(i); _renderSegments(); });
-        img.addEventListener('error', () => { _failed.add(i);  _loaded.delete(i); _renderSegments(); });
+        const _i = i;
+        img.addEventListener('load', () => {
+          _loaded.add(_i); _failed.delete(_i);
+          if (img.naturalWidth > 0) {
+            _setDims(_i, img.naturalWidth, img.naturalHeight);
+            if (_autoSpread) {
+              _maybeComposite(_i);          // this page starts a pair
+              if (_i > 0) _maybeComposite(_i - 1); // this page completes a pair
+            }
+          }
+          _renderSegments();
+        });
+        img.addEventListener('error', () => { _failed.add(_i); _loaded.delete(_i); _renderSegments(); });
         if (img.complete) {
-          if (img.naturalWidth) _loaded.add(i); else _failed.add(i);
+          if (img.naturalWidth) { _loaded.add(i); _setDims(i, img.naturalWidth, img.naturalHeight); }
+          else _failed.add(i);
         }
+        _scrollImgs.set(i, img);
         pagesEl.appendChild(img);
       }
 
@@ -710,7 +985,7 @@ export async function init(container, { id }) {
           _maybePreloadNext();
         }
       }, { root: pagesEl, threshold: 0.1 });
-      pagesEl.querySelectorAll('img[data-index]').forEach(img => _scrollObs?.observe(img));
+      pagesEl.querySelectorAll('[data-index]').forEach(el => _scrollObs?.observe(el));
 
     } else {
       // Paged mode
@@ -723,7 +998,25 @@ export async function init(container, { id }) {
         img.src       = _pages[pageIdx] ?? '';
         img.className = _imgClass(_doublePage ? 'paged-double' : 'paged-single');
         img.alt       = altText;
-        img.addEventListener('load', () => { _loaded.add(pageIdx); _failed.delete(pageIdx); _renderSegments(); });
+        img.addEventListener('load', () => {
+          _loaded.add(pageIdx); _failed.delete(pageIdx);
+          if (img.naturalWidth > 0) {
+            _setDims(pageIdx, img.naturalWidth, img.naturalHeight);
+            if (_lastLayoutPage !== _currentPage) {
+              if (_autoSpread && _isSpreadPair(_currentPage)) {
+                _lastLayoutPage = _currentPage;
+                _renderPages();
+                return;
+              }
+              if (_doublePage && (_isWideImage(_currentPage) || _isWideImage(_currentPage + 1))) {
+                _lastLayoutPage = _currentPage;
+                _renderPages();
+                return;
+              }
+            }
+          }
+          _renderSegments();
+        });
         img.addEventListener('error', () => {
           _failed.add(pageIdx); _loaded.delete(pageIdx); _renderSegments();
           const err = document.createElement('div');
@@ -732,23 +1025,159 @@ export async function init(container, { id }) {
           pagesEl.appendChild(err);
         });
         if (img.complete) {
-          if (img.naturalWidth) _loaded.add(pageIdx); else _failed.add(pageIdx);
+          if (img.naturalWidth) {
+            _loaded.add(pageIdx);
+            _setDims(pageIdx, img.naturalWidth, img.naturalHeight);
+          } else {
+            _failed.add(pageIdx);
+          }
         }
         return img;
       }
 
       if (_doublePage && _pages.length > 1) {
-        // Double-page spread: show two adjacent pages side-by-side.
-        // RTL: right page = current, left page = current+1
-        // LTR: left page = current, right page = current+1
         const leftIdx  = _direction === 'rtl' ? _currentPage + 1 : _currentPage;
         const rightIdx = _direction === 'rtl' ? _currentPage     : _currentPage + 1;
-        const spread   = document.createElement('div');
-        spread.className = 'flex items-center justify-center gap-0.5 max-w-full max-h-full';
-        if (leftIdx < _pages.length) spread.appendChild(_makePageImg(leftIdx, `Page ${leftIdx + 1}`));
-        if (rightIdx < _pages.length && rightIdx !== leftIdx) spread.appendChild(_makePageImg(rightIdx, `Page ${rightIdx + 1}`));
-        pagesEl.appendChild(spread);
+
+        if (_currentPage === 0) {
+          const img = _makePageImg(0, 'Page 1');
+          img.className = _imgClass('paged-single');
+          pagesEl.appendChild(img);
+        } else if (_isSpreadPair(_currentPage) && leftIdx < _pages.length && rightIdx < _pages.length) {
+          const a = /** @type {{w:number,h:number}} */ (_imgDims.get(leftIdx));
+          const b = /** @type {{w:number,h:number}} */ (_imgDims.get(rightIdx));
+          const expectedW = a.w + b.w;
+          const expectedH = Math.max(a.h, b.h);
+
+          const canvas = document.createElement('canvas');
+          canvas.className = _spreadClass();
+          canvas.width  = expectedW;
+          canvas.height = expectedH;
+          canvas.setAttribute('role', 'img');
+          canvas.setAttribute('aria-label',
+            `Spread: pages ${Math.min(leftIdx, rightIdx) + 1}–${Math.max(leftIdx, rightIdx) + 1}`);
+
+          const leftImg  = new Image();
+          const rightImg = new Image();
+          leftImg.src  = _pages[leftIdx];
+          rightImg.src = _pages[rightIdx];
+
+          let _lReady = false;
+          let _rReady = false;
+          const _drawSpread = () => {
+            if (!_lReady || !_rReady) return;
+            const W = leftImg.naturalWidth + rightImg.naturalWidth;
+            const H = Math.max(leftImg.naturalHeight, rightImg.naturalHeight);
+            canvas.width  = W;
+            canvas.height = H;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.drawImage(leftImg,  0,                  (H - leftImg.naturalHeight)  / 2);
+            ctx.drawImage(rightImg, leftImg.naturalWidth, (H - rightImg.naturalHeight) / 2);
+            _loaded.add(leftIdx); _loaded.add(rightIdx);
+            _renderSegments();
+          };
+          leftImg.addEventListener('load', () => {
+            _lReady = true;
+            _setDims(leftIdx,  leftImg.naturalWidth,  leftImg.naturalHeight);
+            _drawSpread();
+          });
+          rightImg.addEventListener('load', () => {
+            _rReady = true;
+            _setDims(rightIdx, rightImg.naturalWidth, rightImg.naturalHeight);
+            _drawSpread();
+          });
+          let _spreadErrorShown = false;
+          const _showSpreadError = () => {
+            _failed.add(leftIdx); _failed.add(rightIdx);
+            _renderSegments();
+            if (_spreadErrorShown) return;
+            _spreadErrorShown = true;
+            canvas.remove();
+            const err = document.createElement('div');
+            err.className = 'absolute inset-0 flex flex-col items-center justify-center gap-3';
+            err.innerHTML = `
+              <p class="text-muted text-sm">Failed to load spread pages</p>
+              <button class="btn-ghost">Retry</button>
+            `;
+            err.querySelector('button')?.addEventListener('click', () => {
+              _failed.delete(leftIdx); _failed.delete(rightIdx);
+              _renderPages();
+            });
+            pagesEl.appendChild(err);
+          };
+          leftImg.addEventListener('error',  _showSpreadError);
+          rightImg.addEventListener('error', _showSpreadError);
+          // Handle already-cached images (naturalWidth set synchronously).
+          if (leftImg.complete && leftImg.naturalWidth)   { _lReady = true;  _setDims(leftIdx,  leftImg.naturalWidth,  leftImg.naturalHeight);  }
+          if (rightImg.complete && rightImg.naturalWidth) { _rReady = true;  _setDims(rightIdx, rightImg.naturalWidth, rightImg.naturalHeight); }
+          _drawSpread();
+
+          pagesEl.appendChild(canvas);
+        } else if (_isWideImage(_currentPage) || (_currentPage + 1 < _pages.length && _isWideImage(_currentPage + 1))) {
+          const img = _makePageImg(_currentPage, `Page ${_currentPage + 1}`);
+          img.className = _imgClass('paged-single');
+          pagesEl.appendChild(img);
+        } else {
+          const spread   = document.createElement('div');
+          spread.className = 'flex items-center justify-center gap-0.5 max-w-full h-full';
+          if (leftIdx < _pages.length) spread.appendChild(_makePageImg(leftIdx, `Page ${leftIdx + 1}`));
+          if (rightIdx < _pages.length && rightIdx !== leftIdx) spread.appendChild(_makePageImg(rightIdx, `Page ${rightIdx + 1}`));
+          pagesEl.appendChild(spread);
+        }
         _prefetch(_currentPage + 1);
+      } else if (_autoSpread && _isSpreadPair(_currentPage) && _currentPage + 1 < _pages.length) {
+        const leftIdx  = _direction === 'rtl' ? _currentPage + 1 : _currentPage;
+        const rightIdx = _direction === 'rtl' ? _currentPage     : _currentPage + 1;
+        const a = /** @type {{w:number,h:number}} */ (_imgDims.get(leftIdx));
+        const b = /** @type {{w:number,h:number}} */ (_imgDims.get(rightIdx));
+
+        const canvas = document.createElement('canvas');
+        canvas.className = _spreadClass();
+        canvas.width  = a.w + b.w;
+        canvas.height = Math.max(a.h, b.h);
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label',
+          `Spread: pages ${Math.min(leftIdx, rightIdx) + 1}–${Math.max(leftIdx, rightIdx) + 1}`);
+
+        const leftImg  = new Image();
+        const rightImg = new Image();
+        leftImg.src  = _pages[leftIdx];
+        rightImg.src = _pages[rightIdx];
+
+        let _lReady = false, _rReady = false;
+        const _draw = () => {
+          if (!_lReady || !_rReady) return;
+          const W = leftImg.naturalWidth + rightImg.naturalWidth;
+          const H = Math.max(leftImg.naturalHeight, rightImg.naturalHeight);
+          canvas.width = W; canvas.height = H;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          ctx.drawImage(leftImg,  0,                    (H - leftImg.naturalHeight)  / 2);
+          ctx.drawImage(rightImg, leftImg.naturalWidth,  (H - rightImg.naturalHeight) / 2);
+          _loaded.add(leftIdx); _loaded.add(rightIdx);
+          _renderSegments();
+        };
+        leftImg.addEventListener('load',  () => { _lReady = true;  _setDims(leftIdx,  leftImg.naturalWidth,  leftImg.naturalHeight);  _draw(); });
+        rightImg.addEventListener('load', () => { _rReady = true;  _setDims(rightIdx, rightImg.naturalWidth, rightImg.naturalHeight); _draw(); });
+        let _errShown = false;
+        const _onErr = () => {
+          _failed.add(leftIdx); _failed.add(rightIdx); _renderSegments();
+          if (_errShown) return; _errShown = true;
+          canvas.remove();
+          const err = document.createElement('div');
+          err.className = 'absolute inset-0 flex flex-col items-center justify-center gap-3';
+          err.innerHTML = `<p class="text-muted text-sm">Failed to load spread pages</p><button class="btn-ghost">Retry</button>`;
+          err.querySelector('button')?.addEventListener('click', () => { _failed.delete(leftIdx); _failed.delete(rightIdx); _renderPages(); });
+          pagesEl.appendChild(err);
+        };
+        leftImg.addEventListener('error', _onErr);
+        rightImg.addEventListener('error', _onErr);
+        if (leftImg.complete  && leftImg.naturalWidth)  { _lReady = true;  _setDims(leftIdx,  leftImg.naturalWidth,  leftImg.naturalHeight);  }
+        if (rightImg.complete && rightImg.naturalWidth) { _rReady = true;  _setDims(rightIdx, rightImg.naturalWidth, rightImg.naturalHeight); }
+        _draw();
+        pagesEl.appendChild(canvas);
+        _prefetch(_currentPage + 2);
       } else {
         const img = _makePageImg(_currentPage, `Page ${_currentPage + 1}`);
         img.className = _imgClass('paged-single');
@@ -768,6 +1197,7 @@ export async function init(container, { id }) {
         });
         pagesEl.appendChild(img);
         _prefetch(_currentPage);
+        if (_autoSpread && !_hasServerAnalysis && _currentPage > 0) _isSpreadPair(_currentPage - 1);
       }
     }
 
@@ -778,21 +1208,17 @@ export async function init(container, { id }) {
 
   function _goPage(rawDelta) {
     if (_mode !== 'paged') return;
-    // RTL flips the direction: advancing means going to a lower page number.
     const delta = _direction === 'rtl' ? -rawDelta : rawDelta;
-    const step  = _doublePage ? 2 : 1;
-    const next  = _currentPage + Math.sign(delta) * step;
+    const next  = delta > 0 ? _nextStop(_currentPage) : _prevStop(_currentPage);
 
     if (next < 0) {
       if (_chapterInfo.prev_chapter_id) {
-        // Signal reader to start at the last page of the previous chapter
         api.setChapterProgress(_chapterInfo.prev_chapter_id, -1).catch(() => {});
         _navigateChapter(_chapterInfo.prev_chapter_id);
       }
       return;
     }
     if (next >= _pages.length) {
-      // Reset progress to 0 for completed chapter before navigating away
       api.setChapterProgress(chapterId, 0).catch(() => {});
       if (_chapterInfo.next_chapter_id) {
         _navigateChapter(_chapterInfo.next_chapter_id);
@@ -821,7 +1247,6 @@ export async function init(container, { id }) {
     const third = rect.width / 3;
 
     if (_mode === 'paged') {
-      // In RTL: left zone = forward, right zone = back (consistent with manga convention).
       if (x < third)     { _goPage(_direction === 'rtl' ? 1 : -1); return; }
       if (x > 2 * third) { _goPage(_direction === 'rtl' ? -1 : 1); return; }
     }
@@ -843,7 +1268,6 @@ export async function init(container, { id }) {
   pagesEl.addEventListener('touchstart', (e) => { _touchStartX = e.touches[0].clientX; }, { passive: true });
   pagesEl.addEventListener('touchend',   (e) => {
     const dx = e.changedTouches[0].clientX - _touchStartX;
-    // Swipe left = go forward (next page in LTR, prev page in RTL via _goPage direction flip)
     if (Math.abs(dx) > 50) _goPage(dx < 0 ? 1 : -1);
   });
 
@@ -879,6 +1303,21 @@ export async function init(container, { id }) {
     _chapterInfo = data ?? {};
     _mangaId     = data?.manga_id ?? null;
 
+    _hasServerAnalysis = data?.spread_analysed === true;
+    _serverDoublePages = new Set(
+      (data?.pages ?? []).filter(p => p.double_page).map(p => p.index)
+    );
+
+    const _cachedDims = getLocalJson(`kani_dims_${chapterId}`);
+    if (Array.isArray(_cachedDims)) {
+      for (const entry of _cachedDims) {
+        const [i, w, h] = entry;
+        if (typeof i === 'number' && typeof w === 'number' && typeof h === 'number') {
+          _imgDims.set(i, { w, h });
+        }
+      }
+    }
+
     // Load per-manga reading direction, falling back to localStorage
     if (_mangaId) {
       try {
@@ -889,7 +1328,6 @@ export async function init(container, { id }) {
       } catch { /* keep localStorage default */ }
     }
 
-    // Trust server-side progress; -1 means start at last page (used when navigating backwards)
     if (data?.last_page_read != null) {
       _currentPage = data.last_page_read;
     }
@@ -947,7 +1385,6 @@ export async function init(container, { id }) {
 
   _destroyFn = () => {
     if (_hideTimer) clearTimeout(_hideTimer);
-    // Flush progress to server immediately on exit
     if (_currentPage !== _lastReportedPage) {
       api.setChapterProgress(chapterId, _currentPage).catch(() => {});
     }

@@ -254,9 +254,32 @@ impl DownloaderManager {
 
     async fn create_cbz(
         cbz_path: &std::path::Path,
-        staged_pages: Vec<(PathBuf, String)>,
+        mut staged_pages: Vec<(PathBuf, String)>,
         comic_info: Option<crate::comic_info::ComicInfo>,
     ) -> Result<()> {
+        // Sort by destination filename so pages are in display order for both
+        // the zip entries and the spread-detection pass below.
+        staged_pages.sort_unstable_by(|a, b| a.1.cmp(&b.1));
+
+        // Run spread detection and embed the results in ComicInfo.xml.
+        // Only executed when we have a ComicInfo to write results into; skipped
+        // for downloads where the caller passed None.
+        let comic_info = if let Some(mut info) = comic_info {
+            let paths: Vec<PathBuf> = staged_pages.iter().map(|(p, _)| p.clone()).collect();
+            let spread_flags =
+                tokio::task::spawn_blocking(move || crate::cbz::detect_spread_pages(&paths))
+                    .await
+                    .ok()
+                    .unwrap_or_default();
+            info.pages = Some(crate::comic_info::ComicPages::from_flags(
+                staged_pages.len(),
+                &spread_flags,
+            ));
+            Some(info)
+        } else {
+            None
+        };
+
         let cbz_file = tokio::fs::File::create(cbz_path).await?;
         let mut zip_writer = ZipFileWriter::new(cbz_file.compat_write());
 
@@ -1026,6 +1049,7 @@ mod tests {
             penciller: None,
             genre: None,
             web: None,
+            pages: None,
         };
         DownloaderManager::create_cbz(&cbz_path, vec![(page, "0001.jpg".to_string())], Some(info))
             .await

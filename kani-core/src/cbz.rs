@@ -1,6 +1,9 @@
 //! CBZ archive reading utilities.
 
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+use image::GenericImageView;
 
 use crate::error::{Error, Result};
 
@@ -90,6 +93,168 @@ pub fn read_cbz_page(path: &Path, page_num: usize) -> Result<(Vec<u8>, String)> 
     Ok((buf, ext))
 }
 
+// ---------------------------------------------------------------------------
+// ComicInfo.xml helpers
+// ---------------------------------------------------------------------------
+
+/// Read the raw UTF-8 content of `ComicInfo.xml` from a CBZ archive, if present.
+pub fn read_cbz_comic_info(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+    let mut entry = archive.by_name("ComicInfo.xml").ok()?;
+    let mut buf = String::new();
+    std::io::Read::read_to_string(&mut entry, &mut buf).ok()?;
+    Some(buf)
+}
+
+/// Returns `(double_page_indices, spread_analysed)` from a CBZ's `ComicInfo.xml`.
+pub fn read_double_page_flags(path: &Path) -> (HashSet<usize>, bool) {
+    let Some(xml) = read_cbz_comic_info(path) else {
+        return (HashSet::new(), false);
+    };
+    // Strip the XML declaration so the deserialiser sees a bare element.
+    let body = xml
+        .strip_prefix("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
+        .unwrap_or(&xml)
+        .trim();
+    let analysed = crate::comic_info::has_pages_metadata(body);
+    let flags = crate::comic_info::parse_double_pages(body)
+        .into_iter()
+        .map(|i| i as usize)
+        .collect();
+    (flags, analysed)
+}
+
+// ---------------------------------------------------------------------------
+// Spread detection (CBZ creation time)
+// ---------------------------------------------------------------------------
+
+const STRIP_W: u32 = 32;
+const SAMPLE_H: u32 = 64;
+const VARIANCE_THRESHOLD: f64 = 200.0;
+const DIFF_THRESHOLD: f64 = 20.0;
+
+/// Returns 0-based indices that should be flagged `DoublePage=true` in `ComicInfo.xml`.
+/// Wide (w/h ≥ 1.2) images are flagged directly; portrait pairs are confirmed via pixel edge comparison.
+pub fn detect_spread_pages(page_paths: &[PathBuf]) -> HashSet<usize> {
+    let mut double_pages = HashSet::new();
+    let mut candidate: Option<(usize, PathBuf, u32, u32)> = None;
+
+    for (i, path) in page_paths.iter().enumerate() {
+        let (w, h) = match imagesize::size(path) {
+            Ok(dim) => (dim.width as u32, dim.height as u32),
+            Err(e) => {
+                tracing::warn!(
+                    "detect_spread_pages: could not read dims for {}: {e}",
+                    path.display()
+                );
+                candidate = None;
+                continue;
+            }
+        };
+
+        if h == 0 {
+            candidate = None;
+            continue;
+        }
+
+        if w as f64 / h as f64 >= 1.2 {
+            double_pages.insert(i);
+            candidate = None;
+            continue;
+        }
+
+        let plausible_pair = candidate.as_ref().is_some_and(|(_, _, cw, ch)| {
+            let ratio = (*cw + w) as f64 / (*ch).max(h) as f64;
+            (1.2..=2.5).contains(&ratio)
+        });
+
+        if plausible_pair {
+            let (prev_idx, prev_path, _, _) = candidate.take().expect("checked above");
+
+            let matched = image::open(&prev_path)
+                .ok()
+                .zip(image::open(path).ok())
+                .map(|(img_a, img_b)| {
+                    pixel_edges_adjacent(&img_a, &img_b) || pixel_edges_adjacent(&img_b, &img_a)
+                })
+                .unwrap_or(false);
+
+            if matched {
+                double_pages.insert(prev_idx);
+            } else {
+                candidate = Some((i, path.clone(), w, h));
+            }
+        } else {
+            candidate = Some((i, path.clone(), w, h));
+        }
+    }
+
+    double_pages
+}
+
+fn pixel_edges_adjacent(left_img: &image::DynamicImage, right_img: &image::DynamicImage) -> bool {
+    let (aw, ah) = left_img.dimensions();
+    let (bw, bh) = right_img.dimensions();
+
+    if aw < STRIP_W || bw < STRIP_W || ah == 0 || bh == 0 {
+        return false;
+    }
+
+    let strip_a = left_img
+        .crop_imm(aw - STRIP_W, 0, STRIP_W, ah)
+        .resize_exact(STRIP_W, SAMPLE_H, image::imageops::FilterType::Nearest)
+        .into_rgb8();
+
+    let strip_b = right_img
+        .crop_imm(0, 0, STRIP_W, bh)
+        .resize_exact(STRIP_W, SAMPLE_H, image::imageops::FilterType::Nearest)
+        .into_rgb8();
+
+    let pixel_count = (STRIP_W * SAMPLE_H) as f64;
+    let channel_count = pixel_count * 3.0;
+
+    let strip_variance = |strip: &image::ImageBuffer<image::Rgb<u8>, Vec<u8>>| -> f64 {
+        let mut sum = [0f64; 3];
+        for px in strip.pixels() {
+            sum[0] += px[0] as f64;
+            sum[1] += px[1] as f64;
+            sum[2] += px[2] as f64;
+        }
+        let mean = [
+            sum[0] / pixel_count,
+            sum[1] / pixel_count,
+            sum[2] / pixel_count,
+        ];
+        let mut var = 0f64;
+        for px in strip.pixels() {
+            let dr = px[0] as f64 - mean[0];
+            let dg = px[1] as f64 - mean[1];
+            let db = px[2] as f64 - mean[2];
+            var += dr * dr + dg * dg + db * db;
+        }
+        var / channel_count
+    };
+
+    if strip_variance(&strip_a) < VARIANCE_THRESHOLD
+        || strip_variance(&strip_b) < VARIANCE_THRESHOLD
+    {
+        return false;
+    }
+
+    let mut diff = 0f64;
+    for y in 0..SAMPLE_H {
+        for x in 0..STRIP_W {
+            let pa = strip_a.get_pixel(STRIP_W - 1 - x, y);
+            let pb = strip_b.get_pixel(x, y);
+            diff += (pa[0] as f64 - pb[0] as f64).abs()
+                + (pa[1] as f64 - pb[1] as f64).abs()
+                + (pa[2] as f64 - pb[2] as f64).abs();
+        }
+    }
+    diff / channel_count < DIFF_THRESHOLD
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -99,7 +264,7 @@ mod tests {
     use zip::write::SimpleFileOptions;
 
     /// Builds a CBZ at `dir/name.cbz` containing the given entries (name → bytes).
-    fn make_cbz(dir: &TempDir, name: &str, entries: &[(&str, &[u8])]) -> std::path::PathBuf {
+    fn make_cbz(dir: &TempDir, name: &str, entries: &[(&str, &[u8])]) -> PathBuf {
         let path = dir.path().join(name);
         let file = std::fs::File::create(&path).unwrap();
         let mut writer = zip::ZipWriter::new(file);
@@ -111,6 +276,100 @@ mod tests {
         writer.finish().unwrap();
         path
     }
+
+    /// Encode a solid-colour RGB image to PNG bytes.
+    fn make_png(w: u32, h: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
+        let img = image::ImageBuffer::from_pixel(w, h, image::Rgb([r, g, b]));
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .unwrap();
+        buf.into_inner()
+    }
+
+    /// Encode a vertical gradient (row-varying colour) to PNG bytes.
+    /// Top row ≈ (0,0,128), bottom row ≈ (255,0,128).  The red channel varies
+    /// per row but is uniform per column, so the right edge of any left-half
+    /// crop and the left edge of any right-half crop are identical — zero diff,
+    /// high variance (spread over the full 0-255 range).
+    fn make_gradient_png(w: u32, h: u32) -> Vec<u8> {
+        let img = image::ImageBuffer::from_fn(w, h, |_x, y| {
+            let v = (y * 255 / h.max(1)) as u8;
+            image::Rgb([v, 0u8, 128u8])
+        });
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .unwrap();
+        buf.into_inner()
+    }
+
+    /// Encode a vertical gradient with per-pixel random noise of the given
+    /// amplitude added to every channel.  The base gradient provides high
+    /// variance so the variance guard passes; the noise simulates the
+    /// compression artefacts present in real JPEG scans.
+    ///
+    /// After splitting this image in half, adjacent edge strips differ only by
+    /// noise — average diff ≈ amplitude * 4/3 (expected value for |U[-A,A] -
+    /// U[-A,A]| summed across independent per-pixel samples).  With amplitude=8
+    /// the expected per-channel diff is ~10.7, comfortably below the threshold
+    /// of 20, so the split should still be detected as a spread.
+    fn make_noisy_gradient_png(w: u32, h: u32, amplitude: u8) -> Vec<u8> {
+        let a = amplitude as i16;
+        let range = (2 * a + 1) as u64;
+        let img = image::ImageBuffer::from_fn(w, h, |x, y| {
+            // Finalised splitmix64 hash — good avalanche, deterministic per (x, y).
+            let mut v = 0xdead_beef_cafe_babeu64
+                .wrapping_add((x as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
+                .wrapping_add((y as u64).wrapping_mul(0x6c62_272e_07bb_0142));
+            v ^= v >> 30;
+            v = v.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            v ^= v >> 27;
+            v = v.wrapping_mul(0x94d0_49bb_1331_11eb);
+            v ^= v >> 31;
+            let noise = |bits: u64| -> i16 { (bits % range) as i16 - a };
+            let base_r = (y * 255 / h.max(1)) as i16; // gradient
+            let base_g = 128i16; // constant mid-grey
+            let base_b = 128i16;
+            image::Rgb([
+                (base_r + noise(v)).clamp(0, 255) as u8,
+                (base_g + noise(v >> 8)).clamp(0, 255) as u8,
+                (base_b + noise(v >> 16)).clamp(0, 255) as u8,
+            ])
+        });
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .unwrap();
+        buf.into_inner()
+    }
+
+    /// Encode a PNG where every pixel has a unique deterministic colour derived
+    /// from its coordinates and a seed.  No spatial correlation — adjacent
+    /// columns look completely different.  Simulates a digital manga page: high
+    /// variance everywhere, no matching edges with any unrelated page.
+    fn make_noise_png(w: u32, h: u32, seed: u64) -> Vec<u8> {
+        let img = image::ImageBuffer::from_fn(w, h, |x, y| {
+            let mut v = seed
+                .wrapping_add((x as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
+                .wrapping_add((y as u64).wrapping_mul(0x6c62_272e_07bb_0142));
+            v ^= v >> 30;
+            v = v.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            v ^= v >> 27;
+            v = v.wrapping_mul(0x94d0_49bb_1331_11eb);
+            v ^= v >> 31;
+            image::Rgb([v as u8, (v >> 8) as u8, (v >> 16) as u8])
+        });
+        let mut buf = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .unwrap();
+        buf.into_inner()
+    }
+
+    // -----------------------------------------------------------------------
+    // list_cbz_pages
+    // -----------------------------------------------------------------------
 
     #[test]
     fn lists_only_image_entries() {
@@ -195,5 +454,227 @@ mod tests {
         );
         let pages = list_cbz_pages(&cbz).unwrap();
         assert_eq!(pages.len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // read_cbz_comic_info / read_double_page_flags
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn reads_comic_info_xml_from_cbz() {
+        let dir = TempDir::new().unwrap();
+        let cbz = make_cbz(
+            &dir,
+            "meta.cbz",
+            &[
+                ("0001.jpg", b"img"),
+                (
+                    "ComicInfo.xml",
+                    b"<ComicInfo><Series>X</Series></ComicInfo>",
+                ),
+            ],
+        );
+        let xml = read_cbz_comic_info(&cbz).unwrap();
+        assert!(xml.contains("<Series>X</Series>"));
+    }
+
+    #[test]
+    fn comic_info_absent_returns_none() {
+        let dir = TempDir::new().unwrap();
+        let cbz = make_cbz(&dir, "nometa.cbz", &[("0001.jpg", b"img")]);
+        assert!(read_cbz_comic_info(&cbz).is_none());
+    }
+
+    #[test]
+    fn double_page_flags_absent_when_no_comic_info() {
+        let dir = TempDir::new().unwrap();
+        let cbz = make_cbz(&dir, "noflags.cbz", &[("0001.jpg", b"img")]);
+        let (flags, analysed) = read_double_page_flags(&cbz);
+        assert!(flags.is_empty());
+        assert!(!analysed);
+    }
+
+    #[test]
+    fn double_page_flags_parsed_from_comic_info() {
+        let xml = r#"<ComicInfo>
+  <Series>Test</Series>
+  <Pages>
+    <Page Image="0" />
+    <Page Image="1" DoublePage="true" />
+    <Page Image="2" />
+  </Pages>
+</ComicInfo>"#;
+        let dir = TempDir::new().unwrap();
+        let cbz = make_cbz(
+            &dir,
+            "flags.cbz",
+            &[
+                ("0001.jpg", b"img"),
+                ("0002.jpg", b"img"),
+                ("0003.jpg", b"img"),
+                ("ComicInfo.xml", xml.as_bytes()),
+            ],
+        );
+        let (flags, analysed) = read_double_page_flags(&cbz);
+        assert!(analysed, "should detect pages metadata");
+        assert_eq!(flags, [1usize].into_iter().collect::<HashSet<_>>());
+    }
+
+    #[test]
+    fn not_analysed_when_no_pages_block() {
+        let xml = b"<ComicInfo><Series>Test</Series></ComicInfo>";
+        let dir = TempDir::new().unwrap();
+        let cbz = make_cbz(
+            &dir,
+            "nopages.cbz",
+            &[("0001.jpg", b"img"), ("ComicInfo.xml", xml)],
+        );
+        let (flags, analysed) = read_double_page_flags(&cbz);
+        assert!(!analysed);
+        assert!(flags.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // detect_spread_pages
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn landscape_images_are_flagged() {
+        let dir = TempDir::new().unwrap();
+        // 132×100 → ratio 1.32, typical manga double-page spread
+        let wide = make_png(132, 100, 128, 128, 128);
+        // 100×150 → portrait
+        let portrait = make_png(100, 150, 64, 64, 64);
+
+        let p0 = dir.path().join("0001.png");
+        let p1 = dir.path().join("0002.png");
+        let p2 = dir.path().join("0003.png");
+        std::fs::write(&p0, &portrait).unwrap();
+        std::fs::write(&p1, &wide).unwrap();
+        std::fs::write(&p2, &portrait).unwrap();
+
+        let flags = detect_spread_pages(&[p0, p1, p2]);
+        assert!(flags.contains(&1), "wide page (idx 1) should be flagged");
+        assert!(
+            !flags.contains(&0),
+            "portrait page (idx 0) should not be flagged"
+        );
+        assert!(
+            !flags.contains(&2),
+            "portrait page (idx 2) should not be flagged"
+        );
+    }
+
+    #[test]
+    fn uniform_portrait_pages_not_paired() {
+        // Solid colour pages have near-zero variance → variance guard rejects.
+        let dir = TempDir::new().unwrap();
+        let page = make_png(720, 1080, 255, 255, 255);
+        let paths: Vec<PathBuf> = (0..4)
+            .map(|i| {
+                let p = dir.path().join(format!("{:04}.png", i + 1));
+                std::fs::write(&p, &page).unwrap();
+                p
+            })
+            .collect();
+
+        let flags = detect_spread_pages(&paths);
+        assert!(
+            flags.is_empty(),
+            "solid-colour portrait pages must not be paired: {flags:?}"
+        );
+    }
+
+    #[test]
+    fn split_gradient_image_detected_as_spread() {
+        // Create a gradient image twice as wide as it is tall → split it.
+        // Right edge of left half ≈ left edge of right half (neighbouring columns).
+        let dir = TempDir::new().unwrap();
+        let full_w: u32 = 200;
+        let h: u32 = 150;
+        let gradient = make_gradient_png(full_w, h);
+
+        // Load, split into halves, save as two portrait pages.
+        let full_img = image::load_from_memory(&gradient).unwrap();
+        let half_w = full_w / 2;
+
+        let left = full_img.crop_imm(0, 0, half_w, h);
+        let right = full_img.crop_imm(half_w, 0, half_w, h);
+
+        let p0 = dir.path().join("0001.png");
+        let p1 = dir.path().join("0002.png");
+        let write_png = |img: image::DynamicImage, path: &PathBuf| {
+            let mut buf = std::io::Cursor::new(Vec::new());
+            img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+            std::fs::write(path, buf.into_inner()).unwrap();
+        };
+        write_png(left, &p0);
+        write_png(right, &p1);
+
+        let flags = detect_spread_pages(&[p0, p1]);
+        assert!(
+            flags.contains(&0),
+            "left half of split scan (idx 0) should be flagged as double-page"
+        );
+    }
+
+    #[test]
+    fn empty_page_list_returns_empty_flags() {
+        let flags = detect_spread_pages(&[]);
+        assert!(flags.is_empty());
+    }
+
+    #[test]
+    fn independent_noise_pages_not_paired() {
+        // Two independently-seeded noise images have high variance but
+        // unrelated edges → NOT detected as a spread.  This covers the
+        // diff-check code path that the solid-white test (which hits the
+        // variance guard early-exit) does not exercise.  Simulates digital
+        // manga chapters where every page is the same pixel size but contains
+        // completely different artwork.
+        let dir = TempDir::new().unwrap();
+        let page_a = make_noise_png(100, 150, 0xdead_beef_cafe_babe);
+        let page_b = make_noise_png(100, 150, 0x1234_5678_9abc_def0); // different seed
+        let p0 = dir.path().join("0001.png");
+        let p1 = dir.path().join("0002.png");
+        std::fs::write(&p0, &page_a).unwrap();
+        std::fs::write(&p1, &page_b).unwrap();
+        let flags = detect_spread_pages(&[p0, p1]);
+        assert!(
+            flags.is_empty(),
+            "independently-generated noise pages must not be paired: {flags:?}"
+        );
+    }
+
+    #[test]
+    fn split_scan_with_compression_noise_detected() {
+        // A split scan with amplitude-8 noise (simulating JPEG quality ~85
+        // compression artefacts) should still be detected as a spread pair.
+        // Expected per-channel diff at the join edge ≈ amplitude * 4/3 ≈ 10.7,
+        // comfortably below the DIFF_THRESHOLD of 20.
+        let dir = TempDir::new().unwrap();
+        let full_w: u32 = 200;
+        let h: u32 = 150;
+        let noisy = make_noisy_gradient_png(full_w, h, 8);
+        let full_img = image::load_from_memory(&noisy).unwrap();
+        let half_w = full_w / 2;
+        let left = full_img.crop_imm(0, 0, half_w, h);
+        let right = full_img.crop_imm(half_w, 0, half_w, h);
+
+        let write_png = |img: image::DynamicImage, path: &std::path::PathBuf| {
+            let mut buf = std::io::Cursor::new(Vec::new());
+            img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+            std::fs::write(path, buf.into_inner()).unwrap();
+        };
+        let p0 = dir.path().join("0001.png");
+        let p1 = dir.path().join("0002.png");
+        write_png(left, &p0);
+        write_png(right, &p1);
+
+        let flags = detect_spread_pages(&[p0, p1]);
+        assert!(
+            flags.contains(&0),
+            "split scan with JPEG-level compression noise should still be detected as a spread"
+        );
     }
 }

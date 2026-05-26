@@ -281,10 +281,15 @@ export async function getPages(sid, mangaId, chapterId) {
  *   manga_id: number,
  *   manga_title: string,
  *   page_count: number,
- *   pages: Array<{ index: number, filename: string }>,
+ *   pages: Array<{
+ *     index: number,
+ *     filename: string,
+ *     double_page: boolean,
+ *   }>,
  *   prev_chapter_id: number | null,
  *   next_chapter_id: number | null,
  *   last_page_read: number | null,
+ *   spread_analysed: boolean,
  * }>}
  */
 export async function getChapterPages(chapterId) {

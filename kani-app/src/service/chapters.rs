@@ -221,16 +221,25 @@ impl AppService {
             .await?;
 
         let path_clone = cbz_path.clone();
-        let names =
-            tokio::task::spawn_blocking(move || kani_core::cbz::list_cbz_pages(&path_clone))
-                .await
-                .map_err(|e| ServiceError::Internal(format!("Task join error: {e}")))?
-                .map_err(ServiceError::Core)?;
+        // Read page list and double-page flags in a single blocking task so
+        // we open the CBZ archive only once (the `zip` crate is sync).
+        let (names, double_page_flags, spread_analysed) = tokio::task::spawn_blocking(move || {
+            let names = kani_core::cbz::list_cbz_pages(&path_clone)?;
+            let (flags, analysed) = kani_core::cbz::read_double_page_flags(&path_clone);
+            Ok::<_, kani_core::error::Error>((names, flags, analysed))
+        })
+        .await
+        .map_err(|e| ServiceError::Internal(format!("Task join error: {e}")))?
+        .map_err(ServiceError::Core)?;
 
         let pages = names
             .into_iter()
             .enumerate()
-            .map(|(index, filename)| crate::models::PageInfo { index, filename })
+            .map(|(index, filename)| crate::models::PageInfo {
+                double_page: double_page_flags.contains(&index),
+                index,
+                filename,
+            })
             .collect::<Vec<_>>();
         let page_count = pages.len();
 
@@ -277,6 +286,7 @@ impl AppService {
             prev_chapter_id,
             next_chapter_id,
             last_page_read,
+            spread_analysed,
         })
     }
 
