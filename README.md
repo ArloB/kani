@@ -87,7 +87,7 @@ build:
 Prerequisites: Rust stable, `wasm32-unknown-unknown` target, [`wasm-tools`](https://github.com/bytecodealliance/wasm-tools), [`wasm-opt`](https://github.com/WebAssembly/binaryen).
 
 ```bash
-cargo run -p kani-cli -- setup        # fetch JS vendors and Tailwind CLI
+cargo run -p kani-cli -- setup        # fetch JS vendors, Tailwind CLI, and configure git hooks
 cargo build --release                 # build the server binary
 cargo run -p kani-cli -- build --all  # compile WASM extensions
 ./target/release/kani-web
@@ -166,7 +166,7 @@ Extensions are sandboxed WASM Components built against a WIT interface (`kani-co
 
 Every new pure function gets a happy-path test and at least one edge/error case. New REST endpoints get a test triplet: 200 for an authenticated user, 401 without auth, and 4xx for invalid input. Use `common::test_state()` + `common::build_test_app()` + `common::create_admin()` from `kani-web/tests/common/mod.rs`; this wires the full auth stack against an in-memory SQLite DB.
 
-After any SQL schema change run `cargo sqlx prepare --workspace` to regenerate the `.sqlx/` query cache before pushing.
+After any SQL schema change run `cargo sqlx prepare --workspace` to regenerate the `.sqlx/` query cache. The pre-push hook (configured by `setup`) will catch a stale cache before it reaches CI, provided `sqlx-cli` is installed (`cargo binstall sqlx-cli`).
 
 ### Contributing
 

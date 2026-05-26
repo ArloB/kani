@@ -68,4 +68,4 @@ jobs:
           SQLX_OFFLINE: "false"
         run: |
           cargo sqlx migrate run
-          cargo sqlx prepare --check --workspace
+          cargo sqlx prepare --check --workspace -- --all-targets

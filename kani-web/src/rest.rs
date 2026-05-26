@@ -3297,6 +3297,19 @@ async fn admin_delete_user(
         ));
     }
     let backend = AuthBackend::new(state.db.clone());
+    // Prevent deleting the last admin user — would lock everyone out.
+    let target = backend
+        .fetch_user_by_id(user_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+    if target.roles.iter().any(|r| r == "admin") {
+        let admin_count = backend.count_users_with_role("admin").await?;
+        if admin_count <= 1 {
+            return Err(AppError::ValidationError(
+                "Cannot delete the only admin account".into(),
+            ));
+        }
+    }
     backend.delete_user(user_id).await?;
     state
         .audit(
@@ -3336,6 +3349,15 @@ async fn admin_revoke_role(
     Path((user_id, role_slug)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     let backend = AuthBackend::new(state.db.clone());
+    // Prevent revoking the admin role from the last admin — would lock everyone out.
+    if role_slug == "admin" {
+        let admin_count = backend.count_users_with_role("admin").await?;
+        if admin_count <= 1 {
+            return Err(AppError::ValidationError(
+                "Cannot remove the admin role from the only admin account".into(),
+            ));
+        }
+    }
     backend.revoke_role(user_id, &role_slug).await?;
     state
         .audit(

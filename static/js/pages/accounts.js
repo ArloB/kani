@@ -580,7 +580,7 @@ function _showUserModal(user, onSaved) {
         onClose();
         await onSaved();
       } catch (e) {
-        setError(e?.message ?? 'Failed to save.');
+        showToast(e?.message ?? 'Failed to save.', { type: 'error' });
         setSaving(false);
       }
     };
@@ -678,7 +678,7 @@ function _showRoleModal(role, onSaved) {
         onClose();
         await onSaved();
       } catch (e) {
-        setError(e?.message ?? 'Failed to save.');
+        showToast(e?.message ?? 'Failed to save.', { type: 'error' });
         setSaving(false);
       }
     };

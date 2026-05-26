@@ -1071,7 +1071,13 @@ async function _fetch(gridEl, paginEl, isSearch) {
       gridEl.setAttribute('aria-busy', 'false');
       gridEl.classList.remove('opacity-50', 'pointer-events-none');
       finishLoading();
-      gridEl.appendChild(createErrorState({ message: 'Failed to load manga.' }));
+      if (/** @type {any} */ (e)?.code === 'source_disabled') {
+        const panel = /** @type {HTMLElement | null} */ (gridEl.closest('[data-panel]'));
+        if (panel) _showDisabledPanel(panel);
+        else gridEl.appendChild(createErrorState({ message: 'Extension is disabled.' }));
+      } else {
+        gridEl.appendChild(createErrorState({ message: 'Failed to load manga.' }));
+      }
     }
     return;
   }

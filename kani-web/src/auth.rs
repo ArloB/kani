@@ -268,6 +268,17 @@ impl AuthBackend {
         Ok(())
     }
 
+    /// Returns the number of users who currently hold the given role.
+    pub async fn count_users_with_role(&self, role_slug: &str) -> Result<i64, AppError> {
+        let count = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM user_roles WHERE role_slug = ?",
+            role_slug
+        )
+        .fetch_one(&self.db)
+        .await?;
+        Ok(count)
+    }
+
     /// Revokes a role from a user.
     pub async fn revoke_role(&self, user_id: i64, role_slug: &str) -> Result<(), AppError> {
         sqlx::query!(

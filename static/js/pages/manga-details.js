@@ -210,7 +210,10 @@ export async function init(container, params) {
     }
   } catch (e) {
     container.innerHTML = '';
-    container.appendChild(createErrorState({ message: 'Failed to load manga details.' }));
+    const msg = /** @type {any} */ (e)?.code === 'source_disabled'
+      ? 'Extension is disabled — enable it in Settings > Sources.'
+      : 'Failed to load manga details.';
+    container.appendChild(createErrorState({ message: msg }));
     return;
   }
 
@@ -854,7 +857,10 @@ async function _fetchChapters(sectionEl) {
       if (/** @type {any} */(e)?.name === 'AbortError') return;
       finishLoading();
       listEl.innerHTML = '';
-      listEl.appendChild(createErrorState({ message: 'Failed to load chapters.' }));
+      const msg = /** @type {any} */ (e)?.code === 'source_disabled'
+        ? 'Extension is disabled — enable it in Settings > Sources.'
+        : 'Failed to load chapters.';
+      listEl.appendChild(createErrorState({ message: msg }));
       return;
     }
   }

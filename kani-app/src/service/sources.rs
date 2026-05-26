@@ -119,6 +119,64 @@ impl AppService {
         sqlx::query!("UPDATE sources SET enabled = ? WHERE id = ?", enabled, id)
             .execute(&self.db)
             .await?;
+
+        if enabled {
+            // Re-instantiate the WASM module and insert it into the in-memory sources
+            // map. Without this, re-enabling a source that was disabled before (or across
+            // a restart) would result in "Source {id} not found" errors for all requests
+            // because the map is only populated at startup for enabled sources.
+            let source = sqlx::query!(
+                "SELECT name, base_url, unrestricted_http FROM sources WHERE id = ? AND deleted_at IS NULL",
+                id
+            )
+            .fetch_optional(&self.db)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+
+            let wasm_path = self
+                .settings
+                .read()
+                .await
+                .wasm_storage_path
+                .join(format!("{}.wasm", source.name));
+
+            let bytes = tokio::fs::read(&wasm_path)
+                .await
+                .map_err(|e| ServiceError::Core(kani_core::Error::Io(e)))?;
+
+            let component = self
+                .wasm_runtime
+                .compile_component(&bytes)
+                .map_err(ServiceError::Core)?;
+
+            let instance_pre = self
+                .wasm_runtime
+                .instantiate_pre(&component)
+                .map_err(ServiceError::Core)?;
+
+            let prefs = self.load_pref_map(id).await?;
+
+            let source_manager = SourceManager::new(
+                self.wasm_runtime.engine().clone(),
+                instance_pre,
+                self.smart_client.clone(),
+                Some(source.base_url),
+                source.unrestricted_http,
+                25,
+                prefs,
+            );
+
+            self.sources
+                .write()
+                .await
+                .insert(id, Arc::new(source_manager));
+        } else {
+            // Remove from the in-memory map immediately so in-flight requests fail fast
+            // rather than operating on a disabled source.
+            self.sources.write().await.remove(&id);
+            self.cache.invalidate_source(id);
+        }
+
         Ok(())
     }
 

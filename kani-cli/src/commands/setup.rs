@@ -18,6 +18,33 @@ pub fn run(vendors: bool, tailwind: bool, esbuild: bool) -> Result<(), CliError>
     }
     if run_all {
         super::icons::run()?;
+        setup_git_hooks()?;
+    }
+
+    Ok(())
+}
+
+fn setup_git_hooks() -> Result<(), CliError> {
+    let status = std::process::Command::new("git")
+        .args(["config", "core.hooksPath", ".githooks"])
+        .status();
+
+    match status {
+        Ok(s) if s.success() => println!("Git hooks path configured (.githooks)"),
+        Ok(_) => eprintln!("warning: git config failed — not inside a git repository?"),
+        Err(_) => eprintln!("warning: git not found, skipping hooks configuration"),
+    }
+
+    let hooks_dir = Path::new(".githooks");
+    if !hooks_dir.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(hooks_dir)? {
+        let path = entry?.path();
+        if path.is_file() {
+            make_executable(&path)?;
+        }
     }
 
     Ok(())
@@ -72,7 +99,7 @@ fn fetch_tailwind(client: &Client) -> Result<(), CliError> {
 
     let bytes = client.get(&url).send()?.bytes()?;
     fs::write(out, &bytes)?;
-    make_executable(out)?;
+    make_executable(Path::new(out))?;
 
     println!("Saved to {out}");
     Ok(())
@@ -125,7 +152,7 @@ fn fetch_esbuild(client: &Client) -> Result<(), CliError> {
         )));
     }
 
-    make_executable(out)?;
+    make_executable(Path::new(out))?;
     println!("Saved to {out}");
     Ok(())
 }
@@ -157,7 +184,7 @@ fn esbuild_platform() -> Result<(&'static str, &'static str), CliError> {
 }
 
 #[allow(unused_variables)]
-fn make_executable(path: &str) -> Result<(), CliError> {
+fn make_executable(path: &Path) -> Result<(), CliError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
