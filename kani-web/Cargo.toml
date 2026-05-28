@@ -51,6 +51,7 @@ argon2 = { version = "0.5.3", features = ["std"] }
 dirs = "6.0.0"
 tower-sessions-sqlx-store = { version = "0.15", default-features = false, features = ["sqlite"] }
 garde = { version = "0.22", features = ["derive"] }
+urlencoding.workspace = true
 tower_governor = "0.6"
 
 [dev-dependencies]

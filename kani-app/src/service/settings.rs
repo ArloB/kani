@@ -138,7 +138,7 @@ impl AppService {
                     settings.registration_enabled = s.registration_enabled;
                     settings.cover_max_dimension = s.cover_max_dimension;
                 }
-                kani_core::v8_process::set_browser_debug_logging(s.browser_debug_logging);
+                kani_core::v8_process::set_v8_debug_logging(s.browser_debug_logging);
                 let new_solver = if s.flaresolverr_url.is_empty() {
                     None
                 } else {

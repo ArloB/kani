@@ -923,4 +923,13 @@ pub mod v8_context {
         scripting::capture_url_param(page_url, url_pattern, param, timeout_ms, force_refresh)
             .map_err(ExtensionError::Other)
     }
+
+    pub fn capture_page_payload(
+        page_url: &str,
+        init_script: &str,
+        timeout_ms: u32,
+    ) -> Result<String, ExtensionError> {
+        scripting::capture_page_payload(page_url, init_script, timeout_ms)
+            .map_err(ExtensionError::Other)
+    }
 }

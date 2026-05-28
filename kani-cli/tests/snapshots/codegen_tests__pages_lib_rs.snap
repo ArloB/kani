@@ -115,6 +115,7 @@ impl MangaExtension for TestPages {
                     Some(Page {
                         index: row.get_i64("/index").unwrap_or(i as i64) as i32,
                         url: row.require_str("/url").ok()?,
+                        transform: None,
                     })
                 })
                 .collect(),

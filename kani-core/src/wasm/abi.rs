@@ -580,4 +580,27 @@ impl scripting::Host for HostState {
         self.last_io_at = Some(std::time::Instant::now());
         result
     }
+
+    fn capture_page_payload(
+        &mut self,
+        page_url: String,
+        init_script: String,
+        timeout_ms: u32,
+    ) -> Result<String, String> {
+        self.io_count += 1;
+        if self.io_count > 32 {
+            return Err("Extension exceeded maximum request count".into());
+        }
+        if self.call_started_at.elapsed().as_secs() > 120 {
+            return Err("Extension exceeded maximum wall time".into());
+        }
+        let result = crate::v8_process::capture_page_payload(
+            &self.v8_process,
+            &page_url,
+            &init_script,
+            timeout_ms,
+        );
+        self.last_io_at = Some(std::time::Instant::now());
+        result
+    }
 }

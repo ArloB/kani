@@ -62,6 +62,8 @@ pub struct PopularMangaQuery {
 pub struct ProxyQuery {
     #[garde(length(min = 1, max = 4096))]
     pub token: String,
+    #[garde(skip)]
+    pub transform: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]

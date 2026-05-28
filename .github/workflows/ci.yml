@@ -40,7 +40,7 @@ jobs:
       - name: Install sqlx-cli
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cargo binstall sqlx-cli --no-confirm --no-symlinks
+        run: test -f "$HOME/.cargo/bin/cargo-sqlx" || cargo binstall sqlx-cli --no-confirm --no-symlinks --force
 
       - name: Cache kani-cli binary
         uses: actions/cache@v5

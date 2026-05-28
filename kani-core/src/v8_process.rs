@@ -3,10 +3,10 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-static BROWSER_DEBUG_LOGGING: AtomicBool = AtomicBool::new(false);
+static V8_DEBUG_LOGGING: AtomicBool = AtomicBool::new(false);
 
-pub fn set_browser_debug_logging(enabled: bool) {
-    BROWSER_DEBUG_LOGGING.store(enabled, Ordering::Relaxed);
+pub fn set_v8_debug_logging(enabled: bool) {
+    V8_DEBUG_LOGGING.store(enabled, Ordering::Relaxed);
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -152,7 +152,7 @@ pub fn capture_url_param(
                 .to_string(),
         );
     }
-    let verbose = BROWSER_DEBUG_LOGGING.load(Ordering::Relaxed);
+    let verbose = V8_DEBUG_LOGGING.load(Ordering::Relaxed);
     with_process(handle, |p| {
         p.request(
             "capture_token",
@@ -166,6 +166,34 @@ pub fn capture_url_param(
                 if verbose { 1 } else { 0 },
             ),
         )
+    })
+}
+
+pub fn capture_page_payload(
+    handle: &V8ProcessHandle,
+    page_url: &str,
+    init_script: &str,
+    timeout_ms: u32,
+) -> Result<String, String> {
+    let enabled = std::env::var("KANI_BROWSER_ENABLED")
+        .map(|v| v != "false" && v != "0")
+        .unwrap_or(true);
+    if !enabled {
+        return Err(
+            "Browser features are disabled (KANI_BROWSER_ENABLED=false). \
+             Set KANI_BROWSER_ENABLED=true and ensure chromium is installed."
+                .to_string(),
+        );
+    }
+    let verbose = V8_DEBUG_LOGGING.load(Ordering::Relaxed);
+    let script = serde_json::json!({
+        "initScript": init_script,
+        "timeoutMs": timeout_ms,
+        "verbose": verbose,
+    })
+    .to_string();
+    with_process(handle, |p| {
+        p.request("capture_page_payload", page_url, &script)
     })
 }
 
@@ -203,11 +231,11 @@ mod tests {
     }
 
     #[test]
-    fn set_browser_debug_logging_toggles_flag() {
-        set_browser_debug_logging(true);
-        assert!(BROWSER_DEBUG_LOGGING.load(Ordering::Relaxed));
-        set_browser_debug_logging(false);
-        assert!(!BROWSER_DEBUG_LOGGING.load(Ordering::Relaxed));
+    fn set_v8_debug_logging_toggles_flag() {
+        set_v8_debug_logging(true);
+        assert!(V8_DEBUG_LOGGING.load(Ordering::Relaxed));
+        set_v8_debug_logging(false);
+        assert!(!V8_DEBUG_LOGGING.load(Ordering::Relaxed));
     }
 
     #[test]

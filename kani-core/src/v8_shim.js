@@ -285,6 +285,88 @@ rl.on('line', (line) => {
                     await closePage(page);
                 }
 
+            } else if (action === 'capture_page_payload') {
+                const params = JSON.parse(script);
+                const initScript = params.initScript || '';
+                const timeoutMs  = params.timeoutMs  || 30000;
+                const verbose    = !!params.verbose;
+
+                const dbg = (msg) => { if (verbose) process.stderr.write(`[capture_page_payload] ${msg}\n`); };
+
+                dbg(`loading page: ${name}`);
+                dbg(`timeout: ${timeoutMs}ms`);
+                dbg(`init script length: ${initScript.length} chars`);
+
+                const browser = await getPuppeteerBrowser();
+                const page = await openPage(browser);
+                let scrollInterval = null;
+
+                try {
+                    await page.setViewport({ width: 1280, height: 8000 });
+
+                    if (verbose) {
+                        page.on('console', msg => dbg(`page console [${msg.type()}]: ${msg.text()}`));
+                        page.on('pageerror', err => dbg(`page error: ${err}`));
+                    }
+
+                    let payloadResolve, payloadReject;
+                    const payloadPromise = new Promise((res, rej) => {
+                        payloadResolve = res;
+                        payloadReject  = rej;
+                    });
+
+                    const timer = setTimeout(() => {
+                        payloadReject(new Error(`Payload not captured within ${timeoutMs}ms from: ${name}`));
+                    }, timeoutMs);
+
+                    await page.exposeFunction('passPayload', (data) => {
+                        dbg(`passPayload called (${String(data).length} chars)`);
+                        clearTimeout(timer);
+                        payloadResolve(String(data));
+                    });
+
+                    await page.exposeFunction('resetPayloadTimer', () => {
+                        dbg('resetPayloadTimer called');
+                    });
+
+                    if (initScript) {
+                        await page.evaluateOnNewDocument(initScript);
+                        dbg('evaluateOnNewDocument registered');
+                    }
+
+                    await page.setRequestInterception(true);
+                    page.on('request', req => {
+                        const type = req.resourceType();
+                        if (type === 'image' || type === 'font' || type === 'media') {
+                            req.abort().catch(() => {});
+                        } else {
+                            dbg(`request [${type}]: ${req.url().slice(0, 120)}`);
+                            req.continue().catch(() => {});
+                        }
+                    });
+
+                    dbg('starting navigation');
+                    page.goto(name, { timeout: timeoutMs + 5000 }).catch(e => {
+                        dbg(`goto error: ${e}`);
+                    });
+
+                    scrollInterval = setInterval(async () => {
+                        try {
+                            await page.evaluate(() => {
+                                window.scrollTo(0, document.body.scrollHeight);
+                                window.dispatchEvent(new Event('scroll', { bubbles: true }));
+                            });
+                        } catch (_) {}
+                    }, 1500);
+
+                    const payload = await payloadPromise;
+                    dbg(`payload captured (${payload.length} chars)`);
+                    process.stdout.write(JSON.stringify({ id, ok: true, value: payload }) + '\n');
+                } finally {
+                    if (scrollInterval) clearInterval(scrollInterval);
+                    await closePage(page);
+                }
+
             } else {
                 throw new Error(`Unknown action: ${action}`);
             }

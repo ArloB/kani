@@ -1120,6 +1120,8 @@ pub struct ChapterContents {
 pub struct Page {
     pub index: i64,
     pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transform: Option<String>,
 }
 
 #[cfg(feature = "host")]

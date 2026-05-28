@@ -323,6 +323,7 @@ impl DownloaderManager {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn download_page_with_retry(
         client: &SmartClient,
         url: &str,
@@ -331,12 +332,15 @@ impl DownloaderManager {
         max_retries: i64,
         initial_retry_delay_ms: i64,
         base_url: &str,
+        transform: Option<&str>,
     ) -> Result<(PathBuf, String)> {
         let mut attempts = 0;
         let mut delay = Duration::from_millis(initial_retry_delay_ms.try_into()?);
 
         loop {
-            match Self::download_page(client, url, page_index, staging_dir, base_url).await {
+            match Self::download_page(client, url, page_index, staging_dir, base_url, transform)
+                .await
+            {
                 Ok(data) => return Ok(data),
                 Err(e) => {
                     attempts += 1;
@@ -371,6 +375,7 @@ impl DownloaderManager {
         page: i32,
         staging_dir: &std::path::Path,
         referer: &str,
+        transform: Option<&str>,
     ) -> Result<(PathBuf, String)> {
         let request = client
             .inner()
@@ -388,24 +393,45 @@ impl DownloaderManager {
             )));
         }
 
-        let extension = Self::get_image_extension(&resp, url);
+        let scramble_seed = transform
+            .and_then(|hint| crate::image_transform::resolve_scramble_seed(hint, resp.headers()));
 
-        let filename = format!("{:04}.{}", page, extension);
+        let (extension, filename) = if scramble_seed.is_some() {
+            ("jpg", format!("{:04}.jpg", page))
+        } else {
+            let ext = Self::get_image_extension(&resp, url);
+            (ext, format!("{:04}.{}", page, ext))
+        };
+        let _ = extension;
         let tmp_file_path = staging_dir.join(format!("{:04}.tmp", page));
 
-        let mut file = tokio::fs::File::create(&tmp_file_path).await?;
-        let mut bytes_written: u64 = 0;
-
-        while let Some(chunk) = resp.chunk().await? {
-            bytes_written += chunk.len() as u64;
-            file.write_all(&chunk).await?;
-        }
-        file.flush().await?;
-
-        if bytes_written == 0 {
-            return Err(error::Error::Other(format!(
-                "Server returned empty body for page {page}"
-            )));
+        if let Some(seed) = scramble_seed {
+            let mut raw: Vec<u8> = Vec::new();
+            while let Some(chunk) = resp.chunk().await? {
+                raw.extend_from_slice(&chunk);
+            }
+            if raw.is_empty() {
+                return Err(error::Error::Other(format!(
+                    "Server returned empty body for page {page}"
+                )));
+            }
+            let descrambled = crate::image_transform::lcg_tile_descramble(&raw, seed)?;
+            let mut file = tokio::fs::File::create(&tmp_file_path).await?;
+            file.write_all(&descrambled).await?;
+            file.flush().await?;
+        } else {
+            let mut file = tokio::fs::File::create(&tmp_file_path).await?;
+            let mut bytes_written: u64 = 0;
+            while let Some(chunk) = resp.chunk().await? {
+                bytes_written += chunk.len() as u64;
+                file.write_all(&chunk).await?;
+            }
+            file.flush().await?;
+            if bytes_written == 0 {
+                return Err(error::Error::Other(format!(
+                    "Server returned empty body for page {page}"
+                )));
+            }
         }
 
         Ok((tmp_file_path, filename))
@@ -687,6 +713,7 @@ impl DownloaderManager {
                     let page_tx = progress_tx.clone();
                     let staging_dir = staging_dir.clone();
                     let active_for_page = active_for_stream.clone();
+                    let transform = page.transform.clone();
 
                     async move {
                         let result = Self::download_page_with_retry(
@@ -697,6 +724,7 @@ impl DownloaderManager {
                             max_retries,
                             initial_retry_delay_ms,
                             &base_url,
+                            transform.as_deref(),
                         )
                         .await;
 

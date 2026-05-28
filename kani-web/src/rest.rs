@@ -43,8 +43,8 @@ use std::marker::PhantomData;
 use std::{convert::Infallible, sync::Arc};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
-fn sign_image_url(url: &str, referer: &str, state: &AppState) -> String {
-    crate::proxy::make_proxy_url(url, referer, &state.proxy_secret)
+fn sign_image_url(url: &str, referer: &str, state: &AppState, transform: Option<&str>) -> String {
+    crate::proxy::make_proxy_url(url, referer, &state.proxy_secret, transform)
 }
 
 struct ValidatedJson<T>(T);
@@ -887,6 +887,8 @@ async fn image_proxy(
     let (url, referer) = crate::proxy::unseal_proxy_token(&query.token, &state.proxy_secret)
         .ok_or_else(|| AppError::Other("Invalid or expired proxy token".into()))?;
 
+    let transform_hint = query.transform.as_deref().filter(|s| !s.is_empty());
+
     let etag = crate::proxy::compute_etag(&url, &referer, &state.proxy_secret);
 
     if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH)
@@ -935,18 +937,24 @@ async fn image_proxy(
         *last = std::time::Instant::now();
     }
 
+    let cache_key = match transform_hint {
+        Some(t) => format!("{}|t:{}", url, t),
+        None => url.clone(),
+    };
+
     let fetched: Arc<(bytes::Bytes, String)> = state
         .proxy_coalesce
-        .try_get_with(url.clone(), {
+        .try_get_with(cache_key, {
             let url = url.clone();
             let referer = referer.clone();
             let state = state.clone();
             let host = host.clone();
+            let transform_hint = transform_hint.map(str::to_string);
             async move {
                 let semaphore = host_semaphore(&state.proxy_semaphores, &host).await;
                 let mut attempt = 0u32;
 
-                let (response, ct_string) = loop {
+                let (response, ct_string, scramble_seed) = loop {
                     let permit = Arc::clone(&semaphore)
                         .acquire_owned()
                         .await
@@ -1056,9 +1064,11 @@ async fn image_proxy(
                                 )));
                             }
                             let ct_string = ct_str.to_string();
-                            // Permit released here — buffering doesn't hold the semaphore slot.
+                            let scramble_seed = transform_hint
+                                .as_deref()
+                                .and_then(|hint| kani_core::image_transform::resolve_scramble_seed(hint, resp.headers()));
                             drop(permit);
-                            break (resp, ct_string);
+                            break (resp, ct_string, scramble_seed);
                         }
                     }
                 };
@@ -1073,7 +1083,15 @@ async fn image_proxy(
                     buf.extend_from_slice(&chunk);
                 }
 
-                Ok::<_, AppError>(Arc::new((buf.freeze(), ct_string)))
+                let (final_bytes, final_ct) = if let Some(seed) = scramble_seed {
+                    let descrambled = kani_core::image_transform::lcg_tile_descramble(&buf, seed)
+                        .map_err(|e| AppError::InternalServerError(format!("Descramble failed: {e}")))?;
+                    (bytes::Bytes::from(descrambled), "image/jpeg".to_string())
+                } else {
+                    (buf.freeze(), ct_string)
+                };
+
+                Ok::<_, AppError>(Arc::new((final_bytes, final_ct)))
             }
         })
         .await
@@ -1420,7 +1438,7 @@ async fn get_popular_manga(
     let mut list: crate::types::MangaList = serde_json::from_str(&json_str)?;
     for item in &mut list.manga {
         if let Some(ref url) = item.cover_url.clone() {
-            item.cover_url = Some(sign_image_url(url, &base_url, &state));
+            item.cover_url = Some(sign_image_url(url, &base_url, &state, None));
         }
     }
     Ok(Json(list))
@@ -1445,7 +1463,7 @@ async fn search_manga(
     let mut list: crate::types::MangaList = serde_json::from_str(&json_str)?;
     for item in &mut list.manga {
         if let Some(ref url) = item.cover_url.clone() {
-            item.cover_url = Some(sign_image_url(url, &base_url, &state));
+            item.cover_url = Some(sign_image_url(url, &base_url, &state, None));
         }
     }
     Ok(Json(list))
@@ -1470,7 +1488,7 @@ async fn get_manga_details(
     let mut info: crate::types::MangaInfo = serde_json::from_str(&json_str)?;
     info.cover_url = info
         .cover_url
-        .map(|url| sign_image_url(&url, &base_url, &state));
+        .map(|url| sign_image_url(&url, &base_url, &state, None));
     info.description_html = info
         .description
         .as_deref()
@@ -1523,7 +1541,7 @@ async fn get_pages(
     let json_str = state.get_pages(id, &manga_id, &chapter_id).await?;
     let mut contents: crate::types::ChapterContents = serde_json::from_str(&json_str)?;
     for page in &mut contents.pages {
-        page.url = sign_image_url(&page.url, &base_url, &state);
+        page.url = sign_image_url(&page.url, &base_url, &state, page.transform.as_deref());
     }
     Ok(Json(contents))
 }
@@ -1710,7 +1728,7 @@ async fn get_library_filtered(
                 Some(format!("/rest/manga/{}/cover", r.id))
             } else {
                 r.cover_url
-                    .map(|url| sign_image_url(&url, &r.base_url, &state))
+                    .map(|url| sign_image_url(&url, &r.base_url, &state, None))
             };
             crate::types::MangaListItem {
                 id: r.id.to_string(),
@@ -1740,7 +1758,7 @@ async fn get_local_manga_details(
     } else {
         d.manga
             .cover_url
-            .map(|url| sign_image_url(&url, &d.source.base_url, &state))
+            .map(|url| sign_image_url(&url, &d.source.base_url, &state, None))
     };
     let display_name = d
         .manga
@@ -1918,7 +1936,7 @@ async fn get_recent_updates(
         u.cover_url = if u.local_cover_path.is_some() {
             Some(format!("/rest/manga/{}/cover", u.manga_id))
         } else if let Some(ref url) = u.cover_url.clone() {
-            Some(sign_image_url(url, &u.base_url, &state))
+            Some(sign_image_url(url, &u.base_url, &state, None))
         } else {
             None
         };
@@ -1986,7 +2004,7 @@ async fn global_search_handler(
             .unwrap_or("");
         for item in &mut result.manga {
             if let Some(ref url) = item.cover_url.clone() {
-                item.cover_url = Some(sign_image_url(url, referer, &state));
+                item.cover_url = Some(sign_image_url(url, referer, &state, None));
             }
         }
     }
@@ -3141,7 +3159,7 @@ async fn get_continue_reading_shelf(
                 Some(format!("/rest/manga/{}/cover", item.manga_id))
             } else {
                 item.cover_url
-                    .map(|url| sign_image_url(&url, &item.base_url, &state))
+                    .map(|url| sign_image_url(&url, &item.base_url, &state, None))
             };
             json!({
                 "manga_id": item.manga_id,

@@ -407,6 +407,7 @@ fn emit_pages_assembly(ep: &ValidatedEndpoint) -> String {
         };
         fields.push(format!("        {}: {accessor}", f.name));
     }
+    fields.push("        transform: None".to_string());
     format!("Some(Page {{\n{}\n    }})", fields.join(",\n"))
 }
 

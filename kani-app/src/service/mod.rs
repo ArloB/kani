@@ -142,7 +142,7 @@ impl AppService {
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
-        kani_core::v8_process::set_browser_debug_logging(settings.browser_debug_logging);
+        kani_core::v8_process::set_v8_debug_logging(settings.browser_debug_logging);
 
         // Decrypt email_provider_config so in-memory value is always plaintext.
         if let Some(ref cipher) = enc {

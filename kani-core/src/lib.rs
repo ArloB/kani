@@ -10,6 +10,7 @@ pub mod error;
 pub mod evaluator;
 pub mod file_storage;
 pub mod http;
+pub mod image_transform;
 pub mod network;
 pub mod source_manager;
 pub mod sources;

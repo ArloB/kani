@@ -136,6 +136,7 @@ interface types {
     record page {
         index: s32,
         url: string,
+        transform: option<string>,
     }
 
     record chapter {
@@ -280,6 +281,12 @@ interface scripting {
     /// timeout-ms controls how long to wait before returning an error.
     /// force-refresh bypasses the per-URL token cache; use after an API 401/403.
     capture-url-param: func(page-url: string, url-pattern: string, param: string, timeout-ms: u32, force-refresh: bool) -> result<string, string>;
+
+    /// Loads page-url in a headless Chromium instance, runs init-script via
+    /// evaluateOnNewDocument (so it executes before any page JS), and waits for the
+    /// page's script to call the host-injected `passPayload(string)` function.
+    /// Returns the string passed to passPayload. timeout-ms is the deadline.
+    capture-page-payload: func(page-url: string, init-script: string, timeout-ms: u32) -> result<string, string>;
 }
 
 world kani-extension {

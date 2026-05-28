@@ -101,9 +101,21 @@ pub fn compute_etag(url: &str, referer: &str, secret: &[u8; 32]) -> String {
 }
 
 /// Build an opaque proxy URL for use in `src` attributes.
-pub fn make_proxy_url(url: &str, referer: &str, secret: &[u8; 32]) -> String {
+pub fn make_proxy_url(
+    url: &str,
+    referer: &str,
+    secret: &[u8; 32],
+    transform: Option<&str>,
+) -> String {
     let token = seal_proxy_token(url, referer, secret);
-    format!("/rest/image_proxy?token={}", token)
+    match transform {
+        Some(t) if !t.is_empty() => format!(
+            "/rest/image_proxy?token={}&transform={}",
+            token,
+            urlencoding::encode(t),
+        ),
+        _ => format!("/rest/image_proxy?token={}", token),
+    }
 }
 
 #[cfg(test)]

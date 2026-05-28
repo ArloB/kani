@@ -7,3 +7,5 @@ STAGED_RS=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || tr
 
 cargo fmt --all
 printf '%s\n' "$STAGED_RS" | tr '\n' '\0' | xargs -0 git add
+
+cargo clippy --workspace -- -D warnings || exit 1
