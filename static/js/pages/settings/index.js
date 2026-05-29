@@ -4,8 +4,9 @@
 
 import * as api from '../../api.js';
 import { hasPermission } from '../../state.js';
-import { escapeHtml } from '../../utils.js';
+import { escapeHtml, deferredSkeleton } from '../../utils.js';
 import { iconLock } from '../../icons.js';
+import { skeletonSettingsCards } from '../../components/skeletons.js';
 import { mountRestartTray } from '../../components/restart-tray.js';
 import { setPageHeader, clearPageHeader } from '../../components/app-header.js';
 import { setBeforeNavigate, clearBeforeNavigate } from '../../router.js';
@@ -48,11 +49,17 @@ export async function init(container) {
     return;
   }
 
+  const cancelSkeleton = deferredSkeleton(() => {
+    container.innerHTML = `<div class="max-w-page mx-auto px-4 md:px-6 py-8">${skeletonSettingsCards(5)}</div>`;
+  });
+
   const [settings, categories, bootData] = await Promise.allSettled([
     api.getSettings(),
     api.getCategories(),
     api.getBootId(),
   ]).then(r => r.map(s => s.status === 'fulfilled' ? s.value : null));
+
+  cancelSkeleton();
 
   const bootId  = bootData?.boot_id ?? bootData ?? '';
   const catList = Array.isArray(categories) ? categories : [];

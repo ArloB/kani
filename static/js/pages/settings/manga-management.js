@@ -6,6 +6,9 @@ import { escapeHtml } from '../../utils.js';
 import { showToast } from '../../components/toast.js';
 import { showConfirm } from '../../components/modal.js';
 import { navigate } from '../../router.js';
+import { skeletonSettingsCards } from '../../components/skeletons.js';
+import { createEmptyState } from '../../components/empty-state.js';
+import { createErrorState } from '../../components/error-state.js';
 
 /** @param {HTMLElement} el */
 export function mount(el) {
@@ -71,19 +74,23 @@ export function mount(el) {
 
 /** @param {HTMLElement} el */
 async function _loadPendingImports(el) {
-  el.innerHTML = '<p class="text-sm text-text-muted py-4">Loading…</p>';
+  el.innerHTML = skeletonSettingsCards(3);
   try {
     const items = await api.getPendingImports();
     _renderPendingImports(el, items);
   } catch (e) {
-    el.innerHTML = `<p class="text-sm text-danger py-4">Failed to load: ${escapeHtml(e.message)}</p>`;
+    el.innerHTML = '';
+    el.appendChild(createErrorState({ message: `Failed to load: ${e?.message ?? 'Unknown error'}`, onRetry: () => _loadPendingImports(el) }));
   }
 }
 
 function _renderPendingImports(el, items) {
   el.innerHTML = '';
   if (!items.length) {
-    el.innerHTML = '<p class="text-sm text-text-muted py-4">No pending imports.</p>';
+    el.appendChild(createEmptyState({
+      title: 'No pending imports',
+      subtitle: 'Files dropped into the library folder will appear here for review.',
+    }));
     return;
   }
   const list = document.createElement('div');
@@ -160,19 +167,23 @@ function _renderPendingImports(el, items) {
 
 /** @param {HTMLElement} el */
 async function _mountDuplicatesTab(el) {
-  el.innerHTML = '<p class="text-sm text-text-muted py-4">Loading…</p>';
+  el.innerHTML = skeletonSettingsCards(3);
   try {
     const pairs = await api.getDuplicates();
     el.innerHTML = '';
     _renderDuplicates(el, pairs);
   } catch (e) {
-    el.innerHTML = `<p class="text-sm text-danger py-4">Failed to load: ${escapeHtml(e.message)}</p>`;
+    el.innerHTML = '';
+    el.appendChild(createErrorState({ message: `Failed to load: ${e?.message ?? 'Unknown error'}`, onRetry: () => _mountDuplicatesTab(el) }));
   }
 }
 
 function _renderDuplicates(el, pairs) {
   if (!pairs.length) {
-    el.innerHTML = '<p class="text-sm text-text-muted py-4">No duplicates detected. New ones will appear here automatically when manga are added.</p>';
+    el.appendChild(createEmptyState({
+      title: 'No duplicates detected',
+      subtitle: 'New duplicates will appear here automatically when manga are added.',
+    }));
     return;
   }
 
@@ -263,19 +274,23 @@ function _renderDuplicates(el, pairs) {
 
 /** @param {HTMLElement} el */
 async function _loadOrphanedManga(el) {
-  el.innerHTML = '<p class="text-sm text-text-muted py-4">Loading…</p>';
+  el.innerHTML = skeletonSettingsCards(3);
   try {
     const items = await api.getOrphanedManga();
+    el.innerHTML = '';
     _renderOrphanedManga(el, items);
   } catch (e) {
-    el.innerHTML = `<p class="text-sm text-danger py-4">Failed to load: ${escapeHtml(e.message)}</p>`;
+    el.innerHTML = '';
+    el.appendChild(createErrorState({ message: `Failed to load: ${e?.message ?? 'Unknown error'}`, onRetry: () => _loadOrphanedManga(el) }));
   }
 }
 
 function _renderOrphanedManga(el, items) {
-  el.innerHTML = '';
   if (!items.length) {
-    el.innerHTML = '<p class="text-sm text-text-muted py-4">No orphaned manga.</p>';
+    el.appendChild(createEmptyState({
+      title: 'No orphaned manga',
+      subtitle: 'Manga whose source extension has been deleted will appear here.',
+    }));
     return;
   }
   const list = document.createElement('div');

@@ -14,6 +14,7 @@ import { renderTabs } from '../components/tabs.js';
 import { iconPencil, iconX, iconAccounts } from '../icons.js';
 import { ActivityFeed } from '../components/activity-feed.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
+import { createEmptyState } from '../components/empty-state.js';
 const html = htm.bind(h);
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -132,6 +133,7 @@ async function _reload() {
 
 /** @type {HTMLElement | null} */ let _listEl = null;
 /** @type {HTMLElement | null} */ let _detailEl = null;
+/** @type {((v: 'list'|'detail') => void) | null} */ let _setMdView = null;
 
 /** Re-renders the list pane (called after data changes). */
 function _rerenderList() {
@@ -140,13 +142,15 @@ function _rerenderList() {
 
 /** @param {HTMLElement} el */
 function _mountMasterDetail(el) {
-  const { listEl, detailEl, destroy } = mountMasterDetail(el);
+  const { listEl, detailEl, setView, destroy } = mountMasterDetail(el);
   _destroyMasterDetail = destroy;
   _listEl = listEl;
   _detailEl = detailEl;
+  _setMdView = setView;
 
   _renderList(listEl);
   _renderDetail(detailEl);
+  setView(_selected ? 'detail' : 'list');
 }
 
 /** @param {HTMLElement} detailEl */
@@ -165,6 +169,19 @@ function _renderDetail(detailEl) {
   } else {
     _renderRoleDetail(detailEl, _selected);
   }
+  // On mobile, prepend a back affordance that returns to the list pane.
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'btn-ghost btn-sm md:hidden mb-3 ml-4 mt-4';
+  backBtn.textContent = '← Back';
+  backBtn.addEventListener('click', () => {
+    _selected = null;
+    _setMdView?.('list');
+    _rerenderList();
+    _renderDetail(detailEl);
+    _updateHeaderActions();
+  });
+  detailEl.prepend(backBtn);
 }
 
 /** @param {HTMLElement} listEl */
@@ -216,7 +233,11 @@ function _renderList(listEl) {
       : items;
 
     if (filtered.length === 0) {
-      bodyEl.innerHTML = '<p class="text-sm text-text-muted px-3 py-4">No results.</p>';
+      const emptyTitle = filter
+        ? 'No results'
+        : _activeTab === 'users' ? 'No users yet' : 'No custom roles yet';
+      const emptySub = filter ? 'Try a different search term.' : undefined;
+      bodyEl.appendChild(createEmptyState({ title: emptyTitle, subtitle: emptySub }));
       return;
     }
 
@@ -263,6 +284,7 @@ function _renderList(listEl) {
         _renderList(listEl);
         _updateHeaderActions();
         if (_detailEl) _renderDetail(_detailEl);
+        _setMdView?.('detail');
       });
       bodyEl.appendChild(div);
     }

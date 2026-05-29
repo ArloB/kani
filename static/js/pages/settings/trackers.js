@@ -6,6 +6,8 @@ import { escapeHtml, openConfirm } from '../../utils.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { hasPermission } from '../../state.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
+import { skeletonSettingsCards } from '../../components/skeletons.js';
+import { createErrorState } from '../../components/error-state.js';
 
 /**
  * @param {HTMLElement} el
@@ -15,13 +17,14 @@ export function mount(el, settings) {
   const isAdmin = hasPermission('settings:edit_advanced');
 
   async function _render() {
-    el.innerHTML = '<p class="text-sm text-text-muted p-1">Loading…</p>';
+    el.innerHTML = skeletonSettingsCards(3);
 
     let trackers = [];
     try {
       trackers = await api.getTrackers();
-    } catch {
-      el.innerHTML = '<p class="text-sm text-danger p-1">Failed to load trackers.</p>';
+    } catch (e) {
+      el.innerHTML = '';
+      el.appendChild(createErrorState({ message: 'Failed to load trackers.', onRetry: _render }));
       return;
     }
 

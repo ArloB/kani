@@ -126,7 +126,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     const rect = coverInner.getBoundingClientRect();
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 z-top flex items-center justify-center';
-    overlay.style.cssText = 'background:rgba(0,0,0,0);transition:background 250ms ease';
+    overlay.style.cssText = 'background:rgba(0,0,0,0);transition:background var(--motion-slow) ease';
 
     const img = document.createElement('img');
     img.src = coverUrl;
@@ -137,9 +137,8 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     document.body.appendChild(overlay);
 
     img.getBoundingClientRect(); // force reflow
-    const EASE = 'cubic-bezier(0.4,0,0.2,1)';
-    img.style.transition = `top 280ms ${EASE}, left 280ms ${EASE}, width 280ms ${EASE}, height 280ms ${EASE}, border-radius 280ms ease`;
-    overlay.style.background = 'rgba(0,0,0,0.75)';
+    img.style.transition = `top 280ms var(--motion-ease), left 280ms var(--motion-ease), width 280ms var(--motion-ease), height 280ms var(--motion-ease), border-radius 280ms ease`;
+    overlay.style.background = 'rgba(0,0,0,0.6)';
 
     const vw = window.innerWidth, vh = window.innerHeight;
     const maxW = vw * 0.9, maxH = vh * 0.9;
@@ -152,7 +151,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     img.style.borderRadius = '1rem';
 
     const close = () => {
-      overlay.style.background = 'rgba(0,0,0,0)';
+      overlay.style.background = 'rgba(0,0,0,0)'; /* fades back to transparent */
       img.style.top = rect.top + 'px'; img.style.left = rect.left + 'px';
       img.style.width = rect.width + 'px'; img.style.height = rect.height + 'px';
       setTimeout(() => overlay.remove(), 280);

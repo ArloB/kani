@@ -89,6 +89,7 @@ export function mkToggleRow({ label, description, checked, onChange }) {
 export function mkNumberRow({ label, description, badge, id, value, min, max, onChange }) {
   const input = document.createElement('input');
   input.type = 'number';
+  input.inputMode = 'numeric';
   input.id = id;
   input.className = 'input w-24 text-sm';
   if (value != null) input.value = String(value);

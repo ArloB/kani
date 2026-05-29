@@ -191,7 +191,7 @@ function DownloadsPage() {
           <div class="ml-auto flex items-center gap-2 pb-1">
             <span class="text-xs text-text-muted">Show last</span>
             <select
-              class="input w-20 text-sm h-7 py-0"
+              class="input input-sm w-20"
               aria-label="History size"
               value=${historySize}
               onChange=${(/** @type {any} */ e) => changeHistorySize(Number(e.target.value))}
@@ -206,7 +206,10 @@ function DownloadsPage() {
       ${activeTab === 'active' && html`
         <div class="bg-surface border border-border rounded-xl overflow-hidden">
           ${active.length === 0
-            ? html`<p class="px-4 py-6 text-sm text-text-muted text-center">No active downloads.</p>`
+            ? html`<div class="flex flex-col items-center gap-2 py-12 text-center">
+                <p class="text-base font-medium text-text">No active downloads</p>
+                <p class="text-sm text-text-muted">Downloads started from manga details will appear here.</p>
+              </div>`
             : active.map(e => html`<${ActiveRow} key=${e.id} entry=${e} />`)
           }
         </div>
@@ -217,7 +220,10 @@ function DownloadsPage() {
         <div class="flex flex-col gap-3">
           <div class="bg-surface border border-border rounded-xl overflow-hidden">
             ${history.length === 0
-              ? html`<p class="px-4 py-6 text-sm text-text-muted text-center">No recent downloads.</p>`
+              ? html`<div class="flex flex-col items-center gap-2 py-12 text-center">
+                  <p class="text-base font-medium text-text">No download history</p>
+                  <p class="text-sm text-text-muted">Completed and failed downloads will appear here.</p>
+                </div>`
               : history.map(e => html`<${HistoryRow} key=${e.id} entry=${e} />`)
             }
           </div>

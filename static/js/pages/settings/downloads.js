@@ -30,6 +30,7 @@ export function mount(el, settings) {
   for (const f of fields) {
     const input = document.createElement('input');
     input.type = 'number';
+    input.inputMode = 'numeric';
     input.id = f.key;
     input.className = 'input w-24 text-sm js-dl-field';
     input.dataset.key = f.key;

@@ -30,7 +30,7 @@
   --color-accent-dim:    rgba(232, 84, 90, 0.15);
   --color-text:          #ddddf0;
   --color-text-muted:    #7878a0;
-  --color-text-faint:    #6868a0;
+  --color-text-faint:    #7878a8;
   --color-success:       #4caf79;
   --color-warn:          #e8a954;
   --color-danger:        #e85454;
@@ -94,10 +94,40 @@
   --btn-h-lg: 2.75rem;
 
   /* Shadows (overrides Tailwind defaults) */
-  --shadow-sm:   0 1px 3px rgba(0, 0, 0, 0.4);
-  --shadow-md:   0 4px 12px rgba(0, 0, 0, 0.5);
-  --shadow-lg:   0 8px 32px rgba(0, 0, 0, 0.6);
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-sm:       0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md:       0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg:       0 8px 32px rgba(0, 0, 0, 0.6);
+  --shadow-card:     0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-popover:  0 8px 24px rgba(0, 0, 0, 0.45);
+
+  /* Motion */
+  --motion-fast:    100ms;
+  --motion-base:    150ms;
+  --motion-slow:    250ms;
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-in:  cubic-bezier(0.7, 0, 0.84, 0);
+  --motion-ease:     cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Z-stack semantic extensions */
+  --z-reader-bar:   21;
+  --z-reader-hover:  9;
+  --z-card-overlay: 10;
+  --z-banner:       20;
+  --z-bottom-nav:   25;
+
+  /* Chart palette */
+  --chart-1: #e8545a;
+  --chart-2: #4caf79;
+  --chart-3: #e8a954;
+  --chart-4: #6c9bc4;
+  --chart-5: #a97cc4;
+
+  /* Reader progress segments */
+  --color-reader-seg-loaded:   rgba(255, 255, 255, 0.20);
+  --color-reader-seg-unloaded: rgba(255, 255, 255, 0.10);
+
+  /* Text on accent/colored fill backgrounds */
+  --color-on-accent: #ffffff;
 
   /* Breakpoints (overrides Tailwind defaults) */
   --breakpoint-sm: 480px;
@@ -167,8 +197,8 @@
     user-select: none;
     touch-action: manipulation;
     white-space: nowrap;
-    transition: background-color 130ms ease, box-shadow 130ms ease,
-                color 130ms ease, border-color 130ms ease, filter 130ms ease;
+    transition: background-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease,
+                color var(--motion-fast) ease, border-color var(--motion-fast) ease, filter var(--motion-fast) ease;
 
     &:focus-visible {
       outline: none;
@@ -193,9 +223,11 @@
     color: #fff;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 3px rgba(0,0,0,0.3);
 
-    &:hover:not(:disabled):not([aria-disabled="true"]) {
-      background-color: var(--color-accent-hover);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 2px 6px rgba(0,0,0,0.35);
+    @media (hover: hover) {
+      &:hover:not(:disabled):not([aria-disabled="true"]) {
+        background-color: var(--color-accent-hover);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 2px 6px rgba(0,0,0,0.35);
+      }
     }
   }
 
@@ -205,9 +237,11 @@
     border: 1px solid var(--color-border);
     color: var(--color-text);
 
-    &:hover:not(:disabled):not([aria-disabled="true"]) {
-      background-color: var(--color-surface-2);
-      border-color: var(--color-surface-3);
+    @media (hover: hover) {
+      &:hover:not(:disabled):not([aria-disabled="true"]) {
+        background-color: var(--color-surface-2);
+        border-color: var(--color-surface-3);
+      }
     }
   }
 
@@ -217,8 +251,10 @@
     color: #fff;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 1px 3px rgba(0,0,0,0.3);
 
-    &:hover:not(:disabled):not([aria-disabled="true"]) {
-      background-color: color-mix(in srgb, var(--color-danger) 85%, #000);
+    @media (hover: hover) {
+      &:hover:not(:disabled):not([aria-disabled="true"]) {
+        background-color: color-mix(in srgb, var(--color-danger) 85%, #000);
+      }
     }
   }
 
@@ -229,9 +265,11 @@
     background-color: transparent;
     color: var(--color-text-muted);
 
-    &:hover:not(:disabled):not([aria-disabled="true"]) {
-      background-color: var(--color-surface-2);
-      color: var(--color-text);
+    @media (hover: hover) {
+      &:hover:not(:disabled):not([aria-disabled="true"]) {
+        background-color: var(--color-surface-2);
+        color: var(--color-text);
+      }
     }
   }
 
@@ -242,14 +280,16 @@
     border: 1px solid var(--color-border);
     @apply rounded-lg p-4;
     box-shadow: var(--shadow-card);
-    transition: border-color 150ms ease, box-shadow 150ms ease;
+    transition: border-color var(--motion-base) ease, box-shadow var(--motion-base) ease;
   }
 
   /* Interactive card (anchor or button) gets a lift on hover */
-  a.card:hover,
-  button.card:hover {
-    border-color: color-mix(in srgb, var(--color-border) 60%, var(--color-surface-3));
-    box-shadow: var(--shadow-md);
+  @media (hover: hover) {
+    a.card:hover,
+    button.card:hover {
+      border-color: color-mix(in srgb, var(--color-border) 60%, var(--color-surface-3));
+      box-shadow: var(--shadow-md);
+    }
   }
 
   /* ── Input ───────────────────────────────────────────────────────────── */
@@ -259,7 +299,7 @@
     border: 1px solid var(--color-border);
     background-color: var(--color-surface-2);
     color: var(--color-text);
-    transition: border-color 150ms ease, box-shadow 150ms ease;
+    transition: border-color var(--motion-base) ease, box-shadow var(--motion-base) ease;
 
     &::placeholder {
       color: var(--color-text-muted);
@@ -285,7 +325,7 @@
     border: 1px solid var(--color-border);
     background-color: var(--color-surface-2);
     color: var(--color-text);
-    transition: border-color 150ms ease, box-shadow 150ms ease;
+    transition: border-color var(--motion-base) ease, box-shadow var(--motion-base) ease;
 
     &:focus-within {
       outline: none;
@@ -301,10 +341,12 @@
     border: 1px solid var(--color-border);
     color: var(--color-text-muted);
     touch-action: manipulation;
-    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+    transition: background-color var(--motion-base) ease, border-color var(--motion-base) ease, color var(--motion-base) ease;
 
-    &:hover {
-      background-color: var(--color-surface-2);
+    @media (hover: hover) {
+      &:hover {
+        background-color: var(--color-surface-2);
+      }
     }
 
     &:focus-visible {
@@ -352,6 +394,16 @@
   .btn-sm.btn-icon {
     width: var(--btn-h-sm);
     padding: 0;
+  }
+  /* On touch devices, give .btn-sm a generous tap target so it clears the
+     ~40px guideline. Padding-only on text variants; explicit width on icon. */
+  @media (hover: none) {
+    .btn-sm {
+      min-height: 2.5rem;
+    }
+    .btn-sm.btn-icon {
+      min-width: 2.5rem;
+    }
   }
   .btn-lg {
     height: var(--btn-h-lg);
@@ -436,12 +488,27 @@
     width: 1rem;
     height: 1rem;
   }
-  .manga-card:hover .manga-card__menu-btn,
-  .manga-card__menu-btn:focus-visible {
-    opacity: 1;
+  /* Hover-driven reveal only on devices that actually hover. On touch,
+     the button is always visible and sized for a 36px+ tap target. */
+  @media (hover: hover) {
+    .manga-card:hover .manga-card__menu-btn,
+    .manga-card__menu-btn:focus-visible {
+      opacity: 1;
+    }
+    .manga-card__menu-btn:hover {
+      background: rgba(0, 0, 0, 0.65);
+    }
   }
-  .manga-card__menu-btn:hover {
-    background: rgba(0, 0, 0, 0.65);
+  @media (hover: none) {
+    .manga-card__menu-btn {
+      opacity: 1;
+      width: 2.25rem;
+      height: 2.25rem;
+    }
+    .manga-card__menu-btn [data-svg], .manga-card__menu-btn svg {
+      width: 1.125rem;
+      height: 1.125rem;
+    }
   }
   .is-select-mode .manga-card__menu-btn {
     display: none !important;
@@ -485,7 +552,7 @@
     background: transparent;
     color: var(--color-text);
     cursor: pointer;
-    transition: background 130ms;
+    transition: background var(--motion-fast);
     font-size: 1.25rem;
     &:hover { background: color-mix(in srgb, var(--color-surface) 70%, transparent); }
     &:disabled { opacity: 0.4; cursor: default; }
@@ -500,7 +567,7 @@
     border-bottom: 2px solid transparent;
     background: none;
     touch-action: manipulation;
-    transition: color 150ms ease, border-color 150ms ease;
+    transition: color var(--motion-base) ease, border-color var(--motion-base) ease;
     &:hover {
       color: var(--color-text);
     }
@@ -533,12 +600,12 @@
     height: 100%;
     border-radius: 9999px;
     position: relative;
-    transition: background-color 150ms ease;
+    transition: background-color var(--motion-base) ease;
     background-color: var(--color-surface-3);
     &::after {
       content: '';
       @apply absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full;
-      transition: transform 150ms ease;
+      transition: transform var(--motion-base) ease;
     }
   }
   .kani-toggle__input:checked ~ .kani-toggle__track {
@@ -558,7 +625,7 @@
     @apply inline-flex items-center justify-center w-9 h-9 rounded-md cursor-pointer;
     color: var(--color-text-muted);
     touch-action: manipulation;
-    transition: background-color 150ms ease, color 150ms ease;
+    transition: background-color var(--motion-base) ease, color var(--motion-base) ease;
     &:hover {
       background-color: var(--color-surface-2);
       color: var(--color-text);
@@ -584,7 +651,7 @@
     border: 1px solid var(--color-border);
     background-color: transparent;
     color: var(--color-text-muted);
-    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+    transition: background-color var(--motion-base) ease, border-color var(--motion-base) ease, color var(--motion-base) ease;
     touch-action: manipulation;
     flex-shrink: 0;
     &:focus-visible {
@@ -592,6 +659,9 @@
       box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
     }
     &:active { transform: scale(0.95); }
+  }
+  @media (hover: none) {
+    .dl-btn { width: 2.5rem; height: 2.5rem; }
   }
   .dl-btn-active {
     color: var(--color-accent);
@@ -655,9 +725,11 @@
     background-color: var(--color-surface-2);
     border: 1px solid var(--color-border);
     color: var(--color-text);
-    &:hover:not(:disabled):not([aria-disabled="true"]) {
-      background-color: var(--color-surface-3);
-      border-color: var(--color-surface-3);
+    @media (hover: hover) {
+      &:hover:not(:disabled):not([aria-disabled="true"]) {
+        background-color: var(--color-surface-3);
+        border-color: var(--color-surface-3);
+      }
     }
   }
 
@@ -666,6 +738,12 @@
     padding: 0 0.5rem;
     font-size: var(--text-2xs);
     border-radius: var(--radius-sm);
+  }
+  @media (hover: none) {
+    .btn-xs {
+      min-height: 2.25rem;
+      padding: 0 0.75rem;
+    }
   }
 
   /* ── Icon size helpers ── */
@@ -702,6 +780,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  @media (max-width: 479px) {
+    .truncate-crumb {
+      max-width: 8rem;
+    }
+  }
 
   /* ── App shell layout ── */
 
@@ -715,6 +798,9 @@
     display: flex;
     flex-direction: column;
     @media (max-width: 767px) { margin-left: 0; }
+    @media (min-width: 768px) and (max-width: 1023px) {
+      margin-left: 200px;
+    }
   }
   #page-content {
     flex: 1;
@@ -740,6 +826,11 @@
     overflow-y: auto;
     z-index: var(--z-sidebar);
     @media (max-width: 767px) { display: none; }
+    /* On tablets, the full 234px sidebar eats too much horizontal real estate.
+       Shrink to 200px between md and lg breakpoints. */
+    @media (min-width: 768px) and (max-width: 1023px) {
+      width: 200px;
+    }
   }
   .sidebar-brand {
     display: flex; align-items: center; gap: 10px;
@@ -785,7 +876,9 @@
     transition: background 0.12s, color 0.12s;
     text-decoration: none;
     cursor: pointer;
-    &:hover { background: var(--color-surface-2); color: var(--color-text); text-decoration: none; }
+    @media (hover: hover) {
+      &:hover { background: var(--color-surface-2); color: var(--color-text); text-decoration: none; }
+    }
     & svg { width: 16px; height: 16px; flex-shrink: 0; }
     &.active,
     &[aria-current="page"] { background: var(--color-accent-dim); color: var(--color-accent); }
@@ -826,12 +919,17 @@
   .breadcrumb {
     display: flex; align-items: center; gap: 6px;
     font-size: 13px; color: var(--color-text-muted);
-    & a { color: var(--color-text-muted); text-decoration: none; }
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+    &::-webkit-scrollbar { display: none; }
+    & a { color: var(--color-text-muted); text-decoration: none; flex-shrink: 0; }
     & a:hover { color: var(--color-text); }
-    & .sep { color: var(--color-text-faint); font-size: 11px; }
-    & .cur { color: var(--color-text); font-weight: 500; }
+    & .sep { color: var(--color-text-faint); font-size: 11px; flex-shrink: 0; }
+    & .cur { color: var(--color-text); font-weight: 500; flex-shrink: 0; }
   }
-  .header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
   /* ── Avatar ── */
 
@@ -859,6 +957,29 @@
   .badge-muted   { background: var(--color-surface-2); color: var(--color-text-muted); border: 1px solid var(--color-border); }
   .badge-accent  { background: var(--color-accent-dim); color: var(--color-accent); }
 
+  /* ── Master-detail layout ── */
+
+  .master-detail {
+    display: grid;
+    grid-template-columns: var(--md-list-w, 300px) 1fr;
+    grid-template-rows: 1fr;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .master-detail__detail {
+    overflow-y: auto;
+    min-height: 0;
+  }
+  @media (max-width: 767px) {
+    /* Single-pane mode: only the active pane is shown. */
+    .master-detail {
+      grid-template-columns: 1fr;
+    }
+    .master-detail[data-view="list"]   .master-detail__detail { display: none; }
+    .master-detail[data-view="detail"] .master-detail__list   { display: none; }
+  }
+
   /* ── Master-detail list pane ── */
 
   .list-pane {
@@ -883,7 +1004,9 @@
     display: flex; align-items: center; gap: 10px;
     padding: 8px 10px; border-radius: var(--radius-md);
     cursor: pointer; transition: background 0.1s;
-    &:hover { background: var(--color-surface-2); }
+    @media (hover: hover) {
+      &:hover { background: var(--color-surface-2); }
+    }
     &.active { background: var(--color-accent-dim); }
     & .li-title { font-size: 13.5px; color: var(--color-text); line-height: 1.3; }
     & .li-sub   { font-size: 11.5px; color: var(--color-text-muted); margin-top: 1px; }
@@ -993,7 +1116,10 @@
   .max-h-sheet  { max-height: 85vh; }
 
   /* ── Sidebar offset (for full-bleed banners on desktop) ── */
-  .md\:left-sidebar { @media (min-width: 768px) { left: var(--sidebar-w); } }
+  .md\:left-sidebar {
+    @media (min-width: 768px) and (max-width: 1023px) { left: 200px; }
+    @media (min-width: 1024px) { left: var(--sidebar-w); }
+  }
 
   /* ── Safe-area padding ── */
   .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -1007,6 +1133,9 @@
     font-size: var(--text-sm);
     flex-shrink: 0;
   }
+  @media (hover: none) {
+    .tile-btn { width: 2.5rem; height: 2.5rem; }
+  }
 }
 
 @layer utilities {
@@ -1015,4 +1144,11 @@
   .z-toast       { z-index: var(--z-toast); }
   .z-popover     { z-index: var(--z-popover); }
   .z-top         { z-index: var(--z-top); }
+  .z-banner      { z-index: var(--z-banner); }
+  .z-bottom-nav  { z-index: var(--z-bottom-nav); }
+  .reader-bar       { z-index: var(--z-reader-bar); }
+  .reader-bar-hover { z-index: var(--z-reader-hover); }
+  .seg-loaded   { background: var(--color-reader-seg-loaded); }
+  .seg-unloaded { background: var(--color-reader-seg-unloaded); }
+  .text-on-accent { color: var(--color-on-accent); }
 }

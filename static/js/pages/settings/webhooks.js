@@ -5,6 +5,9 @@ import * as api from '../../api.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
 import { escapeHtml, confirmDialog } from '../../utils.js';
+import { createErrorState } from '../../components/error-state.js';
+import { createEmptyState } from '../../components/empty-state.js';
+import { skeletonSettingsCards } from '../../components/skeletons.js';
 
 const ALL_EVENTS = [
   { value: 'chapter.new',         label: 'New chapters',        description: 'New chapters found during a scan' },
@@ -100,17 +103,21 @@ export async function mount(el) {
 
   // ── Load and render webhook list ──────────────────────────────────────────
   async function _reload() {
-    listEl.innerHTML = '';
+    listEl.innerHTML = skeletonSettingsCards(2);
     let webhooks;
     try {
       webhooks = await api.listWebhooks();
-    } catch {
-      listEl.innerHTML = '<p class="px-4 py-3 text-sm text-danger">Failed to load webhooks.</p>';
+    } catch (e) {
+      listEl.innerHTML = '';
+      listEl.appendChild(createErrorState({ message: 'Failed to load webhooks.', onRetry: _reload }));
       return;
     }
 
     if (webhooks.length === 0) {
-      listEl.innerHTML = '<p class="px-4 py-3 text-sm text-text-muted">No webhooks configured.</p>';
+      listEl.appendChild(createEmptyState({
+        title: 'No webhooks configured',
+        subtitle: 'Add a webhook to receive HTTP notifications for library events.',
+      }));
       return;
     }
 
@@ -265,13 +272,14 @@ function _mkWebhookRow(wh, reload) {
     logsToggle.textContent = open ? 'Show recent deliveries ›' : 'Hide deliveries ‹';
     if (!open && !logsLoaded) {
       logsLoaded = true;
-      logsEl.innerHTML = '<p class="text-xs text-text-muted">Loading…</p>';
+      logsEl.innerHTML = skeletonSettingsCards(3);
       try {
         const deliveries = await api.listWebhookDeliveries(wh.id);
         logsEl.innerHTML = '';
         logsEl.appendChild(_mkDeliveryLog(deliveries));
       } catch {
-        logsEl.innerHTML = '<p class="text-xs text-danger">Failed to load delivery log.</p>';
+        logsEl.innerHTML = '';
+        logsEl.appendChild(createErrorState({ message: 'Failed to load delivery log.' }));
       }
     }
   });

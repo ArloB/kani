@@ -18,6 +18,9 @@ export function renderCollapsiblePanel(container, { label, open = false, variant
   let _open = open;
 
   const isSection = variant === 'section';
+  const _uid = Math.random().toString(36).slice(2, 8);
+  const _bodyId = 'cp-body-' + _uid;
+  const _labelId = 'cp-label-' + _uid;
 
   const wrap = document.createElement('div');
   wrap.className = isSection
@@ -30,9 +33,11 @@ export function renderCollapsiblePanel(container, { label, open = false, variant
   toggleBtn.className = isSection
     ? 'w-full flex items-center justify-between gap-3 py-4 text-left hover:text-accent transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:outline-none rounded'
     : 'w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-surface-2 transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:outline-none';
+  toggleBtn.setAttribute('aria-controls', _bodyId);
   wrap.appendChild(toggleBtn);
 
   const labelEl = document.createElement('span');
+  labelEl.id = _labelId;
   labelEl.className = isSection
     ? 'text-base font-semibold text-text'
     : 'text-sm font-medium text-text';
@@ -45,6 +50,9 @@ export function renderCollapsiblePanel(container, { label, open = false, variant
   toggleBtn.appendChild(chevron);
 
   const body = document.createElement('div');
+  body.id = _bodyId;
+  body.setAttribute('role', 'region');
+  body.setAttribute('aria-labelledby', _labelId);
   body.className = isSection
     ? 'pb-4'
     : 'border-t border-border-subtle px-4 py-3';

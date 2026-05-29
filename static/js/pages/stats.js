@@ -17,6 +17,19 @@ function cssVar(varName) {
   return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || '#888';
 }
 
+/**
+ * Resolves a CSS hex color token and returns it as an rgba() string.
+ * @param {string} varName
+ * @param {number} alpha
+ */
+function chartColor(varName, alpha = 1) {
+  const hex = cssVar(varName).replace(/\s/g, '');
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 // ── Widget registry ───────────────────────────────────────────────────────────
 // Each widget: { id: string, render(container, data) → { destroy() } }
 // Adding a new widget requires only appending to WIDGETS — no other changes.
@@ -128,14 +141,14 @@ function _destroyWidgets() {
 
 function _buildSkeleton() {
   return `
-    <div class="flex flex-col gap-6 animate-pulse">
+    <div class="flex flex-col gap-6">
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        ${Array(4).fill('<div class="h-24 rounded-xl bg-surface-2"></div>').join('')}
+        ${Array(4).fill('<div class="skeleton h-24 rounded-xl"></div>').join('')}
       </div>
-      <div class="h-56 rounded-xl bg-surface-2"></div>
+      <div class="skeleton h-56 rounded-xl"></div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="h-64 rounded-xl bg-surface-2"></div>
-        <div class="h-64 rounded-xl bg-surface-2"></div>
+        <div class="skeleton h-64 rounded-xl"></div>
+        <div class="skeleton h-64 rounded-xl"></div>
       </div>
     </div>
   `;
@@ -207,7 +220,7 @@ function dailyActivityWidget() {
             datasets: [{
               label: 'Chapters',
               data: rows.map((r) => r.chapters_read),
-              backgroundColor: 'rgba(99, 102, 241, 0.6)',
+              backgroundColor: chartColor('--chart-1', 0.6),
               borderRadius: 3,
             }],
           },
@@ -272,7 +285,7 @@ function topMangaWidget() {
             datasets: [{
               label: 'Chapters',
               data: rows.map((r) => r.chapters_read),
-              backgroundColor: 'rgba(16, 185, 129, 0.65)',
+              backgroundColor: chartColor('--chart-2', 0.65),
               borderRadius: 3,
             }],
           },
@@ -343,8 +356,9 @@ function genreBreakdownWidget() {
       const canvas = /** @type {HTMLCanvasElement} */ (container.querySelector('#chart-genre'));
 
       const PALETTE = [
-        '#6366f1','#10b981','#f59e0b','#ef4444','#3b82f6','#8b5cf6',
-        '#ec4899','#14b8a6','#f97316','#84cc16','#06b6d4','#a855f7',
+        cssVar('--chart-1'), cssVar('--chart-2'), cssVar('--chart-3'),
+        cssVar('--chart-4'), cssVar('--chart-5'), cssVar('--color-accent-hover'),
+        '#ec4899', '#14b8a6', '#f97316', '#84cc16', '#06b6d4', '#a855f7',
       ];
 
       _loadChartJs().then(Chart => {

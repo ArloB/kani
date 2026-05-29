@@ -149,6 +149,7 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
       <div class="flex items-center gap-2">
         <input
           type="number"
+          inputMode="numeric"
           class="input w-24"
           value=${numVal}
           onInput=${(e) => setNumVal(/** @type {HTMLInputElement} */ (e.target).value)}

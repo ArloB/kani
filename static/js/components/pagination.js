@@ -24,7 +24,7 @@ export function renderPagination(container, { page, hasNext, total, onPageChange
     container.innerHTML = '';
 
     const wrap = document.createElement('div');
-    wrap.className = 'flex items-center justify-center gap-1.5 py-4';
+    wrap.className = 'flex flex-wrap items-center justify-center gap-1.5 py-4';
 
     // ── Prev ──
     const prevBtn = _mkNavTile(iconChevronLeft, page <= 1, () => onPageChange(_props.page - 1));

@@ -4,6 +4,8 @@
 import * as api from '../../api.js';
 import { mkSettingsGroup, mkSettingsGroupCard } from './_shared.js';
 import { fmtCompactDate } from '../../utils.js';
+import { createEmptyState } from '../../components/empty-state.js';
+import { createErrorState } from '../../components/error-state.js';
 
 /**
  * @param {HTMLElement} el
@@ -13,24 +15,17 @@ export function mount(el) {
   const card  = mkSettingsGroupCard(group);
   el.appendChild(group);
 
-  const loadingEl = document.createElement('p');
-  loadingEl.className = 'text-sm text-text-muted px-4 py-3';
-  loadingEl.textContent = 'Loading…';
-  card.appendChild(loadingEl);
-
   api.getSourcesHealth().then((rows) => {
-    card.removeChild(loadingEl);
     if (!Array.isArray(rows) || rows.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'text-sm text-text-muted px-4 py-3';
-      empty.textContent = 'No sources installed.';
-      card.appendChild(empty);
+      card.appendChild(createEmptyState({
+        title: 'No sources installed',
+        subtitle: 'Install extensions from the Sources page to see health data.',
+      }));
       return;
     }
     _renderTable(card, rows);
   }).catch(() => {
-    loadingEl.textContent = 'Failed to load health data.';
-    loadingEl.classList.add('text-danger');
+    card.appendChild(createErrorState({ message: 'Failed to load extension health data.' }));
   });
 
   return {

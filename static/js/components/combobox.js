@@ -132,6 +132,9 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
     const spaceAbove = rect.top - 4;
     const openUp = spaceBelow < localDropH && spaceAbove > localDropH;
     const dropTop = openUp ? rect.top - localDropH - 4 : rect.bottom + 4;
+    // Clamp horizontally so the popover never clips off the viewport edge on narrow screens.
+    const dropWidth = Math.min(rect.width, window.innerWidth - 8);
+    const dropLeft  = Math.max(4, Math.min(rect.left, window.innerWidth - dropWidth - 4));
 
     _renderPopover(html`
       <div
@@ -139,13 +142,13 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
         style=${{
           position: 'fixed',
           top: dropTop + 'px',
-          left: rect.left + 'px',
-          width: rect.width + 'px',
+          left: dropLeft + 'px',
+          width: dropWidth + 'px',
           height: localDropH + 'px',
           background: 'var(--color-surface)',
           border: '1px solid var(--color-border)',
           borderRadius: 'var(--radius-lg)',
-          boxShadow: '0 8px 24px rgba(0,0,0,.18)',
+          boxShadow: 'var(--shadow-popover)',
           overflowY: 'auto',
           zIndex: 'var(--z-popover)',
           pointerEvents: 'auto',
@@ -320,6 +323,8 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
     const spaceAbove = rect.top - 4;
     const openUp = spaceBelow < localDropH && spaceAbove > localDropH;
     const dropTop = openUp ? rect.top - localDropH - 4 : rect.bottom + 4;
+    const dropWidth = Math.min(rect.width, window.innerWidth - 8);
+    const dropLeft  = Math.max(4, Math.min(rect.left, window.innerWidth - dropWidth - 4));
 
     _renderPopover(html`
       <div
@@ -328,13 +333,13 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
         style=${{
           position: 'fixed',
           top: dropTop + 'px',
-          left: rect.left + 'px',
-          width: rect.width + 'px',
+          left: dropLeft + 'px',
+          width: dropWidth + 'px',
           height: localDropH + 'px',
           background: 'var(--color-surface)',
           border: '1px solid var(--color-border)',
           borderRadius: 'var(--radius-lg)',
-          boxShadow: '0 8px 24px rgba(0,0,0,.18)',
+          boxShadow: 'var(--shadow-popover)',
           overflowY: 'auto',
           zIndex: 'var(--z-popover)',
           pointerEvents: 'auto',
@@ -442,6 +447,7 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
           aria-expanded=${open}
           aria-autocomplete="list"
           aria-multiselectable="true"
+          aria-activedescendant=${open && filtered[highlighted] ? 'combobox-multi-opt-' + filtered[highlighted].id : undefined}
           onInput=${(/** @type {any} */ e) => {
             setInputText(/** @type {HTMLInputElement} */(e.target).value);
             if (!open) setOpen(true);
@@ -522,6 +528,8 @@ function CreatableMultiCombobox({ options, value, onChange, placeholder, disable
     const spaceAbove = rect.top - 4;
     const openUp = spaceBelow < localDropH && spaceAbove > localDropH;
     const dropTop = openUp ? rect.top - localDropH - 4 : rect.bottom + 4;
+    const dropWidth = Math.min(rect.width, window.innerWidth - 8);
+    const dropLeft  = Math.max(4, Math.min(rect.left, window.innerWidth - dropWidth - 4));
 
     _renderPopover(html`
       <div
@@ -529,13 +537,13 @@ function CreatableMultiCombobox({ options, value, onChange, placeholder, disable
         style=${{
           position: 'fixed',
           top: dropTop + 'px',
-          left: rect.left + 'px',
-          width: rect.width + 'px',
+          left: dropLeft + 'px',
+          width: dropWidth + 'px',
           height: localDropH + 'px',
           background: 'var(--color-surface)',
           border: '1px solid var(--color-border)',
           borderRadius: 'var(--radius-lg)',
-          boxShadow: '0 8px 24px rgba(0,0,0,.18)',
+          boxShadow: 'var(--shadow-popover)',
           overflowY: 'auto',
           zIndex: 'var(--z-popover)',
           pointerEvents: 'auto',
@@ -550,6 +558,7 @@ function CreatableMultiCombobox({ options, value, onChange, placeholder, disable
             const isHighlighted = idx === highlighted;
             return html`
               <div
+                id=${'combobox-create-opt-' + (isCreate ? _CREATE_ID : opt.id)}
                 key=${isCreate ? _CREATE_ID : opt.id}
                 role="option"
                 class=${'flex items-center gap-2 px-3 text-sm cursor-pointer select-none '
@@ -632,6 +641,7 @@ function CreatableMultiCombobox({ options, value, onChange, placeholder, disable
           disabled=${disabled}
           aria-expanded=${open}
           aria-autocomplete="list"
+          aria-activedescendant=${open && dropItems[highlighted] ? 'combobox-create-opt-' + (dropItems[highlighted].id === _CREATE_ID ? _CREATE_ID : dropItems[highlighted].id) : undefined}
           onInput=${(/** @type {any} */ e) => {
             setInputText(/** @type {HTMLInputElement} */(e.target).value);
             if (!open) setOpen(true);

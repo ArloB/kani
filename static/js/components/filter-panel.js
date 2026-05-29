@@ -66,7 +66,7 @@ export function mountFilterModal(triggerBtn, modalRoot, { filterDefs, activeFilt
   }
 
   function _openModal() {
-    // Snapshot committed → draft for this session
+    const _prevFocus = /** @type {HTMLElement|null} */ (document.activeElement);
     draft = { ...committed };
 
     const overlay = document.createElement('div');
@@ -121,6 +121,7 @@ export function mountFilterModal(triggerBtn, modalRoot, { filterDefs, activeFilt
     const close = () => {
       overlay.remove();
       overlayEl = null;
+      _prevFocus?.focus();
     };
 
     header.querySelector('.js-close')?.addEventListener('click', close);

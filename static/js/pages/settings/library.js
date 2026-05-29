@@ -11,6 +11,7 @@ import { iconPencil, iconX } from '../../icons.js';
 import { Modal, mountIntoModalRoot } from '../../components/modal.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
 import { mountSortableList } from '../../components/sortable-list.js';
+import { createEmptyState } from '../../components/empty-state.js';
 
 const html = htm.bind(h);
 const _DRAG_HANDLE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>`;
@@ -48,7 +49,10 @@ export function mount(el, initialCategories) {
     card.appendChild(listContainer);
 
     if (cats.length === 0) {
-      listContainer.innerHTML = '<p class="text-sm text-text-muted px-4 py-3">No categories yet.</p>';
+      listContainer.appendChild(createEmptyState({
+        title: 'No categories yet',
+        subtitle: 'Create a category to organise your library.',
+      }));
     } else {
       sortable = mountSortableList(listContainer, {
         items: cats,

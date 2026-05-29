@@ -71,7 +71,7 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
 
   return html`
     <div
-      class="fixed inset-0 z-modal flex items-center justify-center p-4 bg-scrim"
+      class="fixed inset-0 z-modal flex items-end sm:items-center justify-center p-0 sm:p-4 bg-scrim"
       onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
@@ -79,17 +79,17 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
         aria-modal="true"
         aria-labelledby=${title ? titleId : undefined}
         tabindex="-1"
-        class=${'relative bg-surface rounded-xl shadow-lg w-full flex flex-col overflow-hidden max-h-modal outline-none ' + (wide ? 'modal-wide' : 'modal-narrow')}
+        class=${'relative bg-surface shadow-lg w-full flex flex-col overflow-hidden outline-none rounded-t-2xl sm:rounded-xl max-h-[85vh] sm:max-h-modal ' + (wide ? 'modal-wide' : 'modal-narrow')}
         ref=${dialogRef}
       >
         ${title && html`
-          <div class="flex items-center justify-between gap-3 px-6 py-4 border-b border-border-subtle shrink-0">
+          <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle shrink-0">
             <h2 id=${titleId} class="text-lg font-semibold text-text">${title}</h2>
             <button class="btn-icon" aria-label="Close" onClick=${onClose}><${Icon} svg=${iconX} /></button>
           </div>
         `}
-        <div class="flex-1 overflow-y-auto p-6">${children}</div>
-        ${footer && html`<div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-border-subtle shrink-0">${footer}</div>`}
+        <div class="flex-1 overflow-y-auto p-5">${children}</div>
+        ${footer && html`<div class="flex items-center justify-end gap-3 px-5 py-4 border-t border-border-subtle shrink-0">${footer}</div>`}
       </div>
     </div>
   `;

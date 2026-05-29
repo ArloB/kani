@@ -38,6 +38,7 @@ export function showToast(message, { type = 'info', duration = 3000 } = {}) {
     typeClasses[type] ?? typeClasses.info,
   ].join(' ');
   toast.setAttribute('role', 'status');
+  toast.setAttribute('aria-atomic', 'true');
   toast.textContent = message;
 
   container.appendChild(toast);

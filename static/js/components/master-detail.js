@@ -1,24 +1,29 @@
 // @ts-check
 // MasterDetail — CSS-grid two-pane layout (list left, detail right).
-// Both panes scroll independently.
+// On desktop, both panes show side-by-side and scroll independently.
+// On mobile (<768px), only one pane is visible at a time; callers control
+// which via setView('list' | 'detail').
 
 /**
  * Builds a master-detail shell and mounts it into `el`.
- * Returns references to the list and detail pane containers.
+ * Returns references to the list and detail pane containers plus a
+ * setView helper for switching active pane on mobile.
  *
  * @param {HTMLElement} el
  * @param {{ listWidth?: number }} [opts]
- * @returns {{ listEl: HTMLElement, detailEl: HTMLElement, destroy: () => void }}
+ * @returns {{ listEl: HTMLElement, detailEl: HTMLElement, setView: (v: 'list'|'detail') => void, destroy: () => void }}
  */
 export function mountMasterDetail(el, { listWidth = 300 } = {}) {
   const wrap = document.createElement('div');
-  wrap.style.cssText = `display:grid;grid-template-columns:${listWidth}px 1fr;grid-template-rows:1fr;flex:1;min-height:0;overflow:hidden;`;
+  wrap.className = 'master-detail';
+  wrap.style.setProperty('--md-list-w', `${listWidth}px`);
+  wrap.dataset.view = 'list';
 
   const listEl = document.createElement('div');
-  listEl.className = 'list-pane';
+  listEl.className = 'list-pane master-detail__list';
 
   const detailEl = document.createElement('div');
-  detailEl.style.cssText = 'overflow-y:auto;min-height:0;';
+  detailEl.className = 'master-detail__detail';
 
   wrap.appendChild(listEl);
   wrap.appendChild(detailEl);
@@ -27,6 +32,7 @@ export function mountMasterDetail(el, { listWidth = 300 } = {}) {
   return {
     listEl,
     detailEl,
+    setView(v) { wrap.dataset.view = v; },
     destroy() { wrap.remove(); },
   };
 }

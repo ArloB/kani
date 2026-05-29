@@ -7,6 +7,7 @@ import { navigate } from '../router.js';
 import { getLocal, setLocal, getLocalJson, setLocalJson } from '../utils.js';
 import { getState, subscribe } from '../state.js';
 import { registerShortcuts } from '../shortcuts.js';
+import { createEmptyState } from '../components/empty-state.js';
 
 const BTN_ACTIVE   = 'bg-surface-2 text-text';
 const BTN_INACTIVE = 'text-muted hover:bg-surface-2 hover:text-text';
@@ -33,10 +34,11 @@ export async function init(container, { id }) {
   container.innerHTML = `
     <div id="reader-root" class="fixed inset-0 bg-black z-40 flex flex-col select-none overflow-hidden">
 
-      <!-- Mobile-only top bar (hidden on md+). Slides in from top when bars visible. -->
+      <!-- Mobile-only top bar (hidden on md+). Slides in from top when bars visible.
+           min-h-14 + safe-area padding lets the bar absorb the iOS notch / Dynamic Island. -->
       <div id="reader-top"
-        class="md:hidden absolute top-0 inset-x-0 z-30 flex items-center gap-2 px-3 h-14 bg-surface border-b border-border/60 transition-transform duration-150"
-        style="transform: translateY(-100%)">
+        class="md:hidden absolute top-0 inset-x-0 z-30 flex items-center gap-2 px-3 min-h-14 bg-surface border-b border-border/60 transition-transform duration-150"
+        style="transform: translateY(-100%); padding-top: env(safe-area-inset-top, 0px)">
         <button id="reader-back-mobile"
           class="btn-icon shrink-0"
           aria-label="Back">${iconChevronLeft}</button>
@@ -67,8 +69,8 @@ export async function init(container, { id }) {
       <!-- Full indicator bar — slides up from bottom on hover/tap, z-21.
            Sits above the mini strip and overlays the page content. -->
       <div id="reader-full-bar"
-        class="absolute bottom-0 inset-x-0 flex items-center gap-3 px-4 h-14 bg-surface/90 backdrop-blur-sm border-t border-border/40 transition-transform duration-150"
-        style="z-index:21; transform:translateY(100%)">
+        class="absolute bottom-0 inset-x-0 flex items-center gap-3 px-4 h-14 bg-surface/90 backdrop-blur-sm border-t border-border/40 transition-transform duration-150 reader-bar"
+        style="transform:translateY(100%)">
         <span id="reader-seg-left"
           class="text-xs text-muted w-6 text-right shrink-0 tabular-nums select-none">—</span>
         <div id="reader-segs"
@@ -80,8 +82,8 @@ export async function init(container, { id }) {
       <!-- Hover zone — fine-pointer proximity detection. z-9 so mouse events pass
            through the pointer-events-none mini strip (z-20) down to this zone. -->
       <div id="reader-bar-hover"
-        class="absolute bottom-0 inset-x-0 pointer-events-none"
-        style="height:64px;z-index:9">
+        class="absolute bottom-0 inset-x-0 pointer-events-none reader-bar-hover"
+        style="height:64px">
       </div>
 
       <!-- Side panel backdrop -->
@@ -615,8 +617,8 @@ export async function init(container, { id }) {
       const color = _failed.has(i)     ? 'bg-danger/70'
                   : i === _currentPage ? 'bg-accent'
                   : i < _currentPage   ? 'bg-accent/50'
-                  : _loaded.has(i)     ? 'bg-white/20'
-                  :                      'bg-white/10';
+                  : _loaded.has(i)     ? 'seg-loaded'
+                  :                      'seg-unloaded';
 
       // Mini strip: thin, no interaction
       const mini = document.createElement('div');
@@ -838,7 +840,10 @@ export async function init(container, { id }) {
 
     if (_pages.length === 0) {
       pagesEl.className = 'flex-1 overflow-y-auto overflow-x-hidden flex flex-col items-center';
-      pagesEl.innerHTML = '<div class="flex items-center justify-center min-h-full"><p class="text-muted text-sm">No pages found.</p></div>';
+      const emptyWrap = document.createElement('div');
+      emptyWrap.className = 'flex items-center justify-center min-h-full';
+      emptyWrap.appendChild(createEmptyState({ title: 'No pages found', subtitle: 'This chapter appears to have no pages.' }));
+      pagesEl.appendChild(emptyWrap);
       _renderSegments();
       return;
     }
@@ -917,6 +922,7 @@ export async function init(container, { id }) {
         img.className     = _imgClass('scroll');
         img.alt           = '';
         img.loading       = 'lazy';
+        img.style.aspectRatio = '2/3'; // reserve space before dimensions are known
         img.dataset.index = String(i);
         const _i = i;
         img.addEventListener('load', () => {
@@ -997,6 +1003,7 @@ export async function init(container, { id }) {
         const img     = document.createElement('img');
         img.src       = _pages[pageIdx] ?? '';
         img.className = _imgClass(_doublePage ? 'paged-double' : 'paged-single');
+        img.style.aspectRatio = '2/3'; // reserve space before dimensions are known
         img.alt       = altText;
         img.addEventListener('load', () => {
           _loaded.add(pageIdx); _failed.delete(pageIdx);

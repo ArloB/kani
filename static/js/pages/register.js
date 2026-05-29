@@ -66,7 +66,7 @@ export async function init(container) {
             <label class="text-sm font-medium text-text" for="reg-captcha">
               <span id="reg-captcha-prompt">Loading…</span>
             </label>
-            <input id="reg-captcha" class="input" type="number" name="captcha" required />
+            <input id="reg-captcha" class="input" type="number" inputMode="numeric" name="captcha" required />
           </div>
           <button type="submit" class="btn-primary w-full h-11 mt-2" id="reg-submit">Create account</button>
         </form>
