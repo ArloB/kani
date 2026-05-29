@@ -14,7 +14,7 @@ async function _parseBody(res) {
  * Internal fetch wrapper.
  * @param {string} method
  * @param {string} path
- * @param {{ body?: any, params?: Record<string, any>, signal?: AbortSignal }} [opts]
+ * @param {{ body?: any, params?: Record<string, any>, signal?: AbortSignal, timeoutMs?: number }} [opts]
  */
 async function _req(method, path, opts = {}) {
   let url = `/rest${path}`;
@@ -37,9 +37,28 @@ async function _req(method, path, opts = {}) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(opts.body);
   }
-  if (opts.signal) init.signal = opts.signal;
 
-  const res = await fetch(url, init);
+  // Apply timeout via a local AbortController; if the caller also passed a signal,
+  // chain it so either abort source cancels the request.
+  let timer;
+  if (opts.timeoutMs && opts.timeoutMs > 0) {
+    const ctrl = new AbortController();
+    timer = setTimeout(() => ctrl.abort(new DOMException('Request timed out', 'TimeoutError')), opts.timeoutMs);
+    if (opts.signal) {
+      if (opts.signal.aborted) ctrl.abort(opts.signal.reason);
+      else opts.signal.addEventListener('abort', () => ctrl.abort(opts.signal?.reason), { once: true });
+    }
+    init.signal = ctrl.signal;
+  } else if (opts.signal) {
+    init.signal = opts.signal;
+  }
+
+  let res;
+  try {
+    res = await fetch(url, init);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 
   if (res.status === 401) {
     if (location.pathname !== '/login') window.location.href = '/login';
@@ -107,28 +126,31 @@ export async function getRegistrationEnabled() {
   return _req('GET', '/auth/registration-enabled');
 }
 
+/** Default timeout (ms) for auth-flow requests so a hanging server doesn't strand the submit button. */
+const AUTH_TIMEOUT_MS = 15_000;
+
 /** @param {string} email */
 export async function requestPasswordReset(email) {
-  return _req('POST', '/auth/password-reset/request', { body: { email } });
+  return _req('POST', '/auth/password-reset/request', { body: { email }, timeoutMs: AUTH_TIMEOUT_MS });
 }
 
 /** @param {string} token */
 export async function validateResetToken(token) {
-  return _req('GET', '/auth/password-reset/validate', { params: { token } });
+  return _req('GET', '/auth/password-reset/validate', { params: { token }, timeoutMs: AUTH_TIMEOUT_MS });
 }
 
 /** @param {string} token @param {string} newPassword */
 export async function confirmPasswordReset(token, newPassword) {
-  return _req('POST', '/auth/password-reset/confirm', { body: { token, new_password: newPassword } });
+  return _req('POST', '/auth/password-reset/confirm', { body: { token, new_password: newPassword }, timeoutMs: AUTH_TIMEOUT_MS });
 }
 
 /** @param {string} token */
 export async function verifyEmail(token) {
-  return _req('POST', '/auth/verify-email', { body: { token } });
+  return _req('POST', '/auth/verify-email', { body: { token }, timeoutMs: AUTH_TIMEOUT_MS });
 }
 
 export async function resendVerification() {
-  return _req('POST', '/auth/resend-verification');
+  return _req('POST', '/auth/resend-verification', { timeoutMs: AUTH_TIMEOUT_MS });
 }
 
 /** @param {string} to */

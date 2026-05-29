@@ -97,12 +97,15 @@ export function init(container) {
     const username = /** @type {HTMLInputElement} */ (container.querySelector('#login-username')).value;
     const password = /** @type {HTMLInputElement} */ (container.querySelector('#login-password')).value;
 
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(new DOMException('Request timed out', 'TimeoutError')), 15_000);
     try {
       const res = await fetch('/rest/auth/login', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
+        signal: ctrl.signal,
       });
 
       if (res.ok) {
@@ -118,11 +121,14 @@ export function init(container) {
       errMsg.textContent = msg;
       errBox.classList.remove('hidden');
       errBox.classList.add('flex');
-    } catch {
-      errMsg.textContent = 'Could not reach the server. Please try again.';
+    } catch (/** @type {any} */ err) {
+      errMsg.textContent = err?.name === 'TimeoutError'
+        ? 'Server is taking too long to respond. Please try again.'
+        : 'Could not reach the server. Please try again.';
       errBox.classList.remove('hidden');
       errBox.classList.add('flex');
     } finally {
+      clearTimeout(timer);
       btn.disabled = false;
       btn.textContent = 'Sign in';
     }

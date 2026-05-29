@@ -38,7 +38,12 @@ function _connect() {
 
   _source.addEventListener('message', (event) => {
     let data;
-    try { data = JSON.parse(event.data); } catch { return; }
+    try {
+      data = JSON.parse(event.data);
+    } catch (err) {
+      console.warn('[SSE] Failed to parse event payload, dropping:', err, event.data);
+      return;
+    }
     _handleEvent(data);
     // Broadcast to any page-level listeners (e.g. manga-details watching its chapters).
     window.dispatchEvent(new CustomEvent('kani:sse', { detail: data }));

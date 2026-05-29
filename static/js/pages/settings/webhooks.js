@@ -245,11 +245,13 @@ function _mkWebhookRow(wh, reload) {
   delBtn.addEventListener('click', async () => {
     const ok = await confirmDialog({ title: 'Delete webhook?', message: `Delete webhook ${wh.url}?`, confirmLabel: 'Delete', danger: true });
     if (!ok) return;
+    delBtn.disabled = true;
     try {
       await api.deleteWebhook(wh.id);
       await reload();
     } catch (/** @type {any} */ e) {
-      alert(`Delete failed: ${e?.message ?? 'Unknown error'}`);
+      showApiError(e);
+      delBtn.disabled = false;
     }
   });
   controls.appendChild(delBtn);

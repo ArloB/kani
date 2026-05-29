@@ -170,6 +170,19 @@
   :focus:not(:focus-visible) {
     outline: none;
   }
+
+  /* Honour the user's motion preference everywhere. Component-level animations
+     (e.g. .skeleton, .page-loading-bar--active) already gate themselves on
+     prefers-reduced-motion: no-preference, but this catch-all ensures any
+     transition/animation we forgot collapses to an instant change. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.001ms !important;
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 /* ── 6. Component classes ────────────────────────────────────────────────── */
@@ -715,7 +728,9 @@
   }
   .dl-ring-spin {
     transform-origin: center;
-    animation: ring-spin 0.9s linear infinite;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: ring-spin 0.9s linear infinite;
+    }
   }
 
   /* ── Additional button variants ── */

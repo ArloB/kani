@@ -381,8 +381,10 @@ function _renderUserDetail(el, user) {
     });
   });
 
-  el.querySelector('.js-delete-user')?.addEventListener('click', async () => {
+  const _delUserBtn = /** @type {HTMLButtonElement|null} */ (el.querySelector('.js-delete-user'));
+  _delUserBtn?.addEventListener('click', async () => {
     if (!(await openConfirm({ title: 'Delete user', message: `Delete "${user.username}"? This cannot be undone.`, danger: true }))) return;
+    if (_delUserBtn) _delUserBtn.disabled = true;
     try {
       await api.adminDeleteUser(user.id);
       showToast(`User "${user.username}" deleted.`);
@@ -392,6 +394,7 @@ function _renderUserDetail(el, user) {
       if (_detailEl) _renderDetail(_detailEl);
     } catch (e) {
       showToast(e?.message ?? 'Failed to delete user.', { type: 'error' });
+      if (_delUserBtn) _delUserBtn.disabled = false;
     }
   });
 
@@ -528,8 +531,10 @@ function _renderRoleDetail(el, role) {
     });
   });
 
-  el.querySelector('.js-delete-role')?.addEventListener('click', async () => {
+  const _delRoleBtn = /** @type {HTMLButtonElement|null} */ (el.querySelector('.js-delete-role'));
+  _delRoleBtn?.addEventListener('click', async () => {
     if (!(await openConfirm({ title: 'Delete role', message: `Delete role "${role.slug}"? This cannot be undone.`, danger: true }))) return;
+    if (_delRoleBtn) _delRoleBtn.disabled = true;
     try {
       await api.adminDeleteRole(role.slug);
       showToast(`Role "${role.slug}" deleted.`);
@@ -539,6 +544,7 @@ function _renderRoleDetail(el, role) {
       if (_detailEl) _renderDetail(_detailEl);
     } catch (e) {
       showToast(e?.message ?? 'Failed to delete role.', { type: 'error' });
+      if (_delRoleBtn) _delRoleBtn.disabled = false;
     }
   });
 

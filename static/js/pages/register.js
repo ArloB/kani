@@ -103,12 +103,15 @@ export async function init(container) {
     const password = /** @type {HTMLInputElement} */ (container.querySelector('#reg-password')).value;
     const captcha  = Number(/** @type {HTMLInputElement} */ (container.querySelector('#reg-captcha')).value);
 
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(new DOMException('Request timed out', 'TimeoutError')), 15_000);
     try {
       const res = await fetch('/rest/auth/register', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, email, password, captcha_id: captchaId, captcha_answer: captcha }),
+        signal: ctrl.signal,
       });
 
       if (res.ok) {
@@ -119,9 +122,12 @@ export async function init(container) {
       const data = await res.json().catch(() => ({}));
       _showError(data.error ?? 'Registration failed. Please try again.');
       await _loadCaptcha();
-    } catch {
-      _showError('Could not reach the server. Please try again.');
+    } catch (/** @type {any} */ err) {
+      _showError(err?.name === 'TimeoutError'
+        ? 'Server is taking too long to respond. Please try again.'
+        : 'Could not reach the server. Please try again.');
     } finally {
+      clearTimeout(timer);
       btn.disabled = false;
       btn.textContent = 'Create account';
     }

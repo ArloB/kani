@@ -2,13 +2,13 @@ services:
   kani:
     build:
       context: .
-      args:
-        # Uncomment to include Chromium + puppeteer-core (~250 MB extra).
-        # Required for browser-based extensions such as kani-comix.
-        # INSTALL_BROWSER: "true"
+      # args:
+      #   Uncomment to include Chromium + puppeteer-core (~250 MB extra).
+      #   Required for browser-based extensions such as kani-comix.
+      #   INSTALL_BROWSER: "true"
 
-        # Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
-        # INSTALL_KCC: "true"
+      #   Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
+      #   INSTALL_KCC: "true"
     image: kani:latest
     ports:
       - "8242:8242"
