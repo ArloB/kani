@@ -732,6 +732,12 @@
       animation: ring-spin 0.9s linear infinite;
     }
   }
+  .icon-spin {
+    transform-origin: center;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: ring-spin 1s linear infinite;
+    }
+  }
 
   /* ── Additional button variants ── */
 

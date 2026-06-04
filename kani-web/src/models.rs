@@ -34,6 +34,13 @@ pub struct FetchWasmRequest {
 // (rest.rs, tests) continues to compile unchanged.
 pub use kani_app::models::{DownloadRuleRow, LibraryManga, Manga, Settings};
 
+#[derive(serde::Deserialize, Default, Debug)]
+pub struct RefreshMangaRequest {
+    pub fields: Option<Vec<String>>,
+    pub fetch_chapters: Option<bool>,
+    pub clear_overrides: Option<bool>,
+}
+
 #[derive(serde::Deserialize, Debug)]
 pub struct UpdateLocalMetadataRequest {
     pub local_name: Option<String>,

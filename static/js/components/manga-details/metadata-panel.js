@@ -7,9 +7,11 @@ import htm from 'htm';
 import * as api from '../../api.js';
 import { Modal, mountIntoModalRoot } from '../modal.js';
 import { Combobox } from '../combobox.js';
-import { showToast } from '../toast.js';
-import { iconPencil, iconRefresh } from '../../icons.js';
+import { showApiError } from '../toast.js';
+import { iconPencil, iconRefresh, iconX } from '../../icons.js';
 import { mkCard, mkRow, mkItem } from './_shared.js';
+import { hasPermission } from '../../state.js';
+import { getLocal, setLocal } from '../../utils.js';
 
 const html = htm.bind(h);
 
@@ -29,8 +31,14 @@ const STATUS_OPTIONS = [
 /** @param {{ status: string|null }} props */
 function SaveStatus({ status }) {
   if (!status) return null;
-  const isError = status === 'error';
-  return html`<span class=${'text-xs ' + (isError ? 'text-danger' : 'text-accent')}>${isError ? 'Error saving' : 'Saved'}</span>`;
+  if (status === 'error') return html`<span class="text-xs text-danger">Error saving</span>`;
+  if (status === 'saving') return html`<span class="text-xs text-text-muted">Saving…</span>`;
+  return html`<span class="text-xs text-accent">Saved</span>`;
+}
+
+/** Small dot shown next to a field heading when an override is active. */
+function OverrideDot() {
+  return html`<span class="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-accent align-middle" title="Override active"></span>`;
 }
 
 // ── MetadataEditModal ─────────────────────────────────────────────────────────
@@ -91,6 +99,12 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
   const [hasLocalTags, setHasLocalTags] = useState(d.has_local_tags ?? false);
   const [tagsStatus, setTagsStatus] = useState(/** @type {string|null} */(null));
 
+  // Refresh-from-source state
+  const canRefresh = hasPermission('library:refresh');
+  const [redownloadCover, setRedownloadCover] = useState(() => getLocal('kani.refreshOpts.cover') !== 'false');
+  const [refreshStatus, setRefreshStatus] = useState(/** @type {string|null} */(null));
+  const [pulling, setPulling] = useState(/** @type {string|null} */(null));
+
   /** @param {(v: string|null) => void} setter @param {string|null} v */
   function flash(setter, v) {
     setter(v);
@@ -109,7 +123,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
       flash(setCoverStatus, 'saved');
       onFieldSaved({ cover_overridden: true });
     } catch (err) {
-      showToast(/** @type {any} */(err)?.hint ?? 'Failed to upload cover', { type: 'error' });
+      showApiError(err);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -123,7 +137,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
       flash(setCoverStatus, 'saved');
       onFieldSaved({ cover_overridden: false });
     } catch (err) {
-      showToast(/** @type {any} */(err)?.hint ?? 'Failed to remove cover', { type: 'error' });
+      showApiError(err);
     }
   }
 
@@ -158,6 +172,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     if (descTimer.current) clearTimeout(descTimer.current);
     descTimer.current = setTimeout(async () => {
       const val = localDesc.trim() || null;
+      setDescStatus('saving');
       try {
         await api.updateLocalMetadata(dbId, { local_description: val });
         flash(setDescStatus, 'saved');
@@ -245,21 +260,131 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     } catch { flash(setTagsStatus, 'error'); }
   }
 
+  // ── Refresh-from-source handlers ──────────────────────────────────────────
+
+  async function handleRefreshAll() {
+    flash(setRefreshStatus, 'refreshing');
+    const fields = redownloadCover ? undefined : ['title', 'description', 'status', 'people', 'tags'];
+    try {
+      await api.refreshManga(dbId, { fields, fetch_chapters: false });
+      const fresh = await api.getMangaDetails(dbId);
+      onFieldSaved(fresh);
+      if (!hasLocalPeople) {
+        setAuthors(toNames(fresh.source_authors?.length ? fresh.source_authors : fresh.authors));
+        setArtists(toNames(fresh.source_artists?.length ? fresh.source_artists : fresh.artists));
+      }
+      if (!hasLocalTags) {
+        setTags(toNames(fresh.source_tags?.length ? fresh.source_tags : fresh.tags));
+      }
+      setCoverTs(Date.now());
+      flash(setRefreshStatus, 'saved');
+    } catch (e) {
+      flash(setRefreshStatus, 'error');
+      showApiError(e);
+    }
+  }
+
+  /** @param {string} fieldName */
+  async function handlePullField(fieldName) {
+    setPulling(fieldName);
+    try {
+      await api.refreshManga(dbId, { fields: [fieldName], fetch_chapters: false, clear_overrides: true });
+      const fresh = await api.getMangaDetails(dbId);
+      onFieldSaved(fresh);
+      if (fieldName === 'title') {
+        setLocalName('');
+        savedName.current = '';
+      } else if (fieldName === 'description') {
+        if (descTimer.current) clearTimeout(descTimer.current);
+        setLocalDesc('');
+      } else if (fieldName === 'status') {
+        setLocalStatus('');
+      } else if (fieldName === 'people') {
+        setAuthors(toNames(fresh.source_authors?.length ? fresh.source_authors : fresh.authors));
+        setArtists(toNames(fresh.source_artists?.length ? fresh.source_artists : fresh.artists));
+        setHasLocalPeople(false);
+      } else if (fieldName === 'tags') {
+        setTags(toNames(fresh.source_tags?.length ? fresh.source_tags : fresh.tags));
+        setHasLocalTags(false);
+      } else if (fieldName === 'cover') {
+        setCoverOverridden(false);
+        setCoverTs(Date.now());
+      }
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      setPulling(null);
+    }
+  }
+
+  // ── Derived booleans ──────────────────────────────────────────────────────
+
+  const titleOverridden = d.local_name != null || !!localName;
+  const descOverridden = d.local_description != null || !!localDesc;
+  const statusOverridden = localStatus !== '';
+  const isRefreshing = refreshStatus === 'refreshing';
+
+  const srcStatusLabel = STATUS_OPTIONS.find(o => String(o.value) === String(d.source_status))?.label;
+
+  const descPlaceholder = d.source_description
+    ? d.source_description.slice(0, 120) + (d.source_description.length > 120 ? '…' : '')
+    : 'Override description…';
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return html`
     <${Modal} open=${true} onClose=${onClose} title="Edit Metadata" wide=${true}
-      footer=${html`<button type="button" class="btn-primary btn-sm" onClick=${onClose}>Done</button>`}
+      footer=${html`<button type="button" class="btn-primary btn-sm" onClick=${onClose}>Close</button>`}
     >
-      <div id="metadata-import-slot"></div>
+      ${canRefresh && html`
+        <div class="border-b border-border pb-4 mb-2">
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-sm font-semibold text-text">Refresh from source</span>
+            <div class="flex items-center gap-3">
+              <${SaveStatus} status=${isRefreshing ? null : refreshStatus} />
+              <label class="flex items-center gap-1.5 cursor-pointer select-none text-xs text-text-muted">
+                <input type="checkbox" class="accent-accent" checked=${redownloadCover}
+                  onChange=${(/** @type {Event} */e) => {
+                    const v = /** @type {HTMLInputElement} */(e.target).checked;
+                    setRedownloadCover(v);
+                    setLocal('kani.refreshOpts.cover', String(v));
+                  }} />
+                Re-download cover
+              </label>
+              <button type="button"
+                class="btn-ghost btn-sm flex items-center gap-1"
+                disabled=${!!pulling || isRefreshing}
+                title="Your edits below are kept. Use 'Pull' on a field to adopt the latest source value."
+                onClick=${handleRefreshAll}>
+                <span class=${'icon-xs' + (isRefreshing ? ' icon-spin' : '')}
+                  dangerouslySetInnerHTML=${{ __html: iconRefresh }}></span>
+                ${isRefreshing ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+          </div>
+        </div>
+      `}
 
       <div class="flex flex-col gap-6">
 
         <!-- Cover -->
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between gap-2">
-            <span class="text-sm font-semibold text-text">Cover</span>
-            <${SaveStatus} status=${coverStatus} />
+            <span class="text-sm font-semibold text-text">
+              Cover
+              ${coverOverridden && html`<${OverrideDot} />`}
+            </span>
+            <div class="flex items-center gap-2">
+              <${SaveStatus} status=${coverStatus} />
+              ${canRefresh && html`
+                <button type="button"
+                  class="btn-ghost btn-sm text-xs text-text-muted"
+                  disabled=${!!pulling} onClick=${() => handlePullField('cover')}
+                  title="Fetch latest cover from source">
+                  ${pulling === 'cover' ? '…' : 'Pull'}
+                </button>
+              `}
+            </div>
           </div>
           <div class="flex items-start gap-4">
             <img
@@ -285,22 +410,34 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
         <!-- Title -->
         <div class="flex flex-col gap-1.5">
           <div class="flex items-center justify-between gap-2">
-            <label class="text-sm font-semibold text-text">Title</label>
+            <label class="text-sm font-semibold text-text">
+              Title
+              ${titleOverridden && html`<${OverrideDot} />`}
+            </label>
             <div class="flex items-center gap-2">
               <${SaveStatus} status=${titleStatus} />
-              ${d.local_name != null || localName ? html`
+              ${titleOverridden ? html`
                 <button type="button"
                   class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
                   onClick=${resetTitle}>
-                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconRefresh }}></span>
+                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
                   Restore
                 </button>
               ` : null}
+              ${canRefresh && titleOverridden && html`
+                <button type="button"
+                  class="btn-ghost btn-sm text-xs text-text-muted"
+                  disabled=${!!pulling} onClick=${() => handlePullField('title')}
+                  title="Fetch latest title from source">
+                  ${pulling === 'title' ? '…' : 'Pull'}
+                </button>
+              `}
             </div>
           </div>
           <input type="text" class="input w-full text-sm"
             value=${localName}
             placeholder=${d.source_name ?? ''}
+            disabled=${pulling === 'title'}
             onInput=${(/** @type {Event} */e) => setLocalName(/** @type {HTMLInputElement} */(e.target).value)}
             onBlur=${saveTitle}
             onKeyDown=${(/** @type {KeyboardEvent} */e) => { if (e.key === 'Enter') /** @type {HTMLElement} */(e.target).blur(); }}
@@ -313,59 +450,105 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
         <!-- Description -->
         <div class="flex flex-col gap-1.5">
           <div class="flex items-center justify-between gap-2">
-            <label class="text-sm font-semibold text-text">Description</label>
+            <label class="text-sm font-semibold text-text">
+              Description
+              ${descOverridden && html`<${OverrideDot} />`}
+            </label>
             <div class="flex items-center gap-2">
               <${SaveStatus} status=${descStatus} />
-              ${(d.local_description != null || localDesc) ? html`
+              ${descOverridden ? html`
                 <button type="button"
                   class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
                   onClick=${resetDesc}>
-                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconRefresh }}></span>
+                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
                   Restore
                 </button>
               ` : null}
+              ${canRefresh && descOverridden && html`
+                <button type="button"
+                  class="btn-ghost btn-sm text-xs text-text-muted"
+                  disabled=${!!pulling} onClick=${() => handlePullField('description')}
+                  title="Fetch latest description from source">
+                  ${pulling === 'description' ? '…' : 'Pull'}
+                </button>
+              `}
             </div>
           </div>
           <textarea class="input w-full text-sm resize-y" rows="4"
-            placeholder="Override description…"
+            placeholder=${descPlaceholder}
             value=${localDesc}
+            disabled=${pulling === 'description'}
             onInput=${(/** @type {Event} */e) => setLocalDesc(/** @type {HTMLTextAreaElement} */(e.target).value)}
           ></textarea>
+          ${descOverridden && d.source_description != null && html`
+            <p class="text-xs text-text-muted">
+              Source: ${d.source_description.slice(0, 120)}${d.source_description.length > 120 ? '…' : ''}
+            </p>
+          `}
         </div>
 
         <!-- Status -->
-        <div class="flex items-center justify-between gap-4">
-          <span class="text-sm font-semibold text-text">Publication status</span>
-          <div class="flex items-center gap-2 shrink-0">
-            <${SaveStatus} status=${statusStatus} />
-            ${localStatus !== '' && html`
-              <button type="button"
-                class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
-                onClick=${resetStatus}>
-                <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconRefresh }}></span>
-                Restore
-              </button>
-            `}
-            <select class="input w-auto text-sm" value=${localStatus} onChange=${handleStatusChange}>
-              ${STATUS_OPTIONS.map(opt => html`
-                <option key=${opt.value} value=${String(opt.value)}>${opt.label}</option>
-              `)}
-            </select>
+        <div class="flex flex-col gap-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-sm font-semibold text-text">
+              Publication status
+              ${statusOverridden && html`<${OverrideDot} />`}
+            </span>
+            <div class="flex items-center gap-2 shrink-0">
+              <${SaveStatus} status=${statusStatus} />
+              ${statusOverridden ? html`
+                <button type="button"
+                  class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
+                  onClick=${resetStatus}>
+                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
+                  Restore
+                </button>
+              ` : null}
+              ${canRefresh && statusOverridden && html`
+                <button type="button"
+                  class="btn-ghost btn-sm text-xs text-text-muted"
+                  disabled=${!!pulling} onClick=${() => handlePullField('status')}
+                  title="Fetch latest status from source">
+                  ${pulling === 'status' ? '…' : 'Pull'}
+                </button>
+              `}
+            </div>
           </div>
+          <select class="input w-full text-sm" value=${localStatus}
+            disabled=${pulling === 'status'}
+            onChange=${handleStatusChange}>
+            ${STATUS_OPTIONS.map(opt => html`
+              <option key=${opt.value} value=${String(opt.value)}>${opt.label}</option>
+            `)}
+          </select>
+          ${statusOverridden && srcStatusLabel && html`
+            <p class="text-xs text-text-muted">Source: ${srcStatusLabel}</p>
+          `}
         </div>
 
         <!-- Authors & Artists -->
         <div class="flex flex-col gap-4">
           <div class="flex items-center justify-between gap-2">
-            <span class="text-sm font-semibold text-text">Authors & Artists</span>
+            <span class="text-sm font-semibold text-text">
+              Authors & Artists
+              ${hasLocalPeople && html`<${OverrideDot} />`}
+            </span>
             <div class="flex items-center gap-2">
               <${SaveStatus} status=${peopleStatus} />
               ${hasLocalPeople && html`
                 <button type="button"
                   class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
                   onClick=${resetPeople}>
-                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconRefresh }}></span>
+                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
                   Restore
+                </button>
+              `}
+              ${canRefresh && hasLocalPeople && html`
+                <button type="button"
+                  class="btn-ghost btn-sm text-xs text-text-muted"
+                  disabled=${!!pulling} onClick=${() => handlePullField('people')}
+                  title="Fetch latest authors & artists from source">
+                  ${pulling === 'people' ? '…' : 'Pull'}
                 </button>
               `}
             </div>
@@ -395,15 +578,26 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
         <!-- Tags -->
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between gap-2">
-            <span class="text-sm font-semibold text-text">Tags</span>
+            <span class="text-sm font-semibold text-text">
+              Tags
+              ${hasLocalTags && html`<${OverrideDot} />`}
+            </span>
             <div class="flex items-center gap-2">
               <${SaveStatus} status=${tagsStatus} />
               ${hasLocalTags && html`
                 <button type="button"
                   class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
                   onClick=${resetTags}>
-                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconRefresh }}></span>
+                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
                   Restore
+                </button>
+              `}
+              ${canRefresh && hasLocalTags && html`
+                <button type="button"
+                  class="btn-ghost btn-sm text-xs text-text-muted"
+                  disabled=${!!pulling} onClick=${() => handlePullField('tags')}
+                  title="Fetch latest tags from source">
+                  ${pulling === 'tags' ? '…' : 'Pull'}
                 </button>
               `}
             </div>

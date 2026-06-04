@@ -168,6 +168,46 @@ pub struct LocalMetadataUpdate {
     pub tags: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RefreshFields {
+    pub cover: bool,
+    pub title: bool,
+    pub description: bool,
+    pub status: bool,
+    pub people: bool,
+    pub tags: bool,
+}
+
+impl Default for RefreshFields {
+    fn default() -> Self {
+        Self {
+            cover: true,
+            title: true,
+            description: true,
+            status: true,
+            people: true,
+            tags: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RefreshOptions {
+    pub fields: RefreshFields,
+    pub fetch_chapters: bool,
+    pub clear_overrides: bool,
+}
+
+impl Default for RefreshOptions {
+    fn default() -> Self {
+        Self {
+            fields: RefreshFields::default(),
+            fetch_chapters: true,
+            clear_overrides: false,
+        }
+    }
+}
+
 /// All data required to render the manga-details page.
 /// URL signing and markdown rendering are left to the HTTP layer.
 pub struct LocalMangaDetails {

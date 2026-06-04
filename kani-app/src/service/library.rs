@@ -566,7 +566,7 @@ impl AppService {
         Ok(manga_row_id)
     }
 
-    pub(super) async fn sync_manga_metadata(
+    pub(super) async fn sync_manga_people(
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         manga_row_id: i64,
         manga: &wit_types::MangaInfo,
@@ -599,6 +599,14 @@ impl AppService {
             .await?;
         }
 
+        Ok(())
+    }
+
+    pub(super) async fn sync_manga_tags(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        manga_row_id: i64,
+        manga: &wit_types::MangaInfo,
+    ) -> Result<()> {
         for tag in &manga.tags {
             sqlx::query!("INSERT OR IGNORE INTO tags (name) VALUES (?)", tag)
                 .execute(&mut **tx)
@@ -616,12 +624,41 @@ impl AppService {
         Ok(())
     }
 
+    pub(super) async fn sync_manga_metadata(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        manga_row_id: i64,
+        manga: &wit_types::MangaInfo,
+    ) -> Result<()> {
+        Self::sync_manga_people(tx, manga_row_id, manga).await?;
+        Self::sync_manga_tags(tx, manga_row_id, manga).await?;
+        Ok(())
+    }
+
     pub async fn refresh_manga(&self, manga_row_id: i64) -> Result<()> {
+        self.refresh_manga_with_options(manga_row_id, crate::models::RefreshOptions::default())
+            .await
+    }
+
+    pub async fn refresh_manga_with_options(
+        &self,
+        manga_row_id: i64,
+        opts: crate::models::RefreshOptions,
+    ) -> Result<()> {
         let ids = sqlx::query!(
             "SELECT source_id, source_manga_id, s.base_url as base_url, m.cover_overridden
             FROM manga m
             JOIN sources s ON m.source_id = s.id
             WHERE m.id = ?",
+            manga_row_id
+        )
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or_else(|| ServiceError::NotFound(format!("Manga {manga_row_id} not found")))?;
+
+        // Read current scalar fields so we can keep unselected ones unchanged.
+        let current = sqlx::query_as!(
+            crate::models::Manga,
+            "SELECT * FROM manga WHERE id = ?",
             manga_row_id
         )
         .fetch_optional(&self.db)
@@ -635,32 +672,113 @@ impl AppService {
             .map_err(|e| ServiceError::Internal(format!("Failed to parse manga: {}", e)))?;
 
         let mut tx = self.db.begin().await?;
-        let status = manga_info.status as i64;
+
+        let new_name: String = if opts.fields.title {
+            manga_info.title.clone()
+        } else {
+            current.name.clone()
+        };
+        let new_cover_url: Option<String> = if opts.fields.cover {
+            manga_info.cover_url.clone()
+        } else {
+            current.cover_url.clone()
+        };
+        let new_description: Option<String> = if opts.fields.description {
+            manga_info.description.clone()
+        } else {
+            current.description.clone()
+        };
+        let new_status: i64 = if opts.fields.status {
+            manga_info.status as i64
+        } else {
+            i64::from(current.status)
+        };
 
         sqlx::query!(
             "UPDATE manga SET name = ?, cover_url = ?, description = ?, status = ? WHERE id = ?",
-            manga_info.title,
-            manga_info.cover_url,
-            manga_info.description,
-            status,
+            new_name,
+            new_cover_url,
+            new_description,
+            new_status,
             manga_row_id
         )
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query!("DELETE FROM manga_people WHERE manga_id = ?", manga_row_id)
-            .execute(&mut *tx)
-            .await?;
+        if opts.clear_overrides {
+            if opts.fields.title {
+                sqlx::query!(
+                    "UPDATE manga SET local_name = NULL WHERE id = ?",
+                    manga_row_id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            if opts.fields.description {
+                sqlx::query!(
+                    "UPDATE manga SET local_description = NULL WHERE id = ?",
+                    manga_row_id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            if opts.fields.status {
+                sqlx::query!(
+                    "UPDATE manga SET local_status = NULL WHERE id = ?",
+                    manga_row_id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            if opts.fields.cover {
+                sqlx::query!(
+                    "UPDATE manga SET local_cover_path = NULL, cover_overridden = FALSE WHERE id = ?",
+                    manga_row_id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            if opts.fields.people {
+                sqlx::query!(
+                    "DELETE FROM manga_local_authors WHERE manga_id = ?",
+                    manga_row_id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+            if opts.fields.tags {
+                sqlx::query!(
+                    "DELETE FROM manga_local_tags WHERE manga_id = ?",
+                    manga_row_id
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
 
-        sqlx::query!("DELETE FROM manga_tags WHERE manga_id = ?", manga_row_id)
-            .execute(&mut *tx)
-            .await?;
+        if opts.fields.people {
+            sqlx::query!("DELETE FROM manga_people WHERE manga_id = ?", manga_row_id)
+                .execute(&mut *tx)
+                .await?;
+            Self::sync_manga_people(&mut tx, manga_row_id, &manga_info).await?;
+        }
 
-        Self::sync_manga_metadata(&mut tx, manga_row_id, &manga_info).await?;
+        if opts.fields.tags {
+            sqlx::query!("DELETE FROM manga_tags WHERE manga_id = ?", manga_row_id)
+                .execute(&mut *tx)
+                .await?;
+            Self::sync_manga_tags(&mut tx, manga_row_id, &manga_info).await?;
+        }
 
         tx.commit().await?;
 
-        if !ids.cover_overridden
+        let cover_overridden_now = if opts.clear_overrides && opts.fields.cover {
+            false
+        } else {
+            ids.cover_overridden
+        };
+        if opts.fields.cover
+            && !cover_overridden_now
             && let Some(ref url) = manga_info.cover_url
             && let Err(e) = self
                 .download_and_store_cover(manga_row_id, url, &ids.base_url)
@@ -674,26 +792,33 @@ impl AppService {
             self.schedule_cover_retry(manga_row_id).await;
         }
 
-        let has_next_page = self
-            .fetch_and_store_chapter_page(ids.source_id, &ids.source_manga_id, manga_row_id, 1)
-            .await
-            .unwrap_or_else(|e| {
-                tracing::error!("Failed to fetch initial chapters during refresh: {}", e);
-                false
-            });
+        if opts.fetch_chapters {
+            let has_next_page = self
+                .fetch_and_store_chapter_page(ids.source_id, &ids.source_manga_id, manga_row_id, 1)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::error!("Failed to fetch initial chapters during refresh: {}", e);
+                    false
+                });
 
-        self.cache
-            .invalidate_chapter_list_for_manga(ids.source_id, &ids.source_manga_id)
-            .await;
+            self.cache
+                .invalidate_chapter_list_for_manga(ids.source_id, &ids.source_manga_id)
+                .await;
 
-        if has_next_page {
-            let bg_self = self.clone();
-            let bg_manga_id = ids.source_manga_id.clone();
-            tokio::spawn(async move {
-                bg_self
-                    .fetch_and_store_remaining_chapters(ids.source_id, bg_manga_id, manga_row_id, 2)
-                    .await;
-            });
+            if has_next_page {
+                let bg_self = self.clone();
+                let bg_manga_id = ids.source_manga_id.clone();
+                tokio::spawn(async move {
+                    bg_self
+                        .fetch_and_store_remaining_chapters(
+                            ids.source_id,
+                            bg_manga_id,
+                            manga_row_id,
+                            2,
+                        )
+                        .await;
+                });
+            }
         }
 
         Ok(())

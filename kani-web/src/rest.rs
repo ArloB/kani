@@ -2215,12 +2215,54 @@ async fn toggle_download_all_preferred(
     Ok(Json(json!({})))
 }
 
+fn map_refresh_request(
+    req: crate::models::RefreshMangaRequest,
+) -> Result<kani_app::models::RefreshOptions, AppError> {
+    let fields = match req.fields.as_deref() {
+        None | Some([]) => kani_app::models::RefreshFields::default(),
+        Some(names) => {
+            let mut f = kani_app::models::RefreshFields {
+                cover: false,
+                title: false,
+                description: false,
+                status: false,
+                people: false,
+                tags: false,
+            };
+            for name in names {
+                match name.as_str() {
+                    "cover" => f.cover = true,
+                    "title" => f.title = true,
+                    "description" => f.description = true,
+                    "status" => f.status = true,
+                    "people" => f.people = true,
+                    "tags" => f.tags = true,
+                    other => {
+                        return Err(AppError::ValidationError(format!(
+                            "unknown refresh field: {other}"
+                        )));
+                    }
+                }
+            }
+            f
+        }
+    };
+    Ok(kani_app::models::RefreshOptions {
+        fields,
+        fetch_chapters: req.fetch_chapters.unwrap_or(true),
+        clear_overrides: req.clear_overrides.unwrap_or(false),
+    })
+}
+
 async fn refresh_manga(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
+    body: Option<Json<crate::models::RefreshMangaRequest>>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.refresh_manga(id).await?;
+    let req = body.map(|Json(b)| b).unwrap_or_default();
+    let opts = map_refresh_request(req)?;
+    state.refresh_manga_with_options(id, opts).await?;
     Ok(Json(json!({})))
 }
 

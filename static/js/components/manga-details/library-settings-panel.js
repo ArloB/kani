@@ -4,7 +4,6 @@
 import * as api from '../../api.js';
 import { hasPermission } from '../../state.js';
 import { mkCard, mkRow, mkItem } from './_shared.js';
-import { showToast } from '../toast.js';
 
 /**
  * @param {HTMLElement} containerEl
@@ -25,27 +24,6 @@ export function mountLibrarySettingsPanel(containerEl, ctx) {
       try { await api.toggleAutoScan(dbId, input.checked); } catch { input.checked = !input.checked; }
     });
     card.appendChild(mkItem(mkRow('Auto scan', 'Automatically scan this manga for new chapters', toggle)));
-  }
-
-  if (hasPermission('library:refresh')) {
-    const refreshBtn = document.createElement('button');
-    refreshBtn.type = 'button';
-    refreshBtn.className = 'btn-ghost btn-sm';
-    refreshBtn.textContent = 'Refresh';
-    refreshBtn.addEventListener('click', async () => {
-      refreshBtn.disabled = true;
-      try {
-        await api.refreshManga(dbId);
-        refreshBtn.textContent = 'Done';
-        setTimeout(() => { refreshBtn.textContent = 'Refresh'; }, 3000);
-      } catch (e) {
-        const msg = /** @type {any} */ (e)?.code === 'source_disabled'
-          ? 'Extension is disabled — enable it in Settings > Sources.'
-          : /** @type {any} */ (e)?.message ?? 'Refresh failed.';
-        showToast(msg, { type: 'error' });
-      } finally { refreshBtn.disabled = false; }
-    });
-    card.appendChild(mkItem(mkRow('Refresh metadata', 'Re-fetch title, cover, and description from source', refreshBtn)));
   }
 
   if (hasPermission('library:manage')) {

@@ -494,8 +494,8 @@ export async function cancelAllDownloads(id) {
 }
 
 /** @param {number} id */
-export async function refreshManga(id) {
-  return _req('POST', `/manga/${id}/refresh`);
+export async function refreshManga(id, opts) {
+  return _req('POST', `/manga/${id}/refresh`, opts ? { body: opts } : undefined);
 }
 
 /** @param {number} id @returns {Promise<{ new_chapters: number }>} */
