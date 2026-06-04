@@ -47,7 +47,12 @@ import { mountAppHeader } from './components/app-header.js';
     initRouter(pageContent);
   }
 
-  window.addEventListener('kani:server-restart', _handleServerRestart);
+  window.addEventListener('kani:server-restart', () => {
+    // Re-hydrate permissions immediately — the SSE reconnect means the server
+    // is up, so this should succeed without a full reload.
+    initPermissions();
+    _handleServerRestart();
+  });
 
   _registerServiceWorker();
 })();
@@ -254,9 +259,26 @@ function _handleServerRestart() {
   banner.innerHTML = `
     <span aria-hidden="true" class="shrink-0 icon-sm">${iconWarning}</span>
     <span class="flex-1">Server restarted. Reload to get the latest version.</span>
-    <button class="btn-primary btn-sm ml-auto" onclick="location.reload()">Reload</button>
+    <button id="restart-reload-btn" class="btn-primary btn-sm ml-auto">Reload</button>
   `;
   document.body.prepend(banner);
+
+  document.getElementById('restart-reload-btn')?.addEventListener('click', async function () {
+    this.disabled = true;
+    this.textContent = 'Waiting…';
+    // Poll /ready until the server confirms it is fully initialised, then
+    // reload. The SSE reconnect already proves the server is up, but the DB
+    // and other subsystems may still be settling.
+    for (let i = 0; i < 20; i++) {
+      try {
+        const r = await fetch('/ready');
+        if (r.ok) { location.reload(); return; }
+      } catch { /* server not yet accepting connections */ }
+      await new Promise(res => setTimeout(res, 500));
+    }
+    // Fell through — reload anyway after 10 s.
+    location.reload();
+  });
 }
 
 // ── Service worker ────────────────────────────────────────────────────────────

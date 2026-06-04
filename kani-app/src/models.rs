@@ -62,11 +62,23 @@ pub struct PageInfo {
     pub double_page: bool,
 }
 
+/// An alternative downloaded version of the same chapter from a different scanlator group.
+#[derive(Debug, Serialize)]
+pub struct ScanlatorAlt {
+    pub chapter_id: i64,
+    pub scanlator: Option<String>,
+    /// Volume number, included so the frontend can disambiguate identical scanlator strings.
+    pub volume: Option<i64>,
+}
+
 /// Manifest returned when opening a downloaded chapter for reading.
 #[derive(Debug, Serialize)]
 pub struct ChapterPageManifest {
     pub chapter_id: i64,
     pub chapter_title: String,
+    pub chapter_number: f64,
+    pub scanlator: Option<String>,
+    pub source_name: String,
     pub manga_id: i64,
     pub manga_title: String,
     pub page_count: usize,
@@ -78,6 +90,8 @@ pub struct ChapterPageManifest {
     /// `<Pages>` block in `ComicInfo.xml`).  When `false`, the reader
     /// should fall back to client-side edge detection.
     pub spread_analysed: bool,
+    /// Other downloaded chapters for the same chapter number from different scanlators.
+    pub scanlator_alternatives: Vec<ScanlatorAlt>,
 }
 
 /// Full manga row as stored in the database.
@@ -335,6 +349,12 @@ pub struct DailyActivity {
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct PaceEntry {
+    pub date: String,
+    pub pages: i64,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct MangaReadCount {
     pub manga_id: i64,
     pub manga_name: String,
@@ -362,4 +382,6 @@ pub struct ReadingStats {
     pub daily_activity: Vec<DailyActivity>,
     pub top_manga: Vec<MangaReadCount>,
     pub genre_breakdown: Vec<GenreCount>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reading_pace: Vec<PaceEntry>,
 }

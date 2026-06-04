@@ -2,15 +2,15 @@
 // Reader page — full-screen chapter reader with page-by-page and scroll modes.
 
 import * as api from '../api.js';
-import { iconChevronLeft, iconChevronRight, iconX, iconMenu } from '../icons.js';
+import { iconChevronLeft, iconChevronRight, iconX, iconMenu, iconSettings } from '../icons.js';
 import { navigate } from '../router.js';
-import { getLocal, setLocal, getLocalJson, setLocalJson } from '../utils.js';
+import { getLocal, getLocalJson, setLocalJson, debounce, formatChapterTitle } from '../utils.js';
 import { getState, subscribe } from '../state.js';
-import { registerShortcuts } from '../shortcuts.js';
+import { registerShortcuts, getShortcuts, setF1Override } from '../shortcuts.js';
 import { createEmptyState } from '../components/empty-state.js';
-
-const BTN_ACTIVE   = 'bg-surface-2 text-text';
-const BTN_INACTIVE = 'text-muted hover:bg-surface-2 hover:text-text';
+import { renderTabs } from '../components/tabs.js';
+import { loadReaderPrefs, setReaderPref, cancelReaderPrefsSync } from '../reader-prefs.js';
+import { mkReaderSection, mkAccordionSection, mkToggleRow, mkSliderRow, mkSegmentedRow, mkSelectRow, mkActionBtn } from '../components/reader/reader-controls.js';
 
 /** @type {(() => void) | null} */
 let _destroyFn = null;
@@ -28,11 +28,8 @@ export async function init(container, { id }) {
 
   document.body.classList.add('overflow-hidden');
 
-  // Unified indicator bar: collapses to 4px strip, expands to 56px.
-  // Uses overflow-hidden + fixed inner layout so the strip colours are always
-  // the bottom slice of the same element — no separate strip div needed.
   container.innerHTML = `
-    <div id="reader-root" class="fixed inset-0 bg-black z-40 flex flex-col select-none overflow-hidden">
+    <div id="reader-root" class="fixed inset-0 z-40 flex flex-col select-none overflow-hidden" style="background-color:#000">
 
       <!-- Mobile-only top bar (hidden on md+). Slides in from top when bars visible.
            min-h-14 + safe-area padding lets the bar absorb the iOS notch / Dynamic Island. -->
@@ -48,14 +45,28 @@ export async function init(container, { id }) {
           aria-label="Open menu">${iconMenu}</button>
       </div>
 
-      <!-- Page viewer -->
-      <div id="reader-pages"
-        class="flex-1 overflow-y-auto overflow-x-hidden flex flex-col items-center"
-        style="overscroll-behavior: none"
-        tabindex="0" aria-label="Chapter pages" aria-live="polite">
-        <div class="flex items-center justify-center min-h-full w-full">
-          <p class="text-muted text-sm">Loading…</p>
+      <!-- Page canvas: flex-col so pagesEl can use flex-1; isolation:isolate so
+           tint blend modes blend within the canvas group, not against the root. -->
+      <div id="reader-canvas" class="flex-1 flex flex-col min-h-0 relative" style="isolation:isolate">
+        <!-- Page viewer -->
+        <div id="reader-pages"
+          class="flex-1 overflow-y-auto overflow-x-hidden flex flex-col items-center"
+          style="overscroll-behavior: none"
+          tabindex="0" aria-label="Chapter pages" aria-live="polite">
+          <div class="flex items-center justify-center min-h-full w-full">
+            <p class="text-muted text-sm">Loading…</p>
+          </div>
         </div>
+
+        <!-- Page tint overlay: sibling of pagesEl inside the isolated canvas so it
+             isn't destroyed by pagesEl.innerHTML = ''. The isolation:isolate on the
+             canvas wrapper confines blend modes to the canvas group. -->
+        <div id="reader-tint" class="absolute inset-0 pointer-events-none" style="z-index:1;display:none"></div>
+      </div>
+
+      <!-- Page-number overlay badge: shown when pageOverlay pref is enabled. -->
+      <div id="reader-page-num" class="absolute bottom-20 right-3 pointer-events-none select-none" style="z-index:2;display:none">
+        <span class="text-xs tabular-nums rounded px-1.5 py-0.5 bg-black/50 text-white/80"></span>
       </div>
 
       <!-- Mini progress strip — always visible, 4px, z-20, pointer-events-none.
@@ -104,12 +115,15 @@ export async function init(container, { id }) {
             class="hidden md:flex btn-icon shrink-0"
             aria-label="Back to manga">${iconChevronLeft}</button>
           <span id="reader-side-title" class="flex-1 text-sm font-medium text-muted truncate">—</span>
+          <button id="reader-settings-btn"
+            class="btn-icon shrink-0"
+            aria-label="Reader settings">${iconSettings}</button>
           <button id="reader-side-close"
             class="btn-icon shrink-0"
             aria-label="Close menu">${iconX}</button>
         </div>
 
-        <div class="flex flex-col flex-1 overflow-y-auto">
+        <div id="reader-side-scroll" class="flex flex-col flex-1 overflow-y-auto">
 
           <!-- Mobile back button (full-width, only on mobile) -->
           <div class="md:hidden px-3 py-3 border-b border-border shrink-0">
@@ -119,68 +133,37 @@ export async function init(container, { id }) {
             </button>
           </div>
 
-          <!-- Prev / Next chapter -->
-          <div class="px-3 py-3 flex gap-2 border-b border-border shrink-0">
+          <!-- Prev / Chapter dropdown / Next -->
+          <div class="px-3 py-3 flex gap-1.5 border-b border-border shrink-0 items-center">
             <button id="reader-side-prev"
-              class="btn-ghost flex-1 flex items-center justify-center gap-1"
-              disabled>${iconChevronLeft} Prev</button>
+              class="btn-ghost flex items-center justify-center gap-0.5 shrink-0 px-2"
+              disabled>${iconChevronLeft}</button>
+            <select id="reader-chapter-select"
+              class="input text-sm flex-1 min-w-0 text-center h-9 py-0"
+              disabled>
+              <option>—</option>
+            </select>
             <button id="reader-side-next"
-              class="btn-ghost flex-1 flex items-center justify-center gap-1"
-              disabled>Next ${iconChevronRight}</button>
+              class="btn-ghost flex items-center justify-center gap-0.5 shrink-0 px-2"
+              disabled>${iconChevronRight}</button>
           </div>
 
-          <!-- Reading mode -->
-          <div class="px-3 py-4 border-b border-border">
-            <p class="text-xs font-medium text-muted uppercase tracking-wide mb-2">Reading Mode</p>
-            <div class="flex gap-2">
-              <button id="reader-mode-scroll"
-                class="flex-1 text-sm px-3 py-2 rounded-md transition-colors"
-                aria-pressed="false">Scroll</button>
-              <button id="reader-mode-paged"
-                class="flex-1 text-sm px-3 py-2 rounded-md transition-colors"
-                aria-pressed="false">Paged</button>
-            </div>
+          <div class="px-3 py-4 border-b border-border flex flex-col gap-3">
+            <div id="reader-mode-mount"></div>
+            <div id="reader-fit-mount"></div>
+            <div id="reader-dir-row"></div>
           </div>
 
-          <!-- Options -->
-          <div class="px-3 py-4 flex flex-col gap-3">
-            <p class="text-xs font-medium text-muted uppercase tracking-wide">Options</p>
-            <label class="flex items-center justify-between gap-3 cursor-pointer">
-              <span class="text-sm text-text">Smooth scroll</span>
-              <label class="kani-toggle" aria-label="Smooth scroll">
-                <input id="reader-smooth-input" type="checkbox" class="kani-toggle__input">
-                <span class="kani-toggle__track"></span>
-              </label>
-            </label>
-            <label class="flex items-center justify-between gap-3 cursor-pointer" id="reader-double-row">
-              <span class="text-sm text-text">Double page</span>
-              <label class="kani-toggle" aria-label="Double page spread">
-                <input id="reader-double-input" type="checkbox" class="kani-toggle__input">
-                <span class="kani-toggle__track"></span>
-              </label>
-            </label>
-            <label class="flex items-center justify-between gap-3 cursor-pointer" id="reader-spread-row" style="display:none">
-              <span class="text-sm text-text">Auto-combine spreads</span>
-              <label class="kani-toggle" aria-label="Auto-combine split page spreads">
-                <input id="reader-spread-input" type="checkbox" class="kani-toggle__input">
-                <span class="kani-toggle__track"></span>
-              </label>
-            </label>
-            <div>
-              <p class="text-xs text-muted mb-2">Reading direction</p>
-              <div class="flex gap-2">
-                <button id="reader-dir-rtl" class="flex-1 text-sm px-2 py-1.5 rounded-md transition-colors" aria-pressed="false">RTL</button>
-                <button id="reader-dir-ltr" class="flex-1 text-sm px-2 py-1.5 rounded-md transition-colors" aria-pressed="false">LTR</button>
-              </div>
+          <!-- Hidden inputs kept for backwards-compat with existing JS refs -->
+          <div style="display:none">
+            <input id="reader-smooth-input" type="checkbox">
+            <div id="reader-double-row">
+              <input id="reader-double-input" type="checkbox">
             </div>
-            <div>
-              <p class="text-xs text-muted mb-2">Image fit</p>
-              <div class="flex gap-2">
-                <button id="reader-fit-both"  class="flex-1 text-sm px-2 py-1.5 rounded-md transition-colors" aria-pressed="false">Both</button>
-                <button id="reader-fit-width" class="flex-1 text-sm px-2 py-1.5 rounded-md transition-colors" aria-pressed="false">Width</button>
-                <button id="reader-fit-height" class="flex-1 text-sm px-2 py-1.5 rounded-md transition-colors" aria-pressed="false">Height</button>
-              </div>
+            <div id="reader-spread-row">
+              <input id="reader-spread-input" type="checkbox">
             </div>
+            <div id="reader-spread-offset-mount"></div>
           </div>
 
         </div>
@@ -189,6 +172,10 @@ export async function init(container, { id }) {
     </div>
   `;
 
+  const readerRoot     = /** @type {HTMLElement}       */ (container.querySelector('#reader-root'));
+  const canvasEl       = /** @type {HTMLElement}       */ (container.querySelector('#reader-canvas'));
+  const tintOverlay    = /** @type {HTMLElement}       */ (container.querySelector('#reader-tint'));
+  const pageNumOverlay = /** @type {HTMLElement}       */ (container.querySelector('#reader-page-num'));
   const topBar       = /** @type {HTMLElement}       */ (container.querySelector('#reader-top'));
   const pagesEl      = /** @type {HTMLElement}       */ (container.querySelector('#reader-pages'));
   const miniStrip    = /** @type {HTMLElement}       */ (container.querySelector('#reader-mini-strip'));
@@ -203,28 +190,35 @@ export async function init(container, { id }) {
   const sideClose    = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-side-close'));
   const sideBack     = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-side-back'));
   const sideBackMob  = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-side-back-mobile'));
-  const sidePrev     = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-side-prev'));
-  const sideNext     = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-side-next'));
+  const sidePrev        = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-side-prev'));
+  const sideNext        = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-side-next'));
+  const chapterSelect   = /** @type {HTMLSelectElement} */ (container.querySelector('#reader-chapter-select'));
+  const settingsBtn     = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-settings-btn'));
   const sideTitle    = /** @type {HTMLElement}       */ (container.querySelector('#reader-side-title'));
+  const panelScroll  = /** @type {HTMLElement}       */ (container.querySelector('#reader-side-scroll'));
   const backMobile   = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-back-mobile'));
   const titleMobile  = /** @type {HTMLElement}       */ (container.querySelector('#reader-title-mobile'));
-  const modeScroll   = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-mode-scroll'));
-  const modePaged    = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-mode-paged'));
+  const modeMountEl  = /** @type {HTMLElement}       */ (container.querySelector('#reader-mode-mount'));
+  const dirRow       = /** @type {HTMLElement}       */ (container.querySelector('#reader-dir-row'));
+  const fitMountEl   = /** @type {HTMLElement}       */ (container.querySelector('#reader-fit-mount'));
   const smoothInput  = /** @type {HTMLInputElement}  */ (container.querySelector('#reader-smooth-input'));
   const doubleInput  = /** @type {HTMLInputElement}  */ (container.querySelector('#reader-double-input'));
   const doubleRow    = /** @type {HTMLElement}        */ (container.querySelector('#reader-double-row'));
   const spreadInput  = /** @type {HTMLInputElement}  */ (container.querySelector('#reader-spread-input'));
   const spreadRow    = /** @type {HTMLElement}        */ (container.querySelector('#reader-spread-row'));
-  const dirRtl       = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-dir-rtl'));
-  const dirLtr       = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-dir-ltr'));
-  const fitBoth      = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-fit-both'));
-  const fitWidth     = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-fit-width'));
-  const fitHeight    = /** @type {HTMLButtonElement} */ (container.querySelector('#reader-fit-height'));
+
+  /** @type {import('../reader-prefs.js').ReaderPrefs|null} */
+  let _prefs        = null;
 
   /** @type {string[]} */
   let _pages        = [];
   let _currentPage  = 0;
-  let _mode         = /** @type {'scroll'|'paged'} */ (getLocal('kani_reader_mode') === 'paged' ? 'paged' : 'scroll');
+  // Initialised from localStorage as a fast pre-load; overwritten after loadReaderPrefs resolves.
+  const _VALID_MODES = /** @type {const} */ (['scroll', 'paged', 'webtoon', 'continuous-paged']);
+  const _storedMode = getLocal('kani_reader_mode') ?? '';
+  let _mode = /** @type {import('../reader-prefs.js').ReadingMode} */ (
+    _VALID_MODES.includes(/** @type {any} */ (_storedMode)) ? _storedMode : 'scroll'
+  );
   let _smoothScroll = getLocal('kani_reader_smooth') === 'true';
   let _doublePage   = getLocal('kani_reader_double') === 'true';
   let _direction    = /** @type {'rtl'|'ltr'} */ (getLocal('kani_reader_direction') === 'ltr' ? 'ltr' : 'rtl');
@@ -238,6 +232,8 @@ export async function init(container, { id }) {
   let _isHovering   = false;
   let _hideTimer    = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
   let _mangaId      = /** @type {number|null} */ (null);
+  /** All chapters for this manga, lazily loaded for the chapter dropdown. */
+  let _allChapters  = /** @type {Array<{id:number,chapter_number:number,title:string,is_read:boolean}>|null} */ (null);
   let _progressTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
   let _lastReportedPage = -1;
   let _preloadDone = false;
@@ -286,6 +282,117 @@ export async function init(container, { id }) {
   }
 
   _cleanup.push(() => { if (_progressTimer) clearTimeout(_progressTimer); });
+
+  // ── Presentation ─────────────────────────────────────────────────────────
+
+  /** Apply CSS filter + background colour from prefs to the page container. */
+  function _applyPresentation() {
+    if (!_prefs) return;
+    const { brightness: br, contrast: co, saturation: sa, grayscale: gs, invert: inv, bg, bgTintPage } = _prefs;
+    const needsFilter = br !== 100 || co !== 100 || sa !== 100 || gs || inv;
+    pagesEl.style.filter = needsFilter
+      ? [`brightness(${br}%)`, `contrast(${co}%)`, `saturate(${sa}%)`,
+         gs ? 'grayscale(1)' : '', inv ? 'invert(1)' : ''].filter(Boolean).join(' ')
+      : '';
+    const bgMap = /** @type {Record<string,string>} */ ({ black: '#000', white: '#fff', sepia: '#f5e6c8' });
+    const bgColor = bgMap[bg] ?? '#000';
+    readerRoot.style.backgroundColor = bgColor;
+    // canvasEl also needs the bg color so blend modes on pagesEl (inside the isolation
+    // context) have the colored backdrop to blend against. Without this, bgTintPage's
+    // multiply blend sees transparent (outside the isolation boundary) and has no effect.
+    canvasEl.style.backgroundColor = bgColor;
+    if (bgTintPage && bg !== 'black') {
+      pagesEl.style.mixBlendMode = 'multiply';
+    } else {
+      pagesEl.style.mixBlendMode = '';
+    }
+  }
+
+  /** Apply a semi-transparent colour overlay with the chosen blend mode to the page area. */
+  function _applyTint() {
+    if (!_prefs) return;
+    const { tintOpacity: op, tintColor: col, tintBlend: blend } = _prefs;
+    if (!op) { tintOverlay.style.display = 'none'; return; }
+    const r = parseInt(col.slice(1, 3), 16);
+    const g = parseInt(col.slice(3, 5), 16);
+    const b = parseInt(col.slice(5, 7), 16);
+    tintOverlay.style.display          = '';
+    tintOverlay.style.backgroundColor  = `rgba(${r},${g},${b},${op / 100})`;
+    tintOverlay.style.mixBlendMode     = blend;
+  }
+
+  function _updatePageOverlay() {
+    const on = _prefs?.pageOverlay ?? false;
+    if (!on || _pages.length === 0) { pageNumOverlay.style.display = 'none'; return; }
+    pageNumOverlay.style.display = '';
+    const span = pageNumOverlay.querySelector('span');
+    if (span) span.textContent = `${_currentPage + 1} / ${_pages.length}`;
+  }
+
+  /**
+   * Apply percentage-based clip-path to remove border strips from an image.
+   * Crop values are 0–50 (percent of the element's own dimension per side).
+   *
+   * clip-path inset() % are relative to the element's own box: correct.
+   * margin % is always relative to the containing block's WIDTH (even for top/bottom),
+   * which equals the image width in our layouts.  For left/right that's correct.
+   * For top/bottom it's an approximation: on a 2:3 manga page 1% width ≈ 0.67% height,
+   * so we scale by the natural aspect ratio (h/w) when dimensions are known.
+   */
+  function _applyCropToImg(/** @type {HTMLElement} */ el) {
+    const { cropTop: ct = 0, cropBottom: cb = 0, cropLeft: cl = 0, cropRight: cr = 0 } = _prefs ?? /** @type {any} */ ({});
+    if (!ct && !cb && !cl && !cr) {
+      el.style.clipPath    = '';
+      el.style.marginTop   = el.style.marginBottom = '';
+      el.style.marginLeft  = el.style.marginRight  = '';
+      return;
+    }
+    el.style.clipPath = `inset(${ct}% ${cr}% ${cb}% ${cl}%)`;
+    // Look up aspect ratio to correct the vertical margin approximation.
+    const imgEl = /** @type {HTMLImageElement} */ (el);
+    const nw = imgEl.naturalWidth  || 0;
+    const nh = imgEl.naturalHeight || 0;
+    const ratio = (nw > 0 && nh > 0) ? nh / nw : 1.5; // fallback: 2:3 manga page
+    el.style.marginTop    = `-${ct * ratio}%`;
+    el.style.marginBottom = `-${cb * ratio}%`;
+    el.style.marginLeft   = `-${cl}%`;
+    el.style.marginRight  = `-${cr}%`;
+  }
+
+  /**
+   * Re-apply crop styles to all currently visible images in-place.
+   * Used by crop sliders to avoid a full DOM re-render (which causes flicker).
+   * Canvas composites (spread pages) are NOT updated here — those still need _renderPages().
+   */
+  function _applyCropToAllImages() {
+    pagesEl.querySelectorAll('img').forEach(img => _applyCropToImg(/** @type {HTMLImageElement} */ (img)));
+  }
+
+  /** Cropped natural width of an image element after applying percentage prefs. */
+  const _cW = (/** @type {HTMLImageElement} */ img) => {
+    const { cropLeft: cl = 0, cropRight: cr = 0 } = _prefs ?? /** @type {any} */ ({});
+    return Math.max(1, img.naturalWidth  * (1 - (cl + cr) / 100));
+  };
+  /** Cropped natural height of an image element after applying percentage prefs. */
+  const _cH = (/** @type {HTMLImageElement} */ img) => {
+    const { cropTop: ct = 0, cropBottom: cb = 0 } = _prefs ?? /** @type {any} */ ({});
+    return Math.max(1, img.naturalHeight * (1 - (ct + cb) / 100));
+  };
+
+  /**
+   * Draw a page image onto a canvas at (dx, dy), honouring crop prefs
+   * via the drawImage source-rect so the canvas bitmap is trimmed correctly.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {HTMLImageElement} img
+   * @param {number} dx
+   * @param {number} dy
+   */
+  function _drawPage(ctx, img, dx, dy) {
+    const { cropLeft: cl = 0, cropTop: ct = 0 } = _prefs ?? /** @type {any} */ ({});
+    const sw = _cW(img);
+    const sh = _cH(img);
+    ctx.drawImage(img, cl, ct, sw, sh, dx, dy, sw, sh);
+  }
 
   function _maybePreloadNext() {
     if (_preloadDone || !_chapterInfo.next_chapter_id) return;
@@ -343,20 +450,23 @@ export async function init(container, { id }) {
     else history.length > 1 ? history.back() : navigate('/');
   }
 
-  async function _navigateChapter(chId) {
+  /**
+   * Navigate to a different chapter, optionally landing on a specific page.
+   * @param {number} chId
+   * @param {number} [targetPage] — 0-based page index to jump to on arrival
+   */
+  async function _navigateChapter(chId, targetPage) {
     _pendingBarsVisible = _barsVisible && !_isFinePointer();
+    const suffix = targetPage != null && targetPage > 0 ? `?page=${targetPage}` : '';
 
-    // If the chapter is already downloaded, navigate immediately.
     try {
       await api.getChapterPages(chId);
-      navigate(`/reader/${chId}`);
+      navigate(`/reader/${chId}${suffix}`);
       return;
     } catch { /* not downloaded yet */ }
 
-    // Queue the download (ignore error if already in progress / downloaded).
     try { await api.downloadChapter(chId); } catch { /* already queued or downloading */ }
 
-    // Show overlay and track progress via SSE state.
     let _dlDone = false;
 
     /** @param {{ totalPages: number, completedPages: number } | null} p */
@@ -392,7 +502,7 @@ export async function init(container, { id }) {
       if (p.status === 'completed') {
         _dlDone = true;
         unsub();
-        navigate(`/reader/${chId}`);
+        navigate(`/reader/${chId}${suffix}`);
         return;
       }
 
@@ -423,12 +533,17 @@ export async function init(container, { id }) {
 
   // ── Side panel ───────────────────────────────────────────────────────────
 
+  /** Callbacks invoked each time the side panel opens — avoids MutationObserver hacks. */
+  const _panelOpenCallbacks = /** @type {Array<() => void>} */ ([]);
+
   function _openPanel() {
     _panelOpen = true;
     _positionPanel();
     sidePanel.style.transform = 'translateX(0)';
     backdrop.classList.remove('hidden');
     if (_hideTimer) clearTimeout(_hideTimer);
+    _loadChapterList();
+    for (const fn of _panelOpenCallbacks) fn();
   }
 
   function _closePanel() {
@@ -445,6 +560,51 @@ export async function init(container, { id }) {
   sideClose.addEventListener('click', ()  => _closePanel());
   backdrop.addEventListener('click',  ()  => _closePanel());
 
+  // ── Chapter dropdown lazy load ─────────────────────────────────────────────
+
+  async function _loadChapterList() {
+    if (!_mangaId || _allChapters !== null) return;
+    _allChapters = []; // mark as loading (prevents duplicate requests)
+    try {
+      // page_size is capped at 200 by the API; paginate to collect all chapters.
+      const PAGE_SIZE = 200;
+      let page = 1;
+      const all = [];
+      while (true) {
+        const result = await api.getLocalChapters(_mangaId, page, PAGE_SIZE, 'chapter_asc');
+        const batch = result?.chapters ?? [];
+        all.push(...batch);
+        if (!result?.has_next_page) break;
+        page++;
+      }
+      _allChapters = all.map((/** @type {any} */ ch) => ({
+        id:             Number(ch.id),
+        chapter_number: ch.chapter_number ?? ch.number ?? 0,
+        title:          formatChapterTitle(ch),
+        is_read:        ch.is_read ?? ch.read ?? false,
+      }));
+      _populateChapterSelect();
+    } catch { _allChapters = null; /* allow retry on next panel open */ }
+  }
+
+  function _populateChapterSelect() {
+    if (!_allChapters || _allChapters.length === 0) return;
+    chapterSelect.innerHTML = '';
+    for (const ch of _allChapters) {
+      const opt = document.createElement('option');
+      opt.value = String(ch.id);
+      opt.textContent = ch.title;
+      if (ch.id === chapterId) opt.selected = true;
+      chapterSelect.appendChild(opt);
+    }
+    chapterSelect.disabled = false;
+  }
+
+  chapterSelect.addEventListener('change', () => {
+    const id = Number(chapterSelect.value);
+    if (id && id !== chapterId) { _closePanel(); _navigateChapter(id); }
+  });
+
   sideBack.addEventListener('click',    () => _navigateToManga());
   sideBackMob.addEventListener('click', () => _navigateToManga());
   backMobile.addEventListener('click',  () => _navigateToManga());
@@ -455,10 +615,8 @@ export async function init(container, { id }) {
     _barsVisible = true;
     fullBar.style.transform = '';
     segsEl.style.pointerEvents = 'auto';
-    // Mobile top bar
     if (!_isDesktop()) topBar.style.transform = '';
     if (_hideTimer) clearTimeout(_hideTimer);
-    // On fine-pointer, auto-hide only when not hovering and panel is closed.
     if (_isFinePointer() && !_panelOpen && !_isHovering) {
       _hideTimer = setTimeout(_hideBars, 3000);
     }
@@ -472,8 +630,6 @@ export async function init(container, { id }) {
     _closePanel();
   }
 
-  // Fine-pointer: hover zone near bottom reveals the full bar; mouseenter on
-  // the full bar itself keeps it open while the cursor is over it.
   if (_isFinePointer()) {
     barHover.style.pointerEvents = 'auto';
 
@@ -492,7 +648,6 @@ export async function init(container, { id }) {
     fullBar.addEventListener('mouseenter', _onEnter);
     fullBar.addEventListener('mouseleave', _onLeave);
   } else {
-    // Touch: tapping the always-visible mini strip expands the full bar.
     miniStrip.style.pointerEvents = 'auto';
     miniStrip.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -500,12 +655,42 @@ export async function init(container, { id }) {
     });
   }
 
+  // ── Jump to page ──────────────────────────────────────────────────────────
+
+  segLeft.style.cursor        = 'pointer';
+  segLeft.style.pointerEvents = 'auto';
+  segLeft.title               = 'Jump to page';
+  segLeft.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (_pages.length === 0) return;
+    const input = document.createElement('input');
+    input.type  = 'number';
+    input.min   = '1';
+    input.max   = String(_pages.length);
+    input.value = String(_currentPage + 1);
+    input.className = 'w-10 text-xs text-center bg-transparent border-b border-accent outline-none tabular-nums text-text';
+    segLeft.replaceWith(input);
+    input.select();
+    const _commit = () => {
+      const p = Math.max(0, Math.min(_pages.length - 1, (Number(input.value) || 1) - 1));
+      input.replaceWith(segLeft);
+      if (p !== _currentPage) { _currentPage = p; _renderPages(); _reportProgress(); }
+      else _renderSegments();
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter')  { ev.preventDefault(); _commit(); }
+      if (ev.key === 'Escape') { input.replaceWith(segLeft); }
+    });
+    input.addEventListener('blur', _commit, { once: true });
+    input.focus();
+  });
+
   // ── Smooth scroll toggle ─────────────────────────────────────────────────
 
   smoothInput.checked = _smoothScroll;
   smoothInput.addEventListener('change', () => {
     _smoothScroll = smoothInput.checked;
-    setLocal('kani_reader_smooth', String(_smoothScroll));
+    if (_prefs) setReaderPref(_prefs, 'smoothScroll', _smoothScroll);
   });
 
   // ── Double-page toggle ────────────────────────────────────────────────────
@@ -513,12 +698,14 @@ export async function init(container, { id }) {
   function _applyDoublePageVisibility() {
     doubleRow.style.display = _mode === 'paged' ? '' : 'none';
     spreadRow.style.display = '';
+    // Webtoon: hide direction control (reading is always top-to-bottom).
+    dirRow.style.display = _mode === 'webtoon' ? 'none' : '';
   }
 
   doubleInput.checked = _doublePage;
   doubleInput.addEventListener('change', () => {
     _doublePage = doubleInput.checked;
-    setLocal('kani_reader_double', String(_doublePage));
+    if (_prefs) setReaderPref(_prefs, 'doublePage', _doublePage);
     _applyDoublePageVisibility();
     _renderPages();
   });
@@ -528,79 +715,21 @@ export async function init(container, { id }) {
   spreadInput.checked = _autoSpread;
   spreadInput.addEventListener('change', () => {
     _autoSpread = spreadInput.checked;
-    setLocal('kani_reader_spread', String(_autoSpread));
+    if (_prefs) setReaderPref(_prefs, 'autoSpread', _autoSpread);
     _lastLayoutPage = -2;
     _renderPages();
   });
 
-  // ── Direction buttons ─────────────────────────────────────────────────────
-
-  function _applyDirButtons() {
-    dirRtl.className = `flex-1 text-sm px-2 py-1.5 rounded-md transition-colors ${_direction === 'rtl' ? BTN_ACTIVE : BTN_INACTIVE}`;
-    dirLtr.className = `flex-1 text-sm px-2 py-1.5 rounded-md transition-colors ${_direction === 'ltr' ? BTN_ACTIVE : BTN_INACTIVE}`;
-    dirRtl.setAttribute('aria-pressed', String(_direction === 'rtl'));
-    dirLtr.setAttribute('aria-pressed', String(_direction === 'ltr'));
-  }
-
-  dirRtl.addEventListener('click', () => {
-    _direction = 'rtl'; setLocal('kani_reader_direction', _direction);
-    if (_mangaId) api.setMangaTracking(_mangaId, { reading_direction: 'rtl' }).catch(() => {});
-    for (const d of _imgDims.values()) d.edgeMatch = undefined;
-    _applyDirButtons(); _renderPages();
-  });
-  dirLtr.addEventListener('click', () => {
-    _direction = 'ltr'; setLocal('kani_reader_direction', _direction);
-    if (_mangaId) api.setMangaTracking(_mangaId, { reading_direction: 'ltr' }).catch(() => {});
-    for (const d of _imgDims.values()) d.edgeMatch = undefined;
-    _applyDirButtons(); _renderPages();
-  });
-
-  // ── Fit buttons ───────────────────────────────────────────────────────────
-
-  function _applyFitButtons() {
-    fitBoth.className   = `flex-1 text-sm px-2 py-1.5 rounded-md transition-colors ${_fit === 'both'   ? BTN_ACTIVE : BTN_INACTIVE}`;
-    fitWidth.className  = `flex-1 text-sm px-2 py-1.5 rounded-md transition-colors ${_fit === 'width'  ? BTN_ACTIVE : BTN_INACTIVE}`;
-    fitHeight.className = `flex-1 text-sm px-2 py-1.5 rounded-md transition-colors ${_fit === 'height' ? BTN_ACTIVE : BTN_INACTIVE}`;
-    fitBoth.setAttribute('aria-pressed',   String(_fit === 'both'));
-    fitWidth.setAttribute('aria-pressed',  String(_fit === 'width'));
-    fitHeight.setAttribute('aria-pressed', String(_fit === 'height'));
-  }
-
-  fitBoth.addEventListener('click', () => {
-    _fit = 'both';   setLocal('kani_reader_fit', _fit); _applyFitButtons(); _renderPages();
-  });
-  fitWidth.addEventListener('click', () => {
-    _fit = 'width';  setLocal('kani_reader_fit', _fit); _applyFitButtons(); _renderPages();
-  });
-  fitHeight.addEventListener('click', () => {
-    _fit = 'height'; setLocal('kani_reader_fit', _fit); _applyFitButtons(); _renderPages();
-  });
-
-  // ── Mode buttons ─────────────────────────────────────────────────────────
-
-  function _applyModeButtons() {
-    const isScroll = _mode === 'scroll';
-    modeScroll.className = `flex-1 text-sm px-3 py-2 rounded-md transition-colors ${isScroll ? BTN_ACTIVE : BTN_INACTIVE}`;
-    modePaged.className  = `flex-1 text-sm px-3 py-2 rounded-md transition-colors ${!isScroll ? BTN_ACTIVE : BTN_INACTIVE}`;
-    modeScroll.setAttribute('aria-pressed', String( isScroll));
-    modePaged.setAttribute( 'aria-pressed', String(!isScroll));
-    _applyDoublePageVisibility();
-  }
-
-  modeScroll.addEventListener('click', () => {
-    _mode = 'scroll'; setLocal('kani_reader_mode', _mode);
-    _applyModeButtons(); _renderPages();
-  });
-  modePaged.addEventListener('click', () => {
-    _mode = 'paged'; setLocal('kani_reader_mode', _mode);
-    _applyModeButtons(); _renderPages();
-  });
+  // ── Dir / Fit / Mode segmented controls ──────────────────────────────────
+  // Built post-prefs-load (after the await below) so `selected` reflects the
+  // loaded preference. Mount points are injected here; rows are appended there.
 
   // ── Segment rendering ─────────────────────────────────────────────────────
 
   function _renderSegments() {
     miniStrip.innerHTML = '';
     segsEl.innerHTML    = '';
+    _updatePageOverlay();
 
     const total = _pages.length;
     if (total === 0) {
@@ -613,19 +742,16 @@ export async function init(container, { id }) {
     segRight.textContent = String(total);
 
     for (let i = 0; i < total; i++) {
-      // Failed pages are red regardless of read/current state.
       const color = _failed.has(i)     ? 'bg-danger/70'
                   : i === _currentPage ? 'bg-accent'
                   : i < _currentPage   ? 'bg-accent/50'
                   : _loaded.has(i)     ? 'seg-loaded'
                   :                      'seg-unloaded';
 
-      // Mini strip: thin, no interaction
       const mini = document.createElement('div');
       mini.className = `flex-1 h-full ${color}`;
       miniStrip.appendChild(mini);
 
-      // Full bar: clickable segments
       const seg = document.createElement('div');
       seg.className = `flex-1 h-full rounded-sm cursor-pointer ${color}`;
       const idx = i;
@@ -783,7 +909,8 @@ export async function init(container, { id }) {
    */
   function _nextStop(from) {
     if (_doublePage) {
-      if (from === 0) return 1; // page 0 always shown alone
+      const spreadOffset = _prefs?.spreadOffset ?? false;
+      if (!spreadOffset && from === 0) return 1; // page 0 always shown alone unless offset
       if (_isWideImage(from) || (from + 1 < _pages.length && _isWideImage(from + 1)))
         return from + 1;
       return from + 2;
@@ -802,19 +929,35 @@ export async function init(container, { id }) {
       const c = from - offset;
       if (c >= 0 && _nextStop(c) === from) return c;
     }
-    return Math.max(0, from - 1); // fallback
+    return from - 1; // fallback: -1 when from===0 signals prev-chapter navigation
   }
 
   // ── Prefetch ─────────────────────────────────────────────────────────────
 
+  // Rolling fetch-time log for smart preload.
+  const FETCH_WINDOW = 8;
+  /** @type {number[]} */
+  const _fetchMsLog = [];
+  /** @type {number|null} — cached result; null = stale, recompute on next call */
+  let _cachedPreloadN = /** @type {number|null} */ (null);
+
+  function _recordFetchMs(ms) {
+    _fetchMsLog.push(ms);
+    if (_fetchMsLog.length > FETCH_WINDOW) _fetchMsLog.shift();
+    _cachedPreloadN = null;
+  }
+
   function _prefetch(pageIndex) {
-    if (_mode !== 'paged') return;
-    for (let i = 1; i <= 2; i++) {
+    if (_mode !== 'paged' && _mode !== 'continuous-paged') return;
+    const preloadN = _adaptivePreload();
+    for (let i = 1; i <= preloadN; i++) {
       const prefIdx = pageIndex + i;
       const url = _pages[prefIdx];
       if (url && !_loaded.has(prefIdx) && !_failed.has(prefIdx)) {
         const img = new Image();
+        const fetchStart = performance.now();
         img.addEventListener('load', () => {
+          _recordFetchMs(performance.now() - fetchStart);
           _loaded.add(prefIdx); _renderSegments();
           if (img.naturalWidth > 0) {
             _setDims(prefIdx, img.naturalWidth, img.naturalHeight);
@@ -834,8 +977,176 @@ export async function init(container, { id }) {
 
   // ── Page rendering ────────────────────────────────────────────────────────
 
+  // ── Zoom & pan state ──────────────────────────────────────────────────────
+  let _zoomScale = 1;
+  let _zoomTx    = 0;
+  let _zoomTy    = 0;
+  const ZOOM_MIN = 1.0;
+  const ZOOM_MAX = 5.0;
+
+  /** Returns the element to zoom in paged mode; null otherwise (no-op).
+   * continuous-paged is excluded because _cpTrack also owns the translateY snap —
+   * both writes target style.transform and would race each other. */
+  function _zoomTarget() {
+    return _mode === 'paged'
+      ? /** @type {HTMLElement|null} */ (pagesEl.firstElementChild)
+      : null;
+  }
+
+  function _applyZoom() {
+    const t = _zoomTarget();
+    if (!t) return;
+    if (_zoomScale <= 1) {
+      t.style.transform = '';
+      t.style.transformOrigin = '';
+      t.style.cursor = '';
+    } else {
+      t.style.transformOrigin = '0 0';
+      t.style.transform = `translate(${_zoomTx}px,${_zoomTy}px) scale(${_zoomScale})`;
+      t.style.cursor = 'grab';
+    }
+  }
+
+  function _resetZoom() {
+    const t = _zoomTarget();
+    _zoomScale = 1; _zoomTx = 0; _zoomTy = 0;
+    if (t) { t.style.transform = ''; t.style.transformOrigin = ''; t.style.cursor = ''; }
+  }
+
+  function _clampPan() {
+    const rect = pagesEl.getBoundingClientRect();
+    const maxTx = 0,  minTx = Math.min(0, rect.width  * (1 - _zoomScale));
+    const maxTy = 0,  minTy = Math.min(0, rect.height * (1 - _zoomScale));
+    _zoomTx = Math.max(minTx, Math.min(maxTx, _zoomTx));
+    _zoomTy = Math.max(minTy, Math.min(maxTy, _zoomTy));
+  }
+
+  function _zoomAt(factor, clientX, clientY) {
+    const t = _zoomTarget();
+    let cx, cy;
+    if (t) {
+      const r = t.getBoundingClientRect();
+      cx = clientX - (r.left - _zoomTx);
+      cy = clientY - (r.top  - _zoomTy);
+    } else {
+      const r = pagesEl.getBoundingClientRect();
+      cx = clientX - r.left;
+      cy = clientY - r.top;
+    }
+    const prev = _zoomScale;
+    _zoomScale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, _zoomScale * factor));
+    if (_zoomScale <= 1) { _zoomTx = 0; _zoomTy = 0; _zoomScale = 1; }
+    else {
+      _zoomTx = cx - (_zoomScale / prev) * (cx - _zoomTx);
+      _zoomTy = cy - (_zoomScale / prev) * (cy - _zoomTy);
+      _clampPan();
+    }
+    _applyZoom();
+  }
+
+  // ── Image class helpers (used by both scroll and paged renderers) ─────────
+
+  /** Returns CSS classes for page images given current fit mode and layout context. */
+  function _imgClass(ctx = 'scroll') {
+    if (ctx === 'scroll') {
+      if (_fit === 'height') return 'max-h-screen w-auto';
+      if (_fit === 'width')  return 'max-w-full h-auto';
+      return 'max-w-full max-h-screen object-contain'; // both
+    }
+    if (ctx === 'paged-single') {
+      if (_fit === 'height') return 'max-h-full w-auto';
+      if (_fit === 'width')  return 'max-w-full h-auto';
+      return 'max-w-full max-h-full object-contain'; // both
+    }
+    if (_fit === 'height') return 'max-h-full w-auto';
+    if (_fit === 'width')  return 'max-w-[50vw] max-h-full';
+    return 'max-w-[50vw] max-h-full object-contain'; // both
+  }
+
+  /** CSS classes for a spread canvas (already a bitmap — no object-contain). */
+  function _spreadClass() {
+    if (_fit === 'height') return 'max-h-full w-auto';
+    if (_fit === 'width')  return 'max-w-full h-auto';
+    return 'max-w-full max-h-full';
+  }
+
+  /**
+   * CSS classes for the paged/continuous-paged outer container.
+   * Enables native scroll on the non-constrained axis in fit-width/height modes.
+   */
+  function _pagedContainerClass() {
+    const overflow = _fit === 'width'  ? 'overflow-y-auto overflow-x-hidden'
+                   : _fit === 'height' ? 'overflow-x-auto overflow-y-hidden'
+                   : 'overflow-hidden';
+    // fit-width: align to top so the image starts at scrollTop=0 (items-center would push
+    // the top of a tall image above the scroll origin, making it unreachable).
+    const align = _fit === 'width' ? 'items-start' : 'items-center';
+    return `flex-1 ${overflow} ${align} relative flex justify-center`;
+  }
+
+  // ── Continuous-paged renderer ────────────────────────────────────────────
+  // Renders a window of pages as absolutely-positioned slots. Navigation snaps
+  // by translating the container — no re-render on page change.
+
+  /** @type {HTMLElement|null} */
+  let _cpTrack = null;
+
+  function _renderContinuousPaged() {
+    const preload = _adaptivePreload();
+    const windowStart = Math.max(0, _currentPage - preload);
+    const windowEnd   = Math.min(_pages.length - 1, _currentPage + preload);
+
+    pagesEl.className = _pagedContainerClass();
+
+    const track = document.createElement('div');
+    track.className = 'absolute inset-0 flex flex-col items-center reader-cp-track';
+    track.style.willChange = 'transform';
+    _cpTrack = track;
+
+    for (let i = windowStart; i <= windowEnd; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'w-full flex-shrink-0 flex items-center justify-center';
+      slot.style.height = '100%';
+
+      const img = document.createElement('img');
+      img.src           = _pages[i] ?? '';
+      img.className     = _imgClass('paged-single');
+      img.style.aspectRatio = '2/3'; // placeholder until dimensions are known
+      img.alt           = `Page ${i + 1}`;
+      img.dataset.index = String(i);
+      const _i = i;
+      img.addEventListener('load', () => {
+        img.style.aspectRatio = '';
+        _applyCropToImg(img);
+        _loaded.add(_i); _failed.delete(_i);
+        if (img.naturalWidth > 0) _setDims(_i, img.naturalWidth, img.naturalHeight);
+        _renderSegments();
+      });
+      img.addEventListener('error', () => { _failed.add(_i); _loaded.delete(_i); _renderSegments(); });
+      if (img.complete && img.naturalWidth) {
+        img.style.aspectRatio = '';
+        _loaded.add(i); _setDims(i, img.naturalWidth, img.naturalHeight);
+      }
+      _applyCropToImg(img);
+      slot.appendChild(img);
+      track.appendChild(slot);
+    }
+
+    pagesEl.appendChild(track);
+    _cpSnapToPage(_currentPage, windowStart);
+  }
+
+  function _cpSnapToPage(pageIdx, windowStart) {
+    if (!_cpTrack) return;
+    const offset = pageIdx - (windowStart ?? _currentPage - (_prefs?.preloadCount ?? 2));
+    const h = pagesEl.getBoundingClientRect().height || window.innerHeight;
+    _cpTrack.style.transform = `translateY(${-offset * h}px)`;
+  }
+
   function _renderPages() {
+    _cpTrack = null;
     if (_scrollObs) { _scrollObs.disconnect(); _scrollObs = null; }
+    _resetZoom();
     pagesEl.innerHTML = '';
 
     if (_pages.length === 0) {
@@ -848,35 +1159,13 @@ export async function init(container, { id }) {
       return;
     }
 
-    /** Returns the CSS class string for an image given current fit mode and context. */
-    function _imgClass(ctx = 'scroll') {
-      if (ctx === 'scroll') {
-        if (_fit === 'height') return 'max-h-screen w-auto';
-        if (_fit === 'width')  return 'max-w-full h-auto';
-        return 'max-w-full max-h-screen object-contain'; // both
-      }
-      if (ctx === 'paged-single') {
-        if (_fit === 'height') return 'max-h-full w-auto';
-        if (_fit === 'width')  return 'max-w-full h-auto';
-        return 'max-w-full max-h-full object-contain'; // both
-      }
-      // paged-double: each image shares half the width
-      if (_fit === 'height') return 'max-h-full w-auto';
-      if (_fit === 'width')  return 'max-w-[50vw] max-h-full';
-      return 'max-w-[50vw] max-h-full object-contain'; // both
-    }
+    const _isScrollLike = _mode === 'scroll' || _mode === 'webtoon';
 
-    /** CSS class for a spread canvas (no object-contain — canvas is already the bitmap). */
-    function _spreadClass() {
-      if (_fit === 'height') return 'max-h-full w-auto';
-      if (_fit === 'width')  return 'max-w-full h-auto';
-      return 'max-w-full max-h-full';
-    }
+    if (_isScrollLike) {
+      pagesEl.className = _mode === 'webtoon'
+        ? 'flex-1 overflow-y-auto overflow-x-hidden flex flex-col items-center'
+        : 'flex-1 overflow-y-auto overflow-x-hidden flex flex-col items-center gap-1 py-2';
 
-    if (_mode === 'scroll') {
-      pagesEl.className = 'flex-1 overflow-y-auto overflow-x-hidden flex flex-col items-center gap-1 py-2';
-
-      // Track img elements by page index so we can replace pairs with canvases.
       /** @type {Map<number, HTMLImageElement>} */
       const _scrollImgs = new Map();
 
@@ -892,17 +1181,17 @@ export async function init(container, { id }) {
         if (!imgA || !imgB || !imgA.parentElement) return;
 
         const [leftImg, rightImg] = _direction === 'rtl' ? [imgB, imgA] : [imgA, imgB];
-        const W = leftImg.naturalWidth + rightImg.naturalWidth;
-        const H = Math.max(leftImg.naturalHeight, rightImg.naturalHeight);
+        const W = _cW(leftImg) + _cW(rightImg);
+        const H = Math.max(_cH(leftImg), _cH(rightImg));
         const canvas = document.createElement('canvas');
-        canvas.className   = _imgClass('scroll');
+        canvas.className   = _spreadClass(); // bitmap already has correct ratio — no object-contain
         canvas.dataset.index = String(idxA);
         canvas.width  = W;
         canvas.height = H;
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(leftImg,  0,                   (H - leftImg.naturalHeight)  / 2);
-          ctx.drawImage(rightImg, leftImg.naturalWidth, (H - rightImg.naturalHeight) / 2);
+          _drawPage(ctx, leftImg,  0,           (H - _cH(leftImg))  / 2);
+          _drawPage(ctx, rightImg, _cW(leftImg), (H - _cH(rightImg)) / 2);
         }
         _loaded.add(idxA); _loaded.add(idxA + 1);
 
@@ -926,12 +1215,14 @@ export async function init(container, { id }) {
         img.dataset.index = String(i);
         const _i = i;
         img.addEventListener('load', () => {
+          img.style.aspectRatio = '';
+          _applyCropToImg(img);
           _loaded.add(_i); _failed.delete(_i);
           if (img.naturalWidth > 0) {
             _setDims(_i, img.naturalWidth, img.naturalHeight);
             if (_autoSpread) {
-              _maybeComposite(_i);          // this page starts a pair
-              if (_i > 0) _maybeComposite(_i - 1); // this page completes a pair
+              _maybeComposite(_i);
+              if (_i > 0) _maybeComposite(_i - 1);
             }
           }
           _renderSegments();
@@ -941,11 +1232,11 @@ export async function init(container, { id }) {
           if (img.naturalWidth) { _loaded.add(i); _setDims(i, img.naturalWidth, img.naturalHeight); }
           else _failed.add(i);
         }
+        _applyCropToImg(img);
         _scrollImgs.set(i, img);
         pagesEl.appendChild(img);
       }
 
-      // End-of-chapter card
       {
         const card = document.createElement('div');
         card.className = 'flex flex-col items-center justify-center py-16 gap-4 w-full shrink-0';
@@ -973,7 +1264,6 @@ export async function init(container, { id }) {
         pagesEl.appendChild(card);
       }
 
-      // IntersectionObserver for current-page tracking
       /** @type {Set<number>} */
       const visible = new Set();
       _scrollObs = new IntersectionObserver((entries) => {
@@ -990,13 +1280,20 @@ export async function init(container, { id }) {
           _reportProgress();
           _maybePreloadNext();
         }
-      }, { root: pagesEl, threshold: 0.1 });
+      // Webtoon: higher threshold for finer per-panel progress.
+      }, { root: pagesEl, threshold: _mode === 'webtoon' ? 0.5 : 0.1 });
       pagesEl.querySelectorAll('[data-index]').forEach(el => _scrollObs?.observe(el));
 
     } else {
-      // Paged mode
       _currentPage = Math.max(0, Math.min(_pages.length - 1, _currentPage));
-      pagesEl.className = 'flex-1 overflow-hidden relative flex items-center justify-center';
+
+      if (_mode === 'continuous-paged') {
+        _renderContinuousPaged();
+        _renderSegments();
+        return;
+      }
+
+      pagesEl.className = _pagedContainerClass();
 
       /** @param {number} pageIdx @param {string} altText @returns {HTMLImageElement} */
       function _makePageImg(pageIdx, altText) {
@@ -1006,6 +1303,8 @@ export async function init(container, { id }) {
         img.style.aspectRatio = '2/3'; // reserve space before dimensions are known
         img.alt       = altText;
         img.addEventListener('load', () => {
+          img.style.aspectRatio = ''; // clear placeholder once natural size is known
+          _applyCropToImg(img);       // re-apply crop with correct aspect ratio now known
           _loaded.add(pageIdx); _failed.delete(pageIdx);
           if (img.naturalWidth > 0) {
             _setDims(pageIdx, img.naturalWidth, img.naturalHeight);
@@ -1033,20 +1332,26 @@ export async function init(container, { id }) {
         });
         if (img.complete) {
           if (img.naturalWidth) {
+            img.style.aspectRatio = '';
             _loaded.add(pageIdx);
             _setDims(pageIdx, img.naturalWidth, img.naturalHeight);
           } else {
             _failed.add(pageIdx);
           }
         }
+        _applyCropToImg(img);
         return img;
       }
+
+      // When spreadOffset is on, pairs start from page 0 (no lone first page).
+      // When off (default), page 0 is always shown alone to match cover convention.
+      const _firstAlone = _doublePage && !(_prefs?.spreadOffset ?? false);
 
       if (_doublePage && _pages.length > 1) {
         const leftIdx  = _direction === 'rtl' ? _currentPage + 1 : _currentPage;
         const rightIdx = _direction === 'rtl' ? _currentPage     : _currentPage + 1;
 
-        if (_currentPage === 0) {
+        if (_firstAlone && _currentPage === 0) {
           const img = _makePageImg(0, 'Page 1');
           img.className = _imgClass('paged-single');
           pagesEl.appendChild(img);
@@ -1073,14 +1378,14 @@ export async function init(container, { id }) {
           let _rReady = false;
           const _drawSpread = () => {
             if (!_lReady || !_rReady) return;
-            const W = leftImg.naturalWidth + rightImg.naturalWidth;
-            const H = Math.max(leftImg.naturalHeight, rightImg.naturalHeight);
+            const W = _cW(leftImg) + _cW(rightImg);
+            const H = Math.max(_cH(leftImg), _cH(rightImg));
             canvas.width  = W;
             canvas.height = H;
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
-            ctx.drawImage(leftImg,  0,                  (H - leftImg.naturalHeight)  / 2);
-            ctx.drawImage(rightImg, leftImg.naturalWidth, (H - rightImg.naturalHeight) / 2);
+            _drawPage(ctx, leftImg,  0,            (H - _cH(leftImg))  / 2);
+            _drawPage(ctx, rightImg, _cW(leftImg),  (H - _cH(rightImg)) / 2);
             _loaded.add(leftIdx); _loaded.add(rightIdx);
             _renderSegments();
           };
@@ -1155,13 +1460,13 @@ export async function init(container, { id }) {
         let _lReady = false, _rReady = false;
         const _draw = () => {
           if (!_lReady || !_rReady) return;
-          const W = leftImg.naturalWidth + rightImg.naturalWidth;
-          const H = Math.max(leftImg.naturalHeight, rightImg.naturalHeight);
+          const W = _cW(leftImg) + _cW(rightImg);
+          const H = Math.max(_cH(leftImg), _cH(rightImg));
           canvas.width = W; canvas.height = H;
           const ctx = canvas.getContext('2d');
           if (!ctx) return;
-          ctx.drawImage(leftImg,  0,                    (H - leftImg.naturalHeight)  / 2);
-          ctx.drawImage(rightImg, leftImg.naturalWidth,  (H - rightImg.naturalHeight) / 2);
+          _drawPage(ctx, leftImg,  0,            (H - _cH(leftImg))  / 2);
+          _drawPage(ctx, rightImg, _cW(leftImg),  (H - _cH(rightImg)) / 2);
           _loaded.add(leftIdx); _loaded.add(rightIdx);
           _renderSegments();
         };
@@ -1214,7 +1519,7 @@ export async function init(container, { id }) {
   // ── Page navigation ───────────────────────────────────────────────────────
 
   function _goPage(rawDelta) {
-    if (_mode !== 'paged') return;
+    if (_mode !== 'paged' && _mode !== 'continuous-paged') return;
     const delta = _direction === 'rtl' ? -rawDelta : rawDelta;
     const next  = delta > 0 ? _nextStop(_currentPage) : _prevStop(_currentPage);
 
@@ -1238,49 +1543,363 @@ export async function init(container, { id }) {
     _currentPage = next;
     _reportProgress();
     _maybePreloadNext();
+    _recordPace();
+
+    if (_mode === 'continuous-paged' && _cpTrack) {
+      const first = Number(_cpTrack.firstElementChild?.querySelector('[data-index]')?.dataset.index ?? -1);
+      const last  = Number(_cpTrack.lastElementChild?.querySelector('[data-index]')?.dataset.index ?? -1);
+      if (_currentPage >= first && _currentPage <= last) {
+        _cpSnapToPage(_currentPage, first);
+        _renderSegments();
+        return; // no re-render needed; page already in DOM
+      }
+    }
     _renderPages();
   }
 
   // ── Three-zone click ──────────────────────────────────────────────────────
-  // Desktop (fine-pointer): left/right navigate; middle opens panel.
-  // Mobile (touch): left/right navigate; middle shows bars (top + bottom).
+
+  function _triggerZoneAction(action) {
+    switch (action) {
+      case 'prev': _goPage(_direction === 'rtl' ? 1  : -1); break;
+      case 'next': _goPage(_direction === 'rtl' ? -1 : 1);  break;
+      case 'menu':
+        if (_isFinePointer()) _openPanel();
+        else if (_barsVisible) _hideBars(); else _showBars();
+        break;
+    }
+  }
 
   pagesEl.addEventListener('click', (e) => {
     const target = /** @type {HTMLElement} */ (e.target);
     if (target.closest('button') || target.closest('a')) return;
+    if (_zoomScale > 1) return; // suppress nav while zoomed
 
     const rect  = pagesEl.getBoundingClientRect();
     const x     = e.clientX - rect.left;
     const third = rect.width / 3;
 
-    if (_mode === 'paged') {
-      if (x < third)     { _goPage(_direction === 'rtl' ? 1 : -1); return; }
-      if (x > 2 * third) { _goPage(_direction === 'rtl' ? -1 : 1); return; }
-    }
+    const tapLeft   = _prefs?.tapLeft   ?? 'prev';
+    const tapCenter = _prefs?.tapCenter ?? 'menu';
+    const tapRight  = _prefs?.tapRight  ?? 'next';
 
-    // Middle zone (or scroll mode anywhere in centre third)
+    if (_mode === 'paged' || _mode === 'continuous-paged') {
+      if (x < third)      { _triggerZoneAction(tapLeft);   return; }
+      if (x > 2 * third)  { _triggerZoneAction(tapRight);  return; }
+    }
     if (x >= third && x <= 2 * third) {
-      if (_isFinePointer()) {
-        _openPanel();
-      } else {
-        // Mobile: toggle bars (both top bar and expanded indicator)
-        if (_barsVisible) _hideBars(); else _showBars();
-      }
+      _triggerZoneAction(tapCenter);
     }
   });
 
   // ── Touch/swipe ───────────────────────────────────────────────────────────
 
-  let _touchStartX = 0;
-  pagesEl.addEventListener('touchstart', (e) => { _touchStartX = e.touches[0].clientX; }, { passive: true });
-  pagesEl.addEventListener('touchend',   (e) => {
+  // ── Zoom + swipe touch handler (replaces simple touchstart/touchend) ─────
+
+  let _touchStartX   = 0;
+  let _touchStartY   = 0;
+  let _pinchDist     = 0;
+  let _panActive     = false;
+  let _panStartTx    = 0;
+  let _panStartTy    = 0;
+
+  pagesEl.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      _pinchDist = Math.hypot(dx, dy);
+      return;
+    }
+    _touchStartX = e.touches[0].clientX;
+    _touchStartY = e.touches[0].clientY;
+    if (_zoomScale > 1) {
+      e.preventDefault();
+      _panActive  = true;
+      _panStartTx = _zoomTx;
+      _panStartTy = _zoomTy;
+    }
+  }, { passive: false });
+
+  pagesEl.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const newDist = Math.hypot(dx, dy);
+      if (_pinchDist > 0 && newDist > 0) {
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        _zoomAt(newDist / _pinchDist, midX, midY);
+      }
+      _pinchDist = newDist;
+      return;
+    }
+    if (_panActive && e.touches.length === 1) {
+      e.preventDefault();
+      _zoomTx = _panStartTx + (e.touches[0].clientX - _touchStartX);
+      _zoomTy = _panStartTy + (e.touches[0].clientY - _touchStartY);
+      _clampPan();
+      _applyZoom();
+    }
+  }, { passive: false });
+
+  pagesEl.addEventListener('touchend', (e) => {
+    _pinchDist = 0;
+    _panActive = false;
+    if (_zoomScale > 1) return; // suppress swipe nav while zoomed
+
     const dx = e.changedTouches[0].clientX - _touchStartX;
-    if (Math.abs(dx) > 50) _goPage(dx < 0 ? 1 : -1);
+    const dy = e.changedTouches[0].clientY - _touchStartY;
+
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) _goPage(dx < 0 ? 1 : -1);
   });
+
+  // ── Wheel zoom (desktop) ──────────────────────────────────────────────────
+  // Paged + fit=both: plain wheel zooms.
+  // Paged + fit=width/height: plain wheel scrolls the overflow axis; ctrl+wheel zooms.
+  // Scroll/webtoon: wheel always scrolls; ctrl+wheel zooms.
+  // When already zoomed: wheel always zooms regardless of mode/fit.
+
+  pagesEl.addEventListener('wheel', (e) => {
+    const isPaged = _mode === 'paged' || _mode === 'continuous-paged';
+    const alreadyZoomed = _zoomScale > 1;
+
+    if (alreadyZoomed) {
+      e.preventDefault();
+      _zoomAt(e.deltaY < 0 ? 1.1 : 0.9, e.clientX, e.clientY);
+      return;
+    }
+
+    // ctrl+wheel always zooms (browser pinch-to-zoom emulation sends ctrlKey=true).
+    if (e.ctrlKey) {
+      e.preventDefault();
+      _zoomAt(e.deltaY < 0 ? 1.1 : 0.9, e.clientX, e.clientY);
+      return;
+    }
+
+    // Plain wheel in paged+both: zoom in/out (no native scroll at zoom=1 in this mode).
+    if (isPaged && _fit === 'both') {
+      e.preventDefault();
+      _zoomAt(e.deltaY < 0 ? 1.1 : 0.9, e.clientX, e.clientY);
+      return;
+    }
+
+  }, { passive: false });
+
+  // ── Mouse drag-to-pan ─────────────────────────────────────────────────────
+
+  let _mousePanActive = false;
+  let _mousePanStartX = 0;
+  let _mousePanStartY = 0;
+  let _mousePanTx0    = 0;
+  let _mousePanTy0    = 0;
+
+  pagesEl.addEventListener('mousedown', (e) => {
+    if (_zoomScale <= 1 || e.button !== 0) return;
+    const target = /** @type {HTMLElement} */ (e.target);
+    if (target.closest('button') || target.closest('a')) return;
+    _mousePanActive = true;
+    _mousePanStartX = e.clientX;
+    _mousePanStartY = e.clientY;
+    _mousePanTx0    = _zoomTx;
+    _mousePanTy0    = _zoomTy;
+    pagesEl.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  const _onMouseMove = (/** @type {MouseEvent} */ e) => {
+    if (!_mousePanActive) return;
+    _zoomTx = _mousePanTx0 + (e.clientX - _mousePanStartX);
+    _zoomTy = _mousePanTy0 + (e.clientY - _mousePanStartY);
+    _clampPan();
+    _applyZoom();
+  };
+  const _onMouseUp = () => {
+    if (!_mousePanActive) return;
+    _mousePanActive = false;
+    pagesEl.style.cursor = '';
+    _applyZoom();
+  };
+  document.addEventListener('mousemove', _onMouseMove);
+  document.addEventListener('mouseup',   _onMouseUp);
+  _cleanup.push(() => {
+    document.removeEventListener('mousemove', _onMouseMove);
+    document.removeEventListener('mouseup',   _onMouseUp);
+  });
+
+  // ── Fullscreen ───────────────────────────────────────────────────────────
+
+  function _toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      readerRoot.requestFullscreen().catch(() => {});
+    }
+  }
+
+  // ── Slideshow ────────────────────────────────────────────────────────────
+
+  let _slideshowActive = false;
+  let _slideshowTimer  = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
+  /** Timestamp of the most recent _slideshowPlay() call — used to ignore the
+      starting tap in _slideshowPauseOnInput so it doesn't immediately stop. */
+  let _slideshowStartedAt = 0;
+  /** Reference to the Start/Stop button; set once the panel is built. */
+  let _ssPlayBtn = /** @type {HTMLButtonElement|null} */ (null);
+
+  function _slideshowStop() {
+    _slideshowActive = false;
+    if (_slideshowTimer) { clearTimeout(_slideshowTimer); _slideshowTimer = null; }
+    if (_ssPlayBtn) _ssPlayBtn.textContent = 'Start slideshow';
+  }
+
+  function _slideshowAdvance() {
+    if (!_slideshowActive) return;
+    const isScrollLike = _mode === 'scroll' || _mode === 'webtoon';
+    if (isScrollLike) {
+      const scrollable = /** @type {HTMLElement|null} */ (pagesEl);
+      if (scrollable) {
+        const before = scrollable.scrollTop;
+        scrollable.scrollBy({ top: scrollable.clientHeight, behavior: 'smooth' });
+        setTimeout(() => {
+          if (!_slideshowActive) return;
+          if (Math.abs(scrollable.scrollTop - before) < 4 || // didn't scroll
+              scrollable.scrollTop + scrollable.clientHeight >= scrollable.scrollHeight - 4) {
+            if (_chapterInfo.next_chapter_id) {
+              _navigateChapter(_chapterInfo.next_chapter_id);
+            }
+          }
+        }, 600);
+      }
+    } else {
+      // Always advance forward: compensate for RTL so _goPage's direction flip doesn't reverse us.
+      _goPage(_direction === 'rtl' ? -1 : 1);
+    }
+  }
+
+  function _slideshowSchedule() {
+    if (!_slideshowActive) return;
+    const ms = (_prefs?.slideshowInterval ?? 5) * 1000;
+    _slideshowTimer = setTimeout(() => {
+      if (!_slideshowActive) return;
+      _slideshowAdvance();
+      _slideshowSchedule();
+    }, ms);
+  }
+
+  function _slideshowPlay() {
+    _slideshowActive = true;
+    _slideshowStartedAt = Date.now();
+    _slideshowSchedule();
+    if (_ssPlayBtn) _ssPlayBtn.textContent = 'Stop slideshow';
+  }
+
+  function _slideshowPauseOnInput() {
+    // Ignore the very interaction that started the slideshow (the tap/click that
+    // pressed the Start button) so the slideshow doesn't immediately cancel itself.
+    if (Date.now() - _slideshowStartedAt < 500) { _resetInactivity(); return; }
+    if (_slideshowActive) _slideshowStop();
+    _resetInactivity();
+  }
+
+  _cleanup.push(_slideshowStop);
+
+  // ── Inactivity timer ──────────────────────────────────────────────────────
+
+  let _inactivityTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
+
+  function _resetInactivity() {
+    if (_inactivityTimer) clearTimeout(_inactivityTimer);
+    const ms = (_prefs?.inactivityTimeout ?? 0) * 60000;
+    if (!ms) return;
+    _inactivityTimer = setTimeout(() => {
+      if (_slideshowActive) _slideshowStop();
+      else _navigateToManga();
+    }, ms);
+  }
+
+  _cleanup.push(() => { if (_inactivityTimer) clearTimeout(_inactivityTimer); });
+
+  const _onUserInput = () => _slideshowPauseOnInput();
+  document.addEventListener('keydown',     _onUserInput, { capture: true, passive: true });
+  document.addEventListener('pointerdown', _onUserInput, { capture: true, passive: true });
+  _cleanup.push(() => {
+    document.removeEventListener('keydown',     _onUserInput, { capture: true });
+    document.removeEventListener('pointerdown', _onUserInput, { capture: true });
+  });
+
+  // ── Reading-stats pace tracking ───────────────────────────────────────────
+
+  const PACE_WINDOW = 10;
+  /** @type {{ time: number }[]} */
+  const _paceLog = [];
+
+  function _recordPace() {
+    _paceLog.push({ time: Date.now() });
+    if (_paceLog.length > PACE_WINDOW + 1) _paceLog.shift();
+    _cachedPreloadN = null;
+  }
+
+  /** Returns pages-per-minute rolling average, or null if not enough data. */
+  function _ppm() {
+    if (_paceLog.length < 2) return null;
+    const dt = (_paceLog[_paceLog.length - 1].time - _paceLog[0].time) / 60000;
+    return dt > 0 ? (_paceLog.length - 1) / dt : null;
+  }
+
+  function _etaText() {
+    const rate = _ppm();
+    if (!rate || _pages.length === 0) return null;
+    const remaining = _pages.length - 1 - _currentPage;
+    if (remaining <= 0) return '0 min';
+    const mins = remaining / rate;
+    return mins < 1 ? '<1 min' : `~${Math.round(mins)} min`;
+  }
+
+  /**
+   * Smart preload count: how many images can fully load within one
+   * average page-read interval, clamped to [1, user max].
+   * Falls back to the configured max when there isn't enough data yet.
+   */
+  function _adaptivePreload() {
+    if (_cachedPreloadN !== null) return _cachedPreloadN;
+    const max = _prefs?.preloadCount ?? 2;
+    if (_fetchMsLog.length < 3 || _paceLog.length < 2) return max;
+    const avgFetchMs = _fetchMsLog.reduce((a, b) => a + b, 0) / _fetchMsLog.length;
+    const pagesPerMin = _ppm();
+    if (!pagesPerMin || avgFetchMs <= 0) return max;
+    const msPerPage = 60000 / pagesPerMin;
+    _cachedPreloadN = Math.max(1, Math.min(max, Math.floor(msPerPage / avgFetchMs)));
+    return _cachedPreloadN;
+  }
+
+  // ── Volume-key navigation ─────────────────────────────────────────────────
+
+  // keydown: browser doesn't normally fire for hardware volume, but PWA/some
+  // Android WebViews do surface AudioVolume* keys.
+  const _onVolumeKey = (/** @type {KeyboardEvent} */ e) => {
+    if (e.key === 'AudioVolumeUp')   { e.preventDefault(); if (!_panelOpen) _goPage(-1); }
+    if (e.key === 'AudioVolumeDown') { e.preventDefault(); if (!_panelOpen) _goPage(1);  }
+  };
+  document.addEventListener('keydown', _onVolumeKey);
+  _cleanup.push(() => document.removeEventListener('keydown', _onVolumeKey));
+
+  // MediaSession: fires from Bluetooth / headset media buttons.
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.setActionHandler('previoustrack', () => { if (!_panelOpen) _goPage(-1); });
+      navigator.mediaSession.setActionHandler('nexttrack',     () => { if (!_panelOpen) _goPage(1);  });
+    } catch { /* unsupported action */ }
+    _cleanup.push(() => {
+      try {
+        navigator.mediaSession.setActionHandler('previoustrack', null);
+        navigator.mediaSession.setActionHandler('nexttrack',     null);
+      } catch { /* ignore */ }
+    });
+  }
 
   // ── Keyboard ─────────────────────────────────────────────────────────────
 
-  // Panel-open shortcuts (Escape closes panel) bypass ShortcutManager.
   function _onPanelKeyDown(/** @type {KeyboardEvent} */ e) {
     if (_panelOpen && e.key === 'Escape') { e.preventDefault(); _closePanel(); }
   }
@@ -1292,12 +1911,143 @@ export async function init(container, { id }) {
     { key: ['ArrowLeft',  'ArrowUp',   'h', 'a'], description: 'Previous page', handler: () => { if (!_panelOpen) _goPage(-1); } },
     { key: ']', description: 'Next chapter',     handler: () => { if (!_panelOpen && _chapterInfo.next_chapter_id) _navigateChapter(_chapterInfo.next_chapter_id); } },
     { key: '[', description: 'Previous chapter', handler: () => { if (!_panelOpen && _chapterInfo.prev_chapter_id) _navigateChapter(_chapterInfo.prev_chapter_id); } },
+    { key: 'f', description: 'Toggle fullscreen', handler: () => { if (!_panelOpen) _toggleFullscreen(); } },
     { key: 'Escape', description: 'Back to manga', handler: () => { if (!_panelOpen) _navigateToManga(); } },
   ]));
 
   // Position the panel immediately (before the await) so there is no flash of
   // the desktop default position on mobile before the JS takes effect.
   _positionPanel();
+
+  // ── Landscape-aware double-page ───────────────────────────────────────────
+  const _landscapeMQ = window.matchMedia('(orientation: landscape) and (max-height: 600px)');
+  const _onLandscapeChange = (/** @type {MediaQueryListEvent|MediaQueryList} */ mq) => {
+    if (_mode !== 'paged') return;
+    if (mq.matches && !_doublePage) {
+      _doublePage = true;
+      doubleInput.checked = true;
+      if (_prefs) setReaderPref(_prefs, 'doublePage', true);
+      _applyDoublePageVisibility(); _renderPages();
+    } else if (!mq.matches && _doublePage) {
+      _doublePage = false;
+      doubleInput.checked = false;
+      if (_prefs) setReaderPref(_prefs, 'doublePage', false);
+      _applyDoublePageVisibility(); _renderPages();
+    }
+  };
+  _landscapeMQ.addEventListener('change', _onLandscapeChange);
+  _cleanup.push(() => _landscapeMQ.removeEventListener('change', _onLandscapeChange));
+
+  const { row: preloadRow, input: preloadInput } = mkSliderRow({
+    label: 'Preload pages', min: 1, max: 10, value: _prefs?.preloadCount ?? 2,
+    onChange: (v) => { if (_prefs) setReaderPref(_prefs, 'preloadCount', v); },
+  });
+
+  const saveBtn = mkActionBtn({
+    label: 'Save page',
+    onClick: async () => {
+      const canvas = /** @type {HTMLCanvasElement|null} */ (pagesEl.querySelector('canvas'));
+      if (canvas) {
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `page-${_currentPage + 1}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }, 'image/png');
+        return;
+      }
+      // Single image: fetch the raw bytes so we get the original format.
+      const pageUrl = _pages[_currentPage];
+      if (!pageUrl) return;
+      try {
+        const resp = await fetch(pageUrl);
+        const blob = await resp.blob();
+        const ext  = blob.type.includes('png') ? 'png' : 'jpg';
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `page-${_currentPage + 1}.${ext}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch { /* network error — ignore */ }
+    },
+  });
+
+  const _modalOpenCallbacks = /** @type {Array<() => void>} */ ([]);
+  const _modalSections = /** @type {Record<string, HTMLElement>} */ ({});
+  _modalSections.navigation = mkReaderSection('', saveBtn, preloadRow);
+
+  const fsBtn = mkActionBtn({ label: 'Enter fullscreen', onClick: () => _toggleFullscreen() });
+  const _onFsChange = () => {
+    fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen';
+  };
+  document.addEventListener('fullscreenchange', _onFsChange);
+  _cleanup.push(() => document.removeEventListener('fullscreenchange', _onFsChange));
+
+  // ── Keep screen on ────────────────────────────────────────────────────────
+  const displayChildren = /** @type {HTMLElement[]} */ ([fsBtn]);
+
+  if ('wakeLock' in navigator) {
+    let _wakeLock = /** @type {WakeLockSentinel|null} */ (null);
+    const { row: wakeRow, input: wakeInput } = mkToggleRow({
+      label: 'Keep screen on',
+      checked: false,
+      onChange: async (on) => {
+        if (on) {
+          try {
+            _wakeLock = await navigator.wakeLock.request('screen');
+            _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+          } catch { wakeInput.checked = false; }
+        } else {
+          await _wakeLock?.release();
+          _wakeLock = null;
+        }
+      },
+    });
+    const _onVisibility = async () => {
+      if (document.visibilityState === 'visible' && wakeInput.checked) {
+        try {
+          _wakeLock = await navigator.wakeLock.request('screen');
+          _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+        } catch { /* best-effort */ }
+      }
+    };
+    document.addEventListener('visibilitychange', _onVisibility);
+    _cleanup.push(() => {
+      document.removeEventListener('visibilitychange', _onVisibility);
+      _wakeLock?.release().catch(() => {});
+    });
+    displayChildren.push(wakeRow);
+  }
+
+  // ── Orientation lock ──────────────────────────────────────────────────────
+  // Only show on touch/coarse-pointer devices — orientation lock requires
+  // mobile fullscreen and always rejects on desktop browsers.
+  if ('lock' in (screen.orientation ?? {}) && !_isFinePointer()) {
+    const { row: orientRow } = mkSegmentedRow({
+      label: 'Screen orientation',
+      options: [
+        { value: 'auto',      label: 'Auto' },
+        { value: 'portrait',  label: 'Portrait' },
+        { value: 'landscape', label: 'Landscape' },
+      ],
+      selected: 'auto',
+      onSelect: async (v) => {
+        try {
+          if (v === 'auto') screen.orientation.unlock();
+          // @ts-ignore — OrientationLockType not in all TS libs
+          else await screen.orientation.lock(v);
+        } catch { /* best-effort; unsupported outside fullscreen on some browsers */ }
+      },
+    });
+    _cleanup.push(() => { try { screen.orientation.unlock(); } catch { /* ignore */ } });
+    displayChildren.push(orientRow);
+  }
+
+  const _displayAccordion = mkAccordionSection('Display', {}, ...displayChildren);
 
   // ── Load chapter ──────────────────────────────────────────────────────────
 
@@ -1309,6 +2059,7 @@ export async function init(container, { id }) {
       : [];
     _chapterInfo = data ?? {};
     _mangaId     = data?.manga_id ?? null;
+    _loadChapterList();
 
     _hasServerAnalysis = data?.spread_analysed === true;
     _serverDoublePages = new Set(
@@ -1325,26 +2076,620 @@ export async function init(container, { id }) {
       }
     }
 
-    // Load per-manga reading direction, falling back to localStorage
-    if (_mangaId) {
-      try {
-        const tracking = await api.getMangaTracking(_mangaId);
-        if (tracking?.reading_direction === 'ltr' || tracking?.reading_direction === 'rtl') {
-          _direction = tracking.reading_direction;
-        }
-      } catch { /* keep localStorage default */ }
+    _prefs = await loadReaderPrefs(_mangaId);
+    _mode        = _VALID_MODES.includes(_prefs.mode) ? _prefs.mode : 'scroll';
+    _smoothScroll = _prefs.smoothScroll;
+    _doublePage  = _prefs.doublePage;
+    _direction   = _prefs.direction;
+    _fit         = _prefs.fit;
+    _autoSpread  = _prefs.autoSpread;
+    smoothInput.checked    = _smoothScroll;
+    doubleInput.checked    = _doublePage;
+    spreadInput.checked    = _autoSpread;
+    preloadInput.value     = String(_prefs.preloadCount);
+    preloadInput.dispatchEvent(new Event('input'));
+
+    _applyPresentation();
+    _applyTint();
+
+    {
+      const spreadOffsetMount = container.querySelector('#reader-spread-offset-mount');
+      const { row: spreadOffsetRow } = mkToggleRow({
+        label: 'Pair from first page',
+        checked: _prefs.spreadOffset ?? false,
+        onChange: (v) => {
+          if (_prefs) { setReaderPref(_prefs, 'spreadOffset', v); _renderPages(); }
+        },
+      });
+      spreadOffsetRow.style.display = _doublePage ? '' : 'none';
+      spreadOffsetMount?.appendChild(spreadOffsetRow);
+      doubleInput.addEventListener('change', () => {
+        spreadOffsetRow.style.display = doubleInput.checked ? '' : 'none';
+      });
     }
+
+    // ── Fit / Dir / Mode segmented controls ───────────────────────────────────
+
+    const { row: fitRow, update: _updateFit } = mkSegmentedRow({
+      label: 'Image fit',
+      options: [
+        { value: 'both',   label: 'Both'   },
+        { value: 'width',  label: 'Width'  },
+        { value: 'height', label: 'Height' },
+      ],
+      selected: _fit,
+      onSelect: (v) => {
+        _fit = /** @type {'both'|'width'|'height'} */ (v);
+        if (_prefs) setReaderPref(_prefs, 'fit', _fit);
+        _renderPages();
+      },
+    });
+    fitMountEl.appendChild(fitRow);
+
+    const { row: dirRow_ } = mkSegmentedRow({
+      label: 'Reading direction',
+      options: [
+        { value: 'rtl', label: 'RTL' },
+        { value: 'ltr', label: 'LTR' },
+      ],
+      selected: _direction,
+      onSelect: (v) => {
+        _direction = /** @type {'rtl'|'ltr'} */ (v);
+        if (_prefs) setReaderPref(_prefs, 'direction', _direction);
+        for (const d of _imgDims.values()) d.edgeMatch = undefined;
+        _renderPages();
+      },
+    });
+    dirRow.appendChild(dirRow_);
+
+    const { row: modeRow } = mkSegmentedRow({
+      options: [
+        { value: 'scroll',           label: 'Scroll'   },
+        { value: 'paged',            label: 'Paged'    },
+        { value: 'webtoon',          label: 'Webtoon'  },
+        { value: 'continuous-paged', label: 'Cont.'    },
+      ],
+      selected: _mode,
+      onSelect: (v) => {
+        _mode = /** @type {import('../reader-prefs.js').ReadingMode} */ (v);
+        if (_mode === 'webtoon' && _fit === 'both') {
+          _fit = 'width';
+          if (_prefs) setReaderPref(_prefs, 'fit', _fit);
+          _updateFit('width');
+        }
+        if (_prefs) setReaderPref(_prefs, 'mode', _mode);
+        _applyDoublePageVisibility();
+        _renderPages();
+      },
+    });
+    modeMountEl.appendChild(modeRow);
+
+    // ── Image adjustments ─────────────────────────────────────────────────
+    {
+      const p = _prefs;
+
+      const { row: bgRow } = mkSegmentedRow({
+        label: 'Background',
+        options: [
+          { value: 'black', label: 'Black' },
+          { value: 'white', label: 'White' },
+          { value: 'sepia', label: 'Sepia' },
+        ],
+        selected: p.bg,
+        onSelect: (v) => {
+          if (_prefs) { setReaderPref(_prefs, 'bg', v); _applyPresentation(); }
+        },
+      });
+
+      const { row: brRow } = mkSliderRow({ label: 'Brightness', min: 50, max: 200, value: p.brightness, unit: '%',
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'brightness', v); _applyPresentation(); } } });
+      const { row: coRow } = mkSliderRow({ label: 'Contrast',   min: 50, max: 200, value: p.contrast,   unit: '%',
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'contrast',   v); _applyPresentation(); } } });
+      const { row: saRow } = mkSliderRow({ label: 'Saturation', min: 0,  max: 200, value: p.saturation, unit: '%',
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'saturation', v); _applyPresentation(); } } });
+
+      const { row: gsRow } = mkToggleRow({ label: 'Grayscale', checked: p.grayscale,
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'grayscale', v); _applyPresentation(); } } });
+      const { row: invRow } = mkToggleRow({ label: 'Invert',   checked: p.invert,
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'invert',    v); _applyPresentation(); } } });
+
+      const { row: ctRow } = mkSliderRow({ label: 'Crop top',    min: 0, max: 50, value: p.cropTop,    unit: '%',
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'cropTop',    v); _applyCropToAllImages(); } } });
+      const { row: cbRow } = mkSliderRow({ label: 'Crop bottom', min: 0, max: 50, value: p.cropBottom, unit: '%',
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'cropBottom', v); _applyCropToAllImages(); } } });
+      const { row: clRow } = mkSliderRow({ label: 'Crop left',   min: 0, max: 50, value: p.cropLeft,   unit: '%',
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'cropLeft',   v); _applyCropToAllImages(); } } });
+      const { row: crRow } = mkSliderRow({ label: 'Crop right',  min: 0, max: 50, value: p.cropRight,  unit: '%',
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'cropRight',  v); _applyCropToAllImages(); } } });
+
+      const tintColorRow = document.createElement('div');
+      tintColorRow.className = 'flex items-center justify-between gap-3';
+      const tintColorLbl = document.createElement('span');
+      tintColorLbl.className = 'text-sm text-text';
+      tintColorLbl.textContent = 'Tint colour';
+      const tintColorInput = document.createElement('input');
+      tintColorInput.type = 'color';
+      tintColorInput.value = p.tintColor;
+      tintColorInput.className = 'w-8 h-8 rounded cursor-pointer border border-border bg-transparent shrink-0';
+      tintColorInput.addEventListener('input', () => {
+        if (_prefs) { setReaderPref(_prefs, 'tintColor', tintColorInput.value); _applyTint(); }
+      });
+      tintColorRow.appendChild(tintColorLbl);
+      tintColorRow.appendChild(tintColorInput);
+
+      const { row: tintOpRow } = mkSliderRow({ label: 'Tint opacity', min: 0, max: 100, value: p.tintOpacity, unit: '%',
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'tintOpacity', v); _applyTint(); } } });
+
+      const { row: tintBlendRow } = mkSegmentedRow({
+        label: 'Blend mode',
+        options: [
+          { value: 'multiply', label: 'Multiply' },
+          { value: 'screen',   label: 'Screen'   },
+          { value: 'overlay',  label: 'Overlay'  },
+          { value: 'color',    label: 'Colour'   },
+        ],
+        selected: p.tintBlend,
+        onSelect: (v) => { if (_prefs) { setReaderPref(_prefs, 'tintBlend', v); _applyTint(); } },
+      });
+
+      const { row: bgTintRow } = mkToggleRow({ label: 'Tint page background', checked: p.bgTintPage,
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'bgTintPage', v); _applyPresentation(); } } });
+
+      _modalSections.image = mkReaderSection('', bgRow, bgTintRow, brRow, coRow, saRow, gsRow, invRow, ctRow, cbRow, clRow, crRow);
+      _modalSections.tint  = mkReaderSection('', tintColorRow, tintOpRow, tintBlendRow);
+    }
+
+    // ── Tap zones ─────────────────────────────────────────────────────────
+    {
+      const zoneOptions = [
+        { value: 'prev', label: 'Prev' },
+        { value: 'next', label: 'Next' },
+        { value: 'menu', label: 'Menu' },
+        { value: 'none', label: 'None' },
+      ];
+
+      const tzHint = document.createElement('p');
+      tzHint.className = 'text-xs text-danger hidden';
+      tzHint.textContent = 'At least one zone must open the menu.';
+
+      /** Ensure at least one zone stays set to 'menu'; shows hint if blocked. */
+      function _guardZone(key, val, fallbackKey) {
+        if (!_prefs) return;
+        const other1 = key === 'tapLeft'   ? _prefs.tapCenter : _prefs.tapLeft;
+        const other2 = key === 'tapRight'  ? _prefs.tapCenter : _prefs.tapRight;
+        const wouldLockout = val !== 'menu' && other1 !== 'menu' && other2 !== 'menu';
+        if (wouldLockout) {
+          tzHint.classList.remove('hidden');
+          if (key !== 'tapCenter') {
+            if (_prefs) setReaderPref(_prefs, 'tapCenter', 'menu');
+            tzcUpdate('menu');
+          } else {
+            tzcUpdate('menu');
+            return;
+          }
+        } else {
+          tzHint.classList.add('hidden');
+        }
+        setReaderPref(_prefs, key, val);
+      }
+
+      const { row: tzlRow, update: tzlUpdate } = mkSegmentedRow({ label: 'Left zone',   options: zoneOptions, selected: _prefs.tapLeft,
+        onSelect: (v) => _guardZone('tapLeft',   v, 'tapCenter') });
+      const { row: tzcRow, update: tzcUpdate } = mkSegmentedRow({ label: 'Center zone', options: zoneOptions, selected: _prefs.tapCenter,
+        onSelect: (v) => _guardZone('tapCenter', v, 'tapLeft')  });
+      const { row: tzrRow, update: tzrUpdate } = mkSegmentedRow({ label: 'Right zone',  options: zoneOptions, selected: _prefs.tapRight,
+        onSelect: (v) => _guardZone('tapRight',  v, 'tapCenter') });
+
+      _modalSections.controls = mkReaderSection('Tap Zones', tzlRow, tzcRow, tzrRow, tzHint);
+    }
+
+    // ── Dual-scanlator comparison ─────────────────────────────────────────
+    const _alts = data?.scanlator_alternatives ?? [];
+    if (_alts.length > 0) {
+      const _primaryPages  = _pages.slice();
+      const _primaryChId   = chapterId;
+
+      /**
+       * @typedef {{ chId: number, scanlator: string|null, volume: number|null }} AltEntry
+       */
+      /** @type {AltEntry[]} */
+      const _allEntries = [
+        { chId: _primaryChId, scanlator: data?.scanlator ?? null, volume: data?.chapter_number ?? null },
+        ..._alts.map(a => ({ chId: a.chapter_id, scanlator: a.scanlator ?? null, volume: a.volume ?? null })),
+      ];
+
+      /**
+       * Build a human-readable, collision-free label for an entry.
+       * Duplicates the scanlator string (including null→"Unknown") across entries
+       * get a volume suffix, then a numeric ID suffix as a last resort.
+       * @param {AltEntry} entry
+       * @returns {string}
+       */
+      function _scanlatorLabel(entry) {
+        const base = entry.scanlator ?? 'Unknown';
+        const sameBase = _allEntries.filter(e => e.scanlator === entry.scanlator);
+        if (sameBase.length === 1) return base;
+        const sameVol = sameBase.filter(e => e.volume === entry.volume);
+        if (entry.volume != null && sameVol.length === 1) return `${base} (Vol. ${entry.volume})`;
+        return `${base} (#${entry.chId})`;
+      }
+
+      /** @type {Map<number, string[]>} */
+      const _pageCache = new Map([[_primaryChId, _primaryPages]]);
+
+      const { row: selectRow, select: scanlatorSelect } = mkSelectRow({
+        options: _allEntries.map(entry => ({
+          value: String(entry.chId),
+          label: _scanlatorLabel(entry) + (entry.chId === _primaryChId ? ' (current)' : ''),
+        })),
+        selected: String(_primaryChId),
+        onChange: async (val) => {
+          scanlatorSelect.disabled = true;
+          const chId = Number(val);
+          try {
+            if (!_pageCache.has(chId)) {
+              const d = await api.getChapterPages(chId);
+              _pageCache.set(chId, (d?.pages ?? []).map(p => api.getChapterPageUrl(chId, p.index)));
+            }
+            _pages = /** @type {string[]} */ (_pageCache.get(chId)).slice();
+            _currentPage = Math.min(_currentPage, Math.max(0, _pages.length - 1));
+            _renderPages();
+          } catch {
+            const active = [..._pageCache.entries()].find(([, v]) => v === _pages)?.[0] ?? _primaryChId;
+            scanlatorSelect.value = String(active);
+          } finally {
+            scanlatorSelect.disabled = false;
+          }
+        },
+      });
+
+      panelScroll.appendChild(mkAccordionSection('Scanlators', {}, selectRow));
+    }
+
+    // ── Bookmarks ─────────────────────────────────────────────────────────
+    if (_mangaId) {
+      /** @type {Set<number>} */
+      let _bookmarks = new Set();
+
+      const bookmarkStar = mkActionBtn({ label: '☆  Bookmark this page', onClick: async () => {
+        try {
+          const res = await api.toggleBookmark(chapterId, _currentPage);
+          if (res.bookmarked) _bookmarks.add(_currentPage);
+          else _bookmarks.delete(_currentPage);
+          _refreshBookmarkUI();
+        } catch { /* ignore */ }
+      }});
+
+      const bookmarkList = document.createElement('div');
+      bookmarkList.className = 'flex flex-col gap-1';
+
+      function _refreshBookmarkUI() {
+        bookmarkStar.textContent = _bookmarks.has(_currentPage)
+          ? '★  Remove bookmark' : '☆  Bookmark this page';
+        bookmarkList.innerHTML = '';
+        if (_bookmarks.size === 0) {
+          const empty = document.createElement('p');
+          empty.className = 'text-xs text-muted';
+          empty.textContent = 'No bookmarks yet.';
+          bookmarkList.appendChild(empty);
+        } else {
+          const sorted = [..._bookmarks].sort((a, b) => a - b);
+          for (const pg of sorted) {
+            const row = document.createElement('button');
+            row.className = 'text-xs text-left text-text hover:text-accent py-0.5';
+            row.textContent = `Page ${pg + 1}`;
+            row.addEventListener('click', () => {
+              _currentPage = pg; _renderPages(); _closePanel();
+            });
+            bookmarkList.appendChild(row);
+          }
+        }
+      }
+
+      api.getBookmarks(chapterId).then(pages => {
+        _bookmarks = new Set(pages);
+        _refreshBookmarkUI();
+      }).catch(() => {});
+
+      _panelOpenCallbacks.push(_refreshBookmarkUI);
+
+      panelScroll.appendChild(mkAccordionSection('Bookmarks', {}, bookmarkStar, bookmarkList));
+    }
+
+    // ── Per-chapter note ──────────────────────────────────────────────────
+    {
+      const noteArea = document.createElement('textarea');
+      noteArea.className = 'w-full text-sm bg-surface-2 border border-border rounded-md px-2 py-1.5 resize-none outline-none focus:border-accent';
+      noteArea.rows = 3;
+      noteArea.placeholder = 'Add a note for this chapter…';
+
+      const _saveNote = debounce(
+        () => api.setChapterNote(chapterId, noteArea.value).catch(() => {}),
+        1000,
+      );
+      noteArea.addEventListener('input', _saveNote);
+      // Flush immediately on destroy so a note typed within the debounce window isn't lost.
+      _cleanup.push(() => {
+        _saveNote.cancel();
+        if (noteArea.value) api.setChapterNote(chapterId, noteArea.value).catch(() => {});
+      });
+
+      api.getChapterNote(chapterId).then(res => {
+        if (res?.note) noteArea.value = res.note;
+      }).catch(() => {});
+
+      panelScroll.appendChild(mkAccordionSection('Chapter Note', {}, noteArea));
+    }
+
+    panelScroll.appendChild(_displayAccordion);
+
+    const { row: overlayRow } = mkToggleRow({
+      label: 'Page number overlay',
+      checked: _prefs.pageOverlay,
+      onChange: (v) => {
+        if (_prefs) { setReaderPref(_prefs, 'pageOverlay', v); _updatePageOverlay(); }
+      },
+    });
+
+    const { row: ssSpeedRow } = mkSliderRow({
+      label: 'Slideshow speed', min: 3, max: 30, value: _prefs.slideshowInterval, unit: 's',
+      onChange: (v) => { if (_prefs) setReaderPref(_prefs, 'slideshowInterval', v); },
+    });
+    const ssBtn = mkActionBtn({
+      label: _slideshowActive ? 'Stop slideshow' : 'Start slideshow',
+      onClick: () => {
+        if (_slideshowActive) {
+          _slideshowStop();
+        } else {
+          _slideshowPlay();
+          _closeSettingsModal();
+          _closePanel();
+        }
+      },
+    });
+    _ssPlayBtn = ssBtn;
+
+    const { row: sleepRow } = mkSliderRow({
+      label: 'Sleep after (0 = off)', min: 0, max: 60, value: _prefs.inactivityTimeout, unit: 'min',
+      onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'inactivityTimeout', v); _resetInactivity(); } },
+    });
+
+    const statsDiv = document.createElement('div');
+    statsDiv.className = 'flex flex-col gap-1';
+    const etaLine = document.createElement('div');
+    etaLine.className = 'flex items-center justify-between';
+    const etaLbl = document.createElement('span');
+    etaLbl.className = 'text-xs text-muted';
+    etaLbl.textContent = 'ETA';
+    const etaVal = document.createElement('span');
+    etaVal.className = 'text-xs text-text tabular-nums';
+    etaVal.textContent = '—';
+    etaLine.appendChild(etaLbl);
+    etaLine.appendChild(etaVal);
+    const paceLine = document.createElement('div');
+    paceLine.className = 'flex items-center justify-between';
+    const paceLbl = document.createElement('span');
+    paceLbl.className = 'text-xs text-muted';
+    paceLbl.textContent = 'Pace';
+    const paceVal = document.createElement('span');
+    paceVal.className = 'text-xs text-text tabular-nums';
+    paceVal.textContent = '—';
+    paceLine.appendChild(paceLbl);
+    paceLine.appendChild(paceVal);
+    statsDiv.appendChild(etaLine);
+    statsDiv.appendChild(paceLine);
+
+    const _updateStats = () => {
+      const eta  = _etaText();
+      const rate = _ppm();
+      etaVal.textContent  = eta  ?? '—';
+      paceVal.textContent = rate ? `${rate.toFixed(1)} p/min` : '—';
+    };
+    _modalOpenCallbacks.push(_updateStats);
+
+    _modalSections.reading = mkReaderSection('', overlayRow, ssBtn, ssSpeedRow, sleepRow, statsDiv);
+
+    // ── Settings modal ────────────────────────────────────────────────────────
+
+    /** @type {HTMLElement|null} */
+    let _settingsModalEl = null;
+
+    /**
+     * Open the reader settings modal, optionally jumping to a tab.
+     * Built lazily on first call; subsequent calls just show the cached shell.
+     * @param {string} [defaultTab]
+     */
+    function _openSettingsModal(defaultTab = 'layout') {
+      if (_settingsModalEl) {
+        _settingsModalEl.style.display = '';
+        activateTab(defaultTab);
+        for (const fn of _modalOpenCallbacks) fn();
+        return;
+      }
+
+      const overlay = document.createElement('div');
+      overlay.className = 'fixed inset-0 flex items-center justify-center p-3 sm:p-6 bg-scrim z-modal';
+      overlay.style.zIndex = 'var(--z-modal, 9999)';
+
+      const card = document.createElement('div');
+      card.className = 'bg-surface rounded-xl shadow-lg flex flex-col w-full max-w-2xl max-h-[90vh] min-h-0';
+      card.addEventListener('click', e => e.stopPropagation());
+
+      const header = document.createElement('div');
+      header.className = 'flex items-center justify-between px-5 py-4 border-b border-border shrink-0';
+      const htitle = document.createElement('h2');
+      htitle.className = 'text-base font-semibold text-text';
+      htitle.textContent = 'Reader Settings';
+      const hclose = document.createElement('button');
+      hclose.className = 'btn-icon';
+      hclose.setAttribute('aria-label', 'Close settings');
+      hclose.innerHTML = iconX;
+      hclose.addEventListener('click', _closeSettingsModal);
+      header.appendChild(htitle);
+      header.appendChild(hclose);
+
+      const tabStrip = document.createElement('div');
+      tabStrip.className = 'shrink-0';
+
+      const body = document.createElement('div');
+      body.className = 'flex-1 overflow-y-auto min-h-0 p-4 flex flex-col gap-3';
+
+      card.appendChild(header);
+      card.appendChild(tabStrip);
+      card.appendChild(body);
+      overlay.appendChild(card);
+      _settingsModalEl = overlay;
+
+      // ── Layout tab ─────────────────────────────────────────────────────────
+      const layoutSection = document.createElement('div');
+      layoutSection.className = 'flex flex-col gap-3';
+
+      const { row: smRow } = mkToggleRow({
+        label: 'Smooth scroll',
+        checked: _prefs.smoothScroll,
+        onChange: (v) => {
+          _smoothScroll = v; smoothInput.checked = v;
+          if (_prefs) setReaderPref(_prefs, 'smoothScroll', v);
+          if (_mode === 'scroll' || _mode === 'webtoon') _renderPages();
+        },
+      });
+
+      const { row: dpRow } = mkToggleRow({
+        label: 'Double page',
+        checked: _prefs.doublePage,
+        onChange: (v) => {
+          _doublePage = v; doubleInput.checked = v;
+          if (_prefs) setReaderPref(_prefs, 'doublePage', v);
+          _applyDoublePageVisibility(); _renderPages();
+        },
+      });
+
+      const { row: asRow } = mkToggleRow({
+        label: 'Auto-combine spreads',
+        checked: _prefs.autoSpread,
+        onChange: (v) => {
+          _autoSpread = v; spreadInput.checked = v;
+          if (_prefs) setReaderPref(_prefs, 'autoSpread', v);
+          _renderPages();
+        },
+      });
+
+      const { row: soRow } = mkToggleRow({
+        label: 'Pair from first page',
+        checked: _prefs.spreadOffset ?? false,
+        onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'spreadOffset', v); _renderPages(); } },
+      });
+
+      layoutSection.appendChild(smRow);
+      layoutSection.appendChild(dpRow);
+      layoutSection.appendChild(asRow);
+      layoutSection.appendChild(soRow);
+
+      const shortcutsEl = document.createElement('div');
+      shortcutsEl.className = 'flex flex-col gap-1 border-t border-border pt-3 mt-1';
+      const scTitle = document.createElement('p');
+      scTitle.className = 'text-xs font-medium text-muted uppercase tracking-wide mb-1';
+      scTitle.textContent = 'Keyboard Shortcuts  (F1 = this modal)';
+      shortcutsEl.appendChild(scTitle);
+      for (const entry of getShortcuts('reader')) {
+        const scRow = document.createElement('div');
+        scRow.className = 'flex items-center justify-between gap-4';
+        const sdesc = document.createElement('span');
+        sdesc.className = 'text-xs text-muted';
+        sdesc.textContent = entry.description;
+        const skbd = document.createElement('kbd');
+        skbd.className = 'text-xs bg-surface-2 border border-border rounded px-1.5 py-0.5 font-mono shrink-0';
+        skbd.textContent = entry.key;
+        scRow.appendChild(sdesc);
+        scRow.appendChild(skbd);
+        shortcutsEl.appendChild(scRow);
+      }
+      _modalSections.controls?.appendChild(shortcutsEl);
+
+      const TABS = [
+        { id: 'layout',     name: 'Layout',     section: layoutSection },
+        { id: 'image',      name: 'Image',       section: _modalSections.image },
+        { id: 'tint',       name: 'Page Tint',   section: _modalSections.tint },
+        { id: 'navigation', name: 'Navigation',  section: _modalSections.navigation },
+        { id: 'controls',   name: 'Controls',    section: _modalSections.controls },
+        { id: 'reading',    name: 'Reading',      section: _modalSections.reading },
+      ].filter(t => t.section);
+
+      for (const tab of TABS) {
+        tab.section.style.display = 'none';
+        body.appendChild(tab.section);
+      }
+
+      const { update: updateTabs } = renderTabs(tabStrip, {
+        tabs: TABS.map(t => ({ id: t.id, name: t.name })),
+        activeId: defaultTab,
+        onSelect: activateTab,
+        variant: 'underline',
+      });
+
+      function activateTab(/** @type {string} */ id) {
+        for (const t of TABS) t.section.style.display = t.id === id ? '' : 'none';
+        updateTabs(id);
+      }
+      activateTab(defaultTab);
+
+      document.body.appendChild(overlay);
+
+      overlay.addEventListener('click', _closeSettingsModal);
+
+      const _onModalKey = (/** @type {KeyboardEvent} */ e) => {
+        if (e.key === 'Escape') _closeSettingsModal();
+      };
+      document.addEventListener('keydown', _onModalKey);
+      _cleanup.push(() => {
+        document.removeEventListener('keydown', _onModalKey);
+        _settingsModalEl?.remove();
+      });
+
+      for (const fn of _modalOpenCallbacks) fn();
+    }
+
+    function _closeSettingsModal() {
+      if (_settingsModalEl) _settingsModalEl.style.display = 'none';
+    }
+
+    settingsBtn?.addEventListener('click', () => { _closePanel(); _openSettingsModal(); });
+    setF1Override(() => _openSettingsModal('controls'));
+    _cleanup.push(() => setF1Override(null));
+
+    _resetInactivity();
 
     if (data?.last_page_read != null) {
       _currentPage = data.last_page_read;
     }
     if (_currentPage === -1) _currentPage = _pages.length - 1;
+
+    // ?page= query param overrides the server-stored last_page_read (used by chapter navigation).
+    const _qp = new URLSearchParams(location.search);
+    const _qpPage = parseInt(_qp.get('page') ?? '', 10);
+    if (!isNaN(_qpPage) && _qpPage >= 0) _currentPage = _qpPage;
+
     _currentPage = Math.max(0, Math.min(Math.max(_pages.length - 1, 0), _currentPage));
 
     if (data?.chapter_title) {
       titleMobile.textContent = data.chapter_title;
-      sideTitle.textContent   = data.chapter_title;
       document.title = data.chapter_title + ' - Kani';
+
+      sideTitle.textContent = '';
+      const headerRow = document.createElement('div');
+      headerRow.className = 'flex items-center gap-1.5 min-w-0';
+      const titleLine = document.createElement('span');
+      titleLine.className = 'text-sm font-medium text-text truncate';
+      titleLine.textContent = data.chapter_title;
+      headerRow.appendChild(titleLine);
+      sideTitle.appendChild(headerRow);
+      const meta = [data.source_name, data.scanlator].filter(Boolean).join(' · ');
+      if (meta) {
+        const metaLine = document.createElement('span');
+        metaLine.className = 'block text-xs text-muted truncate';
+        metaLine.textContent = meta;
+        sideTitle.appendChild(metaLine);
+      }
     }
 
     if (data?.prev_chapter_id) {
@@ -1359,15 +2704,11 @@ export async function init(container, { id }) {
     pagesEl.innerHTML = '<div class="flex items-center justify-center min-h-full"><p class="text-danger text-sm">Failed to load chapter pages.</p></div>';
   }
 
-  _applyModeButtons();
-  _applyDirButtons();
-  _applyFitButtons();
   _applyDoublePageVisibility();
   _renderPages();
   if (_pendingBarsVisible) _showBars();
   pagesEl.focus();
 
-  // Download-ahead: after a 1s delay, silently queue the next N chapters
   if (getLocal('kani_download_ahead_enabled') === 'true' && _chapterInfo.next_chapter_id) {
     const aheadCount = Math.max(1, Math.min(10, parseInt(getLocal('kani_download_ahead_count') || '3', 10)));
     const _downloadAheadTimer = setTimeout(async () => {
@@ -1376,7 +2717,6 @@ export async function init(container, { id }) {
         try {
           await api.downloadChapter(nextId);
         } catch { /* already downloading/downloaded — ignore */ }
-        // Walk forward: get next chapter's manifest for its next_chapter_id
         if (i < aheadCount - 1) {
           try {
             const nextManifest = await api.getChapterPages(nextId);
@@ -1391,6 +2731,7 @@ export async function init(container, { id }) {
   }
 
   _destroyFn = () => {
+    if (_prefs) cancelReaderPrefsSync(_prefs);
     if (_hideTimer) clearTimeout(_hideTimer);
     if (_currentPage !== _lastReportedPage) {
       api.setChapterProgress(chapterId, _currentPage).catch(() => {});

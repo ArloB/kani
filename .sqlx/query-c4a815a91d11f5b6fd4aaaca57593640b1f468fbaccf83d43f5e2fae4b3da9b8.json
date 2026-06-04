@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT status, score,\n                   tracking_enabled as \"tracking_enabled: bool\",\n                   COALESCE(notify_new_chapters, TRUE) as \"notify_new_chapters: bool\",\n                   COALESCE(reading_direction, 'rtl') as \"reading_direction: String\"\n            FROM user_manga_tracking\n            WHERE user_id = ? AND manga_id = ?\n            ",
+  "query": "\n            SELECT status, score,\n                   tracking_enabled as \"tracking_enabled: bool\",\n                   COALESCE(notify_new_chapters, TRUE) as \"notify_new_chapters: bool\",\n                   COALESCE(reading_direction, 'rtl') as \"reading_direction: String\",\n                   reader_prefs\n            FROM user_manga_tracking\n            WHERE user_id = ? AND manga_id = ?\n            ",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,11 @@
         "name": "reading_direction: String",
         "ordinal": 4,
         "type_info": "Null"
+      },
+      {
+        "name": "reader_prefs",
+        "ordinal": 5,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -37,8 +42,9 @@
       true,
       false,
       null,
-      null
+      null,
+      true
     ]
   },
-  "hash": "668e641049648873074fab74959584ca3917b5adb71d595bb89e2024adf83843"
+  "hash": "c4a815a91d11f5b6fd4aaaca57593640b1f468fbaccf83d43f5e2fae4b3da9b8"
 }

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ucn.chapter_id as \"id: i64\"\n               FROM user_chapter_notes ucn\n               JOIN chapters c ON c.id = ucn.chapter_id\n               WHERE ucn.user_id = ? AND c.manga_id = ? AND ucn.note != ''",
+  "describe": {
+    "columns": [
+      {
+        "name": "id: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1e412dd9ad3fde8f4fc9782c23c661dd6a86be45d0a988517149dbb6675aed0d"
+}

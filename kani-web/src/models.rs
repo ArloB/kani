@@ -344,6 +344,22 @@ pub struct SetMangaTrackingRequest {
     pub tracking_enabled: Option<bool>,
     pub notify_new_chapters: Option<bool>,
     pub reading_direction: Option<String>,
+    pub reader_prefs: Option<String>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ToggleBookmarkRequest {
+    pub page_index: i64,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct SetChapterNoteRequest {
+    pub note: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct PaceQuery {
+    pub period: Option<i32>,
 }
 
 #[derive(serde::Deserialize, Debug)]

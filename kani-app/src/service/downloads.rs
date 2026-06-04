@@ -129,9 +129,9 @@ impl AppService {
     }
 
     pub async fn delete_downloaded(&self, chapter_id: i64) -> Result<()> {
-        let (cbz_path, ..) = self.chapter_cbz_path(chapter_id).await?;
+        let info = self.chapter_cbz_path(chapter_id).await?;
 
-        if let Err(e) = tokio::fs::remove_file(&cbz_path).await {
+        if let Err(e) = tokio::fs::remove_file(&info.path).await {
             tracing::error!("Failed to remove chapter file: {}", e);
         }
 

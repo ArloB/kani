@@ -1180,3 +1180,51 @@ export async function getMangaWebhookNotify(mangaId) {
 export async function setMangaWebhookNotify(mangaId, enabled) {
   return _req('PUT', `/manga/${mangaId}/webhook-notify`, { body: { enabled } });
 }
+
+// ── Bookmarks (#14) ───────────────────────────────────────────────────────────
+
+/** @param {number} chapterId @returns {Promise<number[]>} */
+export async function getBookmarks(chapterId) {
+  return _req('GET', `/chapter/${chapterId}/bookmarks`);
+}
+
+/** @param {number} chapterId @param {number} pageIndex @returns {Promise<{bookmarked:boolean}>} */
+export async function toggleBookmark(chapterId, pageIndex) {
+  return _req('POST', `/chapter/${chapterId}/bookmarks`, { body: { page_index: pageIndex } });
+}
+
+// ── Per-chapter notes (#31) ───────────────────────────────────────────────────
+
+/**
+ * Returns chapter notes for a manga: `{ notes: [{chapter_id, chapter_number, note}] }`.
+ * The chapter ID set for indicator display can be derived from the result.
+ * @param {number} mangaId
+ * @returns {Promise<{notes: Array<{chapter_id:number,chapter_number:number,note:string}>}>}
+ */
+export async function getMangaChapterNotes(mangaId) {
+  return _req('GET', `/manga/${mangaId}/chapter-notes`);
+}
+
+/** @deprecated Use getMangaChapterNotes instead; kept for callers that only need IDs.
+ * @param {number} mangaId @returns {Promise<number[]>} */
+export async function getNotedChapterIds(mangaId) {
+  const res = await getMangaChapterNotes(mangaId);
+  return (res?.notes ?? []).map((/** @type {{chapter_id:number}} */ n) => n.chapter_id);
+}
+
+/** @param {number} chapterId @returns {Promise<{note:string|null}>} */
+export async function getChapterNote(chapterId) {
+  return _req('GET', `/chapter/${chapterId}/note`);
+}
+
+/** @param {number} chapterId @param {string} note */
+export async function setChapterNote(chapterId, note) {
+  return _req('PUT', `/chapter/${chapterId}/note`, { body: { note } });
+}
+
+// ── Reading-pace history (#34) ────────────────────────────────────────────────
+
+/** @param {number} [period] */
+export async function getReadingPace(period = 90) {
+  return _req('GET', '/stats/pace', { params: { period } });
+}

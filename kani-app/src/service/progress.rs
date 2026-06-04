@@ -171,6 +171,27 @@ impl AppService {
         Ok(())
     }
 
+    pub async fn set_reader_prefs(&self, user_id: i64, manga_id: i64, prefs: &str) -> Result<()> {
+        // Reject anything that isn't a JSON object so the column stays well-formed.
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(prefs).map_err(
+            |_| crate::error::ServiceError::Validation("reader_prefs must be a JSON object".into()),
+        )?;
+        sqlx::query!(
+            r#"
+            INSERT INTO user_manga_tracking (user_id, manga_id, reader_prefs)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT (user_id, manga_id) DO UPDATE SET
+                reader_prefs = excluded.reader_prefs
+            "#,
+            user_id,
+            manga_id,
+            prefs
+        )
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
     pub async fn get_manga_tracking(
         &self,
         user_id: i64,
@@ -181,7 +202,8 @@ impl AppService {
             SELECT status, score,
                    tracking_enabled as "tracking_enabled: bool",
                    COALESCE(notify_new_chapters, TRUE) as "notify_new_chapters: bool",
-                   COALESCE(reading_direction, 'rtl') as "reading_direction: String"
+                   COALESCE(reading_direction, 'rtl') as "reading_direction: String",
+                   reader_prefs
             FROM user_manga_tracking
             WHERE user_id = ? AND manga_id = ?
             "#,
@@ -213,7 +235,7 @@ impl AppService {
         .fetch_one(&self.db)
         .await?;
 
-        let (status, score, tracking_enabled, notify_new_chapters, reading_direction) =
+        let (status, score, tracking_enabled, notify_new_chapters, reading_direction, reader_prefs) =
             match tracking {
                 Some(row) => {
                     let status = match row.status {
@@ -231,11 +253,12 @@ impl AppService {
                         row.tracking_enabled,
                         row.notify_new_chapters.unwrap_or(true),
                         row.reading_direction,
+                        row.reader_prefs,
                     )
                 }
                 None => {
                     let default = self.settings.read().await.default_tracking_enabled;
-                    (None, None, default, true, None)
+                    (None, None, default, true, None, None)
                 }
             };
 
@@ -247,6 +270,7 @@ impl AppService {
             tracking_enabled,
             notify_new_chapters,
             reading_direction: reading_direction.unwrap_or_else(|| "rtl".to_string()),
+            reader_prefs,
         })
     }
 
@@ -387,5 +411,118 @@ impl AppService {
         .fetch_all(&self.db)
         .await?;
         Ok(ids)
+    }
+
+    // ── Bookmarks (#14) ───────────────────────────────────────────────────────
+
+    pub async fn get_bookmarks(&self, user_id: i64, chapter_id: i64) -> Result<Vec<i64>> {
+        let pages = sqlx::query_scalar!(
+            r#"SELECT page_index as "page_index: i64" FROM user_page_bookmarks
+               WHERE user_id = ? AND chapter_id = ?
+               ORDER BY page_index"#,
+            user_id,
+            chapter_id,
+        )
+        .fetch_all(&self.db)
+        .await?;
+        Ok(pages)
+    }
+
+    pub async fn toggle_bookmark(
+        &self,
+        user_id: i64,
+        chapter_id: i64,
+        page_index: i64,
+    ) -> Result<bool> {
+        let deleted = sqlx::query!(
+            "DELETE FROM user_page_bookmarks WHERE user_id = ? AND chapter_id = ? AND page_index = ?",
+            user_id, chapter_id, page_index,
+        )
+        .execute(&self.db)
+        .await?
+        .rows_affected();
+
+        if deleted > 0 {
+            return Ok(false);
+        }
+
+        sqlx::query!(
+            "INSERT INTO user_page_bookmarks (user_id, chapter_id, page_index) VALUES (?, ?, ?)",
+            user_id,
+            chapter_id,
+            page_index,
+        )
+        .execute(&self.db)
+        .await?;
+        Ok(true)
+    }
+
+    // ── Per-chapter notes (#31) ────────────────────────────────────────────────
+
+    pub async fn get_chapter_note(&self, user_id: i64, chapter_id: i64) -> Result<Option<String>> {
+        let note = sqlx::query_scalar!(
+            r#"SELECT note FROM user_chapter_notes WHERE user_id = ? AND chapter_id = ?"#,
+            user_id,
+            chapter_id,
+        )
+        .fetch_optional(&self.db)
+        .await?;
+        Ok(note)
+    }
+
+    /// Returns chapter IDs that have a non-empty note for this user + manga.
+    pub async fn get_noted_chapter_ids(&self, user_id: i64, manga_id: i64) -> Result<Vec<i64>> {
+        let ids = sqlx::query_scalar!(
+            r#"SELECT ucn.chapter_id as "id: i64"
+               FROM user_chapter_notes ucn
+               JOIN chapters c ON c.id = ucn.chapter_id
+               WHERE ucn.user_id = ? AND c.manga_id = ? AND ucn.note != ''"#,
+            user_id,
+            manga_id,
+        )
+        .fetch_all(&self.db)
+        .await?;
+        Ok(ids)
+    }
+
+    /// Returns chapter notes with text for a given user + manga, ordered by chapter number.
+    pub async fn get_manga_chapter_notes_with_text(
+        &self,
+        user_id: i64,
+        manga_id: i64,
+    ) -> Result<Vec<(i64, f64, String)>> {
+        let rows = sqlx::query!(
+            r#"SELECT ucn.chapter_id as "chapter_id: i64",
+                      c.chapter_number as "chapter_number: f64",
+                      ucn.note
+               FROM user_chapter_notes ucn
+               JOIN chapters c ON c.id = ucn.chapter_id
+               WHERE ucn.user_id = ? AND c.manga_id = ? AND ucn.note != ''
+               ORDER BY c.chapter_number ASC"#,
+            user_id,
+            manga_id,
+        )
+        .fetch_all(&self.db)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.chapter_id, r.chapter_number, r.note))
+            .collect())
+    }
+
+    pub async fn set_chapter_note(&self, user_id: i64, chapter_id: i64, note: &str) -> Result<()> {
+        sqlx::query!(
+            r#"INSERT INTO user_chapter_notes (user_id, chapter_id, note, updated_at)
+               VALUES (?, ?, ?, datetime('now'))
+               ON CONFLICT (user_id, chapter_id) DO UPDATE SET
+                   note = excluded.note,
+                   updated_at = excluded.updated_at"#,
+            user_id,
+            chapter_id,
+            note,
+        )
+        .execute(&self.db)
+        .await?;
+        Ok(())
     }
 }

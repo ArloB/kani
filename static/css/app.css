@@ -1173,3 +1173,12 @@
   .seg-unloaded { background: var(--color-reader-seg-unloaded); }
   .text-on-accent { color: var(--color-on-accent); }
 }
+
+@media (prefers-reduced-motion: no-preference) {
+  .reader-cp-track { transition: transform var(--motion-base) ease; }
+}
+
+/* ── Spinner-free number inputs (used in reader slider rows) ──────────────── */
+.no-spinners::-webkit-inner-spin-button,
+.no-spinners::-webkit-outer-spin-button { display: none; }
+.no-spinners { -moz-appearance: textfield; appearance: textfield; }

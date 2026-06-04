@@ -274,9 +274,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/manga/{id}", get(get_manga).delete(delete_manga))
         .route(
             "/manga/{id}/cover",
-            get(serve_manga_cover)
-                .post(upload_manga_cover_handler)
-                .delete(clear_manga_cover_handler),
+            post(upload_manga_cover_handler).delete(clear_manga_cover_handler),
         )
         .route("/manga/{id}/details", get(get_local_manga_details))
         .route("/manga/{id}/chapters", get(get_local_chapters))
@@ -344,8 +342,19 @@ pub fn routes(state: AppState) -> Router {
         .route("/chapter/{id}/delete", delete(delete_downloaded))
         .route("/chapter/{id}/cancel", post(cancel_download))
         .route("/chapter/{id}/pages", get(get_chapter_page_manifest))
-        .route("/chapter/{id}/page/{page_num}", get(serve_chapter_page))
         .route("/chapter/{id}/progress", put(set_chapter_progress_handler))
+        .route(
+            "/chapter/{id}/bookmarks",
+            get(get_bookmarks_handler).post(toggle_bookmark_handler),
+        )
+        .route(
+            "/chapter/{id}/note",
+            get(get_chapter_note_handler).put(set_chapter_note_handler),
+        )
+        .route(
+            "/manga/{id}/chapter-notes",
+            get(get_manga_chapter_notes_handler),
+        )
         .route(
             "/chapters/read_status",
             put(set_chapter_read_status_handler),
@@ -433,6 +442,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/admin/audit-log", get(admin_audit_log))
         .route("/admin/audit-log/download", get(admin_audit_log_download))
         .route("/stats", get(reading_stats))
+        .route("/stats/pace", get(reading_pace_handler))
         .route("/downloads/active", delete(cancel_all_global_downloads))
         .route("/chapters/{id}/cbz", get(serve_chapter_cbz))
         .route("/chapters/{id}/export/epub", get(export_epub))
@@ -458,12 +468,14 @@ pub fn routes(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(MAX_WASM_BYTES))
 }
 
-/// Mounts only the image proxy route. Intended to be layered with a more
-/// permissive rate limiter than the main REST API, since the reader fires
-/// many concurrent image requests.
+/// Mounts image-serving routes under the permissive rate limiter. The reader
+/// fires many concurrent requests for page images and proxy images; these must
+/// not share a bucket with the JSON API.
 pub fn image_proxy_route(state: AppState) -> Router {
     Router::new()
         .route("/image_proxy", get(image_proxy))
+        .route("/chapter/{id}/page/{page_num}", get(serve_chapter_page))
+        .route("/manga/{id}/cover", get(serve_manga_cover))
         .with_state(state)
 }
 
@@ -2832,9 +2844,9 @@ async fn serve_chapter_page(
 ) -> Result<impl IntoResponse, AppError> {
     // Resolve the path first so we can derive an ETag from the CBZ mtime.
     // This avoids reading image bytes on cache hits.
-    let (cbz_path, ..) = state.chapter_cbz_path(id).await?;
+    let info = state.chapter_cbz_path(id).await?;
 
-    let mtime = tokio::fs::metadata(&cbz_path)
+    let mtime = tokio::fs::metadata(&info.path)
         .await
         .map(|m| {
             m.modified()
@@ -3173,6 +3185,12 @@ async fn set_manga_tracking_handler(
         if dir == "rtl" || dir == "ltr" {
             state.set_reading_direction(user.id, manga_id, &dir).await?;
         }
+    }
+    if let Some(prefs) = body.reader_prefs {
+        state
+            .set_reader_prefs(user.id, manga_id, &prefs)
+            .await
+            .map_err(|_| AppError::ValidationError("reader_prefs must be a JSON object".into()))?;
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -4052,6 +4070,81 @@ async fn reading_stats(
     Ok(Json((*stats).clone()))
 }
 
+// ── Bookmarks (#14) ───────────────────────────────────────────────────────────
+
+async fn get_bookmarks_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    Path(chapter_id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    let pages = state.get_bookmarks(user.id, chapter_id).await?;
+    Ok(Json(pages))
+}
+
+async fn toggle_bookmark_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    Path(chapter_id): Path<i64>,
+    Json(body): Json<crate::models::ToggleBookmarkRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let bookmarked = state
+        .toggle_bookmark(user.id, chapter_id, body.page_index)
+        .await?;
+    Ok(Json(json!({ "bookmarked": bookmarked })))
+}
+
+// ── Per-chapter notes (#31) ───────────────────────────────────────────────────
+
+async fn get_manga_chapter_notes_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    Path(manga_id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    let notes = state
+        .get_manga_chapter_notes_with_text(user.id, manga_id)
+        .await?;
+    let items: Vec<_> = notes
+        .into_iter()
+        .map(|(chapter_id, chapter_number, note)| {
+            json!({ "chapter_id": chapter_id, "chapter_number": chapter_number, "note": note })
+        })
+        .collect();
+    Ok(Json(json!({ "notes": items })))
+}
+
+async fn get_chapter_note_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    Path(chapter_id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    let note = state.get_chapter_note(user.id, chapter_id).await?;
+    Ok(Json(json!({ "note": note })))
+}
+
+async fn set_chapter_note_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    Path(chapter_id): Path<i64>,
+    Json(body): Json<crate::models::SetChapterNoteRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    state
+        .set_chapter_note(user.id, chapter_id, &body.note)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Reading-pace history (#34) ────────────────────────────────────────────────
+
+async fn reading_pace_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    Query(q): Query<crate::models::PaceQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let period = q.period.unwrap_or(90);
+    let rows = state.get_reading_pace(user.id, period).await?;
+    Ok(Json(rows))
+}
+
 // ── Backup / Restore ─────────────────────────────────────────────────────────
 
 async fn library_backup(
@@ -4420,11 +4513,11 @@ async fn serve_chapter_cbz(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let (cbz_path, chapter_title, ..) = state.chapter_cbz_path(id).await?;
-    let bytes = tokio::fs::read(&cbz_path)
+    let info = state.chapter_cbz_path(id).await?;
+    let bytes = tokio::fs::read(&info.path)
         .await
         .map_err(|_| AppError::NotFound(format!("Chapter {id} CBZ not found")))?;
-    let safe_name = chapter_title.replace(['/', '\\', '"'], "_");
+    let safe_name = info.chapter_title.replace(['/', '\\', '"'], "_");
     let disposition = format!("attachment; filename=\"{safe_name}.cbz\"");
     Ok((
         StatusCode::OK,

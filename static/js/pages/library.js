@@ -790,6 +790,7 @@ function _fetchLibrary() {
     finishLoading();
     _paginEl.innerHTML = '';
     if (!isAppend) {
+      _gridEl.classList.remove('opacity-50', 'pointer-events-none');
       _gridEl.innerHTML = '';
       _gridEl.appendChild(createErrorState({
         message: 'Failed to load library.',

@@ -37,6 +37,7 @@ function chartColor(varName, alpha = 1) {
 const WIDGETS = [
   summaryWidget(),
   dailyActivityWidget(),
+  readingPaceWidget(),
   topMangaWidget(),
   genreBreakdownWidget(),
 ];
@@ -180,6 +181,74 @@ function summaryWidget() {
         ${data.longest_streak ? `<p class="text-sm text-text-muted mt-2">Longest streak: <span class="font-medium text-text">${data.longest_streak}d</span></p>` : ''}
       `;
       return { destroy() { container.innerHTML = ''; } };
+    },
+  };
+}
+
+// ── Widget: Reading-pace line chart (#34) ─────────────────────────────────────
+
+function readingPaceWidget() {
+  /** @type {any} */ let _chart = null;
+
+  return {
+    id: 'reading_pace',
+    /** @param {HTMLElement} container @param {any} data */
+    render(container, data) {
+      const rows = data.reading_pace ?? [];
+      if (!rows.length) {
+        container.innerHTML = `<div class="card p-4 text-text-muted text-sm">No reading activity in selected period.</div>`;
+        return { destroy() { container.innerHTML = ''; } };
+      }
+
+      container.innerHTML = `
+        <div class="card p-4">
+          <h2 class="text-base font-semibold mb-4">Pages per Day</h2>
+          <div class="relative h-48">
+            <canvas id="chart-pace" class="w-full h-full"></canvas>
+          </div>
+        </div>
+      `;
+
+      const canvas = /** @type {HTMLCanvasElement} */ (container.querySelector('#chart-pace'));
+
+      _loadChartJs().then(Chart => {
+        if (!canvas.isConnected) return;
+        _chart = new Chart(canvas.getContext('2d'), {
+          type: 'line',
+          data: {
+            labels: rows.map((r) => r.date),
+            datasets: [{
+              label: 'Pages',
+              data: rows.map((r) => r.pages),
+              backgroundColor: chartColor('--chart-2', 0.15),
+              borderColor: chartColor('--chart-2', 0.9),
+              borderWidth: 2,
+              fill: true,
+              tension: 0.3,
+              pointRadius: 2,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { maxTicksLimit: 8, color: cssVar('--color-text-muted') }, grid: { display: false } },
+              y: { beginAtZero: true, ticks: { precision: 0, color: cssVar('--color-text-muted') } },
+            },
+          },
+        });
+      }).catch(() => {
+        container.innerHTML = `<div class="card p-4 text-sm text-text-muted">Chart.js not available. Run <code>kani-cli setup</code> to download vendor files.</div>`;
+      });
+
+      return {
+        destroy() {
+          _chart?.destroy();
+          _chart = null;
+          container.innerHTML = '';
+        },
+      };
     },
   };
 }

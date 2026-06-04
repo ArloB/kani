@@ -1,7 +1,7 @@
 // @ts-check
 // Global keyboard shortcut manager.
 // Scoped registrations (e.g. 'reader') are unregistered when the page destroys.
-// '?' always opens a cheatsheet of currently active shortcuts.
+// F1 opens a cheatsheet of currently active shortcuts (or triggers a registered override).
 
 /**
  * @typedef {{ key: string, description: string }} ShortcutEntry
@@ -12,6 +12,8 @@
 const _registry = new Map();
 /** @type {Map<string, (e: KeyboardEvent) => void>} — scope → handler fn */
 const _handlers = new Map();
+/** Optional override for the F1 help shortcut (e.g. opens a page-specific settings modal). */
+let _f1Override = /** @type {(() => void)|null} */ (null);
 
 let _globalListenerAttached = false;
 
@@ -21,8 +23,10 @@ function _onKeyDown(/** @type {KeyboardEvent} */ e) {
   if (/** @type {HTMLElement} */ (e.target)?.isContentEditable) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-  if (e.key === '?') {
+  if (e.key === 'F1') {
     e.preventDefault();
+    // If an override is registered (e.g. the reader's settings modal), call it instead.
+    if (_f1Override) { _f1Override(); return; }
     _showCheatsheet();
     return;
   }
@@ -73,6 +77,25 @@ export function registerShortcuts(scope, shortcuts) {
     _registry.delete(scope);
     _handlers.delete(scope);
   };
+}
+
+/**
+ * Returns the registered shortcut entries for a scope (or all if omitted).
+ * @param {string} [scope]
+ * @returns {ShortcutEntry[]}
+ */
+/**
+ * Register a function to call instead of the default F1 cheatsheet.
+ * Pass null to restore default behaviour.
+ * @param {(() => void)|null} fn
+ */
+export function setF1Override(fn) { _f1Override = fn; }
+
+export function getShortcuts(scope) {
+  if (scope) return _registry.get(scope) ?? [];
+  const all = [];
+  for (const entries of _registry.values()) all.push(...entries);
+  return all;
 }
 
 function _showCheatsheet() {

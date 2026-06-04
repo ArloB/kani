@@ -130,13 +130,10 @@ impl AppService {
         chapter_id: i64,
         profile: DeviceProfile,
     ) -> Result<(Vec<u8>, String)> {
-        let (cbz_path, chapter_title, manga_id, _) = self.chapter_cbz_path(chapter_id).await?;
-
-        let manga_name = sqlx::query_scalar!("SELECT name FROM manga WHERE id = ?", manga_id)
-            .fetch_one(&self.db)
-            .await?;
-
-        let filename = format!("{manga_name} - {chapter_title}.epub");
+        let info = self.chapter_cbz_path(chapter_id).await?;
+        let filename = format!("{} - {}.epub", info.manga_name, info.chapter_title);
+        let (cbz_path, chapter_title, manga_name) =
+            (info.path, info.chapter_title, info.manga_name);
         let bytes = tokio::task::spawn_blocking(move || {
             build_epub_zip(&cbz_path, &chapter_title, &manga_name, &profile)
         })
@@ -152,13 +149,10 @@ impl AppService {
         chapter_id: i64,
         profile: DeviceProfile,
     ) -> Result<(Vec<u8>, String)> {
-        let (cbz_path, chapter_title, manga_id, _) = self.chapter_cbz_path(chapter_id).await?;
-
-        let manga_name = sqlx::query_scalar!("SELECT name FROM manga WHERE id = ?", manga_id)
-            .fetch_one(&self.db)
-            .await?;
-
-        let filename = format!("{manga_name} - {chapter_title}.kepub.epub");
+        let info = self.chapter_cbz_path(chapter_id).await?;
+        let filename = format!("{} - {}.kepub.epub", info.manga_name, info.chapter_title);
+        let (cbz_path, chapter_title, manga_name) =
+            (info.path, info.chapter_title, info.manga_name);
         let bytes = tokio::task::spawn_blocking(move || {
             let epub = build_epub_zip(&cbz_path, &chapter_title, &manga_name, &profile)?;
             kepub_transform(epub, &profile)
@@ -182,11 +176,9 @@ impl AppService {
             ));
         }
 
-        let (cbz_path, chapter_title, manga_id, _) = self.chapter_cbz_path(chapter_id).await?;
-
-        let manga_name = sqlx::query_scalar!("SELECT name FROM manga WHERE id = ?", manga_id)
-            .fetch_one(&self.db)
-            .await?;
+        let info = self.chapter_cbz_path(chapter_id).await?;
+        let (cbz_path, chapter_title, manga_name) =
+            (info.path, info.chapter_title, info.manga_name);
 
         let tmp = tempfile::TempDir::new()
             .map_err(|e| ServiceError::Internal(format!("TempDir: {e}")))?;

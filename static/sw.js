@@ -1,7 +1,7 @@
 // @ts-check
 // Kani service worker — shell caching + page-image caching.
 
-const SHELL_CACHE  = 'kani-shell-v1';
+const SHELL_CACHE  = 'kani-shell-v2';
 const PAGE_CACHE   = 'kani-pages-v1';
 const KNOWN_CACHES = [SHELL_CACHE, PAGE_CACHE];
 
@@ -59,9 +59,19 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Shell assets — cache-first.
-  if (SHELL_URLS.includes(path) || path.startsWith('/js/') || path.startsWith('/css/') || path.startsWith('/icons/')) {
+  // Pre-cached shell assets (app entry, vendors, CSS, icons) — cache-first for
+  // offline PWA support. Explicitly-listed files only; the set is small and
+  // known-stable so stale-cache risk is acceptable.
+  if (SHELL_URLS.includes(path) || path.startsWith('/css/') || path.startsWith('/icons/')) {
     e.respondWith(_cacheFirst(SHELL_CACHE, request));
+    return;
+  }
+
+  // Dynamic JS modules (page chunks, components, etc.) — network-first so that
+  // updates are always picked up without requiring a hard refresh. Falls back to
+  // cache only when the network is unavailable.
+  if (path.startsWith('/js/')) {
+    e.respondWith(_networkFirst(SHELL_CACHE, request));
     return;
   }
 
@@ -92,6 +102,18 @@ self.addEventListener('message', e => {
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function _networkFirst(cacheName, request) {
+  const cache = await caches.open(cacheName);
+  try {
+    const response = await fetch(request);
+    if (response.ok) cache.put(request, response.clone());
+    return response;
+  } catch {
+    const cached = await cache.match(request);
+    return cached ?? new Response('Offline', { status: 503 });
+  }
+}
 
 async function _cacheFirst(cacheName, request) {
   const cache = await caches.open(cacheName);

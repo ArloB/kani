@@ -87,6 +87,9 @@ let _manageMounted = false;
 let _chapters = /** @type {any[]} */ ([]);
 let _chaptersHasMore = false;
 let _chaptersLoading = false;
+/** @type {Set<number>} */         let _notedChapterIds = new Set();
+/** @type {Array<{chapter_id:number,chapter_number:number,note:string}>} */
+let _chapterNotes = [];
 /** @type {any[] | null} */       let _allRemoteChapters = null;
 let _selectMode = false;
 /** @type {Set<number>} */        let _selected = new Set();
@@ -352,6 +355,11 @@ export async function init(container, params) {
     getCachedChapterIds().then(ids => { _cachedChapterIds = ids; _renderChapterList(); });
     fetch('/rest/system/capabilities').then(r => r.json()).then(d => { _kccAvailable = !!d.kcc; _renderChapterList(); }).catch(() => {});
     _unsubscribeCacheMsgs = onChapterCached(id => { _cachedChapterIds = new Set(_cachedChapterIds); _cachedChapterIds.add(id); _renderChapterList(); });
+    if (_dbId) api.getMangaChapterNotes(_dbId).then(res => {
+      _chapterNotes = res?.notes ?? [];
+      _notedChapterIds = new Set(_chapterNotes.map(n => n.chapter_id));
+      _renderChapterList();
+    }).catch(() => {});
     _renderTabs(rightCol);
     await _fetchChapters(/** @type {HTMLElement} */(_contentSection));
   } else {
@@ -514,6 +522,30 @@ async function _renderManageTab(contentEl) {
     notesWrap.className = 'flex flex-col gap-1 px-4 py-3';
     notesWrap.appendChild(notesArea);
     notesWrap.appendChild(notesSaveStatus);
+
+    if (_chapterNotes.length > 0) {
+      const chapNotesDiv = document.createElement('div');
+      chapNotesDiv.className = 'flex flex-col gap-1 border-t border-border-subtle pt-3';
+      const chapNotesTitle = document.createElement('p');
+      chapNotesTitle.className = 'text-xs font-medium text-muted px-0';
+      chapNotesTitle.textContent = 'Chapter notes';
+      chapNotesDiv.appendChild(chapNotesTitle);
+      for (const n of _chapterNotes) {
+        const item = document.createElement('div');
+        item.className = 'flex flex-col gap-0.5 py-1.5 border-t border-border-subtle';
+        const lbl = document.createElement('p');
+        lbl.className = 'text-xs text-muted font-medium';
+        lbl.textContent = `Ch. ${n.chapter_number}`;
+        const txt = document.createElement('p');
+        txt.className = 'text-sm text-text whitespace-pre-wrap';
+        txt.textContent = n.note;
+        item.appendChild(lbl);
+        item.appendChild(txt);
+        chapNotesDiv.appendChild(item);
+      }
+      notesWrap.appendChild(chapNotesDiv);
+    }
+
     notesCard.appendChild(notesWrap);
     notesSection.appendChild(notesCard);
     contentEl.appendChild(notesSection);
@@ -685,6 +717,58 @@ function _findNextPreferredChapter() {
     return best;
   }
   return null;
+}
+
+// ── Chapter notes modal ───────────────────────────────────────────────────────
+
+function _openChapterNotesModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-modal flex items-center justify-center p-4 bg-black/50';
+
+  const card = document.createElement('div');
+  card.className = 'bg-surface rounded-xl shadow-lg w-full max-w-md max-h-[70vh] flex flex-col overflow-hidden';
+
+  const hdr = document.createElement('div');
+  hdr.className = 'flex items-center justify-between gap-3 px-5 py-4 border-b border-border shrink-0';
+  const title = document.createElement('h2');
+  title.className = 'text-lg font-semibold text-text';
+  title.textContent = 'Chapter Notes';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn-icon';
+  closeBtn.setAttribute('aria-label', 'Close');
+  closeBtn.textContent = '✕';
+  hdr.appendChild(title);
+  hdr.appendChild(closeBtn);
+
+  const body = document.createElement('div');
+  body.className = 'overflow-y-auto flex-1 divide-y divide-border';
+  for (const n of _chapterNotes) {
+    const item = document.createElement('div');
+    item.className = 'px-5 py-3';
+    const lbl = document.createElement('p');
+    lbl.className = 'text-xs text-muted font-medium mb-1';
+    lbl.textContent = `Chapter ${n.chapter_number}`;
+    const text = document.createElement('p');
+    text.className = 'text-sm text-text whitespace-pre-wrap';
+    text.textContent = n.note;
+    item.appendChild(lbl);
+    item.appendChild(text);
+    body.appendChild(item);
+  }
+
+  card.appendChild(hdr);
+  card.appendChild(body);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  const _onKey = (/** @type {KeyboardEvent} */ e) => { if (e.key === 'Escape') _close(); };
+  const _close = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', _onKey);
+  };
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) _close(); });
+  closeBtn.addEventListener('click', _close);
+  document.addEventListener('keydown', _onKey);
 }
 
 // ── Chapters ──────────────────────────────────────────────────────────────────
@@ -944,6 +1028,7 @@ function _renderChapterList() {
     readerHrefFn=${readerHrefFn}
     inLibrary=${_isLocal}
     mangaId=${_dbId || null}
+    notedChapterIds=${_notedChapterIds}
     hasMore=${_chaptersHasMore}
     loading=${_chaptersLoading}
     canDownload=${hasPermission('chapter:download')}

@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::{DailyActivity, GenreCount, MangaReadCount, ReadingStats};
+use crate::models::{DailyActivity, GenreCount, MangaReadCount, PaceEntry, ReadingStats};
 use std::sync::Arc;
 use time::macros::format_description;
 
@@ -28,7 +28,7 @@ impl AppService {
             .format(DATE_FMT)
             .unwrap_or_default();
 
-        let (totals, completed_manga, daily_rows, top_rows, genre_rows) = tokio::try_join!(
+        let (totals, completed_manga, daily_rows, top_rows, genre_rows, pace_rows) = tokio::try_join!(
             sqlx::query!(
                 r#"
                 SELECT
@@ -94,6 +94,22 @@ impl AppService {
                 user_id
             )
             .fetch_all(&self.db),
+            sqlx::query!(
+                r#"
+                SELECT
+                    DATE(uct.last_read_at)         AS "date!: String",
+                    COALESCE(SUM(c.page_count), 0)  AS "pages!: i64"
+                FROM user_chapter_tracking uct
+                JOIN chapters c ON c.id = uct.chapter_id
+                WHERE uct.is_read = TRUE AND uct.user_id = ? AND uct.last_read_at >= ?
+                  AND c.page_count IS NOT NULL
+                GROUP BY DATE(uct.last_read_at)
+                ORDER BY 1 ASC
+                "#,
+                user_id,
+                cutoff
+            )
+            .fetch_all(&self.db),
         )?;
 
         let daily_activity: Vec<DailyActivity> = daily_rows
@@ -119,6 +135,14 @@ impl AppService {
             })
             .collect();
 
+        let reading_pace: Vec<PaceEntry> = pace_rows
+            .into_iter()
+            .map(|r| PaceEntry {
+                date: r.date,
+                pages: r.pages,
+            })
+            .collect();
+
         let (current_streak, longest_streak) = calculate_streaks(&daily_activity);
 
         Ok(ReadingStats {
@@ -130,7 +154,46 @@ impl AppService {
             daily_activity,
             top_manga,
             genre_breakdown,
+            reading_pace,
         })
+    }
+
+    // ── Reading-pace history (#34) ────────────────────────────────────────────
+    /// Returns one row per day: date + pages read that day, for the last `period_days`.
+    /// Derived entirely from `user_chapter_tracking` — no new table required.
+    pub async fn get_reading_pace(&self, user_id: i64, period_days: i32) -> Result<Vec<PaceEntry>> {
+        let cutoff = (time::OffsetDateTime::now_utc() - time::Duration::days(period_days as i64))
+            .date()
+            .format(DATE_FMT)
+            .unwrap_or_default();
+
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                DATE(uct.last_read_at)           AS "date!: String",
+                COALESCE(SUM(c.page_count), 0)   AS "pages!: i64"
+            FROM user_chapter_tracking uct
+            JOIN chapters c ON c.id = uct.chapter_id
+            WHERE uct.is_read = TRUE
+              AND uct.user_id = ?
+              AND uct.last_read_at >= ?
+              AND c.page_count IS NOT NULL
+            GROUP BY DATE(uct.last_read_at)
+            ORDER BY 1 ASC
+            "#,
+            user_id,
+            cutoff,
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| PaceEntry {
+                date: r.date,
+                pages: r.pages,
+            })
+            .collect())
     }
 }
 

@@ -1269,6 +1269,7 @@ pub struct MangaTracking {
     pub tracking_enabled: bool,
     pub notify_new_chapters: bool,
     pub reading_direction: String,
+    pub reader_prefs: Option<String>,
 }
 
 #[cfg(feature = "host")]

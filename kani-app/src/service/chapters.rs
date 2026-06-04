@@ -1,5 +1,18 @@
 use super::*;
 
+/// Resolved metadata for a downloaded chapter, including its on-disk CBZ path.
+/// Returned by [`AppService::chapter_cbz_path`]; all callers get everything
+/// they need from one query instead of issuing follow-up round-trips.
+pub struct ChapterCbzInfo {
+    pub path: std::path::PathBuf,
+    pub chapter_title: String,
+    pub manga_id: i64,
+    pub manga_name: String,
+    pub chapter_number: f64,
+    pub scanlator: Option<String>,
+    pub source_name: String,
+}
+
 impl AppService {
     /// Returns a paginated chapter list for a manga. Returns (chapters, has_next_page, total_pages).
     #[allow(clippy::too_many_arguments)]
@@ -162,16 +175,17 @@ impl AppService {
         }
     }
 
-    /// Resolves the on-disk CBZ path for a downloaded chapter and returns its
-    /// metadata. Returns an error if the chapter is not in downloaded state.
-    pub async fn chapter_cbz_path(
-        &self,
-        chapter_id: i64,
-    ) -> Result<(std::path::PathBuf, String, i64, f64)> {
+    /// Resolves the on-disk CBZ path for a downloaded chapter together with all
+    /// associated metadata in a single query. Returns an error if the chapter is
+    /// not in downloaded state.
+    pub async fn chapter_cbz_path(&self, chapter_id: i64) -> Result<ChapterCbzInfo> {
         let rec = sqlx::query!(
-            "SELECT c.download_status, c.volume, c.chapter_number, c.name,
-                    m.id as manga_id, m.name as manga_name
-             FROM chapters c JOIN manga m ON c.manga_id = m.id
+            "SELECT c.download_status, c.volume, c.chapter_number, c.name, c.scanlator,
+                    m.id as manga_id, m.name as manga_name,
+                    s.name as source_name
+             FROM chapters c
+             JOIN manga m ON c.manga_id = m.id
+             JOIN sources s ON s.id = m.source_id
              WHERE c.id = ?",
             chapter_id
         )
@@ -192,18 +206,24 @@ impl AppService {
             kani_core::utilities::sanitize_filename(&rec.manga_name),
             rec.manga_id,
         );
-        let safe_chapter = kani_core::utilities::sanitize_filename(&chapter_title);
-        let cbz_path = library_path
-            .join(safe_manga_dir)
-            .join(format!("{safe_chapter}.cbz"));
+        let safe_cbz = kani_core::utilities::assert_within_root(
+            &library_path,
+            &library_path.join(safe_manga_dir).join(format!(
+                "{}.cbz",
+                kani_core::utilities::sanitize_filename(&chapter_title)
+            )),
+        )
+        .map_err(|e| ServiceError::Internal(format!("Path traversal blocked: {e}")))?;
 
-        // Defence-in-depth: even though sanitize_filename strips traversal
-        // characters, canonicalise and verify containment to guard against
-        // future weakening of the sanitisation logic.
-        let safe_cbz = kani_core::utilities::assert_within_root(&library_path, &cbz_path)
-            .map_err(|e| ServiceError::Internal(format!("Path traversal blocked: {e}")))?;
-
-        Ok((safe_cbz, chapter_title, rec.manga_id, rec.chapter_number))
+        Ok(ChapterCbzInfo {
+            path: safe_cbz,
+            chapter_title,
+            manga_id: rec.manga_id,
+            manga_name: rec.manga_name,
+            chapter_number: rec.chapter_number,
+            scanlator: rec.scanlator,
+            source_name: rec.source_name,
+        })
     }
 
     /// Returns the page manifest for a downloaded chapter, including adjacent
@@ -213,12 +233,14 @@ impl AppService {
         chapter_id: i64,
         user_id: i64,
     ) -> Result<crate::models::ChapterPageManifest> {
-        let (cbz_path, chapter_title, manga_id, chapter_number) =
-            self.chapter_cbz_path(chapter_id).await?;
-
-        let manga_title = sqlx::query_scalar!("SELECT name FROM manga WHERE id = ?", manga_id)
-            .fetch_one(&self.db)
-            .await?;
+        let info = self.chapter_cbz_path(chapter_id).await?;
+        let cbz_path = info.path;
+        let chapter_title = info.chapter_title;
+        let manga_id = info.manga_id;
+        let manga_title = info.manga_name;
+        let chapter_number = info.chapter_number;
+        let scanlator = info.scanlator;
+        let source_name = info.source_name;
 
         let path_clone = cbz_path.clone();
         // Read page list and double-page flags in a single blocking task so
@@ -276,9 +298,34 @@ impl AppService {
             .await?
             .map(|(page, _)| page);
 
+        // Find other downloaded chapters with the same chapter_number (different scanlators).
+        let alt_rows = sqlx::query!(
+            r#"SELECT id as "id: i64", scanlator, volume as "volume: i64"
+               FROM chapters
+               WHERE manga_id = ? AND chapter_number = ? AND id != ? AND download_status = 2
+               ORDER BY scanlator, volume"#,
+            manga_id,
+            chapter_number,
+            chapter_id,
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        let scanlator_alternatives = alt_rows
+            .into_iter()
+            .map(|r| crate::models::ScanlatorAlt {
+                chapter_id: r.id,
+                scanlator: r.scanlator,
+                volume: r.volume,
+            })
+            .collect();
+
         Ok(crate::models::ChapterPageManifest {
             chapter_id,
             chapter_title,
+            chapter_number,
+            scanlator,
+            source_name,
             manga_id,
             manga_title,
             page_count,
@@ -287,6 +334,7 @@ impl AppService {
             next_chapter_id,
             last_page_read,
             spread_analysed,
+            scanlator_alternatives,
         })
     }
 
@@ -331,8 +379,8 @@ impl AppService {
         chapter_id: i64,
         page_num: usize,
     ) -> Result<(Vec<u8>, String)> {
-        let (cbz_path, ..) = self.chapter_cbz_path(chapter_id).await?;
-        tokio::task::spawn_blocking(move || kani_core::cbz::read_cbz_page(&cbz_path, page_num))
+        let info = self.chapter_cbz_path(chapter_id).await?;
+        tokio::task::spawn_blocking(move || kani_core::cbz::read_cbz_page(&info.path, page_num))
             .await
             .map_err(|e| ServiceError::Internal(format!("Task join error: {e}")))?
             .map_err(ServiceError::Core)
