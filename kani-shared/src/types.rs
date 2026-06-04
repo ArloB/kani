@@ -15,8 +15,7 @@ use std::fmt;
 
 /// Manga publication status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "host", derive(Serialize, Deserialize, ts_rs::TS))]
-#[cfg_attr(feature = "host", ts(export, export_to = "bindings/"))]
+#[cfg_attr(feature = "host", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "host", serde(rename_all = "lowercase"))]
 pub enum MangaStatus {
     Ongoing,
@@ -71,8 +70,7 @@ impl From<MangaStatus> for i64 {
 
 /// Filter state used by extensions to read active filter values.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "host", derive(Serialize, Deserialize, ts_rs::TS))]
-#[cfg_attr(feature = "host", ts(export, export_to = "bindings/"))]
+#[cfg_attr(feature = "host", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "host", serde(tag = "kind", content = "data"))]
 pub enum FilterState {
     Selection { name: String, value: String },
@@ -110,8 +108,7 @@ impl From<wit_types::FilterState> for FilterState {
 
 /// Active filter value passed to extension search/popular methods.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "host", derive(Serialize, Deserialize, ts_rs::TS))]
-#[cfg_attr(feature = "host", ts(export, export_to = "bindings/"))]
+#[cfg_attr(feature = "host", derive(Serialize, Deserialize))]
 pub struct ActiveFilter {
     pub filter_name: String,
     pub state: FilterState,
@@ -609,8 +606,7 @@ where
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct NamedItem {
     pub id: i64,
@@ -618,8 +614,7 @@ pub struct NamedItem {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MangaListItem {
     pub id: String,
     pub title: String,
@@ -629,8 +624,7 @@ pub struct MangaListItem {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MangaList {
     pub manga: Vec<MangaListItem>,
     pub has_next_page: bool,
@@ -639,8 +633,7 @@ pub struct MangaList {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MangaInfo {
     pub id: String,
     pub title: String,
@@ -658,8 +651,7 @@ pub struct MangaInfo {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Chapter {
     pub id: String,
     pub title: Option<String>,
@@ -680,8 +672,7 @@ pub struct Chapter {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ChapterList {
     pub chapters: Vec<Chapter>,
     pub has_next_page: bool,
@@ -691,16 +682,14 @@ pub struct ChapterList {
 
 /// A sort option declared by a source extension for its chapter list.
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ChapterSortOption {
     pub id: String,
     pub name: String,
 }
 
 #[cfg(feature = "host")]
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ChapterSortOrder {
     #[default]
@@ -765,8 +754,7 @@ impl ChapterSortOrder {
 }
 
 #[cfg(feature = "host")]
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MangaSortOrder {
     #[default]
@@ -838,8 +826,7 @@ impl MangaSortOrder {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DownloadProgressEvent {
     ChapterStarted {
@@ -878,8 +865,7 @@ pub enum DownloadProgressEvent {
 }
 
 #[cfg(feature = "host")]
-#[derive(Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LibraryPage {
     pub items: Vec<MangaListItem>,
     pub has_next_page: bool,
@@ -887,8 +873,7 @@ pub struct LibraryPage {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct Source {
     pub id: i64,
@@ -901,8 +886,7 @@ pub struct Source {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct GlobalSearchResult {
     pub source_id: i64,
     pub source_name: String,
@@ -911,8 +895,7 @@ pub struct GlobalSearchResult {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum SearchScope {
     FavouritedOnly,
     AllEnabled,
@@ -920,8 +903,7 @@ pub enum SearchScope {
 }
 
 #[cfg(feature = "host")]
-#[derive(Debug, Clone, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct ChapterFilterRow {
     pub id: i64,
@@ -934,8 +916,7 @@ pub struct ChapterFilterRow {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum DownloadRuleKind {
     LanguageInclude(String),
     LanguageExclude(String),
@@ -1016,8 +997,7 @@ impl std::fmt::Display for DownloadRuleKind {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DownloadRule {
     pub id: i64,
     pub manga_id: i64,
@@ -1025,8 +1005,7 @@ pub struct DownloadRule {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct ScanlatorPreference {
     pub id: i64,
@@ -1038,8 +1017,7 @@ pub struct ScanlatorPreference {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct Category {
     pub id: i64,
@@ -1048,8 +1026,7 @@ pub struct Category {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AppSettings {
     pub flaresolverr_url: String,
     pub library_path: String,
@@ -1080,8 +1057,7 @@ pub struct AppSettings {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct RecentUpdate {
     pub recent_updates: Vec<RecentUpdateItem>,
     pub has_next_page: bool,
@@ -1089,8 +1065,7 @@ pub struct RecentUpdate {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct RecentUpdateItem {
     pub manga_id: i64,
     pub manga_name: String,
@@ -1101,22 +1076,19 @@ pub struct RecentUpdateItem {
     pub chapter_id: i64,
     pub chapter_number: f64,
     pub chapter_name: Option<String>,
-    #[ts(type = "string")]
     #[serde(with = "time::serde::rfc3339::option")]
     pub discovered_at: std::option::Option<time::OffsetDateTime>,
     pub is_downloaded: bool,
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ChapterContents {
     pub pages: Vec<Page>,
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Page {
     pub index: i64,
     pub url: String,
@@ -1125,8 +1097,7 @@ pub struct Page {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MigrationResult {
     pub chapters_matched: usize,
     pub chapters_orphaned: usize,
@@ -1135,8 +1106,7 @@ pub struct MigrationResult {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MigrationPreview {
     pub target_title: String,
     pub target_cover_url: Option<String>,
@@ -1147,8 +1117,7 @@ pub struct MigrationPreview {
 }
 
 #[cfg(feature = "host")]
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct AuthenticatedUser {
     pub id: i64,
     pub username: String,
@@ -1168,8 +1137,7 @@ impl AuthenticatedUser {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DownloadSettings {
     pub concurrent_page_downloads: i64,
     pub concurrent_manga_downloads: i64,
@@ -1180,8 +1148,7 @@ pub struct DownloadSettings {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ScanSettings {
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
@@ -1189,8 +1156,7 @@ pub struct ScanSettings {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AdvancedSettings {
     pub flaresolverr_url: String,
     pub library_path: String,
@@ -1203,15 +1169,13 @@ pub struct AdvancedSettings {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct TrackingSettings {
     pub default_tracking_enabled: bool,
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct EmailSettings {
     pub email_enabled: bool,
     pub email_provider: String,
@@ -1225,8 +1189,7 @@ pub struct EmailSettings {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum SettingsUpdate {
     Download(DownloadSettings),
     Scan(ScanSettings),
@@ -1236,8 +1199,7 @@ pub enum SettingsUpdate {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct CredentialEncryptionStatus {
     pub encryption_enabled: bool,
     /// Number of credential values currently stored in plaintext.
@@ -1245,8 +1207,7 @@ pub struct CredentialEncryptionStatus {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[repr(i64)]
 pub enum MangaTrackingStatus {
@@ -1259,8 +1220,7 @@ pub enum MangaTrackingStatus {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MangaTracking {
     pub status: Option<MangaTrackingStatus>,
     pub score: Option<f64>,
@@ -1273,8 +1233,7 @@ pub struct MangaTracking {
 }
 
 #[cfg(feature = "host")]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, ts_rs::TS)]
-#[ts(export, export_to = "bindings/")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ContinueReadingChapter {
     pub chapter_id: i64,
     pub chapter_number: f64,

@@ -258,3 +258,14 @@ export function deferredSkeleton(mountFn, delayMs = 150) {
   const t = setTimeout(mountFn, delayMs);
   return () => clearTimeout(t);
 }
+
+/**
+ * Returns an accessible label for a consecutive-error count badge so AT
+ * users don't rely on color alone to infer severity.
+ * @param {number} count
+ * @returns {string}
+ */
+export function errorCountAriaLabel(count) {
+  if (count >= 3) return `${count} errors — unhealthy`;
+  return `${count} ${count === 1 ? 'error' : 'errors'}`;
+}

@@ -147,7 +147,7 @@ function _renderPendingImports(el, items) {
         await api.deletePendingImport(item.id);
         card.remove();
         if (!list.children.length) {
-          el.innerHTML = '<p class="text-sm text-text-muted py-4">No pending imports.</p>';
+          _renderPendingImports(el, []);
         }
       } catch (e) {
         showToast(`Error: ${e.message}`, 'error');
@@ -179,6 +179,7 @@ async function _mountDuplicatesTab(el) {
 }
 
 function _renderDuplicates(el, pairs) {
+  el.innerHTML = '';
   if (!pairs.length) {
     el.appendChild(createEmptyState({
       title: 'No duplicates detected',
@@ -286,6 +287,7 @@ async function _loadOrphanedManga(el) {
 }
 
 function _renderOrphanedManga(el, items) {
+  el.innerHTML = '';
   if (!items.length) {
     el.appendChild(createEmptyState({
       title: 'No orphaned manga',
@@ -332,7 +334,7 @@ function _renderOrphanedManga(el, items) {
         await api.deleteManga(item.id);
         card.remove();
         if (!list.children.length) {
-          el.innerHTML = '<p class="text-sm text-text-muted py-4">No orphaned manga.</p>';
+          _renderOrphanedManga(el, []);
         }
       } catch (e) {
         showToast(`Error: ${e.message}`, 'error');

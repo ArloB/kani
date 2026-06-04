@@ -3,7 +3,7 @@
 
 import * as api from '../../api.js';
 import { mkSettingsGroup, mkSettingsGroupCard } from './_shared.js';
-import { fmtCompactDate } from '../../utils.js';
+import { fmtCompactDate, errorCountAriaLabel } from '../../utils.js';
 import { createEmptyState } from '../../components/empty-state.js';
 import { createErrorState } from '../../components/error-state.js';
 
@@ -77,9 +77,9 @@ function _renderTable(card, rows) {
     const countCell = document.createElement('td');
     countCell.className = 'px-4 py-2.5 text-right tabular-nums';
     if (errors >= 3) {
-      countCell.innerHTML = `<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-danger/20 text-danger">${errors}</span>`;
+      countCell.innerHTML = `<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-danger/20 text-danger" aria-label="${errorCountAriaLabel(errors)}">${errors}</span>`;
     } else if (errors > 0) {
-      countCell.innerHTML = `<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-warn/20 text-warn">${errors}</span>`;
+      countCell.innerHTML = `<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-warn/20 text-warn" aria-label="${errorCountAriaLabel(errors)}">${errors}</span>`;
     } else {
       countCell.textContent = '0';
       countCell.classList.add('text-text-muted');

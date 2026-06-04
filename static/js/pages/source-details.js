@@ -8,7 +8,7 @@ import htm from 'htm';
 import * as api from '../api.js';
 import { hasPermission, updateState, subscribe } from '../state.js';
 import { navigate } from '../router.js';
-import { setLocal, getLocal, getLocalInt, debounce, hasNextPage, confirmDialog, fmtCompactDate } from '../utils.js';
+import { setLocal, getLocal, getLocalInt, debounce, hasNextPage, confirmDialog, fmtCompactDate, errorCountAriaLabel } from '../utils.js';
 import { skeletonGrid } from '../components/skeletons.js';
 import { renderPagination } from '../components/pagination.js';
 import { createMangaCard } from '../components/manga-card.js';
@@ -426,10 +426,10 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
                   <div class="flex items-center justify-between gap-4 py-3">
                     <p class="text-sm text-text">Consecutive errors</p>
                     ${(health.consecutive_error_count ?? 0) >= 3
-                      ? html`<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-danger/20 text-danger">${health.consecutive_error_count}</span>`
+                      ? html`<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-danger/20 text-danger" aria-label=${errorCountAriaLabel(health.consecutive_error_count ?? 0)}>${health.consecutive_error_count}</span>`
                       : (health.consecutive_error_count ?? 0) > 0
-                        ? html`<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-warn/20 text-warn">${health.consecutive_error_count}</span>`
-                        : html`<span class="text-sm text-success">0</span>`
+                        ? html`<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-warn/20 text-warn" aria-label=${errorCountAriaLabel(health.consecutive_error_count ?? 0)}>${health.consecutive_error_count}</span>`
+                        : html`<span class="text-sm text-success" aria-label="0 errors">0</span>`
                     }
                   </div>
                   <div class="flex items-center justify-between gap-4 py-3">

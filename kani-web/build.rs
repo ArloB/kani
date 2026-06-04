@@ -3,8 +3,6 @@ use std::path::Path;
 fn main() {
     println!("cargo:rerun-if-changed=../migrations");
 
-    sync_ts_bindings();
-
     let is_release = std::env::var("PROFILE").unwrap_or_default() == "release";
 
     build_css(is_release);
@@ -101,33 +99,5 @@ fn build_js() {
 
     if !status.success() {
         panic!("esbuild JS bundle failed (exit {})", status);
-    }
-}
-
-fn sync_ts_bindings() {
-    println!("cargo:rerun-if-changed=../kani-shared/bindings/bindings");
-
-    let src = Path::new("../kani-shared/bindings/bindings");
-    let dst = Path::new("../static/types");
-
-    if !src.exists() {
-        return;
-    }
-
-    std::fs::create_dir_all(dst).expect("failed to create static/types");
-
-    for entry in std::fs::read_dir(src).expect("failed to read bindings dir") {
-        let entry = entry.expect("failed to read dir entry");
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("ts") {
-            let dest_file = dst.join(path.file_name().unwrap());
-            std::fs::copy(&path, &dest_file).unwrap_or_else(|e| {
-                panic!(
-                    "failed to copy {} → {}: {e}",
-                    path.display(),
-                    dest_file.display()
-                )
-            });
-        }
     }
 }

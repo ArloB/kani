@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import { getState, subscribe, hasPermission } from '../state.js';
 import { formatDate, isChapterDownloaded } from '../utils.js';
+import { navigate } from '../router.js';
 import { downloadChapter, deleteChapter, cancelDownload, setChapterReadStatus, markChaptersUpTo } from '../api.js';
 import { iconCheck, iconDownload, iconCloud, iconCloudCheck } from '../icons.js';
 import { Icon } from './icon.js';
@@ -43,6 +44,9 @@ const OVERSCAN = 5;
  *   selected?: boolean,
  *   isCached?: boolean,
  *   kccAvailable?: boolean,
+ *   isKeyboardActive?: boolean,
+ *   menuTick?: number,
+ *   hasNote?: boolean,
  *   onToggleRead?: (id: number, isRead: boolean) => void,
  *   onMarkUpTo?: (chapterNumber: number, isRead: boolean) => void,
  *   onToggleSelect?: (id: number) => void,
@@ -51,7 +55,7 @@ const OVERSCAN = 5;
  *   onCacheChange?: (id: number, cached: boolean) => void,
  * }} props
  */
-function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selected, isCached, kccAvailable, hasNote, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange }) {
+function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selected, isCached, kccAvailable, hasNote, isKeyboardActive, menuTick, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange }) {
   const [progress, setProgress] = useState(/** @type {ChapterProgress|null} */(null));
   const [isRead, setIsRead] = useState(!!chapter.read);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -92,6 +96,9 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
     sync();
     return subscribe('chaptersProgress', sync);
   }, [chapter.id]);
+
+  // Open context menu when the listbox keyboard handler signals it
+  useEffect(() => { if (menuTick) setMenuOpen(true); }, [menuTick]);
 
 
   const isActive = progress?.status === 'in_progress';
@@ -234,6 +241,7 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
         class="inline-flex items-center justify-center w-9 h-9 text-text-muted hover:text-text rounded-md cursor-pointer select-none transition-colors"
         aria-label="More actions"
         aria-expanded=${menuOpen}
+        tabindex="-1"
         onClick=${(e) => { e.preventDefault(); e.stopPropagation(); setMenuOpen(o => !o); }}
       >⋮</button>
       ${menuOpen && html`<${ContextMenu} items=${menuItems} trigger=${btnRef} onClose=${() => setMenuOpen(false)} />`}
@@ -249,7 +257,11 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
     }
     return html`
       <div
-        class=${selectRowBorder + 'flex items-center gap-3 px-3 py-2.5 border-b border-border-subtle cursor-pointer select-none' + (chapter.is_orphaned ? ' opacity-60' : '') + (selected ? ' bg-accent/10' : '')}
+        id=${'chapter-opt-' + chapter.id}
+        role="option"
+        tabindex="-1"
+        aria-selected=${!!selected}
+        class=${selectRowBorder + 'flex items-center gap-3 px-3 py-2.5 border-b border-border-subtle cursor-pointer select-none' + (chapter.is_orphaned ? ' opacity-60' : '') + (selected ? ' bg-accent/10' : '') + (isKeyboardActive ? ' ring-2 ring-inset ring-accent/60' : '')}
         onClick=${() => {
           // Absorb the click from pointer-up that fires right after a long-press entered select mode
           if (longPressFiredRef.current) { longPressFiredRef.current = false; return; }
@@ -285,7 +297,11 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
 
   return html`
     <div
-      class=${rowBorderClass + 'flex items-center gap-3 px-3 py-2.5 border-b border-border-subtle' + (chapter.is_orphaned ? ' opacity-60' : '') + (menuOpen ? ' relative' : '')}
+      id=${'chapter-opt-' + chapter.id}
+      role="option"
+      tabindex="-1"
+      aria-selected=${undefined}
+      class=${rowBorderClass + 'flex items-center gap-3 px-3 py-2.5 border-b border-border-subtle' + (chapter.is_orphaned ? ' opacity-60' : '') + (menuOpen ? ' relative' : '') + (isKeyboardActive ? ' ring-2 ring-inset ring-accent/60' : '')}
       style=${menuOpen ? 'z-index: 50' : undefined}
       onPointerDown=${_startLongPress}
       onPointerUp=${_cancelLongPress}
@@ -299,7 +315,7 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
           `}
           ${statusIndicator}
           ${isClickable
-      ? html`<a class=${'text-sm truncate hover:text-accent transition-colors ' + (isRead ? 'text-text-faint' : 'text-text')} href=${readerHref}>${chapter.title}</a>`
+      ? html`<a class=${'text-sm truncate hover:text-accent transition-colors ' + (isRead ? 'text-text-faint' : 'text-text')} href=${readerHref} tabindex="-1">${chapter.title}</a>`
       : html`<span class=${'text-sm truncate' + nonClickableClass + (isRead ? ' text-text-faint' : ' text-text-muted')} title=${nonClickableTitle || undefined}>${chapter.title}</span>`
     }
         </div>
@@ -368,7 +384,11 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
  */
 export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId, height, hasMore, loading, selectMode, selected, canDownload, canDelete, allSelectedProp, onLoadMore, onToggleRead, onMarkUpTo, onToggleSelect, onSelectAll, onFlipSelection, onSelectUndownloaded, onSelectUnread, onBulkRead, onBulkDownload, onBulkDelete, onExitSelect, onEnterSelectWithChapter, onDelete, cachedChapterIds, kccAvailable, onCacheChange, notedChapterIds }) {
   const [scrollTop, setScrollTop] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [focused, setFocused] = useState(false);
+  const [menuSignal, setMenuSignal] = useState({ id: /** @type {number|null} */ (null), tick: 0 });
   const sentinelRef = useRef(/** @type {HTMLDivElement | null} */(null));
+  const scrollRef = useRef(/** @type {HTMLDivElement | null} */(null));
 
   // IntersectionObserver for the non-windowed sentinel
   useEffect(() => {
@@ -382,6 +402,82 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
   }, [height, hasMore, onLoadMore, chapters.length]);
+
+  // Clamp activeIndex when the list shrinks (e.g. after a delete or reload)
+  useEffect(() => {
+    if (chapters.length > 0 && activeIndex >= chapters.length) {
+      setActiveIndex(chapters.length - 1);
+    }
+  }, [chapters.length]);
+
+  // Non-windowed: scroll the active row into view when it changes via keyboard
+  useEffect(() => {
+    if (height) return;
+    document.getElementById('chapter-opt-' + chapters[activeIndex]?.id)
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [activeIndex, height]);
+
+  const visibleCount = height ? Math.ceil(height / ROW_H) : chapters.length;
+
+  /** @param {KeyboardEvent} e */
+  function handleListKeyDown(e) {
+    if (!chapters.length) return;
+    const len = chapters.length;
+    let newIndex = activeIndex;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      newIndex = Math.min(activeIndex + 1, len - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      newIndex = Math.max(activeIndex - 1, 0);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      newIndex = 0;
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      newIndex = len - 1;
+    } else if (e.key === 'PageDown') {
+      e.preventDefault();
+      newIndex = Math.min(activeIndex + visibleCount, len - 1);
+    } else if (e.key === 'PageUp') {
+      e.preventDefault();
+      newIndex = Math.max(activeIndex - visibleCount, 0);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      const ch = chapters[activeIndex];
+      if (!ch) return;
+      if (selectMode && onToggleSelect) {
+        onToggleSelect(ch.id);
+      } else {
+        const href = readerHrefFn(ch);
+        if (href) navigate(href);
+      }
+      return;
+    } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      e.preventDefault();
+      const ch = chapters[activeIndex];
+      if (ch) setMenuSignal(s => ({ id: ch.id, tick: s.tick + 1 }));
+      return;
+    } else {
+      return;
+    }
+
+    setActiveIndex(newIndex);
+
+    if (height && scrollRef.current) {
+      const top = newIndex * ROW_H;
+      const bot = top + ROW_H;
+      const st = scrollRef.current.scrollTop;
+      let newSt = st;
+      if (top < st) newSt = top;
+      else if (bot > st + height) newSt = bot - height;
+      if (newSt !== st) {
+        scrollRef.current.scrollTop = newSt;
+        setScrollTop(newSt);
+      }
+    }
+  }
 
   const skeletonRow = html`<div class="h-14 mx-3 my-1 skeleton rounded-lg" />`;
 
@@ -436,11 +532,27 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
     </div>
   ` : null;
 
+  // Slice indices — used by both windowed rendering and the aria-activedescendant guard
+  const startIdx = height ? Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN) : 0;
+  const endIdx = height ? Math.min(chapters.length, startIdx + visibleCount + OVERSCAN * 2) : chapters.length;
+  // Only emit aria-activedescendant when the active option's DOM node exists in the current slice
+  const activeOptId = chapters[activeIndex] ? 'chapter-opt-' + chapters[activeIndex].id : undefined;
+  const activeDescendant = (activeOptId && activeIndex >= startIdx && activeIndex < endIdx) ? activeOptId : undefined;
+
   if (!height) {
     return html`
-      <div class="flex flex-col">
+      <div
+        class="flex flex-col"
+        role="listbox"
+        aria-label="Chapters"
+        tabindex="0"
+        aria-activedescendant=${focused ? activeDescendant : undefined}
+        onKeyDown=${handleListKeyDown}
+        onFocus=${() => setFocused(true)}
+        onBlur=${() => setFocused(false)}
+      >
         <div class="flex flex-col divide-y divide-border-subtle">
-          ${chapters.map(ch => html`
+          ${chapters.map((ch, i) => html`
             <${ChapterRow}
               key=${ch.id}
               chapter=${ch}
@@ -449,6 +561,8 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
               mangaId=${mangaId}
               selectMode=${!!selectMode}
               selected=${selected ? selected.has(ch.id) : false}
+              isKeyboardActive=${focused && i === activeIndex}
+              menuTick=${menuSignal.id === ch.id ? menuSignal.tick : 0}
               onToggleRead=${onToggleRead}
               onMarkUpTo=${onMarkUpTo}
               onToggleSelect=${onToggleSelect}
@@ -469,9 +583,6 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
 
   // Windowed rendering for fixed-height scroll containers
   const totalH = chapters.length * ROW_H;
-  const visibleCount = Math.ceil(height / ROW_H);
-  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
-  const endIdx = Math.min(chapters.length, startIdx + visibleCount + OVERSCAN * 2);
   const visible = chapters.slice(startIdx, endIdx);
 
   function handleScroll(e) {
@@ -484,8 +595,18 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
   }
 
   return html`
-    <div class="flex flex-col">
+    <div
+      class="flex flex-col"
+      role="listbox"
+      aria-label="Chapters"
+      tabindex="0"
+      aria-activedescendant=${focused ? activeDescendant : undefined}
+      onKeyDown=${handleListKeyDown}
+      onFocus=${() => setFocused(true)}
+      onBlur=${() => setFocused(false)}
+    >
       <div
+        ref=${scrollRef}
         class="overflow-y-auto"
         style=${{ height: (selectMode ? Math.max(100, height - 60) : height) + 'px', scrollbarWidth: 'none' }}
         onScroll=${handleScroll}
@@ -503,6 +624,8 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
                 mangaId=${mangaId}
                 selectMode=${!!selectMode}
                 selected=${selected ? selected.has(ch.id) : false}
+                isKeyboardActive=${focused && startIdx + i === activeIndex}
+                menuTick=${menuSignal.id === ch.id ? menuSignal.tick : 0}
                 onToggleRead=${onToggleRead}
                 onMarkUpTo=${onMarkUpTo}
                 onToggleSelect=${onToggleSelect}
