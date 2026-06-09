@@ -11,7 +11,7 @@ lcov.info
 *.db
 *.db*
 kani-shared/bindings
-library
+/library
 kani-web/dist
 todo.txt
 changes
