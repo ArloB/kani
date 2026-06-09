@@ -1,0 +1,1441 @@
+//! Plain Axum REST handlers — mounted at /rest in main.rs.
+
+use crate::{
+    auth::{AuthBackend, AuthSession, Credentials},
+    error::AppError,
+    models::{
+        AddDownloadRuleRequest, AdminCreateRoleRequest, AdminCreateUserRequest,
+        AdminGrantRoleRequest, AdminUpdateRoleRequest, AdminUpdateUserRequest,
+        ChangePasswordRequest, ContinueReadingShelfQuery, CreateCategoryRequest, CreateSource,
+        FetchWasmRequest, GlobalSearchQuery, LibraryQuery, ListItemRequest, LocalChaptersQuery,
+        LoginRequest, MarkUpToRequest, MigrateMangaRequest, PageQuery, PasswordResetConfirmBody,
+        PasswordResetRequestBody, PreviewDownloadRulesRequest, PreviewMigrationRequest, ProxyQuery,
+        RenameCategoryRequest, ReorderCategoriesRequest, ReorderDownloadRulesRequest,
+        ScanMangaRequest, SearchMangaRequest, SendTestEmailBody, SetChapterProgressRequest,
+        SetMangaCategoriesRequest, SetMangaTrackingRequest, SetPreferenceRequest,
+        SetReadStatusRequest, SetScanlatorPrefRequest, SetTrackerConfigRequest,
+        SetTrackerMappingRequest, ToggleAutoDownloadRequest, ToggleEnabledRequest,
+        ToggleFavouritedRequest, ToggleSelectRequest, TokenQuery, TrackerAuthUrlQuery,
+        TrackerCallbackQuery, TrackerSearchQuery, UpdateDownloadRuleRequest, UpdateSource,
+    },
+    permissions::AuthRequirement,
+    state::AppState,
+    types::Source,
+};
+use axum::{
+    Json, Router,
+    body::Body,
+    extract::{DefaultBodyLimit, FromRef, Multipart, Path, Query, Request, State},
+    http::{HeaderMap, StatusCode, header},
+    response::{
+        IntoResponse,
+        sse::{Event, KeepAlive, Sse},
+    },
+    routing::{delete, get, patch, post, put},
+};
+use axum_login::AuthnBackend;
+use axum_login::AuthzBackend;
+use futures::TryStreamExt;
+use kani_core::source_manager::SourceManager;
+use serde::de::DeserializeOwned;
+use serde_json::json;
+use std::marker::PhantomData;
+use std::{convert::Infallible, sync::Arc};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+
+mod admin;
+mod auth;
+mod categories;
+mod chapters;
+mod downloads;
+mod export;
+mod filters;
+mod library;
+mod manga;
+mod scanlators;
+mod settings;
+mod sources;
+mod sse;
+mod stats;
+mod trackers;
+mod webhooks;
+
+fn sign_image_url(url: &str, referer: &str, state: &AppState, transform: Option<&str>) -> String {
+    crate::proxy::make_proxy_url(url, referer, &state.proxy_secret, transform)
+}
+
+struct ValidatedJson<T>(T);
+
+impl<S, T> axum::extract::FromRequest<S> for ValidatedJson<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned + garde::Validate<Context = ()>,
+{
+    type Rejection = AppError;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let Json(value) = Json::<T>::from_request(req, state)
+            .await
+            .map_err(|e| AppError::ValidationError(e.to_string()))?;
+        value
+            .validate()
+            .map_err(|e| AppError::ValidationError(e.to_string()))?;
+        Ok(ValidatedJson(value))
+    }
+}
+
+struct ValidatedQuery<T>(T);
+
+impl<S, T> axum::extract::FromRequestParts<S> for ValidatedQuery<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned + garde::Validate<Context = ()>,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let Query(value) = Query::<T>::from_request_parts(parts, state)
+            .await
+            .map_err(|e| AppError::ValidationError(e.to_string()))?;
+        value
+            .validate()
+            .map_err(|e| AppError::ValidationError(e.to_string()))?;
+        Ok(ValidatedQuery(value))
+    }
+}
+
+const MAX_WASM_BYTES: usize = 10 * 1024 * 1024;
+const MAX_BACKUP_BYTES: usize = 100 * 1024 * 1024;
+const MAX_TACHI_BYTES: usize = 50 * 1024 * 1024;
+
+pub struct AuthGuard<P: AuthRequirement>(pub crate::auth::User, pub PhantomData<P>);
+
+impl<S, P> axum::extract::FromRequestParts<S> for AuthGuard<P>
+where
+    S: Send + Sync,
+    AppState: axum::extract::FromRef<S>,
+    P: AuthRequirement,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let auth_session = crate::auth::AuthSession::from_request_parts(parts, state)
+            .await
+            .map_err(|_| AppError::InternalServerError("Session error".into()))?;
+
+        let user = auth_session
+            .user
+            .ok_or(AppError::Unauthorized("User not authenticated".into()))?;
+
+        if let Some(perm) = P::required_permission()
+            && !auth_session
+                .backend
+                .has_perm(&user, perm)
+                .await
+                .unwrap_or(false)
+        {
+            tracing::warn!(
+                user_id = user.id,
+                username = %user.username,
+                permission = %perm,
+                "Permission denied"
+            );
+            let app_state = AppState::from_ref(state);
+            app_state
+                .audit(
+                    Some(user.id),
+                    "auth.permission_denied",
+                    Some(&perm.to_string()),
+                    Some(serde_json::json!({ "username": user.username })),
+                )
+                .await;
+            return Err(AppError::Forbidden(format!(
+                "User lacks permission: {}",
+                perm
+            )));
+        }
+
+        Ok(Self(user, PhantomData))
+    }
+}
+
+pub fn routes(state: AppState) -> Router {
+    Router::new()
+        .merge(auth::router())
+        .merge(sse::router())
+        .merge(sources::router())
+        .merge(library::router())
+        .merge(manga::router())
+        .merge(chapters::router())
+        .merge(scanlators::router())
+        .merge(categories::router())
+        .merge(downloads::router())
+        .merge(trackers::router())
+        .merge(filters::router())
+        .merge(settings::router())
+        .merge(admin::router())
+        .merge(stats::router())
+        .merge(export::router())
+        .merge(webhooks::router())
+        .with_state(state)
+        .layer(DefaultBodyLimit::max(MAX_WASM_BYTES))
+}
+
+/// Mounts image-serving routes under the permissive rate limiter. The reader
+/// fires many concurrent requests for page images and proxy images; these must
+/// not share a bucket with the JSON API.
+pub fn image_proxy_route(state: AppState) -> Router {
+    Router::new()
+        .route("/image_proxy", get(image_proxy))
+        .route("/chapter/{id}/page/{page_num}", get(serve_chapter_page))
+        .route("/manga/{id}/cover", get(serve_manga_cover))
+        .with_state(state)
+}
+
+/// Extract the client IP from `X-Forwarded-For` (first value) or fall back to a sentinel.
+fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+// ── Password strength endpoint (public — called before registration) ──────────
+
+#[derive(serde::Deserialize)]
+struct PasswordStrengthRequest {
+    password: String,
+    identity: Option<String>,
+}
+
+// ── Session inventory ─────────────────────────────────────────────────────────
+
+// ── TOTP 2FA ──────────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct TotpCodeRequest {
+    code: String,
+}
+
+// ── Features endpoint ─────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct RegisterRequest {
+    username: String,
+    email: String,
+    password: String,
+    captcha_id: String,
+    captcha_answer: i64,
+}
+
+// ── Filesystem browser ────────────────────────────────────────────────────────
+
+// ── Path migration ────────────────────────────────────────────────────────────
+
+async fn resolve_path_field(state: &AppState, field: &str) -> Result<std::path::PathBuf, AppError> {
+    let settings = state.settings.read().await;
+    match field {
+        "library_path" => Ok(settings.library_path.clone()),
+        "wasm_storage_path" => Ok(settings.wasm_storage_path.clone()),
+        other => Err(AppError::ValidationError(format!(
+            "unknown path field: {other}"
+        ))),
+    }
+}
+
+const PER_HOST_CONCURRENCY: usize = 5;
+const PROXY_MAX_RETRIES: u32 = 3;
+const PROXY_BASE_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+const PROXY_RETRY_AFTER_CAP_SECS: u64 = 60;
+
+fn proxy_retry_delay(
+    headers: Option<&rquest::header::HeaderMap>,
+    attempt: u32,
+) -> std::time::Duration {
+    let backoff = PROXY_BASE_DELAY * 2u32.pow(attempt);
+    headers
+        .and_then(|h| h.get(rquest::header::RETRY_AFTER))
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| {
+            s.parse::<u64>()
+                .ok()
+                .map(|secs| secs.min(PROXY_RETRY_AFTER_CAP_SECS))
+                .or_else(|| {
+                    time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc2822)
+                        .ok()
+                        .map(|dt| {
+                            let now = time::OffsetDateTime::now_utc();
+                            (dt - now).whole_seconds().max(0) as u64
+                        })
+                        .map(|secs| secs.min(PROXY_RETRY_AFTER_CAP_SECS))
+                })
+        })
+        .map(std::time::Duration::from_secs)
+        .unwrap_or(backoff)
+}
+
+fn proxy_jitter() -> std::time::Duration {
+    use rand::RngExt;
+    std::time::Duration::from_millis(rand::rng().random_range(0u64..1000))
+}
+
+fn is_retryable_proxy_status(status: rquest::StatusCode) -> bool {
+    matches!(
+        status,
+        rquest::StatusCode::TOO_MANY_REQUESTS
+            | rquest::StatusCode::BAD_GATEWAY
+            | rquest::StatusCode::SERVICE_UNAVAILABLE
+            | rquest::StatusCode::GATEWAY_TIMEOUT
+    )
+}
+
+async fn host_semaphore(
+    cache: &moka::future::Cache<String, Arc<tokio::sync::Semaphore>>,
+    host: &str,
+) -> Arc<tokio::sync::Semaphore> {
+    cache
+        .get_with(host.to_string(), async {
+            Arc::new(tokio::sync::Semaphore::new(PER_HOST_CONCURRENCY))
+        })
+        .await
+}
+
+async fn image_proxy(
+    AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    ValidatedQuery(query): ValidatedQuery<ProxyQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let (url, referer) = crate::proxy::unseal_proxy_token(&query.token, &state.proxy_secret)
+        .ok_or_else(|| AppError::Other("Invalid or expired proxy token".into()))?;
+
+    let transform_hint = query.transform.as_deref().filter(|s| !s.is_empty());
+
+    let etag = crate::proxy::compute_etag(&url, &referer, &state.proxy_secret);
+
+    if let Some(if_none_match) = headers.get(header::IF_NONE_MATCH)
+        && if_none_match.as_bytes() == etag.as_bytes()
+    {
+        return Ok((
+            StatusCode::NOT_MODIFIED,
+            [
+                (
+                    header::CACHE_CONTROL,
+                    header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+                ),
+                (
+                    header::ETAG,
+                    header::HeaderValue::from_str(&etag)
+                        .map_err(|e| AppError::InternalServerError(e.to_string()))?,
+                ),
+            ],
+            Body::empty(),
+        )
+            .into_response());
+    }
+
+    let host = rquest::Url::parse(&url)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
+        .unwrap_or_else(|| url.clone());
+
+    const MIN_HOST_REQUEST_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+    let throttle_mutex = state
+        .proxy_throttle
+        .get_with(host.clone(), async {
+            Arc::new(tokio::sync::Mutex::new(
+                std::time::Instant::now()
+                    .checked_sub(MIN_HOST_REQUEST_INTERVAL)
+                    .unwrap_or_else(std::time::Instant::now),
+            ))
+        })
+        .await;
+    {
+        let mut last = throttle_mutex.lock().await;
+        let elapsed = last.elapsed();
+        if elapsed < MIN_HOST_REQUEST_INTERVAL {
+            tokio::time::sleep(MIN_HOST_REQUEST_INTERVAL - elapsed).await;
+        }
+        *last = std::time::Instant::now();
+    }
+
+    let cache_key = match transform_hint {
+        Some(t) => format!("{}|t:{}", url, t),
+        None => url.clone(),
+    };
+
+    let fetched: Arc<(bytes::Bytes, String)> = state
+        .proxy_coalesce
+        .try_get_with(cache_key, {
+            let url = url.clone();
+            let referer = referer.clone();
+            let state = state.clone();
+            let host = host.clone();
+            let transform_hint = transform_hint.map(str::to_string);
+            async move {
+                let semaphore = host_semaphore(&state.proxy_semaphores, &host).await;
+                let mut attempt = 0u32;
+
+                let (response, ct_string, scramble_seed) = loop {
+                    let permit = Arc::clone(&semaphore)
+                        .acquire_owned()
+                        .await
+                        .map_err(|_| AppError::InternalServerError("Semaphore closed".into()))?;
+
+                    let mut req_headers = rquest::header::HeaderMap::new();
+                    req_headers.insert(
+                        rquest::header::REFERER,
+                        rquest::header::HeaderValue::from_str(&referer)
+                            .map_err(AppError::InvalidHeaderValue)?,
+                    );
+                    req_headers.insert(
+                        rquest::header::ACCEPT,
+                        rquest::header::HeaderValue::from_static(
+                            "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                        ),
+                    );
+
+                    let fetch = tokio::time::timeout(
+                        std::time::Duration::from_secs(35),
+                        state.proxy_client.safe_get(&url, Some(req_headers)),
+                    )
+                    .await;
+
+                    match fetch {
+                        Err(_elapsed) => {
+                            if attempt < PROXY_MAX_RETRIES {
+                                let delay = proxy_retry_delay(None, attempt) + proxy_jitter();
+                                tracing::warn!(
+                                    "Upstream image timed out, retrying in {:?} (attempt {}/{})",
+                                    delay,
+                                    attempt + 1,
+                                    PROXY_MAX_RETRIES,
+                                );
+                                drop(permit);
+                                tokio::time::sleep(delay).await;
+                                attempt += 1;
+                                continue;
+                            }
+                            return Err(AppError::Other("Upstream image fetch timed out".into()));
+                        }
+                        Ok(Err(e)) => {
+                            if attempt < PROXY_MAX_RETRIES {
+                                let delay = proxy_retry_delay(None, attempt) + proxy_jitter();
+                                tracing::warn!(
+                                    "Upstream image fetch error ({}), retrying in {:?} (attempt {}/{})",
+                                    e,
+                                    delay,
+                                    attempt + 1,
+                                    PROXY_MAX_RETRIES,
+                                );
+                                drop(permit);
+                                tokio::time::sleep(delay).await;
+                                attempt += 1;
+                                continue;
+                            }
+                            return Err(AppError::Other(format!(
+                                "Upstream image fetch failed: {e}"
+                            )));
+                        }
+                        Ok(Ok(resp)) => {
+                            let status = resp.status();
+                            if is_retryable_proxy_status(status) && attempt < PROXY_MAX_RETRIES {
+                                let delay =
+                                    proxy_retry_delay(Some(resp.headers()), attempt) + proxy_jitter();
+                                tracing::warn!(
+                                    "Upstream returned {}, retrying in {:?} (attempt {}/{})",
+                                    status.as_u16(),
+                                    delay,
+                                    attempt + 1,
+                                    PROXY_MAX_RETRIES,
+                                );
+                                drop(permit);
+                                tokio::time::sleep(delay).await;
+                                attempt += 1;
+                                continue;
+                            }
+                            if !status.is_success() {
+                                tracing::warn!(
+                                    "Upstream returned {} for proxied request",
+                                    status.as_u16()
+                                );
+                                return Err(AppError::Other(format!(
+                                    "Upstream returned {}",
+                                    status.as_u16()
+                                )));
+                            }
+
+                            let content_type = resp
+                                .headers()
+                                .get(rquest::header::CONTENT_TYPE)
+                                .cloned()
+                                .ok_or_else(|| {
+                                    AppError::InternalServerError(
+                                        "Upstream response missing Content-Type".into(),
+                                    )
+                                })?;
+                            let ct_str = content_type.to_str().unwrap_or("");
+                            if !ct_str.starts_with("image/") {
+                                tracing::warn!(
+                                    "Upstream proxy returned non-image Content-Type: {}",
+                                    ct_str
+                                );
+                                return Err(AppError::Other(format!(
+                                    "Expected image, upstream returned Content-Type: {}",
+                                    ct_str
+                                )));
+                            }
+                            let ct_string = ct_str.to_string();
+                            let scramble_seed = transform_hint
+                                .as_deref()
+                                .and_then(|hint| kani_core::image_transform::resolve_scramble_seed(hint, resp.headers()));
+                            drop(permit);
+                            break (resp, ct_string, scramble_seed);
+                        }
+                    }
+                };
+
+                const MAX_IMAGE_BYTES: usize = 50 * 1024 * 1024;
+                let mut buf = bytes::BytesMut::new();
+                let mut resp = response;
+                while let Ok(Some(chunk)) = resp.chunk().await {
+                    if buf.len() + chunk.len() > MAX_IMAGE_BYTES {
+                        return Err(AppError::Other("Upstream image exceeded size limit".into()));
+                    }
+                    buf.extend_from_slice(&chunk);
+                }
+
+                let (final_bytes, final_ct) = if let Some(seed) = scramble_seed {
+                    let descrambled = kani_core::image_transform::lcg_tile_descramble(&buf, seed)
+                        .map_err(|e| AppError::InternalServerError(format!("Descramble failed: {e}")))?;
+                    (bytes::Bytes::from(descrambled), "image/jpeg".to_string())
+                } else {
+                    (buf.freeze(), ct_string)
+                };
+
+                Ok::<_, AppError>(Arc::new((final_bytes, final_ct)))
+            }
+        })
+        .await
+        .map_err(|e: Arc<AppError>| match Arc::try_unwrap(e) {
+            Ok(err) => err,
+            Err(arc) => AppError::InternalServerError(arc.to_string()),
+        })?;
+
+    let (body, ct_str): &(bytes::Bytes, String) = &fetched;
+    let ct_value = header::HeaderValue::from_str(ct_str)
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+    let etag_value = header::HeaderValue::from_str(&etag)
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, ct_value),
+            (header::ETAG, etag_value),
+            (
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+            ),
+            (
+                header::X_CONTENT_TYPE_OPTIONS,
+                header::HeaderValue::from_static("nosniff"),
+            ),
+        ],
+        Body::from(body.clone()),
+    )
+        .into_response())
+}
+
+pub(crate) async fn install_source(
+    state: &AppState,
+    id: i64,
+    current_source: &Source,
+    bytes: &[u8],
+) -> Result<std::path::PathBuf, AppError> {
+    let bytes_owned = bytes.to_vec();
+    let runtime_clone = state.wasm_runtime.clone();
+
+    let component =
+        tokio::task::spawn_blocking(move || runtime_clone.compile_component(&bytes_owned))
+            .await
+            .map_err(|e| {
+                AppError::InternalServerError(format!("WASM compilation task panicked: {}", e))
+            })??;
+
+    let (metadata, raw_schema) = {
+        let mut inst =
+            kani_core::sources::SourceInstance::new(state.smart_client.clone(), None, false);
+        inst.load(
+            state.wasm_runtime.engine(),
+            &component,
+            state.wasm_runtime.linker(),
+        )
+        .await
+        .map_err(AppError::CoreError)?;
+        let meta = inst.get_metadata().await.map_err(AppError::CoreError)?;
+        let schema = inst.get_preferences().await.ok();
+        (meta, schema)
+    };
+
+    const RESERVED_IDS: &[&str] = &["example", "test-abi"];
+    if RESERVED_IDS.contains(&metadata.id.as_str()) {
+        return Err(AppError::ValidationError(format!(
+            "Extension ID '{}' is reserved for development use and cannot be installed",
+            metadata.id
+        )));
+    }
+
+    sqlx::query!(
+        "UPDATE sources SET name = ?, version = ?, base_url = ?, unrestricted_http = ? WHERE id = ?",
+        metadata.id,
+        metadata.version,
+        metadata.base_url,
+        metadata.unrestricted_http,
+        id
+    )
+    .execute(&state.db)
+    .await?;
+
+    let settings = state.settings.read().await;
+    let storage_path = settings
+        .wasm_storage_path
+        .to_str()
+        .ok_or_else(|| AppError::InternalServerError("Failed to convert path".to_string()))?;
+
+    if current_source.name != metadata.id {
+        tracing::info!(
+            "Source name changed from {} to {}. Deleting old file.",
+            current_source.name,
+            metadata.id
+        );
+        let _ = kani_core::file_storage::delete_wasm_file(storage_path, &current_source.name).await;
+    }
+
+    let path = kani_core::file_storage::save_wasm(storage_path, &metadata.id, bytes)
+        .await
+        .map_err(AppError::CoreError)?;
+    drop(settings);
+
+    let source_manager = SourceManager::new(
+        state.wasm_runtime.engine().clone(),
+        state
+            .wasm_runtime
+            .instantiate_pre(&component)
+            .map_err(AppError::CoreError)?,
+        state.smart_client.clone(),
+        Some(metadata.base_url.clone()),
+        metadata.unrestricted_http,
+        25,
+        state.load_pref_map(id).await.unwrap_or_default(),
+    );
+
+    state
+        .sources
+        .write()
+        .await
+        .insert(id, Arc::new(source_manager));
+
+    if let Some(schema) = raw_schema {
+        state.cache.insert_preference_schema(id, schema);
+    }
+
+    state.cache.invalidate_source(id);
+
+    tracing::info!(
+        "Successfully installed source {}: {} v{}",
+        id,
+        metadata.name,
+        metadata.version
+    );
+
+    Ok(path)
+}
+
+async fn reload_source(state: &AppState, id: i64) -> Result<(), AppError> {
+    let source = state.get_source(id).await?;
+
+    let wasm_path = state
+        .settings
+        .read()
+        .await
+        .wasm_storage_path
+        .join(format!("{}.wasm", source.name));
+
+    let bytes = tokio::fs::read(&wasm_path)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to read WASM: {e}")))?;
+
+    let runtime_clone = state.wasm_runtime.clone();
+    let component = tokio::task::spawn_blocking(move || runtime_clone.compile_component(&bytes))
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("WASM compile task panicked: {e}")))??;
+
+    let (metadata, raw_schema) = {
+        let mut inst =
+            kani_core::sources::SourceInstance::new(state.smart_client.clone(), None, false);
+        inst.load(
+            state.wasm_runtime.engine(),
+            &component,
+            state.wasm_runtime.linker(),
+        )
+        .await
+        .map_err(AppError::CoreError)?;
+        let meta = inst.get_metadata().await.map_err(AppError::CoreError)?;
+        let schema = inst.get_preferences().await.ok();
+        (meta, schema)
+    };
+
+    sqlx::query!(
+        "UPDATE sources SET version = ?, base_url = ?, unrestricted_http = ? WHERE id = ?",
+        metadata.version,
+        metadata.base_url,
+        metadata.unrestricted_http,
+        id
+    )
+    .execute(&state.db)
+    .await?;
+
+    let source_manager = SourceManager::new(
+        state.wasm_runtime.engine().clone(),
+        state
+            .wasm_runtime
+            .instantiate_pre(&component)
+            .map_err(AppError::CoreError)?,
+        state.smart_client.clone(),
+        Some(metadata.base_url.clone()),
+        metadata.unrestricted_http,
+        25,
+        state.load_pref_map(id).await.unwrap_or_default(),
+    );
+
+    state
+        .sources
+        .write()
+        .await
+        .insert(id, Arc::new(source_manager));
+
+    if let Some(schema) = raw_schema {
+        state.cache.insert_preference_schema(id, schema);
+    }
+
+    state.cache.invalidate_source(id);
+
+    tracing::info!("Reloaded extension {} ({})", id, source.name);
+    Ok(())
+}
+
+#[derive(serde::Deserialize, Default)]
+struct ChapterListQuery {
+    sort: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct SaveToLibraryQuery {
+    force: Option<bool>,
+}
+
+async fn serve_manga_cover(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let full_path = state.get_manga_cover_path(id).await?;
+
+    let metadata = tokio::fs::metadata(&full_path)
+        .await
+        .map_err(|_| AppError::NotFound("Cover file not found on disk".into()))?;
+
+    let mtime = metadata
+        .modified()
+        .map(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        })
+        .unwrap_or(0);
+    let etag = format!("\"{}\"", mtime);
+
+    if let Some(inm) = headers.get(header::IF_NONE_MATCH)
+        && inm.as_bytes() == etag.as_bytes()
+    {
+        return Ok((
+            StatusCode::NOT_MODIFIED,
+            [
+                (
+                    header::CACHE_CONTROL,
+                    header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+                ),
+                (
+                    header::ETAG,
+                    header::HeaderValue::from_str(&etag)
+                        .map_err(|e| AppError::InternalServerError(e.to_string()))?,
+                ),
+            ],
+            axum::body::Body::empty(),
+        )
+            .into_response());
+    }
+
+    let ext = full_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpg");
+    let content_type = match ext {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        _ => "image/jpeg",
+    };
+
+    let bytes = tokio::fs::read(&full_path)
+        .await
+        .map_err(AppError::IoError)?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            (
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static(content_type),
+            ),
+            (
+                header::ETAG,
+                header::HeaderValue::from_str(&etag)
+                    .map_err(|e| AppError::InternalServerError(e.to_string()))?,
+            ),
+            (
+                header::CONTENT_LENGTH,
+                header::HeaderValue::from(bytes.len()),
+            ),
+            (
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+            ),
+            (
+                header::X_CONTENT_TYPE_OPTIONS,
+                header::HeaderValue::from_static("nosniff"),
+            ),
+        ],
+        axum::body::Body::from(bytes),
+    )
+        .into_response())
+}
+
+// ── Library ──────────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct DownloadHistoryQuery {
+    #[serde(default = "default_history_limit")]
+    limit: i64,
+}
+fn default_history_limit() -> i64 {
+    50
+}
+
+// ── Filter metadata ───────────────────────────────────────────────────────────
+
+// ── Settings & scan ───────────────────────────────────────────────────────────
+
+fn map_refresh_request(
+    req: crate::models::RefreshMangaRequest,
+) -> Result<kani_app::models::RefreshOptions, AppError> {
+    let fields = match req.fields.as_deref() {
+        None | Some([]) => kani_app::models::RefreshFields::default(),
+        Some(names) => {
+            let mut f = kani_app::models::RefreshFields {
+                cover: false,
+                title: false,
+                description: false,
+                status: false,
+                people: false,
+                tags: false,
+            };
+            for name in names {
+                match name.as_str() {
+                    "cover" => f.cover = true,
+                    "title" => f.title = true,
+                    "description" => f.description = true,
+                    "status" => f.status = true,
+                    "people" => f.people = true,
+                    "tags" => f.tags = true,
+                    other => {
+                        return Err(AppError::ValidationError(format!(
+                            "unknown refresh field: {other}"
+                        )));
+                    }
+                }
+            }
+            f
+        }
+    };
+    Ok(kani_app::models::RefreshOptions {
+        fields,
+        fetch_chapters: req.fetch_chapters.unwrap_or(true),
+        clear_overrides: req.clear_overrides.unwrap_or(false),
+    })
+}
+
+// ── Download rules ────────────────────────────────────────────────────────────
+
+// ── Scanlator preferences ─────────────────────────────────────────────────────
+
+// ── Categories ────────────────────────────────────────────────────────────────
+
+// ── Source preferences ────────────────────────────────────────────────────────
+
+// ── Migration ─────────────────────────────────────────────────────────────────
+
+// ── User / Auth ───────────────────────────────────────────────────────────────
+
+// ── Chapter CBZ reader ────────────────────────────────────────────────────────
+
+async fn serve_chapter_page(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+    State(state): State<AppState>,
+    Path((id, page_num)): Path<(i64, usize)>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    // Resolve the path first so we can derive an ETag from the CBZ mtime.
+    // This avoids reading image bytes on cache hits.
+    let info = state.chapter_cbz_path(id).await?;
+
+    let mtime = tokio::fs::metadata(&info.path)
+        .await
+        .map(|m| {
+            m.modified()
+                .map(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                })
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+    let etag = format!("\"{mtime}-{page_num}\"");
+
+    if let Some(inm) = headers.get(header::IF_NONE_MATCH)
+        && inm.as_bytes() == etag.as_bytes()
+    {
+        return Ok((
+            StatusCode::NOT_MODIFIED,
+            [
+                (
+                    header::CACHE_CONTROL,
+                    header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+                ),
+                (
+                    header::ETAG,
+                    header::HeaderValue::from_str(&etag)
+                        .map_err(|e| AppError::InternalServerError(e.to_string()))?,
+                ),
+            ],
+            axum::body::Body::empty(),
+        )
+            .into_response());
+    }
+
+    let (bytes, ext) = state.read_chapter_page(id, page_num).await?;
+
+    let content_type = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "avif" => "image/avif",
+        _ => "image/jpeg",
+    };
+
+    Ok((
+        StatusCode::OK,
+        [
+            (
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static(content_type),
+            ),
+            (
+                header::ETAG,
+                header::HeaderValue::from_str(&etag)
+                    .map_err(|e| AppError::InternalServerError(e.to_string()))?,
+            ),
+            (
+                header::CONTENT_LENGTH,
+                header::HeaderValue::from(bytes.len()),
+            ),
+            (
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+            ),
+            (
+                header::X_CONTENT_TYPE_OPTIONS,
+                header::HeaderValue::from_static("nosniff"),
+            ),
+        ],
+        axum::body::Body::from(bytes),
+    )
+        .into_response())
+}
+
+pub async fn health() -> impl IntoResponse {
+    (StatusCode::OK, Json(json!({"status": "ok"})))
+}
+
+pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    match sqlx::query("SELECT 1").execute(&state.db).await {
+        Ok(_) => (StatusCode::OK, Json(json!({"status": "ready"}))).into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "status": "not_ready",
+                "reason": format!("database: {e}")
+            })),
+        )
+            .into_response(),
+    }
+}
+
+// ── External tracker handlers ────────────────────────────────────────────
+
+const OAUTH_SUCCESS_HTML: &str = r#"<!DOCTYPE html>
+<html>
+<head><title>Account Linked</title></head>
+<body>
+<script>
+  if (window.opener) {
+    window.opener.postMessage({ type: 'tracker_linked' }, window.location.origin);
+    window.close();
+  } else {
+    document.body.innerText = 'Account linked successfully. You can close this window.';
+  }
+</script>
+</body>
+</html>"#;
+
+// ── Progress tracking handlers ───────────────────────────────────────────
+
+// ── Admin — maintenance ───────────────────────────────────────────────────────
+
+// ── Admin — user management ───────────────────────────────────────────────────
+
+// ── Admin — user activity feed ────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct UserActivityQuery {
+    limit: Option<i64>,
+    before: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ActivityEvent {
+    id: i64,
+    action: String,
+    target: Option<String>,
+    details: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
+    created_at: time::OffsetDateTime,
+}
+
+#[derive(serde::Serialize)]
+struct UserActivityResponse {
+    events: Vec<ActivityEvent>,
+}
+
+// ── Admin — role management ───────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum_login::{
+        AuthManagerLayerBuilder,
+        tower_sessions::{SessionManagerLayer, cookie::SameSite},
+    };
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    use tower_sessions_sqlx_store::SqliteStore;
+
+    // ── test helpers ──────────────────────────────────────────────────────────
+
+    async fn test_app_state(pool: sqlx::SqlitePool) -> AppState {
+        AppState::new_for_test(pool).await
+    }
+
+    /// Builds a full test router with an in-memory DB, a default test user, and
+    /// the auth + session layers wired up — matching the production setup in main.rs
+    /// but without rate-limiting or CORS.
+    ///
+    /// Returns `(router, username, password)`.
+    async fn test_router() -> (axum::Router, String, String) {
+        let pool = crate::auth::test_db().await;
+        let backend = crate::auth::AuthBackend::new(pool.clone());
+        backend
+            .create_user("alice", "alice@test.com", "hunter2")
+            .await
+            .expect("create test user");
+
+        let session_store = SqliteStore::new(pool.clone());
+        session_store.migrate().await.expect("session migrate");
+
+        let session_layer = SessionManagerLayer::new(session_store)
+            .with_secure(false)
+            .with_http_only(true)
+            .with_same_site(SameSite::Lax);
+
+        let auth_layer = AuthManagerLayerBuilder::new(
+            crate::auth::AuthBackend::new(pool.clone()),
+            session_layer,
+        )
+        .build();
+
+        let state = test_app_state(pool).await;
+        let router = routes(state).layer(auth_layer);
+        (router, "alice".to_string(), "hunter2".to_string())
+    }
+
+    fn login_request(username: &str, password: &str) -> axum::http::Request<Body> {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri("/auth/login")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"username": username, "password": password}).to_string(),
+            ))
+            .unwrap()
+    }
+
+    async fn body_json(body: Body) -> serde_json::Value {
+        let bytes = body.collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    /// Log in and return the raw `id=value` portion of the Set-Cookie header.
+    async fn login_and_get_cookie(app: axum::Router, username: &str, password: &str) -> String {
+        let resp = app
+            .oneshot(login_request(username, password))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "expected login to succeed");
+        resp.headers()
+            .get("set-cookie")
+            .expect("Set-Cookie header")
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_string()
+    }
+
+    // ── login ─────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn login_valid_credentials_returns_200() {
+        let (app, user, pass) = test_router().await;
+        let resp = app.oneshot(login_request(&user, &pass)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn login_sets_session_cookie() {
+        let (app, user, pass) = test_router().await;
+        let resp = app.oneshot(login_request(&user, &pass)).await.unwrap();
+        assert!(resp.headers().contains_key("set-cookie"));
+    }
+
+    #[tokio::test]
+    async fn login_response_body_has_ok_true() {
+        let (app, user, pass) = test_router().await;
+        let resp = app.oneshot(login_request(&user, &pass)).await.unwrap();
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn login_wrong_password_returns_401() {
+        let (app, user, _) = test_router().await;
+        let resp = app
+            .oneshot(login_request(&user, "wrongpass"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn login_unknown_user_returns_401() {
+        let (app, _, _) = test_router().await;
+        let resp = app
+            .oneshot(login_request("nobody", "whatever"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn login_failure_body_has_error_field() {
+        let (app, user, _) = test_router().await;
+        let resp = app.oneshot(login_request(&user, "bad")).await.unwrap();
+        let json = body_json(resp.into_body()).await;
+        assert!(json["error"].is_string());
+    }
+
+    // ── auth/me ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn auth_me_without_session_returns_401() {
+        let (app, _, _) = test_router().await;
+        let req = axum::http::Request::builder()
+            .uri("/auth/me")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_me_with_session_returns_200() {
+        let (app, user, pass) = test_router().await;
+        let cookie = login_and_get_cookie(app.clone(), &user, &pass).await;
+
+        let req = axum::http::Request::builder()
+            .uri("/auth/me")
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_me_response_contains_username() {
+        let (app, user, pass) = test_router().await;
+        let cookie = login_and_get_cookie(app.clone(), &user, &pass).await;
+
+        let req = axum::http::Request::builder()
+            .uri("/auth/me")
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["username"], user.as_str());
+    }
+
+    // ── logout ────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn logout_returns_200() {
+        let (app, user, pass) = test_router().await;
+        let cookie = login_and_get_cookie(app.clone(), &user, &pass).await;
+
+        let req = axum::http::Request::builder()
+            .method("POST")
+            .uri("/auth/logout")
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn after_logout_old_session_is_rejected() {
+        let (app, user, pass) = test_router().await;
+        let cookie = login_and_get_cookie(app.clone(), &user, &pass).await;
+
+        let logout = axum::http::Request::builder()
+            .method("POST")
+            .uri("/auth/logout")
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap();
+        app.clone().oneshot(logout).await.unwrap();
+
+        // Old cookie should no longer grant access.
+        let req = axum::http::Request::builder()
+            .uri("/auth/me")
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // ── boot_id ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn boot_id_with_session_returns_expected_value() {
+        let (app, user, pass) = test_router().await;
+        let cookie = login_and_get_cookie(app.clone(), &user, &pass).await;
+
+        let req = axum::http::Request::builder()
+            .uri("/boot_id")
+            .header("cookie", &cookie)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["boot_id"], "test-boot-id");
+    }
+
+    // ── smoke: unauthenticated protected routes return 401 ────────────────────
+
+    async fn assert_401_without_session(uri: &'static str) {
+        let (app, _, _) = test_router().await;
+        let req = axum::http::Request::builder()
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "expected 401 for unauthenticated GET {uri}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sources_unauthenticated_returns_401() {
+        assert_401_without_session("/sources").await;
+    }
+
+    #[tokio::test]
+    async fn library_unauthenticated_returns_401() {
+        assert_401_without_session("/library").await;
+    }
+
+    #[tokio::test]
+    async fn settings_unauthenticated_returns_401() {
+        assert_401_without_session("/settings").await;
+    }
+
+    #[tokio::test]
+    async fn categories_unauthenticated_returns_401() {
+        assert_401_without_session("/categories").await;
+    }
+
+    #[tokio::test]
+    async fn recent_updates_unauthenticated_returns_401() {
+        assert_401_without_session("/recent_updates").await;
+    }
+
+    #[tokio::test]
+    async fn global_search_unauthenticated_returns_401() {
+        assert_401_without_session("/global_search").await;
+    }
+
+    #[tokio::test]
+    async fn boot_id_unauthenticated_returns_401() {
+        assert_401_without_session("/boot_id").await;
+    }
+}
+
+// ── Admin: application logs ───────────────────────────────────────────────────
+
+// ── Admin: audit log ──────────────────────────────────────────────────────────
+
+// ── Reading statistics ────────────────────────────────────────────────────────
+
+// ── Bookmarks (#14) ───────────────────────────────────────────────────────────
+
+// ── Per-chapter notes (#31) ───────────────────────────────────────────────────
+
+// ── Backup / Restore ─────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct LibraryBackupQuery {
+    include_chapter_progress: Option<bool>,
+}
+
+// ── Pending imports ───────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct ResolvePendingImportBody {
+    source_id: i64,
+    source_manga_id: String,
+}
+
+// ── Orphaned manga ────────────────────────────────────────────────────────────
+
+// ── Duplicates ────────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct DismissDuplicatePath {
+    a: i64,
+    b: i64,
+}
+
+#[derive(serde::Deserialize)]
+struct MergeDuplicateBody {
+    keep_id: i64,
+    discard_id: i64,
+}
+
+// ── Backup multipart helper ───────────────────────────────────────────────────
+
+async fn collect_file_field(
+    multipart: &mut Multipart,
+    limit: usize,
+) -> Result<bytes::Bytes, AppError> {
+    let field = multipart
+        .next_field()
+        .await?
+        .ok_or_else(|| AppError::ValidationError("No file field in upload".into()))?;
+
+    let content_length = field
+        .headers()
+        .get(rquest::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+
+    Ok(kani_core::http::collect_bytes_limited(
+        Box::pin(field.map_err(|e| kani_core::error::Error::Other(e.to_string()))),
+        content_length,
+        limit,
+    )
+    .await?)
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+fn parse_csv(s: Option<&str>) -> Vec<String> {
+    match s {
+        Some(v) if !v.is_empty() => v.split(',').map(|p| p.trim().to_string()).collect(),
+        _ => vec![],
+    }
+}
+
+fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+// ── CBZ / Export handlers ─────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize, Default)]
+struct ExportQuery {
+    profile: Option<String>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct KccExportQuery {
+    profile: Option<String>,
+    format: Option<String>,
+    manga: Option<bool>,
+}
+
+// ── Webhooks ──────────────────────────────────────────────────────────────────
