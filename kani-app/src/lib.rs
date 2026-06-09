@@ -9,6 +9,7 @@ pub mod error;
 pub mod events;
 pub mod models;
 pub mod service;
+pub mod tuning;
 pub mod utils;
 
 pub use error::ServiceError;

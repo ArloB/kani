@@ -111,21 +111,43 @@ impl DownloaderManager {
     }
 }
 
+pub const DEFAULT_CONCURRENT_PAGES: usize = 4;
+pub const DEFAULT_CONCURRENT_MANGA: usize = 2;
+pub const DEFAULT_MAX_RETRIES: i64 = 3;
+pub const DEFAULT_INITIAL_RETRY_DELAY_MS: i64 = 1_000;
+pub const DEFAULT_CHAPTER_QUEUE_SIZE: usize = 32;
+
+/// Tunables for [`DownloaderManager::new`]. Replaces a positional argument list
+/// where the three integer fields were trivially swappable.
+#[derive(Debug, Clone)]
+pub struct DownloaderConfig {
+    pub concurrent_pages: usize,
+    pub concurrent_manga: usize,
+    pub max_retries: i64,
+    pub initial_retry_delay_ms: i64,
+    pub chapter_queue_size: usize,
+}
+
+impl Default for DownloaderConfig {
+    fn default() -> Self {
+        Self {
+            concurrent_pages: DEFAULT_CONCURRENT_PAGES,
+            concurrent_manga: DEFAULT_CONCURRENT_MANGA,
+            max_retries: DEFAULT_MAX_RETRIES,
+            initial_retry_delay_ms: DEFAULT_INITIAL_RETRY_DELAY_MS,
+            chapter_queue_size: DEFAULT_CHAPTER_QUEUE_SIZE,
+        }
+    }
+}
+
 impl DownloaderManager {
-    pub async fn new(
-        smart_client: SmartClient,
-        concurrent_page_downloads: usize,
-        concurrent_chapters: usize,
-        max_retries: i64,
-        initial_retry_delay_ms: i64,
-        queue_limit: usize,
-    ) -> Result<Self> {
+    pub async fn new(smart_client: SmartClient, config: DownloaderConfig) -> Result<Self> {
         let queue = Arc::new(Mutex::new(QueueState::new()));
         let (progress_tx, _) = broadcast::channel(PROGRESS_CHANNEL_CAPACITY);
         let active = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
-        let capacity_semaphore = Arc::new(tokio::sync::Semaphore::new(queue_limit));
+        let capacity_semaphore = Arc::new(tokio::sync::Semaphore::new(config.chapter_queue_size));
         let queue_semaphore = Arc::new(tokio::sync::Semaphore::new(0)); // starts empty
-        let chapter_limiter = Arc::new(tokio::sync::Semaphore::new(concurrent_chapters));
+        let chapter_limiter = Arc::new(tokio::sync::Semaphore::new(config.concurrent_manga));
 
         tokio::spawn(Self::run_worker(
             smart_client,
@@ -134,9 +156,9 @@ impl DownloaderManager {
             chapter_limiter,
             progress_tx.clone(),
             active.clone(),
-            concurrent_page_downloads,
-            max_retries,
-            initial_retry_delay_ms,
+            config.concurrent_pages,
+            config.max_retries,
+            config.initial_retry_delay_ms,
         ));
 
         Ok(Self {
@@ -866,11 +888,30 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
 
+    #[test]
+    fn downloader_config_default_values() {
+        let c = DownloaderConfig::default();
+        assert_eq!(c.concurrent_pages, 4);
+        assert_eq!(c.concurrent_manga, 2);
+        assert_eq!(c.max_retries, 3);
+        assert_eq!(c.initial_retry_delay_ms, 1_000);
+        assert_eq!(c.chapter_queue_size, 32);
+    }
+
     async fn make_manager() -> DownloaderManager {
         let client = crate::http::SmartClient::new(None).expect("SmartClient");
-        DownloaderManager::new(client, 4, 2, 3, 100, 32)
-            .await
-            .expect("DownloaderManager")
+        DownloaderManager::new(
+            client,
+            DownloaderConfig {
+                concurrent_pages: 4,
+                concurrent_manga: 2,
+                max_retries: 3,
+                initial_retry_delay_ms: 100,
+                chapter_queue_size: 32,
+            },
+        )
+        .await
+        .expect("DownloaderManager")
     }
 
     // ── initial state ────────────────────────────────────────────────────────

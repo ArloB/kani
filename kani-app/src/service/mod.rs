@@ -8,7 +8,7 @@ use kani_shared::wit_types;
 use ordered_float::OrderedFloat;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
-use kani_core::downloader::{DownloadTask, DownloaderManager};
+use kani_core::downloader::{DownloadTask, DownloaderConfig, DownloaderManager};
 use kani_core::source_manager::SourceManager;
 use kani_core::wasm::WasmRuntime;
 
@@ -223,7 +223,9 @@ impl AppService {
         let engine_for_ticker = wasm_runtime.engine().clone();
         let ticker_token = shutdown_token.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_millis(10));
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(
+                crate::tuning::WASM_EPOCH_TICK_MS,
+            ));
             loop {
                 tokio::select! {
                     _ = ticker_token.cancelled() => {
@@ -310,11 +312,13 @@ impl AppService {
 
         let downloader = DownloaderManager::new(
             global_smart_client.clone(),
-            settings.concurrent_page_downloads.try_into()?,
-            settings.concurrent_manga_downloads.try_into()?,
-            settings.max_retries,
-            settings.initial_retry_delay_ms,
-            settings.chapter_queue_size.try_into()?,
+            DownloaderConfig {
+                concurrent_pages: settings.concurrent_page_downloads.try_into()?,
+                concurrent_manga: settings.concurrent_manga_downloads.try_into()?,
+                max_retries: settings.max_retries,
+                initial_retry_delay_ms: settings.initial_retry_delay_ms,
+                chapter_queue_size: settings.chapter_queue_size.try_into()?,
+            },
         )
         .await
         .map_err(ServiceError::Core)?;
@@ -328,7 +332,8 @@ impl AppService {
         )?;
         tracing::info!("Proxy client created");
 
-        let (refresh_tx, _) = tokio::sync::broadcast::channel(256);
+        let (refresh_tx, _) =
+            tokio::sync::broadcast::channel(crate::tuning::SSE_BROADCAST_CAPACITY);
         let refresh_task = Arc::new(tokio::sync::Mutex::new(None));
 
         let tracker_registry = TrackerRegistry::new(&pool, enc.as_ref()).await?;
@@ -404,12 +409,22 @@ impl AppService {
         let proxy_client =
             kani_core::http::SmartClient::new(None).expect("proxy SmartClient::new failed in test");
         let wasm_runtime = Arc::new(WasmRuntime::new(1).expect("WasmRuntime::new failed in test"));
-        let downloader = DownloaderManager::new(smart_client.clone(), 1, 1, 0, 0, 4)
-            .await
-            .expect("DownloaderManager::new failed in test");
+        let downloader = DownloaderManager::new(
+            smart_client.clone(),
+            DownloaderConfig {
+                concurrent_pages: 1,
+                concurrent_manga: 1,
+                max_retries: 0,
+                initial_retry_delay_ms: 0,
+                chapter_queue_size: 4,
+            },
+        )
+        .await
+        .expect("DownloaderManager::new failed in test");
         let tracker_registry = TrackerRegistry::new(&pool, None)
             .await
             .expect("TrackerRegistry::new failed in test");
+        // Small capacity: tests have at most a couple of SSE subscribers.
         let (refresh_tx, _) = tokio::sync::broadcast::channel(16);
 
         Self {
@@ -660,7 +675,9 @@ impl AppService {
                         tracing::info!("Cover retry task shutting down");
                         break;
                     }
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(
+                        crate::tuning::COVER_RETRY_INTERVAL_SECS,
+                    )) => {}
                 }
 
                 let ids: Vec<i64> = state.cover_retry_queue.lock().await.drain().collect();
@@ -687,7 +704,9 @@ impl AppService {
         let client = self.smart_client.clone();
         let token = self.shutdown_token.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(20 * 60));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+                crate::tuning::CREDENTIAL_REFRESH_INTERVAL_SECS,
+            ));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tokio::select! {
