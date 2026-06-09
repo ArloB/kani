@@ -11,8 +11,10 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
+        // Atomic claim failed: the chapter is already downloaded or in progress.
+        // This is a benign client conflict (409), not a server error (500).
         if claimed.rows_affected() == 0 {
-            return Err(ServiceError::Internal(format!(
+            return Err(ServiceError::Conflict(format!(
                 "Chapter {chapter_id} is already downloaded or in progress."
             )));
         }

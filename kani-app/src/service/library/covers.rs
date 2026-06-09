@@ -92,10 +92,10 @@ impl AppService {
             self.proxy_client.safe_get(cover_url, Some(headers)),
         )
         .await
-        .map_err(|_| ServiceError::Other("Cover download timed out".into()))??;
+        .map_err(|_| ServiceError::Internal("Cover download timed out".into()))??;
 
         if !response.status().is_success() {
-            return Err(ServiceError::Other(format!(
+            return Err(ServiceError::Internal(format!(
                 "Cover download returned {}",
                 response.status().as_u16()
             )));
@@ -109,7 +109,7 @@ impl AppService {
             .to_string();
 
         if !content_type.starts_with("image/") {
-            return Err(ServiceError::Other(format!(
+            return Err(ServiceError::Internal(format!(
                 "Expected image for cover, got Content-Type: {}",
                 content_type
             )));

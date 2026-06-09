@@ -164,14 +164,14 @@ impl AppService {
     }
 
     /// Export a downloaded chapter via Kindle Comic Converter (KCC).
-    /// Returns `Err(ServiceError::Other)` if `kcc-c2e` is not in PATH.
+    /// Returns `Err(ServiceError::Internal)` if `kcc-c2e` is not in PATH.
     pub async fn export_chapter_kcc(
         &self,
         chapter_id: i64,
         opts: KccOptions,
     ) -> Result<(Vec<u8>, String, &'static str)> {
         if which::which("kcc-c2e").is_err() {
-            return Err(ServiceError::Other(
+            return Err(ServiceError::Internal(
                 "KCC not available: kcc-c2e not found in PATH".into(),
             ));
         }

@@ -4,11 +4,34 @@
 
 mod common;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use common::{
     authed_get, authed_post, body_json, build_test_app, create_admin, create_regular_user, get_req,
     login, post_json, test_state,
 };
+use kani_app::ServiceError;
+use kani_web::error::AppError;
 use tower::ServiceExt;
+
+// ── ServiceError → AppError → HTTP status mapping ────────────────────────────
+
+#[test]
+fn service_conflict_maps_to_409() {
+    let resp = AppError::from(ServiceError::Conflict("already in progress".into())).into_response();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+}
+
+#[test]
+fn service_forbidden_maps_to_403() {
+    let resp = AppError::from(ServiceError::Forbidden("no access".into())).into_response();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[test]
+fn service_not_found_maps_to_404() {
+    let resp = AppError::from(ServiceError::NotFound("manga 1".into())).into_response();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
 
 // ── 404 Not Found ────────────────────────────────────────────────────────────
 

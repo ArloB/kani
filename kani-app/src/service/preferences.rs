@@ -84,7 +84,7 @@ impl AppService {
         self.set_preference(
             source_id,
             key,
-            &serde_json::to_string(&list).map_err(|e| ServiceError::Other(e.to_string()))?,
+            &serde_json::to_string(&list).map_err(|e| ServiceError::Internal(e.to_string()))?,
         )
         .await
     }
@@ -99,7 +99,7 @@ impl AppService {
         self.set_preference(
             source_id,
             key,
-            &serde_json::to_string(&list).map_err(|e| ServiceError::Other(e.to_string()))?,
+            &serde_json::to_string(&list).map_err(|e| ServiceError::Internal(e.to_string()))?,
         )
         .await
     }
@@ -126,7 +126,7 @@ impl AppService {
         self.set_preference(
             source_id,
             key,
-            &serde_json::to_string(&list).map_err(|e| ServiceError::Other(e.to_string()))?,
+            &serde_json::to_string(&list).map_err(|e| ServiceError::Internal(e.to_string()))?,
         )
         .await
     }

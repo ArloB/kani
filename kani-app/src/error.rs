@@ -13,14 +13,14 @@ pub enum ServiceError {
     #[error("Conflict: {0}")]
     Conflict(String),
 
+    #[error("Permission denied: {0}")]
+    Forbidden(String),
+
     #[error("Internal error: {0}")]
     Internal(String),
 
     #[error("Validation error: {0}")]
     Validation(String),
-
-    #[error("Other error: {0}")]
-    Other(String),
 
     #[error("Possible duplicate")]
     PossibleDuplicate(Vec<crate::service::dedup::SimilarMangaHit>),
