@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id FROM chapters WHERE download_status = 1",
+  "query": "SELECT id FROM chapters WHERE manga_id = ? AND download_status = ? AND is_orphaned = 0",
   "describe": {
     "columns": [
       {
@@ -10,11 +10,11 @@
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 2
     },
     "nullable": [
       false
     ]
   },
-  "hash": "07fe5dd4148a06b349dacaf7299a7867508d54130b55b6a3ac4a7dfc057dc75f"
+  "hash": "d14a213614c9a376c97072c6bb5aabf373fe976241fc08d24bee8b7ccd75b671"
 }

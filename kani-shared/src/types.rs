@@ -650,6 +650,68 @@ pub struct MangaInfo {
     pub tags: Vec<NamedItem>,
 }
 
+/// Durable download lifecycle state of a chapter, stored as the integer
+/// `download_status` column. Serialises as that integer (0/1/2) to preserve the
+/// existing JSON API and frontend contract.
+#[cfg(feature = "host")]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(into = "i64", try_from = "i64")]
+#[repr(i64)]
+pub enum DownloadStatus {
+    #[default]
+    Pending = 0,
+    InProgress = 1,
+    Complete = 2,
+}
+
+#[cfg(feature = "host")]
+impl From<DownloadStatus> for i64 {
+    fn from(s: DownloadStatus) -> i64 {
+        s as i64
+    }
+}
+
+#[cfg(feature = "host")]
+impl TryFrom<i64> for DownloadStatus {
+    type Error = String;
+    fn try_from(v: i64) -> Result<Self, String> {
+        match v {
+            0 => Ok(Self::Pending),
+            1 => Ok(Self::InProgress),
+            2 => Ok(Self::Complete),
+            other => Err(format!("invalid download_status: {other}")),
+        }
+    }
+}
+
+#[cfg(feature = "ssr")]
+impl sqlx::Type<sqlx::Sqlite> for DownloadStatus {
+    fn type_info() -> sqlx::sqlite::SqliteTypeInfo {
+        <i64 as sqlx::Type<sqlx::Sqlite>>::type_info()
+    }
+    fn compatible(ty: &sqlx::sqlite::SqliteTypeInfo) -> bool {
+        <i64 as sqlx::Type<sqlx::Sqlite>>::compatible(ty)
+    }
+}
+
+#[cfg(feature = "ssr")]
+impl<'q> sqlx::Encode<'q, sqlx::Sqlite> for DownloadStatus {
+    fn encode_by_ref(
+        &self,
+        buf: &mut Vec<sqlx::sqlite::SqliteArgumentValue<'q>>,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        <i64 as sqlx::Encode<sqlx::Sqlite>>::encode_by_ref(&(*self as i64), buf)
+    }
+}
+
+#[cfg(feature = "ssr")]
+impl<'r> sqlx::Decode<'r, sqlx::Sqlite> for DownloadStatus {
+    fn decode(value: sqlx::sqlite::SqliteValueRef<'r>) -> Result<Self, sqlx::error::BoxDynError> {
+        let v = <i64 as sqlx::Decode<sqlx::Sqlite>>::decode(value)?;
+        DownloadStatus::try_from(v).map_err(Into::into)
+    }
+}
+
 #[cfg(feature = "host")]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Chapter {
@@ -661,7 +723,7 @@ pub struct Chapter {
     pub scanlator: Option<String>,
     pub date_uploaded: Option<i64>,
     #[serde(default)]
-    pub download_status: i64,
+    pub download_status: DownloadStatus,
     #[serde(default)]
     pub is_orphaned: bool,
     pub page_count: Option<i64>,
@@ -1245,6 +1307,23 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
 
+    #[test]
+    fn download_status_serialises_as_integer() {
+        assert_eq!(
+            serde_json::to_string(&DownloadStatus::Complete).unwrap(),
+            "2"
+        );
+        let s: DownloadStatus = serde_json::from_str("1").unwrap();
+        assert_eq!(s, DownloadStatus::InProgress);
+        assert_eq!(DownloadStatus::default(), DownloadStatus::Pending);
+        assert!(serde_json::from_str::<DownloadStatus>("3").is_err());
+        assert_eq!(i64::from(DownloadStatus::Complete), 2);
+        assert_eq!(
+            DownloadStatus::try_from(0).unwrap(),
+            DownloadStatus::Pending
+        );
+    }
+
     fn json_rt<T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(
         v: &T,
     ) {
@@ -1414,7 +1493,7 @@ mod tests {
             language: "en".into(),
             scanlator: Some("TeamX".into()),
             date_uploaded: Some(1_700_000_000),
-            download_status: 0,
+            download_status: DownloadStatus::Pending,
             is_orphaned: false,
             page_count: Some(20),
             is_read: true,
@@ -1426,7 +1505,7 @@ mod tests {
     fn chapter_missing_optional_fields_default_to_zero_or_false() {
         let json = r#"{"id":"c","number":1.0,"language":"en"}"#;
         let ch: Chapter = serde_json::from_str(json).unwrap();
-        assert_eq!(ch.download_status, 0);
+        assert_eq!(ch.download_status, DownloadStatus::Pending);
         assert!(!ch.is_orphaned);
         assert!(!ch.is_read);
         assert!(ch.last_page_read.is_none());

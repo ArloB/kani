@@ -203,7 +203,8 @@ async fn main() {
                             chapter_id, ..
                         } => {
                             if let Err(e) = sqlx::query!(
-                                "UPDATE chapters SET download_status = 1 WHERE id = ?",
+                                "UPDATE chapters SET download_status = ? WHERE id = ?",
+                                kani_shared::types::DownloadStatus::InProgress,
                                 chapter_id
                             )
                             .execute(&db)
@@ -223,7 +224,8 @@ async fn main() {
                         } => {
                             let pc = successful_pages as i64;
                             if let Err(e) = sqlx::query!(
-                                "UPDATE chapters SET download_status = 2, page_count = ?, downloaded_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                "UPDATE chapters SET download_status = ?, page_count = ?, downloaded_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                kani_shared::types::DownloadStatus::Complete,
                                 pc,
                                 chapter_id
                             )
@@ -280,7 +282,8 @@ async fn main() {
                         } => {
                             tracing::error!("Chapter failed to download: {}", error);
                             if let Err(e) = sqlx::query!(
-                                "UPDATE chapters SET download_status = 0 WHERE id = ?",
+                                "UPDATE chapters SET download_status = ? WHERE id = ?",
+                                kani_shared::types::DownloadStatus::Pending,
                                 chapter_id
                             )
                             .execute(&db)
@@ -300,7 +303,8 @@ async fn main() {
                             chapter_id, ..
                         } => {
                             if let Err(e) = sqlx::query!(
-                                "UPDATE chapters SET download_status = 0 WHERE id = ?",
+                                "UPDATE chapters SET download_status = ? WHERE id = ?",
+                                kani_shared::types::DownloadStatus::Pending,
                                 chapter_id
                             )
                             .execute(&db)
@@ -352,7 +356,8 @@ async fn main() {
 
                                 if tokio::fs::try_exists(&file_path).await.unwrap_or(false) {
                                     if let Err(e) = sqlx::query!(
-                                        "UPDATE chapters SET download_status = 2, downloaded_at = COALESCE(downloaded_at, CURRENT_TIMESTAMP) WHERE id = ?",
+                                        "UPDATE chapters SET download_status = ?, downloaded_at = COALESCE(downloaded_at, CURRENT_TIMESTAMP) WHERE id = ?",
+                                        kani_shared::types::DownloadStatus::Complete,
                                         record.id
                                     )
                                     .execute(&sweep_state.db)
@@ -365,7 +370,8 @@ async fn main() {
                                         );
                                     }
                                 } else if let Err(e) = sqlx::query!(
-                                    "UPDATE chapters SET download_status = 0 WHERE id = ?",
+                                    "UPDATE chapters SET download_status = ? WHERE id = ?",
+                                    kani_shared::types::DownloadStatus::Pending,
                                     record.id
                                 )
                                 .execute(&sweep_state.db)
@@ -550,10 +556,13 @@ async fn main() {
         tracing::info!("Stopping background tasks...");
         shutdown_token.cancel();
         tokio::task::yield_now().await;
-        if let Err(e) =
-            sqlx::query!("UPDATE chapters SET download_status = 0 WHERE download_status = 1")
-                .execute(&state.db)
-                .await
+        if let Err(e) = sqlx::query!(
+            "UPDATE chapters SET download_status = ? WHERE download_status = ?",
+            kani_shared::types::DownloadStatus::Pending,
+            kani_shared::types::DownloadStatus::InProgress
+        )
+        .execute(&state.db)
+        .await
         {
             tracing::warn!("Failed to reset in-flight download statuses on shutdown: {e}");
         }

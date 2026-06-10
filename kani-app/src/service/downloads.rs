@@ -1,12 +1,15 @@
 use super::*;
 use futures::stream::{FuturesUnordered, StreamExt};
+use kani_shared::types::DownloadStatus;
 
 impl AppService {
     pub async fn download_chapter(&self, chapter_id: i64) -> Result<()> {
         let claimed = sqlx::query!(
-            "UPDATE chapters SET download_status = 1 \
-             WHERE id = ? AND download_status = 0",
-            chapter_id
+            "UPDATE chapters SET download_status = ? \
+             WHERE id = ? AND download_status = ?",
+            DownloadStatus::InProgress,
+            chapter_id,
+            DownloadStatus::Pending,
         )
         .execute(&self.db)
         .await?;
@@ -35,7 +38,8 @@ impl AppService {
 
         if result.is_err() {
             let _ = sqlx::query!(
-                "UPDATE chapters SET download_status = 0 WHERE id = ?",
+                "UPDATE chapters SET download_status = ? WHERE id = ?",
+                DownloadStatus::Pending,
                 chapter_id
             )
             .execute(&self.db)
@@ -48,8 +52,9 @@ impl AppService {
     pub async fn download_all_chapters(&self, manga_id: i64) -> Result<()> {
         let candidate_ids: Vec<i64> = sqlx::query_scalar!(
             "SELECT id FROM chapters \
-             WHERE manga_id = ? AND download_status = 0 AND is_orphaned = 0",
-            manga_id
+             WHERE manga_id = ? AND download_status = ? AND is_orphaned = 0",
+            manga_id,
+            DownloadStatus::Pending,
         )
         .fetch_all(&self.db)
         .await?;
@@ -89,10 +94,12 @@ impl AppService {
         let mut claimed_ids = Vec::with_capacity(preferred_ids.len());
         for id in preferred_ids {
             let res = sqlx::query_scalar!(
-                "UPDATE chapters SET download_status = 1 \
-                 WHERE id = ? AND download_status = 0 \
+                "UPDATE chapters SET download_status = ? \
+                 WHERE id = ? AND download_status = ? \
                  RETURNING id",
-                id
+                DownloadStatus::InProgress,
+                id,
+                DownloadStatus::Pending,
             )
             .fetch_optional(&self.db)
             .await?;
@@ -149,7 +156,8 @@ impl AppService {
                 .await;
         } else {
             let _ = sqlx::query!(
-                "UPDATE chapters SET download_status = 0 WHERE id = ?",
+                "UPDATE chapters SET download_status = ? WHERE id = ?",
+                DownloadStatus::Pending,
                 chapter_id
             )
             .execute(&self.db)
@@ -164,8 +172,10 @@ impl AppService {
         let was_cancelled = self.downloader.cancel_download(chapter_id).await;
         if was_cancelled {
             sqlx::query!(
-                "UPDATE chapters SET download_status = 0 WHERE id = ? AND download_status = 1",
-                chapter_id
+                "UPDATE chapters SET download_status = ? WHERE id = ? AND download_status = ?",
+                DownloadStatus::Pending,
+                chapter_id,
+                DownloadStatus::InProgress,
             )
             .execute(&self.db)
             .await?;
@@ -176,8 +186,9 @@ impl AppService {
     /// Cancels all queued or in-progress downloads for a manga.
     pub async fn cancel_all_downloads(&self, manga_id: i64) -> Result<()> {
         let chapter_ids: Vec<i64> = sqlx::query_scalar!(
-            "SELECT id FROM chapters WHERE manga_id = ? AND download_status = 1",
-            manga_id
+            "SELECT id FROM chapters WHERE manga_id = ? AND download_status = ?",
+            manga_id,
+            DownloadStatus::InProgress,
         )
         .fetch_all(&self.db)
         .await?;
@@ -186,8 +197,10 @@ impl AppService {
             let was_cancelled = self.downloader.cancel_download(id).await;
             if was_cancelled {
                 let _ = sqlx::query!(
-                    "UPDATE chapters SET download_status = 0 WHERE id = ? AND download_status = 1",
-                    id
+                    "UPDATE chapters SET download_status = ? WHERE id = ? AND download_status = ?",
+                    DownloadStatus::Pending,
+                    id,
+                    DownloadStatus::InProgress,
                 )
                 .execute(&self.db)
                 .await;
@@ -198,17 +211,21 @@ impl AppService {
 
     /// Cancels all in-progress downloads across all manga.
     pub async fn cancel_all_global_downloads(&self) -> Result<()> {
-        let chapter_ids: Vec<i64> =
-            sqlx::query_scalar!("SELECT id FROM chapters WHERE download_status = 1")
-                .fetch_all(&self.db)
-                .await?;
+        let chapter_ids: Vec<i64> = sqlx::query_scalar!(
+            "SELECT id FROM chapters WHERE download_status = ?",
+            DownloadStatus::InProgress
+        )
+        .fetch_all(&self.db)
+        .await?;
 
         for id in chapter_ids {
             let was_cancelled = self.downloader.cancel_download(id).await;
             if was_cancelled {
                 let _ = sqlx::query!(
-                    "UPDATE chapters SET download_status = 0 WHERE id = ? AND download_status = 1",
-                    id
+                    "UPDATE chapters SET download_status = ? WHERE id = ? AND download_status = ?",
+                    DownloadStatus::Pending,
+                    id,
+                    DownloadStatus::InProgress,
                 )
                 .execute(&self.db)
                 .await;
@@ -410,9 +427,10 @@ impl AppService {
             "SELECT c.id, c.name, c.chapter_number, c.volume, c.manga_id, m.name as manga_title, c.downloaded_at
              FROM chapters c
              JOIN manga m ON m.id = c.manga_id
-             WHERE c.download_status = 2
+             WHERE c.download_status = ?
              ORDER BY c.downloaded_at DESC
              LIMIT ?",
+            DownloadStatus::Complete,
             limit
         )
         .fetch_all(&self.db)

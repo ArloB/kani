@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id FROM chapters WHERE manga_id = ? AND download_status = 1",
+  "query": "UPDATE chapters SET download_status = ? WHERE id = ? AND download_status = ? RETURNING id",
   "describe": {
     "columns": [
       {
@@ -10,11 +10,11 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
       false
     ]
   },
-  "hash": "5f75930a5e7e62fed55dc80ec50cd2fc07b51b8e3ae697b338c8e03fd21d2487"
+  "hash": "db126c70033a7aa72b71ab9b20713560dc831bf339231c5c1796892967e8373b"
 }
