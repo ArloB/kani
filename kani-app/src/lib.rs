@@ -7,6 +7,7 @@
 pub mod cache;
 pub mod error;
 pub mod events;
+pub mod ids;
 pub mod models;
 pub mod service;
 pub mod tuning;
