@@ -1,0 +1,12 @@
+# cargo-nextest configuration. See https://nexte.st/docs/configuration/
+# `cargo test` remains valid locally; nextest is the CI runner (--profile ci).
+
+[profile.default]
+retries = 0
+test-threads = "num-cpus"
+
+[profile.ci]
+# Run every test to completion so a CI run reports all failures, not just the
+# first, and absorb the occasional flake with a single retry.
+fail-fast = false
+retries = 1

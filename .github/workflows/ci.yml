@@ -57,7 +57,7 @@ jobs:
         run: ./target/release/kani-cli build --dev
 
       - name: Test
-        run: cargo nextest run --locked
+        run: cargo nextest run --locked --profile ci
 
       - name: Clippy
         run: cargo clippy --locked --no-deps -- -D warnings
