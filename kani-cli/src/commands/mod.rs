@@ -3,6 +3,7 @@ pub mod css;
 pub mod dsl_cmd;
 pub mod generate;
 pub mod icons;
+pub mod lint;
 pub mod new;
 pub mod setup;
 pub mod validate;
@@ -92,6 +93,8 @@ pub enum Command {
         /// DSL expression string
         expression: String,
     },
+    /// Run the workspace quality checks (clippy, machete, deny, fmt) in sequence
+    Lint,
 }
 
 pub fn run(cli: Cli) -> Result<(), CliError> {
@@ -128,5 +131,6 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         } => setup::run(vendors, tailwind, esbuild),
         Command::Icons => icons::run(),
         Command::Dsl { expression } => dsl_cmd::run(&expression),
+        Command::Lint => lint::run(),
     }
 }
