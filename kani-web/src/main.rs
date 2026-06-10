@@ -493,16 +493,24 @@ async fn main() {
         ))
         .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(
-                "default-src 'self'; \
-                 img-src 'self' data: blob:; \
-                 style-src 'self' 'unsafe-inline'; \
-                 script-src 'self' 'wasm-unsafe-eval'; \
-                 object-src 'none'; \
-                 base-uri 'self'; \
-                 form-action 'self'; \
-                 frame-ancestors 'none'",
-            ),
+            {
+                let script_src = if cfg!(debug_assertions) {
+                    "script-src 'self' 'wasm-unsafe-eval' 'sha256-BJKz37AmPw+fUEipsvCRxBFhDsl5WKhFeDeCFQe5hGY='"
+                } else {
+                    "script-src 'self' 'wasm-unsafe-eval'"
+                };
+                HeaderValue::try_from(format!(
+                    "default-src 'self'; \
+                     img-src 'self' data: blob:; \
+                     style-src 'self' 'unsafe-inline'; \
+                     {script_src}; \
+                     object-src 'none'; \
+                     base-uri 'self'; \
+                     form-action 'self'; \
+                     frame-ancestors 'none'"
+                ))
+                .expect("CSP header value is statically valid")
+            },
         ))
         // HSTS: only when KANI_SECURE_COOKIES=true, meaning TLS is terminated upstream.
         .layer(tower::util::option_layer(if secure_cookies {
