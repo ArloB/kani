@@ -75,7 +75,16 @@ async fn main() {
 
     tracing::info!("Starting Kani Web Server");
 
-    let state = AppState::new(log_handle)
+    // Resolve the data directory. In Docker the working directory is /data, so the
+    // default (CWD) is correct without any configuration. Native installs can
+    // override with KANI_DATA_DIR.
+    let data_dir: std::path::PathBuf = std::env::var("KANI_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::current_dir().expect("Cannot determine current working directory")
+        });
+
+    let state = AppState::new(log_handle, data_dir)
         .await
         .expect("Failed to initialise AppState");
 
@@ -86,10 +95,19 @@ async fn main() {
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
 
+    // Session lifetime — defaults to 30 days of inactivity. Override with KANI_SESSION_TIMEOUT_SECONDS.
+    let session_timeout_secs: i64 = std::env::var("KANI_SESSION_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30 * 24 * 60 * 60);
+
     let session_layer = SessionManagerLayer::new(session_store)
         .with_secure(secure_cookies)
         .with_http_only(true)
-        .with_same_site(SameSite::Lax);
+        .with_same_site(SameSite::Lax)
+        .with_expiry(axum_login::tower_sessions::Expiry::OnInactivity(
+            time::Duration::seconds(session_timeout_secs),
+        ));
 
     let auth_backend = AuthBackend::new(state.db.clone());
     let auth_layer = AuthManagerLayerBuilder::new(auth_backend.clone(), session_layer).build();
@@ -107,6 +125,7 @@ async fn main() {
     state.spawn_cover_retry();
     state.spawn_credential_refresh();
     state.spawn_webhook_listener();
+    state.spawn_login_attempt_prune();
 
     // Rate limiter settings.
     // API: enough for normal UI use while protecting against abuse.
@@ -382,37 +401,67 @@ async fn main() {
 
     let app = Router::new()
         // PWA — manifest and service worker need explicit Content-Type headers
-        .route("/manifest.webmanifest", axum::routing::get(move || {
-            let p = manifest_path.clone();
-            async move {
-                match tokio::fs::read(&p).await {
-                    Ok(b) => ([(header::CONTENT_TYPE, "application/manifest+json; charset=utf-8")], b).into_response(),
-                    Err(_) => StatusCode::NOT_FOUND.into_response(),
-                }
-            }
-        }))
-        .route("/sw.js", axum::routing::get(move || {
-            let p = sw_path.clone();
-            async move {
-                match tokio::fs::read(&p).await {
-                    Ok(b) => {
-                        let mut h = axum::http::HeaderMap::new();
-                        h.insert(header::CONTENT_TYPE, header::HeaderValue::from_static("application/javascript; charset=utf-8"));
-                        h.insert(
-                            header::HeaderName::from_static("service-worker-allowed"),
-                            header::HeaderValue::from_static("/"),
-                        );
-                        (StatusCode::OK, h, b).into_response()
+        .route(
+            "/manifest.webmanifest",
+            axum::routing::get(move || {
+                let p = manifest_path.clone();
+                async move {
+                    match tokio::fs::read(&p).await {
+                        Ok(b) => (
+                            [(
+                                header::CONTENT_TYPE,
+                                "application/manifest+json; charset=utf-8",
+                            )],
+                            b,
+                        )
+                            .into_response(),
+                        Err(_) => StatusCode::NOT_FOUND.into_response(),
                     }
-                    Err(_) => StatusCode::NOT_FOUND.into_response(),
                 }
-            }
-        }))
+            }),
+        )
+        .route(
+            "/sw.js",
+            axum::routing::get(move || {
+                let p = sw_path.clone();
+                async move {
+                    match tokio::fs::read(&p).await {
+                        Ok(b) => {
+                            let mut h = axum::http::HeaderMap::new();
+                            h.insert(
+                                header::CONTENT_TYPE,
+                                header::HeaderValue::from_static(
+                                    "application/javascript; charset=utf-8",
+                                ),
+                            );
+                            h.insert(
+                                header::HeaderName::from_static("service-worker-allowed"),
+                                header::HeaderValue::from_static("/"),
+                            );
+                            (StatusCode::OK, h, b).into_response()
+                        }
+                        Err(_) => StatusCode::NOT_FOUND.into_response(),
+                    }
+                }
+            }),
+        )
         .nest_service("/icons", ServeDir::new(format!("{static_dir}/icons")))
         // OPDS catalog — auth is handled per-handler (supports Basic auth)
         .nest("/opds", opds_router)
-        .merge(Router::new().nest("/rest", rest_router).layer(GovernorLayer { config: governor_conf }))
-        .merge(Router::new().nest("/rest", proxy_router).layer(GovernorLayer { config: proxy_governor_conf }))
+        .merge(
+            Router::new()
+                .nest("/rest", rest_router)
+                .layer(GovernorLayer {
+                    config: governor_conf,
+                }),
+        )
+        .merge(
+            Router::new()
+                .nest("/rest", proxy_router)
+                .layer(GovernorLayer {
+                    config: proxy_governor_conf,
+                }),
+        )
         .merge(health_router)
         .nest_service("/js", ServeDir::new(format!("{static_dir}/js")))
         .nest_service("/css", ServeDir::new(format!("{static_dir}/css")))
@@ -433,11 +482,31 @@ async fn main() {
             HeaderValue::from_static("strict-origin-when-cross-origin"),
         ))
         .layer(SetResponseHeaderLayer::overriding(
+            axum::http::HeaderName::from_static("permissions-policy"),
+            HeaderValue::from_static("camera=(), microphone=(), geolocation=(), payment=()"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(
-                "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+                "default-src 'self'; \
+                 img-src 'self' data: blob:; \
+                 style-src 'self' 'unsafe-inline'; \
+                 script-src 'self' 'wasm-unsafe-eval'; \
+                 object-src 'none'; \
+                 base-uri 'self'; \
+                 form-action 'self'; \
+                 frame-ancestors 'none'",
             ),
         ))
+        // HSTS: only when KANI_SECURE_COOKIES=true, meaning TLS is terminated upstream.
+        .layer(tower::util::option_layer(if secure_cookies {
+            Some(SetResponseHeaderLayer::overriding(
+                axum::http::HeaderName::from_static("strict-transport-security"),
+                HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+            ))
+        } else {
+            None
+        }))
         .layer(cors_layer)
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {

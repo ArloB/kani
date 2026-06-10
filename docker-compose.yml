@@ -51,11 +51,50 @@ services:
       # Lower values save RAM on idle servers at the cost of a ~2 s relaunch delay.
       # BROWSER_IDLE_TIMEOUT_MS: "120000"
 
-      # Encrypt SMTP password and OAuth tokens at rest using ChaCha20-Poly1305.
-      # Generate a key with: openssl rand -hex 32
-      # Without this variable credentials are stored as plaintext in the database.
+      # ── Credential encryption ────────────────────────────────────────────────
+      # Encrypts SMTP password and OAuth tokens at rest with ChaCha20-Poly1305.
+      # If neither variable is set, a key is auto-provisioned to /data/secret.key
+      # on first boot. Back that file up alongside kani.db — losing it means
+      # losing access to any stored credentials (trackers, SMTP, etc.).
+      #
+      # To use a fixed key (e.g. from a secret manager):
+      #   Generate: openssl rand -hex 32
       # KANI_SECRET_KEY: ""
-
-      # Alternative — load the key from a Docker secret (recommended for production):
+      #
+      # Or load from a Docker secret (recommended for production):
       # KANI_SECRET_KEY_FILE: "/run/secrets/kani_secret_key"
+
+      # ── Image proxy ──────────────────────────────────────────────────────────
+      # Signs cover-image proxy URLs. Auto-provisioned to /data/proxy.key on
+      # first boot — no action needed unless you want a fixed key across restarts.
+      # KANI_PROXY_SECRET: ""   # base64url-encoded 32 bytes
+
+      # ── Auth / rate limiting ─────────────────────────────────────────────────
+      # How long a session stays alive after last activity. Default: 30 days.
+      # KANI_SESSION_TIMEOUT_SECONDS: "2592000"
+
+      # Failed-login lockout: max attempts per identity before a 15-minute block.
+      # KANI_MAX_LOGIN_ATTEMPTS: "5"
+
+      # Lockout window length in seconds. Default: 15 minutes.
+      # KANI_LOGIN_LOCKOUT_SECONDS: "900"
+
+      # Max failed attempts from one IP (across all identities) before IP-level block.
+      # KANI_MAX_IP_ATTEMPTS: "20"
+
+      # Set to "false" to prevent new user self-registration. The first admin
+      # account is always created automatically on first boot if no users exist.
+      # KANI_ALLOW_REGISTRATION: "true"
+
+      # ── Public instance hardening ────────────────────────────────────────────
+      # Set to "true" for internet-facing deployments. Forces secure cookies,
+      # aggressive rate limits (3 attempts / 15-min lockout), strict CSP, and
+      # shows a persistent banner if any admin account lacks 2FA.
+      # KANI_PUBLIC_INSTANCE: "false"
+
+      # ── Data directory ───────────────────────────────────────────────────────
+      # Where kani stores its database and auto-provisioned key files.
+      # Defaults to the process working directory (/data inside Docker).
+      # Only needed for non-Docker deployments where the working directory differs.
+      # KANI_DATA_DIR: "/data"
     restart: unless-stopped

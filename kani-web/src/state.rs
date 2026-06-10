@@ -1,9 +1,15 @@
 use crate::error::AppError;
 use crate::logging::LogHandle;
+use crate::rate_limit::AuthRateLimiter;
 use bytes::Bytes;
 use kani_app::AppService;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+
+/// Helper that generates a random [u8; 32] for ephemeral per-process secrets.
+fn random_secret() -> [u8; 32] {
+    rand::random()
+}
 
 pub type Result<T, E = AppError> = std::result::Result<T, E>;
 
@@ -25,13 +31,23 @@ pub struct AppState {
     /// instead of 0, so an entrypoint wrapper can restart the process.
     pub restart_requested: Arc<AtomicBool>,
     pub log_handle: Arc<LogHandle>,
+    /// Per-identity and per-IP login-attempt rate limiter.
+    pub rate_limiter: Arc<AuthRateLimiter>,
+    /// Ephemeral per-process key for signing CSRF double-submit tokens.
+    pub csrf_secret: Arc<[u8; 32]>,
+    /// Whether `KANI_PUBLIC_INSTANCE=true` is set; enables hardened runtime profile.
+    pub public_instance: bool,
 }
 
 impl AppState {
-    pub async fn new(log_handle: Arc<LogHandle>) -> Result<Self> {
-        let service = Arc::new(AppService::new().await?);
+    pub async fn new(log_handle: Arc<LogHandle>, data_dir: std::path::PathBuf) -> Result<Self> {
+        let service = Arc::new(AppService::new(&data_dir).await?);
+        let public_instance = std::env::var("KANI_PUBLIC_INSTANCE")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+
         Ok(Self {
-            proxy_secret: Arc::new(crate::proxy::load_or_generate_secret()),
+            proxy_secret: Arc::new(crate::proxy::load_or_persist_secret(&data_dir)),
             proxy_semaphores: moka::future::Cache::builder()
                 .max_capacity(1_000)
                 .time_to_idle(std::time::Duration::from_secs(3_600))
@@ -52,8 +68,26 @@ impl AppState {
                 .to_string(),
             restart_requested: Arc::new(AtomicBool::new(false)),
             log_handle,
+            rate_limiter: Arc::new(AuthRateLimiter::new(service.db.clone())),
+            csrf_secret: Arc::new(random_secret()),
+            public_instance,
             service,
         })
+    }
+}
+
+impl AppState {
+    /// Spawns a daily task to prune expired login attempts from the database.
+    pub fn spawn_login_attempt_prune(&self) {
+        let limiter = self.rate_limiter.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                limiter.prune_old_attempts().await;
+            }
+        });
     }
 }
 
@@ -67,12 +101,15 @@ impl std::ops::Deref for AppState {
 
 pub use kani_app::chapter_name;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl AppState {
     pub async fn new_for_test(pool: sqlx::SqlitePool) -> Self {
-        let service = Arc::new(AppService::new_for_test(pool).await);
+        let service = Arc::new(AppService::new_for_test(pool.clone()).await);
         let (_, log_handle) = crate::logging::RingBufferLayer::new(100);
         Self {
+            rate_limiter: Arc::new(AuthRateLimiter::new(pool)),
+            csrf_secret: Arc::new([0u8; 32]),
+            public_instance: false,
             service,
             proxy_secret: Arc::new([0u8; 32]),
             proxy_semaphores: moka::future::Cache::builder().max_capacity(100).build(),

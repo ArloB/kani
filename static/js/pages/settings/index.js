@@ -23,6 +23,7 @@ import * as account           from './account.js';
 import * as server            from './server.js';
 import * as email             from './email.js';
 import * as webhooks          from './webhooks.js';
+import * as security          from './security.js';
 
 /** @type {Array<() => void>} */
 let _panelDestroys = [];
@@ -78,6 +79,7 @@ export async function init(container) {
     { id: 'advanced',        label: 'Advanced',        description: 'FlareSolverr, library path, and other low-level options.',  perm: 'settings:edit_advanced', group: 'Server',  mount: el => advanced.mount(el, settings, bootId) },
     { id: 'server',          label: 'Lifecycle',       description: 'Stop or restart the server process.',                         perm: 'server:manage',          group: 'Server',  mount: el => server.mount(el) },
     { id: 'account',         label: 'My Account',      description: 'Change your password and manage active sessions.',            perm: null,                     group: 'Account', mount: el => account.mount(el) },
+    { id: 'security',        label: 'Security',        description: 'Two-factor authentication, session management, and security status.', perm: null,                group: 'Account', mount: el => security.mount(el) },
   ];
 
   const sections = allSections.filter(s => !s.perm || hasPermission(s.perm));

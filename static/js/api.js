@@ -1228,3 +1228,66 @@ export async function setChapterNote(chapterId, note) {
 export async function getReadingPace(period = 90) {
   return _req('GET', '/stats/pace', { params: { period } });
 }
+
+// ── Security — sessions ───────────────────────────────────────────────────────
+
+/** @returns {Promise<{sessions: Array<{id:string,created_at:number,last_seen_at:number,user_agent:string|null,ip_addr:string|null,is_current:boolean}>}>} */
+export async function getSessions() {
+  return _req('GET', '/auth/sessions');
+}
+
+/** @param {string} sessionId */
+export async function revokeSession(sessionId) {
+  return _req('DELETE', `/auth/sessions/${sessionId}`);
+}
+
+export async function revokeOtherSessions() {
+  return _req('DELETE', '/auth/sessions');
+}
+
+// ── Security — TOTP ───────────────────────────────────────────────────────────
+
+/** @returns {Promise<{secret:string,otpauth_uri:string,qr_data_url:string}>} */
+export async function beginTotpSetup() {
+  return _req('POST', '/auth/totp/setup');
+}
+
+/** @param {string} code @returns {Promise<{backup_codes:string[]}>} */
+export async function verifyTotpSetup(code) {
+  return _req('POST', '/auth/totp/verify', { body: { code } });
+}
+
+/** @param {string} code */
+export async function disableTotp(code) {
+  return _req('POST', '/auth/totp/disable', { body: { code } });
+}
+
+/** @param {string} code */
+export async function stepUpTotp(code) {
+  return _req('POST', '/auth/totp/step-up', { body: { code } });
+}
+
+/** @param {string} code @returns {Promise<{backup_codes:string[]}>} */
+export async function regenerateBackupCodes(code) {
+  return _req('POST', '/auth/totp/backup-codes', { body: { totp_code: code } });
+}
+
+// ── Security — password strength ─────────────────────────────────────────────
+
+/** @param {string} password @param {string} [identity] */
+export async function checkPasswordStrength(password, identity = '') {
+  return _req('POST', '/auth/password-strength', { body: { password, identity } });
+}
+
+// ── Security — features ───────────────────────────────────────────────────────
+
+/** @returns {Promise<{public_instance:boolean,totp_enabled:boolean}>} */
+export async function getFeatures() {
+  return _req('GET', '/features');
+}
+
+// ── Admin logs ────────────────────────────────────────────────────────────────
+
+export async function purgeAdminLogs() {
+  return _req('POST', '/admin/logs/purge');
+}

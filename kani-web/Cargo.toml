@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
+[features]
+test-util = ["kani-app/test-util"]
+# Passkeys/WebAuthn deferred — see overviews plan. The audited server crate
+# (webauthn-rs) pulls OpenSSL, which conflicts at link time with rquest's
+# bundled BoringSSL (boring2). A hand-rolled verifier was rejected as unsafe for
+# an auth feature. The recommended path is the pure-RustCrypto `webauthn_rp`
+# crate (no OpenSSL/ring/boring) — to be implemented when passkeys are revisited.
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
@@ -39,6 +47,7 @@ moka.workspace = true
 chacha20poly1305 = "0.10.1"
 sha2 = "0.10.9"
 hmac = "0.12.1"
+secrecy = { version = "0.8", features = ["alloc", "serde"] }
 rand = "0.10.0"
 base64.workspace = true
 hex = "0.4.3"
@@ -53,10 +62,10 @@ tower-sessions-sqlx-store = { version = "0.15", default-features = false, featur
 garde = { version = "0.22", features = ["derive"] }
 urlencoding.workspace = true
 tower_governor = "0.6"
+tower = { version = "0.5", features = ["util"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
-tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 kani-app = { path = "../kani-app", features = ["test-util"] }
 moka = { workspace = true }

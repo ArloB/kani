@@ -4,7 +4,7 @@
 import { initPermissions, getState, setState, subscribe, hasPermission } from './state.js';
 import { connectSSE } from './sse.js';
 import { initRouter, navigate, onNavigate } from './router.js';
-import { getBootId, logout } from './api.js';
+import { getBootId, logout, getFeatures } from './api.js';
 import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs } from './icons.js';
 import { mountNotificationsPanel } from './components/notifications-panel.js';
 import { mountAppHeader } from './components/app-header.js';
@@ -37,6 +37,8 @@ import { mountAppHeader } from './components/app-header.js';
   if (appEl) {
     // Mount the global header at the top of shell-main; pages go in a sub-container.
     const { notificationsMount } = mountAppHeader(appEl);
+    // Async: show security banner if admin and TOTP not enabled on public instance.
+    _maybeShowSecurityBanner(appEl);
     mountNotificationsPanel(notificationsMount);
 
     const pageContent = document.createElement('div');
@@ -299,6 +301,37 @@ function _registerServiceWorker() {
       });
     })
     .catch(err => console.warn('SW registration failed:', err));
+}
+
+/**
+ * If public_instance mode is active and the current user is admin but hasn't enabled TOTP,
+ * show a persistent security notice banner below the app header.
+ * @param {HTMLElement} appEl
+ */
+async function _maybeShowSecurityBanner(appEl) {
+  try {
+    const features = await getFeatures();
+    if (!features?.public_instance) return;
+    if (features?.totp_enabled) return;
+    if (!hasPermission('admin:manage')) return;
+
+    if (document.getElementById('security-banner')) return;
+    const banner = document.createElement('div');
+    banner.id = 'security-banner';
+    banner.className = 'flex items-center gap-3 px-4 py-2 border-b border-warn/30 bg-warn/10 text-sm';
+    banner.innerHTML = `
+      <span class="text-warn font-semibold shrink-0">Security notice:</span>
+      <span class="text-text flex-1">Enable two-factor authentication to protect your admin account.</span>
+      <a href="/settings?section=security" class="text-accent underline shrink-0">Enable 2FA</a>
+    `;
+    // Insert after the app-header element
+    const header = appEl.querySelector('header');
+    if (header?.nextSibling) {
+      appEl.insertBefore(banner, header.nextSibling);
+    } else {
+      appEl.appendChild(banner);
+    }
+  } catch { /* non-fatal */ }
 }
 
 /** @param {ServiceWorker} incoming */

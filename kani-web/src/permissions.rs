@@ -139,6 +139,7 @@ permissions! {
     Admin => "admin" {
         ViewLogs  => "view_logs",
         ViewAudit => "view_audit",
+        Manage    => "manage",
     },
 }
 

@@ -42,15 +42,18 @@ pub mod import;
 mod library;
 mod migration;
 pub mod opds;
+pub mod password_policy;
 pub mod password_reset;
 pub mod path_migration;
 pub mod pending_imports;
 mod preferences;
 mod progress;
 mod scanlators;
+pub mod sessions;
 mod settings;
 mod sources;
 mod stats;
+pub mod totp;
 pub mod trackers;
 pub mod webhooks;
 
@@ -77,37 +80,81 @@ pub struct AppService {
     pub webhook_service: webhooks::WebhookService,
 }
 
-/// Load a credential cipher from env vars. Reads `KANI_SECRET_KEY_FILE` first,
-/// then falls back to `KANI_SECRET_KEY`. Returns `None` if neither is set.
-fn load_credential_cipher() -> Option<encryption::CredentialCipher> {
-    let hex = if let Ok(path) = std::env::var("KANI_SECRET_KEY_FILE") {
-        match std::fs::read_to_string(path.trim()) {
+/// Load a credential cipher from env vars, or auto-provision one at `data_dir/secret.key`.
+///
+/// Priority order:
+/// 1. `KANI_SECRET_KEY_FILE` — path to a file containing a 64-char hex key.
+/// 2. `KANI_SECRET_KEY` — inline hex key.
+/// 3. Auto-provision: read `data_dir/secret.key`, or generate and persist it on first boot.
+///
+/// The auto-provisioned file is written with `0o600` permissions (owner-read only on Unix).
+fn load_or_provision_credential_cipher(
+    data_dir: &std::path::Path,
+) -> Option<encryption::CredentialCipher> {
+    if let Ok(path) = std::env::var("KANI_SECRET_KEY_FILE") {
+        let hex = match std::fs::read_to_string(path.trim()) {
             Ok(s) => s.trim().to_string(),
             Err(e) => {
                 tracing::error!("KANI_SECRET_KEY_FILE set but could not read file: {e}");
                 return None;
             }
-        }
-    } else if let Ok(val) = std::env::var("KANI_SECRET_KEY") {
-        val.trim().to_string()
-    } else {
-        return None;
-    };
+        };
+        return parse_cipher_hex(&hex);
+    }
+    if let Ok(val) = std::env::var("KANI_SECRET_KEY") {
+        return parse_cipher_hex(val.trim());
+    }
 
-    match encryption::CredentialCipher::from_hex(&hex) {
+    // Auto-provision path.
+    let key_path = data_dir.join("secret.key");
+    let hex = if key_path.exists() {
+        match std::fs::read_to_string(&key_path) {
+            Ok(s) => s.trim().to_string(),
+            Err(e) => {
+                tracing::error!("Failed to read {}: {e}", key_path.display());
+                return None;
+            }
+        }
+    } else {
+        let key: [u8; 32] = rand::random();
+        let hex = hex::encode(key);
+        if let Err(e) = std::fs::write(&key_path, &hex) {
+            tracing::error!(
+                "Failed to write credential key to {}: {e}",
+                key_path.display()
+            );
+            return None;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+        }
+        tracing::info!(
+            "Auto-provisioned credential encryption key at {}. \
+             Back this file up alongside your database.",
+            key_path.display()
+        );
+        hex
+    };
+    parse_cipher_hex(&hex)
+}
+
+fn parse_cipher_hex(hex: &str) -> Option<encryption::CredentialCipher> {
+    match encryption::CredentialCipher::from_hex(hex) {
         Ok(c) => {
-            tracing::info!("Credential encryption enabled (KANI_SECRET_KEY loaded)");
+            tracing::info!("Credential encryption enabled");
             Some(c)
         }
         Err(e) => {
-            tracing::error!("KANI_SECRET_KEY is invalid — credential encryption disabled: {e}");
+            tracing::error!("Invalid encryption key — credential encryption disabled: {e}");
             None
         }
     }
 }
 
 impl AppService {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(data_dir: &std::path::Path) -> Result<Self> {
         let pool = SqlitePoolOptions::new()
             .max_connections(20)
             .after_connect(|conn, _meta| {
@@ -136,7 +183,7 @@ impl AppService {
 
         let mut sources_map = HashMap::new();
 
-        let enc = load_credential_cipher();
+        let enc = load_or_provision_credential_cipher(data_dir);
 
         let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required FROM settings")
             .fetch_one(&pool)
@@ -149,6 +196,16 @@ impl AppService {
             match cipher.decrypt(&settings.email_provider_config) {
                 Ok(plain) => settings.email_provider_config = plain,
                 Err(e) => tracing::warn!("Cannot decrypt email_provider_config on startup: {e}"),
+            }
+        }
+
+        // KANI_ALLOW_REGISTRATION=false disables new user registration at startup,
+        // overriding the database setting. Useful for instances exposed to the internet.
+        if let Ok(val) = std::env::var("KANI_ALLOW_REGISTRATION") {
+            let allow = val.trim() != "false" && val.trim() != "0";
+            if !allow {
+                settings.registration_enabled = false;
+                tracing::info!("Registration disabled by KANI_ALLOW_REGISTRATION=false");
             }
         }
 
@@ -280,7 +337,7 @@ impl AppService {
         let enc = enc.map(Arc::new);
         let webhook_service = webhooks::WebhookService::new(pool.clone());
 
-        Ok(Self {
+        let svc = Self {
             db: pool,
             wasm_runtime,
             sources: Arc::new(tokio::sync::RwLock::new(sources_map)),
@@ -297,7 +354,16 @@ impl AppService {
             email_service: Arc::new(tokio::sync::RwLock::new(email_svc)),
             encryption: enc,
             webhook_service,
-        })
+        };
+
+        // Encrypt any plaintext credentials left over from pre-encryption installs.
+        if let Err(e) = svc.migrate_credentials_to_encrypted().await {
+            tracing::warn!("Credential encryption migration on startup failed: {e}");
+        } else if svc.encryption.is_some() {
+            tracing::info!("Credential encryption migration complete");
+        }
+
+        Ok(svc)
     }
 
     #[cfg(any(test, feature = "test-util"))]

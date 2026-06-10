@@ -10,9 +10,14 @@ type HmacSha256 = Hmac<Sha256>;
 const NONCE_LEN: usize = 12;
 const TOKEN_TTL_SECS: i64 = 3600;
 
-/// Load the proxy secret from `KANI_PROXY_SECRET` (base64-encoded 32 bytes),
-/// or generate a random one if the env var is absent.
-pub fn load_or_generate_secret() -> [u8; 32] {
+/// Load the proxy secret from `KANI_PROXY_SECRET` (base64-encoded 32 bytes), read/persist it
+/// from `data_dir/proxy.key`, or generate and persist a new one on first boot.
+///
+/// Priority order:
+/// 1. `KANI_PROXY_SECRET` — base64url-encoded 32-byte value.
+/// 2. `data_dir/proxy.key` — persisted from a previous boot.
+/// 3. Generate a fresh random secret and write it to `data_dir/proxy.key`.
+pub fn load_or_persist_secret(data_dir: &std::path::Path) -> [u8; 32] {
     if let Ok(val) = std::env::var("KANI_PROXY_SECRET") {
         let decoded = URL_SAFE_NO_PAD.decode(val.trim()).unwrap_or_default();
         if decoded.len() == 32 {
@@ -23,14 +28,35 @@ pub fn load_or_generate_secret() -> [u8; 32] {
         }
         tracing::warn!(
             "KANI_PROXY_SECRET was set but not 32 bytes after decoding — \
-             generating a random secret instead"
+             falling back to persisted secret"
         );
     }
+
+    let key_path = data_dir.join("proxy.key");
+    if let Ok(encoded) = std::fs::read_to_string(&key_path) {
+        let decoded = URL_SAFE_NO_PAD.decode(encoded.trim()).unwrap_or_default();
+        if decoded.len() == 32 {
+            let mut secret = [0u8; 32];
+            secret.copy_from_slice(&decoded);
+            tracing::info!("Loaded proxy secret from {}", key_path.display());
+            return secret;
+        }
+        tracing::warn!("proxy.key exists but is malformed — regenerating");
+    }
+
     let secret: [u8; 32] = rand::random();
-    tracing::info!(
-        "Generated ephemeral proxy secret. Set KANI_PROXY_SECRET to persist \
-         tokens across restarts."
-    );
+    let encoded = URL_SAFE_NO_PAD.encode(secret);
+    match std::fs::write(&key_path, &encoded) {
+        Ok(_) => tracing::info!(
+            "Generated and persisted proxy secret to {}",
+            key_path.display()
+        ),
+        Err(e) => tracing::error!(
+            "Failed to persist proxy secret to {}: {e}. \
+             Cover URLs will break on next restart.",
+            key_path.display()
+        ),
+    }
     secret
 }
 
@@ -120,8 +146,45 @@ pub fn make_proxy_url(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    // ── load_or_persist_secret tests ──────────────────────────────────────────
+
+    #[test]
+    fn persists_on_first_boot_and_same_on_second() {
+        let dir = tempfile::tempdir().unwrap();
+        let s1 = load_or_persist_secret(dir.path());
+        let s2 = load_or_persist_secret(dir.path());
+        assert_eq!(
+            s1, s2,
+            "second call must return the persisted secret, not a new one"
+        );
+        assert!(
+            dir.path().join("proxy.key").exists(),
+            "proxy.key must be created"
+        );
+    }
+
+    #[test]
+    fn env_var_takes_precedence_over_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let known: [u8; 32] = [0x55u8; 32];
+        let encoded = URL_SAFE_NO_PAD.encode(known);
+        // Write a different key to the file first.
+        std::fs::write(
+            dir.path().join("proxy.key"),
+            URL_SAFE_NO_PAD.encode([0xAAu8; 32]),
+        )
+        .unwrap();
+        // Now set the env var (unsafe in Rust 2024 due to signal-safety concerns in tests).
+        // SAFETY: This test is single-threaded for this env mutation; no concurrent access.
+        unsafe { std::env::set_var("KANI_PROXY_SECRET", &encoded) };
+        let result = load_or_persist_secret(dir.path());
+        unsafe { std::env::remove_var("KANI_PROXY_SECRET") };
+        assert_eq!(result, known, "env var must override the file");
+    }
 
     fn secret() -> [u8; 32] {
         [0xABu8; 32]

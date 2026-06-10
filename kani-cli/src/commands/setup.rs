@@ -1,5 +1,7 @@
 use crate::error::CliError;
+use base64::Engine;
 use reqwest::blocking::Client;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 
@@ -73,11 +75,30 @@ fn fetch_vendors(client: &Client) -> Result<(), CliError> {
         ),
     ];
 
+    let mut hashes = serde_json::Map::new();
+
     for (url, filename) in &files {
         println!("Downloading {filename}...");
         let bytes = client.get(*url).send()?.bytes()?;
         fs::write(vendor_dir.join(filename), &bytes)?;
+
+        // Compute SHA-256 for subresource integrity tracking.
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        let digest = hasher.finalize();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(digest);
+        hashes.insert(
+            filename.to_string(),
+            serde_json::Value::String(format!("sha256-{b64}")),
+        );
     }
+
+    // Write sri.json so CI and build.rs can verify integrity.
+    let sri_path = vendor_dir.join("sri.json");
+    let sri_content = serde_json::to_string_pretty(&hashes)
+        .map_err(|e| CliError::Other(format!("sri.json serialise: {e}")))?;
+    fs::write(&sri_path, sri_content)?;
+    println!("SRI hashes written to {}", sri_path.display());
 
     println!("Vendor files saved to {}", vendor_dir.display());
     Ok(())

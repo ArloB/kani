@@ -70,6 +70,12 @@ export function mount(el) {
 
   const sessGroup = mkSettingsGroup('Sessions');
   const sessCard  = mkSettingsGroupCard(sessGroup);
+  const securityLink = document.createElement('a');
+  securityLink.href = '/settings?section=security';
+  securityLink.className = 'btn-ghost btn-sm';
+  securityLink.textContent = 'Manage sessions';
+  securityLink.addEventListener('click', e => { e.preventDefault(); import('../../router.js').then(({ navigate }) => navigate('/settings?section=security')); });
+  sessCard.appendChild(mkSettingsRow({ label: 'Active sessions', description: 'View and revoke individual sessions.', control: securityLink }));
   const logoutBtn = document.createElement('button');
   logoutBtn.type = 'button';
   logoutBtn.className = 'btn-danger btn-sm';

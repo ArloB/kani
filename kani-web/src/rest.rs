@@ -156,6 +156,21 @@ pub fn routes(state: AppState) -> Router {
         .route("/auth/current_user", get(get_current_user))
         .route("/auth/change_password", post(change_password))
         .route("/auth/logout_everywhere", post(logout_everywhere))
+        .route(
+            "/auth/sessions",
+            get(list_sessions).delete(revoke_all_other_sessions),
+        )
+        .route("/auth/sessions/{id}", delete(revoke_session))
+        .route("/auth/password-strength", post(password_strength))
+        .route("/auth/totp/setup", post(totp_setup))
+        .route("/auth/totp/verify", post(totp_verify))
+        .route("/auth/totp/disable", post(totp_disable))
+        .route(
+            "/auth/totp/backup-codes",
+            post(totp_regenerate_backup_codes),
+        )
+        .route("/auth/totp/step-up", post(totp_step_up))
+        .route("/features", get(get_features))
         .route("/auth/permissions", get(get_my_permissions))
         .route("/auth/registration-enabled", get(get_registration_enabled))
         .route("/auth/captcha", get(get_captcha))
@@ -439,6 +454,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/admin/logs", get(admin_logs))
         .route("/admin/logs/stream", get(admin_logs_stream))
         .route("/admin/logs/download", get(admin_logs_download))
+        .route("/admin/logs/purge", post(admin_purge_logs))
         .route("/admin/audit-log", get(admin_audit_log))
         .route("/admin/audit-log/download", get(admin_audit_log_download))
         .route("/stats", get(reading_stats))
@@ -482,39 +498,96 @@ pub fn image_proxy_route(state: AppState) -> Router {
 async fn auth_login(
     mut auth: AuthSession,
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(form): Json<LoginRequest>,
 ) -> impl IntoResponse {
+    let ip = extract_client_ip(&headers);
     let username = form.username.clone();
+
+    // Phase 1: read-only pre-flight check — is this identity/IP already locked out?
+    // Does NOT record an attempt, so successful logins don't accumulate as failures.
+    use crate::rate_limit::RateLimitResult;
+    let pre_check = state.rate_limiter.check_lockout(&username, &ip).await;
+    if let RateLimitResult::LockedOutByIdentity { retry_after_secs }
+    | RateLimitResult::LockedOutByIp { retry_after_secs } = pre_check
+    {
+        let locked_by = match pre_check {
+            RateLimitResult::LockedOutByIdentity { .. } => "identity",
+            _ => "ip",
+        };
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            [("Retry-After", retry_after_secs.to_string().as_str())],
+            Json(json!({
+                "error": "too_many_attempts",
+                "retry_after_seconds": retry_after_secs,
+                "locked_by": locked_by,
+            })),
+        )
+            .into_response();
+    }
+
     let creds = Credentials {
         username: form.username,
-        password: form.password,
+        password: form.password.into(),
     };
     match auth.authenticate(creds).await {
-        Ok(Some(user)) => match auth.login(&user).await {
-            Ok(_) => {
-                if let Err(e) = auth.session.cycle_id().await {
-                    tracing::warn!("Failed to cycle session ID after login: {}", e);
+        Ok(Some(user)) => {
+            // Phase 2: record success (resets failure window for this identity).
+            state
+                .rate_limiter
+                .record_and_check(&username, &ip, true)
+                .await;
+            match auth.login(&user).await {
+                Ok(_) => {
+                    if let Err(e) = auth.session.cycle_id().await {
+                        tracing::warn!("Failed to cycle session ID after login: {}", e);
+                    }
+                    tracing::info!(user_id = user.id, username = %user.username, "User logged in");
+                    state
+                        .audit(Some(user.id), "auth.login", Some(&user.username), None)
+                        .await;
+                    (StatusCode::OK, Json(json!({"ok": true}))).into_response()
                 }
-                tracing::info!(user_id = user.id, username = %user.username, "User logged in");
-                state
-                    .audit(Some(user.id), "auth.login", Some(&user.username), None)
-                    .await;
-                (StatusCode::OK, Json(json!({"ok": true}))).into_response()
+                Err(e) => {
+                    tracing::error!("Session login error: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "Server error"})),
+                    )
+                        .into_response()
+                }
             }
-            Err(e) => {
-                tracing::error!("Session login error: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Server error"})),
-                )
-                    .into_response()
-            }
-        },
+        }
         Ok(None) => {
+            // Phase 2: record failure and check if lockout is now triggered.
+            let post_check = state
+                .rate_limiter
+                .record_and_check(&username, &ip, false)
+                .await;
             tracing::warn!(attempted_username = %username, "Failed login attempt");
             state
                 .audit(None, "auth.login.failed", Some(&username), None)
                 .await;
+            // If this failure just crossed the threshold, tell the client.
+            if let RateLimitResult::LockedOutByIdentity { retry_after_secs }
+            | RateLimitResult::LockedOutByIp { retry_after_secs } = post_check
+            {
+                let locked_by = match post_check {
+                    RateLimitResult::LockedOutByIdentity { .. } => "identity",
+                    _ => "ip",
+                };
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("Retry-After", retry_after_secs.to_string().as_str())],
+                    Json(json!({
+                        "error": "too_many_attempts",
+                        "retry_after_seconds": retry_after_secs,
+                        "locked_by": locked_by,
+                    })),
+                )
+                    .into_response();
+            }
             (
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "Invalid credentials"})),
@@ -532,6 +605,16 @@ async fn auth_login(
     }
 }
 
+/// Extract the client IP from `X-Forwarded-For` (first value) or fall back to a sentinel.
+fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 async fn auth_logout(mut auth: AuthSession, State(state): State<AppState>) -> impl IntoResponse {
     let (user_id, username) = auth
         .user
@@ -547,6 +630,210 @@ async fn auth_logout(mut auth: AuthSession, State(state): State<AppState>) -> im
         .await;
     (StatusCode::OK, Json(json!({"ok": true})))
 }
+
+// ── Password strength endpoint (public — called before registration) ──────────
+
+#[derive(serde::Deserialize)]
+struct PasswordStrengthRequest {
+    password: String,
+    identity: Option<String>,
+}
+
+async fn password_strength(
+    State(state): State<AppState>,
+    Json(body): Json<PasswordStrengthRequest>,
+) -> impl IntoResponse {
+    use kani_app::service::password_policy::{PasswordPolicyError, check_password};
+    let identity = body.identity.as_deref().unwrap_or("");
+    match check_password(&body.password, identity, &state.smart_client).await {
+        Ok(result) => Json(json!({
+            "score": result.score,
+            "feedback": result.feedback,
+            "pwned": result.pwned_count.map(|c| c > 0).unwrap_or(false),
+            "pwned_count": result.pwned_count,
+        }))
+        .into_response(),
+        Err(PasswordPolicyError::TooShort) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "password_too_short" })),
+        )
+            .into_response(),
+        Err(PasswordPolicyError::SameAsIdentity) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "password_same_as_identity" })),
+        )
+            .into_response(),
+        Err(PasswordPolicyError::Pwned(count)) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "password_pwned", "count": count })),
+        )
+            .into_response(),
+        Err(PasswordPolicyError::TooWeak(score, msg)) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "password_too_weak", "score": score, "feedback": [msg] })),
+        )
+            .into_response(),
+    }
+}
+
+// ── Session inventory ─────────────────────────────────────────────────────────
+
+async fn list_sessions(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    auth: AuthSession,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let current_id = auth.session.id().map(|id| id.to_string());
+    let sessions = state.list_sessions(user.id).await?;
+    let response: Vec<_> = sessions
+        .into_iter()
+        .map(|s| {
+            let is_current = current_id.as_deref() == Some(s.id.as_str());
+            json!({
+                "id": s.id,
+                "created_at": s.created_at,
+                "last_seen_at": s.last_seen_at,
+                "user_agent": s.user_agent,
+                "ip_addr": s.ip_addr,
+                "is_current": is_current,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "sessions": response })))
+}
+
+async fn revoke_session(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    let revoked = state.revoke_session(&session_id, user.id).await?;
+    if revoked {
+        state
+            .audit(
+                Some(user.id),
+                "auth.session.revoked",
+                Some(&session_id),
+                None,
+            )
+            .await;
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::NotFound("Session not found".into()))
+    }
+}
+
+async fn revoke_all_other_sessions(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    auth: AuthSession,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let current_id = auth
+        .session
+        .id()
+        .map(|id| id.to_string())
+        .unwrap_or_default();
+    let count = state.revoke_other_sessions(user.id, &current_id).await?;
+    state
+        .audit(
+            Some(user.id),
+            "auth.sessions.revoked_all_others",
+            None,
+            Some(json!({ "count": count })),
+        )
+        .await;
+    Ok(Json(json!({ "revoked": count })))
+}
+
+// ── TOTP 2FA ──────────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct TotpCodeRequest {
+    code: String,
+}
+
+async fn totp_setup(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let (secret, uri, qr_data_url) = state.begin_totp_setup(user.id, &user.username).await?;
+    // Expose the base32 secret once for QR manual entry.
+    use secrecy::ExposeSecret;
+    Ok(Json(json!({
+        "secret": secret.expose_secret(),
+        "otpauth_uri": uri,
+        "qr_data_url": qr_data_url,
+    })))
+}
+
+async fn totp_verify(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    Json(body): Json<TotpCodeRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let backup_codes = state.verify_totp_setup(user.id, &body.code).await?;
+    state
+        .audit(Some(user.id), "totp.enrolled", Some(&user.username), None)
+        .await;
+    Ok(Json(json!({ "backup_codes": backup_codes })))
+}
+
+async fn totp_disable(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    Json(body): Json<TotpCodeRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    state.disable_totp(user.id, &body.code).await?;
+    state
+        .audit(Some(user.id), "totp.disabled", Some(&user.username), None)
+        .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn totp_regenerate_backup_codes(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    Json(body): Json<TotpCodeRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let codes = state.regenerate_backup_codes(user.id, &body.code).await?;
+    Ok(Json(json!({ "backup_codes": codes })))
+}
+
+/// Satisfy a TOTP step-up challenge (sets `totp_verified` session flag).
+/// Currently stores the flag in the session store via a custom key.
+async fn totp_step_up(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+    auth: AuthSession,
+    Json(body): Json<TotpCodeRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    // Try TOTP code first, then backup codes.
+    let verified = state.verify_totp_code(user.id, &body.code).await?
+        || state.verify_totp_backup_code(user.id, &body.code).await?;
+    if !verified {
+        return Err(AppError::ValidationError("Incorrect TOTP code".into()));
+    }
+    // Mark step-up in session.
+    let _ = auth.session.insert("totp_verified", true).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Features endpoint ─────────────────────────────────────────────────────────
+
+async fn get_features(State(state): State<AppState>, auth: AuthSession) -> impl IntoResponse {
+    // `totp_enabled` will be populated once the TOTP service is implemented (task 9).
+    let totp_enabled = if let Some(user) = &auth.user {
+        state.is_totp_enabled(user.id).await.unwrap_or(false)
+    } else {
+        false
+    };
+    Json(json!({
+        "public_instance": state.public_instance,
+        "totp_enabled": totp_enabled,
+    }))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 async fn auth_me(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
@@ -1190,6 +1477,14 @@ async fn delete_source(
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
     state.delete_source(id, user.id).await?;
+    state
+        .audit(
+            Some(user.id),
+            "source.uninstall",
+            None,
+            Some(json!({ "source_id": id })),
+        )
+        .await;
     Ok(Json(json!({})))
 }
 
@@ -2719,7 +3014,7 @@ async fn change_password(
     let verified = backend
         .authenticate(Credentials {
             username: user.username.clone(),
-            password: body.current_password,
+            password: body.current_password.into(),
         })
         .await?;
     if verified.is_none() {
@@ -3967,6 +4262,18 @@ async fn admin_logs_download(
         .map_err(|e| AppError::InternalServerError(e.to_string()))
 }
 
+/// POST /admin/logs/purge — clear the in-memory log ring buffer immediately.
+async fn admin_purge_logs(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminViewLogs>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    state.log_handle.clear();
+    state
+        .audit(Some(user.id), "admin.logs.purged", None, None)
+        .await;
+    StatusCode::NO_CONTENT
+}
+
 // ── Admin: audit log ──────────────────────────────────────────────────────────
 
 async fn admin_audit_log(
@@ -4274,6 +4581,14 @@ async fn library_restore(
 
     let data = file_bytes.ok_or_else(|| AppError::ValidationError("No file uploaded".into()))?;
     let result = state.restore_backup(user.id, &data, opts).await?;
+    state
+        .audit(
+            Some(user.id),
+            "backup.restore",
+            None,
+            Some(json!({ "imported_manga": result.imported_manga })),
+        )
+        .await;
     Ok(Json(result))
 }
 

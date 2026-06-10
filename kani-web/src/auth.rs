@@ -1,4 +1,6 @@
+use secrecy::{ExposeSecret, Secret};
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use argon2::{
     Argon2,
@@ -44,10 +46,10 @@ impl AuthUser for User {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Credentials {
     pub username: String,
-    pub password: String,
+    pub password: Secret<String>,
 }
 
 pub type AuthSession = axum_login::AuthSession<AuthBackend>;
@@ -515,6 +517,16 @@ pub struct RoleWithPermissions {
     pub permissions: Vec<String>,
 }
 
+/// A precomputed dummy hash used only to consume argon2 work when a user is not found or is
+/// inactive. Computed once at startup; the result is never compared to a real password.
+static DUMMY_HASH: OnceLock<String> = OnceLock::new();
+
+fn dummy_hash() -> &'static str {
+    DUMMY_HASH.get_or_init(|| {
+        hash_password("kani-dummy-timing-placeholder").expect("argon2 dummy hash failed at startup")
+    })
+}
+
 impl AuthnBackend for AuthBackend {
     type User = User;
     type Credentials = Credentials;
@@ -524,26 +536,33 @@ impl AuthnBackend for AuthBackend {
         &self,
         creds: Self::Credentials,
     ) -> Result<Option<Self::User>, Self::Error> {
-        let Some(user) = self.fetch_user_by_identity(&creds.username).await? else {
-            return Ok(None);
-        };
+        match self.fetch_user_by_identity(&creds.username).await? {
+            None => {
+                // Consume argon2 work to prevent timing-based user enumeration.
+                let _ = verify_password(creds.password.expose_secret().as_str(), dummy_hash());
+                Ok(None)
+            }
+            Some(user) if !user.is_active => {
+                // A found-but-inactive account must take the same time as an active one
+                // to prevent distinguishing active from inactive accounts.
+                let _ = verify_password(creds.password.expose_secret().as_str(), dummy_hash());
+                Ok(None)
+            }
+            Some(user) => {
+                if !verify_password(creds.password.expose_secret().as_str(), &user.password_hash)? {
+                    return Ok(None);
+                }
 
-        if !user.is_active {
-            return Ok(None);
+                let _ = sqlx::query!(
+                    "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?",
+                    user.id
+                )
+                .execute(&self.db)
+                .await;
+
+                Ok(Some(user))
+            }
         }
-
-        if !verify_password(&creds.password, &user.password_hash)? {
-            return Ok(None);
-        }
-
-        let _ = sqlx::query!(
-            "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?",
-            user.id
-        )
-        .execute(&self.db)
-        .await;
-
-        Ok(Some(user))
     }
 
     async fn get_user(&self, user_id: &UserId<Self>) -> Result<Option<Self::User>, Self::Error> {
@@ -836,7 +855,7 @@ mod tests {
         let result = backend
             .authenticate(Credentials {
                 username: "dave".into(),
-                password: "secret".into(),
+                password: Secret::new("secret".into()),
             })
             .await
             .unwrap();
@@ -854,7 +873,7 @@ mod tests {
         let result = backend
             .authenticate(Credentials {
                 username: "eve".into(),
-                password: "wrong".into(),
+                password: Secret::new("wrong".into()),
             })
             .await
             .unwrap();
@@ -868,7 +887,7 @@ mod tests {
         let result = backend
             .authenticate(Credentials {
                 username: "ghost".into(),
-                password: "pass".into(),
+                password: Secret::new("pass".into()),
             })
             .await
             .unwrap();
@@ -887,11 +906,64 @@ mod tests {
         let result = backend
             .authenticate(Credentials {
                 username: "frank".into(),
-                password: "pass".into(),
+                password: Secret::new("pass".into()),
             })
             .await
             .unwrap();
         assert!(result.is_none());
+    }
+
+    // ── timing-fix tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn dummy_hash_is_stable_across_calls() {
+        let h1 = dummy_hash();
+        let h2 = dummy_hash();
+        assert_eq!(
+            h1, h2,
+            "dummy_hash() must return the same value every call (OnceLock)"
+        );
+        assert!(
+            h1.starts_with("$argon2"),
+            "must be a valid argon2 hash string"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "timing test — run locally: cargo test -- --ignored"]
+    async fn unknown_user_and_known_user_take_comparable_time() {
+        let db = test_db().await;
+        let backend = AuthBackend::new(db);
+        backend
+            .create_user("timing_user", "t@t.com", "correct_password_42")
+            .await
+            .unwrap();
+
+        let start_known = std::time::Instant::now();
+        let _ = backend
+            .authenticate(Credentials {
+                username: "timing_user".into(),
+                password: Secret::new("wrong".into()),
+            })
+            .await;
+        let elapsed_known = start_known.elapsed();
+
+        let start_unknown = std::time::Instant::now();
+        let _ = backend
+            .authenticate(Credentials {
+                username: "nobody_here".into(),
+                password: Secret::new("wrong".into()),
+            })
+            .await;
+        let elapsed_unknown = start_unknown.elapsed();
+
+        // Allow 10× difference (argon2 timing can vary, but both must be in the same order of magnitude)
+        let ratio =
+            elapsed_known.as_millis().max(1) as f64 / elapsed_unknown.as_millis().max(1) as f64;
+        assert!(
+            ratio < 10.0 && ratio > 0.1,
+            "timing ratio {ratio:.1}× is too large — unknown-user path must run dummy argon2 work"
+        );
     }
 
     // ── role management ──────────────────────────────────────────────────────

@@ -107,6 +107,12 @@ impl LogHandle {
         (entries, total)
     }
 
+    /// Clears all entries from the ring buffer.
+    pub fn clear(&self) {
+        let mut buf = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
+        buf.clear();
+    }
+
     /// Returns all matching entries, newest-first, with no pagination.
     pub fn query_all(
         &self,

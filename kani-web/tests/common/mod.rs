@@ -7,7 +7,9 @@ use axum_login::{
 };
 use http_body_util::BodyExt;
 use kani_app::AppService;
-use kani_web::{auth::AuthBackend, logging::RingBufferLayer, state::AppState};
+use kani_web::{
+    auth::AuthBackend, logging::RingBufferLayer, rate_limit::AuthRateLimiter, state::AppState,
+};
 use std::sync::{Arc, atomic::AtomicBool};
 use tower::ServiceExt;
 use tower_sessions_sqlx_store::SqliteStore;
@@ -24,9 +26,12 @@ pub async fn test_db() -> sqlx::SqlitePool {
 
 pub async fn test_state() -> AppState {
     let pool = test_db().await;
-    let service = Arc::new(AppService::new_for_test(pool).await);
+    let service = Arc::new(AppService::new_for_test(pool.clone()).await);
     let (_, log_handle) = RingBufferLayer::new(100);
     AppState {
+        rate_limiter: Arc::new(AuthRateLimiter::new(pool)),
+        csrf_secret: Arc::new([0u8; 32]),
+        public_instance: false,
         service,
         proxy_secret: Arc::new([0u8; 32]),
         proxy_semaphores: moka::future::Cache::builder().max_capacity(100).build(),

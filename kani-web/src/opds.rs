@@ -167,7 +167,7 @@ async fn opds_authenticate(
     let backend = AuthBackend::new(state.service.db.clone());
     let creds = Credentials {
         username: username.to_owned(),
-        password: password.to_owned(),
+        password: secrecy::Secret::new(password.to_owned()),
     };
     let user = backend.authenticate(creds).await.ok()??;
     if user.is_active { Some(user) } else { None }
