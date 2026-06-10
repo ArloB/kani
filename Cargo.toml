@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web", "kani-app", "kani-cli"]
+members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web", "kani-app", "kani-cli", "kani-shared-test"]
 # Extensions are WASM-only; their WIT-generated ABI symbols (e.g. `cabi_post_kani:...#...`)
 # are invalid in the GNU ld version script used when linking native binaries. Excluding them
 # from default-members means `cargo test` / `cargo clippy` skip them on the native target.

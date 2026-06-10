@@ -55,6 +55,7 @@ test-util = []
 [dev-dependencies]
 kani-core   = { path = "../kani-core" }
 kani-shared = { path = "../kani-shared", features = ["ssr"] }
+kani-shared-test = { path = "../kani-shared-test" }
 tokio-util  = { workspace = true }
 
 [build-dependencies]

@@ -1,0 +1,12 @@
+[package]
+name = "kani-shared-test"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Dev-only fixture helpers shared by kani-app/tests and kani-web/tests.
+# A workspace member but NOT a default-member: building it pulls kani-app with
+# the `test-util` feature, which must not leak into production `cargo build`.
+[dependencies]
+kani-app = { path = "../kani-app", features = ["test-util"] }
+sqlx.workspace = true

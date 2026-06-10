@@ -68,4 +68,5 @@ tower = { version = "0.5", features = ["util"] }
 tempfile = "3.27.0"
 http-body-util = "0.1"
 kani-app = { path = "../kani-app", features = ["test-util"] }
+kani-shared-test = { path = "../kani-shared-test" }
 moka = { workspace = true }

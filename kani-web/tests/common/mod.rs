@@ -223,33 +223,8 @@ pub async fn build_test_app_with_opds(state: AppState) -> Router {
         .layer(auth_layer)
 }
 
-/// Insert a minimal source row into the given pool; returns its id.
-pub async fn insert_source(pool: &sqlx::SqlitePool, name: &str) -> i64 {
-    sqlx::query_scalar("INSERT INTO sources (name, version) VALUES (?, '0.1') RETURNING id")
-        .bind(name)
-        .fetch_one(pool)
-        .await
-        .unwrap()
-}
-
-/// Insert a minimal manga row (status 0 = Unknown) into the given pool; returns its id.
-pub async fn insert_manga(
-    pool: &sqlx::SqlitePool,
-    source_id: i64,
-    source_manga_id: &str,
-    name: &str,
-) -> i64 {
-    sqlx::query_scalar(
-        "INSERT INTO manga (source_id, source_manga_id, name, status) \
-         VALUES (?, ?, ?, 0) RETURNING id",
-    )
-    .bind(source_id)
-    .bind(source_manga_id)
-    .bind(name)
-    .fetch_one(pool)
-    .await
-    .unwrap()
-}
+// DB row inserters are shared via kani-shared-test (identical across crates).
+pub use kani_shared_test::{insert_chapter, insert_manga, insert_source, insert_user};
 
 /// Build a Basic-auth `Authorization` header value for the given credentials.
 pub fn basic_auth(username: &str, password: &str) -> String {
