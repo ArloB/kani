@@ -379,6 +379,7 @@ pub struct PaginationConfig {
     any(feature = "host", feature = "builder"),
     derive(serde::Serialize, serde::Deserialize)
 )]
+#[must_use = "a Blueprint is built to be evaluated or serialized; discarding it does nothing"]
 pub struct Blueprint {
     /// HTTP Request
     pub request: Option<RequestDef>,
@@ -991,6 +992,7 @@ impl Expr {
 }
 
 #[cfg(feature = "builder")]
+#[must_use = "BlueprintBuilder is a fluent builder; its methods return a new builder that must be used (chain further or call .build())"]
 pub struct BlueprintBuilder {
     request: Option<RequestDef>,
     container: String,
