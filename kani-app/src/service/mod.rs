@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexMap;
 use kani_shared::wit_types;
 use ordered_float::OrderedFloat;
@@ -520,6 +519,11 @@ impl AppService {
     }
 
     /// Spawns the background auto-scan loop. Call once from main after construction.
+    ///
+    /// Cancellation audit: every `select!` in the background loops pairs
+    /// `shutdown_token.cancelled()` against a `sleep`/`interval.tick()` only —
+    /// both are cancel-safe and hold no DB transaction across the await, so a
+    /// shutdown can never abort an in-flight write mid-transaction.
     pub fn spawn_auto_scan(&self) {
         let state = self.clone();
         let token = self.shutdown_token.clone();
@@ -612,9 +616,10 @@ impl AppService {
                                         manga_db_id
                                     );
 
-                                    let futures = filtered_ids.into_iter().map(|new_id| {
+                                    let mut join_set = tokio::task::JoinSet::new();
+                                    for new_id in filtered_ids {
                                         let s = state.clone();
-                                        async move {
+                                        join_set.spawn(async move {
                                             match s.enqueue_claimed_chapter(new_id).await {
                                                 Ok(_) => tracing::info!(
                                                     "Chapter {} enqueued for download",
@@ -626,9 +631,13 @@ impl AppService {
                                                     e
                                                 ),
                                             }
+                                        });
+                                    }
+                                    while let Some(result) = join_set.join_next().await {
+                                        if let Err(e) = result {
+                                            tracing::error!("Chapter enqueue task panicked: {e}");
                                         }
-                                    });
-                                    futures::future::join_all(futures).await;
+                                    }
                                 }
                             }
                         }

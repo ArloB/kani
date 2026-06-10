@@ -1,4 +1,5 @@
 use super::*;
+use futures::stream::{FuturesUnordered, StreamExt};
 
 impl AppService {
     pub async fn download_chapter(&self, chapter_id: i64) -> Result<()> {

@@ -1,4 +1,5 @@
 use super::super::*;
+use futures::stream::{FuturesUnordered, StreamExt};
 
 // Library scanning, refresh, chapter fetch/store and metadata sync.
 
