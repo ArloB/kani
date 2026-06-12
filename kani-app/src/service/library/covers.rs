@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::ids::{MangaId, UserId};
 
 // Cover download, retry, upload and override management.
 
@@ -74,7 +75,7 @@ impl AppService {
 
     pub(super) async fn download_and_store_cover(
         &self,
-        manga_row_id: i64,
+        manga_row_id: MangaId,
         cover_url: &str,
         base_url: &str,
     ) -> Result<()> {
@@ -157,7 +158,7 @@ impl AppService {
 
     /// Retries downloading the cover for a single manga. Only attempts if
     /// `local_cover_path IS NULL` (already downloaded covers are skipped).
-    pub async fn retry_single_cover(&self, manga_id: i64) -> Result<()> {
+    pub async fn retry_single_cover(&self, manga_id: MangaId) -> Result<()> {
         struct Row {
             cover_url: String,
             base_url: String,
@@ -183,7 +184,7 @@ impl AppService {
 
     pub async fn retry_missing_covers(&self) {
         struct Row {
-            id: i64,
+            id: MangaId,
             cover_url: String,
             base_url: String,
         }
@@ -225,10 +226,10 @@ impl AppService {
     /// local cover. Sets `cover_overridden = TRUE` so scans won't replace it.
     pub async fn upload_manga_cover(
         &self,
-        manga_id: i64,
+        manga_id: MangaId,
         bytes: Vec<u8>,
         content_type: &str,
-        user_id: i64,
+        user_id: UserId,
     ) -> Result<()> {
         // 1. Explicit SVG rejection — check both declared Content-Type and magic bytes.
         if content_type.contains("svg") || content_type.contains("xml") {
@@ -298,7 +299,11 @@ impl AppService {
     /// Clears the user-uploaded cover override. If the source cover file still exists on disk
     /// it is restored immediately; otherwise `local_cover_path` is set to NULL so the next
     /// refresh re-downloads it.
-    pub async fn clear_manga_cover_override(&self, manga_id: i64, user_id: i64) -> Result<()> {
+    pub async fn clear_manga_cover_override(
+        &self,
+        manga_id: MangaId,
+        user_id: UserId,
+    ) -> Result<()> {
         let library_path = self.settings.read().await.library_path.clone();
 
         let current_rel =

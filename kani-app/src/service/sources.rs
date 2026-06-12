@@ -1,4 +1,5 @@
 use super::*;
+use crate::ids::UserId;
 use crate::models::SourceHealthRow;
 
 impl AppService {
@@ -28,7 +29,7 @@ impl AppService {
     }
 
     /// Inserts a new source row with a default version and returns its id.
-    pub async fn add_source(&self, name: &str, user_id: i64) -> Result<i64> {
+    pub async fn add_source(&self, name: &str, user_id: UserId) -> Result<i64> {
         let id = sqlx::query_scalar!(
             "INSERT INTO sources (name, version) VALUES (?, '0.1') RETURNING id",
             name
@@ -62,7 +63,7 @@ impl AppService {
     /// Soft-deletes a source: marks manga as orphaned, sets deleted_at on the source
     /// row, removes the WASM file, and evicts the source from the runtime. The source
     /// row is kept so manga.source_id FKs remain valid.
-    pub async fn delete_source(&self, id: i64, user_id: i64) -> Result<()> {
+    pub async fn delete_source(&self, id: i64, user_id: UserId) -> Result<()> {
         let row = sqlx::query!(
             "SELECT name FROM sources WHERE id = ? AND deleted_at IS NULL",
             id
@@ -113,6 +114,10 @@ impl AppService {
         }
 
         Ok(())
+    }
+
+    pub async fn list_active_source_ids(&self) -> Result<Vec<i64>> {
+        Ok(self.sources.read().await.keys().copied().collect())
     }
 
     pub async fn toggle_source_enabled(&self, id: i64, enabled: bool) -> Result<()> {

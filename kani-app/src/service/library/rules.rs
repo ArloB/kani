@@ -7,7 +7,7 @@ impl AppService {
     /// without modifying any state.
     pub async fn preview_download_rules(
         &self,
-        manga_id: i64,
+        manga_id: MangaId,
         kinds: Vec<DownloadRuleKind>,
     ) -> Result<(usize, usize)> {
         let rows = sqlx::query_as::<_, ChapterFilterRow>(
@@ -62,9 +62,10 @@ impl AppService {
 
     pub async fn filter_chapters_by_rules(
         &self,
-        manga_id: i64,
-        candidate_ids: Vec<i64>,
-    ) -> Vec<i64> {
+        manga_id: MangaId,
+        chapter_ids: Vec<crate::ids::ChapterId>,
+    ) -> Vec<crate::ids::ChapterId> {
+        let candidate_ids: Vec<i64> = chapter_ids.into_iter().map(|c| c.0).collect();
         let raw_rules: Vec<DownloadRuleRow> = sqlx::query_as!(
             DownloadRuleRow,
             "SELECT id, manga_id, rule_type, value
@@ -146,7 +147,10 @@ impl AppService {
         .collect();
 
         if prefs.is_empty() {
-            return ids_after_rules;
+            return ids_after_rules
+                .into_iter()
+                .map(crate::ids::ChapterId)
+                .collect();
         }
 
         if ids_after_rules.is_empty() {
@@ -217,6 +221,7 @@ impl AppService {
         ids_after_rules
             .into_iter()
             .filter(|id| winner_ids.contains(id))
+            .map(crate::ids::ChapterId)
             .collect()
     }
 }

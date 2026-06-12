@@ -1,4 +1,5 @@
 use super::*;
+use crate::ids::{MangaId, UserId};
 
 impl AppService {
     /// Returns the public-facing settings snapshot (omits internal paths).
@@ -39,7 +40,7 @@ impl AppService {
     pub async fn update_settings(
         &self,
         update: kani_shared::types::SettingsUpdate,
-        user_id: i64,
+        user_id: UserId,
     ) -> Result<()> {
         use kani_shared::types::SettingsUpdate;
         match update {
@@ -210,7 +211,7 @@ impl AppService {
         Ok(new_val)
     }
 
-    pub async fn toggle_auto_scan_manga(&self, manga_id: i64, enabled: bool) -> Result<()> {
+    pub async fn toggle_auto_scan_manga(&self, manga_id: MangaId, enabled: bool) -> Result<()> {
         sqlx::query!("UPDATE manga SET auto_scan=? WHERE id=?", enabled, manga_id)
             .execute(&self.db)
             .await?;
@@ -229,7 +230,7 @@ impl AppService {
         Ok((before, after))
     }
 
-    pub async fn mark_manga_seen(&self, user_id: i64, manga_id: i64) -> Result<()> {
+    pub async fn mark_manga_seen(&self, user_id: UserId, manga_id: MangaId) -> Result<()> {
         sqlx::query!(
             "INSERT INTO user_manga_tracking (user_id, manga_id, last_seen_at) \
              VALUES (?1, ?2, CURRENT_TIMESTAMP) \
@@ -242,7 +243,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn update_manga_notes(&self, manga_id: i64, notes: Option<String>) -> Result<()> {
+    pub async fn update_manga_notes(&self, manga_id: MangaId, notes: Option<String>) -> Result<()> {
         sqlx::query!("UPDATE manga SET notes = ? WHERE id = ?", notes, manga_id)
             .execute(&self.db)
             .await?;
@@ -258,7 +259,7 @@ impl AppService {
         mailer.send(to, &subject, &html).await
     }
 
-    pub async fn toggle_auto_download(&self, manga_id: i64, enabled: bool) -> Result<()> {
+    pub async fn toggle_auto_download(&self, manga_id: MangaId, enabled: bool) -> Result<()> {
         sqlx::query!(
             "UPDATE manga SET auto_download=? WHERE id=?",
             enabled,
@@ -269,7 +270,11 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn toggle_download_all_preferred(&self, manga_id: i64, enabled: bool) -> Result<()> {
+    pub async fn toggle_download_all_preferred(
+        &self,
+        manga_id: MangaId,
+        enabled: bool,
+    ) -> Result<()> {
         sqlx::query!(
             "UPDATE manga SET download_all_preferred_only=? WHERE id=?",
             enabled,

@@ -2,12 +2,13 @@
 
 mod common;
 use common::{insert_manga, insert_source, test_service};
+use kani_app::ids::{MangaId, UserId};
 use kani_shared::types::MangaSortOrder;
 
 #[tokio::test]
 async fn get_manga_by_id_returns_not_found_for_missing_id() {
     let svc = test_service().await;
-    let result = svc.get_manga_by_id(99999).await;
+    let result = svc.get_manga_by_id(MangaId(99999)).await;
     assert!(result.is_err());
 }
 
@@ -46,7 +47,7 @@ async fn get_library_filtered_empty_db_returns_empty() {
     let svc = test_service().await;
     let (rows, has_next, _total) = svc
         .get_library_filtered(
-            1,
+            UserId(1),
             1,
             20,
             None,
@@ -76,7 +77,7 @@ async fn get_library_filtered_returns_matching_manga() {
 
     let (rows, _, _) = svc
         .get_library_filtered(
-            1,
+            UserId(1),
             1,
             20,
             Some("Dragon".to_string()),
@@ -103,7 +104,7 @@ async fn delete_manga_removes_row() {
     let src = insert_source(&svc.db, "src").await;
     let manga_id = insert_manga(&svc.db, src, "m1", "To Delete").await;
 
-    svc.delete_manga(manga_id, 1).await.unwrap();
+    svc.delete_manga(manga_id, UserId(1)).await.unwrap();
 
     let result = svc.get_manga_by_id(manga_id).await;
     assert!(result.is_err(), "manga should be gone after delete");
@@ -112,6 +113,6 @@ async fn delete_manga_removes_row() {
 #[tokio::test]
 async fn delete_manga_returns_not_found_for_missing_id() {
     let svc = test_service().await;
-    let result = svc.delete_manga(99999, 1).await;
+    let result = svc.delete_manga(MangaId(99999), UserId(1)).await;
     assert!(result.is_err());
 }

@@ -8,6 +8,7 @@ use axum::{
     routing::get,
 };
 use base64::prelude::{BASE64_STANDARD, Engine as _};
+use kani_app::ids::MangaId;
 use serde::Deserialize;
 
 use crate::{
@@ -89,7 +90,7 @@ async fn opds_manga(
     auth: AuthSession,
     headers: HeaderMap,
     State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    Path(manga_id): Path<MangaId>,
 ) -> impl IntoResponse {
     let Some(_user) = opds_authenticate(&auth, &headers, &state).await else {
         return opds_401();

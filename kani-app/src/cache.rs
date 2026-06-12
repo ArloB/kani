@@ -170,10 +170,11 @@ impl RequestCache {
         );
     }
 
-    pub fn invalidate_stats(&self, user_id: i64) {
+    pub fn invalidate_stats(&self, user_id: crate::ids::UserId) {
+        let raw = user_id.0;
         let _ = self
             .stats
-            .invalidate_entries_if(move |(id, _period), _| *id == user_id);
+            .invalidate_entries_if(move |(id, _period), _| *id == raw);
     }
 
     pub fn clear_all(&self) {

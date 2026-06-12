@@ -7,6 +7,7 @@ use super::{
     set_tracker_app_config, store_credentials, store_pkce_state,
 };
 use crate::error::{Result, ServiceError};
+use crate::ids::{MangaId, UserId};
 use crate::service::AppService;
 
 /// Item returned by `list_trackers_status`.
@@ -28,7 +29,7 @@ pub struct TrackerMappingItem {
 
 impl AppService {
     /// List all known trackers with per-user link status.
-    pub async fn list_trackers_status(&self, user_id: i64) -> Result<Vec<TrackerStatusItem>> {
+    pub async fn list_trackers_status(&self, user_id: UserId) -> Result<Vec<TrackerStatusItem>> {
         let rows = sqlx::query!("SELECT id, name FROM trackers ORDER BY name")
             .fetch_all(&self.db)
             .await?;
@@ -106,7 +107,7 @@ impl AppService {
     /// Complete the OAuth callback: validate state, exchange code, store tokens.
     pub async fn complete_tracker_oauth(
         &self,
-        user_id: i64,
+        user_id: UserId,
         tracker_id: i64,
         code: &str,
         state: &str,
@@ -143,14 +144,14 @@ impl AppService {
     }
 
     /// Unlink a tracker account for a user.
-    pub async fn unlink_tracker(&self, user_id: i64, tracker_id: i64) -> Result<()> {
+    pub async fn unlink_tracker(&self, user_id: UserId, tracker_id: i64) -> Result<()> {
         delete_credentials(&self.db, user_id, tracker_id).await
     }
 
     /// Search a tracker's catalog by title.
     pub async fn search_tracker_manga(
         &self,
-        user_id: i64,
+        user_id: UserId,
         tracker_id: i64,
         query: &str,
     ) -> Result<Vec<TrackerMangaResult>> {
@@ -173,8 +174,8 @@ impl AppService {
     /// Get tracker mappings for a manga (all configured trackers).
     pub async fn get_tracker_mappings(
         &self,
-        user_id: i64,
-        manga_id: i64,
+        user_id: UserId,
+        manga_id: MangaId,
     ) -> Result<Vec<TrackerMappingItem>> {
         let registry = self.tracker_registry.read().await;
         let mut mappings = Vec::new();
@@ -227,6 +228,25 @@ impl AppService {
     pub async fn delete_tracker_config(&self, tracker_id: i64) -> Result<()> {
         delete_tracker_app_config(&self.db, tracker_id).await?;
         self.reload_tracker_registry().await
+    }
+
+    pub async fn set_tracker_mapping(
+        &self,
+        user_id: UserId,
+        tracker_id: i64,
+        manga_id: MangaId,
+        tracker_manga_id: &str,
+    ) -> Result<()> {
+        super::set_mapping(&self.db, user_id, tracker_id, manga_id, tracker_manga_id).await
+    }
+
+    pub async fn delete_tracker_mapping(
+        &self,
+        user_id: UserId,
+        tracker_id: i64,
+        manga_id: MangaId,
+    ) -> Result<()> {
+        super::delete_mapping(&self.db, user_id, tracker_id, manga_id).await
     }
 
     /// Rebuild the tracker registry in-place (hot-reload after credential changes).

@@ -12,14 +12,14 @@ pub fn router() -> Router<AppState> {
 
 async fn get_settings(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsView>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    Ok(Json(state.get_settings().await))
+    Ok(Json(svc.get_settings().await))
 }
 
 async fn update_settings(
     auth: AuthSession,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SettingsDomain>>,
     Json(update): Json<crate::types::SettingsUpdate>,
 ) -> Result<impl IntoResponse, AppError> {
     use crate::types::SettingsUpdate;
@@ -58,31 +58,82 @@ async fn update_settings(
             std::sync::atomic::Ordering::Relaxed,
         );
     }
-    state.update_settings(update, user.id).await?;
+    svc.update_settings(update, user.id).await?;
     Ok(Json(json!({})))
 }
 
 async fn toggle_auto_scan(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditScan>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let new_val = state.toggle_auto_scan().await?;
+    let new_val = svc.toggle_auto_scan().await?;
     Ok(Json(json!({ "auto_scan": new_val })))
 }
 
 pub async fn start_refresh_all_rest(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.start_refresh_all().await?;
+    svc.start_refresh_all().await?;
     Ok((StatusCode::ACCEPTED, Json(json!({}))))
 }
 
 async fn get_refresh_status(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    Ok(Json(
-        json!({ "is_refreshing": state.is_refreshing().await }),
-    ))
+    Ok(Json(json!({ "is_refreshing": svc.is_refreshing().await })))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn stub_user() -> crate::auth::User {
+        crate::auth::User {
+            id: UserId(1),
+            username: "stub".into(),
+            email: "stub@test.com".into(),
+            is_active: true,
+            roles: vec![],
+            password_hash: String::new(),
+            change_id: vec![],
+        }
+    }
+
+    struct StubSettings;
+
+    #[async_trait::async_trait]
+    impl SettingsDomain for StubSettings {
+        async fn get_settings(&self) -> kani_shared::types::AppSettings {
+            unimplemented!()
+        }
+        async fn update_settings(
+            &self,
+            _update: kani_shared::types::SettingsUpdate,
+            _user_id: UserId,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn toggle_auto_scan(&self) -> kani_app::error::Result<bool> {
+            Ok(false)
+        }
+        async fn start_refresh_all(&self) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn is_refreshing(&self) -> bool {
+            false
+        }
+    }
+
+    #[tokio::test]
+    async fn toggle_auto_scan_returns_ok_without_appservice() {
+        let svc: Arc<dyn SettingsDomain> = Arc::new(StubSettings);
+        let response = toggle_auto_scan(AuthGuard(stub_user(), PhantomData), State(svc))
+            .await
+            .unwrap();
+        let resp = axum::response::IntoResponse::into_response(response);
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    }
 }

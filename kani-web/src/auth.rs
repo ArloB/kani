@@ -13,7 +13,8 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Redirect, Response},
 };
-use axum_login::{AuthUser, AuthnBackend, AuthzBackend, UserId};
+use axum_login::{AuthUser, AuthnBackend, AuthzBackend, UserId as AxLoginUserId};
+use kani_app::ids::UserId;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
@@ -21,7 +22,7 @@ use crate::error::AppError;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
-    pub id: i64,
+    pub id: UserId,
     pub username: String,
     pub email: String,
     pub is_active: bool,
@@ -35,9 +36,9 @@ pub struct User {
 }
 
 impl AuthUser for User {
-    type Id = i64;
+    type Id = UserId;
 
-    fn id(&self) -> i64 {
+    fn id(&self) -> UserId {
         self.id
     }
 
@@ -65,7 +66,7 @@ impl AuthBackend {
     }
 
     /// Fetch a user row by ID.
-    pub async fn fetch_user_by_id(&self, id: i64) -> Result<Option<User>, AppError> {
+    pub async fn fetch_user_by_id(&self, id: UserId) -> Result<Option<User>, AppError> {
         struct Row {
             id: i64,
             username: String,
@@ -92,7 +93,7 @@ impl AuthBackend {
         let roles = self.fetch_roles(row.id).await?;
 
         Ok(Some(User {
-            id: row.id,
+            id: UserId(row.id),
             username: row.username,
             email: row.email,
             password_hash: row.password_hash,
@@ -133,7 +134,7 @@ impl AuthBackend {
         let roles = self.fetch_roles(row.id).await?;
 
         Ok(Some(User {
-            id: row.id,
+            id: UserId(row.id),
             username: row.username,
             email: row.email,
             password_hash: row.password_hash,
@@ -191,14 +192,18 @@ impl AuthBackend {
         .execute(&self.db)
         .await?;
 
-        self.fetch_user_by_id(id)
+        self.fetch_user_by_id(UserId(id))
             .await?
             .ok_or_else(|| AppError::SqlxError(sqlx::Error::RowNotFound))
     }
 
     /// Changes a user's password and simultaneously rotates `change_id`,
     /// invalidating all existing sessions.
-    pub async fn change_password(&self, user_id: i64, new_password: &str) -> Result<(), AppError> {
+    pub async fn change_password(
+        &self,
+        user_id: UserId,
+        new_password: &str,
+    ) -> Result<(), AppError> {
         let path = dirs::home_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join(".kani_admin_password");
@@ -223,7 +228,7 @@ impl AuthBackend {
     }
 
     /// Rotates `change_id` invalidating all active sessions.
-    pub async fn cycle_change_id(&self, user_id: i64) -> Result<(), AppError> {
+    pub async fn cycle_change_id(&self, user_id: UserId) -> Result<(), AppError> {
         let change_id = fresh_change_id();
         sqlx::query!(
             "UPDATE users SET change_id = ? WHERE id = ?",
@@ -237,7 +242,7 @@ impl AuthBackend {
 
     /// Activates or deactivates a user account.
     /// Deactivating also rotates `change_id` to terminate live sessions.
-    pub async fn set_active(&self, user_id: i64, active: bool) -> Result<(), AppError> {
+    pub async fn set_active(&self, user_id: UserId, active: bool) -> Result<(), AppError> {
         if !active {
             self.cycle_change_id(user_id).await?;
         }
@@ -254,9 +259,9 @@ impl AuthBackend {
     /// Grants a role to a user.  `granted_by` is the admin's user id.
     pub async fn grant_role(
         &self,
-        user_id: i64,
+        user_id: UserId,
         role_slug: &str,
-        granted_by: Option<i64>,
+        granted_by: Option<UserId>,
     ) -> Result<(), AppError> {
         sqlx::query!(
             "INSERT OR IGNORE INTO user_roles (user_id, role_slug, granted_by)
@@ -282,7 +287,7 @@ impl AuthBackend {
     }
 
     /// Revokes a role from a user.
-    pub async fn revoke_role(&self, user_id: i64, role_slug: &str) -> Result<(), AppError> {
+    pub async fn revoke_role(&self, user_id: UserId, role_slug: &str) -> Result<(), AppError> {
         sqlx::query!(
             "DELETE FROM user_roles WHERE user_id = ? AND role_slug = ?",
             user_id,
@@ -331,7 +336,7 @@ impl AuthBackend {
                     .map(|csv| csv.split(',').map(str::to_string).collect())
                     .unwrap_or_default();
                 User {
-                    id: row.id,
+                    id: UserId(row.id),
                     username: row.username,
                     email: row.email,
                     password_hash: row.password_hash,
@@ -348,7 +353,7 @@ impl AuthBackend {
     /// Updates a user's username and/or email.
     pub async fn update_user(
         &self,
-        user_id: i64,
+        user_id: UserId,
         username: Option<&str>,
         email: Option<&str>,
     ) -> Result<(), AppError> {
@@ -366,7 +371,7 @@ impl AuthBackend {
     }
 
     /// Deletes a user account and all associated data.
-    pub async fn delete_user(&self, user_id: i64) -> Result<(), AppError> {
+    pub async fn delete_user(&self, user_id: UserId) -> Result<(), AppError> {
         sqlx::query!("DELETE FROM users WHERE id = ?", user_id)
             .execute(&self.db)
             .await?;
@@ -376,7 +381,7 @@ impl AuthBackend {
     /// Resets a user's password (admin action — no current-password check).
     pub async fn admin_reset_password(
         &self,
-        user_id: i64,
+        user_id: UserId,
         new_password: &str,
     ) -> Result<(), AppError> {
         let hash =
@@ -565,7 +570,10 @@ impl AuthnBackend for AuthBackend {
         }
     }
 
-    async fn get_user(&self, user_id: &UserId<Self>) -> Result<Option<Self::User>, Self::Error> {
+    async fn get_user(
+        &self,
+        user_id: &AxLoginUserId<Self>,
+    ) -> Result<Option<Self::User>, Self::Error> {
         self.fetch_user_by_id(*user_id).await
     }
 }

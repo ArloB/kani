@@ -1,5 +1,6 @@
 //! Database models and application-layer data types.
 
+use crate::ids::{ChapterId, MangaId, SourceId};
 use kani_shared::types::{DownloadRule, DownloadRuleKind, NamedItem, Source};
 use serde::{Deserialize, Serialize};
 
@@ -65,7 +66,7 @@ pub struct PageInfo {
 /// An alternative downloaded version of the same chapter from a different scanlator group.
 #[derive(Debug, Serialize)]
 pub struct ScanlatorAlt {
-    pub chapter_id: i64,
+    pub chapter_id: ChapterId,
     pub scanlator: Option<String>,
     /// Volume number, included so the frontend can disambiguate identical scanlator strings.
     pub volume: Option<i64>,
@@ -74,17 +75,17 @@ pub struct ScanlatorAlt {
 /// Manifest returned when opening a downloaded chapter for reading.
 #[derive(Debug, Serialize)]
 pub struct ChapterPageManifest {
-    pub chapter_id: i64,
+    pub chapter_id: ChapterId,
     pub chapter_title: String,
     pub chapter_number: f64,
     pub scanlator: Option<String>,
     pub source_name: String,
-    pub manga_id: i64,
+    pub manga_id: MangaId,
     pub manga_title: String,
     pub page_count: usize,
     pub pages: Vec<PageInfo>,
-    pub prev_chapter_id: Option<i64>,
-    pub next_chapter_id: Option<i64>,
+    pub prev_chapter_id: Option<ChapterId>,
+    pub next_chapter_id: Option<ChapterId>,
     pub last_page_read: Option<i64>,
     /// `true` when the CBZ contains server-analysed spread metadata (a
     /// `<Pages>` block in `ComicInfo.xml`).  When `false`, the reader
@@ -97,7 +98,7 @@ pub struct ChapterPageManifest {
 /// Full manga row as stored in the database.
 #[derive(Serialize, Deserialize, Clone, Debug, sqlx::FromRow)]
 pub struct Manga {
-    pub id: i64,
+    pub id: MangaId,
     pub source_id: i64,
     pub source_manga_id: String,
     pub name: String,
@@ -123,7 +124,7 @@ pub struct Manga {
 /// DB row fetched when listing chapters for a manga.
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub struct ChapterRow {
-    pub id: i64,
+    pub id: ChapterId,
     pub source_chapter_id: String,
     pub name: Option<String>,
     pub chapter_number: f64,
@@ -141,7 +142,7 @@ pub struct ChapterRow {
 /// Slim row returned by filtered library queries (joins manga + source).
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub struct LibraryManga {
-    pub id: i64,
+    pub id: MangaId,
     pub name: String,
     pub cover_url: Option<String>,
     pub local_cover_path: Option<String>,
@@ -159,12 +160,12 @@ pub struct LibraryManga {
 /// One item in the "continue reading" shelf.
 #[derive(Debug, Serialize)]
 pub struct ContinueReadingItem {
-    pub manga_id: i64,
+    pub manga_id: MangaId,
     pub manga_name: String,
     pub cover_url: Option<String>,
     pub local_cover_path: Option<String>,
     pub base_url: String,
-    pub chapter_id: i64,
+    pub chapter_id: ChapterId,
     pub chapter_number: f64,
     pub last_page: i64,
 }
@@ -260,7 +261,7 @@ pub struct PendingImportRow {
     pub id: i64,
     pub origin: String,
     pub title: String,
-    pub source_hint: Option<String>,
+    pub source_hint: Option<SourceId>,
     pub source_manga_id: Option<String>,
     pub description: Option<String>,
     pub cover_url: Option<String>,

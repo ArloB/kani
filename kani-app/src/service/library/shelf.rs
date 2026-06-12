@@ -1,11 +1,12 @@
 use super::super::*;
+use crate::ids::{MangaId, UserId};
 
 impl AppService {
     /// Returns the continue-reading shelf: manga the user has started that still have
     /// unread chapters, ordered by most-recently-read first.
     pub async fn get_continue_reading_shelf(
         &self,
-        user_id: i64,
+        user_id: UserId,
         limit: i64,
     ) -> Result<Vec<crate::models::ContinueReadingItem>> {
         let mangas = sqlx::query!(
@@ -41,16 +42,19 @@ impl AppService {
 
         let mut items = Vec::new();
         for row in mangas {
-            let Ok(Some(next)) = self.get_continue_reading_chapter(user_id, row.id).await else {
+            let Ok(Some(next)) = self
+                .get_continue_reading_chapter(user_id, MangaId(row.id))
+                .await
+            else {
                 continue;
             };
             items.push(crate::models::ContinueReadingItem {
-                manga_id: row.id,
+                manga_id: MangaId(row.id),
                 manga_name: row.name,
                 cover_url: row.cover_url,
                 local_cover_path: row.local_cover_path,
                 base_url: row.base_url,
-                chapter_id: next.chapter_id,
+                chapter_id: crate::ids::ChapterId(next.chapter_id),
                 chapter_number: next.chapter_number,
                 last_page: next.last_page,
             });

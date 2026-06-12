@@ -70,3 +70,4 @@ http-body-util = "0.1"
 kani-app = { path = "../kani-app", features = ["test-util"] }
 kani-shared-test = { path = "../kani-shared-test" }
 moka = { workspace = true }
+async-trait = "0.1"

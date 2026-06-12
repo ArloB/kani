@@ -1,11 +1,12 @@
 use crate::error::{Result, ServiceError};
+use crate::ids::UserId;
 use crate::service::AppService;
 use crate::service::email::{generate_token, hash_token};
 use crate::service::email_templates;
 
 impl AppService {
     /// Sends a verification email to the user. No-op if email is disabled or already verified.
-    pub async fn send_verification_email(&self, user_id: i64) -> Result<()> {
+    pub async fn send_verification_email(&self, user_id: UserId) -> Result<()> {
         let user = sqlx::query!(
             "SELECT username, email, email_verified_at FROM users WHERE id = ?",
             user_id
@@ -77,14 +78,14 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
-        self.audit(Some(row.user_id), "auth.email_verified", None, None)
+        self.audit(Some(UserId(row.user_id)), "auth.email_verified", None, None)
             .await;
 
         Ok(())
     }
 
     /// Resends a verification email. Rate-limited to 3 sends per user per hour.
-    pub async fn resend_verification_email(&self, user_id: i64) -> Result<()> {
+    pub async fn resend_verification_email(&self, user_id: UserId) -> Result<()> {
         let recent: i64 = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM email_verification_tokens
              WHERE user_id = ? AND created_at > datetime('now', '-1 hour')",
@@ -103,7 +104,7 @@ impl AppService {
     }
 
     /// Sends a welcome email to a newly registered user (fire-and-forget).
-    pub fn send_welcome_email(&self, user_id: i64) {
+    pub fn send_welcome_email(&self, user_id: UserId) {
         let svc = self.clone();
         tokio::spawn(async move {
             let user = sqlx::query!("SELECT username, email FROM users WHERE id = ?", user_id)

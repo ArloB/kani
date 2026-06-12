@@ -2,6 +2,7 @@
 
 mod common;
 use common::{insert_chapter, insert_manga, insert_source, test_service};
+use kani_app::ids::UserId;
 use kani_shared::types::ChapterSortOrder;
 
 #[tokio::test]
@@ -16,7 +17,7 @@ async fn get_local_chapters_empty_returns_empty_list() {
             1,
             20,
             ChapterSortOrder::ChapterDesc,
-            1,
+            UserId(1),
             None,
             None,
             None,
@@ -41,7 +42,7 @@ async fn get_local_chapters_returns_inserted_chapters() {
             1,
             20,
             ChapterSortOrder::ChapterDesc,
-            1,
+            UserId(1),
             None,
             None,
             None,
@@ -68,7 +69,7 @@ async fn get_local_chapters_paging_works() {
             1,
             3,
             ChapterSortOrder::ChapterAsc,
-            1,
+            UserId(1),
             None,
             None,
             None,
@@ -85,7 +86,7 @@ async fn get_local_chapters_paging_works() {
             2,
             3,
             ChapterSortOrder::ChapterAsc,
-            1,
+            UserId(1),
             None,
             None,
             None,
@@ -116,7 +117,7 @@ async fn download_status_filter_works() {
             1,
             20,
             ChapterSortOrder::ChapterDesc,
-            1,
+            UserId(1),
             Some(true),
             None,
             None,
@@ -131,7 +132,7 @@ async fn download_status_filter_works() {
             1,
             20,
             ChapterSortOrder::ChapterDesc,
-            1,
+            UserId(1),
             Some(false),
             None,
             None,
@@ -160,7 +161,7 @@ async fn orphaned_chapters_are_excluded() {
             1,
             20,
             ChapterSortOrder::ChapterDesc,
-            1,
+            UserId(1),
             None,
             None,
             None,

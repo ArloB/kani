@@ -1,12 +1,13 @@
 use crate::error::{Result, ServiceError};
+use crate::ids::{MangaId, UserId};
 use crate::models::{OrphanedManga, PendingImportRow};
 use crate::service::AppService;
 
 impl AppService {
-    pub async fn list_pending_imports(&self, user_id: i64) -> Result<Vec<PendingImportRow>> {
+    pub async fn list_pending_imports(&self, user_id: UserId) -> Result<Vec<PendingImportRow>> {
         let rows = sqlx::query_as!(
             PendingImportRow,
-            r#"SELECT pi.id, pi.origin, pi.title, pi.source_hint, pi.source_manga_id,
+            r#"SELECT pi.id, pi.origin, pi.title, pi.source_hint AS "source_hint?: crate::ids::SourceId", pi.source_manga_id,
                       pi.description, pi.cover_url, pi.authors, pi.tags, pi.status,
                       pi.tracking, pi.chapter_progress, pi.possible_duplicate_of,
                       m.name AS possible_duplicate_title,
@@ -23,7 +24,7 @@ impl AppService {
         Ok(rows)
     }
 
-    pub async fn delete_pending_import(&self, user_id: i64, id: i64) -> Result<()> {
+    pub async fn delete_pending_import(&self, user_id: UserId, id: i64) -> Result<()> {
         let affected = sqlx::query!(
             "DELETE FROM pending_imports WHERE id = ? AND user_id = ?",
             id,
@@ -44,11 +45,11 @@ impl AppService {
     /// tracking. Returns the new manga's DB id.
     pub async fn resolve_pending_import(
         &self,
-        user_id: i64,
+        user_id: UserId,
         id: i64,
         source_id: i64,
         source_manga_id: &str,
-    ) -> Result<i64> {
+    ) -> Result<MangaId> {
         let row = sqlx::query!(
             "SELECT title, tracking, chapter_progress FROM pending_imports \
              WHERE id = ? AND user_id = ? AND resolved = FALSE",
@@ -73,15 +74,17 @@ impl AppService {
 
         let mut tx = self.db.begin().await?;
 
-        let manga_id = sqlx::query_scalar!(
-            "INSERT INTO manga (source_id, source_manga_id, name) \
+        let manga_id = MangaId(
+            sqlx::query_scalar!(
+                "INSERT INTO manga (source_id, source_manga_id, name) \
              VALUES (?, ?, ?) RETURNING id",
-            source_id,
-            source_manga_id,
-            row.title
-        )
-        .fetch_one(&mut *tx)
-        .await?;
+                source_id,
+                source_manga_id,
+                row.title
+            )
+            .fetch_one(&mut *tx)
+            .await?,
+        );
 
         if let Some(tracking_json) = &row.tracking {
             #[derive(serde::Deserialize)]

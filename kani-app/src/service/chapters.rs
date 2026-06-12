@@ -1,4 +1,5 @@
 use super::*;
+use crate::ids::{ChapterId, MangaId, UserId};
 
 /// Resolved metadata for a downloaded chapter, including its on-disk CBZ path.
 /// Returned by [`AppService::chapter_cbz_path`]; all callers get everything
@@ -6,7 +7,7 @@ use super::*;
 pub struct ChapterCbzInfo {
     pub path: std::path::PathBuf,
     pub chapter_title: String,
-    pub manga_id: i64,
+    pub manga_id: MangaId,
     pub manga_name: String,
     pub chapter_number: f64,
     pub scanlator: Option<String>,
@@ -18,11 +19,11 @@ impl AppService {
     #[allow(clippy::too_many_arguments)]
     pub async fn get_local_chapters(
         &self,
-        manga_id: i64,
+        manga_id: MangaId,
         page: i32,
         page_size: i32,
         sort_order: kani_shared::types::ChapterSortOrder,
-        user_id: i64,
+        user_id: UserId,
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
@@ -118,14 +119,14 @@ impl AppService {
     #[allow(clippy::too_many_arguments)]
     pub async fn get_chapter_ids(
         &self,
-        manga_id: i64,
-        user_id: i64,
+        manga_id: MangaId,
+        user_id: UserId,
         sort_order: kani_shared::types::ChapterSortOrder,
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
         preferred_only: bool,
-    ) -> Result<Vec<i64>> {
+    ) -> Result<Vec<ChapterId>> {
         // When preferred_only is set, restrict to undownloaded chapters and
         // apply filter_chapters_by_rules afterwards.
         let effective_filter_downloaded = if preferred_only {
@@ -159,14 +160,17 @@ impl AppService {
             sort_order.to_sql_order()
         );
 
-        let ids: Vec<i64> = sqlx::query_scalar::<_, i64>(&sql)
+        let ids: Vec<ChapterId> = sqlx::query_scalar::<_, i64>(&sql)
             .bind(manga_id)
             .bind(user_id)
             .bind(manga_id)
             .bind(filter_scanlator.clone())
             .bind(filter_scanlator)
             .fetch_all(&self.db)
-            .await?;
+            .await?
+            .into_iter()
+            .map(ChapterId)
+            .collect();
 
         if preferred_only {
             Ok(self.filter_chapters_by_rules(manga_id, ids).await)
@@ -178,7 +182,7 @@ impl AppService {
     /// Resolves the on-disk CBZ path for a downloaded chapter together with all
     /// associated metadata in a single query. Returns an error if the chapter is
     /// not in downloaded state.
-    pub async fn chapter_cbz_path(&self, chapter_id: i64) -> Result<ChapterCbzInfo> {
+    pub async fn chapter_cbz_path(&self, chapter_id: ChapterId) -> Result<ChapterCbzInfo> {
         let rec = sqlx::query!(
             "SELECT c.download_status, c.volume, c.chapter_number, c.name, c.scanlator,
                     m.id as manga_id, m.name as manga_name,
@@ -218,7 +222,7 @@ impl AppService {
         Ok(ChapterCbzInfo {
             path: safe_cbz,
             chapter_title,
-            manga_id: rec.manga_id,
+            manga_id: MangaId(rec.manga_id),
             manga_name: rec.manga_name,
             chapter_number: rec.chapter_number,
             scanlator: rec.scanlator,
@@ -230,8 +234,8 @@ impl AppService {
     /// chapter IDs for navigation.
     pub async fn get_chapter_page_manifest(
         &self,
-        chapter_id: i64,
-        user_id: i64,
+        chapter_id: ChapterId,
+        user_id: UserId,
     ) -> Result<crate::models::ChapterPageManifest> {
         let info = self.chapter_cbz_path(chapter_id).await?;
         let cbz_path = info.path;
@@ -314,7 +318,7 @@ impl AppService {
         let scanlator_alternatives = alt_rows
             .into_iter()
             .map(|r| crate::models::ScanlatorAlt {
-                chapter_id: r.id,
+                chapter_id: ChapterId(r.id),
                 scanlator: r.scanlator,
                 volume: r.volume,
             })
@@ -343,10 +347,10 @@ impl AppService {
     /// Does not filter by download status — the reader handles downloading.
     async fn adjacent_chapter_id(
         &self,
-        manga_id: i64,
+        manga_id: MangaId,
         chapter_number: f64,
         next: bool,
-    ) -> Result<Option<i64>> {
+    ) -> Result<Option<ChapterId>> {
         let scanlator_mode = self.get_scanlator_mode(manga_id).await?;
         let scanlator_filter = match scanlator_mode.as_str() {
             "whitelist" => {
@@ -368,7 +372,7 @@ impl AppService {
             .bind(chapter_number)
             .fetch_optional(&self.db)
             .await?;
-        Ok(id)
+        Ok(id.map(ChapterId))
     }
 
     /// Reads a single page image from a downloaded chapter's CBZ archive.
@@ -376,7 +380,7 @@ impl AppService {
     /// Returns the raw bytes and lowercase file extension (e.g. `"jpg"`).
     pub async fn read_chapter_page(
         &self,
-        chapter_id: i64,
+        chapter_id: ChapterId,
         page_num: usize,
     ) -> Result<(Vec<u8>, String)> {
         let info = self.chapter_cbz_path(chapter_id).await?;

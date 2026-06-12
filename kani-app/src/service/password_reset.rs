@@ -1,4 +1,5 @@
 use crate::error::{Result, ServiceError};
+use crate::ids::UserId;
 use crate::service::AppService;
 use crate::service::email::{generate_token, hash_token};
 use crate::service::email_templates;
@@ -87,7 +88,7 @@ impl AppService {
     /// Atomically validates and marks a reset token as used in one UPDATE … RETURNING statement.
     /// Returns the user_id, or an error if the token is invalid, already used, or expired.
     /// Using RETURNING eliminates the validate-then-consume TOCTOU window.
-    pub async fn consume_reset_token(&self, raw_token: &str) -> Result<i64> {
+    pub async fn consume_reset_token(&self, raw_token: &str) -> Result<UserId> {
         let hash = hash_token(raw_token);
         let row = sqlx::query!(
             "UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP
@@ -100,7 +101,7 @@ impl AppService {
         .ok_or_else(|| {
             ServiceError::Validation("Token is invalid or has already been used.".into())
         })?;
-        Ok(row.user_id)
+        Ok(UserId(row.user_id))
     }
 
     /// Returns an obfuscated hint of the email for the validate endpoint.
@@ -110,7 +111,11 @@ impl AppService {
     }
 
     /// Admin-triggered reset: generates a token and emails it to the user.
-    pub async fn admin_trigger_password_reset(&self, user_id: i64, admin_id: i64) -> Result<()> {
+    pub async fn admin_trigger_password_reset(
+        &self,
+        user_id: UserId,
+        admin_id: UserId,
+    ) -> Result<()> {
         let user = sqlx::query!(
             "SELECT id, username, email FROM users WHERE id = ? AND is_active = TRUE",
             user_id
@@ -159,7 +164,7 @@ impl AppService {
     }
 
     /// Sends a password-changed security notification to the user (fire-and-forget).
-    pub fn notify_password_changed(&self, user_id: i64) {
+    pub fn notify_password_changed(&self, user_id: UserId) {
         let svc = self.clone();
         tokio::spawn(async move {
             let user = sqlx::query!("SELECT username, email FROM users WHERE id = ?", user_id)

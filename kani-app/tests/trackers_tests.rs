@@ -6,6 +6,7 @@
 
 mod common;
 use common::{insert_manga, insert_source, insert_user, test_service};
+use kani_app::ids::UserId;
 use kani_app::service::trackers::{
     TokenResponse, consume_pkce_state, delete_mapping, get_mapping, set_mapping, store_credentials,
     store_pkce_state,
@@ -23,7 +24,7 @@ async fn tracker_id(svc: &kani_app::AppService, name: &str) -> i64 {
 #[tokio::test]
 async fn list_trackers_status_returns_anilist_and_mal_unconfigured() {
     let svc = test_service().await;
-    let items = svc.list_trackers_status(1).await.unwrap();
+    let items = svc.list_trackers_status(UserId(1)).await.unwrap();
     assert_eq!(
         items.len(),
         2,
@@ -185,7 +186,7 @@ async fn set_and_get_tracker_config_round_trips() {
     assert_eq!(client_id, "client-id-123");
     assert!(has_secret);
 
-    let items = svc.list_trackers_status(1).await.unwrap();
+    let items = svc.list_trackers_status(UserId(1)).await.unwrap();
     let anilist = items.iter().find(|i| i.name == "AniList").unwrap();
     assert!(anilist.configured);
 }

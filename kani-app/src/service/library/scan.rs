@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::ids::MangaId;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 // Library scanning, refresh, chapter fetch/store and metadata sync.
@@ -10,7 +11,7 @@ impl AppService {
         source_id: i64,
         manga_id: &str,
         force: bool,
-    ) -> Result<i64> {
+    ) -> Result<MangaId> {
         let source_manager = {
             let sources = self.sources.read().await;
             sources
@@ -60,13 +61,15 @@ impl AppService {
 
         let we_inserted = insert_result.rows_affected() == 1;
 
-        let manga_row_id: i64 = sqlx::query_scalar!(
-            "SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?",
-            decoded_manga_id,
-            source_id
-        )
-        .fetch_one(&mut *tx)
-        .await?;
+        let manga_row_id = MangaId(
+            sqlx::query_scalar!(
+                "SELECT id FROM manga WHERE source_manga_id = ? AND source_id = ?",
+                decoded_manga_id,
+                source_id
+            )
+            .fetch_one(&mut *tx)
+            .await?,
+        );
 
         if we_inserted {
             Self::sync_manga_metadata(&mut tx, manga_row_id, &manga).await?;
@@ -136,7 +139,7 @@ impl AppService {
 
     pub(super) async fn sync_manga_people(
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        manga_row_id: i64,
+        manga_row_id: MangaId,
         manga: &wit_types::MangaInfo,
     ) -> Result<()> {
         for author in &manga.authors {
@@ -172,7 +175,7 @@ impl AppService {
 
     pub(super) async fn sync_manga_tags(
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        manga_row_id: i64,
+        manga_row_id: MangaId,
         manga: &wit_types::MangaInfo,
     ) -> Result<()> {
         for tag in &manga.tags {
@@ -194,7 +197,7 @@ impl AppService {
 
     pub(in crate::service) async fn sync_manga_metadata(
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        manga_row_id: i64,
+        manga_row_id: MangaId,
         manga: &wit_types::MangaInfo,
     ) -> Result<()> {
         Self::sync_manga_people(tx, manga_row_id, manga).await?;
@@ -202,14 +205,14 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn refresh_manga(&self, manga_row_id: i64) -> Result<()> {
+    pub async fn refresh_manga(&self, manga_row_id: MangaId) -> Result<()> {
         self.refresh_manga_with_options(manga_row_id, crate::models::RefreshOptions::default())
             .await
     }
 
     pub async fn refresh_manga_with_options(
         &self,
-        manga_row_id: i64,
+        manga_row_id: MangaId,
         opts: crate::models::RefreshOptions,
     ) -> Result<()> {
         let ids = sqlx::query!(
@@ -395,7 +398,7 @@ impl AppService {
     pub(super) async fn insert_chapters_batch(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        manga_row_id: i64,
+        manga_row_id: MangaId,
         chapters: &[wit_types::ChapterInfo],
     ) -> Result<Vec<i64>> {
         let mut ids = Vec::new();
@@ -425,7 +428,7 @@ impl AppService {
     /// Fetches chapters from the source and stores them without broadcasting any SSE events.
     /// Used during bulk import to avoid spamming `NewChapters` notifications.
     /// Returns the IDs of newly inserted chapters.
-    pub async fn fetch_and_store_chapters_silent(&self, manga_row_id: i64) -> Result<Vec<i64>> {
+    pub async fn fetch_and_store_chapters_silent(&self, manga_row_id: MangaId) -> Result<Vec<i64>> {
         let ids = sqlx::query!(
             "SELECT source_id, source_manga_id FROM manga WHERE id = ?",
             manga_row_id
@@ -491,7 +494,7 @@ impl AppService {
         Ok(new_chapter_ids)
     }
 
-    pub async fn scan_for_new_chapters(&self, manga_row_id: i64) -> Result<Vec<i64>> {
+    pub async fn scan_for_new_chapters(&self, manga_row_id: MangaId) -> Result<Vec<i64>> {
         let new_chapter_ids = self.fetch_and_store_chapters_silent(manga_row_id).await?;
 
         if !new_chapter_ids.is_empty() {
@@ -542,18 +545,18 @@ impl AppService {
             return Err(ServiceError::Internal("Refresh already in progress".into()));
         }
 
-        let ids: Vec<(i64, String)> = sqlx::query!("SELECT id, name FROM manga ORDER BY id")
+        let ids: Vec<(MangaId, String)> = sqlx::query!("SELECT id, name FROM manga ORDER BY id")
             .fetch_all(&self.db)
             .await?
             .into_iter()
-            .map(|r| (r.id, r.name))
+            .map(|r| (r.id.into(), r.name))
             .collect();
 
         let total = ids.len();
         let state = self.clone();
 
         let handle = tokio::spawn(async move {
-            let manga_ids: Vec<i64> = ids.iter().map(|(id, _)| *id).collect();
+            let manga_ids: Vec<MangaId> = ids.iter().map(|(id, _)| *id).collect();
             let _ = state
                 .refresh_tx
                 .send(AppEvent::Refresh(RefreshProgressEvent::Started {
@@ -628,7 +631,7 @@ impl AppService {
         &self,
         source_id: i64,
         manga_id: &str,
-        manga_row_id: i64,
+        manga_row_id: MangaId,
         page: i32,
     ) -> Result<bool> {
         let source_manager = {
@@ -678,13 +681,13 @@ impl AppService {
     /// Queues a background scan for every manga in the library.
     /// Returns immediately with the count of manga queued.
     pub async fn scan_all_manga(&self) -> Result<usize> {
-        let rows: Vec<(i64, String)> = sqlx::query!("SELECT id, name FROM manga ORDER BY id")
+        let rows: Vec<(MangaId, String)> = sqlx::query!("SELECT id, name FROM manga ORDER BY id")
             .fetch_all(&self.db)
             .await?
             .into_iter()
-            .map(|r| (r.id, r.name))
+            .map(|r| (r.id.into(), r.name))
             .collect();
-        let ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
+        let ids: Vec<MangaId> = rows.iter().map(|(id, _)| *id).collect();
         let count = ids.len();
         self.scan_manga_ids_inner(ids).await?;
         Ok(count)
@@ -693,25 +696,25 @@ impl AppService {
     /// Scans a specific list of manga IDs for new chapters, emitting SSE progress
     /// events compatible with the scan-all event stream. The caller receives
     /// `Started`, per-manga `MangaRefreshed`, and `Completed` events.
-    pub async fn scan_manga_ids(&self, ids: Vec<i64>) -> Result<()> {
+    pub async fn scan_manga_ids(&self, ids: Vec<MangaId>) -> Result<()> {
         self.scan_manga_ids_inner(ids).await
     }
 
-    async fn scan_manga_ids_inner(&self, ids: Vec<i64>) -> Result<()> {
+    async fn scan_manga_ids_inner(&self, ids: Vec<MangaId>) -> Result<()> {
         // Resolve manga names for the given IDs.
         let ids_json = serde_json::to_string(&ids).unwrap_or_default();
-        let rows: Vec<(i64, String)> = sqlx::query!(
+        let rows: Vec<(MangaId, String)> = sqlx::query!(
             "SELECT id, name FROM manga WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id",
             ids_json
         )
         .fetch_all(&self.db)
         .await?
         .into_iter()
-        .map(|r| (r.id, r.name))
+        .map(|r| (r.id.into(), r.name))
         .collect();
 
         let total = rows.len();
-        let manga_ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
+        let manga_ids: Vec<MangaId> = rows.iter().map(|(id, _)| *id).collect();
 
         let _ = self
             .refresh_tx
@@ -758,7 +761,7 @@ impl AppService {
         &self,
         source_id: i64,
         manga_id: String,
-        manga_row_id: i64,
+        manga_row_id: MangaId,
         start_page: i32,
     ) {
         let mut page = start_page;

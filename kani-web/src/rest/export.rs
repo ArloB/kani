@@ -13,7 +13,7 @@ pub fn router() -> Router<AppState> {
 async fn serve_chapter_cbz(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(id): Path<ChapterId>,
 ) -> Result<impl IntoResponse, AppError> {
     let info = state.chapter_cbz_path(id).await?;
     let bytes = tokio::fs::read(&info.path)
@@ -35,7 +35,7 @@ async fn serve_chapter_cbz(
 async fn export_epub(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(id): Path<ChapterId>,
     Query(q): Query<ExportQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     use kani_app::service::export::DeviceProfile;
@@ -60,7 +60,7 @@ async fn export_epub(
 async fn export_kepub(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(id): Path<ChapterId>,
     Query(q): Query<ExportQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     use kani_app::service::export::DeviceProfile;
@@ -85,7 +85,7 @@ async fn export_kepub(
 async fn export_kcc(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(id): Path<ChapterId>,
     Query(q): Query<KccExportQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     use kani_app::service::export::{KccFormat, KccOptions};

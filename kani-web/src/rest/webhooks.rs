@@ -76,7 +76,7 @@ async fn list_webhook_deliveries(
 async fn get_manga_webhook_notify(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
     let enabled = state.webhook_service.get_manga_notify(id).await?;
     Ok(Json(json!({ "enabled": enabled })))
@@ -85,7 +85,7 @@ async fn get_manga_webhook_notify(
 async fn set_manga_webhook_notify(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(id): Path<MangaId>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, AppError> {
     let enabled = body

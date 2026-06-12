@@ -1,9 +1,10 @@
 use super::super::*;
+use crate::ids::UserId;
 
 // Library CRUD: fetch, list, filter, delete and local-metadata updates.
 
 impl AppService {
-    pub async fn get_manga_by_id(&self, id: i64) -> Result<crate::models::Manga> {
+    pub async fn get_manga_by_id(&self, id: MangaId) -> Result<crate::models::Manga> {
         sqlx::query_as!(crate::models::Manga, "SELECT * FROM manga WHERE id = ?", id)
             .fetch_optional(&self.db)
             .await?
@@ -24,7 +25,7 @@ impl AppService {
 
     /// Deletes a manga entry together with its directory on disk (best-effort) and
     /// its cover file. Succeeds even if the files are already absent.
-    pub async fn delete_manga(&self, id: i64, user_id: i64) -> Result<()> {
+    pub async fn delete_manga(&self, id: MangaId, user_id: UserId) -> Result<()> {
         let row = sqlx::query!("SELECT name, local_cover_path FROM manga WHERE id = ?", id)
             .fetch_optional(&self.db)
             .await?
@@ -75,7 +76,7 @@ impl AppService {
     #[allow(clippy::too_many_arguments)]
     pub async fn get_library_filtered(
         &self,
-        user_id: i64,
+        user_id: UserId,
         page: i32,
         page_size: i32,
         search: Option<String>,
@@ -213,7 +214,7 @@ impl AppService {
     /// URL signing and markdown rendering are the caller's responsibility.
     pub async fn get_local_manga_details(
         &self,
-        id: i64,
+        id: MangaId,
     ) -> Result<crate::models::LocalMangaDetails> {
         use kani_shared::types::NamedItem;
 
@@ -386,9 +387,9 @@ impl AppService {
     /// For people/tags, pass `Some(vec![])` to clear the override entirely.
     pub async fn update_local_metadata(
         &self,
-        manga_id: i64,
+        manga_id: MangaId,
         update: crate::models::LocalMetadataUpdate,
-        user_id: i64,
+        user_id: UserId,
     ) -> Result<()> {
         sqlx::query!(
             "UPDATE manga SET local_name = ?, local_description = ?, local_status = ? WHERE id = ?",

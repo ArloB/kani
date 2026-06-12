@@ -91,7 +91,7 @@ async fn auth_login(
                     if let Err(e) = auth.session.cycle_id().await {
                         tracing::warn!("Failed to cycle session ID after login: {}", e);
                     }
-                    tracing::info!(user_id = user.id, username = %user.username, "User logged in");
+                    tracing::info!(user_id = user.id.0, username = %user.username, "User logged in");
                     state
                         .audit(Some(user.id), "auth.login", Some(&user.username), None)
                         .await;
@@ -190,7 +190,7 @@ async fn get_current_user(
             .map(|t: sqlx::types::time::OffsetDateTime| t.to_string());
 
     Ok(Json(crate::types::AuthenticatedUser {
-        id: user.id,
+        id: user.id.0,
         username: user.username,
         email: user.email,
         roles: user.roles,

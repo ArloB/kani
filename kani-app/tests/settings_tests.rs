@@ -2,6 +2,7 @@
 
 mod common;
 use common::test_service;
+use kani_app::ids::UserId;
 use kani_shared::types::{DownloadSettings, ScanSettings, SettingsUpdate};
 
 #[tokio::test]
@@ -27,7 +28,7 @@ async fn update_download_settings_round_trips() {
             initial_retry_delay_ms: 200,
             auto_download_category_ids: vec![],
         }),
-        1,
+        UserId(1),
     )
     .await
     .unwrap();
@@ -50,7 +51,7 @@ async fn update_scan_settings_round_trips() {
             scan_interval_minutes: 30,
             scan_exclude_completed: true,
         }),
-        1,
+        UserId(1),
     )
     .await
     .unwrap();
@@ -71,7 +72,7 @@ async fn update_scan_settings_rejects_short_interval() {
                 scan_interval_minutes: 4, // below minimum of 5
                 scan_exclude_completed: false,
             }),
-            1,
+            UserId(1),
         )
         .await;
     assert!(result.is_err());
@@ -90,7 +91,7 @@ async fn update_download_settings_rejects_invalid_page_concurrency() {
                 initial_retry_delay_ms: 100,
                 auto_download_category_ids: vec![],
             }),
-            1,
+            UserId(1),
         )
         .await;
     assert!(result.is_err());
@@ -106,7 +107,7 @@ async fn update_settings_does_not_affect_unrelated_fields() {
             scan_interval_minutes: 30,
             scan_exclude_completed: false,
         }),
-        1,
+        UserId(1),
     )
     .await
     .unwrap();
@@ -121,7 +122,7 @@ async fn update_settings_does_not_affect_unrelated_fields() {
             initial_retry_delay_ms: 100,
             auto_download_category_ids: vec![],
         }),
-        1,
+        UserId(1),
     )
     .await
     .unwrap();

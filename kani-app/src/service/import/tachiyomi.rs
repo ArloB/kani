@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, ServiceError};
 use crate::events::AppEvent;
+use crate::ids::{MangaId, SourceId, UserId};
 use crate::service::AppService;
 use crate::service::backup::BackupManga as KaniBackupManga;
 use crate::service::backup::{BackupChapterProgress, BackupMangaTracking};
@@ -193,7 +194,7 @@ impl AppService {
 
     pub async fn import_tachiyomi_backup(
         &self,
-        user_id: i64,
+        user_id: UserId,
         data: &[u8],
         opts: TachiyomiImportOptions,
     ) -> Result<TachiyomiImportResult> {
@@ -505,7 +506,11 @@ impl AppService {
             if opts.import_chapter_progress {
                 // For newly inserted manga, fetch chapters from the source first so that
                 // source_chapter_id values exist in the chapters table for progress matching.
-                if is_new && let Err(e) = self.fetch_and_store_chapters_silent(manga_id).await {
+                if is_new
+                    && let Err(e) = self
+                        .fetch_and_store_chapters_silent(MangaId(manga_id))
+                        .await
+                {
                     result
                         .warnings
                         .push(format!("Could not fetch chapters for '{}': {}", m.title, e));
@@ -561,7 +566,7 @@ impl AppService {
             tokio::spawn(async move {
                 for id in new_manga_ids {
                     if let Err(e) =
-                        crate::service::dedup::record_duplicates_for_manga(&pool, id).await
+                        crate::service::dedup::record_duplicates_for_manga(&pool, MangaId(id)).await
                     {
                         tracing::warn!("Duplicate recording failed for manga {id}: {e}");
                     }
@@ -607,7 +612,7 @@ impl AppService {
         });
 
         KaniBackupManga {
-            source_name: String::new(),
+            source_name: SourceId(String::new()),
             source_manga_id: m.url.clone(),
             name: m.title.clone(),
             status: Some(map_publication_status(m.status)),
@@ -623,10 +628,10 @@ impl AppService {
 
     async fn save_pending_import_tachiyomi(
         &self,
-        user_id: i64,
+        user_id: UserId,
         m: &KaniBackupManga,
         source_hint: &str,
-        duplicate_of: Option<i64>,
+        duplicate_of: Option<MangaId>,
         similarity: Option<f64>,
     ) -> Result<()> {
         let tracking = m

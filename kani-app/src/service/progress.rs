@@ -1,10 +1,11 @@
 use super::*;
+use crate::ids::{ChapterId, MangaId, UserId};
 
 impl AppService {
     pub async fn set_chapter_progress(
         &self,
-        user_id: i64,
-        chapter_id: i64,
+        user_id: UserId,
+        chapter_id: ChapterId,
         page: i64,
     ) -> Result<()> {
         sqlx::query!(
@@ -35,8 +36,8 @@ impl AppService {
 
     pub async fn set_chapter_read_status(
         &self,
-        user_id: i64,
-        chapter_ids: Vec<i64>,
+        user_id: UserId,
+        chapter_ids: Vec<ChapterId>,
         is_read: bool,
     ) -> Result<()> {
         let json_chapter_ids = serde_json::to_string(&chapter_ids)
@@ -67,8 +68,8 @@ impl AppService {
 
     pub async fn set_manga_status(
         &self,
-        user_id: i64,
-        manga_id: i64,
+        user_id: UserId,
+        manga_id: MangaId,
         status: kani_shared::types::MangaTrackingStatus,
     ) -> Result<()> {
         let status_int = status as i64;
@@ -92,8 +93,8 @@ impl AppService {
 
     pub async fn get_chapter_progress(
         &self,
-        user_id: i64,
-        chapter_id: i64,
+        user_id: UserId,
+        chapter_id: ChapterId,
     ) -> Result<Option<(i64, bool)>> {
         let row = sqlx::query!(
             r#"
@@ -112,8 +113,8 @@ impl AppService {
 
     pub async fn set_manga_tracking_enabled(
         &self,
-        user_id: i64,
-        manga_id: i64,
+        user_id: UserId,
+        manga_id: MangaId,
         enabled: bool,
     ) -> Result<()> {
         sqlx::query!(
@@ -132,7 +133,12 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn set_manga_notify(&self, user_id: i64, manga_id: i64, notify: bool) -> Result<()> {
+    pub async fn set_manga_notify(
+        &self,
+        user_id: UserId,
+        manga_id: MangaId,
+        notify: bool,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             INSERT INTO user_manga_tracking (user_id, manga_id, notify_new_chapters)
@@ -151,8 +157,8 @@ impl AppService {
 
     pub async fn set_reading_direction(
         &self,
-        user_id: i64,
-        manga_id: i64,
+        user_id: UserId,
+        manga_id: MangaId,
         direction: &str,
     ) -> Result<()> {
         sqlx::query!(
@@ -171,7 +177,12 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn set_reader_prefs(&self, user_id: i64, manga_id: i64, prefs: &str) -> Result<()> {
+    pub async fn set_reader_prefs(
+        &self,
+        user_id: UserId,
+        manga_id: MangaId,
+        prefs: &str,
+    ) -> Result<()> {
         // Reject anything that isn't a JSON object so the column stays well-formed.
         serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(prefs).map_err(
             |_| crate::error::ServiceError::Validation("reader_prefs must be a JSON object".into()),
@@ -194,8 +205,8 @@ impl AppService {
 
     pub async fn get_manga_tracking(
         &self,
-        user_id: i64,
-        manga_id: i64,
+        user_id: UserId,
+        manga_id: MangaId,
     ) -> Result<kani_shared::types::MangaTracking> {
         let tracking = sqlx::query!(
             r#"
@@ -274,7 +285,12 @@ impl AppService {
         })
     }
 
-    pub async fn set_manga_score(&self, user_id: i64, manga_id: i64, score: f64) -> Result<()> {
+    pub async fn set_manga_score(
+        &self,
+        user_id: UserId,
+        manga_id: MangaId,
+        score: f64,
+    ) -> Result<()> {
         sqlx::query!(
             r#"
             INSERT INTO user_manga_tracking (user_id, manga_id, score)
@@ -299,8 +315,8 @@ impl AppService {
     /// Returns `None` when all chapters are read or there are no chapters.
     pub async fn get_continue_reading_chapter(
         &self,
-        user_id: i64,
-        manga_id: i64,
+        user_id: UserId,
+        manga_id: MangaId,
     ) -> Result<Option<kani_shared::types::ContinueReadingChapter>> {
         // Step 1: in-progress chapter (is_read=false but last_page_read > 0).
         let in_progress = sqlx::query!(
@@ -402,20 +418,24 @@ impl AppService {
 
     /// Returns all chapter IDs for a manga where chapter_number <= the given number.
     /// Used by "mark as read/unread up to here".
-    pub async fn get_chapters_up_to(&self, manga_id: i64, chapter_number: f64) -> Result<Vec<i64>> {
-        let ids = sqlx::query_scalar!(
+    pub async fn get_chapters_up_to(
+        &self,
+        manga_id: MangaId,
+        chapter_number: f64,
+    ) -> Result<Vec<ChapterId>> {
+        let ids: Vec<i64> = sqlx::query_scalar!(
             r#"SELECT id as "id: i64" FROM chapters WHERE manga_id = ? AND chapter_number <= ?"#,
             manga_id,
             chapter_number,
         )
         .fetch_all(&self.db)
         .await?;
-        Ok(ids)
+        Ok(ids.into_iter().map(ChapterId).collect())
     }
 
     // ── Bookmarks (#14) ───────────────────────────────────────────────────────
 
-    pub async fn get_bookmarks(&self, user_id: i64, chapter_id: i64) -> Result<Vec<i64>> {
+    pub async fn get_bookmarks(&self, user_id: UserId, chapter_id: ChapterId) -> Result<Vec<i64>> {
         let pages = sqlx::query_scalar!(
             r#"SELECT page_index as "page_index: i64" FROM user_page_bookmarks
                WHERE user_id = ? AND chapter_id = ?
@@ -430,8 +450,8 @@ impl AppService {
 
     pub async fn toggle_bookmark(
         &self,
-        user_id: i64,
-        chapter_id: i64,
+        user_id: UserId,
+        chapter_id: ChapterId,
         page_index: i64,
     ) -> Result<bool> {
         let deleted = sqlx::query!(
@@ -459,7 +479,11 @@ impl AppService {
 
     // ── Per-chapter notes (#31) ────────────────────────────────────────────────
 
-    pub async fn get_chapter_note(&self, user_id: i64, chapter_id: i64) -> Result<Option<String>> {
+    pub async fn get_chapter_note(
+        &self,
+        user_id: UserId,
+        chapter_id: ChapterId,
+    ) -> Result<Option<String>> {
         let note = sqlx::query_scalar!(
             r#"SELECT note FROM user_chapter_notes WHERE user_id = ? AND chapter_id = ?"#,
             user_id,
@@ -471,8 +495,12 @@ impl AppService {
     }
 
     /// Returns chapter IDs that have a non-empty note for this user + manga.
-    pub async fn get_noted_chapter_ids(&self, user_id: i64, manga_id: i64) -> Result<Vec<i64>> {
-        let ids = sqlx::query_scalar!(
+    pub async fn get_noted_chapter_ids(
+        &self,
+        user_id: UserId,
+        manga_id: MangaId,
+    ) -> Result<Vec<ChapterId>> {
+        let ids: Vec<i64> = sqlx::query_scalar!(
             r#"SELECT ucn.chapter_id as "id: i64"
                FROM user_chapter_notes ucn
                JOIN chapters c ON c.id = ucn.chapter_id
@@ -482,15 +510,15 @@ impl AppService {
         )
         .fetch_all(&self.db)
         .await?;
-        Ok(ids)
+        Ok(ids.into_iter().map(ChapterId).collect())
     }
 
     /// Returns chapter notes with text for a given user + manga, ordered by chapter number.
     pub async fn get_manga_chapter_notes_with_text(
         &self,
-        user_id: i64,
-        manga_id: i64,
-    ) -> Result<Vec<(i64, f64, String)>> {
+        user_id: UserId,
+        manga_id: MangaId,
+    ) -> Result<Vec<(ChapterId, f64, String)>> {
         let rows = sqlx::query!(
             r#"SELECT ucn.chapter_id as "chapter_id: i64",
                       c.chapter_number as "chapter_number: f64",
@@ -506,11 +534,16 @@ impl AppService {
         .await?;
         Ok(rows
             .into_iter()
-            .map(|r| (r.chapter_id, r.chapter_number, r.note))
+            .map(|r| (ChapterId(r.chapter_id), r.chapter_number, r.note))
             .collect())
     }
 
-    pub async fn set_chapter_note(&self, user_id: i64, chapter_id: i64, note: &str) -> Result<()> {
+    pub async fn set_chapter_note(
+        &self,
+        user_id: UserId,
+        chapter_id: ChapterId,
+        note: &str,
+    ) -> Result<()> {
         sqlx::query!(
             r#"INSERT INTO user_chapter_notes (user_id, chapter_id, note, updated_at)
                VALUES (?, ?, ?, datetime('now'))

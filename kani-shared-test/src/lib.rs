@@ -4,6 +4,7 @@
 //! `AppService`, and minimal row inserters. Consumed via `[dev-dependencies]`.
 #![allow(clippy::unwrap_used)]
 
+use kani_app::ids::{ChapterId, MangaId, UserId};
 use kani_app::service::AppService;
 use sqlx::SqlitePool;
 
@@ -34,8 +35,8 @@ pub async fn insert_manga(
     source_id: i64,
     source_manga_id: &str,
     name: &str,
-) -> i64 {
-    sqlx::query_scalar(
+) -> MangaId {
+    let id: i64 = sqlx::query_scalar(
         "INSERT INTO manga (source_id, source_manga_id, name, status) \
          VALUES (?, ?, ?, 0) RETURNING id",
     )
@@ -44,17 +45,18 @@ pub async fn insert_manga(
     .bind(name)
     .fetch_one(pool)
     .await
-    .unwrap()
+    .unwrap();
+    MangaId(id)
 }
 
 /// Inserts a chapter row; returns its id.
 pub async fn insert_chapter(
     pool: &SqlitePool,
-    manga_id: i64,
+    manga_id: MangaId,
     source_chapter_id: &str,
     number: f64,
-) -> i64 {
-    sqlx::query_scalar(
+) -> ChapterId {
+    let id: i64 = sqlx::query_scalar(
         "INSERT INTO chapters (manga_id, source_chapter_id, chapter_number, language) \
          VALUES (?, ?, ?, 'en') RETURNING id",
     )
@@ -63,18 +65,21 @@ pub async fn insert_chapter(
     .bind(number)
     .fetch_one(pool)
     .await
-    .unwrap()
+    .unwrap();
+    ChapterId(id)
 }
 
 /// Inserts a minimal user row; returns its id.
-pub async fn insert_user(pool: &SqlitePool, username: &str) -> i64 {
-    sqlx::query_scalar(
-        "INSERT INTO users (username, email, password_hash, change_id) \
-         VALUES (?, ?, 'hash', randomblob(16)) RETURNING id",
+pub async fn insert_user(pool: &SqlitePool, username: &str) -> UserId {
+    UserId(
+        sqlx::query_scalar(
+            "INSERT INTO users (username, email, password_hash, change_id) \
+             VALUES (?, ?, 'hash', randomblob(16)) RETURNING id",
+        )
+        .bind(username)
+        .bind(format!("{username}@test.local"))
+        .fetch_one(pool)
+        .await
+        .unwrap(),
     )
-    .bind(username)
-    .bind(format!("{username}@test.local"))
-    .fetch_one(pool)
-    .await
-    .unwrap()
 }

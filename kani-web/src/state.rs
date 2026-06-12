@@ -3,6 +3,10 @@ use crate::logging::LogHandle;
 use crate::rate_limit::AuthRateLimiter;
 use bytes::Bytes;
 use kani_app::AppService;
+use kani_app::service::traits::{
+    CategoryDomain, ChapterDomain, DownloadDomain, LibraryDomain, MangaDomain, ScanlatorDomain,
+    SettingsDomain, SourceDomain, TrackerDomain,
+};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -96,6 +100,60 @@ impl std::ops::Deref for AppState {
     type Target = AppService;
     fn deref(&self) -> &Self::Target {
         &self.service
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<dyn SourceDomain> {
+    fn from_ref(s: &AppState) -> Self {
+        s.service.clone() as Arc<dyn SourceDomain>
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<dyn DownloadDomain> {
+    fn from_ref(s: &AppState) -> Self {
+        s.service.clone() as Arc<dyn DownloadDomain>
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<dyn ChapterDomain> {
+    fn from_ref(s: &AppState) -> Self {
+        s.service.clone() as Arc<dyn ChapterDomain>
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<dyn LibraryDomain> {
+    fn from_ref(s: &AppState) -> Self {
+        s.service.clone() as Arc<dyn LibraryDomain>
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<dyn MangaDomain> {
+    fn from_ref(s: &AppState) -> Self {
+        s.service.clone() as Arc<dyn MangaDomain>
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<dyn TrackerDomain> {
+    fn from_ref(s: &AppState) -> Self {
+        s.service.clone() as Arc<dyn TrackerDomain>
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<dyn CategoryDomain> {
+    fn from_ref(s: &AppState) -> Self {
+        s.service.clone() as Arc<dyn CategoryDomain>
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<dyn ScanlatorDomain> {
+    fn from_ref(s: &AppState) -> Self {
+        s.service.clone() as Arc<dyn ScanlatorDomain>
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<dyn SettingsDomain> {
+    fn from_ref(s: &AppState) -> Self {
+        s.service.clone() as Arc<dyn SettingsDomain>
     }
 }
 

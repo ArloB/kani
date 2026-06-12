@@ -61,6 +61,22 @@ int_id!(
 #[sqlx(transparent)]
 pub struct SourceId(pub String);
 
+impl From<String> for SourceId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+impl From<&str> for SourceId {
+    fn from(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
+impl std::fmt::Display for SourceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -92,6 +108,14 @@ mod tests {
         assert_eq!(json, "5");
         let back: ChapterId = serde_json::from_str(&json).unwrap();
         assert_eq!(back, id);
+    }
+
+    #[test]
+    fn source_id_conversions() {
+        let from_string = SourceId::from("weebcentral".to_string());
+        let from_str = SourceId::from("weebcentral");
+        assert_eq!(from_string, from_str);
+        assert_eq!(from_string.to_string(), "weebcentral");
     }
 
     #[test]

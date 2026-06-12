@@ -6,6 +6,7 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 use super::AppService;
 use crate::error::{Result, ServiceError};
 use crate::events::AppEvent;
+use crate::ids::{MangaId, SourceId, UserId};
 
 // ── Serialisable backup structs ───────────────────────────────────────────────
 
@@ -20,7 +21,7 @@ pub struct BackupData {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BackupManga {
-    pub source_name: String,
+    pub source_name: SourceId,
     pub source_manga_id: String,
     pub name: String,
     pub status: Option<i64>,
@@ -83,7 +84,7 @@ pub struct BackupPreview {
 
 #[derive(Debug, Serialize)]
 pub struct BackupSourceSummary {
-    pub source_name: String,
+    pub source_name: SourceId,
     pub manga_count: u32,
     pub found: bool,
 }
@@ -184,7 +185,7 @@ impl AppService {
     pub async fn preview_backup(&self, data: &[u8]) -> Result<BackupPreview> {
         let backup = parse_zip_backup(data)?;
 
-        let mut source_counts: indexmap::IndexMap<String, u32> = Default::default();
+        let mut source_counts: indexmap::IndexMap<SourceId, u32> = Default::default();
         let mut download_rule_count: u32 = 0;
         let mut has_tracking = false;
         let mut has_chapter_progress = false;
@@ -232,7 +233,7 @@ impl AppService {
     /// Export the library to a ZIP archive of JSON.
     pub async fn export_backup(
         &self,
-        user_id: i64,
+        user_id: UserId,
         include_chapter_progress: bool,
     ) -> Result<Vec<u8>> {
         let now = time::OffsetDateTime::now_utc()
@@ -309,7 +310,7 @@ impl AppService {
             };
 
             manga_out.push(BackupManga {
-                source_name: row.source_name,
+                source_name: SourceId(row.source_name),
                 source_manga_id: row.source_manga_id,
                 name: row.name,
                 status: Some(row.status),
@@ -359,7 +360,7 @@ impl AppService {
     /// Restore from a backup ZIP. Honours `opts` to select which sections to apply.
     pub async fn restore_backup(
         &self,
-        user_id: i64,
+        user_id: UserId,
         data: &[u8],
         opts: RestoreOptions,
     ) -> Result<RestoreResult> {
@@ -632,7 +633,7 @@ impl AppService {
             tokio::spawn(async move {
                 for id in new_manga_ids {
                     if let Err(e) =
-                        crate::service::dedup::record_duplicates_for_manga(&pool, id).await
+                        crate::service::dedup::record_duplicates_for_manga(&pool, MangaId(id)).await
                     {
                         tracing::warn!("Duplicate recording failed for manga {id}: {e}");
                     }
@@ -659,10 +660,10 @@ impl AppService {
     /// Save a manga that couldn't be matched to the pending imports queue.
     pub async fn save_pending_import_for_user(
         &self,
-        user_id: i64,
+        user_id: UserId,
         origin: &str,
         m: &BackupManga,
-        duplicate_of: Option<i64>,
+        duplicate_of: Option<MangaId>,
         similarity: Option<f64>,
     ) -> Result<()> {
         let tracking = m

@@ -6,6 +6,7 @@ use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
 
 use super::AppService;
 use crate::error::{Result, ServiceError};
+use crate::ids::ChapterId;
 
 // ─── Device profiles ─────────────────────────────────────────────────────────
 
@@ -127,7 +128,7 @@ impl AppService {
     /// image optimisation. Returns `(epub_bytes, suggested_filename)`.
     pub async fn export_chapter_epub(
         &self,
-        chapter_id: i64,
+        chapter_id: ChapterId,
         profile: DeviceProfile,
     ) -> Result<(Vec<u8>, String)> {
         let info = self.chapter_cbz_path(chapter_id).await?;
@@ -146,7 +147,7 @@ impl AppService {
     /// Export a downloaded chapter as a Kobo KEPUB file. Returns `(kepub_bytes, filename)`.
     pub async fn export_chapter_kepub(
         &self,
-        chapter_id: i64,
+        chapter_id: ChapterId,
         profile: DeviceProfile,
     ) -> Result<(Vec<u8>, String)> {
         let info = self.chapter_cbz_path(chapter_id).await?;
@@ -167,7 +168,7 @@ impl AppService {
     /// Returns `Err(ServiceError::Internal)` if `kcc-c2e` is not in PATH.
     pub async fn export_chapter_kcc(
         &self,
-        chapter_id: i64,
+        chapter_id: ChapterId,
         opts: KccOptions,
     ) -> Result<(Vec<u8>, String, &'static str)> {
         if which::which("kcc-c2e").is_err() {

@@ -1,10 +1,11 @@
 use super::{get_access_token, get_mapping};
 use crate::error::Result;
+use crate::ids::{MangaId, UserId};
 use crate::service::AppService;
 
 impl AppService {
     /// Sync a single manga's tracking state with all linked external trackers.
-    pub async fn sync_manga_trackers(&self, user_id: i64, manga_id: i64) -> Result<()> {
+    pub async fn sync_manga_trackers(&self, user_id: UserId, manga_id: MangaId) -> Result<()> {
         let local = self.get_manga_tracking(user_id, manga_id).await?;
 
         if !local.tracking_enabled {
@@ -111,7 +112,7 @@ impl AppService {
     }
 
     /// Sync all mapped manga for a user across all linked trackers.
-    pub async fn sync_all_trackers(&self, user_id: i64) -> Result<()> {
+    pub async fn sync_all_trackers(&self, user_id: UserId) -> Result<()> {
         let manga_ids: Vec<i64> = sqlx::query_scalar!(
             "SELECT DISTINCT manga_id FROM tracker_manga_mappings WHERE user_id = ?",
             user_id,
@@ -120,7 +121,7 @@ impl AppService {
         .await?;
 
         for manga_id in manga_ids {
-            if let Err(e) = self.sync_manga_trackers(user_id, manga_id).await {
+            if let Err(e) = self.sync_manga_trackers(user_id, MangaId(manga_id)).await {
                 tracing::warn!("Sync failed for manga {manga_id}: {e}");
             }
         }

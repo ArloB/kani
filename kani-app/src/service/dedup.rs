@@ -1,9 +1,10 @@
 use crate::error::{Result, ServiceError};
+use crate::ids::{MangaId, UserId};
 use sqlx::SqlitePool;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SimilarMangaHit {
-    pub id: i64,
+    pub id: MangaId,
     pub name: String,
     pub source_id: i64,
     pub similarity: f64,
@@ -20,7 +21,7 @@ pub struct DuplicatePair {
 
 #[derive(Debug, serde::Serialize)]
 pub struct MangaSummary {
-    pub id: i64,
+    pub id: MangaId,
     pub name: String,
     pub source_id: i64,
     pub cover_url: Option<String>,
@@ -63,7 +64,7 @@ pub async fn find_similar_manga(
     pool: &SqlitePool,
     title: &str,
     authors: &[String],
-    exclude_manga_id: Option<i64>,
+    exclude_manga_id: Option<MangaId>,
 ) -> Result<Vec<SimilarMangaHit>> {
     let total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM manga WHERE is_orphaned = FALSE")
         .fetch_one(pool)
@@ -78,7 +79,7 @@ pub async fn find_similar_manga(
     let first_word = norm.split_whitespace().next().unwrap_or(&norm).to_string();
 
     struct CandidateRow {
-        id: i64,
+        id: MangaId,
         name: String,
         source_id: i64,
     }
@@ -150,7 +151,7 @@ pub async fn find_similar_manga(
 /// Called after every successful manga insert. Finds similar manga and persists
 /// the pairs to `duplicate_pairs`. Existing rows (including dismissed ones) are
 /// left untouched via `INSERT OR IGNORE`.
-pub async fn record_duplicates_for_manga(pool: &SqlitePool, new_manga_id: i64) -> Result<()> {
+pub async fn record_duplicates_for_manga(pool: &SqlitePool, new_manga_id: MangaId) -> Result<()> {
     struct TitleRow {
         name: String,
     }
@@ -175,7 +176,7 @@ pub async fn record_duplicates_for_manga(pool: &SqlitePool, new_manga_id: i64) -
     let hits = find_similar_manga(pool, &row.name, &authors, Some(new_manga_id)).await?;
 
     for hit in hits {
-        let (a, b) = if new_manga_id < hit.id {
+        let (a, b) = if new_manga_id.0 < hit.id.0 {
             (new_manga_id, hit.id)
         } else {
             (hit.id, new_manga_id)
@@ -200,12 +201,12 @@ pub async fn record_duplicates_for_manga(pool: &SqlitePool, new_manga_id: i64) -
 /// Read persisted (non-dismissed) duplicate pairs from the DB, joining manga details.
 pub async fn list_duplicate_pairs(pool: &SqlitePool) -> Result<Vec<DuplicatePair>> {
     struct PairRow {
-        manga_a_id: i64,
+        manga_a_id: MangaId,
         name_a: String,
         source_id_a: i64,
         cover_url_a: Option<String>,
         local_cover_path_a: Option<String>,
-        manga_b_id: i64,
+        manga_b_id: MangaId,
         name_b: String,
         source_id_b: i64,
         cover_url_b: Option<String>,
@@ -267,10 +268,10 @@ pub async fn list_duplicate_pairs(pool: &SqlitePool) -> Result<Vec<DuplicatePair
 /// the IDs in either order.
 pub async fn dismiss_duplicate_pair(
     pool: &SqlitePool,
-    manga_id_x: i64,
-    manga_id_y: i64,
+    manga_id_x: MangaId,
+    manga_id_y: MangaId,
 ) -> Result<()> {
-    let (a, b) = if manga_id_x < manga_id_y {
+    let (a, b) = if manga_id_x.0 < manga_id_y.0 {
         (manga_id_x, manga_id_y)
     } else {
         (manga_id_y, manga_id_x)
@@ -455,6 +456,45 @@ pub async fn merge_manga(pool: &SqlitePool, keep_id: i64, discard_id: i64) -> Re
 
     tx.commit().await?;
     Ok(())
+}
+
+impl super::AppService {
+    pub async fn list_duplicates(&self) -> Result<Vec<DuplicatePair>> {
+        list_duplicate_pairs(&self.db).await
+    }
+
+    pub async fn merge_duplicate(
+        &self,
+        keep_id: i64,
+        discard_id: i64,
+        user_id: UserId,
+    ) -> Result<()> {
+        merge_manga(&self.db, keep_id, discard_id).await?;
+        self.audit(
+            Some(user_id),
+            "manga.merge_duplicate",
+            None,
+            Some(serde_json::json!({ "keep": keep_id, "discard": discard_id })),
+        )
+        .await;
+        Ok(())
+    }
+
+    pub async fn scan_duplicates(&self, user_id: UserId) -> Result<u32> {
+        let new_pairs = scan_and_persist_duplicates(&self.db).await?;
+        self.audit(
+            Some(user_id),
+            "library.duplicates_scan",
+            None,
+            Some(serde_json::json!({ "new_pairs": new_pairs })),
+        )
+        .await;
+        Ok(new_pairs)
+    }
+
+    pub async fn dismiss_duplicate(&self, a: MangaId, b: MangaId) -> Result<()> {
+        dismiss_duplicate_pair(&self.db, a, b).await
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 //! Server-specific models (database entities and API request/response types).
 
+use kani_app::ids::{ChapterId, MangaId};
 use serde::Deserialize;
 
 fn validate_https_url(value: &str, _: &()) -> garde::Result {
@@ -279,7 +280,7 @@ pub struct ToggleAutoDownloadRequest {
 #[serde(untagged)]
 pub enum ScanMangaRequest {
     /// Scan specific manga by ID.
-    Ids { ids: Vec<i64> },
+    Ids { ids: Vec<MangaId> },
     /// Scan all manga in the library. Send `{ "ids": "all" }`.
     All { ids: ScanAll },
 }
@@ -333,7 +334,7 @@ pub struct SetChapterProgressRequest {
 
 #[derive(serde::Deserialize, Debug)]
 pub struct SetReadStatusRequest {
-    pub chapter_ids: Vec<i64>,
+    pub chapter_ids: Vec<ChapterId>,
     pub is_read: bool,
 }
 

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT pi.id, pi.origin, pi.title, pi.source_hint, pi.source_manga_id,\n                      pi.description, pi.cover_url, pi.authors, pi.tags, pi.status,\n                      pi.tracking, pi.chapter_progress, pi.possible_duplicate_of,\n                      m.name AS possible_duplicate_title,\n                      pi.duplicate_similarity,\n                      strftime('%Y-%m-%dT%H:%M:%SZ', pi.created_at) AS created_at\n               FROM pending_imports pi\n               LEFT JOIN manga m ON m.id = pi.possible_duplicate_of\n               WHERE pi.user_id = ? AND pi.resolved = FALSE\n               ORDER BY pi.created_at DESC",
+  "query": "SELECT pi.id, pi.origin, pi.title, pi.source_hint AS \"source_hint?: crate::ids::SourceId\", pi.source_manga_id,\n                      pi.description, pi.cover_url, pi.authors, pi.tags, pi.status,\n                      pi.tracking, pi.chapter_progress, pi.possible_duplicate_of,\n                      m.name AS possible_duplicate_title,\n                      pi.duplicate_similarity,\n                      strftime('%Y-%m-%dT%H:%M:%SZ', pi.created_at) AS created_at\n               FROM pending_imports pi\n               LEFT JOIN manga m ON m.id = pi.possible_duplicate_of\n               WHERE pi.user_id = ? AND pi.resolved = FALSE\n               ORDER BY pi.created_at DESC",
   "describe": {
     "columns": [
       {
@@ -19,7 +19,7 @@
         "type_info": "Text"
       },
       {
-        "name": "source_hint",
+        "name": "source_hint?: crate::ids::SourceId",
         "ordinal": 3,
         "type_info": "Text"
       },
@@ -106,5 +106,5 @@
       true
     ]
   },
-  "hash": "76941a517c7ee362b3b282307dbf8fb68d964e52b40fac1bfe9d7dc31f1a524a"
+  "hash": "3bbf68f44a94af915776819a31773c28c6a9f85fba690f34d4f120a83ad0036b"
 }

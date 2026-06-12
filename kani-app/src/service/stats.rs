@@ -1,4 +1,5 @@
 use super::*;
+use crate::ids::UserId;
 use crate::models::{DailyActivity, GenreCount, MangaReadCount, PaceEntry, ReadingStats};
 use std::sync::Arc;
 use time::macros::format_description;
@@ -9,10 +10,10 @@ static DATE_FMT: &[time::format_description::FormatItem<'static>] =
 impl AppService {
     pub async fn get_reading_stats(
         &self,
-        user_id: i64,
+        user_id: UserId,
         period_days: i32,
     ) -> Result<Arc<ReadingStats>> {
-        let key = (user_id, period_days);
+        let key = (user_id.0, period_days);
         if let Some(cached) = self.cache.stats.get(&key).await {
             return Ok(cached);
         }
@@ -21,7 +22,11 @@ impl AppService {
         Ok(stats)
     }
 
-    async fn compute_reading_stats(&self, user_id: i64, period_days: i32) -> Result<ReadingStats> {
+    async fn compute_reading_stats(
+        &self,
+        user_id: UserId,
+        period_days: i32,
+    ) -> Result<ReadingStats> {
         // Compute cutoff date in Rust to avoid SQLite string concat in datemod arg
         let cutoff = (time::OffsetDateTime::now_utc() - time::Duration::days(period_days as i64))
             .date()
@@ -161,7 +166,11 @@ impl AppService {
     // ── Reading-pace history (#34) ────────────────────────────────────────────
     /// Returns one row per day: date + pages read that day, for the last `period_days`.
     /// Derived entirely from `user_chapter_tracking` — no new table required.
-    pub async fn get_reading_pace(&self, user_id: i64, period_days: i32) -> Result<Vec<PaceEntry>> {
+    pub async fn get_reading_pace(
+        &self,
+        user_id: UserId,
+        period_days: i32,
+    ) -> Result<Vec<PaceEntry>> {
         let cutoff = (time::OffsetDateTime::now_utc() - time::Duration::days(period_days as i64))
             .date()
             .format(DATE_FMT)

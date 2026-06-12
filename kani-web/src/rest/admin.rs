@@ -58,7 +58,7 @@ async fn server_stop(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    tracing::info!(user_id = user.id, username = %user.username, "Server stop requested");
+    tracing::info!(user_id = user.id.0, username = %user.username, "Server stop requested");
     state.audit(Some(user.id), "server.stop", None, None).await;
     state.shutdown_token.cancel();
     Ok(Json(json!({ "ok": true })))
@@ -69,7 +69,7 @@ async fn server_restart(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     use std::sync::atomic::Ordering;
-    tracing::info!(user_id = user.id, username = %user.username, "Server restart requested");
+    tracing::info!(user_id = user.id.0, username = %user.username, "Server restart requested");
     state
         .audit(Some(user.id), "server.restart", None, None)
         .await;
@@ -122,7 +122,7 @@ async fn admin_create_user(
 async fn admin_update_user(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
-    Path(user_id): Path<i64>,
+    Path(user_id): Path<UserId>,
     Json(body): Json<AdminUpdateUserRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let backend = AuthBackend::new(state.db.clone());
@@ -158,7 +158,7 @@ async fn admin_update_user(
 async fn admin_delete_user(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
-    Path(user_id): Path<i64>,
+    Path(user_id): Path<UserId>,
 ) -> Result<impl IntoResponse, AppError> {
     if user_id == admin.id {
         return Err(AppError::ValidationError(
@@ -194,7 +194,7 @@ async fn admin_delete_user(
 async fn admin_grant_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
-    Path(user_id): Path<i64>,
+    Path(user_id): Path<UserId>,
     Json(body): Json<AdminGrantRoleRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let backend = AuthBackend::new(state.db.clone());
@@ -215,7 +215,7 @@ async fn admin_grant_role(
 async fn admin_revoke_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
-    Path((user_id, role_slug)): Path<(i64, String)>,
+    Path((user_id, role_slug)): Path<(UserId, String)>,
 ) -> Result<impl IntoResponse, AppError> {
     let backend = AuthBackend::new(state.db.clone());
     // Prevent revoking the admin role from the last admin — would lock everyone out.
@@ -242,7 +242,7 @@ async fn admin_revoke_role(
 async fn admin_user_activity(
     AuthGuard(_, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
-    Path(user_id): Path<i64>,
+    Path(user_id): Path<UserId>,
     Query(q): Query<UserActivityQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let limit = q.limit.unwrap_or(50).min(200);
@@ -380,7 +380,7 @@ async fn admin_send_test_email(
 async fn admin_trigger_password_reset_handler(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
-    Path(user_id): Path<i64>,
+    Path(user_id): Path<UserId>,
 ) -> Result<impl IntoResponse, AppError> {
     state
         .admin_trigger_password_reset(user_id, admin.id)

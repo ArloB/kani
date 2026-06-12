@@ -14,6 +14,7 @@ use kani_core::wasm::WasmRuntime;
 use crate::cache::RequestCache;
 use crate::error::{Result, ServiceError};
 use crate::events::{AppEvent, RefreshProgressEvent};
+use crate::ids::MangaId;
 use crate::models::{DownloadRuleRow, Settings};
 use crate::utils::decode_manga_id;
 use kani_shared::types::{
@@ -54,6 +55,7 @@ mod sources;
 mod stats;
 pub mod totp;
 pub mod trackers;
+pub mod traits;
 pub mod webhooks;
 
 #[derive(Clone)]
@@ -71,7 +73,7 @@ pub struct AppService {
     pub shutdown_token: tokio_util::sync::CancellationToken,
     pub tracker_registry: Arc<tokio::sync::RwLock<TrackerRegistry>>,
     /// Manga IDs whose cover download failed and should be retried.
-    pub cover_retry_queue: Arc<tokio::sync::Mutex<HashSet<i64>>>,
+    pub cover_retry_queue: Arc<tokio::sync::Mutex<HashSet<MangaId>>>,
     pub email_service: Arc<tokio::sync::RwLock<Option<email::EmailService>>>,
     /// Optional authenticated-encryption cipher for credential fields.
     /// Present when `KANI_SECRET_KEY` or `KANI_SECRET_KEY_FILE` is set at startup.
@@ -592,7 +594,10 @@ impl AppService {
                     // A manga auto-downloads if manually flagged OR in a nominated category.
                     let effective_auto_download =
                         auto_download || category_manga_ids.contains(&manga_db_id);
-                    match state.scan_for_new_chapters(manga_db_id).await {
+                    match state
+                        .scan_for_new_chapters(crate::ids::MangaId(manga_db_id))
+                        .await
+                    {
                         Ok(new_ids) if !new_ids.is_empty() => {
                             tracing::info!(
                                 "Found {} new chapters for manga {}",
@@ -601,7 +606,14 @@ impl AppService {
                             );
                             if effective_auto_download {
                                 let filtered_ids = state
-                                    .filter_chapters_by_rules(manga_db_id, new_ids.clone())
+                                    .filter_chapters_by_rules(
+                                        crate::ids::MangaId(manga_db_id),
+                                        new_ids
+                                            .iter()
+                                            .copied()
+                                            .map(crate::ids::ChapterId)
+                                            .collect(),
+                                    )
                                     .await;
 
                                 if filtered_ids.is_empty() {
@@ -668,7 +680,7 @@ impl AppService {
 
     /// Schedules a cover download retry for the given manga ID.
     /// Called from library operations when a cover download fails.
-    pub async fn schedule_cover_retry(&self, manga_id: i64) {
+    pub async fn schedule_cover_retry(&self, manga_id: MangaId) {
         self.cover_retry_queue.lock().await.insert(manga_id);
     }
 
@@ -689,7 +701,7 @@ impl AppService {
                     )) => {}
                 }
 
-                let ids: Vec<i64> = state.cover_retry_queue.lock().await.drain().collect();
+                let ids: Vec<MangaId> = state.cover_retry_queue.lock().await.drain().collect();
                 if ids.is_empty() {
                     continue;
                 }
@@ -734,7 +746,7 @@ impl AppService {
     /// Record an auditable event. Non-fatal — a DB failure only produces a warning.
     pub async fn audit(
         &self,
-        user_id: Option<i64>,
+        user_id: Option<crate::ids::UserId>,
         action: &str,
         target: Option<&str>,
         details: Option<serde_json::Value>,

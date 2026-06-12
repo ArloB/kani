@@ -53,25 +53,25 @@ pub fn router() -> Router<AppState> {
 
 async fn get_manga(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    Ok(Json(state.get_manga_by_id(id).await?))
+    Ok(Json(svc.get_manga_by_id(id).await?))
 }
 
 async fn delete_manga(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.delete_manga(id, user.id).await?;
+    svc.delete_manga(id, user.id).await?;
     Ok(Json(json!({})))
 }
 
 async fn upload_manga_cover_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
     let field = multipart
@@ -84,25 +84,25 @@ async fn upload_manga_cover_handler(
     if bytes.len() > MAX_COVER_BYTES {
         return Err(AppError::Other("Cover image exceeds 10 MB limit".into()));
     }
-    state
-        .upload_manga_cover(manga_id, bytes.to_vec(), &content_type, user.id)
+    svc.upload_manga_cover(manga_id, bytes.to_vec(), &content_type, user.id)
         .await?;
     Ok(Json(json!({})))
 }
 
 async fn clear_manga_cover_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.clear_manga_cover_override(manga_id, user.id).await?;
+    svc.clear_manga_cover_override(manga_id, user.id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
+// cross-domain: sign_image_url needs proxy_secret from AppState
 async fn get_local_manga_details(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
     use crate::types::{MangaInfo, MangaStatus};
     let d = state.get_local_manga_details(id).await?;
@@ -172,11 +172,11 @@ async fn get_local_manga_details(
 
 async fn get_local_chapters(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     ValidatedQuery(q): ValidatedQuery<LocalChaptersQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let (chapters, has_next_page, total_pages) = state
+    let (chapters, has_next_page, total_pages) = svc
         .get_local_chapters(
             manga_id,
             q.page,
@@ -197,11 +197,11 @@ async fn get_local_chapters(
 
 async fn get_chapter_ids(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     ValidatedQuery(q): ValidatedQuery<crate::models::ChapterIdsQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let ids = state
+    let ids = svc
         .get_chapter_ids(
             manga_id,
             user.id,
@@ -217,12 +217,12 @@ async fn get_chapter_ids(
 
 async fn download_all(
     AuthGuard(..): AuthGuard<crate::permissions::guards::ChapterDownload>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    let state_clone = state.clone();
+    let svc = svc.clone();
     tokio::spawn(async move {
-        if let Err(e) = state_clone.download_all_chapters(manga_id).await {
+        if let Err(e) = svc.download_all_chapters(manga_id).await {
             tracing::error!(
                 "Failed to queue all downloads for manga {}: {}",
                 manga_id,
@@ -235,119 +235,117 @@ async fn download_all(
 
 async fn cancel_all_downloads(
     AuthGuard(..): AuthGuard<crate::permissions::guards::ChapterDownload>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.cancel_all_downloads(manga_id).await?;
+    svc.cancel_all_downloads(manga_id).await?;
     Ok(Json(json!({})))
 }
 
 async fn refresh_manga(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(id): Path<MangaId>,
     body: Option<Json<crate::models::RefreshMangaRequest>>,
 ) -> Result<impl IntoResponse, AppError> {
     let req = body.map(|Json(b)| b).unwrap_or_default();
     let opts = map_refresh_request(req)?;
-    state.refresh_manga_with_options(id, opts).await?;
+    svc.refresh_manga_with_options(id, opts).await?;
     Ok(Json(json!({})))
 }
 
 async fn scan_manga(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    let new_chapters = state.scan_for_new_chapters(id).await?.len() as i64;
+    let new_chapters = svc.scan_for_new_chapters(id).await?.len() as i64;
     Ok(Json(json!({ "new_chapters": new_chapters })))
 }
 
 async fn toggle_auto_download(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<ToggleAutoDownloadRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.toggle_auto_download(manga_id, body.enabled).await?;
+    svc.toggle_auto_download(manga_id, body.enabled).await?;
     Ok(Json(json!({})))
 }
 
 async fn toggle_auto_scan_manga(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<ToggleAutoDownloadRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.toggle_auto_scan_manga(manga_id, body.enabled).await?;
+    svc.toggle_auto_scan_manga(manga_id, body.enabled).await?;
     Ok(Json(json!({})))
 }
 
 async fn toggle_download_all_preferred(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<ToggleAutoDownloadRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state
-        .toggle_download_all_preferred(manga_id, body.enabled)
+    svc.toggle_download_all_preferred(manga_id, body.enabled)
         .await?;
     Ok(Json(json!({})))
 }
 
 async fn update_manga_notes(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, AppError> {
     let notes = body
         .get("notes")
         .and_then(|v| v.as_str())
         .map(str::to_owned);
-    state.update_manga_notes(manga_id, notes).await?;
+    svc.update_manga_notes(manga_id, notes).await?;
     Ok(Json(json!({})))
 }
 
 async fn update_local_metadata_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<crate::models::UpdateLocalMetadataRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state
-        .update_local_metadata(
-            manga_id,
-            kani_app::models::LocalMetadataUpdate {
-                local_name: body.local_name,
-                local_description: body.local_description,
-                local_status: body.local_status,
-                authors: body.authors,
-                artists: body.artists,
-                tags: body.tags,
-            },
-            user.id,
-        )
-        .await?;
+    svc.update_local_metadata(
+        manga_id,
+        kani_app::models::LocalMetadataUpdate {
+            local_name: body.local_name,
+            local_description: body.local_description,
+            local_status: body.local_status,
+            authors: body.authors,
+            artists: body.artists,
+            tags: body.tags,
+        },
+        user.id,
+    )
+    .await?;
     Ok(Json(json!({})))
 }
 
 async fn mark_manga_seen(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.mark_manga_seen(user.id, manga_id).await?;
+    svc.mark_manga_seen(user.id, manga_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn preview_migration(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<PreviewMigrationRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let preview = state
+    let preview = svc
         .preview_migration(manga_id, body.target_source_id, body.target_source_manga_id)
         .await?;
     Ok(Json(preview))
@@ -355,11 +353,11 @@ async fn preview_migration(
 
 async fn migrate_manga_handler(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<MigrateMangaRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let result = state
+    let result = svc
         .migrate_manga(
             manga_id,
             body.target_source_id,
@@ -372,24 +370,24 @@ async fn migrate_manga_handler(
 
 async fn get_download_rules(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    Ok(Json(state.get_download_rules(manga_id).await?))
+    Ok(Json(svc.get_download_rules(manga_id).await?))
 }
 
 async fn add_download_rule(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<AddDownloadRuleRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let id = state.add_download_rule(manga_id, body.kind.clone()).await?;
+    let id = svc.add_download_rule(manga_id, body.kind.clone()).await?;
     Ok((
         StatusCode::CREATED,
         Json(kani_shared::types::DownloadRule {
             id,
-            manga_id,
+            manga_id: manga_id.0,
             kind: body.kind,
         }),
     ))
@@ -397,41 +395,258 @@ async fn add_download_rule(
 
 async fn delete_download_rule(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn MangaDomain>>,
     Path(rule_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.delete_download_rule(rule_id).await?;
+    svc.delete_download_rule(rule_id).await?;
     Ok(Json(json!({})))
 }
 
 async fn update_download_rule(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn MangaDomain>>,
     Path(rule_id): Path<i64>,
     Json(body): Json<UpdateDownloadRuleRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.update_download_rule(rule_id, body.kind).await?;
+    svc.update_download_rule(rule_id, body.kind).await?;
     Ok(Json(json!({})))
 }
 
 async fn reorder_download_rules(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<ReorderDownloadRulesRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state
-        .reorder_download_rules(manga_id, body.ordered_ids)
+    svc.reorder_download_rules(manga_id, body.ordered_ids)
         .await?;
     Ok(Json(json!({})))
 }
 
 async fn preview_download_rules(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<PreviewDownloadRulesRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let (matching, total) = state.preview_download_rules(manga_id, body.kinds).await?;
+    let (matching, total) = svc.preview_download_rules(manga_id, body.kinds).await?;
     Ok(Json(json!({ "matching": matching, "total": total })))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use axum::extract::{Path, State};
+    use kani_app::ids::{MangaId, UserId};
+    use kani_app::service::traits::MangaDomain;
+    use kani_shared::types::{
+        Chapter, ChapterSortOrder, DownloadRule, DownloadRuleKind, MigrationPreview,
+        MigrationResult,
+    };
+    use std::sync::Arc;
+
+    struct StubManga;
+
+    #[async_trait::async_trait]
+    impl MangaDomain for StubManga {
+        async fn get_download_rules(
+            &self,
+            _manga_id: MangaId,
+        ) -> kani_app::error::Result<Vec<DownloadRule>> {
+            Ok(vec![])
+        }
+        async fn get_manga_by_id(
+            &self,
+            _id: MangaId,
+        ) -> kani_app::error::Result<kani_app::models::Manga> {
+            unimplemented!()
+        }
+        async fn delete_manga(
+            &self,
+            _id: MangaId,
+            _user_id: UserId,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn upload_manga_cover(
+            &self,
+            _manga_id: MangaId,
+            _bytes: Vec<u8>,
+            _content_type: &str,
+            _user_id: UserId,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn clear_manga_cover_override(
+            &self,
+            _manga_id: MangaId,
+            _user_id: UserId,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        #[allow(clippy::too_many_arguments)]
+        async fn get_local_chapters(
+            &self,
+            _manga_id: MangaId,
+            _page: i32,
+            _page_size: i32,
+            _sort_order: ChapterSortOrder,
+            _user_id: UserId,
+            _filter_downloaded: Option<bool>,
+            _filter_unread: Option<bool>,
+            _filter_scanlator: Option<String>,
+        ) -> kani_app::error::Result<(Vec<Chapter>, bool, Option<u32>)> {
+            unimplemented!()
+        }
+        #[allow(clippy::too_many_arguments)]
+        async fn get_chapter_ids(
+            &self,
+            _manga_id: MangaId,
+            _user_id: UserId,
+            _sort_order: ChapterSortOrder,
+            _filter_downloaded: Option<bool>,
+            _filter_unread: Option<bool>,
+            _filter_scanlator: Option<String>,
+            _preferred_only: bool,
+        ) -> kani_app::error::Result<Vec<kani_app::ids::ChapterId>> {
+            unimplemented!()
+        }
+        async fn download_all_chapters(&self, _manga_id: MangaId) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn cancel_all_downloads(&self, _manga_id: MangaId) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn refresh_manga_with_options(
+            &self,
+            _manga_id: MangaId,
+            _opts: kani_app::models::RefreshOptions,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn scan_for_new_chapters(
+            &self,
+            _manga_id: MangaId,
+        ) -> kani_app::error::Result<Vec<i64>> {
+            unimplemented!()
+        }
+        async fn toggle_auto_download(
+            &self,
+            _manga_id: MangaId,
+            _enabled: bool,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn toggle_auto_scan_manga(
+            &self,
+            _manga_id: MangaId,
+            _enabled: bool,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn toggle_download_all_preferred(
+            &self,
+            _manga_id: MangaId,
+            _enabled: bool,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn update_manga_notes(
+            &self,
+            _manga_id: MangaId,
+            _notes: Option<String>,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn update_local_metadata(
+            &self,
+            _manga_id: MangaId,
+            _update: kani_app::models::LocalMetadataUpdate,
+            _user_id: UserId,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn mark_manga_seen(
+            &self,
+            _user_id: UserId,
+            _manga_id: MangaId,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn preview_migration(
+            &self,
+            _manga_id: MangaId,
+            _target_source_id: i64,
+            _target_source_manga_id: String,
+        ) -> kani_app::error::Result<MigrationPreview> {
+            unimplemented!()
+        }
+        async fn migrate_manga(
+            &self,
+            _manga_id: MangaId,
+            _target_source_id: i64,
+            _target_source_manga_id: String,
+            _keep_orphaned_downloads: bool,
+        ) -> kani_app::error::Result<MigrationResult> {
+            unimplemented!()
+        }
+        async fn add_download_rule(
+            &self,
+            _manga_id: MangaId,
+            _kind: DownloadRuleKind,
+        ) -> kani_app::error::Result<i64> {
+            unimplemented!()
+        }
+        async fn delete_download_rule(&self, _rule_id: i64) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn update_download_rule(
+            &self,
+            _rule_id: i64,
+            _kind: DownloadRuleKind,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn reorder_download_rules(
+            &self,
+            _manga_id: MangaId,
+            _ordered_ids: Vec<i64>,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn preview_download_rules(
+            &self,
+            _manga_id: MangaId,
+            _kinds: Vec<DownloadRuleKind>,
+        ) -> kani_app::error::Result<(usize, usize)> {
+            unimplemented!()
+        }
+    }
+
+    fn stub_user() -> crate::auth::User {
+        crate::auth::User {
+            id: UserId(1),
+            username: "test".into(),
+            email: "test@example.com".into(),
+            is_active: true,
+            roles: vec![],
+            password_hash: String::new(),
+            change_id: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn download_rules_returns_empty_without_appservice() {
+        let svc: Arc<dyn MangaDomain> = Arc::new(StubManga);
+        let response = get_download_rules(
+            AuthGuard(stub_user(), PhantomData),
+            State(svc),
+            Path(MangaId(1)),
+        )
+        .await
+        .unwrap();
+        let body = axum::response::IntoResponse::into_response(response);
+        assert_eq!(body.status(), axum::http::StatusCode::OK);
+    }
 }

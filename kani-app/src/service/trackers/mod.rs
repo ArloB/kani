@@ -6,6 +6,7 @@ pub mod sync;
 pub use service::{TrackerMappingItem, TrackerStatusItem};
 
 use crate::error::{Result, ServiceError};
+use crate::ids::{MangaId, UserId};
 use crate::service::encryption::{CredentialCipher, maybe_decrypt, maybe_encrypt};
 use kani_shared::types::MangaTrackingStatus;
 use serde::{Deserialize, Serialize};
@@ -316,7 +317,7 @@ pub async fn consume_pkce_state(db: &SqlitePool, state: &str) -> Result<Option<P
 /// Store OAuth tokens for a user+tracker. Encrypts tokens before storage if a cipher is provided.
 pub async fn store_credentials(
     db: &SqlitePool,
-    user_id: i64,
+    user_id: UserId,
     tracker_id: i64,
     tokens: &TokenResponse,
     cipher: Option<&CredentialCipher>,
@@ -353,7 +354,7 @@ pub async fn store_credentials(
 pub async fn get_access_token(
     db: &SqlitePool,
     tracker_id: i64,
-    user_id: i64,
+    user_id: UserId,
     tracker: &dyn ExternalTracker,
     cipher: Option<&CredentialCipher>,
 ) -> Result<String> {
@@ -399,7 +400,7 @@ pub async fn get_access_token(
         .map_err(|e| ServiceError::Internal(format!("Cannot decrypt access token: {e}")))
 }
 
-pub async fn delete_credentials(db: &SqlitePool, user_id: i64, tracker_id: i64) -> Result<()> {
+pub async fn delete_credentials(db: &SqlitePool, user_id: UserId, tracker_id: i64) -> Result<()> {
     sqlx::query!(
         "DELETE FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?",
         user_id,
@@ -421,9 +422,9 @@ pub async fn delete_credentials(db: &SqlitePool, user_id: i64, tracker_id: i64) 
 
 pub async fn set_mapping(
     db: &SqlitePool,
-    user_id: i64,
+    user_id: UserId,
     tracker_id: i64,
-    manga_id: i64,
+    manga_id: MangaId,
     tracker_manga_id: &str,
 ) -> Result<()> {
     sqlx::query!(
@@ -443,9 +444,9 @@ pub async fn set_mapping(
 
 pub async fn get_mapping(
     db: &SqlitePool,
-    user_id: i64,
+    user_id: UserId,
     tracker_id: i64,
-    manga_id: i64,
+    manga_id: MangaId,
 ) -> Result<Option<String>> {
     let row = sqlx::query_scalar!(
         "SELECT tracker_manga_id FROM tracker_manga_mappings WHERE user_id = ? AND tracker_id = ? AND manga_id = ?",
@@ -460,9 +461,9 @@ pub async fn get_mapping(
 
 pub async fn delete_mapping(
     db: &SqlitePool,
-    user_id: i64,
+    user_id: UserId,
     tracker_id: i64,
-    manga_id: i64,
+    manga_id: MangaId,
 ) -> Result<()> {
     sqlx::query!(
         "DELETE FROM tracker_manga_mappings WHERE user_id = ? AND tracker_id = ? AND manga_id = ?",

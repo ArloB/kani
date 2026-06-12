@@ -5,6 +5,7 @@
 
 mod common;
 use common::{insert_manga, insert_source, test_service};
+use kani_app::ids::MangaId;
 use kani_app::service::dedup::{
     find_similar_manga, normalise_title, record_duplicates_for_manga, scan_and_persist_duplicates,
 };
@@ -59,7 +60,7 @@ async fn find_similar_manga_finds_close_title_match() {
         hits.len() >= 1,
         "at least 'Dragon Ball' should match 'Dragon Ball Z'"
     );
-    let hit_ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
+    let hit_ids: Vec<MangaId> = hits.iter().map(|h| h.id).collect();
     assert!(
         hit_ids.contains(&id1),
         "'Dragon Ball' should be a hit for 'Dragon Ball Z'"
@@ -90,7 +91,7 @@ async fn find_similar_manga_excludes_the_given_id() {
     let hits = find_similar_manga(&svc.db, "Dragon Ball", &[], Some(id1))
         .await
         .unwrap();
-    let hit_ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
+    let hit_ids: Vec<MangaId> = hits.iter().map(|h| h.id).collect();
     assert!(
         !hit_ids.contains(&id1),
         "the excluded manga should not appear in results"

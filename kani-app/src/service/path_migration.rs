@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, ServiceError};
 use crate::events::AppEvent;
+use crate::ids::UserId;
 use crate::service::AppService;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -78,7 +79,7 @@ pub fn spawn_path_migration(
     field: String,
     current: PathBuf,
     new: PathBuf,
-    user_id: i64,
+    user_id: UserId,
 ) {
     tokio::spawn(async move {
         if let Err(e) = run_migration(&service, &field, &current, &new, user_id).await {
@@ -96,7 +97,7 @@ async fn run_migration(
     field: &str,
     current: &Path,
     new: &Path,
-    user_id: i64,
+    user_id: UserId,
 ) -> Result<()> {
     let total_bytes = dir_size(current).await.unwrap_or(0);
     let _ = service.refresh_tx.send(AppEvent::PathMigrationStarted {

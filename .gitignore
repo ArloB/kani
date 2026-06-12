@@ -24,3 +24,5 @@ static/types/
 static/css/main.css
 tools/
 .idea/
+*.key
+.codegraph/

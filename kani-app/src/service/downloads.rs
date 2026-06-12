@@ -1,9 +1,10 @@
 use super::*;
+use crate::ids::{ChapterId, MangaId};
 use futures::stream::{FuturesUnordered, StreamExt};
 use kani_shared::types::DownloadStatus;
 
 impl AppService {
-    pub async fn download_chapter(&self, chapter_id: i64) -> Result<()> {
+    pub async fn download_chapter(&self, chapter_id: ChapterId) -> Result<()> {
         let claimed = sqlx::query!(
             "UPDATE chapters SET download_status = ? \
              WHERE id = ? AND download_status = ?",
@@ -25,7 +26,7 @@ impl AppService {
         self.enqueue_claimed_chapter(chapter_id).await
     }
 
-    pub async fn enqueue_claimed_chapter(&self, chapter_id: i64) -> Result<()> {
+    pub async fn enqueue_claimed_chapter(&self, chapter_id: ChapterId) -> Result<()> {
         let result = async {
             let task = self.build_download_task(chapter_id).await?;
             self.downloader
@@ -49,15 +50,18 @@ impl AppService {
         result
     }
 
-    pub async fn download_all_chapters(&self, manga_id: i64) -> Result<()> {
-        let candidate_ids: Vec<i64> = sqlx::query_scalar!(
+    pub async fn download_all_chapters(&self, manga_id: MangaId) -> Result<()> {
+        let candidate_ids: Vec<ChapterId> = sqlx::query_scalar!(
             "SELECT id FROM chapters \
              WHERE manga_id = ? AND download_status = ? AND is_orphaned = 0",
             manga_id,
             DownloadStatus::Pending,
         )
         .fetch_all(&self.db)
-        .await?;
+        .await?
+        .into_iter()
+        .map(ChapterId)
+        .collect();
 
         if candidate_ids.is_empty() {
             tracing::info!(
@@ -91,9 +95,9 @@ impl AppService {
 
         // Claim only the preferred chapters atomically; skip any that were
         // already grabbed by a concurrent request.
-        let mut claimed_ids = Vec::with_capacity(preferred_ids.len());
+        let mut claimed_ids: Vec<ChapterId> = Vec::with_capacity(preferred_ids.len());
         for id in preferred_ids {
-            let res = sqlx::query_scalar!(
+            let res: Option<i64> = sqlx::query_scalar!(
                 "UPDATE chapters SET download_status = ? \
                  WHERE id = ? AND download_status = ? \
                  RETURNING id",
@@ -104,7 +108,7 @@ impl AppService {
             .fetch_optional(&self.db)
             .await?;
             if let Some(claimed_id) = res {
-                claimed_ids.push(claimed_id);
+                claimed_ids.push(ChapterId(claimed_id));
             }
         }
 
@@ -138,7 +142,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn delete_downloaded(&self, chapter_id: i64) -> Result<()> {
+    pub async fn delete_downloaded(&self, chapter_id: ChapterId) -> Result<()> {
         let info = self.chapter_cbz_path(chapter_id).await?;
 
         if let Err(e) = tokio::fs::remove_file(&info.path).await {
@@ -168,8 +172,8 @@ impl AppService {
     }
 
     /// Cancels an in-progress download and resets the chapter's download_status.
-    pub async fn cancel_download(&self, chapter_id: i64) -> Result<()> {
-        let was_cancelled = self.downloader.cancel_download(chapter_id).await;
+    pub async fn cancel_download(&self, chapter_id: ChapterId) -> Result<()> {
+        let was_cancelled = self.downloader.cancel_download(chapter_id.0).await;
         if was_cancelled {
             sqlx::query!(
                 "UPDATE chapters SET download_status = ? WHERE id = ? AND download_status = ?",
@@ -184,7 +188,7 @@ impl AppService {
     }
 
     /// Cancels all queued or in-progress downloads for a manga.
-    pub async fn cancel_all_downloads(&self, manga_id: i64) -> Result<()> {
+    pub async fn cancel_all_downloads(&self, manga_id: MangaId) -> Result<()> {
         let chapter_ids: Vec<i64> = sqlx::query_scalar!(
             "SELECT id FROM chapters WHERE manga_id = ? AND download_status = ?",
             manga_id,
@@ -234,7 +238,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn build_download_task(&self, chapter_id: i64) -> Result<DownloadTask> {
+    pub async fn build_download_task(&self, chapter_id: ChapterId) -> Result<DownloadTask> {
         let record = sqlx::query!(
             "SELECT
                 c.source_chapter_id, c.name, c.chapter_number, c.volume, c.language,
@@ -294,7 +298,7 @@ impl AppService {
         };
 
         Ok(DownloadTask {
-            chapter_id,
+            chapter_id: chapter_id.0,
             manga_id: record.manga_id,
             manga_title: record.manga_name.clone(),
             source_manager,
@@ -309,7 +313,7 @@ impl AppService {
 
     pub async fn get_download_rules(
         &self,
-        manga_id: i64,
+        manga_id: MangaId,
     ) -> Result<Vec<kani_shared::types::DownloadRule>> {
         let rows = sqlx::query_as::<_, crate::models::DownloadRuleRow>(
             "SELECT id, manga_id, rule_type, value FROM download_rules WHERE manga_id=? ORDER BY priority, id",
@@ -327,7 +331,7 @@ impl AppService {
     /// Inserts a download rule and returns the new row id.
     pub async fn add_download_rule(
         &self,
-        manga_id: i64,
+        manga_id: MangaId,
         kind: kani_shared::types::DownloadRuleKind,
     ) -> Result<i64> {
         use kani_shared::types::DownloadRuleKind::*;
@@ -408,7 +412,11 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn reorder_download_rules(&self, manga_id: i64, ordered_ids: Vec<i64>) -> Result<()> {
+    pub async fn reorder_download_rules(
+        &self,
+        manga_id: MangaId,
+        ordered_ids: Vec<i64>,
+    ) -> Result<()> {
         for (priority, id) in ordered_ids.iter().enumerate() {
             let p = priority as i64;
             sqlx::query("UPDATE download_rules SET priority=? WHERE id=? AND manga_id=?")

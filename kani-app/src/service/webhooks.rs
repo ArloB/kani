@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 use time::format_description::well_known::Rfc3339;
 
 use crate::error::{Result, ServiceError};
+use crate::ids::{ChapterId, MangaId};
 
 fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
@@ -35,24 +36,24 @@ impl WebhookService {
 #[serde(rename_all = "snake_case")]
 pub enum WebhookPayload {
     ChapterNew {
-        manga_id: i64,
+        manga_id: MangaId,
         manga_name: String,
         chapter_count: usize,
         chapter_ids: Vec<i64>,
         chapter_names: Vec<String>,
     },
     MangaAdded {
-        manga_id: i64,
+        manga_id: MangaId,
         manga_name: String,
         source_id: i64,
     },
     MangaDeleted {
-        manga_id: i64,
+        manga_id: MangaId,
         manga_name: String,
     },
     ChapterDownloaded {
-        chapter_id: i64,
-        manga_id: i64,
+        chapter_id: ChapterId,
+        manga_id: MangaId,
         manga_name: String,
         chapter_name: String,
     },
@@ -78,7 +79,7 @@ impl WebhookPayload {
             Self::ChapterNew { manga_id, .. }
             | Self::MangaAdded { manga_id, .. }
             | Self::MangaDeleted { manga_id, .. }
-            | Self::ChapterDownloaded { manga_id, .. } => Some(*manga_id),
+            | Self::ChapterDownloaded { manga_id, .. } => Some(manga_id.0),
             Self::ScanCompleted { .. } => None,
         }
     }
@@ -405,7 +406,7 @@ impl WebhookService {
 
     /// Returns whether webhook notifications are enabled globally for a manga.
     /// True = enabled (no global opt-out row), False = opted out.
-    pub async fn get_manga_notify(&self, manga_id: i64) -> Result<bool> {
+    pub async fn get_manga_notify(&self, manga_id: MangaId) -> Result<bool> {
         // An opt-out row (webhook_id=0, enabled=FALSE) means notifications are disabled.
         let opted_out: i64 = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM webhook_manga_overrides \
@@ -418,7 +419,7 @@ impl WebhookService {
     }
 
     /// Set the global per-manga webhook notify flag.
-    pub async fn set_manga_notify(&self, manga_id: i64, enabled: bool) -> Result<()> {
+    pub async fn set_manga_notify(&self, manga_id: MangaId, enabled: bool) -> Result<()> {
         if enabled {
             // Remove the opt-out row so the default (enabled) applies.
             sqlx::query!(

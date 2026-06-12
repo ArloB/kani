@@ -47,6 +47,7 @@ pub fn router() -> Router<AppState> {
         .route("/global_search", get(global_search_handler))
 }
 
+// cross-domain: sign_image_url requires proxy_secret from AppState
 async fn get_library_filtered(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
@@ -98,9 +99,9 @@ async fn get_library_filtered(
 
 async fn scan_all_library(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let queued = state.scan_all_manga().await?;
+    let queued = svc.scan_all_manga().await?;
     Ok(Json(json!({ "queued": queued })))
 }
 
@@ -111,20 +112,21 @@ async fn scan_all_library(
 /// Body: `{ "ids": "all" }` or `{ "ids": [1, 2, 3] }`
 async fn scan_manga_multiple(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     Json(body): Json<ScanMangaRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     match body {
         ScanMangaRequest::All { .. } => {
-            state.scan_all_manga().await?;
+            svc.scan_all_manga().await?;
         }
         ScanMangaRequest::Ids { ids } => {
-            state.scan_manga_ids(ids).await?;
+            svc.scan_manga_ids(ids).await?;
         }
     }
     Ok(StatusCode::ACCEPTED)
 }
 
+// cross-domain: sign_image_url requires proxy_secret from AppState
 async fn get_continue_reading_shelf(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
@@ -155,19 +157,19 @@ async fn get_continue_reading_shelf(
 
 async fn get_library(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     Path((page, order)): Path<(i32, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
-    Ok(Json(state.get_library(page, order).await?))
+    Ok(Json(svc.get_library(page, order).await?))
 }
 
 async fn library_backup(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     Query(q): Query<LibraryBackupQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let include_progress = q.include_chapter_progress.unwrap_or(false);
-    let bytes = state.export_backup(user.id, include_progress).await?;
+    let bytes = svc.export_backup(user.id, include_progress).await?;
 
     let now = time::OffsetDateTime::now_utc();
     let filename = format!(
@@ -188,17 +190,17 @@ async fn library_backup(
 
 async fn library_backup_preview(
     AuthGuard(_, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
     let bytes = collect_file_field(&mut multipart, MAX_BACKUP_BYTES).await?;
-    let preview = state.preview_backup(&bytes).await?;
+    let preview = svc.preview_backup(&bytes).await?;
     Ok(Json(preview))
 }
 
 async fn library_restore(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
     let mut file_bytes: Option<bytes::Bytes> = None;
@@ -282,31 +284,23 @@ async fn library_restore(
     }
 
     let data = file_bytes.ok_or_else(|| AppError::ValidationError("No file uploaded".into()))?;
-    let result = state.restore_backup(user.id, &data, opts).await?;
-    state
-        .audit(
-            Some(user.id),
-            "backup.restore",
-            None,
-            Some(json!({ "imported_manga": result.imported_manga })),
-        )
-        .await;
+    let result = svc.restore_backup(user.id, &data, opts).await?;
     Ok(Json(result))
 }
 
 async fn library_tachiyomi_preview(
     AuthGuard(_, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
     let bytes = collect_file_field(&mut multipart, MAX_TACHI_BYTES).await?;
-    let preview = state.preview_tachiyomi_backup(&bytes).await?;
+    let preview = svc.preview_tachiyomi_backup(&bytes).await?;
     Ok(Json(preview))
 }
 
 async fn library_import_tachiyomi(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
     let mut file_bytes: Option<bytes::Bytes> = None;
@@ -366,34 +360,34 @@ async fn library_import_tachiyomi(
     }
 
     let data = file_bytes.ok_or_else(|| AppError::ValidationError("No file uploaded".into()))?;
-    let result = state.import_tachiyomi_backup(user.id, &data, opts).await?;
+    let result = svc.import_tachiyomi_backup(user.id, &data, opts).await?;
     Ok(Json(result))
 }
 
 async fn library_pending_imports(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let items = state.list_pending_imports(user.id).await?;
+    let items = svc.list_pending_imports(user.id).await?;
     Ok(Json(items))
 }
 
 async fn library_delete_pending_import(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.delete_pending_import(user.id, id).await?;
+    svc.delete_pending_import(user.id, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn library_resolve_pending_import(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     Path(id): Path<i64>,
     Json(body): Json<ResolvePendingImportBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let manga_id = state
+    let manga_id = svc
         .resolve_pending_import(user.id, id, body.source_id, &body.source_manga_id)
         .await?;
     Ok(Json(json!({ "manga_id": manga_id })))
@@ -401,62 +395,48 @@ async fn library_resolve_pending_import(
 
 async fn library_orphaned(
     AuthGuard(_, _): AuthGuard<crate::permissions::guards::LibraryView>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let items = state.list_orphaned_manga().await?;
+    let items = svc.list_orphaned_manga().await?;
     Ok(Json(items))
 }
 
 async fn library_duplicates(
     AuthGuard(_, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let pairs = kani_app::service::dedup::list_duplicate_pairs(&state.db).await?;
+    let pairs = svc.list_duplicates().await?;
     Ok(Json(pairs))
 }
 
 async fn library_merge_duplicate(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     Json(body): Json<MergeDuplicateBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    kani_app::service::dedup::merge_manga(&state.db, body.keep_id, body.discard_id).await?;
-    state
-        .audit(
-            Some(user.id),
-            "manga.merge_duplicate",
-            None,
-            Some(serde_json::json!({ "keep": body.keep_id, "discard": body.discard_id })),
-        )
-        .await;
+    svc.merge_duplicate(body.keep_id, body.discard_id, user.id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn library_duplicates_scan(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let new_pairs = kani_app::service::dedup::scan_and_persist_duplicates(&state.db).await?;
-    state
-        .audit(
-            Some(user.id),
-            "library.duplicates_scan",
-            None,
-            Some(serde_json::json!({ "new_pairs": new_pairs })),
-        )
-        .await;
+    let new_pairs = svc.scan_duplicates(user.id).await?;
     Ok(Json(serde_json::json!({ "new_pairs": new_pairs })))
 }
 
 async fn library_dismiss_duplicate(
     AuthGuard(_, _): AuthGuard<crate::permissions::guards::LibraryManage>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn LibraryDomain>>,
     axum::extract::Path(path): axum::extract::Path<DismissDuplicatePath>,
 ) -> Result<impl IntoResponse, AppError> {
-    kani_app::service::dedup::dismiss_duplicate_pair(&state.db, path.a, path.b).await?;
+    svc.dismiss_duplicate(path.a, path.b).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
+// cross-domain: sign_image_url requires proxy_secret from AppState
 async fn get_recent_updates(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
@@ -479,6 +459,7 @@ async fn get_recent_updates(
     }))
 }
 
+// cross-domain: sign_image_url requires proxy_secret from AppState; direct state.db SQL query
 async fn global_search_handler(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
@@ -517,4 +498,125 @@ async fn global_search_handler(
         }
     }
     Ok(Json(list))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use axum::extract::State;
+    use kani_app::ids::{MangaId, UserId};
+    use kani_app::models::Manga;
+    use kani_app::service::dedup::DuplicatePair;
+    use kani_app::service::traits::LibraryDomain;
+    use kani_app::{
+        BackupPreview, RestoreOptions, RestoreResult, TachiyomiImportOptions,
+        TachiyomiImportResult, TachiyomiPreview,
+    };
+    use kani_app::{OrphanedManga, models::PendingImportRow};
+    use std::sync::Arc;
+
+    struct StubLibrary;
+
+    #[async_trait::async_trait]
+    impl LibraryDomain for StubLibrary {
+        async fn list_orphaned_manga(&self) -> kani_app::error::Result<Vec<OrphanedManga>> {
+            Ok(vec![OrphanedManga {
+                id: 7,
+                name: "Gone Source Manga".into(),
+                cover_url: None,
+                local_cover_path: None,
+                source_name: "removed-ext".into(),
+            }])
+        }
+        async fn scan_all_manga(&self) -> kani_app::error::Result<usize> {
+            unimplemented!()
+        }
+        async fn scan_manga_ids(&self, _: Vec<MangaId>) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn get_library(&self, _: i32, _: i32) -> kani_app::error::Result<Vec<Manga>> {
+            unimplemented!()
+        }
+        async fn export_backup(&self, _: UserId, _: bool) -> kani_app::error::Result<Vec<u8>> {
+            unimplemented!()
+        }
+        async fn preview_backup(&self, _: &[u8]) -> kani_app::error::Result<BackupPreview> {
+            unimplemented!()
+        }
+        async fn restore_backup(
+            &self,
+            _: UserId,
+            _: &[u8],
+            _: RestoreOptions,
+        ) -> kani_app::error::Result<RestoreResult> {
+            unimplemented!()
+        }
+        async fn preview_tachiyomi_backup(
+            &self,
+            _: &[u8],
+        ) -> kani_app::error::Result<TachiyomiPreview> {
+            unimplemented!()
+        }
+        async fn import_tachiyomi_backup(
+            &self,
+            _: UserId,
+            _: &[u8],
+            _: TachiyomiImportOptions,
+        ) -> kani_app::error::Result<TachiyomiImportResult> {
+            unimplemented!()
+        }
+        async fn list_pending_imports(
+            &self,
+            _: UserId,
+        ) -> kani_app::error::Result<Vec<PendingImportRow>> {
+            unimplemented!()
+        }
+        async fn delete_pending_import(&self, _: UserId, _: i64) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn resolve_pending_import(
+            &self,
+            _: UserId,
+            _: i64,
+            _: i64,
+            _: &str,
+        ) -> kani_app::error::Result<MangaId> {
+            unimplemented!()
+        }
+        async fn list_duplicates(&self) -> kani_app::error::Result<Vec<DuplicatePair>> {
+            unimplemented!()
+        }
+        async fn merge_duplicate(&self, _: i64, _: i64, _: UserId) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn scan_duplicates(&self, _: UserId) -> kani_app::error::Result<u32> {
+            unimplemented!()
+        }
+        async fn dismiss_duplicate(&self, _: MangaId, _: MangaId) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+    }
+
+    fn stub_user() -> crate::auth::User {
+        crate::auth::User {
+            id: UserId(1),
+            username: "test".into(),
+            email: "test@example.com".into(),
+            is_active: true,
+            roles: vec![],
+            password_hash: String::new(),
+            change_id: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn library_orphaned_returns_items_without_appservice() {
+        let svc: Arc<dyn LibraryDomain> = Arc::new(StubLibrary);
+        let response = library_orphaned(AuthGuard(stub_user(), PhantomData), State(svc))
+            .await
+            .unwrap();
+        let body = axum::response::IntoResponse::into_response(response);
+        assert_eq!(body.status(), axum::http::StatusCode::OK);
+    }
 }

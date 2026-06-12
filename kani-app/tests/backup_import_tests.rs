@@ -6,6 +6,7 @@
 mod common;
 use common::{insert_manga, insert_source, insert_user, test_service};
 use kani_app::RestoreOptions;
+use kani_app::ids::{MangaId, UserId};
 
 #[tokio::test]
 async fn preview_backup_shows_correct_manga_count() {
@@ -14,7 +15,7 @@ async fn preview_backup_shows_correct_manga_count() {
     insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
     insert_manga(&svc.db, src, "m2", "Naruto").await;
 
-    let zip = svc.export_backup(1, false).await.unwrap();
+    let zip = svc.export_backup(UserId(1), false).await.unwrap();
     let preview = svc.preview_backup(&zip).await.unwrap();
 
     assert_eq!(preview.manga_count, 2);
@@ -30,11 +31,11 @@ async fn restore_backup_reimports_manga_after_wipe() {
     let src = insert_source(&svc.db, "src").await;
     insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
 
-    let zip = svc.export_backup(1, false).await.unwrap();
+    let zip = svc.export_backup(UserId(1), false).await.unwrap();
 
     // merge=false → deletes all manga then re-imports from the ZIP.
     let result = svc
-        .restore_backup(1, &zip, RestoreOptions::default())
+        .restore_backup(UserId(1), &zip, RestoreOptions::default())
         .await
         .unwrap();
 
@@ -55,7 +56,7 @@ async fn restore_backup_unknown_source_adds_pending_import() {
     let svc1 = test_service().await;
     let src = insert_source(&svc1.db, "src").await;
     insert_manga(&svc1.db, src, "m1", "Dragon Ball").await;
-    let zip = svc1.export_backup(1, false).await.unwrap();
+    let zip = svc1.export_backup(UserId(1), false).await.unwrap();
 
     let svc2 = test_service().await;
     let user2 = insert_user(&svc2.db, "user").await;
@@ -96,10 +97,10 @@ async fn restore_backup_preserves_category_assignment() {
         .await
         .unwrap();
 
-    let zip = svc.export_backup(1, false).await.unwrap();
+    let zip = svc.export_backup(UserId(1), false).await.unwrap();
 
     let result = svc
-        .restore_backup(1, &zip, RestoreOptions::default())
+        .restore_backup(UserId(1), &zip, RestoreOptions::default())
         .await
         .unwrap();
     assert_eq!(result.imported_manga, 1);
@@ -112,7 +113,10 @@ async fn restore_backup_preserves_category_assignment() {
             .await
             .unwrap();
 
-    let cats = svc.get_manga_categories(restored_manga_id).await.unwrap();
+    let cats = svc
+        .get_manga_categories(MangaId(restored_manga_id))
+        .await
+        .unwrap();
     assert_eq!(
         cats.len(),
         1,
@@ -126,7 +130,7 @@ async fn restore_backup_merge_mode_keeps_existing_manga() {
     let src = insert_source(&svc.db, "src").await;
     insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
 
-    let zip = svc.export_backup(1, false).await.unwrap();
+    let zip = svc.export_backup(UserId(1), false).await.unwrap();
 
     // Add a second manga AFTER export (not in the ZIP).
     insert_manga(&svc.db, src, "m2", "Naruto").await;
@@ -141,7 +145,7 @@ async fn restore_backup_merge_mode_keeps_existing_manga() {
         import_chapter_progress: false,
         import_settings: false,
     };
-    svc.restore_backup(1, &zip, opts).await.unwrap();
+    svc.restore_backup(UserId(1), &zip, opts).await.unwrap();
 
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM manga")
         .fetch_one(&svc.db)

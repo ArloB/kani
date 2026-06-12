@@ -1,10 +1,11 @@
+use crate::ids::MangaId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AppEvent {
     NewChapters {
-        manga_id: i64,
+        manga_id: MangaId,
         manga_name: String,
         count: usize,
         chapter_ids: Vec<i64>,
@@ -52,10 +53,10 @@ pub enum AppEvent {
 pub enum RefreshProgressEvent {
     Started {
         total: usize,
-        manga_ids: Vec<i64>,
+        manga_ids: Vec<MangaId>,
     },
     MangaRefreshed {
-        manga_id: i64,
+        manga_id: MangaId,
         manga_name: String,
         completed: usize,
         total: usize,

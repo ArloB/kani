@@ -3056,6 +3056,7 @@ version = "0.1.0"
 dependencies = [
  "ammonia",
  "argon2",
+ "async-trait",
  "axum",
  "axum-login",
  "base64",

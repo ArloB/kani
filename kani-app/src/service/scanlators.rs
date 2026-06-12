@@ -1,9 +1,10 @@
 use super::*;
+use crate::ids::MangaId;
 
 impl AppService {
     pub async fn get_scanlator_prefs(
         &self,
-        manga_id: i64,
+        manga_id: MangaId,
     ) -> Result<Vec<kani_shared::types::ScanlatorPreference>> {
         // SQLite stores bool as INTEGER; we map manually to avoid trait bound issues.
         let rows = sqlx::query!(
@@ -29,7 +30,7 @@ impl AppService {
 
     pub async fn set_scanlator_pref(
         &self,
-        manga_id: i64,
+        manga_id: MangaId,
         scanlator: &str,
         priority: i64,
         blocked: bool,
@@ -56,7 +57,7 @@ impl AppService {
     }
 
     /// Returns the distinct scanlator names for chapters of a manga.
-    pub async fn get_chapter_scanlators(&self, manga_id: i64) -> Result<Vec<String>> {
+    pub async fn get_chapter_scanlators(&self, manga_id: MangaId) -> Result<Vec<String>> {
         let rows = sqlx::query_scalar!(
             "SELECT DISTINCT scanlator FROM chapters WHERE manga_id = ? AND scanlator IS NOT NULL ORDER BY scanlator",
             manga_id
@@ -67,7 +68,7 @@ impl AppService {
     }
 
     /// Returns the distinct language codes for chapters of a manga.
-    pub async fn get_chapter_languages(&self, manga_id: i64) -> Result<Vec<String>> {
+    pub async fn get_chapter_languages(&self, manga_id: MangaId) -> Result<Vec<String>> {
         let rows = sqlx::query_scalar!(
             "SELECT DISTINCT language FROM chapters WHERE manga_id = ? ORDER BY language",
             manga_id
@@ -78,7 +79,7 @@ impl AppService {
     }
 
     /// Returns the scanlator mode for a manga, defaulting to `'priority'`.
-    pub async fn get_scanlator_mode(&self, manga_id: i64) -> Result<String> {
+    pub async fn get_scanlator_mode(&self, manga_id: MangaId) -> Result<String> {
         let mode = sqlx::query_scalar!(
             "SELECT COALESCE(scanlator_mode, 'priority') FROM manga WHERE id = ?",
             manga_id
@@ -90,7 +91,7 @@ impl AppService {
     }
 
     /// Sets the scanlator mode for a manga ('priority' or 'whitelist').
-    pub async fn set_scanlator_mode(&self, manga_id: i64, mode: &str) -> Result<()> {
+    pub async fn set_scanlator_mode(&self, manga_id: MangaId, mode: &str) -> Result<()> {
         if mode != "priority" && mode != "whitelist" {
             return Err(ServiceError::Validation(
                 "scanlator_mode must be 'priority' or 'whitelist'".into(),

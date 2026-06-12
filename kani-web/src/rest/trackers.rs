@@ -33,42 +33,40 @@ pub fn router() -> Router<AppState> {
 
 async fn get_manga_tracking_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
+    Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    let tracking = state.get_manga_tracking(user.id, manga_id).await?;
+    let tracking = svc.get_manga_tracking(user.id, manga_id).await?;
     Ok(Json(tracking))
 }
 
 async fn set_manga_tracking_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<SetMangaTrackingRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     if let Some(status) = body.status {
-        state.set_manga_status(user.id, manga_id, status).await?;
+        svc.set_manga_status(user.id, manga_id, status).await?;
     }
     if let Some(score) = body.score {
-        state.set_manga_score(user.id, manga_id, score).await?;
+        svc.set_manga_score(user.id, manga_id, score).await?;
     }
     if let Some(enabled) = body.tracking_enabled {
-        state
-            .set_manga_tracking_enabled(user.id, manga_id, enabled)
+        svc.set_manga_tracking_enabled(user.id, manga_id, enabled)
             .await?;
     }
     if let Some(notify) = body.notify_new_chapters {
-        state.set_manga_notify(user.id, manga_id, notify).await?;
+        svc.set_manga_notify(user.id, manga_id, notify).await?;
     }
     if let Some(dir) = body.reading_direction {
         let dir = dir.to_lowercase();
         if dir == "rtl" || dir == "ltr" {
-            state.set_reading_direction(user.id, manga_id, &dir).await?;
+            svc.set_reading_direction(user.id, manga_id, &dir).await?;
         }
     }
     if let Some(prefs) = body.reader_prefs {
-        state
-            .set_reader_prefs(user.id, manga_id, &prefs)
+        svc.set_reader_prefs(user.id, manga_id, &prefs)
             .await
             .map_err(|_| AppError::ValidationError("reader_prefs must be a JSON object".into()))?;
     }
@@ -77,9 +75,9 @@ async fn set_manga_tracking_handler(
 
 async fn list_trackers(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let items = state.list_trackers_status(user.id).await?;
+    let items = svc.list_trackers_status(user.id).await?;
     let trackers: Vec<_> = items
         .into_iter()
         .map(|t| {
@@ -96,11 +94,11 @@ async fn list_trackers(
 
 async fn get_tracker_auth_url(
     AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
     Query(q): Query<TrackerAuthUrlQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let url = state
+    let url = svc
         .get_tracker_auth_url(tracker_id, &q.redirect_uri)
         .await?;
     Ok(Json(json!({ "url": url })))
@@ -108,12 +106,11 @@ async fn get_tracker_auth_url(
 
 async fn tracker_oauth_callback(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
     Query(q): Query<TrackerCallbackQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    state
-        .complete_tracker_oauth(user.id, tracker_id, &q.code, &q.state)
+    svc.complete_tracker_oauth(user.id, tracker_id, &q.code, &q.state)
         .await?;
     Ok((
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
@@ -123,20 +120,20 @@ async fn tracker_oauth_callback(
 
 async fn unlink_tracker(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.unlink_tracker(user.id, tracker_id).await?;
+    svc.unlink_tracker(user.id, tracker_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn search_tracker_manga(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
     Query(q): Query<TrackerSearchQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let results = state
+    let results = svc
         .search_tracker_manga(user.id, tracker_id, &q.query)
         .await?;
     Ok(Json(results))
@@ -144,10 +141,10 @@ async fn search_tracker_manga(
 
 async fn get_tracker_config(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let config = state.get_tracker_config(tracker_id).await?;
+    let config = svc.get_tracker_config(tracker_id).await?;
     match config {
         Some((client_id, secret_configured)) => Ok(Json(json!({
             "client_id": client_id,
@@ -162,32 +159,31 @@ async fn get_tracker_config(
 
 async fn set_tracker_config(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
     Json(body): Json<SetTrackerConfigRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let secret = body.client_secret.as_deref().filter(|s| !s.is_empty());
-    state
-        .set_tracker_config(tracker_id, &body.client_id, secret)
+    svc.set_tracker_config(tracker_id, &body.client_id, secret)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn delete_tracker_config(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.delete_tracker_config(tracker_id).await?;
+    svc.delete_tracker_config(tracker_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn get_tracker_mappings(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
+    Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mappings = state.get_tracker_mappings(user.id, manga_id).await?;
+    let mappings = svc.get_tracker_mappings(user.id, manga_id).await?;
     let response: Vec<_> = mappings
         .into_iter()
         .map(|m| {
@@ -203,43 +199,222 @@ async fn get_tracker_mappings(
 
 async fn set_tracker_mapping(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
+    Path(manga_id): Path<MangaId>,
     Json(body): Json<SetTrackerMappingRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    kani_app::service::trackers::set_mapping(
-        &state.db,
-        user.id,
-        body.tracker_id,
-        manga_id,
-        &body.tracker_manga_id,
-    )
-    .await?;
+    svc.set_tracker_mapping(user.id, body.tracker_id, manga_id, &body.tracker_manga_id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn delete_tracker_mapping(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
-    Path((manga_id, tracker_id)): Path<(i64, i64)>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
+    Path((manga_id, tracker_id)): Path<(MangaId, i64)>,
 ) -> Result<impl IntoResponse, AppError> {
-    kani_app::service::trackers::delete_mapping(&state.db, user.id, tracker_id, manga_id).await?;
+    svc.delete_tracker_mapping(user.id, tracker_id, manga_id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn sync_all_trackers(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.sync_all_trackers(user.id).await?;
+    svc.sync_all_trackers(user.id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn sync_manga_trackers(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<i64>,
+    State(svc): State<Arc<dyn TrackerDomain>>,
+    Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.sync_manga_trackers(user.id, manga_id).await?;
+    svc.sync_manga_trackers(user.id, manga_id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use kani_app::service::trackers::TrackerStatusItem;
+    use kani_shared::types::{MangaTracking, MangaTrackingStatus};
+
+    fn stub_user() -> crate::auth::User {
+        crate::auth::User {
+            id: UserId(1),
+            username: "stub".into(),
+            email: "stub@test.com".into(),
+            is_active: true,
+            roles: vec![],
+            password_hash: String::new(),
+            change_id: vec![],
+        }
+    }
+
+    struct StubTrackers;
+
+    #[async_trait::async_trait]
+    impl TrackerDomain for StubTrackers {
+        async fn list_trackers_status(
+            &self,
+            _user_id: UserId,
+        ) -> kani_app::error::Result<Vec<TrackerStatusItem>> {
+            Ok(vec![TrackerStatusItem {
+                id: 42,
+                name: "AniList".into(),
+                configured: false,
+                linked: false,
+            }])
+        }
+        async fn get_tracker_auth_url(
+            &self,
+            _tracker_id: i64,
+            _redirect_uri: &str,
+        ) -> kani_app::error::Result<String> {
+            unimplemented!()
+        }
+        async fn complete_tracker_oauth(
+            &self,
+            _user_id: UserId,
+            _tracker_id: i64,
+            _code: &str,
+            _state: &str,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn unlink_tracker(
+            &self,
+            _user_id: UserId,
+            _tracker_id: i64,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn search_tracker_manga(
+            &self,
+            _user_id: UserId,
+            _tracker_id: i64,
+            _query: &str,
+        ) -> kani_app::error::Result<Vec<kani_app::service::trackers::TrackerMangaResult>> {
+            unimplemented!()
+        }
+        async fn get_tracker_mappings(
+            &self,
+            _user_id: UserId,
+            _manga_id: MangaId,
+        ) -> kani_app::error::Result<Vec<kani_app::service::trackers::TrackerMappingItem>> {
+            unimplemented!()
+        }
+        async fn get_tracker_config(
+            &self,
+            _tracker_id: i64,
+        ) -> kani_app::error::Result<Option<(String, bool)>> {
+            unimplemented!()
+        }
+        async fn set_tracker_config(
+            &self,
+            _tracker_id: i64,
+            _client_id: &str,
+            _client_secret: Option<&str>,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn delete_tracker_config(&self, _tracker_id: i64) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn set_tracker_mapping(
+            &self,
+            _user_id: UserId,
+            _tracker_id: i64,
+            _manga_id: MangaId,
+            _tracker_manga_id: &str,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn delete_tracker_mapping(
+            &self,
+            _user_id: UserId,
+            _tracker_id: i64,
+            _manga_id: MangaId,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn sync_all_trackers(&self, _user_id: UserId) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn sync_manga_trackers(
+            &self,
+            _user_id: UserId,
+            _manga_id: MangaId,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn get_manga_tracking(
+            &self,
+            _user_id: UserId,
+            _manga_id: MangaId,
+        ) -> kani_app::error::Result<MangaTracking> {
+            unimplemented!()
+        }
+        async fn set_manga_status(
+            &self,
+            _user_id: UserId,
+            _manga_id: MangaId,
+            _status: MangaTrackingStatus,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn set_manga_score(
+            &self,
+            _user_id: UserId,
+            _manga_id: MangaId,
+            _score: f64,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn set_manga_tracking_enabled(
+            &self,
+            _user_id: UserId,
+            _manga_id: MangaId,
+            _enabled: bool,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn set_manga_notify(
+            &self,
+            _user_id: UserId,
+            _manga_id: MangaId,
+            _notify: bool,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn set_reading_direction(
+            &self,
+            _user_id: UserId,
+            _manga_id: MangaId,
+            _direction: &str,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn set_reader_prefs(
+            &self,
+            _user_id: UserId,
+            _manga_id: MangaId,
+            _prefs: &str,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn list_trackers_returns_ok_without_appservice() {
+        let svc: Arc<dyn TrackerDomain> = Arc::new(StubTrackers);
+        let response = list_trackers(AuthGuard(stub_user(), PhantomData), State(svc))
+            .await
+            .unwrap();
+        let resp = axum::response::IntoResponse::into_response(response);
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+    }
 }

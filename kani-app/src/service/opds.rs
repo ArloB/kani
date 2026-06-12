@@ -7,6 +7,7 @@ use time::OffsetDateTime;
 
 use super::AppService;
 use crate::error::Result;
+use crate::ids::MangaId;
 use kani_shared::types::{ChapterSortOrder, MangaSortOrder};
 
 impl AppService {
@@ -71,7 +72,7 @@ impl AppService {
     ) -> Result<String> {
         let (manga_list, has_next, _) = self
             .get_library_filtered(
-                0,
+                crate::ids::UserId(0),
                 page,
                 page_size,
                 search.clone(),
@@ -176,7 +177,7 @@ impl AppService {
     }
 
     /// Acquisition feed of downloaded chapters for one manga.
-    pub async fn opds_manga_feed(&self, manga_id: i64, base_url: &str) -> Result<String> {
+    pub async fn opds_manga_feed(&self, manga_id: MangaId, base_url: &str) -> Result<String> {
         let manga = self.get_manga_by_id(manga_id).await?;
 
         let (chapters, _, _) = self
@@ -185,7 +186,7 @@ impl AppService {
                 1,
                 500,
                 ChapterSortOrder::default(),
-                0,
+                crate::ids::UserId(0),
                 Some(true),
                 None,
                 None,

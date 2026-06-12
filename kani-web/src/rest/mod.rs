@@ -36,6 +36,11 @@ use axum::{
 use axum_login::AuthnBackend;
 use axum_login::AuthzBackend;
 use futures::TryStreamExt;
+pub use kani_app::ids::{ChapterId, MangaId, UserId};
+pub use kani_app::service::traits::{
+    CategoryDomain, ChapterDomain, DownloadDomain, LibraryDomain, MangaDomain, ScanlatorDomain,
+    SettingsDomain, SourceDomain, TrackerDomain,
+};
 use kani_core::source_manager::SourceManager;
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -141,7 +146,7 @@ where
                 .unwrap_or(false)
         {
             tracing::warn!(
-                user_id = user.id,
+                user_id = user.id.0,
                 username = %user.username,
                 permission = %perm,
                 "Permission denied"
@@ -748,7 +753,7 @@ struct SaveToLibraryQuery {
 async fn serve_manga_cover(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path(id): Path<MangaId>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
     let full_path = state.get_manga_cover_path(id).await?;
@@ -905,7 +910,7 @@ fn map_refresh_request(
 async fn serve_chapter_page(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
-    Path((id, page_num)): Path<(i64, usize)>,
+    Path((id, page_num)): Path<(ChapterId, usize)>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
     // Resolve the path first so we can derive an ETag from the CBZ mtime.
@@ -1372,8 +1377,8 @@ struct ResolvePendingImportBody {
 
 #[derive(serde::Deserialize)]
 struct DismissDuplicatePath {
-    a: i64,
-    b: i64,
+    a: MangaId,
+    b: MangaId,
 }
 
 #[derive(serde::Deserialize)]

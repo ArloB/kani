@@ -64,85 +64,76 @@ pub fn router() -> Router<AppState> {
 
 async fn list_sources(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    Ok(Json(state.list_sources().await?))
+    Ok(Json(svc.list_sources().await?))
 }
 
 async fn add_source(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SourceInstall>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     ValidatedJson(payload): ValidatedJson<CreateSource>,
 ) -> Result<impl IntoResponse, AppError> {
-    let id = state.add_source(&payload.name, user.id).await?;
+    let id = svc.add_source(&payload.name, user.id).await?;
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
 
 async fn get_sources_health(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    Ok(Json(state.get_source_health().await?))
+    Ok(Json(svc.get_source_health().await?))
 }
 
 async fn get_active_source_ids(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let ids: Vec<i64> = state.sources.read().await.keys().copied().collect();
+    let ids = svc.list_active_source_ids().await?;
     Ok(Json(ids))
 }
 
 async fn get_source(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let source = state.get_source(id).await?;
+    let source = svc.get_source(id).await?;
     Ok(Json(source))
 }
 
 async fn update_source(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
     ValidatedJson(payload): ValidatedJson<UpdateSource>,
 ) -> Result<impl IntoResponse, AppError> {
     if payload.name.is_none() && payload.version.is_none() {
         return Ok(Json(json!({})));
     }
-    state
-        .update_source(id, payload.name, payload.version)
-        .await?;
+    svc.update_source(id, payload.name, payload.version).await?;
     Ok(Json(json!({})))
 }
 
 async fn delete_source(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SourceDelete>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.delete_source(id, user.id).await?;
-    state
-        .audit(
-            Some(user.id),
-            "source.uninstall",
-            None,
-            Some(json!({ "source_id": id })),
-        )
-        .await;
+    svc.delete_source(id, user.id).await?;
     Ok(Json(json!({})))
 }
 
 async fn get_metadata(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let result = state.get_metadata(id).await?;
+    let result = svc.get_metadata(id).await?;
     Ok(result)
 }
 
+// cross-domain: needs proxy_client + install_source
 async fn upload_wasm(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
@@ -174,6 +165,7 @@ async fn upload_wasm(
     Ok(StatusCode::OK)
 }
 
+// cross-domain: needs proxy_client
 async fn fetch_wasm(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
@@ -191,6 +183,7 @@ async fn fetch_wasm(
     Ok(StatusCode::OK)
 }
 
+// cross-domain: needs wasm_runtime + sources field
 async fn reload_source_handler(
     AuthGuard(_, _): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
@@ -200,6 +193,7 @@ async fn reload_source_handler(
     Ok(StatusCode::OK)
 }
 
+// cross-domain: needs proxy_secret for sign_image_url
 async fn get_popular_manga(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
@@ -219,6 +213,7 @@ async fn get_popular_manga(
     Ok(Json(list))
 }
 
+// cross-domain: needs proxy_secret for sign_image_url
 async fn search_manga(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
@@ -244,6 +239,7 @@ async fn search_manga(
     Ok(Json(list))
 }
 
+// cross-domain: needs proxy_secret for sign_image_url
 async fn get_manga_details(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
@@ -264,13 +260,14 @@ async fn get_manga_details(
 
 async fn get_source_manga_url(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path((id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let url = state.get_source_url(id, &manga_id).await?;
+    let url = svc.get_source_url(id, &manga_id).await?;
     Ok(Json(serde_json::json!({ "url": url })))
 }
 
+// cross-domain: library domain
 async fn save_to_library(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryAdd>,
     State(state): State<AppState>,
@@ -285,11 +282,11 @@ async fn save_to_library(
 
 async fn get_chapter_list(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path((id, manga_id, page, page_size)): Path<(i64, String, i32, i32)>,
     Query(q): Query<ChapterListQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let json_str = state
+    let json_str = svc
         .get_chapter_list_paged(id, &manga_id, page, page_size, q.sort)
         .await?;
     let list: crate::types::ChapterList = serde_json::from_str(&json_str)?;
@@ -298,13 +295,14 @@ async fn get_chapter_list(
 
 async fn get_chapter_sort_list(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path((id, _manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let opts = state.get_chapter_sort_list(id).await?;
+    let opts = svc.get_chapter_sort_list(id).await?;
     Ok(Json(opts))
 }
 
+// cross-domain: needs proxy_secret for sign_image_url
 async fn get_pages(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
@@ -319,6 +317,7 @@ async fn get_pages(
     Ok(Json(contents))
 }
 
+// cross-domain: library domain
 async fn check_in_library(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
@@ -331,84 +330,49 @@ async fn check_in_library(
 
 async fn toggle_source_enabled(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceToggleEnabled>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
     Json(body): Json<ToggleEnabledRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.toggle_source_enabled(source_id, body.enabled).await?;
+    svc.toggle_source_enabled(source_id, body.enabled).await?;
     Ok(Json(json!({})))
 }
 
 async fn toggle_source_favourite(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
     Json(body): Json<ToggleFavouritedRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state
-        .toggle_source_favourite(source_id, body.favourited)
+    svc.toggle_source_favourite(source_id, body.favourited)
         .await?;
     Ok(Json(json!({})))
 }
 
 async fn get_source_filters(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let filter_list = state.get_filter_list(id).await?;
+    let filter_list = svc.get_filter_list(id).await?;
     Ok(Json(filter_list))
 }
 
 async fn get_pref_schema(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    if let Some(cached) = state.cache.get_preference_schema(source_id) {
-        return Ok(Json(cached));
-    }
-    let mgr = { state.sources.read().await.get(&source_id).cloned() };
-    let raw = if let Some(mgr) = mgr {
-        let mut inst = mgr.lease_instance().await.map_err(AppError::CoreError)?;
-        inst.get_preferences().await.map_err(AppError::CoreError)?
-    } else {
-        let name = sqlx::query_scalar!("SELECT name FROM sources WHERE id=?", source_id)
-            .fetch_optional(&state.db)
-            .await?
-            .ok_or_else(|| AppError::NotFound("Source not found".into()))?;
-        let wasm_path = state
-            .settings
-            .read()
-            .await
-            .wasm_storage_path
-            .join(format!("{}.wasm", name));
-        let bytes = tokio::fs::read(&wasm_path).await?;
-        let component = state
-            .wasm_runtime
-            .compile_component(&bytes)
-            .map_err(AppError::CoreError)?;
-        let mut inst =
-            kani_core::sources::SourceInstance::new(state.smart_client.clone(), None, false);
-        inst.load(
-            state.wasm_runtime.engine(),
-            &component,
-            state.wasm_runtime.linker(),
-        )
-        .await
-        .map_err(AppError::CoreError)?;
-        inst.get_preferences().await.map_err(AppError::CoreError)?
-    };
-    state.cache.insert_preference_schema(source_id, raw.clone());
-    Ok(Json(raw))
+    let schema = svc.get_source_pref_schema(source_id).await?;
+    Ok(Json(schema))
 }
 
 async fn get_source_preferences(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let rows = state
+    let rows = svc
         .get_all_preferences(source_id)
         .await?
         .into_iter()
@@ -419,46 +383,191 @@ async fn get_source_preferences(
 
 async fn set_source_preference(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
     Json(body): Json<SetPreferenceRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state.set_preference(source_id, &key, &body.value).await?;
+    svc.set_preference(source_id, &key, &body.value).await?;
     Ok(Json(json!({})))
 }
 
 async fn append_pref_list_item(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
     Json(body): Json<ListItemRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state
-        .append_pref_list_item(source_id, &key, body.item)
+    svc.append_pref_list_item(source_id, &key, body.item)
         .await?;
     Ok(Json(json!({})))
 }
 
 async fn remove_pref_list_item(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
     Json(body): Json<ListItemRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state
-        .remove_pref_list_item(source_id, &key, &body.item)
+    svc.remove_pref_list_item(source_id, &key, &body.item)
         .await?;
     Ok(Json(json!({})))
 }
 
 async fn toggle_pref_select_item(
     AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
-    State(state): State<AppState>,
+    State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
     Json(body): Json<ToggleSelectRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    state
-        .toggle_pref_select_item(source_id, &key, body.item, body.selected)
+    svc.toggle_pref_select_item(source_id, &key, body.item, body.selected)
         .await?;
     Ok(Json(json!({})))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use axum::extract::State;
+    use kani_app::ids::UserId;
+    use kani_app::models::SourceHealthRow;
+    use kani_app::service::traits::SourceDomain;
+    use kani_shared::types::{ChapterSortOption, Source};
+    use std::sync::Arc;
+
+    struct StubSources;
+
+    #[async_trait::async_trait]
+    impl SourceDomain for StubSources {
+        async fn list_sources(&self) -> kani_app::error::Result<Vec<Source>> {
+            Ok(vec![Source {
+                id: 1,
+                name: "stub-ext".into(),
+                version: "1.0".into(),
+                base_url: "https://example.com".into(),
+                enabled: true,
+                favourited: false,
+                unrestricted_http: false,
+            }])
+        }
+        async fn get_source(&self, _: i64) -> kani_app::error::Result<Source> {
+            unimplemented!()
+        }
+        async fn add_source(&self, _: &str, _: UserId) -> kani_app::error::Result<i64> {
+            unimplemented!()
+        }
+        async fn update_source(
+            &self,
+            _: i64,
+            _: Option<String>,
+            _: Option<String>,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn get_source_health(&self) -> kani_app::error::Result<Vec<SourceHealthRow>> {
+            unimplemented!()
+        }
+        async fn get_metadata(&self, _: i64) -> kani_app::error::Result<String> {
+            unimplemented!()
+        }
+        async fn toggle_source_enabled(&self, _: i64, _: bool) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn toggle_source_favourite(&self, _: i64, _: bool) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn get_filter_list(
+            &self,
+            _: i64,
+        ) -> kani_app::error::Result<kani_core::WitFilterList> {
+            unimplemented!()
+        }
+        async fn get_all_preferences(
+            &self,
+            _: i64,
+        ) -> kani_app::error::Result<Vec<(String, String)>> {
+            unimplemented!()
+        }
+        async fn set_preference(&self, _: i64, _: &str, _: &str) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn append_pref_list_item(
+            &self,
+            _: i64,
+            _: &str,
+            _: String,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn remove_pref_list_item(
+            &self,
+            _: i64,
+            _: &str,
+            _: &str,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn toggle_pref_select_item(
+            &self,
+            _: i64,
+            _: &str,
+            _: String,
+            _: bool,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn get_source_url(&self, _: i64, _: &str) -> kani_app::error::Result<String> {
+            unimplemented!()
+        }
+        async fn get_chapter_list_paged(
+            &self,
+            _: i64,
+            _: &str,
+            _: i32,
+            _: i32,
+            _: Option<String>,
+        ) -> kani_app::error::Result<String> {
+            unimplemented!()
+        }
+        async fn get_chapter_sort_list(
+            &self,
+            _: i64,
+        ) -> kani_app::error::Result<Vec<ChapterSortOption>> {
+            unimplemented!()
+        }
+        async fn delete_source(&self, _: i64, _: UserId) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn list_active_source_ids(&self) -> kani_app::error::Result<Vec<i64>> {
+            unimplemented!()
+        }
+        async fn get_source_pref_schema(
+            &self,
+            _: i64,
+        ) -> kani_app::error::Result<Vec<kani_core::PreferenceSpec>> {
+            unimplemented!()
+        }
+    }
+
+    fn stub_user() -> crate::auth::User {
+        crate::auth::User {
+            id: UserId(1),
+            username: "test".into(),
+            email: "test@example.com".into(),
+            is_active: true,
+            roles: vec![],
+            password_hash: String::new(),
+            change_id: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn list_sources_returns_items_without_appservice() {
+        let svc: Arc<dyn SourceDomain> = Arc::new(StubSources);
+        let response = list_sources(AuthGuard(stub_user(), PhantomData), State(svc))
+            .await
+            .unwrap();
+        let body = axum::response::IntoResponse::into_response(response);
+        assert_eq!(body.status(), axum::http::StatusCode::OK);
+    }
 }

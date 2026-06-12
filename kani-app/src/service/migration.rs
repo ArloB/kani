@@ -12,7 +12,7 @@ pub(super) struct MigrationContext {
 impl AppService {
     pub(super) async fn resolve_migration_context(
         &self,
-        manga_db_id: i64,
+        manga_db_id: crate::ids::MangaId,
         target_source_id: i64,
         target_source_manga_id: &str,
     ) -> Result<MigrationContext> {
@@ -72,7 +72,7 @@ impl AppService {
 
     pub async fn preview_migration(
         &self,
-        manga_db_id: i64,
+        manga_db_id: crate::ids::MangaId,
         target_source_id: i64,
         target_source_manga_id: String,
     ) -> Result<MigrationPreview> {
@@ -92,7 +92,7 @@ impl AppService {
 
     pub async fn migrate_manga(
         &self,
-        manga_db_id: i64,
+        manga_db_id: crate::ids::MangaId,
         target_source_id: i64,
         target_source_manga_id: String,
         keep_orphaned_downloads: bool,

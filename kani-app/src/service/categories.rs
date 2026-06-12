@@ -1,4 +1,5 @@
 use super::*;
+use crate::ids::MangaId;
 
 impl AppService {
     pub async fn list_categories(&self) -> Result<Vec<kani_shared::types::Category>> {
@@ -63,7 +64,7 @@ impl AppService {
 
     pub async fn get_manga_categories(
         &self,
-        manga_id: i64,
+        manga_id: MangaId,
     ) -> Result<Vec<kani_shared::types::Category>> {
         sqlx::query_as!(
             kani_shared::types::Category,
@@ -77,7 +78,11 @@ impl AppService {
         .map_err(Into::into)
     }
 
-    pub async fn set_manga_categories(&self, manga_id: i64, category_ids: Vec<i64>) -> Result<()> {
+    pub async fn set_manga_categories(
+        &self,
+        manga_id: MangaId,
+        category_ids: Vec<i64>,
+    ) -> Result<()> {
         let mut tx = self.db.begin().await?;
         sqlx::query!("DELETE FROM manga_categories WHERE manga_id=?", manga_id)
             .execute(&mut *tx)

@@ -13,6 +13,7 @@ use totp_rs::{Algorithm, TOTP};
 
 use crate::{
     error::{Result, ServiceError},
+    ids::UserId,
     service::AppService,
 };
 
@@ -31,7 +32,7 @@ impl AppService {
     /// fully verified, returns an error — disable first.
     pub async fn begin_totp_setup(
         &self,
-        user_id: i64,
+        user_id: UserId,
         username: &str,
     ) -> Result<(Secret<String>, String, String)> {
         // Refuse if already verified.
@@ -75,7 +76,7 @@ impl AppService {
 
     /// Verify the 6-digit code entered during setup. On success, marks the TOTP
     /// configuration as verified and returns 8 single-use backup codes.
-    pub async fn verify_totp_setup(&self, user_id: i64, code: &str) -> Result<Vec<String>> {
+    pub async fn verify_totp_setup(&self, user_id: UserId, code: &str) -> Result<Vec<String>> {
         let secret = self.get_unverified_totp_secret(user_id).await?;
         let totp = build_totp_anonymous(&secret)?;
 
@@ -106,7 +107,7 @@ impl AppService {
     // ── Verification ──────────────────────────────────────────────────────────
 
     /// Verify a TOTP code for login step-up.
-    pub async fn verify_totp_code(&self, user_id: i64, code: &str) -> Result<bool> {
+    pub async fn verify_totp_code(&self, user_id: UserId, code: &str) -> Result<bool> {
         let secret = self.get_verified_totp_secret(user_id).await?;
         let totp = build_totp_anonymous(&secret)?;
         totp.check_current(code)
@@ -114,7 +115,7 @@ impl AppService {
     }
 
     /// Verify a backup code (consuming it) for login step-up.
-    pub async fn verify_totp_backup_code(&self, user_id: i64, code: &str) -> Result<bool> {
+    pub async fn verify_totp_backup_code(&self, user_id: UserId, code: &str) -> Result<bool> {
         let rows = sqlx::query_scalar::<_, String>(
             "SELECT id FROM user_backup_codes WHERE user_id = ? AND used_at IS NULL",
         )
@@ -158,7 +159,7 @@ impl AppService {
     // ── Disable / manage ──────────────────────────────────────────────────────
 
     /// Disable TOTP after confirming the current TOTP code.
-    pub async fn disable_totp(&self, user_id: i64, totp_code: &str) -> Result<()> {
+    pub async fn disable_totp(&self, user_id: UserId, totp_code: &str) -> Result<()> {
         if !self.verify_totp_code(user_id, totp_code).await? {
             return Err(ServiceError::Validation("Incorrect TOTP code".into()));
         }
@@ -176,7 +177,7 @@ impl AppService {
     /// Regenerate backup codes (invalidates all existing ones). Requires a valid TOTP code.
     pub async fn regenerate_backup_codes(
         &self,
-        user_id: i64,
+        user_id: UserId,
         totp_code: &str,
     ) -> Result<Vec<String>> {
         if !self.verify_totp_code(user_id, totp_code).await? {
@@ -189,7 +190,7 @@ impl AppService {
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
-    async fn get_unverified_totp_secret(&self, user_id: i64) -> Result<String> {
+    async fn get_unverified_totp_secret(&self, user_id: UserId) -> Result<String> {
         let stored: Option<String> = sqlx::query_scalar(
             "SELECT secret FROM user_totp WHERE user_id = ? AND verified_at IS NULL",
         )
@@ -201,7 +202,7 @@ impl AppService {
         self.maybe_decrypt(&stored)
     }
 
-    async fn get_verified_totp_secret(&self, user_id: i64) -> Result<String> {
+    async fn get_verified_totp_secret(&self, user_id: UserId) -> Result<String> {
         let stored: Option<String> = sqlx::query_scalar(
             "SELECT secret FROM user_totp WHERE user_id = ? AND verified_at IS NOT NULL",
         )
@@ -213,7 +214,7 @@ impl AppService {
         self.maybe_decrypt(&stored)
     }
 
-    async fn store_backup_codes(&self, user_id: i64, codes: &[String]) -> Result<()> {
+    async fn store_backup_codes(&self, user_id: UserId, codes: &[String]) -> Result<()> {
         // Delete existing unused codes for this user.
         sqlx::query("DELETE FROM user_backup_codes WHERE user_id = ?")
             .bind(user_id)

@@ -5,6 +5,7 @@
 //! user-agent, IP) and supports individual revocation.
 
 use crate::error::Result;
+use crate::ids::UserId;
 use sqlx::Row;
 
 #[derive(Debug, serde::Serialize)]
@@ -28,7 +29,7 @@ impl AppService {
     pub async fn touch_session(
         &self,
         session_id: &str,
-        user_id: i64,
+        user_id: UserId,
         user_agent: Option<&str>,
         ip_addr: Option<&str>,
     ) -> Result<()> {
@@ -46,7 +47,7 @@ impl AppService {
     }
 
     /// List all active (non-revoked) sessions for a user, newest-first.
-    pub async fn list_sessions(&self, user_id: i64) -> Result<Vec<SessionRecord>> {
+    pub async fn list_sessions(&self, user_id: UserId) -> Result<Vec<SessionRecord>> {
         let rows = sqlx::query(
             "SELECT id, user_id, created_at, last_seen_at, user_agent, ip_addr, revoked_at \
              FROM user_sessions \
@@ -73,7 +74,7 @@ impl AppService {
     }
 
     /// Revoke a single session. Only permitted if the session belongs to `user_id`.
-    pub async fn revoke_session(&self, session_id: &str, user_id: i64) -> Result<bool> {
+    pub async fn revoke_session(&self, session_id: &str, user_id: UserId) -> Result<bool> {
         let rows_affected = sqlx::query(
             "UPDATE user_sessions SET revoked_at = unixepoch() \
              WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
@@ -89,7 +90,7 @@ impl AppService {
     /// Revoke all sessions for `user_id` except `current_session_id`.
     pub async fn revoke_other_sessions(
         &self,
-        user_id: i64,
+        user_id: UserId,
         current_session_id: &str,
     ) -> Result<u64> {
         let rows_affected = sqlx::query(
@@ -106,7 +107,7 @@ impl AppService {
 
     /// Returns `true` if the user has a verified TOTP configuration.
     /// Returns `false` until the TOTP service is set up in `totp.rs`.
-    pub async fn is_totp_enabled(&self, user_id: i64) -> Result<bool> {
+    pub async fn is_totp_enabled(&self, user_id: UserId) -> Result<bool> {
         // The `user_totp` table is created when TOTP migrations run.
         // Until then, check whether the table exists before querying it.
         let table_exists: i64 = sqlx::query_scalar(

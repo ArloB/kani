@@ -104,6 +104,50 @@ impl AppService {
         .await
     }
 
+    pub async fn get_source_pref_schema(
+        &self,
+        source_id: i64,
+    ) -> Result<Vec<kani_core::PreferenceSpec>> {
+        if let Some(cached) = self.cache.get_preference_schema(source_id) {
+            return Ok(cached);
+        }
+        let mgr = { self.sources.read().await.get(&source_id).cloned() };
+        let raw = if let Some(mgr) = mgr {
+            let mut inst = mgr.lease_instance().await.map_err(ServiceError::Core)?;
+            inst.get_preferences().await.map_err(ServiceError::Core)?
+        } else {
+            let name = sqlx::query_scalar!("SELECT name FROM sources WHERE id=?", source_id)
+                .fetch_optional(&self.db)
+                .await?
+                .ok_or_else(|| ServiceError::NotFound(format!("Source {source_id} not found")))?;
+            let wasm_path = self
+                .settings
+                .read()
+                .await
+                .wasm_storage_path
+                .join(format!("{}.wasm", name));
+            let bytes = tokio::fs::read(&wasm_path)
+                .await
+                .map_err(|e| ServiceError::Core(kani_core::Error::Io(e)))?;
+            let component = self
+                .wasm_runtime
+                .compile_component(&bytes)
+                .map_err(ServiceError::Core)?;
+            let mut inst =
+                kani_core::sources::SourceInstance::new(self.smart_client.clone(), None, false);
+            inst.load(
+                self.wasm_runtime.engine(),
+                &component,
+                self.wasm_runtime.linker(),
+            )
+            .await
+            .map_err(ServiceError::Core)?;
+            inst.get_preferences().await.map_err(ServiceError::Core)?
+        };
+        self.cache.insert_preference_schema(source_id, raw.clone());
+        Ok(raw)
+    }
+
     pub async fn toggle_pref_select_item(
         &self,
         source_id: i64,
