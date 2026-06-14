@@ -323,6 +323,62 @@ pub enum Expr {
     StringLen {
         target: Box<Expr>,
     },
+
+    SplitN {
+        target: Box<Expr>,
+        delimiter: String,
+        n: usize,
+    },
+
+    Take {
+        target: Box<Expr>,
+        n: usize,
+    },
+
+    Skip {
+        target: Box<Expr>,
+        n: usize,
+    },
+
+    Reverse {
+        target: Box<Expr>,
+    },
+
+    SortBy {
+        target: Box<Expr>,
+        key: Box<Expr>,
+    },
+
+    Unique {
+        target: Box<Expr>,
+    },
+
+    UrlEncode {
+        target: Box<Expr>,
+    },
+
+    UrlDecode {
+        target: Box<Expr>,
+    },
+
+    FormatPadded {
+        target: Box<Expr>,
+        width: usize,
+        fill: char,
+        align: PadAlign,
+    },
+
+    ScalarOverride {
+        name: String,
+    },
+
+    Fetch {
+        url_expr: Box<Expr>,
+        blueprint: Box<Blueprint>,
+        method: HttpMethod,
+        headers: Vec<(Expr, Expr)>,
+        kind: SubBlueprintKind,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -345,6 +401,31 @@ pub enum Op {
     Or,
 }
 
+/// HTTP method for sub-blueprint fetches.
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum HttpMethod {
+    #[default]
+    Get,
+    Post,
+    Put,
+    Delete,
+}
+
+/// Whether a sub-fetch result should be parsed as HTML or JSON.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum SubBlueprintKind {
+    Html,
+    Json,
+}
+
 /// How the offset/page query parameter is calculated for each chunk fetch.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
@@ -356,7 +437,25 @@ pub enum OffsetType {
     ItemOffset,
     /// Param value = page number starting at `start` (typically 0 or 1)
     PageNumber { start: u32 },
+    /// Cursor-based pagination: each chunk response carries the next cursor in
+    /// the scalar named `next_cursor_field`. Injected as `offset_param` on the
+    /// next request; stops when the scalar is absent or null.
+    CursorToken { next_cursor_field: String },
 }
+
+/// Alignment direction for `Expr::FormatPadded`.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum PadAlign {
+    Left,
+    Right,
+    Center,
+}
+
+pub const DSL_SCHEMA_VERSION: u32 = 2;
 
 /// Declares that a source paginates in fixed-size chunks, so the framework can
 /// handle the offset algebra instead of each extension doing it manually.
@@ -374,7 +473,7 @@ pub struct PaginationConfig {
 }
 
 /// A complete extraction blueprint sent across the FFI boundary.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     any(feature = "host", feature = "builder"),
     derive(serde::Serialize, serde::Deserialize)
@@ -400,7 +499,7 @@ pub struct Blueprint {
     pub pagination: Option<PaginationConfig>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     any(feature = "host", feature = "builder"),
     derive(serde::Serialize, serde::Deserialize)
@@ -416,7 +515,7 @@ pub struct FieldDef {
     pub optional: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     any(feature = "host", feature = "builder"),
     derive(serde::Serialize, serde::Deserialize)
@@ -426,7 +525,7 @@ pub struct Binding {
     pub expr: Expr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     any(feature = "host", feature = "builder"),
     derive(serde::Serialize, serde::Deserialize)
@@ -892,6 +991,142 @@ impl Expr {
         }
     }
 
+    // ── List operations (v2) ─────────────────────────────────────────────────
+    #[inline]
+    pub fn split_n(self, delimiter: impl Into<String>, n: usize) -> Self {
+        Expr::SplitN {
+            target: Box::new(self),
+            delimiter: delimiter.into(),
+            n,
+        }
+    }
+    #[inline]
+    pub fn take(self, n: usize) -> Self {
+        Expr::Take {
+            target: Box::new(self),
+            n,
+        }
+    }
+    #[inline]
+    pub fn skip(self, n: usize) -> Self {
+        Expr::Skip {
+            target: Box::new(self),
+            n,
+        }
+    }
+    #[inline]
+    pub fn reverse(self) -> Self {
+        Expr::Reverse {
+            target: Box::new(self),
+        }
+    }
+    #[inline]
+    pub fn sort_by(self, key: Expr) -> Self {
+        Expr::SortBy {
+            target: Box::new(self),
+            key: Box::new(key),
+        }
+    }
+    #[inline]
+    pub fn unique(self) -> Self {
+        Expr::Unique {
+            target: Box::new(self),
+        }
+    }
+
+    // ── URL encoding (v2) ────────────────────────────────────────────────────
+    #[inline]
+    pub fn url_encode(self) -> Self {
+        Expr::UrlEncode {
+            target: Box::new(self),
+        }
+    }
+    #[inline]
+    pub fn url_decode(self) -> Self {
+        Expr::UrlDecode {
+            target: Box::new(self),
+        }
+    }
+
+    // ── Padded formatting (v2) ───────────────────────────────────────────────
+    #[inline]
+    pub fn format_padded(self, width: usize, fill: char, align: PadAlign) -> Self {
+        Expr::FormatPadded {
+            target: Box::new(self),
+            width,
+            fill,
+            align,
+        }
+    }
+
+    // ── Scalar access (v2) ───────────────────────────────────────────────────
+    #[inline]
+    pub fn scalar(name: impl Into<String>) -> Self {
+        Expr::ScalarOverride { name: name.into() }
+    }
+
+    // ── Sub-blueprint fetch ──────────────────────────────────────────────────
+    #[inline]
+    pub fn fetch_html(url_expr: Expr, blueprint: Blueprint) -> Self {
+        Expr::Fetch {
+            url_expr: Box::new(url_expr),
+            blueprint: Box::new(blueprint),
+            method: HttpMethod::Get,
+            headers: vec![],
+            kind: SubBlueprintKind::Html,
+        }
+    }
+    #[inline]
+    pub fn fetch_json(url_expr: Expr, blueprint: Blueprint) -> Self {
+        Expr::Fetch {
+            url_expr: Box::new(url_expr),
+            blueprint: Box::new(blueprint),
+            method: HttpMethod::Get,
+            headers: vec![],
+            kind: SubBlueprintKind::Json,
+        }
+    }
+    #[inline]
+    pub fn with_method(self, method: HttpMethod) -> Self {
+        match self {
+            Expr::Fetch {
+                url_expr,
+                blueprint,
+                headers,
+                kind,
+                ..
+            } => Expr::Fetch {
+                url_expr,
+                blueprint,
+                method,
+                headers,
+                kind,
+            },
+            other => other,
+        }
+    }
+    #[inline]
+    pub fn with_header(self, key: Expr, value: Expr) -> Self {
+        match self {
+            Expr::Fetch {
+                url_expr,
+                blueprint,
+                method,
+                mut headers,
+                kind,
+            } => {
+                headers.push((key, value));
+                Expr::Fetch {
+                    url_expr,
+                    blueprint,
+                    method,
+                    headers,
+                    kind,
+                }
+            }
+            other => other,
+        }
+    }
     // ── Binary operators ─────────────────────────────────────────────────────
     #[inline]
     pub fn eq(self, rhs: Expr) -> Self {
@@ -1086,7 +1321,10 @@ impl BlueprintBuilder {
 #[cfg(feature = "builder")]
 impl Blueprint {
     pub fn to_bytes(&self) -> Vec<u8> {
-        postcard::to_allocvec(self).expect("Blueprint serialization failed")
+        let mut bytes =
+            postcard::to_allocvec(&DSL_SCHEMA_VERSION).expect("version serialization failed");
+        bytes.extend(postcard::to_allocvec(self).expect("Blueprint serialization failed"));
+        bytes
     }
 
     pub fn with_request_def(&self, req: RequestDef) -> Blueprint {
@@ -1386,6 +1624,91 @@ mod tests {
         ] {
             postcard_rt(e);
         }
+    }
+
+    // ── DSL v2 variants — postcard round-trip ────────────────────────────────
+
+    #[test]
+    fn expr_postcard_round_trip_v2_list_ops() {
+        for e in &[
+            Expr::SplitN {
+                target: Box::new(Expr::Literal("a,b,c,d".into())),
+                delimiter: ",".into(),
+                n: 2,
+            },
+            Expr::SplitN {
+                target: Box::new(Expr::SelfRef),
+                delimiter: "/".into(),
+                n: 1,
+            },
+            Expr::Take {
+                target: Box::new(Expr::SelfRef),
+                n: 5,
+            },
+            Expr::Take {
+                target: Box::new(Expr::SelfRef),
+                n: 0,
+            },
+            Expr::Skip {
+                target: Box::new(Expr::SelfRef),
+                n: 3,
+            },
+            Expr::Reverse {
+                target: Box::new(Expr::SelfRef),
+            },
+            Expr::SortBy {
+                target: Box::new(Expr::SelfRef),
+                key: Box::new(Expr::SelfRef),
+            },
+            Expr::Unique {
+                target: Box::new(Expr::SelfRef),
+            },
+        ] {
+            postcard_rt(e);
+        }
+    }
+
+    #[test]
+    fn expr_postcard_round_trip_v2_url_and_format() {
+        for e in &[
+            Expr::UrlEncode {
+                target: Box::new(Expr::Literal("hello world".into())),
+            },
+            Expr::UrlDecode {
+                target: Box::new(Expr::Literal("hello%20world".into())),
+            },
+            Expr::FormatPadded {
+                target: Box::new(Expr::SelfRef),
+                width: 10,
+                fill: ' ',
+                align: PadAlign::Left,
+            },
+            Expr::FormatPadded {
+                target: Box::new(Expr::SelfRef),
+                width: 8,
+                fill: '0',
+                align: PadAlign::Right,
+            },
+            Expr::FormatPadded {
+                target: Box::new(Expr::SelfRef),
+                width: 20,
+                fill: '-',
+                align: PadAlign::Center,
+            },
+            Expr::ScalarOverride {
+                name: "total_pages".into(),
+            },
+        ] {
+            postcard_rt(e);
+        }
+    }
+
+    #[test]
+    fn blueprint_to_bytes_has_version_prefix() {
+        let bp = BlueprintBuilder::new(".item").build();
+        let bytes = bp.to_bytes();
+        let (version, _): (u32, &[u8]) = postcard::take_from_bytes(&bytes).unwrap();
+        assert_eq!(version, DSL_SCHEMA_VERSION);
     }
 
     // ── Blueprint round-trip and builder ─────────────────────────────────────

@@ -650,20 +650,8 @@ impl DownloaderManager {
             return Err(error::Error::Io(e));
         }
 
-        let fetch_fut = async {
-            match source_manager.lease_instance().await {
-                Ok(mut instance) => {
-                    let pages = instance
-                        .get_pages(&source_manga_id, &source_chapter_id)
-                        .await?;
-
-                    let metadata = instance.get_metadata().await?;
-
-                    Ok((pages, metadata.base_url))
-                }
-                Err(e) => Err(e),
-            }
-        };
+        let fetch_fut =
+            fetch_pages_with_retry(&source_manager, &source_manga_id, &source_chapter_id);
 
         let chapter_generated = tokio::select! {
             res = fetch_fut => match res {
@@ -879,6 +867,71 @@ impl DownloaderManager {
                     delay *= 2;
                 }
             }
+        }
+    }
+}
+
+pub fn ext_retry_params(kind: kani_shared::extension::ExtensionErrorKind) -> Option<(u32, u64)> {
+    use kani_shared::extension::ExtensionErrorKind;
+    match kind {
+        ExtensionErrorKind::NotFound
+        | ExtensionErrorKind::Auth
+        | ExtensionErrorKind::InvalidInput
+        | ExtensionErrorKind::Parse
+        | ExtensionErrorKind::ContentUnavailable => None,
+        ExtensionErrorKind::Network | ExtensionErrorKind::Timeout => Some((3, 2_000)),
+        ExtensionErrorKind::RateLimited => Some((1, 60_000)),
+        ExtensionErrorKind::Internal | ExtensionErrorKind::Unknown => Some((2, 4_000)),
+    }
+}
+
+async fn fetch_pages_with_retry(
+    source_manager: &crate::source_manager::SourceManager,
+    source_manga_id: &str,
+    source_chapter_id: &str,
+) -> Result<(crate::wasm::kani::extension::types::Chapter, String)> {
+    let mut attempts = 0u32;
+    loop {
+        let result = async {
+            let mut instance = source_manager.lease_instance().await?;
+            let pages = instance
+                .get_pages(source_manga_id, source_chapter_id)
+                .await?;
+            let metadata = instance.get_metadata().await?;
+            Ok::<_, error::Error>((pages, metadata.base_url))
+        }
+        .await;
+
+        let err = match result {
+            Ok(data) => return Ok(data),
+            Err(e) => e,
+        };
+
+        let retry = if let error::Error::Extension(ref ext_err) = err {
+            if let Some((max_retries, delay_ms)) = ext_retry_params(ext_err.kind) {
+                attempts += 1;
+                if attempts < max_retries {
+                    tracing::warn!(
+                        "Retry {}/{} for get_pages (kind={}): {}",
+                        attempts,
+                        max_retries,
+                        ext_err.kind,
+                        ext_err.message
+                    );
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if !retry {
+            return Err(err);
         }
     }
 }
@@ -1154,6 +1207,39 @@ mod tests {
         assert!(
             !entry_names.iter().any(|n| n == "ComicInfo.xml"),
             "unexpected ComicInfo.xml"
+        );
+    }
+
+    // ── ext_retry_params ─────────────────────────────────────────────────────
+
+    #[test]
+    fn not_found_no_retry() {
+        use kani_shared::extension::ExtensionErrorKind;
+        assert!(ext_retry_params(ExtensionErrorKind::NotFound).is_none());
+        assert!(ext_retry_params(ExtensionErrorKind::Auth).is_none());
+        assert!(ext_retry_params(ExtensionErrorKind::InvalidInput).is_none());
+        assert!(ext_retry_params(ExtensionErrorKind::Parse).is_none());
+        assert!(ext_retry_params(ExtensionErrorKind::ContentUnavailable).is_none());
+    }
+
+    #[test]
+    fn network_retries_three_times() {
+        use kani_shared::extension::ExtensionErrorKind;
+        let (max, delay) = ext_retry_params(ExtensionErrorKind::Network).unwrap();
+        assert_eq!(max, 3);
+        assert!(delay >= 1_000, "delay should be at least 1s, got {delay}ms");
+        let (max_t, _) = ext_retry_params(ExtensionErrorKind::Timeout).unwrap();
+        assert_eq!(max_t, 3);
+    }
+
+    #[test]
+    fn rate_limited_escalates_not_short_retry() {
+        use kani_shared::extension::ExtensionErrorKind;
+        let (max, delay) = ext_retry_params(ExtensionErrorKind::RateLimited).unwrap();
+        assert_eq!(max, 1, "RateLimited should only allow 1 attempt (escalate)");
+        assert!(
+            delay >= 30_000,
+            "RateLimited delay should be ≥30s, got {delay}ms"
         );
     }
 }

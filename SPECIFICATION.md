@@ -102,6 +102,7 @@ These are the starting points for extraction chains:
 | `json("pointer")` | Navigate to a JSON value using a JSON Pointer (RFC 6901). Returns a `Json` value. |
 | `index()` | The 0-based iteration index of the current container element. Returns `Int`. |
 | `pref("key")` | Read an extension preference value by key. Returns `String` or `Null` if the preference is unset. |
+| `scalar("name")` | Read a named scalar value computed at the document level (from the `scalars` section of the blueprint). Returns whatever type the scalar expression produces. Useful for feeding document-level computation into per-element expressions without re-evaluating it per row. |
 | `$variable` | Reference a previously bound variable. |
 
 ### 1.5 Method Reference
@@ -124,6 +125,7 @@ These are the starting points for extraction chains:
 | Method | Input Type | Return Type | Description |
 |--------|-----------|-------------|-------------|
 | `.split("delim")` | String | List&lt;String&gt; | Split the string on `delim`. Returns a `List` of all segments. Use `.at(n)` to extract a specific segment. |
+| `.split_n("delim", n)` | String | List&lt;String&gt; | Split into at most `n` parts. The last part contains the remainder of the string (unsplit). Useful when a delimiter appears multiple times but only the first few splits matter. |
 | `.replace("from", "to")` | String | String | Replace all occurrences of `from` with `to`. |
 | `.trim()` | String | String | Remove leading and trailing whitespace. |
 | `.lower()` | String | String | Convert to lowercase. |
@@ -136,6 +138,9 @@ These are the starting points for extraction chains:
 | `.slice(start, end)` | String | String | Substring by character index (0-based, exclusive end). Negative values count from the end. `end` is optional; omitting it slices to the end of the string. |
 | `.to_string()` | Int/Number/Bool | String | Convert a numeric or boolean value to its string representation. `Null` propagates as `Null`. |
 | `.string_len()` | String | Int | Number of Unicode characters (not bytes) in the string. |
+| `.url_encode()` | String | String | Percent-encode a string for use as a URL query parameter value (e.g. `"hello world"` → `"hello%20world"`). |
+| `.url_decode()` | String | String | Decode a percent-encoded string. Invalid `%`-sequences are passed through unchanged. |
+| `.format_padded(width, fill, align)` | String | String | Pad or align a string to at least `width` Unicode characters using `fill` (a single character) and `align` (`"left"`, `"right"`, or `"center"`). If the string is already at least `width` characters, it is returned unchanged. |
 | `format("template {}", arg1, arg2, ...)` | — | String | Interpolate `{}` placeholders in the template string with the evaluated arguments in order. Each `{}` is replaced by the corresponding argument's string value. Returns `String`. |
 
 #### List Methods
@@ -144,6 +149,11 @@ These are the starting points for extraction chains:
 |--------|-----------|-------------|-------------|
 | `.at(n)` | List | Any | Get the element at index `n`. Negative indices count from the end: `-1` is the last element. Returns an error if out of bounds (`.fallback()` does not catch errors — guard with `if`/`.matches()` when the index may be absent). Works on any `List`, including results from `.split()`, `.select()`, and `.children()`. |
 | `.join("delim")` | List&lt;String&gt; | String | Join a list of strings into a single string using `delim` as the separator. `Null` elements are skipped. |
+| `.take(n)` | List | List | Return the first `n` elements. Returns the whole list if `n` exceeds its length. |
+| `.skip(n)` | List | List | Drop the first `n` elements and return the rest. Returns an empty list if `n` exceeds the length. |
+| `.reverse()` | List | List | Reverse the list in place. |
+| `.sort_by(key_expr)` | List | List | Sort the list by a key expression evaluated per element with `$item` in scope. Numeric types (`Int`, `Number`) sort numerically; `String` sorts lexicographically; `Bool` sorts false&lt;true; `Null`, `Element`, `Json`, and nested `List` values sort to the end (stable, equal among themselves). |
+| `.unique()` | List | List | Remove duplicate elements. First occurrence is kept; subsequent duplicates are dropped. Order is preserved. |
 | `merge([list1, list2, ...])` | — | List | Concatenate multiple lists into a single flat list. Each argument must evaluate to a `List`. Unlike `.flat_map()`, the lists are given directly rather than derived from a parent collection. Useful for merging results from disjoint selectors. |
 
 #### Type Coercion Methods
@@ -357,6 +367,45 @@ if dom("span.is-completed").text().trim().matches("Completed").not() then "ongoi
 **String length check:**
 ```
 if dom("p.description").text().string_len() > 0 then dom("p.description").text() else null
+```
+
+**Split into at most 2 parts (everything after the first `/`):**
+```
+self.attr("href").split_n("/", 2).at(1)
+```
+
+**First 5 chapters of a list:**
+```
+self.select("a.chapter").map($item.text().trim()).take(5)
+```
+
+**Drop the pinned first entry and sort the rest by chapter number:**
+```
+self.select("a.chapter").map($item.text().trim().parse_float()).skip(1).sort_by($item)
+```
+
+**Deduplicate tags extracted from multiple elements:**
+```
+merge([
+  self.select("a.genre").map($item.text().trim()),
+  self.select("a.category").map($item.text().trim())
+]).unique()
+```
+
+**URL-encode a search query for manual URL construction:**
+```
+let $q = dom("input#search").attr("value").url_encode();
+format("https://example.com/search?q={}", $q)
+```
+
+**Right-pad a chapter number display string to 6 characters:**
+```
+self.text().trim().format_padded(6, " ", "right")
+```
+
+**Read a document-level scalar inside a per-element expression:**
+```
+scalar("base_url").append(self.attr("href"))
 ```
 
 ---
@@ -724,6 +773,73 @@ Concatenates multiple lists. Each element of `"lists"` must evaluate to a `List`
 { "op": "resolve_url", "target": { ... }, "base": { "op": "lit", "value": "https://example.com" } }
 ```
 
+#### DSL v2 List Operations
+
+```json
+{ "op": "split_n", "target": { ... }, "delimiter": "/", "n": 2 }
+```
+
+```json
+{ "op": "take", "target": { ... }, "n": 5 }
+```
+
+```json
+{ "op": "skip", "target": { ... }, "n": 1 }
+```
+
+```json
+{ "op": "reverse", "target": { ... } }
+```
+
+```json
+{ "op": "sort_by", "target": { ... }, "key": { "op": "var", "name": "$item" } }
+```
+
+`"key"` is evaluated per element with `$item` bound to the current element. Numeric types sort numerically; `String` lexicographically; `Bool` false&lt;true; non-comparable types (`Null`, `Element`, `Json`, `List`) sort to the end, stable.
+
+```json
+{ "op": "unique", "target": { ... } }
+```
+
+#### DSL v2 String Operations
+
+```json
+{ "op": "url_encode", "target": { ... } }
+```
+
+```json
+{ "op": "url_decode", "target": { ... } }
+```
+
+```json
+{ "op": "format_padded", "target": { ... }, "width": 6, "fill": " ", "align": "right" }
+```
+
+`"align"` is one of `"left"`, `"right"`, `"center"`.
+
+#### DSL v2 Scalar Access
+
+```json
+{ "op": "scalar", "name": "base_url" }
+```
+
+Reads the named value from the document-level `scalars` map, computed before per-element iteration begins. The scalar must be declared in the `scalars` section of the blueprint.
+
+#### Sub-blueprint Fetch (Rust builder only)
+
+```json
+{
+  "op": "fetch",
+  "url_expr": { ... },
+  "blueprint": { ... },
+  "method": "Get",
+  "headers": [],
+  "kind": "Json"
+}
+```
+
+`"method"` is one of `"Get"`, `"Post"`, `"Put"`, `"Delete"`. `"kind"` is `"Html"` or `"Json"` and determines how the fetched response is parsed before the sub-blueprint is applied. The sub-blueprint is a full blueprint object (§2.3). The host evaluates `url_expr`, fetches the URL (subject to the SSRF `AllowedHost` gate and the per-extension I/O budget), and returns the first row of the sub-extraction as a `Json` value, or `Null` if the result is empty. Nesting `fetch` inside another fetch's sub-blueprint is rejected at evaluation time. Available in the Rust builder via `Expr::fetch_html(url_expr, blueprint)` and `Expr::fetch_json(url_expr, blueprint)`.
+
 ### 2.3 Blueprint Encoding
 
 A complete blueprint is a JSON object with the following fields:
@@ -789,13 +905,17 @@ A complete blueprint is a JSON object with the following fields:
 |-------|------|-------------|
 | `native_page_size` | integer | How many items the source returns per chunk (its real page size). |
 | `offset_param` | string | Query parameter name the source uses for the offset/page (e.g. `"offset"`, `"page"`). |
-| `offset_type` | string/object | Either `"ItemOffset"` (param = absolute item count: 0, 32, 64, …) or `{"PageNumber": {"start": 1}}` (param = page number starting at `start`). |
+| `offset_type` | string/object | `"ItemOffset"` (param = absolute item count: 0, 32, 64, …), `{"PageNumber": {"start": 1}}` (param = page number starting at `start`), or `{"CursorToken": {"next_cursor_field": "/next"}}` (JSON Pointer to the cursor field in each chunk's response). |
 
-When `pagination` is set, the blueprint must be submitted via `paginated-extract-html` rather than `extract-html`. The host handles chunk-fetching, stitching, and `has_next_page` detection automatically.
+When `pagination` is set, the blueprint must be submitted via `paginated-extract-html` / `paginated-extract-json` rather than `extract-html` / `extract-json`. The host handles chunk-fetching, stitching, and `has_next_page` detection automatically.
+
+**`CursorToken` mode:** The host reads the cursor value from `next_cursor_field` (a JSON Pointer into the chunk response) after each fetch, injects it as the `offset_param` query value on the next request, and stops when the field is absent or `null`. Use this for APIs that return a next-page token rather than a numeric offset (e.g. MangaDex's `offset`+`total` model can also be expressed this way, but opaque-token APIs require it).
 
 ### 2.4 Binary Encoding
 
 Blueprints are serialized with **[`postcard`](https://docs.rs/postcard)** (a compact binary format) for the FFI call across the WASM boundary. The `Expr` enum's `serde` derives handle this transparently. Call `blueprint.to_bytes()` (from `BlueprintBuilder::build()`) to get the postcard bytes; the host deserializes via `postcard::from_bytes(&blueprint)`.
+
+**DSL schema versioning.** The binary payload is prefixed with a `u32` schema version. The current version is **2** (introduced when the v2 `Expr` variants — `SplitN`, `Take`, `Skip`, `Reverse`, `SortBy`, `Unique`, `UrlEncode`, `UrlDecode`, `FormatPadded`, `ScalarOverride`, `Fetch` — were added). If a host receives a blueprint with a version it does not support, it returns a human-readable error (`"DSL schema version 2 requires Kani ≥ x.y.z"`) rather than an opaque decode failure. Version 1 blueprints (no prefix) remain decodable by v2 hosts for backward compatibility.
 
 The JSON IM described in §2.2 reflects the logical structure of the AST and is useful for debugging; the wire format is binary, not JSON.
 
@@ -1020,6 +1140,7 @@ When `pagination` is set on an endpoint, the framework calls `paginated-extract-
 |-------|-------------|
 | `item` | Offset param = absolute item count: 0, 32, 64, … |
 | `page` | Offset param = page number. Defaults to 1-based. Use `page_start: 0` for 0-based. |
+| `cursor` | Cursor-token pagination. Set `cursor_field` to the JSON Pointer of the next-page token in the response (e.g. `cursor_field: "/next_cursor"`). The host injects the token as `offset_param` on each subsequent request and stops when the field is absent or null. |
 
 **`has_next_page` detection:** If the blueprint includes a `scalars` entry named `has_next_page`, its value from the last fetched chunk is used. Otherwise the framework falls back to: last chunk was full (≥ `native_page_size` items) → more pages available.
 
@@ -1222,10 +1343,11 @@ preferences:
 
 # Pagination (per-endpoint; omit for sources with flexible page sizes)
 pagination:
-  native_page_size: integer     # Source's fixed chunk size
-  offset_param: string          # Query param name for offset/page
-  offset_type: "item" | "page"  # "item" = absolute count, "page" = page number
-  page_start: integer           # For "page" type: starting page number (default: 1)
+  native_page_size: integer          # Source's fixed chunk size
+  offset_param: string               # Query param name for offset/page/cursor
+  offset_type: "item" | "page" | "cursor"
+  page_start: integer                # For "page" type: starting page number (default: 1)
+  cursor_field: string               # For "cursor" type: JSON Pointer to next-page token in response
 ```
 
 ### 3.7 YAML Validation Rules
@@ -1242,3 +1364,58 @@ The `kani-cli validate` command checks:
 8. **Preference references:** All `$pref:key$` references must correspond to a declared preference.
 9. **Filter mapping:** All filter mapping keys must correspond to declared filter group IDs.
 10. **No unused bindings:** Warn if a top-level binding is declared but never referenced.
+
+---
+
+## 4. Extension Cache Interface
+
+Extensions can store and retrieve values across invocations using the host-provided `cache` WIT interface. The cache is namespaced per extension and version, preventing cross-extension data leakage and stale reads after an upgrade.
+
+### 4.1 Operations
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `cache::get(key)` | `string → option<string>` | Retrieve a value by key. Returns `None` if absent or expired. |
+| `cache::put(key, value, ttl_seconds)` | `string, string, u64 → ()` | Store a value with a TTL. Pass `0` for no expiry (evicted only by capacity limits). |
+| `cache::delete(key)` | `string → ()` | Remove a specific key immediately. |
+| `cache::clear_namespace()` | `→ ()` | Remove all keys for this extension's namespace. |
+
+All values are serialized as strings at the boundary. Extensions are responsible for encoding/decoding structured values (e.g. JSON).
+
+### 4.2 Scopes
+
+The `scope` declared in the extension metadata controls the backend and key namespace:
+
+| Scope | Backend | Lifetime | Key prefix |
+|-------|---------|----------|------------|
+| `session` | In-memory (per process) | Until server restart | `{ext_id}:{version}:session:` |
+| `extension` | SQLite | Persistent across restarts | `{ext_id}:{version}:ext:` |
+| `installation` | SQLite | Persistent, per installation | `{ext_id}:{version}:{install_id}:inst:` |
+
+The version component means cache entries are automatically isolated between extension upgrades — a v2 extension will never read v1's cached data.
+
+### 4.3 Capacity Limits
+
+- **In-memory (`session`):** Global ceiling of `KANI_EXTENSION_CACHE_MAX_MB` (default 64 MB) across all extensions. LRU eviction within the global budget.
+- **SQLite (`extension` / `installation`):** Per-namespace cap of 4 MB / 4096 rows (configurable). LRU eviction within the namespace when the cap is reached.
+
+### 4.4 Usage in Rust Extensions
+
+```rust
+use kani_shared::host_abi::cache;
+
+// Store the fetched cover CDN base URL for 10 minutes
+cache::put("cdn_base", &cdn_url, 600)?;
+
+// Retrieve on subsequent calls
+if let Some(base) = cache::get("cdn_base")? {
+    // use cached value
+}
+
+// Invalidate on auth refresh
+cache::delete("auth_token")?;
+```
+
+### 4.5 TTL and Pruning
+
+Expired entries are not returned by `cache::get` and are pruned by a background job running every 10 minutes (`spawn_cache_prune`). There is no guarantee of exact expiry timing — entries may persist slightly past their TTL until the next prune cycle, but will never be returned to callers after expiry.

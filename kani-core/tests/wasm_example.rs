@@ -268,8 +268,9 @@ async fn example_get_url_returns_default_not_implemented_error() {
     );
     let err = result.unwrap_err();
     assert!(
-        err.contains("not implemented") || err.contains("get_url"),
-        "error should mention not-implemented: {err}"
+        err.message.contains("not implemented") || err.message.contains("get_url"),
+        "error should mention not-implemented: {:?}",
+        err
     );
 }
 

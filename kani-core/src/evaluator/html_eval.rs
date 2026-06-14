@@ -1,4 +1,4 @@
-use crate::evaluator::shared::{Env, Value, eval_common_expr, fetch_body};
+use crate::evaluator::shared::{Env, Value, eval_common_expr, eval_fetch_field, fetch_body};
 use crate::wasm::StoredNode;
 use kani_shared::ast::{Blueprint, Expr, OffsetType};
 use scraper::{Element, Selector};
@@ -17,20 +17,40 @@ pub async fn extract_html(
         (None, Some(req)) => fetch_and_parse_html(state, req).await?,
         (None, None) => return Err("No document source".into()),
     };
+    extract_html_with_doc(state, doc, blueprint).await
+}
 
+pub async fn extract_html_str(
+    state: &mut crate::wasm::HostState,
+    body: &str,
+    blueprint: &Blueprint,
+) -> Result<serde_json::Value, String> {
+    let node = crate::wasm::SendHtml::parse_document(body);
+    let root_id = node
+        .0
+        .lock()
+        .map_err(|_| "HTML document lock poisoned")?
+        .0
+        .root_element()
+        .id();
+    let doc = StoredNode {
+        doc: node.0,
+        node_id: root_id,
+    };
+    extract_html_with_doc(state, doc, blueprint).await
+}
+
+async fn extract_html_with_doc(
+    state: &mut crate::wasm::HostState,
+    doc: StoredNode,
+    blueprint: &Blueprint,
+) -> Result<serde_json::Value, String> {
     let mut env = Env::new();
     for (k, v) in &state.preferences {
         env.set(&format!("$pref:{}", k), Value::Str(v.clone()));
     }
     for binding in &blueprint.bindings {
-        let val = eval_html_expr(
-            &binding.expr,
-            &doc,
-            None,
-            env.clone(),
-            &state.selector_cache,
-        )
-        .await?;
+        let val = eval_html_field(state, &binding.expr, &doc, None, env.clone()).await?;
         env.set(&binding.name, val);
     }
 
@@ -38,11 +58,11 @@ pub async fn extract_html(
 
     let mut scalars = serde_json::Map::new();
     for scalar in &blueprint.scalars {
-        let val =
-            eval_html_expr(&scalar.expr, &doc, None, env.clone(), &state.selector_cache).await?;
+        let val = eval_html_field(state, &scalar.expr, &doc, None, env.clone()).await?;
         match val.to_json() {
             Some(v) => {
-                scalars.insert(scalar.name.clone(), v);
+                scalars.insert(scalar.name.clone(), v.clone());
+                env.set(&format!("$scalar:{}", scalar.name), Value::Json(v));
             }
             None if scalar.optional => {
                 scalars.insert(scalar.name.clone(), serde_json::Value::Null);
@@ -55,12 +75,12 @@ pub async fn extract_html(
     for (index, element) in container_elements.iter().enumerate() {
         let mut row = serde_json::Map::new();
         for field in &blueprint.fields {
-            let val = eval_html_expr(
+            let val = eval_html_field(
+                state,
                 &field.expr,
                 &doc,
                 Some((element, index)),
                 env.clone(),
-                &state.selector_cache,
             )
             .await?;
             match val.to_json() {
@@ -77,6 +97,44 @@ pub async fn extract_html(
     }
 
     Ok(serde_json::json!({ "rows": results, "scalars": scalars }))
+}
+
+async fn eval_html_field(
+    state: &mut crate::wasm::HostState,
+    expr: &Expr,
+    doc: &StoredNode,
+    current: Option<(&StoredNode, usize)>,
+    env: Env,
+) -> Result<Value, String> {
+    if let Expr::Fetch {
+        url_expr,
+        blueprint: sub_bp,
+        method,
+        headers,
+        kind,
+    } = expr
+    {
+        let url_val =
+            eval_html_expr(url_expr, doc, current, env.clone(), &state.selector_cache).await?;
+        let url = match url_val {
+            Value::Str(s) => s,
+            _ => return Err("Fetch: url_expr must evaluate to a String".into()),
+        };
+        let mut resolved_headers = Vec::with_capacity(headers.len());
+        for (k_expr, v_expr) in headers {
+            let k =
+                eval_html_expr(k_expr, doc, current, env.clone(), &state.selector_cache).await?;
+            let v =
+                eval_html_expr(v_expr, doc, current, env.clone(), &state.selector_cache).await?;
+            match (k, v) {
+                (Value::Str(k), Value::Str(v)) => resolved_headers.push((k, v)),
+                _ => return Err("Fetch: header keys and values must be strings".into()),
+            }
+        }
+        eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind).await
+    } else {
+        eval_html_expr(expr, doc, current, env, &state.selector_cache).await
+    }
 }
 
 pub async fn extract_html_paginated(
@@ -106,6 +164,11 @@ pub async fn extract_html_paginated(
                 OffsetType::ItemOffset => current_chunk_offset.to_string(),
                 OffsetType::PageNumber { start } => {
                     (current_chunk_offset / native_size + *start as usize).to_string()
+                }
+                OffsetType::CursorToken { .. } => {
+                    return Err(
+                        "CursorToken pagination is not supported for HTML extraction".into(),
+                    );
                 }
             };
             req.queries.retain(|(k, _)| k != &pagination.offset_param);

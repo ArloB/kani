@@ -23,7 +23,7 @@ strip = true
 [profile.wasm-release]
 inherits = "release"
 opt-level = "z"
-lto = true
+lto = "thin"
 codegen-units = 1
 strip = true
 panic = "abort"
@@ -33,6 +33,7 @@ panic = "abort"
 [profile.wasm-debug]
 inherits = "wasm-release"
 opt-level = 1
+lto = "thin"
 debug = true
 strip = "none"
 debug-assertions = true
@@ -52,6 +53,8 @@ futures     = "0.3"
 bytes       = "1"
 tokio-util  = "0.7"
 urlencoding = "2.1"
+talc        = { version = "4", default-features = false, features = ["lock_api"] }
+governor    = { version = "0.10", default-features = false, features = ["std", "dashmap"] }
 ordered-float = "5"
 
 [workspace.lints.clippy]

@@ -5,9 +5,7 @@ use kani_shared::{
 };
 use wit_types::{Chapter, ChapterList, ExtensionMetadata, MangaInfo, MangaList, PreferenceSpec};
 
-#[cfg(target_family = "wasm")]
-#[global_allocator]
-static ALLOCATOR: talc::TalckWasm = unsafe { talc::TalckWasm::new_global() };
+kani_shared::guest_alloc!();
 
 pub struct Example {
     _base_url: String,
@@ -36,12 +34,13 @@ impl Example {
             nsfw: false,
             unrestricted_http: false,
             mihon_source_id: None,
+            rate_limit: None,
         }
     }
 }
 
 impl Guest for Example {
-    fn get_metadata() -> Result<ExtensionMetadata, String> {
+    fn get_metadata() -> Result<ExtensionMetadata, wit_types::ExtensionError> {
         Ok(Example::metadata())
     }
 
@@ -49,11 +48,11 @@ impl Guest for Example {
         page: i32,
         page_size: i32,
         filters: Vec<wit_types::ActiveFilter>,
-    ) -> Result<MangaList, String> {
+    ) -> Result<MangaList, wit_types::ExtensionError> {
         let shared = to_shared_filters(filters);
         get_extension()
             .get_popular_manga(page, page_size, &shared)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
     fn search_manga(
@@ -61,21 +60,21 @@ impl Guest for Example {
         page: i32,
         page_size: i32,
         filters: Vec<wit_types::ActiveFilter>,
-    ) -> Result<MangaList, String> {
+    ) -> Result<MangaList, wit_types::ExtensionError> {
         let shared = to_shared_filters(filters);
         get_extension()
             .search_manga(&query, page, page_size, &shared)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
-    fn get_filter_list() -> Result<wit_types::FilterList, String> {
-        get_extension().get_filter_list().map_err(|e| e.to_string())
+    fn get_filter_list() -> Result<wit_types::FilterList, wit_types::ExtensionError> {
+        get_extension().get_filter_list().map_err(|e| e.into_wit())
     }
 
-    fn get_manga_details(manga_id: String) -> Result<MangaInfo, String> {
+    fn get_manga_details(manga_id: String) -> Result<MangaInfo, wit_types::ExtensionError> {
         get_extension()
             .get_manga_details(&manga_id)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
     fn get_chapter_list(
@@ -83,31 +82,33 @@ impl Guest for Example {
         page: i32,
         page_size: Option<i32>,
         sort: Option<String>,
-    ) -> Result<ChapterList, String> {
+    ) -> Result<ChapterList, wit_types::ExtensionError> {
         get_extension()
             .get_chapter_list(&manga_id, page, page_size, sort)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
-    fn get_chapter_sort_list() -> Result<Vec<wit_types::ChapterSortOption>, String> {
+    fn get_chapter_sort_list()
+    -> Result<Vec<wit_types::ChapterSortOption>, wit_types::ExtensionError> {
         get_extension()
             .get_chapter_sort_list()
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
-    fn get_pages(manga_id: String, chapter_id: String) -> Result<Chapter, String> {
+    fn get_pages(
+        manga_id: String,
+        chapter_id: String,
+    ) -> Result<Chapter, wit_types::ExtensionError> {
         get_extension()
             .get_pages(&manga_id, &chapter_id)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
-    fn get_preferences() -> Result<Vec<PreferenceSpec>, String> {
-        get_extension().get_preferences().map_err(|e| e.to_string())
+    fn get_preferences() -> Result<Vec<PreferenceSpec>, wit_types::ExtensionError> {
+        get_extension().get_preferences().map_err(|e| e.into_wit())
     }
-    fn get_url(manga_id: String) -> Result<String, String> {
-        get_extension()
-            .get_url(&manga_id)
-            .map_err(|e| e.to_string())
+    fn get_url(manga_id: String) -> Result<String, wit_types::ExtensionError> {
+        get_extension().get_url(&manga_id).map_err(|e| e.into_wit())
     }
 }
 

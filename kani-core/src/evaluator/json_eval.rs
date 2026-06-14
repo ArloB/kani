@@ -1,5 +1,5 @@
-use crate::evaluator::shared::{Env, Value, eval_common_expr, fetch_body};
-use kani_shared::ast::{Blueprint, Expr};
+use crate::evaluator::shared::{Env, Value, eval_common_expr, eval_fetch_field, fetch_body};
+use kani_shared::ast::{Blueprint, Expr, OffsetType};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -13,13 +13,30 @@ pub async fn extract_json(
         (None, Some(req)) => fetch_and_parse_json(state, req).await?,
         (None, None) => return Err("No document source".into()),
     };
+    extract_json_with_doc(state, doc, blueprint).await
+}
 
+pub async fn extract_json_str(
+    state: &mut crate::wasm::HostState,
+    body: &str,
+    blueprint: &Blueprint,
+) -> Result<serde_json::Value, String> {
+    let doc: serde_json::Value =
+        serde_json::from_str(body).map_err(|e| format!("JSON parse error: {}", e))?;
+    extract_json_with_doc(state, doc, blueprint).await
+}
+
+async fn extract_json_with_doc(
+    state: &mut crate::wasm::HostState,
+    doc: serde_json::Value,
+    blueprint: &Blueprint,
+) -> Result<serde_json::Value, String> {
     let mut env = Env::new();
     for (k, v) in &state.preferences {
         env.set(&format!("$pref:{}", k), Value::Str(v.clone()));
     }
     for binding in &blueprint.bindings {
-        let val = eval_json_expr(&binding.expr, &doc, None, env.clone()).await?;
+        let val = eval_json_field(state, &binding.expr, &doc, None, env.clone()).await?;
         env.set(&binding.name, val);
     }
 
@@ -30,8 +47,6 @@ pub async fn extract_json(
             .ok_or_else(|| format!("Container '{}' not found in document", blueprint.container))?
     };
 
-    // Arrays iterate element-by-element; anything else is a single-item container
-    // (used for details endpoints where the document root is the container).
     let items: Vec<&serde_json::Value> = match container_val.as_array() {
         Some(arr) => arr.iter().collect(),
         None => vec![container_val],
@@ -39,10 +54,11 @@ pub async fn extract_json(
 
     let mut scalars = serde_json::Map::new();
     for scalar in &blueprint.scalars {
-        let val = eval_json_expr(&scalar.expr, &doc, None, env.clone()).await?;
+        let val = eval_json_field(state, &scalar.expr, &doc, None, env.clone()).await?;
         match val.to_json() {
             Some(v) => {
-                scalars.insert(scalar.name.clone(), v);
+                scalars.insert(scalar.name.clone(), v.clone());
+                env.set(&format!("$scalar:{}", scalar.name), Value::Json(v));
             }
             None if scalar.optional => {
                 scalars.insert(scalar.name.clone(), serde_json::Value::Null);
@@ -55,7 +71,8 @@ pub async fn extract_json(
     for (index, item) in items.iter().enumerate() {
         let mut row = serde_json::Map::new();
         for field in &blueprint.fields {
-            let val = eval_json_expr(&field.expr, &doc, Some((item, index)), env.clone()).await?;
+            let val =
+                eval_json_field(state, &field.expr, &doc, Some((item, index)), env.clone()).await?;
             match val.to_json() {
                 Some(v) => {
                     row.insert(field.name.clone(), v);
@@ -70,6 +87,41 @@ pub async fn extract_json(
     }
 
     Ok(serde_json::json!({ "rows": results, "scalars": scalars }))
+}
+
+async fn eval_json_field(
+    state: &mut crate::wasm::HostState,
+    expr: &Expr,
+    doc: &serde_json::Value,
+    current: Option<(&serde_json::Value, usize)>,
+    env: Env,
+) -> Result<Value, String> {
+    if let Expr::Fetch {
+        url_expr,
+        blueprint: sub_bp,
+        method,
+        headers,
+        kind,
+    } = expr
+    {
+        let url_val = eval_json_expr(url_expr, doc, current, env.clone()).await?;
+        let url = match url_val {
+            Value::Str(s) => s,
+            _ => return Err("Fetch: url_expr must evaluate to a String".into()),
+        };
+        let mut resolved_headers = Vec::with_capacity(headers.len());
+        for (k_expr, v_expr) in headers {
+            let k = eval_json_expr(k_expr, doc, current, env.clone()).await?;
+            let v = eval_json_expr(v_expr, doc, current, env.clone()).await?;
+            match (k, v) {
+                (Value::Str(k), Value::Str(v)) => resolved_headers.push((k, v)),
+                _ => return Err("Fetch: header keys and values must be strings".into()),
+            }
+        }
+        eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind).await
+    } else {
+        eval_json_expr(expr, doc, current, env).await
+    }
 }
 
 /// Evaluates an expression in a JSON document context.
@@ -221,6 +273,112 @@ fn eval_json_expr<'a>(
             )),
         }
     })
+}
+
+pub async fn extract_json_paginated(
+    state: &mut crate::wasm::HostState,
+    page: i32,
+    page_size: i32,
+    blueprint: &Blueprint,
+) -> Result<serde_json::Value, String> {
+    let pagination = blueprint
+        .pagination
+        .as_ref()
+        .ok_or("paginated_extract_json called on blueprint without PaginationConfig")?;
+
+    let native_size = pagination.native_page_size;
+    let global_start = ((page - 1).max(0) as usize) * (page_size as usize);
+    let first_chunk_offset = (global_start / native_size) * native_size;
+    let offset_in_first_chunk = global_start % native_size;
+    let mut remaining = page_size as usize;
+    let mut current_chunk_offset = first_chunk_offset;
+    let mut all_rows: Vec<serde_json::Value> = Vec::new();
+    let has_next_page;
+
+    let mut cursor: Option<String> = None;
+
+    loop {
+        let mut chunk_bp = blueprint.clone();
+        if let Some(req) = &mut chunk_bp.request {
+            match &pagination.offset_type {
+                OffsetType::ItemOffset => {
+                    let offset_value = current_chunk_offset.to_string();
+                    req.queries.retain(|(k, _)| k != &pagination.offset_param);
+                    req.queries
+                        .push((pagination.offset_param.clone(), offset_value));
+                }
+                OffsetType::PageNumber { start } => {
+                    let offset_value =
+                        (current_chunk_offset / native_size + *start as usize).to_string();
+                    req.queries.retain(|(k, _)| k != &pagination.offset_param);
+                    req.queries
+                        .push((pagination.offset_param.clone(), offset_value));
+                }
+                OffsetType::CursorToken { .. } => {
+                    if let Some(ref c) = cursor {
+                        req.queries.retain(|(k, _)| k != &pagination.offset_param);
+                        req.queries
+                            .push((pagination.offset_param.clone(), c.clone()));
+                    }
+                }
+            }
+        }
+
+        let chunk_result = extract_json(state, None, &chunk_bp).await?;
+
+        let empty = vec![];
+        let rows = chunk_result["rows"].as_array().unwrap_or(&empty);
+        let chunk_len = rows.len();
+
+        let skip = if matches!(pagination.offset_type, OffsetType::CursorToken { .. }) {
+            0
+        } else if current_chunk_offset == first_chunk_offset {
+            offset_in_first_chunk
+        } else {
+            0
+        };
+        let available = chunk_len.saturating_sub(skip);
+        let to_take = available.min(remaining);
+
+        all_rows.extend_from_slice(&rows[skip..skip + to_take]);
+        remaining -= to_take;
+
+        if let OffsetType::CursorToken { next_cursor_field } = &pagination.offset_type {
+            let next = chunk_result["scalars"][next_cursor_field.as_str()]
+                .as_str()
+                .map(str::to_owned);
+            let scalar_hnp = chunk_result["scalars"]["has_next_page"].as_bool();
+            if remaining == 0 {
+                has_next_page = scalar_hnp.unwrap_or(next.is_some());
+                break;
+            }
+            if chunk_len == 0 || next.is_none() || scalar_hnp == Some(false) {
+                has_next_page = false;
+                break;
+            }
+            cursor = next;
+            continue;
+        }
+
+        let scalar_hnp = chunk_result["scalars"]["has_next_page"].as_bool();
+        let chunk_full = chunk_len >= native_size;
+
+        if remaining == 0 {
+            has_next_page = scalar_hnp.unwrap_or(chunk_full);
+            break;
+        }
+        if chunk_len == 0 || !chunk_full || scalar_hnp == Some(false) {
+            has_next_page = false;
+            break;
+        }
+
+        current_chunk_offset += native_size;
+    }
+
+    Ok(serde_json::json!({
+        "rows": all_rows,
+        "scalars": { "has_next_page": has_next_page }
+    }))
 }
 
 async fn fetch_and_parse_json(

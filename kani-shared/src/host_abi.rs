@@ -5,7 +5,7 @@
 
 use crate::{
     ExtensionError,
-    bindings::kani::extension::{html, http, json, utility},
+    bindings::kani::extension::{cache as cache_wit, html, http, json, utility},
 };
 
 pub use http::Method as HttpMethod;
@@ -93,8 +93,7 @@ impl HttpRequest {
 
     #[cfg(feature = "host")]
     pub fn json<T: serde::Serialize>(mut self, payload: &T) -> Result<Self, ExtensionError> {
-        let body =
-            serde_json::to_vec(payload).map_err(|e| ExtensionError::ParseError(e.to_string()))?;
+        let body = serde_json::to_vec(payload).map_err(|e| ExtensionError::parse(e.to_string()))?;
 
         self.body = Some(body);
         Ok(self.header("Content-Type", "application/json"))
@@ -145,14 +144,14 @@ impl HttpRequest {
     fn build_final_url(&self) -> Result<String, ExtensionError> {
         let url = match &self.url {
             Some(u) => u,
-            None => return Err(ExtensionError::Other("URL is not set".to_string())),
+            None => return Err(ExtensionError::unknown("URL is not set".to_string())),
         };
 
         if self.queries.is_empty() {
             return Ok(url.clone());
         }
 
-        crate::utility::build_url(url, &self.queries).map_err(crate::ExtensionError::Other)
+        crate::utility::build_url(url, &self.queries).map_err(crate::ExtensionError::unknown)
     }
 
     /// Send the request and get the response body as a string.
@@ -168,14 +167,14 @@ impl HttpRequest {
 
         match http::send(&req) {
             Ok(res) => Ok(res),
-            Err(e) => Err(ExtensionError::NetworkError(e)),
+            Err(e) => Err(ExtensionError::network(e)),
         }
     }
 
     pub fn send_html(self) -> Result<HtmlDocument, ExtensionError> {
         let resp = self.send()?;
         let html_string = String::from_utf8(resp.body)
-            .map_err(|_| ExtensionError::ParseError("Invalid UTF-8 in HTML".into()))?;
+            .map_err(|_| ExtensionError::parse("Invalid UTF-8 in HTML".into()))?;
         HtmlDocument::new(&html_string)
     }
 
@@ -183,7 +182,7 @@ impl HttpRequest {
         let res = self.send()?;
 
         if res.body.is_empty() {
-            return Err(ExtensionError::NetworkError("Empty response".to_string()));
+            return Err(ExtensionError::network("Empty response".to_string()));
         }
 
         JsonHandle::parse(&res.body)
@@ -192,7 +191,7 @@ impl HttpRequest {
     #[cfg(feature = "host")]
     pub fn send_json<T: serde::de::DeserializeOwned>(self) -> Result<T, ExtensionError> {
         let resp = self.send()?;
-        serde_json::from_slice(&resp.body).map_err(|e| ExtensionError::ParseError(e.to_string()))
+        serde_json::from_slice(&resp.body).map_err(|e| ExtensionError::parse(e.to_string()))
     }
 }
 
@@ -213,7 +212,7 @@ pub struct HtmlDocument {
 impl HtmlDocument {
     /// Parse an HTML string into a document
     pub fn new(html: &str) -> Result<Self, ExtensionError> {
-        let handle = html::parse(html).map_err(ExtensionError::Other)?;
+        let handle = html::parse(html).map_err(ExtensionError::unknown)?;
         Ok(Self { handle })
     }
 
@@ -476,7 +475,7 @@ impl JsonHandle {
 
     /// Parse raw response bytes into a host-side JSON value.
     pub fn parse(data: &[u8]) -> Result<Self, ExtensionError> {
-        let handle = json::parse(data).map_err(ExtensionError::ParseError)?;
+        let handle = json::parse(data).map_err(ExtensionError::parse)?;
         Ok(Self { handle })
     }
 
@@ -488,7 +487,7 @@ impl JsonHandle {
     /// Get a required string, returning ParseError if absent.
     pub fn require_str(&self, ptr: &str) -> Result<String, ExtensionError> {
         self.get_str(ptr)
-            .ok_or_else(|| ExtensionError::ParseError(format!("Missing required field: {}", ptr)))
+            .ok_or_else(|| ExtensionError::parse(format!("Missing required field: {}", ptr)))
     }
 
     pub fn get_i64(&self, ptr: &str) -> Option<i64> {
@@ -510,7 +509,7 @@ impl JsonHandle {
 
     /// Returns a child handle for the element at ptr[index].
     pub fn array_get(&self, ptr: &str, index: i32) -> Result<JsonHandle, ExtensionError> {
-        let child = json::array_get(self.handle, ptr, index).map_err(ExtensionError::ParseError)?;
+        let child = json::array_get(self.handle, ptr, index).map_err(ExtensionError::parse)?;
         Ok(JsonHandle { handle: child })
     }
 
@@ -660,7 +659,7 @@ pub mod extract {
     /// Returns a `JsonHandle` wrapping `[{field: value, ...}, ...]`.
     pub fn html(doc: Option<i32>, blueprint: &Blueprint) -> Result<JsonHandle, ExtensionError> {
         let bytes = blueprint.to_bytes();
-        let handle = extraction::extract_html(doc, &bytes).map_err(ExtensionError::Other)?;
+        let handle = extraction::extract_html(doc, &bytes).map_err(ExtensionError::unknown)?;
         Ok(JsonHandle::from_raw(handle))
     }
 
@@ -669,7 +668,7 @@ pub mod extract {
     pub fn json(handle: Option<i32>, blueprint: &Blueprint) -> Result<JsonHandle, ExtensionError> {
         let bytes = blueprint.to_bytes();
         let result_handle =
-            extraction::extract_json(handle, &bytes).map_err(ExtensionError::Other)?;
+            extraction::extract_json(handle, &bytes).map_err(ExtensionError::unknown)?;
         Ok(JsonHandle::from_raw(result_handle))
     }
 
@@ -682,7 +681,21 @@ pub mod extract {
     ) -> Result<JsonHandle, ExtensionError> {
         let bytes = blueprint.to_bytes();
         let handle = extraction::paginated_extract_html(page, page_size, &bytes)
-            .map_err(ExtensionError::Other)?;
+            .map_err(ExtensionError::unknown)?;
+        Ok(JsonHandle::from_raw(handle))
+    }
+
+    /// Run a paginated JSON extraction.  The blueprint must include a `PaginationConfig`;
+    /// the host handles multi-chunk fetching, stitching, and `has_next_page` detection.
+    /// Supports `OffsetType::ItemOffset`, `PageNumber`, and `CursorToken`.
+    pub fn paginated_json(
+        page: i32,
+        page_size: i32,
+        blueprint: &Blueprint,
+    ) -> Result<JsonHandle, ExtensionError> {
+        let bytes = blueprint.to_bytes();
+        let handle = extraction::paginated_extract_json(page, page_size, &bytes)
+            .map_err(ExtensionError::unknown)?;
         Ok(JsonHandle::from_raw(handle))
     }
 }
@@ -703,13 +716,13 @@ pub mod extract_raw {
 
     /// Run a blueprint extraction over a pre-fetched HTML document handle.
     pub fn html(doc: Option<i32>, bytes: &[u8]) -> Result<JsonHandle, ExtensionError> {
-        let handle = extraction::extract_html(doc, bytes).map_err(ExtensionError::Other)?;
+        let handle = extraction::extract_html(doc, bytes).map_err(ExtensionError::unknown)?;
         Ok(JsonHandle::from_raw(handle))
     }
 
     /// Run a blueprint extraction over a pre-fetched JSON handle.
     pub fn json(handle: Option<i32>, bytes: &[u8]) -> Result<JsonHandle, ExtensionError> {
-        let result = extraction::extract_json(handle, bytes).map_err(ExtensionError::Other)?;
+        let result = extraction::extract_json(handle, bytes).map_err(ExtensionError::unknown)?;
         Ok(JsonHandle::from_raw(result))
     }
 
@@ -726,7 +739,24 @@ pub mod extract_raw {
         let handle = extraction::paginated_extract_html_raw(
             page, page_size, &url, &method, &headers, &queries, bytes,
         )
-        .map_err(ExtensionError::Other)?;
+        .map_err(ExtensionError::unknown)?;
+        Ok(JsonHandle::from_raw(handle))
+    }
+
+    /// Run a paginated JSON extraction.  The blueprint bytes must include a
+    /// `PaginationConfig` but no `RequestDef`; the request is provided separately
+    /// so the host can attach it before each paginated fetch.
+    pub fn paginated_json(
+        page: i32,
+        page_size: i32,
+        req: HttpRequest,
+        bytes: &[u8],
+    ) -> Result<JsonHandle, ExtensionError> {
+        let (url, method, headers, queries) = req.into_extract_parts()?;
+        let handle = extraction::paginated_extract_json_raw(
+            page, page_size, &url, &method, &headers, &queries, bytes,
+        )
+        .map_err(ExtensionError::unknown)?;
         Ok(JsonHandle::from_raw(handle))
     }
 }
@@ -896,12 +926,12 @@ pub mod v8_context {
     /// Creates a named V8 context by running `init_script` in a fresh Node.js
     /// vm.createContext sandbox. Idempotent: if the context already exists this is a no-op.
     pub fn create(name: &str, init_script: &str) -> Result<(), ExtensionError> {
-        scripting::v8_context_create(name, init_script).map_err(ExtensionError::Other)
+        scripting::v8_context_create(name, init_script).map_err(ExtensionError::unknown)
     }
 
     /// Evaluates `script` in the named V8 context. The script must produce a string value.
     pub fn eval(name: &str, script: &str) -> Result<String, ExtensionError> {
-        scripting::v8_context_eval(name, script).map_err(ExtensionError::Other)
+        scripting::v8_context_eval(name, script).map_err(ExtensionError::unknown)
     }
 
     /// Drops the named context and frees its memory on the host.
@@ -921,7 +951,7 @@ pub mod v8_context {
         force_refresh: bool,
     ) -> Result<String, ExtensionError> {
         scripting::capture_url_param(page_url, url_pattern, param, timeout_ms, force_refresh)
-            .map_err(ExtensionError::Other)
+            .map_err(ExtensionError::unknown)
     }
 
     pub fn capture_page_payload(
@@ -930,6 +960,26 @@ pub mod v8_context {
         timeout_ms: u32,
     ) -> Result<String, ExtensionError> {
         scripting::capture_page_payload(page_url, init_script, timeout_ms)
-            .map_err(ExtensionError::Other)
+            .map_err(ExtensionError::unknown)
+    }
+}
+
+pub mod cache {
+    use super::cache_wit;
+
+    pub fn get(key: &str) -> Option<Vec<u8>> {
+        cache_wit::get(key)
+    }
+
+    pub fn put(key: &str, value: Vec<u8>, ttl_secs: u32) {
+        cache_wit::put(key, &value, ttl_secs);
+    }
+
+    pub fn delete(key: &str) {
+        cache_wit::delete(key);
+    }
+
+    pub fn clear() {
+        cache_wit::clear();
     }
 }

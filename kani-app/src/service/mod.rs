@@ -40,6 +40,7 @@ mod filters;
 pub mod fs_browse;
 pub mod import;
 mod library;
+pub mod metadata_provider;
 mod migration;
 pub mod opds;
 pub mod password_policy;
@@ -53,6 +54,7 @@ pub mod sessions;
 mod settings;
 mod sources;
 mod stats;
+pub mod streaming;
 pub mod totp;
 pub mod trackers;
 pub mod traits;
@@ -70,6 +72,7 @@ pub struct AppService {
     pub refresh_tx: tokio::sync::broadcast::Sender<AppEvent>,
     pub refresh_task: Arc<tokio::sync::Mutex<Option<tokio::task::AbortHandle>>>,
     pub cache: RequestCache,
+    pub ext_cache: std::sync::Arc<dyn kani_core::cache::CacheBackend>,
     pub shutdown_token: tokio_util::sync::CancellationToken,
     pub tracker_registry: Arc<tokio::sync::RwLock<TrackerRegistry>>,
     /// Manga IDs whose cover download failed and should be retried.
@@ -79,6 +82,8 @@ pub struct AppService {
     /// Present when `KANI_SECRET_KEY` or `KANI_SECRET_KEY_FILE` is set at startup.
     pub encryption: Option<Arc<encryption::CredentialCipher>>,
     pub webhook_service: webhooks::WebhookService,
+    pub metadata_provider_registry:
+        Arc<tokio::sync::RwLock<metadata_provider::MetadataProviderRegistry>>,
 }
 
 /// Load a credential cipher from env vars, or auto-provision one at `data_dir/secret.key`.
@@ -258,6 +263,8 @@ impl AppService {
         tracing::info!("Smart client created");
 
         let cache = RequestCache::new();
+        let ext_cache: std::sync::Arc<dyn kani_core::cache::CacheBackend> =
+            std::sync::Arc::new(crate::cache::SqliteCache::new(pool.clone()));
 
         if let Err(e) = Self::scan_and_register_sources(
             &pool,
@@ -297,6 +304,7 @@ impl AppService {
 
             let prefs = Self::load_pref_map_static(&pool, source.id).await?;
 
+            let ns = format!("{}:", source.name);
             let source_manager = SourceManager::new(
                 wasm_runtime.engine().clone(),
                 instance_pre,
@@ -305,6 +313,8 @@ impl AppService {
                 source.unrestricted_http,
                 25,
                 prefs,
+                std::sync::Arc::clone(&ext_cache),
+                ns,
             );
 
             sources_map.insert(source.id, Arc::new(source_manager));
@@ -354,12 +364,16 @@ impl AppService {
             refresh_tx,
             refresh_task,
             cache,
+            ext_cache,
             shutdown_token,
             tracker_registry: Arc::new(tokio::sync::RwLock::new(tracker_registry)),
             cover_retry_queue: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             email_service: Arc::new(tokio::sync::RwLock::new(email_svc)),
             encryption: enc,
             webhook_service,
+            metadata_provider_registry: Arc::new(tokio::sync::RwLock::new(
+                metadata_provider::MetadataProviderRegistry::new(),
+            )),
         };
 
         // Encrypt any plaintext credentials left over from pre-encryption installs.
@@ -439,12 +453,16 @@ impl AppService {
             refresh_tx,
             refresh_task: Arc::new(tokio::sync::Mutex::new(None)),
             cache: RequestCache::new(),
+            ext_cache: std::sync::Arc::new(kani_core::cache::InMemoryCache::new()),
             shutdown_token: tokio_util::sync::CancellationToken::new(),
             tracker_registry: Arc::new(tokio::sync::RwLock::new(tracker_registry)),
             cover_retry_queue: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             email_service: Arc::new(tokio::sync::RwLock::new(None)),
             encryption: None,
             webhook_service: webhooks::WebhookService::new(pool),
+            metadata_provider_registry: Arc::new(tokio::sync::RwLock::new(
+                metadata_provider::MetadataProviderRegistry::new(),
+            )),
         }
     }
 
@@ -716,6 +734,21 @@ impl AppService {
                         }
                     }
                 }
+            }
+        });
+    }
+
+    pub fn spawn_cache_prune(&self) {
+        let cache = std::sync::Arc::clone(&self.ext_cache);
+        let token = self.shutdown_token.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(600));
+            loop {
+                tokio::select! {
+                    _ = token.cancelled() => break,
+                    _ = interval.tick() => {}
+                }
+                cache.prune_expired().await;
             }
         });
     }

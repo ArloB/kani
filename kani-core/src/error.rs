@@ -42,7 +42,7 @@ pub enum Error {
     IntConversion(#[from] std::num::TryFromIntError),
 
     #[error("Extension error: {0}")]
-    Extension(String),
+    Extension(kani_shared::extension::ExtensionError),
 
     #[error("{0}")]
     Other(String),

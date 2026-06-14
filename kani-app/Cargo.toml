@@ -51,6 +51,7 @@ dunce         = "1"
 
 [features]
 test-util = []
+streaming-chapters = ["kani-core/streaming-chapters"]
 
 [dev-dependencies]
 kani-core   = { path = "../kani-core" }

@@ -17,27 +17,31 @@
 //!   search_manga(query="extract-html") → extraction::extract_html with a Blueprint
 //!   search_manga(query="extract-json") → extraction::extract_json with a Blueprint
 //!   get_manga_details("error-paths")   → invalid-handle error return verification
+//!   get_chapter_list("error-network")  → ExtensionError::Network kind round-trip
+//!   get_chapter_list("error-parse")    → ExtensionError::Parse kind round-trip
+//!   get_chapter_list("error-not-found")→ ExtensionError::NotFound kind round-trip
+//!   get_chapter_list("error-rate-limited") → ExtensionError::RateLimited kind round-trip
+//!   get_chapter_list("error-auth")     → ExtensionError::Auth kind round-trip
+//!   get_chapter_list("error-timeout")  → ExtensionError::Timeout kind round-trip
+//!   get_chapter_list("error-internal") → ExtensionError::Internal kind round-trip
 
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::bindings::kani::extension::{json, prefs as prefs_raw};
 use kani_shared::html;
 use kani_shared::utility;
 use kani_shared::{
-    ExtensionError, ExtensionResult, MangaExtension, MangaStatus,
-    ast::{BlueprintBuilder, Expr},
-    bindings, ext_version,
+    ExtensionError, ExtensionResult, MangaExtension, MangaStatus, bindings, ext_version,
     host_abi::{extract, prefs},
     to_shared_filters,
     types::ActiveFilter,
     wit_types,
 };
 use wit_types::{
-    Chapter, ChapterList, ExtensionMetadata, MangaInfo, MangaList, MangaListItem, PreferenceSpec,
+    Chapter, ChapterList, ExtensionError as WitError, ExtensionMetadata, MangaInfo, MangaList,
+    MangaListItem, PreferenceSpec,
 };
 
-#[cfg(target_family = "wasm")]
-#[global_allocator]
-static ALLOCATOR: talc::TalckWasm = unsafe { talc::TalckWasm::new_global() };
+kani_shared::guest_alloc!();
 
 pub struct TestAbi;
 
@@ -62,6 +66,7 @@ impl TestAbi {
             nsfw: false,
             unrestricted_http: false,
             mihon_source_id: None,
+            rate_limit: None,
         }
     }
 }
@@ -92,36 +97,36 @@ const HTML_DOC: &str = r#"<html><body>
 </body></html>"#;
 
 fn test_html_imports() -> ExtensionResult<MangaList> {
-    let doc = html::parse(HTML_DOC).map_err(ExtensionError::Other)?;
+    let doc = html::parse(HTML_DOC).map_err(ExtensionError::unknown)?;
 
-    let list_h = html::select(doc, ".card").map_err(ExtensionError::Other)?;
-    let len = html::list_len(list_h).map_err(ExtensionError::Other)?;
+    let list_h = html::select(doc, ".card").map_err(ExtensionError::unknown)?;
+    let len = html::list_len(list_h).map_err(ExtensionError::unknown)?;
     if len != 1 {
-        return Err(ExtensionError::Other(format!(
+        return Err(ExtensionError::unknown(format!(
             "expected list_len=1, got {}",
             len
         )));
     }
-    let elem = html::list_get(list_h, 0).map_err(ExtensionError::Other)?;
+    let elem = html::list_get(list_h, 0).map_err(ExtensionError::unknown)?;
 
     let id_val = html::attr(elem, "", "data-id")
-        .map_err(ExtensionError::Other)?
+        .map_err(ExtensionError::unknown)?
         .unwrap_or_default();
 
     let title_val = html::text(elem, ".title")
-        .map_err(ExtensionError::Other)?
+        .map_err(ExtensionError::unknown)?
         .unwrap_or_default();
 
-    let first_opt = html::first(doc, ".card").map_err(ExtensionError::Other)?;
-    let first_h = first_opt.ok_or_else(|| ExtensionError::Other("first returned None".into()))?;
+    let first_opt = html::first(doc, ".card").map_err(ExtensionError::unknown)?;
+    let first_h = first_opt.ok_or_else(|| ExtensionError::unknown("first returned None".into()))?;
 
-    let _inner = html::inner_html(elem).map_err(ExtensionError::Other)?;
-    let outer = html::outer_html(elem).map_err(ExtensionError::Other)?;
+    let _inner = html::inner_html(elem).map_err(ExtensionError::unknown)?;
+    let outer = html::outer_html(elem).map_err(ExtensionError::unknown)?;
 
-    let child_list = html::children(elem).map_err(ExtensionError::Other)?;
-    let child_len = html::list_len(child_list).map_err(ExtensionError::Other)?;
+    let child_list = html::children(elem).map_err(ExtensionError::unknown)?;
+    let child_len = html::list_len(child_list).map_err(ExtensionError::unknown)?;
     if child_len < 2 {
-        return Err(ExtensionError::Other(format!(
+        return Err(ExtensionError::unknown(format!(
             "expected >=2 children, got {}",
             child_len
         )));
@@ -153,43 +158,43 @@ const JSON_DOC: &[u8] = br#"{
 }"#;
 
 fn test_json_imports() -> ExtensionResult<MangaList> {
-    let h = json::parse(JSON_DOC).map_err(ExtensionError::ParseError)?;
+    let h = json::parse(JSON_DOC).map_err(ExtensionError::parse)?;
 
     let name = json::get_str(h, "/name")
-        .map_err(ExtensionError::Other)?
+        .map_err(ExtensionError::unknown)?
         .unwrap_or_default();
 
     let age = json::get_i64(h, "/age")
-        .map_err(ExtensionError::Other)?
+        .map_err(ExtensionError::unknown)?
         .unwrap_or(0);
 
     let active = json::get_bool(h, "/active")
-        .map_err(ExtensionError::Other)?
+        .map_err(ExtensionError::unknown)?
         .unwrap_or(false);
 
     let score = json::get_f64(h, "/score")
-        .map_err(ExtensionError::Other)?
+        .map_err(ExtensionError::unknown)?
         .unwrap_or(0.0);
 
     let tag_count = json::array_len(h, "/tags")
-        .map_err(ExtensionError::Other)?
+        .map_err(ExtensionError::unknown)?
         .unwrap_or(0);
 
-    let tag0_h = json::array_get(h, "/tags", 0).map_err(ExtensionError::Other)?;
+    let tag0_h = json::array_get(h, "/tags", 0).map_err(ExtensionError::unknown)?;
     let tag0 = json::get_str(tag0_h, "")
-        .map_err(ExtensionError::Other)?
+        .map_err(ExtensionError::unknown)?
         .unwrap_or_default();
     json::drop_json(tag0_h);
 
-    let keys = json::object_keys(h, "").map_err(ExtensionError::Other)?;
+    let keys = json::object_keys(h, "").map_err(ExtensionError::unknown)?;
 
-    let nested_opt = json::object_get(h, "", "nested").map_err(ExtensionError::Other)?;
+    let nested_opt = json::object_get(h, "", "nested").map_err(ExtensionError::unknown)?;
     if let Some(nested_h) = nested_opt {
-        let _val = json::get_str(nested_h, "/key").map_err(ExtensionError::Other)?;
+        let _val = json::get_str(nested_h, "/key").map_err(ExtensionError::unknown)?;
         json::drop_json(nested_h);
     }
 
-    let json_str = json::to_string(h).map_err(ExtensionError::Other)?;
+    let json_str = json::to_string(h).map_err(ExtensionError::unknown)?;
 
     json::drop_json(h);
 
@@ -211,21 +216,21 @@ fn test_json_imports() -> ExtensionResult<MangaList> {
 // ── Utility host imports (page = 3) ──────────────────────────────────────────
 
 fn test_utility_imports() -> ExtensionResult<MangaList> {
-    // date_parse (time-crate format descriptor)
-    let ts1 =
-        utility::date_parse("2024-01-15", "[year]-[month]-[day]").map_err(ExtensionError::Other)?;
+    let ts1 = utility::date_parse("2024-01-15", "[year]-[month]-[day]")
+        .map_err(ExtensionError::unknown)?;
 
-    let ts2 = utility::date_parse_rfc3339("2024-01-15T00:00:00Z").map_err(ExtensionError::Other)?;
+    let ts2 =
+        utility::date_parse_rfc3339("2024-01-15T00:00:00Z").map_err(ExtensionError::unknown)?;
 
     if ts1 != ts2 {
-        return Err(ExtensionError::Other(format!(
+        return Err(ExtensionError::unknown(format!(
             "date mismatch: date_parse={} vs rfc3339={}",
             ts1, ts2
         )));
     }
 
     let _resolved =
-        utility::resolve_url("https://example.com/a/b", "/c").map_err(ExtensionError::Other)?;
+        utility::resolve_url("https://example.com/a/b", "/c").map_err(ExtensionError::unknown)?;
 
     let built = utility::build_url(
         "https://example.com",
@@ -234,27 +239,21 @@ fn test_utility_imports() -> ExtensionResult<MangaList> {
             ("sort".to_string(), "asc".to_string()),
         ],
     )
-    .map_err(ExtensionError::Other)?;
+    .map_err(ExtensionError::unknown)?;
 
     let encoded = utility::url_encode("hello world");
-    let decoded = utility::url_decode(&encoded).map_err(ExtensionError::Other)?;
+    let decoded = utility::url_decode(&encoded).map_err(ExtensionError::unknown)?;
 
     let pg_val = utility::get_query_param(&built, "pg");
 
-    // encode_form (just verify it doesn't error; content depends on url-encoding impl)
     let _form = utility::encode_form(&[
         ("a".to_string(), "b c".to_string()),
         ("d".to_string(), "e".to_string()),
     ]);
 
-    // log — fire and forget; host logs to tracing
     utility::log(1, 0, "kani-test-abi utility test");
 
-    Ok(list(vec![item(
-        "util-ok",
-        &decoded,          // "hello world"
-        pg_val.as_deref(), // Some("5")
-    )]))
+    Ok(list(vec![item("util-ok", &decoded, pg_val.as_deref())]))
 }
 
 // ── Prefs host imports (query = "prefs") ─────────────────────────────────────
@@ -277,11 +276,7 @@ fn test_prefs_imports() -> ExtensionResult<MangaList> {
         Some("prefs-fail")
     };
 
-    Ok(list(vec![item(
-        &str_val,              // host-injected "injected_value"
-        &bool_val.to_string(), // "true"
-        cover,
-    )]))
+    Ok(list(vec![item(&str_val, &bool_val.to_string(), cover)]))
 }
 
 // ── extraction::extract_html (query = "extract-html") ────────────────────────
@@ -294,7 +289,8 @@ const EXTRACT_HTML: &str = r#"<html><body>
 </body></html>"#;
 
 fn test_extract_html() -> ExtensionResult<MangaList> {
-    let doc = html::parse(EXTRACT_HTML).map_err(ExtensionError::Other)?;
+    use kani_shared::ast::{BlueprintBuilder, Expr};
+    let doc = html::parse(EXTRACT_HTML).map_err(ExtensionError::unknown)?;
 
     let bp = BlueprintBuilder::new(".item")
         .field("id", Expr::self_ref().attr("data-id"))
@@ -303,11 +299,10 @@ fn test_extract_html() -> ExtensionResult<MangaList> {
 
     let result = extract::html(Some(doc), &bp)?;
 
-    // Drop the source doc (extraction does not consume the handle)
     html::drop_doc(doc);
 
     if result.rows_len() == 0 {
-        return Err(ExtensionError::Other(
+        return Err(ExtensionError::unknown(
             "extract_html returned no rows".into(),
         ));
     }
@@ -332,7 +327,8 @@ const EXTRACT_JSON: &[u8] = br#"{
 }"#;
 
 fn test_extract_json() -> ExtensionResult<MangaList> {
-    let h = json::parse(EXTRACT_JSON).map_err(ExtensionError::ParseError)?;
+    use kani_shared::ast::{BlueprintBuilder, Expr};
+    let h = json::parse(EXTRACT_JSON).map_err(ExtensionError::parse)?;
 
     let bp = BlueprintBuilder::new("/items")
         .field("id", Expr::self_ref().ptr("/manga_id").str_val())
@@ -341,11 +337,10 @@ fn test_extract_json() -> ExtensionResult<MangaList> {
 
     let result = extract::json(Some(h), &bp)?;
 
-    // Drop the source JSON handle (extraction does not consume it)
     json::drop_json(h);
 
     if result.rows_len() == 0 {
-        return Err(ExtensionError::Other(
+        return Err(ExtensionError::unknown(
             "extract_json returned no rows".into(),
         ));
     }
@@ -363,7 +358,6 @@ fn test_extract_json() -> ExtensionResult<MangaList> {
 // ── Error-path verification (manga_id = "error-paths") ───────────────────────
 
 fn test_error_paths() -> ExtensionResult<MangaInfo> {
-    // All of these must return Err for invalid handles
     let invalid_list: i32 = 9999;
     let invalid_doc: i32 = 9998;
     let invalid_json: i32 = 9997;
@@ -424,10 +418,30 @@ fn test_error_paths() -> ExtensionResult<MangaInfo> {
     })
 }
 
+// ── Error kind round-trip (manga_id = "error-*") ─────────────────────────────
+
+fn test_error_kind(manga_id: &str) -> ExtensionResult<ChapterList> {
+    match manga_id {
+        "error-network" => Err(ExtensionError::network("connection refused".into())
+            .with_url("https://example.com/api?q=1")),
+        "error-parse" => Err(ExtensionError::parse("unexpected token".into())),
+        "error-not-found" => Err(ExtensionError::not_found("manga not found".into())),
+        "error-rate-limited" => Err(ExtensionError::rate_limited_with_retry(60)),
+        "error-auth" => Err(ExtensionError::auth("token expired".into())),
+        "error-timeout" => Err(ExtensionError::timeout("request timed out".into())),
+        "error-internal" => Err(ExtensionError::internal("unexpected state".into())),
+        _ => Ok(ChapterList {
+            chapters: vec![],
+            has_next_page: false,
+            total_pages: None,
+        }),
+    }
+}
+
 // ── Guest trait (WIT boundary) ───────────────────────────────────────────────
 
 impl Guest for TestAbi {
-    fn get_metadata() -> Result<ExtensionMetadata, String> {
+    fn get_metadata() -> Result<ExtensionMetadata, WitError> {
         Ok(TestAbi::metadata())
     }
 
@@ -435,11 +449,11 @@ impl Guest for TestAbi {
         page: i32,
         page_size: i32,
         filters: Vec<wit_types::ActiveFilter>,
-    ) -> Result<MangaList, String> {
+    ) -> Result<MangaList, WitError> {
         let shared = to_shared_filters(filters);
         get_extension()
             .get_popular_manga(page, page_size, &shared)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
     fn search_manga(
@@ -447,21 +461,21 @@ impl Guest for TestAbi {
         page: i32,
         page_size: i32,
         filters: Vec<wit_types::ActiveFilter>,
-    ) -> Result<MangaList, String> {
+    ) -> Result<MangaList, WitError> {
         let shared = to_shared_filters(filters);
         get_extension()
             .search_manga(&query, page, page_size, &shared)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
-    fn get_filter_list() -> Result<wit_types::FilterList, String> {
-        get_extension().get_filter_list().map_err(|e| e.to_string())
+    fn get_filter_list() -> Result<wit_types::FilterList, WitError> {
+        get_extension().get_filter_list().map_err(|e| e.into_wit())
     }
 
-    fn get_manga_details(manga_id: String) -> Result<MangaInfo, String> {
+    fn get_manga_details(manga_id: String) -> Result<MangaInfo, WitError> {
         get_extension()
             .get_manga_details(&manga_id)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
     fn get_chapter_list(
@@ -469,32 +483,30 @@ impl Guest for TestAbi {
         page: i32,
         page_size: Option<i32>,
         sort: Option<String>,
-    ) -> Result<ChapterList, String> {
+    ) -> Result<ChapterList, WitError> {
         get_extension()
             .get_chapter_list(&manga_id, page, page_size, sort)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
-    fn get_chapter_sort_list() -> Result<Vec<wit_types::ChapterSortOption>, String> {
+    fn get_chapter_sort_list() -> Result<Vec<wit_types::ChapterSortOption>, WitError> {
         get_extension()
             .get_chapter_sort_list()
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
-    fn get_pages(manga_id: String, chapter_id: String) -> Result<Chapter, String> {
+    fn get_pages(manga_id: String, chapter_id: String) -> Result<Chapter, WitError> {
         get_extension()
             .get_pages(&manga_id, &chapter_id)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.into_wit())
     }
 
-    fn get_preferences() -> Result<Vec<PreferenceSpec>, String> {
-        get_extension().get_preferences().map_err(|e| e.to_string())
+    fn get_preferences() -> Result<Vec<PreferenceSpec>, WitError> {
+        get_extension().get_preferences().map_err(|e| e.into_wit())
     }
 
-    fn get_url(manga_id: String) -> Result<String, String> {
-        get_extension()
-            .get_url(&manga_id)
-            .map_err(|e| e.to_string())
+    fn get_url(manga_id: String) -> Result<String, WitError> {
+        get_extension().get_url(&manga_id).map_err(|e| e.into_wit())
     }
 }
 
@@ -545,22 +557,18 @@ impl MangaExtension for TestAbi {
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
         match manga_id {
             "error-paths" => test_error_paths(),
-            _ => Err(ExtensionError::NotFound(manga_id.to_string())),
+            _ => Err(ExtensionError::not_found(manga_id.to_string())),
         }
     }
 
     fn get_chapter_list(
         &self,
-        _manga_id: &str,
+        manga_id: &str,
         _page: i32,
         _page_size: Option<i32>,
         _sort: Option<String>,
     ) -> ExtensionResult<ChapterList> {
-        Ok(ChapterList {
-            chapters: vec![],
-            has_next_page: false,
-            total_pages: None,
-        })
+        test_error_kind(manga_id)
     }
 
     fn get_pages(&self, _manga_id: &str, _chapter_id: &str) -> ExtensionResult<Chapter> {

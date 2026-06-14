@@ -17,9 +17,12 @@ pub struct SourceManager {
     preferences: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
     /// Shared Node.js V8 subprocess handle. Lazy-spawned on first use, shared across all leases.
     v8_process: crate::v8_process::V8ProcessHandle,
+    ext_cache: Arc<dyn crate::cache::CacheBackend>,
+    ext_cache_namespace: String,
 }
 
 impl SourceManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         engine: wasmtime::Engine,
         instance_pre: KaniExtensionPre<HostState>,
@@ -28,6 +31,8 @@ impl SourceManager {
         unrestricted_http: bool,
         max_concurrent: usize,
         preferences: std::collections::HashMap<String, String>,
+        ext_cache: Arc<dyn crate::cache::CacheBackend>,
+        ext_cache_namespace: String,
     ) -> Self {
         Self {
             engine,
@@ -38,6 +43,8 @@ impl SourceManager {
             unrestricted_http,
             preferences: Arc::new(std::sync::RwLock::new(preferences)),
             v8_process: Arc::new(Mutex::new(None)),
+            ext_cache,
+            ext_cache_namespace,
         }
     }
 
@@ -66,6 +73,8 @@ impl SourceManager {
             HostState::new(
                 self.smart_client.clone(),
                 allowed_host,
+                Arc::clone(&self.ext_cache),
+                self.ext_cache_namespace.clone(),
                 Arc::clone(&self.v8_process),
             )?,
         );

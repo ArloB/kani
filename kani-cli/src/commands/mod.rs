@@ -95,6 +95,58 @@ pub enum Command {
     },
     /// Run the workspace quality checks (clippy, machete, deny, fmt) in sequence
     Lint,
+    /// REPL: inspect, explain, test, replay, or record a YAML extension
+    #[command(subcommand)]
+    Repl(ReplCommand),
+}
+
+#[derive(Subcommand)]
+pub enum ReplCommand {
+    /// Show a structured summary of a YAML extension (endpoints, fields, filters)
+    Inspect {
+        /// Path to the YAML extension file
+        file: String,
+    },
+    /// Parse a DSL expression and print its evaluation trace as an indented tree
+    Explain {
+        /// DSL expression to trace (e.g. 'first("a").attr("href").split("/").at(-1)')
+        expression: String,
+    },
+    /// Run an endpoint against a HAR fixture and assert the row count
+    Test {
+        /// Path to the YAML extension file
+        file: String,
+        /// Path to the HAR fixture file
+        har: String,
+        /// Endpoint name: popular, search, manga_details, chapter_list, pages
+        endpoint: String,
+        /// Expected number of rows
+        expected_count: usize,
+    },
+    /// Run an endpoint against a HAR fixture and diff the output against an expected JSON file
+    Replay {
+        /// Path to the YAML extension file
+        file: String,
+        /// Path to the HAR fixture file
+        har: String,
+        /// Endpoint name: popular, search, manga_details, chapter_list, pages
+        endpoint: String,
+        /// Path to the expected JSON output file
+        expected: String,
+    },
+    /// Make a live HTTP request to an endpoint and save the response as a HAR file
+    Record {
+        /// Path to the YAML extension file
+        file: String,
+        /// Endpoint name: popular, search, manga_details, chapter_list, pages
+        endpoint: String,
+        /// Arguments for route placeholders and query params (e.g. manga_id=abc page=1)
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+        /// Output HAR file path
+        #[arg(long, short, default_value = "recorded.har")]
+        output: String,
+    },
 }
 
 pub fn run(cli: Cli) -> Result<(), CliError> {
@@ -132,5 +184,27 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         Command::Icons => icons::run(),
         Command::Dsl { expression } => dsl_cmd::run(&expression),
         Command::Lint => lint::run(),
+        Command::Repl(repl_cmd) => match repl_cmd {
+            ReplCommand::Inspect { file } => crate::repl::inspect::run(&file),
+            ReplCommand::Explain { expression } => crate::repl::explain::run(&expression),
+            ReplCommand::Test {
+                file,
+                har,
+                endpoint,
+                expected_count,
+            } => crate::repl::test_cmd::run_test(&file, &har, &endpoint, expected_count),
+            ReplCommand::Replay {
+                file,
+                har,
+                endpoint,
+                expected,
+            } => crate::repl::test_cmd::run_replay(&file, &har, &endpoint, &expected),
+            ReplCommand::Record {
+                file,
+                endpoint,
+                args,
+                output,
+            } => crate::repl::record::run(&file, &endpoint, &args, &output),
+        },
     }
 }

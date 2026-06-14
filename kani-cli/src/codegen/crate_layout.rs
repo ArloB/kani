@@ -72,6 +72,8 @@ use kani_shared::{{
 }};
 {ast_import}use wit_types::{{Chapter, ChapterList, ChapterInfo, ExtensionMetadata, MangaInfo, MangaList, MangaListItem, Page, PreferenceSpec}};
 
+kani_shared::guest_alloc!();
+
 pub struct {struct_name} {{
     base_url: String,
 }}
@@ -106,61 +108,61 @@ pub fn emit_guest_impl(ext: &ValidatedExtension) -> String {
     let struct_name = to_pascal_case(&ext.id);
 
     let popular_impl: String = if ext.popular.is_some() {
-        "    fn get_popular_manga(page: i32, page_size: i32, filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, String> {\n\
+        "    fn get_popular_manga(page: i32, page_size: i32, filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, wit_types::ExtensionError> {\n\
          let shared = to_shared_filters(filters);\n\
-         get_extension().get_popular_manga(page, page_size, &shared).map_err(|e| e.to_string())\n\
+         get_extension().get_popular_manga(page, page_size, &shared).map_err(|e| e.into_wit())\n\
          }\n".to_string()
     } else {
-        "    fn get_popular_manga(_page: i32, _page_size: i32, _filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, String> {\n\
+        "    fn get_popular_manga(_page: i32, _page_size: i32, _filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, wit_types::ExtensionError> {\n\
          Ok(MangaList { manga: vec![], has_next_page: false })\n\
          }\n".to_string()
     };
 
     let search_impl: String = if ext.search.is_some() {
-        "    fn search_manga(query: String, page: i32, page_size: i32, filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, String> {\n\
+        "    fn search_manga(query: String, page: i32, page_size: i32, filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, wit_types::ExtensionError> {\n\
          let shared = to_shared_filters(filters);\n\
-         get_extension().search_manga(&query, page, page_size, &shared).map_err(|e| e.to_string())\n\
+         get_extension().search_manga(&query, page, page_size, &shared).map_err(|e| e.into_wit())\n\
          }\n".to_string()
     } else {
-        "    fn search_manga(_query: String, _page: i32, _page_size: i32, _filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, String> {\n\
+        "    fn search_manga(_query: String, _page: i32, _page_size: i32, _filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, wit_types::ExtensionError> {\n\
          Ok(MangaList { manga: vec![], has_next_page: false })\n\
          }\n".to_string()
     };
 
     format!(
         r#"impl Guest for {struct_name} {{
-    fn get_metadata() -> Result<ExtensionMetadata, String> {{
+    fn get_metadata() -> Result<ExtensionMetadata, wit_types::ExtensionError> {{
         Ok({struct_name}::metadata())
     }}
 
 {popular_impl}
 {search_impl}
-    fn get_filter_list() -> Result<wit_types::FilterList, String> {{
-        get_extension().get_filter_list().map_err(|e| e.to_string())
+    fn get_filter_list() -> Result<wit_types::FilterList, wit_types::ExtensionError> {{
+        get_extension().get_filter_list().map_err(|e| e.into_wit())
     }}
 
-    fn get_manga_details(manga_id: String) -> Result<MangaInfo, String> {{
-        get_extension().get_manga_details(&manga_id).map_err(|e| e.to_string())
+    fn get_manga_details(manga_id: String) -> Result<MangaInfo, wit_types::ExtensionError> {{
+        get_extension().get_manga_details(&manga_id).map_err(|e| e.into_wit())
     }}
 
-    fn get_chapter_list(manga_id: String, page: i32, page_size: Option<i32>, sort: Option<String>) -> Result<ChapterList, String> {{
-        get_extension().get_chapter_list(&manga_id, page, page_size, sort).map_err(|e| e.to_string())
+    fn get_chapter_list(manga_id: String, page: i32, page_size: Option<i32>, sort: Option<String>) -> Result<ChapterList, wit_types::ExtensionError> {{
+        get_extension().get_chapter_list(&manga_id, page, page_size, sort).map_err(|e| e.into_wit())
     }}
 
-    fn get_chapter_sort_list() -> Result<Vec<wit_types::ChapterSortOption>, String> {{
-        get_extension().get_chapter_sort_list().map_err(|e| e.to_string())
+    fn get_chapter_sort_list() -> Result<Vec<wit_types::ChapterSortOption>, wit_types::ExtensionError> {{
+        get_extension().get_chapter_sort_list().map_err(|e| e.into_wit())
     }}
 
-    fn get_pages(manga_id: String, chapter_id: String) -> Result<Chapter, String> {{
-        get_extension().get_pages(&manga_id, &chapter_id).map_err(|e| e.to_string())
+    fn get_pages(manga_id: String, chapter_id: String) -> Result<Chapter, wit_types::ExtensionError> {{
+        get_extension().get_pages(&manga_id, &chapter_id).map_err(|e| e.into_wit())
     }}
 
-    fn get_preferences() -> Result<Vec<PreferenceSpec>, String> {{
-        get_extension().get_preferences().map_err(|e| e.to_string())
+    fn get_preferences() -> Result<Vec<PreferenceSpec>, wit_types::ExtensionError> {{
+        get_extension().get_preferences().map_err(|e| e.into_wit())
     }}
 
-    fn get_url(manga_id: String) -> Result<String, String> {{
-        get_extension().get_url(&manga_id).map_err(|e| e.to_string())
+    fn get_url(manga_id: String) -> Result<String, wit_types::ExtensionError> {{
+        get_extension().get_url(&manga_id).map_err(|e| e.into_wit())
     }}
 }}
 

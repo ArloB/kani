@@ -2127,6 +2127,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "governor"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9efcab3c1958580ff1f25a2a41be1668f7603d849bb63af523b208a3cc1223b8"
+dependencies = [
+ "cfg-if",
+ "dashmap",
+ "futures-sink",
+ "futures-timer",
+ "futures-util",
+ "hashbrown 0.16.1",
+ "nonzero_ext",
+ "parking_lot",
+ "portable-atomic",
+ "smallvec",
+ "spinning_top",
+ "web-time",
+]
+
+[[package]]
 name = "h2"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2178,6 +2198,8 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.2.0",
 ]
 
@@ -2940,7 +2962,6 @@ name = "kani-comix"
 version = "0.1.0"
 dependencies = [
  "kani-shared",
- "talc",
 ]
 
 [[package]]
@@ -2948,12 +2969,14 @@ name = "kani-core"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
+ "async-trait",
  "async_zip",
  "bytes",
  "dashmap",
  "dunce",
  "ego-tree",
  "futures",
+ "governor 0.10.4",
  "hickory-resolver",
  "image",
  "imagesize",
@@ -2988,7 +3011,6 @@ name = "kani-cubari"
 version = "0.1.0"
 dependencies = [
  "kani-shared",
- "talc",
 ]
 
 [[package]]
@@ -2996,7 +3018,6 @@ name = "kani-example"
 version = "0.1.0"
 dependencies = [
  "kani-shared",
- "talc",
 ]
 
 [[package]]
@@ -3004,7 +3025,6 @@ name = "kani-mangadex"
 version = "0.1.0"
 dependencies = [
  "kani-shared",
- "talc",
 ]
 
 [[package]]
@@ -3030,6 +3050,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "talc",
  "time",
  "wit-bindgen 0.53.1",
 ]
@@ -3047,7 +3068,6 @@ name = "kani-test-abi"
 version = "0.1.0"
 dependencies = [
  "kani-shared",
- "talc",
 ]
 
 [[package]]
@@ -6158,7 +6178,7 @@ checksum = "57a2ccff6830fa835371af7541e561a90e4c07b84f72991ebac4b3cb6790dc0d"
 dependencies = [
  "axum",
  "forwarded-header-value",
- "governor",
+ "governor 0.8.1",
  "http",
  "pin-project",
  "thiserror 2.0.18",

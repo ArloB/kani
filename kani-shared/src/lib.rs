@@ -54,3 +54,15 @@ pub use ast::{OffsetType, PaginationConfig};
 
 pub mod filters;
 pub use filters::{ApplyFilters, ArrayFormat, FilterGroups};
+
+#[cfg(target_family = "wasm")]
+pub use talc::TalckWasm as __TalckWasm;
+
+#[macro_export]
+macro_rules! guest_alloc {
+    () => {
+        #[cfg(target_family = "wasm")]
+        #[global_allocator]
+        static ALLOCATOR: $crate::__TalckWasm = unsafe { $crate::__TalckWasm::new_global() };
+    };
+}

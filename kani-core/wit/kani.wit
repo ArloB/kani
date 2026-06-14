@@ -80,6 +80,26 @@ interface json {
 }
 
 interface types {
+    enum extension-error-kind {
+        network,
+        parse,
+        not-found,
+        rate-limited,
+        auth,
+        content-unavailable,
+        timeout,
+        invalid-input,
+        internal,
+        unknown,
+    }
+
+    record extension-error {
+        kind: extension-error-kind,
+        message: string,
+        source-url: option<string>,
+        retry-after-secs: option<u32>,
+    }
+
     enum manga-status {
         ongoing,
         completed,
@@ -143,6 +163,12 @@ interface types {
         pages: list<page>
     }
 
+    record rate-limit-config {
+        requests-per-second: f32,
+        burst: u32,
+        max-concurrent: u32,
+    }
+
     record extension-metadata {
         id: string,
         name: string,
@@ -152,6 +178,12 @@ interface types {
         nsfw: bool,
         unrestricted-http: bool,
         mihon-source-id: option<s64>,
+        rate-limit: option<rate-limit-config>,
+    }
+
+    record chapter-list-chunk {
+        chapters: list<chapter-info>,
+        cursor: option<string>,
     }
 
     enum filter-type-tag {
@@ -232,21 +264,28 @@ interface prefs {
 }
 
 interface manga-provider {
-    use types.{manga-list, manga-info, chapter-list, chapter, extension-metadata, preference-spec, filter-list, active-filter, chapter-sort-option};
+    use types.{manga-list, manga-info, chapter-list, chapter, extension-metadata, preference-spec, filter-list, active-filter, chapter-sort-option, extension-error};
 
-    get-metadata: func() -> result<extension-metadata, string>;
+    get-metadata: func() -> result<extension-metadata, extension-error>;
 
-    get-popular-manga: func(page: s32, page-size: s32, filters: list<active-filter>) -> result<manga-list, string>;
-    search-manga: func(query: string, page: s32, page-size: s32, filters: list<active-filter>) -> result<manga-list, string>;
-    get-manga-details: func(manga-id: string) -> result<manga-info, string>;
-    get-chapter-list: func(manga-id: string, page: s32, page-size: option<s32>, sort: option<string>) -> result<chapter-list, string>;
-    get-pages: func(manga-id: string, chapter-id: string) -> result<chapter, string>;
+    get-popular-manga: func(page: s32, page-size: s32, filters: list<active-filter>) -> result<manga-list, extension-error>;
+    search-manga: func(query: string, page: s32, page-size: s32, filters: list<active-filter>) -> result<manga-list, extension-error>;
+    get-manga-details: func(manga-id: string) -> result<manga-info, extension-error>;
+    get-chapter-list: func(manga-id: string, page: s32, page-size: option<s32>, sort: option<string>) -> result<chapter-list, extension-error>;
+    get-pages: func(manga-id: string, chapter-id: string) -> result<chapter, extension-error>;
 
-    get-chapter-sort-list: func() -> result<list<chapter-sort-option>, string>;
-    get-filter-list: func() -> result<filter-list, string>;
-    get-preferences: func() -> result<list<preference-spec>, string>;
+    get-chapter-sort-list: func() -> result<list<chapter-sort-option>, extension-error>;
+    get-filter-list: func() -> result<filter-list, extension-error>;
+    get-preferences: func() -> result<list<preference-spec>, extension-error>;
 
-    get-url: func(manga-id: string) -> result<string, string>;
+    get-url: func(manga-id: string) -> result<string, extension-error>;
+}
+
+interface streaming-chapter-provider {
+    use types.{chapter-list-chunk, extension-error};
+
+    chapter-list-init: func(manga-id: string) -> result<string, extension-error>;
+    chapter-list-next: func(cursor: string) -> result<chapter-list-chunk, extension-error>;
 }
 
 interface extraction {
@@ -259,6 +298,17 @@ interface extraction {
     // Like paginated-extract-html but the request is provided separately so blueprint bytes
     // need not contain a RequestDef (used by the embedded-bytes codegen path).
     paginated-extract-html-raw: func(page: s32, page-size: s32, url: string, method: string, headers: list<tuple<string, string>>, queries: list<tuple<string, string>>, blueprint: list<u8>) -> result<s32, string>;
+    // Like paginated-extract-html but for JSON sources.
+    paginated-extract-json: func(page: s32, page-size: s32, blueprint: list<u8>) -> result<s32, string>;
+    // Like paginated-extract-json but the request is provided separately.
+    paginated-extract-json-raw: func(page: s32, page-size: s32, url: string, method: string, headers: list<tuple<string, string>>, queries: list<tuple<string, string>>, blueprint: list<u8>) -> result<s32, string>;
+}
+
+interface cache {
+    get: func(key: string) -> option<list<u8>>;
+    put: func(key: string, value: list<u8>, ttl-secs: u32);
+    delete: func(key: string);
+    clear: func();
 }
 
 interface scripting {
@@ -297,6 +347,21 @@ world kani-extension {
     import json;
     import prefs;
     import extraction;
+    import cache;
     import scripting;
     export manga-provider;
+}
+
+world kani-extension-streaming {
+    import types;
+    import http;
+    import html;
+    import utility;
+    import json;
+    import prefs;
+    import extraction;
+    import cache;
+    import scripting;
+    export manga-provider;
+    export streaming-chapter-provider;
 }

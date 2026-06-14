@@ -1,6 +1,8 @@
 use crate::models::ReadingStats;
 use dashmap::DashMap;
+use kani_core::cache::CacheBackend;
 use moka::future::Cache;
+use sqlx::SqlitePool;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -211,6 +213,113 @@ impl Default for RequestCache {
     fn default() -> Self {
         Self::new()
     }
+}
+
+const NS_MAX_BYTES: i64 = 4 * 1024 * 1024;
+const NS_MAX_ROWS: i64 = 4096;
+
+pub struct SqliteCache {
+    pool: SqlitePool,
+}
+
+impl SqliteCache {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait::async_trait]
+impl CacheBackend for SqliteCache {
+    async fn get(&self, namespace: &str, key: &str) -> Option<Vec<u8>> {
+        let now = now_secs();
+        sqlx::query_as::<_, (Vec<u8>,)>(
+            "SELECT value FROM extension_cache WHERE namespace = ? AND key = ? AND expires_at > ?",
+        )
+        .bind(namespace)
+        .bind(key)
+        .bind(now)
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|(v,)| v)
+    }
+
+    async fn put(&self, namespace: &str, key: &str, value: Vec<u8>, ttl: Duration) {
+        let expires_at = now_secs() + ttl.as_secs() as i64;
+
+        let _ = sqlx::query(
+            "INSERT OR REPLACE INTO extension_cache (namespace, key, value, expires_at)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(namespace)
+        .bind(key)
+        .bind(&value)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await;
+
+        let _ = sqlx::query(
+            "DELETE FROM extension_cache WHERE namespace = ? AND key IN (
+                SELECT key FROM extension_cache WHERE namespace = ?
+                ORDER BY expires_at ASC
+                LIMIT MAX(0, (SELECT COUNT(*) FROM extension_cache WHERE namespace = ?) - ?)
+             )",
+        )
+        .bind(namespace)
+        .bind(namespace)
+        .bind(namespace)
+        .bind(NS_MAX_ROWS)
+        .execute(&self.pool)
+        .await;
+
+        let _ = sqlx::query(
+            "DELETE FROM extension_cache WHERE namespace = ? AND key IN (
+                SELECT key FROM extension_cache WHERE namespace = ?
+                ORDER BY expires_at ASC
+                LIMIT MAX(0, (
+                    SELECT MAX(0, SUM(LENGTH(value)) - ?) / MAX(1, AVG(LENGTH(value)))
+                    FROM extension_cache WHERE namespace = ?
+                ))
+             )",
+        )
+        .bind(namespace)
+        .bind(namespace)
+        .bind(NS_MAX_BYTES)
+        .bind(namespace)
+        .execute(&self.pool)
+        .await;
+    }
+
+    async fn delete(&self, namespace: &str, key: &str) {
+        let _ = sqlx::query("DELETE FROM extension_cache WHERE namespace = ? AND key = ?")
+            .bind(namespace)
+            .bind(key)
+            .execute(&self.pool)
+            .await;
+    }
+
+    async fn clear_namespace(&self, namespace: &str) {
+        let _ = sqlx::query("DELETE FROM extension_cache WHERE namespace = ?")
+            .bind(namespace)
+            .execute(&self.pool)
+            .await;
+    }
+
+    async fn prune_expired(&self) {
+        let now = now_secs();
+        let _ = sqlx::query("DELETE FROM extension_cache WHERE expires_at <= ?")
+            .bind(now)
+            .execute(&self.pool)
+            .await;
+    }
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 #[cfg(test)]

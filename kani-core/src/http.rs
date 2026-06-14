@@ -1,8 +1,9 @@
 use crate::{error::Result, network::ValidatingResolver};
 use arc_swap::ArcSwap;
 use futures::{TryStream, TryStreamExt};
+use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use serde_json::json;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, num::NonZeroU32, sync::Arc};
 
 const MAX_RETRIES: u32 = 3;
 const BASE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
@@ -10,6 +11,11 @@ const CREDENTIAL_TTL_SECS: u64 = 3600;
 const RETRY_AFTER_CAP_SECS: u64 = 60;
 const CIRCUIT_OPEN_THRESHOLD: u32 = 5;
 const CIRCUIT_COOLDOWN_SECS: u64 = 30;
+
+pub struct RateState {
+    limiter: DefaultDirectRateLimiter,
+    semaphore: Arc<tokio::sync::Semaphore>,
+}
 
 pub struct HostCircuit {
     consecutive_failures: std::sync::atomic::AtomicU32,
@@ -157,6 +163,7 @@ pub struct SmartClient {
     solver_url: Arc<ArcSwap<Option<String>>>,
     pub solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub host_circuits: Arc<dashmap::DashMap<String, Arc<HostCircuit>>>,
+    pub rate_states: Arc<dashmap::DashMap<String, Arc<RateState>>>,
 }
 
 impl SmartClient {
@@ -177,6 +184,7 @@ impl SmartClient {
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
             solving: Arc::new(dashmap::DashMap::new()),
             host_circuits: Arc::new(dashmap::DashMap::new()),
+            rate_states: Arc::new(dashmap::DashMap::new()),
         })
     }
 
@@ -202,7 +210,29 @@ impl SmartClient {
             solver_url: Arc::new(ArcSwap::from_pointee(solver_url)),
             solving,
             host_circuits,
+            rate_states: Arc::new(dashmap::DashMap::new()),
         })
+    }
+
+    /// Registers a per-domain rate limit config. Called at source load time.
+    pub fn register_rate_limit(&self, domain: &str, cfg: &kani_shared::extension::RateLimitConfig) {
+        let period_ns = (1_000_000_000.0 / cfg.requests_per_second.max(0.001)) as u64;
+        let burst = NonZeroU32::new(cfg.burst.max(1)).unwrap_or(NonZeroU32::MIN);
+        let quota = Quota::with_period(std::time::Duration::from_nanos(period_ns))
+            .expect("rate limit period must be > 0")
+            .allow_burst(burst);
+        let limiter = RateLimiter::direct(quota);
+        let max_concurrent = cfg.max_concurrent.max(1) as usize;
+        let state = Arc::new(RateState {
+            limiter,
+            semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
+        });
+        self.rate_states.insert(domain.to_string(), state);
+    }
+
+    /// Removes the rate limit state for a domain. Called when a source is removed or reloaded.
+    pub fn deregister_rate_limit(&self, domain: &str) {
+        self.rate_states.remove(domain);
     }
 
     fn circuit_for(&self, domain: &str) -> Arc<HostCircuit> {
@@ -296,6 +326,16 @@ impl SmartClient {
                 "Circuit open for {domain}: host temporarily unavailable"
             )));
         }
+
+        let rate_state = self.rate_states.get(&domain).map(|r| Arc::clone(&*r));
+        if let Some(ref state) = rate_state {
+            state.limiter.until_ready().await;
+        }
+        let _semaphore_permit = if let Some(ref state) = rate_state {
+            state.semaphore.clone().acquire_owned().await.ok()
+        } else {
+            None
+        };
 
         let mut current_request = request;
         let mut attempt = 0;
@@ -978,6 +1018,7 @@ impl SmartClient {
             solver_url: Arc::new(ArcSwap::from_pointee(None)),
             solving: Arc::new(dashmap::DashMap::new()),
             host_circuits: Arc::new(dashmap::DashMap::new()),
+            rate_states: Arc::new(dashmap::DashMap::new()),
         })
     }
 }
@@ -1512,5 +1553,75 @@ mod tests {
             panic!("expected error for bad redirect scheme");
         };
         assert!(err.to_string().contains("forbidden scheme"), "{err}");
+    }
+
+    // ── Rate limiting ────────────────────────────────────────────────────────
+
+    #[test]
+    fn register_and_deregister_rate_limit() {
+        let client = SmartClient::new(None).unwrap();
+        let cfg = kani_shared::extension::RateLimitConfig {
+            requests_per_second: 10.0,
+            burst: 5,
+            max_concurrent: 3,
+        };
+        client.register_rate_limit("example.com", &cfg);
+        assert!(client.rate_states.contains_key("example.com"));
+        client.deregister_rate_limit("example.com");
+        assert!(!client.rate_states.contains_key("example.com"));
+    }
+
+    #[tokio::test]
+    async fn rate_limiter_shapes_burst() {
+        let client = SmartClient::new(None).unwrap();
+        let cfg = kani_shared::extension::RateLimitConfig {
+            requests_per_second: 100.0,
+            burst: 3,
+            max_concurrent: 10,
+        };
+        client.register_rate_limit("test.local", &cfg);
+        let state = client
+            .rate_states
+            .get("test.local")
+            .map(|r| Arc::clone(&*r))
+            .unwrap();
+
+        let mut passed = 0u32;
+        let mut blocked = 0u32;
+        for _ in 0..6 {
+            match state.limiter.check() {
+                Ok(_) => passed += 1,
+                Err(_) => blocked += 1,
+            }
+        }
+        assert_eq!(passed, 3, "only burst={} requests pass immediately", 3);
+        assert_eq!(blocked, 3, "remaining requests are rate-limited");
+    }
+
+    #[tokio::test]
+    async fn semaphore_caps_concurrency() {
+        let client = SmartClient::new(None).unwrap();
+        let cfg = kani_shared::extension::RateLimitConfig {
+            requests_per_second: 100.0,
+            burst: 100,
+            max_concurrent: 2,
+        };
+        client.register_rate_limit("sem.local", &cfg);
+        let state = client
+            .rate_states
+            .get("sem.local")
+            .map(|r| Arc::clone(&*r))
+            .unwrap();
+
+        let p1 = state.semaphore.clone().try_acquire_owned().ok();
+        let p2 = state.semaphore.clone().try_acquire_owned().ok();
+        let p3 = state.semaphore.clone().try_acquire_owned();
+
+        assert!(p1.is_some(), "first permit acquired");
+        assert!(p2.is_some(), "second permit acquired");
+        assert!(p3.is_err(), "third permit denied (max_concurrent=2)");
+        drop(p1);
+        let p4 = state.semaphore.clone().try_acquire_owned();
+        assert!(p4.is_ok(), "permit available after release");
     }
 }

@@ -11,6 +11,7 @@ concurrency:
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   warm:
@@ -19,10 +20,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift
+          sudo docker image prune --all --force
+          df -h
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
           components: rustfmt
+
+      - name: Install mold linker
+        run: sudo apt-get install -y mold
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -30,7 +40,7 @@ jobs:
           cache-on-failure: true
 
       - name: Build workspace (populate cache)
-        run: cargo build --locked
+        run: cargo build --locked --tests
 
       - name: Cache kani-cli binary
         uses: actions/cache@v5
@@ -42,3 +52,14 @@ jobs:
       - name: Build kani-cli
         if: steps.kani-cli-cache.outputs.cache-hit != 'true'
         run: cargo build --release -p kani-cli
+
+      - name: Cache WASM extensions
+        uses: actions/cache@v5
+        id: wasm-cache
+        with:
+          path: wasm_sources/
+          key: wasm-${{ runner.os }}-${{ hashFiles('kani-extensions/**', 'kani-shared/**', 'kani-core/wit/**', 'kani-cli/**', 'Cargo.lock') }}
+
+      - name: Build dev/test WASM extensions
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
+        run: ./target/release/kani-cli build --dev

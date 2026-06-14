@@ -27,6 +27,21 @@ pub mod bindings {
     });
 }
 
+#[cfg(feature = "streaming-chapters")]
+pub mod streaming_bindings {
+    wasmtime::component::bindgen!({
+        path: "wit/kani.wit",
+        world: "kani-extension-streaming",
+        imports: {
+            "kani:extension/http": async,
+        },
+        exports: {
+            default: async
+        },
+        additional_derives: [serde::Serialize, serde::Deserialize]
+    });
+}
+
 pub use bindings::KaniExtension;
 pub use bindings::KaniExtensionPre;
 pub use bindings::exports;
@@ -96,6 +111,10 @@ pub struct HostState {
     pub call_started_at: std::time::Instant,
     pub io_count: u32,
     pub last_io_at: Option<std::time::Instant>,
+    /// Cache backend shared across all calls for this source. The namespace prefix
+    /// (`{extension_id}:{version}:{scope}:`) is resolved at construction time.
+    pub ext_cache: std::sync::Arc<dyn crate::cache::CacheBackend>,
+    pub ext_cache_namespace: String,
     /// Handle to the shared Node.js V8 subprocess. Lazy-spawned on first use.
     pub v8_process: crate::v8_process::V8ProcessHandle,
 }
@@ -134,6 +153,8 @@ impl HostState {
     pub fn new(
         http_client: SmartClient,
         allowed_host: AllowedHost,
+        ext_cache: std::sync::Arc<dyn crate::cache::CacheBackend>,
+        ext_cache_namespace: String,
         v8_process: crate::v8_process::V8ProcessHandle,
     ) -> Result<Self> {
         let allowed_host = match allowed_host {
@@ -166,6 +187,8 @@ impl HostState {
             call_started_at: std::time::Instant::now(),
             io_count: 0,
             last_io_at: None,
+            ext_cache,
+            ext_cache_namespace,
             v8_process,
         })
     }
@@ -175,6 +198,17 @@ impl HostState {
         self.html_lists.clear();
         self.json_docs.clear();
         self.next_doc_handle = 1;
+    }
+
+    pub fn charge_io(&mut self) -> std::result::Result<(), String> {
+        self.io_count += 1;
+        if self.io_count > 32 {
+            return Err("Extension exceeded maximum HTTP request count".into());
+        }
+        if self.call_started_at.elapsed().as_secs() > 120 {
+            return Err("Extension exceeded maximum wall time".into());
+        }
+        Ok(())
     }
 
     /// Returns an error string if the total live handle count is at or above
@@ -242,6 +276,8 @@ impl Default for HostState {
         HostState::new(
             SmartClient::new(None).unwrap(),
             AllowedHost::MetadataOnly,
+            Arc::new(crate::cache::InMemoryCache::new()),
+            String::new(),
             Arc::new(Mutex::new(None)),
         )
         .unwrap()
@@ -360,5 +396,78 @@ pub mod filter_conversions {
                 state: f.state.clone().into(),
             })
             .collect()
+    }
+}
+
+pub fn ext_error_from_wit(
+    e: kani::extension::types::ExtensionError,
+) -> kani_shared::extension::ExtensionError {
+    use kani::extension::types::ExtensionErrorKind as WitKind;
+    use kani_shared::extension::ExtensionErrorKind;
+    let kind = match e.kind {
+        WitKind::Network => ExtensionErrorKind::Network,
+        WitKind::Parse => ExtensionErrorKind::Parse,
+        WitKind::NotFound => ExtensionErrorKind::NotFound,
+        WitKind::RateLimited => ExtensionErrorKind::RateLimited,
+        WitKind::Auth => ExtensionErrorKind::Auth,
+        WitKind::ContentUnavailable => ExtensionErrorKind::ContentUnavailable,
+        WitKind::Timeout => ExtensionErrorKind::Timeout,
+        WitKind::InvalidInput => ExtensionErrorKind::InvalidInput,
+        WitKind::Internal => ExtensionErrorKind::Internal,
+        WitKind::Unknown => ExtensionErrorKind::Unknown,
+    };
+    kani_shared::extension::ExtensionError {
+        kind,
+        message: e.message,
+        source_url: e.source_url.map(|u| redact_url(&u)),
+        retry_after_secs: e.retry_after_secs,
+    }
+}
+
+fn redact_url(url: &str) -> String {
+    let url = strip_userinfo(url);
+    strip_sensitive_params(&url)
+}
+
+fn strip_userinfo(url: &str) -> String {
+    if let Some(scheme_end) = url.find("://") {
+        let after_scheme = &url[scheme_end + 3..];
+        let host_end = after_scheme.find('/').unwrap_or(after_scheme.len());
+        let authority = &after_scheme[..host_end];
+        if let Some(at_pos) = authority.rfind('@') {
+            let host = &authority[at_pos + 1..];
+            let rest = &after_scheme[host_end..];
+            return format!("{}{}{}", &url[..scheme_end + 3], host, rest);
+        }
+    }
+    url.to_string()
+}
+
+fn strip_sensitive_params(url: &str) -> String {
+    const SENSITIVE: &[&str] = &["token", "api_key", "session", "password", "signature"];
+    let (base, fragment) = match url.find('#') {
+        Some(p) => (&url[..p], Some(&url[p..])),
+        None => (url, None),
+    };
+    let Some(q_pos) = base.find('?') else {
+        return url.to_string();
+    };
+    let path = &base[..q_pos];
+    let query = &base[q_pos + 1..];
+    let filtered: Vec<&str> = query
+        .split('&')
+        .filter(|pair| {
+            let key = pair.split('=').next().unwrap_or("");
+            !SENSITIVE.iter().any(|s| key.eq_ignore_ascii_case(s))
+        })
+        .collect();
+    let result = if filtered.is_empty() {
+        path.to_string()
+    } else {
+        format!("{}?{}", path, filtered.join("&"))
+    };
+    match fragment {
+        Some(f) => format!("{}{}", result, f),
+        None => result,
     }
 }

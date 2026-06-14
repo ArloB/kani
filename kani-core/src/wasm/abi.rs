@@ -5,28 +5,33 @@
 
 use super::{HostState, SendHtml, StoredNode};
 use crate::evaluator::html_eval::{extract_html, extract_html_paginated};
-use crate::evaluator::json_eval::extract_json;
+use crate::evaluator::json_eval::{extract_json, extract_json_paginated};
 use crate::utilities::parse_date_flexible;
 use crate::wasm::kani::extension::{
-    extraction, html, http, json, prefs, scripting, types, utility,
+    cache, extraction, html, http, json, prefs, scripting, types, utility,
 };
 
 use postcard;
 
 const MAX_HTTP_RESPONSE_BYTES: usize = 15 * 1024 * 1024; // 15 MB
 
+fn decode_blueprint(bytes: &[u8]) -> Result<kani_shared::ast::Blueprint, String> {
+    let (version, rest) = postcard::take_from_bytes::<u32>(bytes)
+        .map_err(|e| format!("Invalid blueprint header: {}", e))?;
+    if version != kani_shared::ast::DSL_SCHEMA_VERSION {
+        return Err(format!(
+            "Blueprint DSL schema version {} is not supported (host requires {}); recompile the extension",
+            version,
+            kani_shared::ast::DSL_SCHEMA_VERSION,
+        ));
+    }
+    postcard::from_bytes(rest).map_err(|e| format!("Invalid blueprint: {}", e))
+}
+
 impl http::Host for HostState {
     #[tracing::instrument(level = "debug", skip(self, req), fields(method = ?req.method, url = %req.url))]
     async fn send(&mut self, req: http::Request) -> wasmtime::Result<http::Response, String> {
-        self.io_count += 1;
-
-        if self.io_count > 32 {
-            return Err("Extension exceeded maximum HTTP request count".into());
-        }
-
-        if self.call_started_at.elapsed().as_secs() > 120 {
-            return Err("Extension exceeded maximum wall time".into());
-        }
+        self.charge_io()?;
 
         let method = match req.method {
             http::Method::Get => rquest::Method::GET,
@@ -457,8 +462,7 @@ impl extraction::Host for HostState {
         doc: Option<i32>,
         blueprint: Vec<u8>,
     ) -> wasmtime::Result<i32, String> {
-        let bp: kani_shared::ast::Blueprint =
-            postcard::from_bytes(&blueprint).map_err(|e| format!("Invalid blueprint: {}", e))?;
+        let bp = decode_blueprint(&blueprint)?;
         let value = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(extract_html(self, doc, &bp))
         })?;
@@ -475,8 +479,7 @@ impl extraction::Host for HostState {
         page_size: i32,
         blueprint: Vec<u8>,
     ) -> wasmtime::Result<i32, String> {
-        let bp: kani_shared::ast::Blueprint =
-            postcard::from_bytes(&blueprint).map_err(|e| format!("Invalid blueprint: {}", e))?;
+        let bp = decode_blueprint(&blueprint)?;
         let value = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
                 .block_on(extract_html_paginated(self, page, page_size, &bp))
@@ -493,8 +496,7 @@ impl extraction::Host for HostState {
         doc: Option<i32>,
         blueprint: Vec<u8>,
     ) -> wasmtime::Result<i32, String> {
-        let bp: kani_shared::ast::Blueprint =
-            postcard::from_bytes(&blueprint).map_err(|e| format!("Invalid blueprint: {}", e))?;
+        let bp = decode_blueprint(&blueprint)?;
         let value = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(extract_json(self, doc, &bp))
         })?;
@@ -515,6 +517,53 @@ impl extraction::Host for HostState {
         queries: Vec<(String, String)>,
         blueprint: Vec<u8>,
     ) -> wasmtime::Result<i32, String> {
+        let mut bp = decode_blueprint(&blueprint)?;
+        bp.request = Some(kani_shared::ast::RequestDef {
+            url,
+            method,
+            headers,
+            queries,
+        });
+        let value = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(extract_html_paginated(self, page, page_size, &bp))
+        })?;
+        self.check_handle_capacity()?;
+        let handle = self.next_doc_handle;
+        self.next_doc_handle += 1;
+        self.json_docs.insert(handle, value);
+        Ok(handle)
+    }
+
+    fn paginated_extract_json(
+        &mut self,
+        page: i32,
+        page_size: i32,
+        blueprint: Vec<u8>,
+    ) -> wasmtime::Result<i32, String> {
+        let bp: kani_shared::ast::Blueprint =
+            postcard::from_bytes(&blueprint).map_err(|e| format!("Invalid blueprint: {}", e))?;
+        let value = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(extract_json_paginated(self, page, page_size, &bp))
+        })?;
+        self.check_handle_capacity()?;
+        let handle = self.next_doc_handle;
+        self.next_doc_handle += 1;
+        self.json_docs.insert(handle, value);
+        Ok(handle)
+    }
+
+    fn paginated_extract_json_raw(
+        &mut self,
+        page: i32,
+        page_size: i32,
+        url: String,
+        method: String,
+        headers: Vec<(String, String)>,
+        queries: Vec<(String, String)>,
+        blueprint: Vec<u8>,
+    ) -> wasmtime::Result<i32, String> {
         let mut bp: kani_shared::ast::Blueprint =
             postcard::from_bytes(&blueprint).map_err(|e| format!("Invalid blueprint: {}", e))?;
         bp.request = Some(kani_shared::ast::RequestDef {
@@ -525,7 +574,7 @@ impl extraction::Host for HostState {
         });
         let value = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
-                .block_on(extract_html_paginated(self, page, page_size, &bp))
+                .block_on(extract_json_paginated(self, page, page_size, &bp))
         })?;
         self.check_handle_capacity()?;
         let handle = self.next_doc_handle;
@@ -560,13 +609,7 @@ impl scripting::Host for HostState {
         timeout_ms: u32,
         force_refresh: bool,
     ) -> Result<String, String> {
-        self.io_count += 1;
-        if self.io_count > 32 {
-            return Err("Extension exceeded maximum request count".into());
-        }
-        if self.call_started_at.elapsed().as_secs() > 120 {
-            return Err("Extension exceeded maximum wall time".into());
-        }
+        self.charge_io()?;
         let result = crate::v8_process::capture_url_param(
             &self.v8_process,
             &page_url,
@@ -587,13 +630,7 @@ impl scripting::Host for HostState {
         init_script: String,
         timeout_ms: u32,
     ) -> Result<String, String> {
-        self.io_count += 1;
-        if self.io_count > 32 {
-            return Err("Extension exceeded maximum request count".into());
-        }
-        if self.call_started_at.elapsed().as_secs() > 120 {
-            return Err("Extension exceeded maximum wall time".into());
-        }
+        self.charge_io()?;
         let result = crate::v8_process::capture_page_payload(
             &self.v8_process,
             &page_url,
@@ -602,5 +639,44 @@ impl scripting::Host for HostState {
         );
         self.last_io_at = Some(std::time::Instant::now());
         result
+    }
+}
+
+impl cache::Host for HostState {
+    fn get(&mut self, key: String) -> Option<Vec<u8>> {
+        let ns = self.ext_cache_namespace.clone();
+        let backend = std::sync::Arc::clone(&self.ext_cache);
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(backend.get(&ns, &key))
+        })
+    }
+
+    fn put(&mut self, key: String, value: Vec<u8>, ttl_secs: u32) {
+        let ns = self.ext_cache_namespace.clone();
+        let backend = std::sync::Arc::clone(&self.ext_cache);
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(backend.put(
+                &ns,
+                &key,
+                value,
+                std::time::Duration::from_secs(u64::from(ttl_secs)),
+            ))
+        });
+    }
+
+    fn delete(&mut self, key: String) {
+        let ns = self.ext_cache_namespace.clone();
+        let backend = std::sync::Arc::clone(&self.ext_cache);
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(backend.delete(&ns, &key))
+        });
+    }
+
+    fn clear(&mut self) {
+        let ns = self.ext_cache_namespace.clone();
+        let backend = std::sync::Arc::clone(&self.ext_cache);
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(backend.clear_namespace(&ns))
+        });
     }
 }

@@ -1291,3 +1291,26 @@ export async function getFeatures() {
 export async function purgeAdminLogs() {
   return _req('POST', '/admin/logs/purge');
 }
+
+// ── Source capabilities ───────────────────────────────────────────────────────
+
+/** @param {number} sourceId @returns {Promise<{streaming_chapters:boolean}>} */
+export async function getSourceCapabilities(sourceId) {
+  return _req('GET', `/sources/${sourceId}/capabilities`);
+}
+
+// ── Metadata providers ────────────────────────────────────────────────────────
+
+/** @returns {Promise<Array<{id:string,name:string}>>} */
+export async function listMetadataProviders() {
+  return _req('GET', '/sources/metadata-providers');
+}
+
+/**
+ * @param {number} mangaId
+ * @param {string} provider
+ * @returns {Promise<{fields_updated:string[]}>}
+ */
+export async function enrichMangaMetadata(mangaId, provider) {
+  return _req('POST', `/manga/${mangaId}/enrich-metadata`, { body: { provider } });
+}

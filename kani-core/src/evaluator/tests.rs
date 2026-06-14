@@ -2982,3 +2982,302 @@ mod extension_integration_tests {
         assert_eq!(rows[0]["scanlator"], "OfficialRip");
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DSL v2 variant tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod dsl_v2_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::helpers::*;
+    use kani_shared::ast::*;
+
+    // ── SplitN ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn split_n_basic() {
+        let expr = Expr::SplitN {
+            target: Box::new(Expr::Literal("a,b,c,d".into())),
+            delimiter: ",".into(),
+            n: 2,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, serde_json::json!(["a", "b,c,d"]));
+    }
+
+    #[tokio::test]
+    async fn split_n_n_equals_one() {
+        let expr = Expr::SplitN {
+            target: Box::new(Expr::Literal("a,b,c".into())),
+            delimiter: ",".into(),
+            n: 1,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, serde_json::json!(["a,b,c"]));
+    }
+
+    #[tokio::test]
+    async fn split_n_n_exceeds_parts() {
+        let expr = Expr::SplitN {
+            target: Box::new(Expr::Literal("a,b".into())),
+            delimiter: ",".into(),
+            n: 10,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, serde_json::json!(["a", "b"]));
+    }
+
+    // ── Take / Skip ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn take_first_two() {
+        let expr = Expr::Take {
+            target: Box::new(Expr::List(vec![
+                Expr::Literal("a".into()),
+                Expr::Literal("b".into()),
+                Expr::Literal("c".into()),
+            ])),
+            n: 2,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, serde_json::json!(["a", "b"]));
+    }
+
+    #[tokio::test]
+    async fn take_n_exceeds_length() {
+        let expr = Expr::Take {
+            target: Box::new(Expr::List(vec![
+                Expr::Literal("x".into()),
+                Expr::Literal("y".into()),
+            ])),
+            n: 100,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, serde_json::json!(["x", "y"]));
+    }
+
+    #[tokio::test]
+    async fn skip_first_two() {
+        let expr = Expr::Skip {
+            target: Box::new(Expr::List(vec![
+                Expr::Literal("a".into()),
+                Expr::Literal("b".into()),
+                Expr::Literal("c".into()),
+            ])),
+            n: 2,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, serde_json::json!(["c"]));
+    }
+
+    // ── Reverse ──────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn reverse_list() {
+        let expr = Expr::Reverse {
+            target: Box::new(Expr::List(vec![
+                Expr::Literal("a".into()),
+                Expr::Literal("b".into()),
+                Expr::Literal("c".into()),
+            ])),
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, serde_json::json!(["c", "b", "a"]));
+    }
+
+    // ── SortBy ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn sort_by_string_key() {
+        let json = r#"{"items": ["banana", "apple", "cherry"]}"#;
+        let rows = json_rows(json, "/items", vec![field("v", Expr::SelfRef)], vec![]).await;
+        let list_expr = Expr::List(vec![
+            Expr::Literal("banana".into()),
+            Expr::Literal("apple".into()),
+            Expr::Literal("cherry".into()),
+        ]);
+        let sorted = Expr::SortBy {
+            target: Box::new(list_expr),
+            key: Box::new(Expr::Var("$item".into())),
+        };
+        let v = json_eval(sorted).await;
+        assert_eq!(v, serde_json::json!(["apple", "banana", "cherry"]));
+        let _ = rows;
+    }
+
+    #[tokio::test]
+    async fn sort_by_mixed_types_non_comparable_to_end() {
+        let sorted = Expr::SortBy {
+            target: Box::new(Expr::List(vec![
+                Expr::Null,
+                Expr::Number(2.0),
+                Expr::Number(1.0),
+            ])),
+            key: Box::new(Expr::Var("$item".into())),
+        };
+        let v = json_eval(sorted).await;
+        let arr = v.as_array().unwrap();
+        assert_eq!(arr[0].as_f64().unwrap(), 1.0);
+        assert_eq!(arr[1].as_f64().unwrap(), 2.0);
+        assert_eq!(arr[2], serde_json::Value::Null);
+    }
+
+    // ── Unique ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn unique_removes_duplicates_preserves_order() {
+        let expr = Expr::Unique {
+            target: Box::new(Expr::List(vec![
+                Expr::Literal("a".into()),
+                Expr::Literal("b".into()),
+                Expr::Literal("a".into()),
+                Expr::Literal("c".into()),
+                Expr::Literal("b".into()),
+            ])),
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, serde_json::json!(["a", "b", "c"]));
+    }
+
+    #[tokio::test]
+    async fn unique_already_unique_unchanged() {
+        let expr = Expr::Unique {
+            target: Box::new(Expr::List(vec![
+                Expr::Literal("x".into()),
+                Expr::Literal("y".into()),
+                Expr::Literal("z".into()),
+            ])),
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, serde_json::json!(["x", "y", "z"]));
+    }
+
+    // ── UrlEncode / UrlDecode ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn url_encode_spaces_and_special_chars() {
+        let expr = Expr::UrlEncode {
+            target: Box::new(Expr::Literal("hello world & more".into())),
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, "hello%20world%20%26%20more");
+    }
+
+    #[tokio::test]
+    async fn url_decode_encoded_string() {
+        let expr = Expr::UrlDecode {
+            target: Box::new(Expr::Literal("hello%20world%20%26%20more".into())),
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, "hello world & more");
+    }
+
+    #[tokio::test]
+    async fn url_decode_bad_percent_encoding_passthrough() {
+        let expr = Expr::UrlDecode {
+            target: Box::new(Expr::Literal("bad%ZZencoding".into())),
+        };
+        let v = json_eval(expr).await;
+        assert!(!v.as_str().unwrap().is_empty());
+    }
+
+    // ── FormatPadded ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn format_padded_left_align() {
+        let expr = Expr::FormatPadded {
+            target: Box::new(Expr::Literal("hi".into())),
+            width: 5,
+            fill: '-',
+            align: PadAlign::Left,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, "hi---");
+    }
+
+    #[tokio::test]
+    async fn format_padded_right_align() {
+        let expr = Expr::FormatPadded {
+            target: Box::new(Expr::Literal("hi".into())),
+            width: 5,
+            fill: '0',
+            align: PadAlign::Right,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, "000hi");
+    }
+
+    #[tokio::test]
+    async fn format_padded_center_align() {
+        let expr = Expr::FormatPadded {
+            target: Box::new(Expr::Literal("hi".into())),
+            width: 6,
+            fill: '-',
+            align: PadAlign::Center,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, "--hi--");
+    }
+
+    #[tokio::test]
+    async fn format_padded_width_less_than_input_unchanged() {
+        let expr = Expr::FormatPadded {
+            target: Box::new(Expr::Literal("hello".into())),
+            width: 3,
+            fill: '-',
+            align: PadAlign::Left,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, "hello");
+    }
+
+    // ── ScalarOverride ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn scalar_override_reads_document_level_scalar() {
+        use crate::evaluator::json_eval::extract_json;
+        use crate::wasm::HostState;
+        use kani_shared::ast::{Blueprint, FieldDef};
+
+        let json = r#"{"items": [{"id": 1}, {"id": 2}], "total": 42}"#;
+        let mut state = HostState::default();
+        let doc: serde_json::Value = serde_json::from_str(json).unwrap();
+        let handle = state.next_doc_handle;
+        state.next_doc_handle += 1;
+        state.json_docs.insert(handle, doc);
+
+        let bp = Blueprint {
+            request: None,
+            container: "/items".into(),
+            fields: vec![
+                FieldDef {
+                    name: "id".into(),
+                    expr: Expr::JsonPtr {
+                        target: Box::new(Expr::SelfRef),
+                        pointer: "/id".into(),
+                    },
+                    optional: false,
+                },
+                FieldDef {
+                    name: "total".into(),
+                    expr: Expr::ScalarOverride {
+                        name: "total".into(),
+                    },
+                    optional: false,
+                },
+            ],
+            bindings: vec![],
+            scalars: vec![FieldDef {
+                name: "total".into(),
+                expr: Expr::Json("/total".into()),
+                optional: false,
+            }],
+            pagination: None,
+        };
+        let out = extract_json(&mut state, Some(handle), &bp).await.unwrap();
+        let rows = out["rows"].as_array().unwrap();
+        assert_eq!(rows[0]["total"], 42);
+        assert_eq!(rows[1]["total"], 42);
+    }
+}

@@ -1,7 +1,7 @@
 //! Emit Rust builder-chain source code from an `Expr` tree.
 //! The output calls `kani_shared::ast::Expr::*` constructors and chained methods.
 
-use kani_shared::ast::{Expr, Op};
+use kani_shared::ast::{Expr, Op, PadAlign};
 
 pub fn emit_expr(expr: &Expr) -> String {
     match expr {
@@ -156,6 +156,69 @@ pub fn emit_expr(expr: &Expr) -> String {
             escape(template),
             emit_list(args)
         ),
+
+        Expr::SplitN {
+            target,
+            delimiter,
+            n,
+        } => format!("{}.split_n(\"{}\", {})", e(target), escape(delimiter), n),
+        Expr::Take { target, n } => format!("{}.take({})", e(target), n),
+        Expr::Skip { target, n } => format!("{}.skip({})", e(target), n),
+        Expr::Reverse { target } => format!("{}.reverse()", e(target)),
+        Expr::SortBy { target, key } => format!("{}.sort_by({})", e(target), e(key)),
+        Expr::Unique { target } => format!("{}.unique()", e(target)),
+        Expr::UrlEncode { target } => format!("{}.url_encode()", e(target)),
+        Expr::UrlDecode { target } => format!("{}.url_decode()", e(target)),
+        Expr::FormatPadded {
+            target,
+            width,
+            fill,
+            align,
+        } => {
+            let align_str = match align {
+                PadAlign::Left => "PadAlign::Left",
+                PadAlign::Right => "PadAlign::Right",
+                PadAlign::Center => "PadAlign::Center",
+            };
+            format!(
+                "{}.format_padded({}, '{}', {})",
+                e(target),
+                width,
+                fill.escape_default(),
+                align_str
+            )
+        }
+        Expr::ScalarOverride { name } => format!("Expr::scalar(\"{}\")", escape(name)),
+        Expr::Fetch {
+            url_expr,
+            blueprint: _,
+            method,
+            headers,
+            kind,
+        } => {
+            use kani_shared::ast::{HttpMethod, SubBlueprintKind};
+            let method_str = match method {
+                HttpMethod::Get => "",
+                HttpMethod::Post => ".with_method(HttpMethod::Post)",
+                HttpMethod::Put => ".with_method(HttpMethod::Put)",
+                HttpMethod::Delete => ".with_method(HttpMethod::Delete)",
+            };
+            let kind_fn = match kind {
+                SubBlueprintKind::Html => "fetch_html",
+                SubBlueprintKind::Json => "fetch_json",
+            };
+            let headers_chain: String = headers
+                .iter()
+                .map(|(k, v)| format!(".with_header({}, {})", e(k), e(v)))
+                .collect();
+            format!(
+                "Expr::{}({}, /* blueprint */todo!()){}{}",
+                kind_fn,
+                e(url_expr),
+                method_str,
+                headers_chain
+            )
+        }
     }
 }
 

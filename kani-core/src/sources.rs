@@ -30,7 +30,7 @@ macro_rules! execute_wasm {
 
         $self.store.data_mut().clear_all();
         let inner = raw_result?;
-        let result = inner.map_err($crate::error::Error::Extension)?;
+        let result = inner.map_err(|e| $crate::error::Error::Extension($crate::wasm::ext_error_from_wit(e)))?;
         Ok(result)
     }};
 }
@@ -77,6 +77,8 @@ impl SourceInstance {
             HostState::new(
                 self.smart_client.clone(),
                 allowed_host,
+                Arc::new(crate::cache::InMemoryCache::new()),
+                String::new(),
                 Arc::new(Mutex::new(None)),
             )?,
         );
@@ -142,7 +144,7 @@ impl SourceInstance {
 
         store.data_mut().clear_all();
         let inner = raw_result?;
-        inner.map_err(Error::Extension)
+        inner.map_err(|e| Error::Extension(crate::wasm::ext_error_from_wit(e)))
     }
 
     /// Calls the `get_preferences` function in the WASM module.
@@ -177,6 +179,6 @@ impl SourceInstance {
 
         store.data_mut().clear_all();
         let inner = raw_result?;
-        inner.map_err(Error::Extension)
+        inner.map_err(|e| Error::Extension(crate::wasm::ext_error_from_wit(e)))
     }
 }

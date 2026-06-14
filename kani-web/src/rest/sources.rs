@@ -1,12 +1,14 @@
 //! Extension source management & browsing routes.
 
 use super::*;
+use sqlx::Row;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/sources", get(list_sources).post(add_source))
         .route("/sources/health", get(get_sources_health))
         .route("/sources/active_ids", get(get_active_source_ids))
+        .route("/sources/metadata-providers", get(list_metadata_providers))
         .route(
             "/sources/{id}",
             get(get_source).patch(update_source).delete(delete_source),
@@ -60,6 +62,7 @@ pub fn router() -> Router<AppState> {
             "/sources/{id}/preferences/{key}/toggle_select",
             post(toggle_pref_select_item),
         )
+        .route("/sources/{id}/capabilities", get(get_capabilities))
 }
 
 async fn list_sources(
@@ -422,6 +425,37 @@ async fn toggle_pref_select_item(
     svc.toggle_pref_select_item(source_id, &key, body.item, body.selected)
         .await?;
     Ok(Json(json!({})))
+}
+
+async fn list_metadata_providers(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let registry = state.metadata_provider_registry.read().await;
+    Ok(Json(registry.list()))
+}
+
+#[derive(serde::Serialize)]
+struct SourceCapabilities {
+    streaming_chapters: bool,
+}
+
+async fn get_capabilities(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    let row =
+        sqlx::query("SELECT streaming_chapters FROM sources WHERE id = ? AND deleted_at IS NULL")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?
+            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
+    let streaming: bool = row.get::<i64, _>(0) != 0;
+    Ok(Json(SourceCapabilities {
+        streaming_chapters: streaming,
+    }))
 }
 
 #[cfg(test)]

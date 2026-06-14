@@ -44,6 +44,18 @@ pub enum AppEvent {
         field: String,
         error: String,
     },
+    ChapterListPartial {
+        manga_id: MangaId,
+        received: usize,
+    },
+    ChapterListComplete {
+        manga_id: MangaId,
+        total: usize,
+    },
+    ChapterListError {
+        manga_id: MangaId,
+        error: String,
+    },
     #[serde(untagged)]
     Refresh(RefreshProgressEvent),
 }

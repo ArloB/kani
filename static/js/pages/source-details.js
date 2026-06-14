@@ -137,6 +137,7 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
   const [healthLoading, setHealthLoading] = useState(true);
   const [reloading, setReloading] = useState(false);
   const [reloadMsg, setReloadMsg] = useState(/** @type {'ok'|'err'|null} */ (null));
+  const [capabilities, setCapabilities] = useState(/** @type {{streaming_chapters:boolean}|null} */ (null));
 
   // Load preferences and health on mount
   useEffect(() => {
@@ -145,6 +146,7 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
         setHealth(rows.find(r => r.source_id === sid) ?? null);
       }
     }).catch(() => {}).finally(() => setHealthLoading(false));
+    api.getSourceCapabilities(sid).then(setCapabilities).catch(() => {});
   }, [sid]);
 
   useEffect(() => {
@@ -352,6 +354,15 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
               </span>
             </div>
           </div>
+
+          ${capabilities?.streaming_chapters && html`
+            <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
+              <div class="flex items-center gap-1.5 text-accent icon-sm">
+                <p class="text-sm font-medium">Streaming Chapters</p>
+              </div>
+              <p class="text-xs text-text-muted mt-0.5">This source supports progressive chapter list delivery via streaming.</p>
+            </div>
+          `}
 
           ${hasPermission('source:install') && html`
             <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">

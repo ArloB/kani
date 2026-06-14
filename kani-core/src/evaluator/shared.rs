@@ -1,7 +1,7 @@
 use crate::utilities::parse_date_flexible;
 use crate::wasm::{SafeHtml, StoredNode};
 use ego_tree::NodeId;
-use kani_shared::ast::{Expr, Op};
+use kani_shared::ast::{Expr, Op, PadAlign};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -603,7 +603,139 @@ where
             }))
         }
 
+        Expr::SplitN {
+            target,
+            delimiter,
+            n,
+        } => Some(recurse(target, env).await.and_then(|v| {
+            v.map_str("split_n", |s| {
+                Ok(Value::List(
+                    s.splitn(*n, delimiter.as_str())
+                        .map(|p| Value::Str(p.to_owned()))
+                        .collect(),
+                ))
+            })
+        })),
+
+        Expr::Take { target, n } => Some(recurse(target, env).await.and_then(|v| {
+            v.into_list("take")
+                .map(|items| Value::List(items.into_iter().take(*n).collect()))
+        })),
+
+        Expr::Skip { target, n } => Some(recurse(target, env).await.and_then(|v| {
+            v.into_list("skip")
+                .map(|items| Value::List(items.into_iter().skip(*n).collect()))
+        })),
+
+        Expr::Reverse { target } => Some(recurse(target, env).await.and_then(|v| {
+            v.into_list("reverse").map(|mut items| {
+                items.reverse();
+                Value::List(items)
+            })
+        })),
+
+        Expr::SortBy { target, key } => Some(
+            (async {
+                let items = recurse(target, env.clone())
+                    .await
+                    .and_then(|v| v.into_list("sort_by"))?;
+                let mut pairs: Vec<(Value, Value)> = Vec::with_capacity(items.len());
+                for item in items {
+                    let mut inner = env.clone();
+                    inner.set("$item", item.clone());
+                    let k = recurse(key, inner).await?;
+                    pairs.push((k, item));
+                }
+                pairs.sort_by(|(a, _), (b, _)| compare_sort_key(a, b));
+                Ok(Value::List(pairs.into_iter().map(|(_, v)| v).collect()))
+            })
+            .await,
+        ),
+
+        Expr::Unique { target } => Some(recurse(target, env).await.and_then(|v| {
+            v.into_list("unique").map(|items| {
+                let mut seen: Vec<Value> = Vec::new();
+                let mut result = Vec::new();
+                for item in items {
+                    if !seen.iter().any(|s| s == &item) {
+                        seen.push(item.clone());
+                        result.push(item);
+                    }
+                }
+                Value::List(result)
+            })
+        })),
+
+        Expr::UrlEncode { target } => Some(recurse(target, env).await.and_then(|v| {
+            v.map_str("url_encode", |s| {
+                Ok(Value::Str(urlencoding::encode(&s).into_owned()))
+            })
+        })),
+
+        Expr::UrlDecode { target } => Some(recurse(target, env).await.and_then(|v| {
+            v.map_str("url_decode", |s| {
+                Ok(Value::Str(
+                    urlencoding::decode(&s).map(|c| c.into_owned()).unwrap_or(s),
+                ))
+            })
+        })),
+
+        Expr::FormatPadded {
+            target,
+            width,
+            fill,
+            align,
+        } => Some(recurse(target, env).await.and_then(|v| {
+            v.map_str("format_padded", |s| {
+                let char_count = s.chars().count();
+                if char_count >= *width {
+                    return Ok(Value::Str(s));
+                }
+                let pad = width - char_count;
+                let fill_str: String = std::iter::repeat_n(*fill, pad).collect();
+                let result = match align {
+                    PadAlign::Left => format!("{s}{fill_str}"),
+                    PadAlign::Right => format!("{fill_str}{s}"),
+                    PadAlign::Center => {
+                        let left = pad / 2;
+                        let right = pad - left;
+                        let lpad: String = std::iter::repeat_n(*fill, left).collect();
+                        let rpad: String = std::iter::repeat_n(*fill, right).collect();
+                        format!("{lpad}{s}{rpad}")
+                    }
+                };
+                Ok(Value::Str(result))
+            })
+        })),
+
+        Expr::ScalarOverride { name } => Some(Ok(env
+            .get(&format!("$scalar:{}", name))
+            .cloned()
+            .unwrap_or(Value::Null))),
+
         _ => None,
+    }
+}
+
+fn compare_sort_key(a: &Value, b: &Value) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => x.cmp(y),
+        (Value::Num(x), Value::Num(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+        (Value::Int(x), Value::Num(y)) => (*x as f64).partial_cmp(y).unwrap_or(Ordering::Equal),
+        (Value::Num(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(Ordering::Equal),
+        (Value::Str(x), Value::Str(y)) => x.cmp(y),
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::Null, Value::Null) => Ordering::Equal,
+        (
+            Value::Null | Value::HtmlElement { .. } | Value::Json(_) | Value::List(_),
+            Value::Int(_) | Value::Num(_) | Value::Str(_) | Value::Bool(_),
+        ) => Ordering::Greater,
+        (
+            Value::Int(_) | Value::Num(_) | Value::Str(_) | Value::Bool(_),
+            Value::Null | Value::HtmlElement { .. } | Value::Json(_) | Value::List(_),
+        ) => Ordering::Less,
+        _ => Ordering::Equal,
     }
 }
 
@@ -619,13 +751,7 @@ pub async fn fetch_body(
 
     state.check_allowed_host(url.host_str().unwrap_or(""))?;
 
-    state.io_count += 1;
-    if state.io_count > 32 {
-        return Err("Extension exceeded maximum HTTP request count".into());
-    }
-    if state.call_started_at.elapsed().as_secs() > 120 {
-        return Err("Extension exceeded maximum wall time".into());
-    }
+    state.charge_io()?;
 
     let method = match req.method.to_uppercase().as_str() {
         "GET" => rquest::Method::GET,
@@ -675,6 +801,123 @@ pub async fn fetch_body(
         .map_err(|e| e.to_string())?
         .to_vec();
     String::from_utf8(body).map_err(|_| "Invalid UTF-8 in response body".to_string())
+}
+
+fn expr_has_fetch(expr: &kani_shared::ast::Expr) -> bool {
+    use kani_shared::ast::Expr;
+    match expr {
+        Expr::Fetch { .. } => true,
+        Expr::Attr { target, .. }
+        | Expr::Text { target }
+        | Expr::InnerHtml { target }
+        | Expr::First { target, .. }
+        | Expr::Select { target, .. }
+        | Expr::HasClass { target, .. }
+        | Expr::Children { target }
+        | Expr::Split { target, .. }
+        | Expr::At { target, .. }
+        | Expr::Replace { target, .. }
+        | Expr::Trim { target }
+        | Expr::Prepend { target, .. }
+        | Expr::Append { target, .. }
+        | Expr::Lower { target }
+        | Expr::Matches { target, .. }
+        | Expr::Capture { target, .. }
+        | Expr::ParseFloat { target }
+        | Expr::Not { target }
+        | Expr::StringLen { target }
+        | Expr::JsonPtr { target, .. }
+        | Expr::JsonStr { target }
+        | Expr::JsonInt { target }
+        | Expr::JsonFloat { target }
+        | Expr::JsonBool { target }
+        | Expr::ArrayLen { target }
+        | Expr::JsonKeys { target }
+        | Expr::JsonFold { target }
+        | Expr::Join { target, .. } => expr_has_fetch(target),
+        Expr::Map { target, transform } | Expr::FlatMap { target, transform } => {
+            expr_has_fetch(target) || expr_has_fetch(transform)
+        }
+        Expr::Filter { target, filter } => expr_has_fetch(target) || expr_has_fetch(filter),
+        Expr::Fold {
+            target,
+            base,
+            transform,
+        } => expr_has_fetch(target) || expr_has_fetch(base) || expr_has_fetch(transform),
+        Expr::ResolveUrl { target, base } => expr_has_fetch(target) || expr_has_fetch(base),
+        Expr::BinaryOperation { lhs, rhs, .. } => expr_has_fetch(lhs) || expr_has_fetch(rhs),
+        Expr::Let { value, body, .. } => expr_has_fetch(value) || expr_has_fetch(body),
+        Expr::If {
+            condition,
+            then,
+            else_,
+        } => expr_has_fetch(condition) || expr_has_fetch(then) || expr_has_fetch(else_),
+        Expr::JsonGet { target, key } => expr_has_fetch(target) || expr_has_fetch(key),
+        Expr::JsonFind { target, key, value } => {
+            expr_has_fetch(target) || expr_has_fetch(key) || expr_has_fetch(value)
+        }
+        Expr::Format { args, .. } => args.iter().any(expr_has_fetch),
+        Expr::Concat(parts) | Expr::List(parts) | Expr::JsonArray(parts) | Expr::Merge(parts) => {
+            parts.iter().any(expr_has_fetch)
+        }
+        _ => false,
+    }
+}
+
+pub fn blueprint_has_fetch(bp: &kani_shared::ast::Blueprint) -> bool {
+    bp.fields.iter().any(|f| expr_has_fetch(&f.expr))
+        || bp.scalars.iter().any(|f| expr_has_fetch(&f.expr))
+        || bp.bindings.iter().any(|b| expr_has_fetch(&b.expr))
+}
+
+pub async fn eval_fetch_field(
+    state: &mut crate::wasm::HostState,
+    url: &str,
+    method: &kani_shared::ast::HttpMethod,
+    headers: Vec<(String, String)>,
+    sub_blueprint: &kani_shared::ast::Blueprint,
+    kind: &kani_shared::ast::SubBlueprintKind,
+) -> Result<Value, String> {
+    if blueprint_has_fetch(sub_blueprint) {
+        return Err("Nested Expr::Fetch inside a sub-blueprint is not allowed".into());
+    }
+
+    let method_str = match method {
+        kani_shared::ast::HttpMethod::Get => "GET",
+        kani_shared::ast::HttpMethod::Post => "POST",
+        kani_shared::ast::HttpMethod::Put => "PUT",
+        kani_shared::ast::HttpMethod::Delete => "DELETE",
+    };
+
+    let req = kani_shared::ast::RequestDef {
+        url: url.to_string(),
+        method: method_str.to_string(),
+        headers,
+        queries: vec![],
+    };
+
+    let body = fetch_body(state, &req).await?;
+
+    let result = match kind {
+        kani_shared::ast::SubBlueprintKind::Html => {
+            Box::pin(crate::evaluator::html_eval::extract_html_str(
+                state,
+                &body,
+                sub_blueprint,
+            ))
+            .await?
+        }
+        kani_shared::ast::SubBlueprintKind::Json => {
+            Box::pin(crate::evaluator::json_eval::extract_json_str(
+                state,
+                &body,
+                sub_blueprint,
+            ))
+            .await?
+        }
+    };
+    let first = result["rows"].as_array().and_then(|a| a.first()).cloned();
+    Ok(first.map(Value::Json).unwrap_or(Value::Null))
 }
 
 fn get_or_compile_regex(pattern: &str) -> Result<regex::Regex, String> {

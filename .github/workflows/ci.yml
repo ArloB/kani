@@ -8,22 +8,61 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pull-requests: read
+
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
 
 jobs:
-  test:
-    name: Test
+  changes:
+    name: Detect changes
     runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      js: ${{ steps.filter.outputs.js }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'kani-core/wit/**'
+              - '.github/workflows/ci.yml'
+            js:
+              - 'static/js/**'
+              - '!static/js/dist/**'
+              - '!static/js/vendor/**'
+              - '.github/workflows/ci.yml'
 
+  lint:
+    name: Lint
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift
+          sudo docker image prune --all --force
+          df -h
+
+      - name: Install mold linker
+        run: sudo apt-get install -y mold
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
-          components: rustfmt
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -32,6 +71,35 @@ jobs:
 
       - name: Format check
         run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --locked --no-deps -- -D warnings
+
+  test:
+    name: Test
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift
+          sudo docker image prune --all --force
+          df -h
+
+      - name: Install mold linker
+        run: sudo apt-get install -y mold
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci"
+          cache-on-failure: true
 
       - uses: taiki-e/install-action@v2
         with:
@@ -53,14 +121,19 @@ jobs:
         if: steps.kani-cli-cache.outputs.cache-hit != 'true'
         run: cargo build --release -p kani-cli
 
+      - name: Cache WASM extensions
+        uses: actions/cache@v5
+        id: wasm-cache
+        with:
+          path: wasm_sources/
+          key: wasm-${{ runner.os }}-${{ hashFiles('kani-extensions/**', 'kani-shared/**', 'kani-core/wit/**', 'kani-cli/**', 'Cargo.lock') }}
+
       - name: Build dev/test WASM extensions
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: ./target/release/kani-cli build --dev
 
       - name: Test
         run: cargo nextest run --locked --profile ci
-
-      - name: Clippy
-        run: cargo clippy --locked --no-deps -- -D warnings
 
       - name: Check sqlx offline data
         env:
@@ -69,3 +142,14 @@ jobs:
         run: |
           cargo sqlx migrate run
           cargo sqlx prepare --check --workspace -- --all-targets
+
+  js:
+    name: JS
+    needs: changes
+    if: needs.changes.outputs.js == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check JS syntax
+        run: find static/js -name '*.js' -not -path '*/dist/*' -not -path '*/vendor/*' -print0 | xargs -0 node --check

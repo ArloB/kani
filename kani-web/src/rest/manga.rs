@@ -49,6 +49,11 @@ pub fn router() -> Router<AppState> {
             "/manga/{id}/download_rules/preview",
             post(preview_download_rules),
         )
+        .route("/manga/{id}/enrich-metadata", post(enrich_metadata_handler))
+        .route(
+            "/manga/{id}/chapters/stream/{source_id}",
+            post(trigger_chapter_stream),
+        )
 }
 
 async fn get_manga(
@@ -431,6 +436,54 @@ async fn preview_download_rules(
 ) -> Result<impl IntoResponse, AppError> {
     let (matching, total) = svc.preview_download_rules(manga_id, body.kinds).await?;
     Ok(Json(json!({ "matching": matching, "total": total })))
+}
+
+#[derive(serde::Deserialize)]
+struct EnrichMetadataBody {
+    provider: String,
+}
+
+async fn enrich_metadata_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(state): State<AppState>,
+    Path(manga_id): Path<MangaId>,
+    Json(body): Json<EnrichMetadataBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let result = state
+        .enrich_manga_metadata(manga_id, &body.provider, user.id)
+        .await?;
+    Ok(Json(result))
+}
+
+async fn trigger_chapter_stream(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
+    State(state): State<AppState>,
+    Path((manga_id, source_id)): Path<(MangaId, i64)>,
+) -> Result<impl IntoResponse, AppError> {
+    use sqlx::Row;
+    let row =
+        sqlx::query("SELECT streaming_chapters FROM sources WHERE id = ? AND deleted_at IS NULL")
+            .bind(source_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?
+            .ok_or_else(|| AppError::NotFound(format!("Source {source_id} not found")))?;
+
+    let streaming_ok: bool = row.get::<i64, _>(0) != 0;
+    if !streaming_ok {
+        return Err(AppError::Other(
+            "Source does not support streaming chapter lists".into(),
+        ));
+    }
+
+    let _ = state
+        .refresh_tx
+        .send(kani_app::events::AppEvent::ChapterListPartial {
+            manga_id,
+            received: 0,
+        });
+
+    Ok((StatusCode::ACCEPTED, Json(json!({}))))
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@
 // Manga details page — breadcrumb, hero, chapter list, tabbed manage panel.
 
 import { h, render } from 'preact';
+import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
 import { hasPermission, getState, subscribe } from '../state.js';
@@ -16,7 +17,8 @@ import { createEmptyState } from '../components/empty-state.js';
 import { mountMigrationDialogue } from '../components/migration-dialogue.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { renderTabs } from '../components/tabs.js';
-import { showToast } from '../components/toast.js';
+import { showToast, showApiError } from '../components/toast.js';
+import { Modal, mountIntoModalRoot } from '../components/modal.js';
 import { iconDocument } from '../icons.js';
 import { getCachedChapterIds, onChapterCached } from '../offline.js';
 import { mountMangaHeader } from '../components/manga-details/manga-header.js';
@@ -83,6 +85,7 @@ let _manageMounted = false;
 /** @type {HTMLElement|null} */ let _listContainerEl = null;
 /** @type {HTMLElement|null} */ let _paginEl = null;
 /** @type {(() => void)|null} */ let _destroyHeader = null;
+/** @type {HTMLElement|null} */ let _streamingBannerEl = null;
 
 let _chapters = /** @type {any[]} */ ([]);
 let _chaptersHasMore = false;
@@ -387,6 +390,16 @@ export async function init(container, params) {
       });
       if (updated) _renderChapterList();
     }
+    if (data.manga_id === _dbId) {
+      if (data.type === 'chapter_list_partial') {
+        _updateStreamingCounter(data.received, false);
+      } else if (data.type === 'chapter_list_complete') {
+        _updateStreamingCounter(data.total, true);
+        if (_activeTab === 'chapters' && _contentSection) _fetchChapters(_contentSection);
+      } else if (data.type === 'chapter_list_error') {
+        _clearStreamingCounter();
+      }
+    }
   };
   window.addEventListener('kani:sse', _sseListener);
 }
@@ -462,6 +475,23 @@ async function _renderManageTab(contentEl) {
     metaSection.appendChild(mkSectionHeader('Edit Metadata', 'Override title, description, status, authors, artists, tags, and cover. Source data is preserved and restored on refresh unless overridden.'));
     mountMetadataPanel(metaSection, { dbId: _dbId, mangaData: _mangaData });
     contentEl.appendChild(metaSection);
+  }
+
+  // ── 0b. Enrich Metadata ──────────────────────────────────────────────────────
+
+  if (hasPermission('library:manage') && _isLocal) {
+    const enrichSection = document.createElement('div');
+    enrichSection.className = 'flex flex-col gap-3';
+    enrichSection.appendChild(mkSectionHeader('Enrich Metadata', 'Pull metadata from an external provider to fill missing fields. Existing local overrides are preserved.'));
+    const enrichCard = mkCard();
+    const enrichBtn = document.createElement('button');
+    enrichBtn.type = 'button';
+    enrichBtn.className = 'btn-secondary btn-sm';
+    enrichBtn.textContent = 'Enrich Metadata…';
+    enrichBtn.addEventListener('click', () => _openEnrichMetadataModal());
+    enrichCard.appendChild(mkItem(mkRow('External providers', 'Fetch title, description, and external IDs from AniList, MangaUpdates, or other providers', enrichBtn)));
+    enrichSection.appendChild(enrichCard);
+    contentEl.appendChild(enrichSection);
   }
 
   // ── 1. Library ──────────────────────────────────────────────────────────────
@@ -717,6 +747,99 @@ function _findNextPreferredChapter() {
     return best;
   }
   return null;
+}
+
+// ── Streaming chapter counter ─────────────────────────────────────────────────
+
+function _updateStreamingCounter(received, complete) {
+  if (!_streamingBannerEl) {
+    _streamingBannerEl = document.createElement('div');
+    _streamingBannerEl.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 z-toast bg-surface border border-border rounded-lg shadow-lg px-4 py-2 text-sm text-text flex items-center gap-2';
+    document.body.appendChild(_streamingBannerEl);
+  }
+  if (complete) {
+    _streamingBannerEl.textContent = `Loaded ${received} chapters`;
+    setTimeout(() => _clearStreamingCounter(), 2500);
+  } else {
+    _streamingBannerEl.textContent = `Loading chapters… ${received} so far`;
+  }
+}
+
+function _clearStreamingCounter() {
+  _streamingBannerEl?.remove();
+  _streamingBannerEl = null;
+}
+
+// ── Enrich metadata modal ─────────────────────────────────────────────────────
+
+function _openEnrichMetadataModal() {
+  function EnrichModal({ onClose }) {
+    const [providers, setProviders] = useState(/** @type {Array<{id:string,name:string}>} */ ([]));
+    const [selected, setSelected] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+      api.listMetadataProviders().then(ps => {
+        setProviders(ps);
+        if (ps.length > 0) setSelected(ps[0].id);
+        setLoading(false);
+      }).catch(e => { showApiError(e); onClose(); });
+    }, []);
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      if (!selected) return;
+      setSubmitting(true);
+      try {
+        const result = await api.enrichMangaMetadata(_dbId, selected);
+        onClose();
+        if (result.fields_updated.length > 0) {
+          showToast(`Metadata updated: ${result.fields_updated.join(', ')}`);
+        } else {
+          showToast('No new fields to fill');
+        }
+      } catch (err) {
+        showApiError(err);
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    const footer = html`
+      <button type="button" class="btn-ghost btn-sm" onClick=${onClose} disabled=${submitting}>Cancel</button>
+      <button type="submit" form="enrich-form" class="btn-primary btn-sm" disabled=${submitting || loading || !selected}>
+        ${submitting ? 'Enriching…' : 'Enrich'}
+      </button>
+    `;
+
+    return html`
+      <${Modal} open=${true} title="Enrich Metadata" onClose=${onClose} footer=${footer}>
+        <form id="enrich-form" class="flex flex-col gap-4 px-1" onSubmit=${handleSubmit}>
+          ${loading
+            ? html`<p class="text-sm text-muted">Loading providers…</p>`
+            : providers.length === 0
+              ? html`<p class="text-sm text-muted">No metadata providers available.</p>`
+              : html`
+                  <div class="flex flex-col gap-1">
+                    <label class="text-sm font-medium text-text" for="enrich-provider">Provider</label>
+                    <select id="enrich-provider" class="input"
+                      value=${selected}
+                      onChange=${(e) => setSelected(e.target.value)}
+                      disabled=${submitting}
+                    >
+                      ${providers.map(p => html`<option key=${p.id} value=${p.id}>${p.name}</option>`)}
+                    </select>
+                  </div>
+                  <p class="text-xs text-muted">Only blank fields will be filled. Local overrides and existing values are preserved.</p>
+                `
+          }
+        </form>
+      </${Modal}>
+    `;
+  }
+
+  const unmount = mountIntoModalRoot(html`<${EnrichModal} onClose=${() => unmount()} />`);
 }
 
 // ── Chapter notes modal ───────────────────────────────────────────────────────
@@ -1207,6 +1330,7 @@ export function destroy(container) {
   _abort?.abort();
   _abort = null;
   if (_sseListener) { window.removeEventListener('kani:sse', _sseListener); _sseListener = null; }
+  _clearStreamingCounter();
   _unsubscribeCacheMsgs?.();
   _unsubscribeCacheMsgs = null;
   _destroyPagination?.();

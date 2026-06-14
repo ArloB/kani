@@ -224,6 +224,7 @@ pub async fn build_test_app_with_opds(state: AppState) -> Router {
 }
 
 // DB row inserters are shared via kani-shared-test (identical across crates).
+#[allow(unused_imports)]
 pub use kani_shared_test::{insert_chapter, insert_manga, insert_source, insert_user};
 
 /// Build a Basic-auth `Authorization` header value for the given credentials.

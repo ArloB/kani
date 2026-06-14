@@ -643,6 +643,8 @@ pub(crate) async fn install_source(
         metadata.unrestricted_http,
         25,
         state.load_pref_map(id).await.unwrap_or_default(),
+        std::sync::Arc::clone(&state.ext_cache),
+        format!("{}:", metadata.id),
     );
 
     state
@@ -722,6 +724,8 @@ async fn reload_source(state: &AppState, id: i64) -> Result<(), AppError> {
         metadata.unrestricted_http,
         25,
         state.load_pref_map(id).await.unwrap_or_default(),
+        std::sync::Arc::clone(&state.ext_cache),
+        format!("{}:", metadata.id),
     );
 
     state

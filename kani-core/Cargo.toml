@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
+[features]
+streaming-chapters = []
+
 [dependencies]
 kani-shared = { path = "../kani-shared", features = ["host"] }
 
@@ -15,6 +18,7 @@ tokio-util = { workspace = true, features = ["compat"] }
 # HTTP client
 rquest = { version = "5.1.0", features = ["json"] }
 rquest-util = "2.2.1"
+governor.workspace = true
 
 # WASM runtime
 wasmtime = { version = "41.0.2", features = ["async", "component-model"] }
@@ -43,6 +47,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 
 # Logging
 tracing.workspace = true
+async-trait = "0.1"
 
 bytes.workspace = true
 arc-swap = "1.8.2"
@@ -58,6 +63,7 @@ rand = "0.10.0"
 
 
 [dev-dependencies]
+kani-shared = { path = "../kani-shared", features = ["builder"] }
 tempfile = "3.27.0"
 tokio = { version = "1", features = ["test-util"] }
 tokio-test = "0.4"

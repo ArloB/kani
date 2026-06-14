@@ -123,6 +123,14 @@ fn build_one(
     let dest = out_dir.join(format!("{ext_id}.wasm"));
     fs::copy(&src, &dest)?;
 
+    let raw_wasm = fs::read(&src)?;
+    if !check_talc_present(&raw_wasm) {
+        eprintln!(
+            "   warning: extension {} does not use talc allocator; consider adding kani_shared::guest_alloc!() to lib.rs",
+            name
+        );
+    }
+
     if is_available("wasm-opt") {
         println!("   running wasm-opt");
         let tmp = tmp_path(&dest);
@@ -175,6 +183,10 @@ fn build_one(
     println!("   done — {size_kb:.2} KB\n");
 
     Ok(())
+}
+
+fn check_talc_present(wasm_bytes: &[u8]) -> bool {
+    wasm_bytes.windows(5).any(|w| w == b"talc-")
 }
 
 fn tmp_path(path: &Path) -> PathBuf {

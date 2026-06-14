@@ -161,6 +161,7 @@ impl AppService {
 
             let prefs = self.load_pref_map(id).await?;
 
+            let ns = format!("{}:", source.name);
             let source_manager = SourceManager::new(
                 self.wasm_runtime.engine().clone(),
                 instance_pre,
@@ -169,6 +170,8 @@ impl AppService {
                 source.unrestricted_http,
                 25,
                 prefs,
+                std::sync::Arc::clone(&self.ext_cache),
+                ns,
             );
 
             self.sources
@@ -178,6 +181,14 @@ impl AppService {
         } else {
             // Remove from the in-memory map immediately so in-flight requests fail fast
             // rather than operating on a disabled source.
+            if let Ok(base_url) = self.get_source_base_url(id).await
+                && let Some(domain) = base_url
+                    .parse::<rquest::Url>()
+                    .ok()
+                    .and_then(|u| u.host_str().map(|h| h.to_owned()))
+            {
+                self.smart_client.deregister_rate_limit(&domain);
+            }
             self.sources.write().await.remove(&id);
             self.cache.invalidate_source(id);
         }
@@ -687,6 +698,16 @@ impl AppService {
                 } else {
                     1i64
                 };
+
+                if let Some(ref rl) = metadata.rate_limit
+                    && let Some(domain) = metadata
+                        .base_url
+                        .parse::<rquest::Url>()
+                        .ok()
+                        .and_then(|u| u.host_str().map(|h| h.to_owned()))
+                {
+                    smart_client.register_rate_limit(&domain, rl);
+                }
 
                 let rename_file = |current_filename: &str| {
                     let src = wasm_storage_path.join(format!("{current_filename}.wasm"));
