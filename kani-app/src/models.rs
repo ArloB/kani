@@ -42,6 +42,7 @@ pub struct Settings {
     pub app_url: String,
     pub password_reset_enabled: bool,
     pub email_verification_required: bool,
+    pub first_run_complete: bool,
 }
 
 #[derive(sqlx::FromRow)]

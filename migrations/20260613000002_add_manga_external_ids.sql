@@ -1,6 +1,2 @@
-CREATE TABLE manga_external_ids (
-    manga_id    INTEGER NOT NULL REFERENCES manga(id) ON DELETE CASCADE,
-    provider    TEXT NOT NULL,
-    external_id TEXT NOT NULL,
-    PRIMARY KEY (manga_id, provider)
-);
+ALTER TABLE manga ADD COLUMN mal_id TEXT;
+ALTER TABLE manga ADD COLUMN anilist_id TEXT;

@@ -26,6 +26,7 @@ const _routes = [
   { path: '/updates',                   load: () => import('./pages/recent-updates.js') },
   { path: '/stats',                     load: () => import('./pages/stats.js') },
   { path: '/admin/logs',                load: () => import('./pages/admin/logs.js') },
+  { path: '/onboarding',               load: () => import('./pages/onboarding.js') },
   { path: '/',                          load: () => import('./pages/library.js') },
 ].map(({ path, load }) => ({ re: _pathToRegex(path), keys: _extractKeys(path), load }));
 

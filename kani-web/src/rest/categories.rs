@@ -16,15 +16,35 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-async fn list_categories(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/categories",
+    responses(
+        (status = 200, description = "All categories"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn list_categories(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn CategoryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(svc.list_categories().await?))
 }
 
-async fn create_category(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/categories",
+    request_body = CreateCategoryRequest,
+    responses(
+        (status = 201, description = "Category created; returns new ID"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn create_category(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Json(body): Json<CreateCategoryRequest>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -32,8 +52,18 @@ async fn create_category(
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
 
-async fn reorder_categories(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    put, path = "/rest/categories/reorder",
+    request_body = ReorderCategoriesRequest,
+    responses(
+        (status = 200, description = "Categories reordered"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn reorder_categories(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Json(body): Json<ReorderCategoriesRequest>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -41,8 +71,19 @@ async fn reorder_categories(
     Ok(Json(json!({})))
 }
 
-async fn rename_category(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    patch, path = "/rest/categories/{id}",
+    params(("id" = i64, Path, description = "Category ID")),
+    request_body = RenameCategoryRequest,
+    responses(
+        (status = 200, description = "Category renamed"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn rename_category(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Path(category_id): Path<i64>,
     Json(body): Json<RenameCategoryRequest>,
@@ -51,8 +92,18 @@ async fn rename_category(
     Ok(Json(json!({})))
 }
 
-async fn delete_category_handler(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    delete, path = "/rest/categories/{id}",
+    params(("id" = i64, Path, description = "Category ID")),
+    responses(
+        (status = 200, description = "Category deleted"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn delete_category_handler(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Path(category_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -60,16 +111,37 @@ async fn delete_category_handler(
     Ok(Json(json!({})))
 }
 
-async fn get_manga_categories(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/categories",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Categories assigned to this manga"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn get_manga_categories(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(svc.get_manga_categories(manga_id).await?))
 }
 
-async fn set_manga_categories(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    put, path = "/rest/manga/{id}/categories",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = SetMangaCategoriesRequest,
+    responses(
+        (status = 200, description = "Categories updated for this manga"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn set_manga_categories(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn CategoryDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<SetMangaCategoriesRequest>,

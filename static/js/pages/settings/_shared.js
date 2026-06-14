@@ -28,12 +28,13 @@ export function mkSettingsGroupCard(groupEl) {
 
 /**
  * Creates a row: label + optional description left, control right.
- * @param {{ label: string, description?: string, badge?: string, control: HTMLElement }} opts
+ * @param {{ label: string, description?: string, badge?: string, tooltip?: string, control: HTMLElement }} opts
  * @returns {HTMLElement}
  */
-export function mkSettingsRow({ label, description, badge, control }) {
+export function mkSettingsRow({ label, description, badge, tooltip, control }) {
   const row = document.createElement('div');
   row.className = 'flex items-center justify-between gap-4 px-4 py-3.5';
+  if (tooltip) row.setAttribute('data-tooltip', tooltip);
   const left = document.createElement('div');
   left.className = 'flex flex-col gap-0.5 min-w-0';
   const labelEl = document.createElement('div');
@@ -63,10 +64,10 @@ export function mkSettingsRow({ label, description, badge, control }) {
 
 /**
  * Creates a toggle row.
- * @param {{ label: string, description?: string, checked: boolean, onChange: (v: boolean) => void }} opts
+ * @param {{ label: string, description?: string, tooltip?: string, checked: boolean, onChange: (v: boolean) => void }} opts
  * @returns {HTMLElement}
  */
-export function mkToggleRow({ label, description, checked, onChange }) {
+export function mkToggleRow({ label, description, tooltip, checked, onChange }) {
   const toggleLabel = document.createElement('label');
   toggleLabel.className = 'kani-toggle';
   const input = document.createElement('input');
@@ -78,15 +79,15 @@ export function mkToggleRow({ label, description, checked, onChange }) {
   track.className = 'kani-toggle__track';
   toggleLabel.appendChild(input);
   toggleLabel.appendChild(track);
-  return mkSettingsRow({ label, description, control: toggleLabel });
+  return mkSettingsRow({ label, description, tooltip, control: toggleLabel });
 }
 
 /**
  * Creates a number input row.
- * @param {{ label: string, description?: string, badge?: string, id: string, value: any, min?: number, max?: number, onChange: (v: number) => void }} opts
+ * @param {{ label: string, description?: string, badge?: string, tooltip?: string, id: string, value: any, min?: number, max?: number, onChange: (v: number) => void }} opts
  * @returns {HTMLElement}
  */
-export function mkNumberRow({ label, description, badge, id, value, min, max, onChange }) {
+export function mkNumberRow({ label, description, badge, tooltip, id, value, min, max, onChange }) {
   const input = document.createElement('input');
   input.type = 'number';
   input.inputMode = 'numeric';
@@ -96,6 +97,6 @@ export function mkNumberRow({ label, description, badge, id, value, min, max, on
   if (min != null) input.min = String(min);
   if (max != null) input.max = String(max);
   input.addEventListener('change', () => onChange(Number(input.value)));
-  return mkSettingsRow({ label, description, badge, control: input });
+  return mkSettingsRow({ label, description, badge, tooltip, control: input });
 }
 

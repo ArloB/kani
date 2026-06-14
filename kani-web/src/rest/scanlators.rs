@@ -17,16 +17,37 @@ pub fn router() -> Router<AppState> {
         .route("/manga/{id}/languages", get(get_chapter_languages))
 }
 
-async fn get_scanlator_prefs(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/scanlator_preferences",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Per-scanlator priority/block preferences for this manga"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_scanlator_prefs(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(svc.get_scanlator_prefs(manga_id).await?))
 }
 
-async fn set_scanlator_pref(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/scanlator_preferences",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = SetScanlatorPrefRequest,
+    responses(
+        (status = 200, description = "Scanlator preference saved"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn set_scanlator_pref(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<SetScanlatorPrefRequest>,
@@ -36,8 +57,18 @@ async fn set_scanlator_pref(
     Ok(Json(json!({})))
 }
 
-async fn delete_scanlator_pref(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    delete, path = "/rest/scanlator_preferences/{id}",
+    params(("id" = i64, Path, description = "Scanlator preference ID")),
+    responses(
+        (status = 200, description = "Preference deleted"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn delete_scanlator_pref(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(pref_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -45,8 +76,19 @@ async fn delete_scanlator_pref(
     Ok(Json(json!({})))
 }
 
-async fn set_scanlator_mode_handler(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    patch, path = "/rest/manga/{id}/scanlator_mode",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = SetScanlatorModeRequest,
+    responses(
+        (status = 200, description = "Scanlator mode updated"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn set_scanlator_mode_handler(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<crate::models::SetScanlatorModeRequest>,
@@ -55,16 +97,36 @@ async fn set_scanlator_mode_handler(
     Ok(Json(json!({})))
 }
 
-async fn get_chapter_scanlators(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/scanlators",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Distinct scanlator names for this manga's chapters"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_chapter_scanlators(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(svc.get_chapter_scanlators(manga_id).await?))
 }
 
-async fn get_chapter_languages(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/languages",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Distinct language codes for this manga's chapters"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_chapter_languages(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn ScanlatorDomain>>,
     Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {

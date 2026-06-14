@@ -4,7 +4,8 @@
 [![codecov](https://codecov.io/gh/arlob/kani/graph/badge.svg?token=MGPR4JQ8IO)](https://codecov.io/gh/arlob/kani)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Self-hosted manga library server written in Rust with a WebAssembly-based extension system. Inspired by [Tachiyomi/Mihon](https://mihon.app/) and [Komga](https://komga.org/).
+Self-hosted manga library server written in Rust with a WebAssembly-based extension system.
+Inspired by [Tachiyomi/Mihon](https://mihon.app/) and [Komga](https://komga.org/).
 
 <!--screenshot: docs/screenshots/library.png — library grid view with category tabs and filters-->
 <!--screenshot: docs/screenshots/reader.png — chapter reader in scroll mode-->
@@ -13,7 +14,8 @@ Self-hosted manga library server written in Rust with a WebAssembly-based extens
 
 ## Features
 
-**Library**
+### Library
+
 - Manga library with custom metadata, categories, and favourites
 - Cover, name, and description overrides; per-manga notes
 - Reading progress tracked per chapter and page
@@ -22,33 +24,38 @@ Self-hosted manga library server written in Rust with a WebAssembly-based extens
 - Scanlator and language preferences (priority + blocking)
 - Duplicate detection and merge
 
-**Downloads**
+### Downloads
+
 - Configurable download rules (language, scanlator, volume filters, chained logic)
 - Bulk download with per-chapter cancellation and history
 - CBZ archive output
 - Tachiyomi backup import with source mapping and duplicate handling
 - Full library backup and restore
 
-**Sources & Extensions**
+### Sources & Extensions
+
 - 5 built-in sources: MangaDex, WeebCentral, Mangapill, Comix, Cubari
 - WebAssembly Component extension system — sandboxed and fast
 - Declarative YAML + DSL authoring for new sources — no raw Rust required
 - CLI tooling: scaffold, validate, generate, and build extensions
 
-**Integrations**
+### Integrations
+
 - Tracker sync: AniList and MyAnimeList (OAuth 2.0, read/write)
 - Outbound webhooks with per-manga overrides and a delivery log
 - SMTP email (password reset, email verification, test send)
 - OPDS feed for e-reader clients *(experimental)*
 
-**Multi-user**
+### Multi-user
+
 - Role-based access control with admin and user roles
 - Granular per-resource permissions
 - User and role management UI
 - Audit log
 - Optional credential encryption at rest (ChaCha20-Poly1305)
 
-**Export**
+### Export
+
 - Chapter export to EPUB and KEPUB
 - Kindle/MOBI export via KCC (requires optional Docker build arg — see below)
 
@@ -64,7 +71,9 @@ cd kani
 docker compose up --build
 ```
 
-Open **http://localhost:8242**. On first run Kani creates an admin account; the credentials are printed to the container log and written to `~/.kani_admin_password` inside the container. Change the password immediately after logging in.
+Open <http://localhost:8242>. On first run Kani creates an admin account; the credentials are
+printed to the container log and written to `~/.kani_admin_password` inside the container.
+Change the password immediately after logging in.
 
 Data is persisted in two directories created alongside `docker-compose.yml`:
 
@@ -84,7 +93,9 @@ build:
 
 ### Local build
 
-Prerequisites: Rust stable, `wasm32-unknown-unknown` target, [`wasm-tools`](https://github.com/bytecodealliance/wasm-tools), [`wasm-opt`](https://github.com/WebAssembly/binaryen).
+Prerequisites: Rust stable, `wasm32-unknown-unknown` target,
+[`wasm-tools`](https://github.com/bytecodealliance/wasm-tools),
+[`wasm-opt`](https://github.com/WebAssembly/binaryen).
 
 ```bash
 cargo run -p kani-cli -- setup        # fetch JS vendors, Tailwind CLI, and configure git hooks
@@ -114,9 +125,12 @@ Set these in `docker-compose.yml` or pass as `-e` flags:
 
 ## Extension System
 
-Extensions are WebAssembly Components compiled against a [WIT](kani-core/wit/kani.wit) interface. The host provides HTTP, HTML/JSON extraction, utilities, and preferences; the extension exports a `manga-provider` implementation. Extensions are sandboxed — they can only reach the host APIs.
+Extensions are WebAssembly Components compiled against a [WIT](kani-core/wit/kani.wit) interface.
+The host provides HTTP, HTML/JSON extraction, utilities, and preferences; the extension exports a
+`manga-provider` implementation. Extensions are sandboxed — they can only reach the host APIs.
 
-New extensions can be authored in YAML using a declarative schema and a small DSL for field extraction, with no raw Rust required:
+New extensions can be authored in YAML using a declarative schema and a small DSL for field
+extraction, with no raw Rust required:
 
 ```bash
 cargo run -p kani-cli -- new my-source           # scaffold a YAML template
@@ -153,7 +167,10 @@ The workspace has six crates:
 | `kani-cli` | Extension tooling: YAML schema, DSL parser, codegen, build orchestration, CSS/setup |
 | `kani-extensions/*` | Individual extension WASM modules |
 
-Extensions are sandboxed WASM Components built against a WIT interface (`kani-core/wit/kani.wit`). Instead of driving DOM traversal via many FFI calls, extensions submit a declarative `Blueprint` across the boundary in one call; the host evaluates it natively against parsed HTML or JSON. See `SPECIFICATION.md` for the full extension authoring reference.
+Extensions are sandboxed WASM Components built against a WIT interface (`kani-core/wit/kani.wit`).
+Instead of driving DOM traversal via many FFI calls, extensions submit a declarative `Blueprint`
+across the boundary in one call; the host evaluates it natively against parsed HTML or JSON.
+See `SPECIFICATION.md` for the full extension authoring reference.
 
 ### Testing
 
@@ -164,13 +181,20 @@ Extensions are sandboxed WASM Components built against a WIT interface (`kani-co
 | REST API | `kani-web/tests/<area>_api_tests.rs` | New HTTP endpoints |
 | CLI / codegen | `kani-cli/tests/` | YAML validation rules, DSL changes, codegen output |
 
-Every new pure function gets a happy-path test and at least one edge/error case. New REST endpoints get a test triplet: 200 for an authenticated user, 401 without auth, and 4xx for invalid input. Use `common::test_state()` + `common::build_test_app()` + `common::create_admin()` from `kani-web/tests/common/mod.rs`; this wires the full auth stack against an in-memory SQLite DB.
+Every new pure function gets a happy-path test and at least one edge/error case. New REST endpoints
+get a test triplet: 200 for an authenticated user, 401 without auth, and 4xx for invalid input.
+Use `common::test_state()` + `common::build_test_app()` + `common::create_admin()` from
+`kani-web/tests/common/mod.rs`; this wires the full auth stack against an in-memory SQLite DB.
 
-After any SQL schema change run `cargo sqlx prepare --workspace` to regenerate the `.sqlx/` query cache. The pre-push hook (configured by `setup`) will catch a stale cache before it reaches CI, provided `sqlx-cli` is installed (`cargo binstall sqlx-cli`).
+After any SQL schema change run `cargo sqlx prepare --workspace -- --all-targets --tests` to
+regenerate the `.sqlx/` query cache. The pre-push hook (configured by `setup`) will catch a stale
+cache before it reaches CI, provided `sqlx-cli` is installed (`cargo binstall sqlx-cli`).
 
 ### Contributing
 
-Branch new work off `develop` (`git checkout -b feature/<name> develop`) and open a PR back into `develop` before starting the next feature. Keep each branch to one feature or a set of tightly related changes. `main` is updated from `develop` at release points only.
+Branch new work off `develop` (`git checkout -b feature/<name> develop`) and open a PR back into
+`develop` before starting the next feature. Keep each branch to one feature or a set of tightly
+related changes. `main` is updated from `develop` at release points only.
 
 ---
 
@@ -178,9 +202,12 @@ Branch new work off `develop` (`git checkout -b feature/<name> develop`) and ope
 
 Kani is infrastructure software — it ships no content.
 
-Extensions are third-party integrations with external websites, installed by the user at runtime. Extension files (`.wasm`) are not included in Kani releases and are not distributed by this project. Kani does not endorse, provide, or maintain any third-party content source.
+Extensions are third-party integrations with external websites, installed by the user at runtime.
+Extension files (`.wasm`) are not included in Kani releases and are not distributed by this
+project. Kani does not endorse, provide, or maintain any third-party content source.
 
-You are solely responsible for ensuring your use of Kani and any content sources you connect to complies with applicable laws and the terms of service of those sources.
+You are solely responsible for ensuring your use of Kani and any content sources you connect to
+complies with applicable laws and the terms of service of those sources.
 
 ---
 

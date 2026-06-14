@@ -31,7 +31,17 @@ pub fn router() -> Router<AppState> {
         .route("/manga/{id}/sync", post(sync_manga_trackers))
 }
 
-async fn get_manga_tracking_handler(
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/tracking",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "User tracking state for this manga across all trackers"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_manga_tracking_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -40,7 +50,18 @@ async fn get_manga_tracking_handler(
     Ok(Json(tracking))
 }
 
-async fn set_manga_tracking_handler(
+#[utoipa::path(
+    put, path = "/rest/manga/{id}/tracking",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = SetMangaTrackingRequest,
+    responses(
+        (status = 204, description = "Tracking state updated"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn set_manga_tracking_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -73,7 +94,16 @@ async fn set_manga_tracking_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn list_trackers(
+#[utoipa::path(
+    get, path = "/rest/trackers",
+    responses(
+        (status = 200, description = "All available trackers with their link status for the current user"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn list_trackers(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -92,8 +122,21 @@ async fn list_trackers(
     Ok(Json(trackers))
 }
 
-async fn get_tracker_auth_url(
-    AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
+#[utoipa::path(
+    get, path = "/rest/trackers/{id}/auth_url",
+    params(
+        ("id" = i64, Path, description = "Tracker ID"),
+        ("redirect_uri" = String, Query, description = "OAuth redirect URI"),
+    ),
+    responses(
+        (status = 200, description = "OAuth authorization URL for this tracker"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_tracker_auth_url(
+    _: AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
     Query(q): Query<TrackerAuthUrlQuery>,
@@ -104,7 +147,21 @@ async fn get_tracker_auth_url(
     Ok(Json(json!({ "url": url })))
 }
 
-async fn tracker_oauth_callback(
+#[utoipa::path(
+    get, path = "/rest/trackers/{id}/callback",
+    params(
+        ("id" = i64, Path, description = "Tracker ID"),
+        ("code" = String, Query, description = "OAuth authorization code"),
+        ("state" = String, Query, description = "OAuth state token"),
+    ),
+    responses(
+        (status = 200, description = "OAuth callback handled; renders success HTML"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn tracker_oauth_callback(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
@@ -118,7 +175,17 @@ async fn tracker_oauth_callback(
     ))
 }
 
-async fn unlink_tracker(
+#[utoipa::path(
+    post, path = "/rest/trackers/{id}/unlink",
+    params(("id" = i64, Path, description = "Tracker ID")),
+    responses(
+        (status = 204, description = "Tracker unlinked"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn unlink_tracker(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
@@ -127,7 +194,20 @@ async fn unlink_tracker(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn search_tracker_manga(
+#[utoipa::path(
+    get, path = "/rest/trackers/{id}/search",
+    params(
+        ("id" = i64, Path, description = "Tracker ID"),
+        ("query" = String, Query, description = "Search query"),
+    ),
+    responses(
+        (status = 200, description = "Manga search results from the tracker"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn search_tracker_manga(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
@@ -139,8 +219,19 @@ async fn search_tracker_manga(
     Ok(Json(results))
 }
 
-async fn get_tracker_config(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    get, path = "/rest/trackers/{id}/config",
+    params(("id" = i64, Path, description = "Tracker ID")),
+    responses(
+        (status = 200, description = "Tracker OAuth client configuration"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_tracker_config(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -157,8 +248,20 @@ async fn get_tracker_config(
     }
 }
 
-async fn set_tracker_config(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    put, path = "/rest/trackers/{id}/config",
+    params(("id" = i64, Path, description = "Tracker ID")),
+    request_body = SetTrackerConfigRequest,
+    responses(
+        (status = 204, description = "Tracker OAuth config updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn set_tracker_config(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
     Json(body): Json<SetTrackerConfigRequest>,
@@ -169,8 +272,19 @@ async fn set_tracker_config(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn delete_tracker_config(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    delete, path = "/rest/trackers/{id}/config",
+    params(("id" = i64, Path, description = "Tracker ID")),
+    responses(
+        (status = 204, description = "Tracker OAuth config deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn delete_tracker_config(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(tracker_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -178,7 +292,17 @@ async fn delete_tracker_config(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn get_tracker_mappings(
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/tracker_mappings",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "External tracker mappings for this manga"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_tracker_mappings(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -197,7 +321,18 @@ async fn get_tracker_mappings(
     Ok(Json(response))
 }
 
-async fn set_tracker_mapping(
+#[utoipa::path(
+    put, path = "/rest/manga/{id}/tracker_mappings",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = SetTrackerMappingRequest,
+    responses(
+        (status = 204, description = "Tracker mapping set"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn set_tracker_mapping(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -208,7 +343,20 @@ async fn set_tracker_mapping(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn delete_tracker_mapping(
+#[utoipa::path(
+    delete, path = "/rest/manga/{id}/tracker_mappings/{tracker_id}",
+    params(
+        ("id" = i64, Path, description = "Manga ID"),
+        ("tracker_id" = i64, Path, description = "Tracker ID"),
+    ),
+    responses(
+        (status = 204, description = "Tracker mapping deleted"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn delete_tracker_mapping(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path((manga_id, tracker_id)): Path<(MangaId, i64)>,
@@ -218,7 +366,16 @@ async fn delete_tracker_mapping(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn sync_all_trackers(
+#[utoipa::path(
+    post, path = "/rest/trackers/sync",
+    responses(
+        (status = 204, description = "All tracker states synced for the current user"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn sync_all_trackers(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -226,7 +383,17 @@ async fn sync_all_trackers(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn sync_manga_trackers(
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/sync",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 204, description = "Tracker states synced for this manga"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn sync_manga_trackers(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn TrackerDomain>>,
     Path(manga_id): Path<MangaId>,

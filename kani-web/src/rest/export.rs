@@ -10,8 +10,19 @@ pub fn router() -> Router<AppState> {
         .route("/chapters/{id}/export/kcc", get(export_kcc))
 }
 
-async fn serve_chapter_cbz(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/chapters/{id}/cbz",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    responses(
+        (status = 200, description = "CBZ archive download", content_type = "application/x-cbz"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "Chapter not downloaded"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn serve_chapter_cbz(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<ChapterId>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -32,8 +43,21 @@ async fn serve_chapter_cbz(
     ))
 }
 
-async fn export_epub(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/chapters/{id}/export/epub",
+    params(
+        ("id" = i64, Path, description = "Chapter ID"),
+        ("profile" = Option<String>, Query, description = "Device profile (e.g. Standard, KoboLibra)"),
+    ),
+    responses(
+        (status = 200, description = "EPUB download", content_type = "application/epub+zip"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn export_epub(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<ChapterId>,
     Query(q): Query<ExportQuery>,
@@ -57,8 +81,21 @@ async fn export_epub(
     ))
 }
 
-async fn export_kepub(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/chapters/{id}/export/kepub",
+    params(
+        ("id" = i64, Path, description = "Chapter ID"),
+        ("profile" = Option<String>, Query, description = "Device profile (default KoboLibra)"),
+    ),
+    responses(
+        (status = 200, description = "Kobo EPUB download", content_type = "application/epub+zip"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn export_kepub(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<ChapterId>,
     Query(q): Query<ExportQuery>,
@@ -82,8 +119,23 @@ async fn export_kepub(
     ))
 }
 
-async fn export_kcc(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/chapters/{id}/export/kcc",
+    params(
+        ("id" = i64, Path, description = "Chapter ID"),
+        ("profile" = Option<String>, Query, description = "Kindle device profile (default KPW5)"),
+        ("format" = Option<String>, Query, description = "Output format: Mobi, Epub, Cbz (default Mobi)"),
+        ("manga" = Option<bool>, Query, description = "Enable manga mode (default true)"),
+    ),
+    responses(
+        (status = 200, description = "KCC-converted e-book download"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn export_kcc(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<ChapterId>,
     Query(q): Query<KccExportQuery>,

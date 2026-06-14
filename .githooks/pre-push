@@ -40,10 +40,10 @@ if ! DATABASE_URL="sqlite:${DB}?mode=rwc" SQLX_OFFLINE=false cargo sqlx migrate 
   exit 1
 fi
 
-if ! DATABASE_URL="sqlite:${DB}?mode=rwc" SQLX_OFFLINE=false cargo sqlx prepare --check --workspace -- --all-targets > /dev/null; then
+if ! DATABASE_URL="sqlite:${DB}?mode=rwc" SQLX_OFFLINE=false cargo sqlx prepare --check --workspace -- --all-targets --tests > /dev/null; then
   echo ""
   echo "error: sqlx offline data is out of date"
-  echo "       Run: cargo sqlx prepare --workspace -- --all-targets"
+  echo "       Run: cargo sqlx prepare --workspace -- --all-targets --tests"
   exit 1
 fi
 

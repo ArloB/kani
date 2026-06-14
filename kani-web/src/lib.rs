@@ -1,11 +1,15 @@
+pub const KANI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod app;
 pub mod auth;
 pub mod cache;
 pub mod csrf;
 pub mod error;
+pub mod i18n;
 pub mod logging;
 pub mod models;
 pub mod opds;
+pub mod openapi;
 pub mod permissions;
 pub mod proxy;
 pub mod rate_limit;

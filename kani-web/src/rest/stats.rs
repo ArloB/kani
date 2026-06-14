@@ -8,7 +8,19 @@ pub fn router() -> Router<AppState> {
         .route("/stats/pace", get(reading_pace_handler))
 }
 
-async fn reading_stats(
+#[utoipa::path(
+    get, path = "/rest/stats",
+    params(
+        ("period" = Option<i32>, Query, description = "Rolling window in days (default 90, max 365)"),
+    ),
+    responses(
+        (status = 200, description = "Reading statistics: pages read, chapters read, daily activity"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn reading_stats(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<crate::models::StatsQuery>,
@@ -18,7 +30,19 @@ async fn reading_stats(
     Ok(Json((*stats).clone()))
 }
 
-async fn reading_pace_handler(
+#[utoipa::path(
+    get, path = "/rest/stats/pace",
+    params(
+        ("period" = Option<i32>, Query, description = "Rolling window in days (default 90)"),
+    ),
+    responses(
+        (status = 200, description = "Daily reading pace: chapters-per-day for each day in the period"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn reading_pace_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     Query(q): Query<crate::models::PaceQuery>,

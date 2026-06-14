@@ -43,7 +43,17 @@ pub fn router() -> Router<AppState> {
         .route("/auth/resend-verification", post(resend_verification))
 }
 
-async fn auth_login(
+#[utoipa::path(
+    post, path = "/rest/auth/login",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful — sets a session cookie"),
+        (status = 401, description = "Invalid credentials"),
+        (status = 429, description = "Too many failed attempts"),
+    ),
+    tag = "auth"
+)]
+pub(crate) async fn auth_login(
     mut auth: AuthSession,
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -153,7 +163,18 @@ async fn auth_login(
     }
 }
 
-async fn auth_logout(mut auth: AuthSession, State(state): State<AppState>) -> impl IntoResponse {
+#[utoipa::path(
+    post, path = "/rest/auth/logout",
+    responses(
+        (status = 200, description = "Session invalidated"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn auth_logout(
+    mut auth: AuthSession,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
     let (user_id, username) = auth
         .user
         .as_ref()
@@ -169,7 +190,16 @@ async fn auth_logout(mut auth: AuthSession, State(state): State<AppState>) -> im
     (StatusCode::OK, Json(json!({"ok": true})))
 }
 
-async fn auth_me(
+#[utoipa::path(
+    get, path = "/rest/auth/me",
+    responses(
+        (status = 200, description = "Current user ID and username"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn auth_me(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(json!({
@@ -178,7 +208,16 @@ async fn auth_me(
     })))
 }
 
-async fn get_current_user(
+#[utoipa::path(
+    get, path = "/rest/auth/current_user",
+    responses(
+        (status = 200, description = "Full current user profile including email and roles"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn get_current_user(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -198,7 +237,18 @@ async fn get_current_user(
     }))
 }
 
-async fn change_password(
+#[utoipa::path(
+    post, path = "/rest/auth/change_password",
+    request_body = ChangePasswordRequest,
+    responses(
+        (status = 200, description = "Password changed successfully"),
+        (status = 401, description = "Not authenticated or current password incorrect"),
+        (status = 422, description = "New password too short"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn change_password(
     auth: AuthSession,
     State(state): State<AppState>,
     Json(body): Json<ChangePasswordRequest>,
@@ -236,7 +286,16 @@ async fn change_password(
     Ok(Json(json!({})))
 }
 
-async fn logout_everywhere(
+#[utoipa::path(
+    post, path = "/rest/auth/logout_everywhere",
+    responses(
+        (status = 200, description = "All sessions for this user invalidated"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn logout_everywhere(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -253,7 +312,16 @@ async fn logout_everywhere(
     Ok(Json(json!({})))
 }
 
-async fn list_sessions(
+#[utoipa::path(
+    get, path = "/rest/auth/sessions",
+    responses(
+        (status = 200, description = "Active sessions for the current user"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn list_sessions(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     auth: AuthSession,
     State(state): State<AppState>,
@@ -277,7 +345,16 @@ async fn list_sessions(
     Ok(Json(json!({ "sessions": response })))
 }
 
-async fn revoke_all_other_sessions(
+#[utoipa::path(
+    delete, path = "/rest/auth/sessions",
+    responses(
+        (status = 200, description = "All sessions except the current one revoked"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn revoke_all_other_sessions(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     auth: AuthSession,
     State(state): State<AppState>,
@@ -299,7 +376,18 @@ async fn revoke_all_other_sessions(
     Ok(Json(json!({ "revoked": count })))
 }
 
-async fn revoke_session(
+#[utoipa::path(
+    delete, path = "/rest/auth/sessions/{id}",
+    params(("id" = String, Path, description = "Session ID")),
+    responses(
+        (status = 204, description = "Session revoked"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "Session not found"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn revoke_session(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     axum::extract::Path(session_id): axum::extract::Path<String>,
@@ -320,7 +408,16 @@ async fn revoke_session(
     }
 }
 
-async fn password_strength(
+#[utoipa::path(
+    post, path = "/rest/auth/password-strength",
+    request_body = PasswordStrengthRequest,
+    responses(
+        (status = 200, description = "Password strength score and feedback"),
+        (status = 422, description = "Password too short, too weak, same as identity, or pwned"),
+    ),
+    tag = "auth"
+)]
+pub(crate) async fn password_strength(
     State(state): State<AppState>,
     Json(body): Json<PasswordStrengthRequest>,
 ) -> impl IntoResponse {
@@ -357,7 +454,16 @@ async fn password_strength(
     }
 }
 
-async fn totp_setup(
+#[utoipa::path(
+    post, path = "/rest/auth/totp/setup",
+    responses(
+        (status = 200, description = "TOTP secret and QR code for enrollment"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn totp_setup(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -371,7 +477,18 @@ async fn totp_setup(
     })))
 }
 
-async fn totp_verify(
+#[utoipa::path(
+    post, path = "/rest/auth/totp/verify",
+    request_body = TotpCodeRequest,
+    responses(
+        (status = 200, description = "TOTP enrolled; returns one-time backup codes"),
+        (status = 401, description = "Not authenticated"),
+        (status = 422, description = "Incorrect TOTP code"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn totp_verify(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     Json(body): Json<TotpCodeRequest>,
@@ -383,7 +500,18 @@ async fn totp_verify(
     Ok(Json(json!({ "backup_codes": backup_codes })))
 }
 
-async fn totp_disable(
+#[utoipa::path(
+    post, path = "/rest/auth/totp/disable",
+    request_body = TotpCodeRequest,
+    responses(
+        (status = 204, description = "TOTP disabled"),
+        (status = 401, description = "Not authenticated"),
+        (status = 422, description = "Incorrect TOTP code"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn totp_disable(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     Json(body): Json<TotpCodeRequest>,
@@ -395,7 +523,18 @@ async fn totp_disable(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn totp_regenerate_backup_codes(
+#[utoipa::path(
+    post, path = "/rest/auth/totp/backup-codes/regenerate",
+    request_body = TotpCodeRequest,
+    responses(
+        (status = 200, description = "New backup codes generated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 422, description = "Incorrect TOTP code"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn totp_regenerate_backup_codes(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     Json(body): Json<TotpCodeRequest>,
@@ -404,9 +543,18 @@ async fn totp_regenerate_backup_codes(
     Ok(Json(json!({ "backup_codes": codes })))
 }
 
-/// Satisfy a TOTP step-up challenge (sets `totp_verified` session flag).
-/// Currently stores the flag in the session store via a custom key.
-async fn totp_step_up(
+#[utoipa::path(
+    post, path = "/rest/auth/totp/step-up",
+    request_body = TotpCodeRequest,
+    responses(
+        (status = 204, description = "Step-up TOTP challenge satisfied"),
+        (status = 401, description = "Not authenticated"),
+        (status = 422, description = "Incorrect TOTP code"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn totp_step_up(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     auth: AuthSession,
@@ -423,7 +571,17 @@ async fn totp_step_up(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn get_features(State(state): State<AppState>, auth: AuthSession) -> impl IntoResponse {
+#[utoipa::path(
+    get, path = "/rest/features",
+    responses(
+        (status = 200, description = "Server feature flags: public_instance, totp_enabled"),
+    ),
+    tag = "system"
+)]
+pub(crate) async fn get_features(
+    State(state): State<AppState>,
+    auth: AuthSession,
+) -> impl IntoResponse {
     // `totp_enabled` will be populated once the TOTP service is implemented (task 9).
     let totp_enabled = if let Some(user) = &auth.user {
         state.is_totp_enabled(user.id).await.unwrap_or(false)
@@ -436,7 +594,16 @@ async fn get_features(State(state): State<AppState>, auth: AuthSession) -> impl 
     }))
 }
 
-async fn get_my_permissions(auth: AuthSession) -> Result<impl IntoResponse, AppError> {
+#[utoipa::path(
+    get, path = "/rest/auth/permissions",
+    responses(
+        (status = 200, description = "All permissions the current user holds"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn get_my_permissions(auth: AuthSession) -> Result<impl IntoResponse, AppError> {
     let user = auth
         .user
         .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
@@ -448,14 +615,31 @@ async fn get_my_permissions(auth: AuthSession) -> Result<impl IntoResponse, AppE
     Ok(Json(perms))
 }
 
-async fn get_registration_enabled(
+#[utoipa::path(
+    get, path = "/rest/auth/registration-enabled",
+    responses(
+        (status = 200, description = "Whether self-registration is enabled"),
+    ),
+    tag = "auth"
+)]
+pub(crate) async fn get_registration_enabled(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let enabled = state.get_settings().await.registration_enabled;
     Ok(Json(json!({ "enabled": enabled })))
 }
 
-async fn get_captcha(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
+#[utoipa::path(
+    get, path = "/rest/auth/captcha",
+    responses(
+        (status = 200, description = "Math captcha challenge: id + prompt"),
+        (status = 404, description = "Registration disabled"),
+    ),
+    tag = "auth"
+)]
+pub(crate) async fn get_captcha(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
     if !state.get_settings().await.registration_enabled {
         return Err(AppError::NotFound("Registration is disabled".into()));
     }
@@ -481,7 +665,17 @@ async fn get_captcha(State(state): State<AppState>) -> Result<impl IntoResponse,
     ))
 }
 
-async fn auth_register(
+#[utoipa::path(
+    post, path = "/rest/auth/register",
+    request_body = RegisterRequest,
+    responses(
+        (status = 200, description = "Registered and logged in"),
+        (status = 403, description = "Registration disabled"),
+        (status = 422, description = "Invalid captcha, short password, or duplicate username"),
+    ),
+    tag = "auth"
+)]
+pub(crate) async fn auth_register(
     auth: AuthSession,
     State(state): State<AppState>,
     Json(body): Json<RegisterRequest>,
@@ -525,14 +719,27 @@ async fn auth_register(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn get_password_reset_enabled(
+#[utoipa::path(
+    get, path = "/rest/auth/password-reset-enabled",
+    responses((status = 200, description = "Whether password reset via email is enabled")),
+    tag = "auth"
+)]
+pub(crate) async fn get_password_reset_enabled(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let enabled = state.get_settings().await.password_reset_enabled;
     Ok(Json(json!({ "enabled": enabled })))
 }
 
-async fn password_reset_request(
+#[utoipa::path(
+    post, path = "/rest/auth/password-reset/request",
+    request_body = PasswordResetRequestBody,
+    responses(
+        (status = 200, description = "Reset email sent if account exists (always 200 to avoid enumeration)"),
+    ),
+    tag = "auth"
+)]
+pub(crate) async fn password_reset_request(
     State(state): State<AppState>,
     Json(body): Json<PasswordResetRequestBody>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -540,7 +747,16 @@ async fn password_reset_request(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn password_reset_confirm(
+#[utoipa::path(
+    post, path = "/rest/auth/password-reset/confirm",
+    request_body = PasswordResetConfirmBody,
+    responses(
+        (status = 200, description = "Password changed via reset token"),
+        (status = 422, description = "Invalid/expired token or weak password"),
+    ),
+    tag = "auth"
+)]
+pub(crate) async fn password_reset_confirm(
     State(state): State<AppState>,
     Json(body): Json<PasswordResetConfirmBody>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -561,7 +777,16 @@ async fn password_reset_confirm(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn password_reset_validate(
+#[utoipa::path(
+    get, path = "/rest/auth/password-reset/validate",
+    params(("token" = String, Query, description = "Password reset token")),
+    responses(
+        (status = 200, description = "Token valid; returns redacted email hint"),
+        (status = 404, description = "Token not found or expired"),
+    ),
+    tag = "auth"
+)]
+pub(crate) async fn password_reset_validate(
     State(state): State<AppState>,
     Query(q): Query<TokenQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -569,7 +794,16 @@ async fn password_reset_validate(
     Ok(Json(json!({ "email_hint": email_hint })))
 }
 
-async fn verify_email(
+#[utoipa::path(
+    post, path = "/rest/auth/verify-email",
+    request_body(content = inline(serde_json::Value), description = r#"{"token":"..."}"#),
+    responses(
+        (status = 200, description = "Email verified"),
+        (status = 422, description = "Invalid or expired token"),
+    ),
+    tag = "auth"
+)]
+pub(crate) async fn verify_email(
     State(state): State<AppState>,
     Json(body): Json<TokenQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -577,7 +811,16 @@ async fn verify_email(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn resend_verification(
+#[utoipa::path(
+    post, path = "/rest/auth/resend-verification",
+    responses(
+        (status = 200, description = "Verification email resent"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "auth"
+)]
+pub(crate) async fn resend_verification(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {

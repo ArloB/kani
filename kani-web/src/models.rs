@@ -11,13 +11,13 @@ fn validate_https_url(value: &str, _: &()) -> garde::Result {
     }
 }
 
-#[derive(garde::Validate, Deserialize, Debug)]
+#[derive(garde::Validate, Deserialize, Debug, utoipa::ToSchema)]
 pub struct CreateSource {
     #[garde(length(min = 1, max = 100))]
     pub name: String,
 }
 
-#[derive(garde::Validate, Deserialize, Debug)]
+#[derive(garde::Validate, Deserialize, Debug, utoipa::ToSchema)]
 pub struct UpdateSource {
     #[garde(inner(length(min = 1, max = 100)))]
     pub name: Option<String>,
@@ -25,7 +25,7 @@ pub struct UpdateSource {
     pub version: Option<String>,
 }
 
-#[derive(garde::Validate, Deserialize, Debug)]
+#[derive(garde::Validate, Deserialize, Debug, utoipa::ToSchema)]
 pub struct FetchWasmRequest {
     #[garde(length(min = 1, max = 2048), custom(validate_https_url))]
     pub url: String,
@@ -35,14 +35,14 @@ pub struct FetchWasmRequest {
 // (rest.rs, tests) continues to compile unchanged.
 pub use kani_app::models::{DownloadRuleRow, LibraryManga, Manga, Settings};
 
-#[derive(serde::Deserialize, Default, Debug)]
+#[derive(serde::Deserialize, Default, Debug, utoipa::ToSchema)]
 pub struct RefreshMangaRequest {
     pub fields: Option<Vec<String>>,
     pub fetch_chapters: Option<bool>,
     pub clear_overrides: Option<bool>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct UpdateLocalMetadataRequest {
     pub local_name: Option<String>,
     pub local_description: Option<String>,
@@ -52,7 +52,7 @@ pub struct UpdateLocalMetadataRequest {
     pub tags: Option<Vec<String>>,
 }
 
-#[derive(garde::Validate, Deserialize, Debug)]
+#[derive(garde::Validate, Deserialize, Debug, utoipa::ToSchema)]
 pub struct SearchMangaRequest {
     #[garde(inner(length(max = 200)))]
     pub query: Option<String>,
@@ -60,13 +60,13 @@ pub struct SearchMangaRequest {
     pub filters: Option<String>,
 }
 
-#[derive(garde::Validate, Deserialize, Debug)]
+#[derive(garde::Validate, Deserialize, Debug, utoipa::ToSchema)]
 pub struct PopularMangaQuery {
     #[garde(skip)]
     pub filters: Option<String>,
 }
 
-#[derive(garde::Validate, Deserialize, Debug)]
+#[derive(garde::Validate, Deserialize, Debug, utoipa::ToSchema)]
 pub struct ProxyQuery {
     #[garde(length(min = 1, max = 4096))]
     pub token: String,
@@ -80,7 +80,7 @@ pub struct FilterOptionResult {
     pub name: String,
 }
 
-#[derive(garde::Validate, serde::Deserialize, Debug)]
+#[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct LibraryQuery {
     #[garde(range(min = 1))]
     pub page: i32,
@@ -110,10 +110,11 @@ pub struct LibraryQuery {
     pub source_id: Option<i64>,
     #[garde(skip)]
     #[serde(default)]
+    #[schema(value_type = String)]
     pub sort_by: kani_shared::MangaSortOrder,
 }
 
-#[derive(garde::Validate, serde::Deserialize, Debug)]
+#[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct LocalChaptersQuery {
     #[garde(range(min = 1))]
     pub page: i32,
@@ -122,6 +123,7 @@ pub struct LocalChaptersQuery {
     pub page_size: i32,
     #[garde(skip)]
     #[serde(default)]
+    #[schema(value_type = String)]
     pub sort_order: kani_shared::ChapterSortOrder,
     /// `true` = downloaded only, `false` = undownloaded only, absent = all
     #[garde(skip)]
@@ -135,10 +137,11 @@ pub struct LocalChaptersQuery {
 }
 
 /// Query parameters for the chapter-IDs endpoint (no pagination).
-#[derive(garde::Validate, serde::Deserialize, Debug)]
+#[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ChapterIdsQuery {
     #[garde(skip)]
     #[serde(default)]
+    #[schema(value_type = String)]
     pub sort_order: kani_shared::ChapterSortOrder,
     /// `true` = downloaded only, `false` = undownloaded only, absent = all
     #[garde(skip)]
@@ -160,7 +163,7 @@ fn default_chapter_page_size() -> i32 {
     50
 }
 
-#[derive(garde::Validate, serde::Deserialize, Debug)]
+#[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct PageQuery {
     #[garde(range(min = 1))]
     pub page: i32,
@@ -181,36 +184,40 @@ where
     serde_json::from_str::<SearchScope>(&format!("\"{}\"", s)).map_err(serde::de::Error::custom)
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct GlobalSearchQuery {
     pub query: String,
     #[serde(deserialize_with = "deserialize_search_scope")]
+    #[schema(value_type = Object)]
     pub scope: kani_shared::SearchScope,
     pub page: i32,
     pub page_size: i32,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct AddDownloadRuleRequest {
+    #[schema(value_type = Object)]
     pub kind: kani_shared::DownloadRuleKind,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct UpdateDownloadRuleRequest {
+    #[schema(value_type = Object)]
     pub kind: kani_shared::DownloadRuleKind,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ReorderDownloadRulesRequest {
     pub ordered_ids: Vec<i64>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct PreviewDownloadRulesRequest {
+    #[schema(value_type = Vec<Object>)]
     pub kinds: Vec<kani_shared::DownloadRuleKind>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SetScanlatorPrefRequest {
     pub scanlator: String,
     pub priority: i64,
@@ -218,75 +225,78 @@ pub struct SetScanlatorPrefRequest {
     pub blocked: bool,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SetScanlatorModeRequest {
     pub mode: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct CreateCategoryRequest {
     pub name: String,
     pub sort_order: i64,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct RenameCategoryRequest {
     pub name: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ReorderCategoriesRequest {
     pub ordered_ids: Vec<i64>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SetMangaCategoriesRequest {
     pub category_ids: Vec<i64>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SetPreferenceRequest {
     pub value: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ListItemRequest {
     pub item: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ToggleSelectRequest {
     pub item: String,
     pub selected: bool,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ToggleEnabledRequest {
     pub enabled: bool,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ToggleFavouritedRequest {
     pub favourited: bool,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ToggleAutoDownloadRequest {
     pub enabled: bool,
 }
 
 /// Body for `POST /manga/scan`. Either scan all manga or a specific list.
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 #[serde(untagged)]
 pub enum ScanMangaRequest {
     /// Scan specific manga by ID.
-    Ids { ids: Vec<MangaId> },
+    Ids {
+        #[schema(value_type = Vec<i64>)]
+        ids: Vec<MangaId>,
+    },
     /// Scan all manga in the library. Send `{ "ids": "all" }`.
     All { ids: ScanAll },
 }
 
 /// Sentinel value — used in `ScanMangaRequest::All`.
-#[derive(Debug)]
+#[derive(Debug, utoipa::ToSchema)]
 pub struct ScanAll;
 
 impl<'de> serde::Deserialize<'de> for ScanAll {
@@ -302,44 +312,46 @@ impl<'de> serde::Deserialize<'de> for ScanAll {
     }
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct PreviewMigrationRequest {
     pub target_source_id: i64,
     pub target_source_manga_id: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct MigrateMangaRequest {
     pub target_source_id: i64,
     pub target_source_manga_id: String,
     pub keep_orphaned_downloads: bool,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ChangePasswordRequest {
     pub current_password: String,
     pub new_password: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SetChapterProgressRequest {
     pub page: i64,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SetReadStatusRequest {
+    #[schema(value_type = Vec<i64>)]
     pub chapter_ids: Vec<ChapterId>,
     pub is_read: bool,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SetMangaTrackingRequest {
+    #[schema(value_type = Option<String>)]
     pub status: Option<kani_shared::types::MangaTrackingStatus>,
     pub score: Option<f64>,
     pub tracking_enabled: Option<bool>,
@@ -348,57 +360,57 @@ pub struct SetMangaTrackingRequest {
     pub reader_prefs: Option<String>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ToggleBookmarkRequest {
     pub page_index: i64,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SetChapterNoteRequest {
     pub note: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct PaceQuery {
     pub period: Option<i32>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct TrackerAuthUrlQuery {
     pub redirect_uri: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct TrackerCallbackQuery {
     pub code: String,
     pub state: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SetTrackerConfigRequest {
     pub client_id: String,
     /// Omit to keep existing secret; set to empty string to clear.
     pub client_secret: Option<String>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct TrackerSearchQuery {
     pub query: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SetTrackerMappingRequest {
     pub tracker_id: i64,
     pub tracker_manga_id: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct MarkUpToRequest {
     pub chapter_number: f64,
     pub is_read: bool,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct ContinueReadingShelfQuery {
     #[serde(default = "default_shelf_limit")]
     pub limit: i64,
@@ -410,7 +422,7 @@ fn default_shelf_limit() -> i64 {
 
 // ── Admin / user-management request types ─────────────────────────────────────
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct AdminCreateUserRequest {
     pub username: String,
     pub email: String,
@@ -420,7 +432,7 @@ pub struct AdminCreateUserRequest {
     pub roles: Vec<String>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct AdminUpdateUserRequest {
     pub username: Option<String>,
     pub email: Option<String>,
@@ -428,12 +440,12 @@ pub struct AdminUpdateUserRequest {
     pub password: Option<String>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct AdminGrantRoleRequest {
     pub role_slug: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct AdminCreateRoleRequest {
     pub slug: String,
     pub parent: Option<String>,
@@ -442,7 +454,7 @@ pub struct AdminCreateRoleRequest {
     pub permissions: Vec<String>,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct AdminUpdateRoleRequest {
     pub description: Option<String>,
     pub permissions: Option<Vec<String>>,
@@ -450,7 +462,7 @@ pub struct AdminUpdateRoleRequest {
 
 // ── Admin logs queries ────────────────────────────────────────────────────────
 
-#[derive(garde::Validate, serde::Deserialize, Debug, Default)]
+#[derive(garde::Validate, serde::Deserialize, Debug, Default, utoipa::ToSchema)]
 pub struct LogsQuery {
     /// Comma-separated levels, e.g. "error,warn". Empty = all levels.
     #[garde(skip)]
@@ -473,7 +485,7 @@ pub struct LogsQuery {
     pub format: Option<String>,
 }
 
-#[derive(garde::Validate, serde::Deserialize, Debug, Default)]
+#[derive(garde::Validate, serde::Deserialize, Debug, Default, utoipa::ToSchema)]
 pub struct AuditLogQuery {
     #[garde(skip)]
     pub user_id: Option<i64>,
@@ -496,30 +508,30 @@ pub struct AuditLogQuery {
 
 // ── Password reset / email verification request types ─────────────────────────
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct PasswordResetRequestBody {
     pub email: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct PasswordResetConfirmBody {
     pub token: String,
     pub new_password: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct TokenQuery {
     pub token: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct SendTestEmailBody {
     pub to: String,
 }
 
 // ── Reading stats query ───────────────────────────────────────────────────────
 
-#[derive(garde::Validate, serde::Deserialize, Debug)]
+#[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct StatsQuery {
     /// Number of days for the daily_activity window. Default 90.
     #[garde(range(min = 1, max = 365))]
@@ -531,19 +543,19 @@ pub struct StatsQuery {
 
 // ── Filesystem browser ────────────────────────────────────────────────────────
 
-#[derive(garde::Validate, serde::Deserialize, Debug)]
+#[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct FsBrowseQuery {
     #[garde(length(min = 1, max = 4096))]
     pub path: String,
 }
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct FsMkdirBody {
     pub path: String,
     pub name: String,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(serde::Serialize, Debug, utoipa::ToSchema)]
 pub struct FsBrowseResponse {
     pub path: String,
     pub segments: Vec<String>,
@@ -551,20 +563,20 @@ pub struct FsBrowseResponse {
     pub drives: Vec<String>,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(serde::Serialize, Debug, utoipa::ToSchema)]
 pub struct FsMkdirResponse {
     pub path: String,
 }
 
 // ── Path migration ────────────────────────────────────────────────────────────
 
-#[derive(serde::Deserialize, Debug)]
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct PathMigrateBody {
     pub field: String,
     pub new_path: String,
 }
 
-#[derive(serde::Serialize, Debug)]
+#[derive(serde::Serialize, Debug, utoipa::ToSchema)]
 pub struct PathMigrateEstimateResponse {
     pub current_bytes: u64,
     pub available_bytes: u64,

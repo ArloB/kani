@@ -1279,6 +1279,20 @@ export async function checkPasswordStrength(password, identity = '') {
   return _req('POST', '/auth/password-strength', { body: { password, identity } });
 }
 
+// ── System info ───────────────────────────────────────────────────────────────
+
+/**
+ * @returns {Promise<{version:string,first_run:boolean,oidc_available:boolean,registration_enabled:boolean}>}
+ */
+export async function getSystemInfo() {
+  return _req('GET', '/system/info');
+}
+
+/** @returns {Promise<void>} */
+export async function markFirstRunComplete() {
+  return _req('POST', '/system/first-run-complete');
+}
+
 // ── Security — features ───────────────────────────────────────────────────────
 
 /** @returns {Promise<{public_instance:boolean,totp_enabled:boolean}>} */

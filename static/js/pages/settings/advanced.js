@@ -195,6 +195,7 @@ export function mount(el, settings, bootId) {
   encCard.appendChild(mkSettingsRow({
     label: 'Encryption at rest',
     description: 'Encrypts SMTP password and OAuth tokens using ChaCha20-Poly1305 (KANI_SECRET_KEY).',
+    tooltip: 'Set KANI_SECRET_KEY to a random 32-byte hex string in your environment and restart Kani to enable encryption at rest.',
     control: encCtrl,
   }));
   el.appendChild(encGroup);

@@ -65,14 +65,34 @@ pub fn router() -> Router<AppState> {
         .route("/sources/{id}/capabilities", get(get_capabilities))
 }
 
-async fn list_sources(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources",
+    responses(
+        (status = 200, description = "All installed sources"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn list_sources(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(svc.list_sources().await?))
 }
 
-async fn add_source(
+#[utoipa::path(
+    post, path = "/rest/sources",
+    request_body = CreateSource,
+    responses(
+        (status = 201, description = "Source slot created; returns new ID"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn add_source(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SourceInstall>,
     State(svc): State<Arc<dyn SourceDomain>>,
     ValidatedJson(payload): ValidatedJson<CreateSource>,
@@ -81,23 +101,69 @@ async fn add_source(
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
 
-async fn get_sources_health(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/health",
+    responses(
+        (status = 200, description = "Health status for all installed sources"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_sources_health(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(svc.get_source_health().await?))
 }
 
-async fn get_active_source_ids(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/active_ids",
+    responses(
+        (status = 200, description = "IDs of all enabled (active) sources"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_active_source_ids(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     let ids = svc.list_active_source_ids().await?;
     Ok(Json(ids))
 }
 
-async fn get_source(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/metadata-providers",
+    responses(
+        (status = 200, description = "All registered metadata enrichment providers"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn list_metadata_providers(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let registry = state.metadata_provider_registry.read().await;
+    Ok(Json(registry.list()))
+}
+
+#[utoipa::path(
+    get, path = "/rest/sources/{id}",
+    params(("id" = i64, Path, description = "Source ID")),
+    responses(
+        (status = 200, description = "Source details"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "Source not found"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_source(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -105,8 +171,20 @@ async fn get_source(
     Ok(Json(source))
 }
 
-async fn update_source(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
+#[utoipa::path(
+    patch, path = "/rest/sources/{id}",
+    params(("id" = i64, Path, description = "Source ID")),
+    request_body = UpdateSource,
+    responses(
+        (status = 200, description = "Source updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn update_source(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
     ValidatedJson(payload): ValidatedJson<UpdateSource>,
@@ -118,7 +196,18 @@ async fn update_source(
     Ok(Json(json!({})))
 }
 
-async fn delete_source(
+#[utoipa::path(
+    delete, path = "/rest/sources/{id}",
+    params(("id" = i64, Path, description = "Source ID")),
+    responses(
+        (status = 200, description = "Source deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn delete_source(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SourceDelete>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
@@ -127,8 +216,18 @@ async fn delete_source(
     Ok(Json(json!({})))
 }
 
-async fn get_metadata(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/metadata",
+    params(("id" = i64, Path, description = "Source ID")),
+    responses(
+        (status = 200, description = "Raw source metadata JSON"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_metadata(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -136,9 +235,20 @@ async fn get_metadata(
     Ok(result)
 }
 
-// cross-domain: needs proxy_client + install_source
-async fn upload_wasm(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
+#[utoipa::path(
+    post, path = "/rest/sources/{id}/wasm",
+    params(("id" = i64, Path, description = "Source ID")),
+    request_body(content = inline(serde_json::Value), description = "Multipart form with WASM file field", content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "WASM installed successfully"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn upload_wasm(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     mut multipart: Multipart,
@@ -168,9 +278,20 @@ async fn upload_wasm(
     Ok(StatusCode::OK)
 }
 
-// cross-domain: needs proxy_client
-async fn fetch_wasm(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceInstall>,
+#[utoipa::path(
+    post, path = "/rest/sources/{id}/wasm/fetch",
+    params(("id" = i64, Path, description = "Source ID")),
+    request_body = FetchWasmRequest,
+    responses(
+        (status = 200, description = "WASM fetched from URL and installed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn fetch_wasm(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     ValidatedJson(payload): ValidatedJson<FetchWasmRequest>,
@@ -186,9 +307,19 @@ async fn fetch_wasm(
     Ok(StatusCode::OK)
 }
 
-// cross-domain: needs wasm_runtime + sources field
-async fn reload_source_handler(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::SourceInstall>,
+#[utoipa::path(
+    post, path = "/rest/sources/{id}/reload",
+    params(("id" = i64, Path, description = "Source ID")),
+    responses(
+        (status = 200, description = "Source reloaded into the runtime"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn reload_source_handler(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -196,9 +327,22 @@ async fn reload_source_handler(
     Ok(StatusCode::OK)
 }
 
-// cross-domain: needs proxy_secret for sign_image_url
-async fn get_popular_manga(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/popular/{page}/{page_size}",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("page" = i32, Path, description = "Page number"),
+        ("page_size" = i32, Path, description = "Results per page"),
+    ),
+    responses(
+        (status = 200, description = "Popular manga from this source"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_popular_manga(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, page, page_size)): Path<(i64, i32, i32)>,
     Query(query): Query<crate::models::PopularMangaQuery>,
@@ -216,9 +360,23 @@ async fn get_popular_manga(
     Ok(Json(list))
 }
 
-// cross-domain: needs proxy_secret for sign_image_url
-async fn search_manga(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/search/{page}/{page_size}",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("page" = i32, Path, description = "Page number"),
+        ("page_size" = i32, Path, description = "Results per page"),
+        ("query" = Option<String>, Query, description = "Search query"),
+    ),
+    responses(
+        (status = 200, description = "Search results from this source"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn search_manga(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, page, page_size)): Path<(i64, i32, i32)>,
     ValidatedQuery(payload): ValidatedQuery<SearchMangaRequest>,
@@ -242,9 +400,21 @@ async fn search_manga(
     Ok(Json(list))
 }
 
-// cross-domain: needs proxy_secret for sign_image_url
-async fn get_manga_details(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/details/{manga_id}",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("manga_id" = String, Path, description = "Source manga ID"),
+    ),
+    responses(
+        (status = 200, description = "Manga details from the source"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_manga_details(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -261,8 +431,21 @@ async fn get_manga_details(
     Ok(Json(info))
 }
 
-async fn get_source_manga_url(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/url/{manga_id}",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("manga_id" = String, Path, description = "Source manga ID"),
+    ),
+    responses(
+        (status = 200, description = "Canonical source URL for this manga"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_source_manga_url(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -270,9 +453,23 @@ async fn get_source_manga_url(
     Ok(Json(serde_json::json!({ "url": url })))
 }
 
-// cross-domain: library domain
-async fn save_to_library(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryAdd>,
+#[utoipa::path(
+    post, path = "/rest/sources/{id}/save/{manga_id}",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("manga_id" = String, Path, description = "Source manga ID"),
+        ("force" = Option<bool>, Query, description = "Force add even if already in library"),
+    ),
+    responses(
+        (status = 200, description = "Manga saved to library; returns db_id"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn save_to_library(
+    _: AuthGuard<crate::permissions::guards::LibraryAdd>,
     State(state): State<AppState>,
     Path((id, manga_id)): Path<(i64, String)>,
     Query(q): Query<SaveToLibraryQuery>,
@@ -283,8 +480,24 @@ async fn save_to_library(
     Ok(Json(json!({ "db_id": manga_row_id })))
 }
 
-async fn get_chapter_list(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/chapters/{manga_id}/{page}/{page_size}",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("manga_id" = String, Path, description = "Source manga ID"),
+        ("page" = i32, Path, description = "Page number"),
+        ("page_size" = i32, Path, description = "Results per page"),
+        ("sort" = Option<String>, Query, description = "Sort option"),
+    ),
+    responses(
+        (status = 200, description = "Paged chapter list from source"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_chapter_list(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((id, manga_id, page, page_size)): Path<(i64, String, i32, i32)>,
     Query(q): Query<ChapterListQuery>,
@@ -296,8 +509,21 @@ async fn get_chapter_list(
     Ok(Json(list))
 }
 
-async fn get_chapter_sort_list(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/chapter-sorts/{manga_id}",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("manga_id" = String, Path, description = "Source manga ID"),
+    ),
+    responses(
+        (status = 200, description = "Available chapter sort options for this source"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_chapter_sort_list(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((id, _manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -305,9 +531,22 @@ async fn get_chapter_sort_list(
     Ok(Json(opts))
 }
 
-// cross-domain: needs proxy_secret for sign_image_url
-async fn get_pages(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/pages/{manga_id}/{chapter_id}",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("manga_id" = String, Path, description = "Source manga ID"),
+        ("chapter_id" = String, Path, description = "Source chapter ID"),
+    ),
+    responses(
+        (status = 200, description = "Page URLs for this chapter"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_pages(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path((id, manga_id, chapter_id)): Path<(i64, String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -320,9 +559,21 @@ async fn get_pages(
     Ok(Json(contents))
 }
 
-// cross-domain: library domain
-async fn check_in_library(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/in_library/{manga_id}",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("manga_id" = String, Path, description = "Source manga ID"),
+    ),
+    responses(
+        (status = 200, description = "Returns db_id if in library, null otherwise"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn check_in_library(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path((source_id, manga_id)): Path<(i64, String)>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -331,8 +582,20 @@ async fn check_in_library(
     Ok(Json(json!({ "db_id": db_id })))
 }
 
-async fn toggle_source_enabled(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceToggleEnabled>,
+#[utoipa::path(
+    patch, path = "/rest/sources/{id}/toggle_enabled",
+    params(("id" = i64, Path, description = "Source ID")),
+    request_body = ToggleEnabledRequest,
+    responses(
+        (status = 200, description = "Source enabled state toggled"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn toggle_source_enabled(
+    _: AuthGuard<crate::permissions::guards::SourceToggleEnabled>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
     Json(body): Json<ToggleEnabledRequest>,
@@ -341,8 +604,19 @@ async fn toggle_source_enabled(
     Ok(Json(json!({})))
 }
 
-async fn toggle_source_favourite(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    patch, path = "/rest/sources/{id}/toggle_favourite",
+    params(("id" = i64, Path, description = "Source ID")),
+    request_body = ToggleFavouritedRequest,
+    responses(
+        (status = 200, description = "Source favourite state toggled"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn toggle_source_favourite(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
     Json(body): Json<ToggleFavouritedRequest>,
@@ -352,8 +626,18 @@ async fn toggle_source_favourite(
     Ok(Json(json!({})))
 }
 
-async fn get_source_filters(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/filters",
+    params(("id" = i64, Path, description = "Source ID")),
+    responses(
+        (status = 200, description = "Filter spec for this source's search"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_source_filters(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -361,8 +645,19 @@ async fn get_source_filters(
     Ok(Json(filter_list))
 }
 
-async fn get_pref_schema(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/preference_schema",
+    params(("id" = i64, Path, description = "Source ID")),
+    responses(
+        (status = 200, description = "Preference schema for this source"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_pref_schema(
+    _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -370,8 +665,19 @@ async fn get_pref_schema(
     Ok(Json(schema))
 }
 
-async fn get_source_preferences(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/preferences",
+    params(("id" = i64, Path, description = "Source ID")),
+    responses(
+        (status = 200, description = "All preferences for this source as key-value pairs"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_source_preferences(
+    _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path(source_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -384,8 +690,23 @@ async fn get_source_preferences(
     Ok(Json(rows))
 }
 
-async fn set_source_preference(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
+#[utoipa::path(
+    put, path = "/rest/sources/{id}/preferences/{key}",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("key" = String, Path, description = "Preference key"),
+    ),
+    request_body = SetPreferenceRequest,
+    responses(
+        (status = 200, description = "Preference updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn set_source_preference(
+    _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
     Json(body): Json<SetPreferenceRequest>,
@@ -394,8 +715,23 @@ async fn set_source_preference(
     Ok(Json(json!({})))
 }
 
-async fn append_pref_list_item(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
+#[utoipa::path(
+    post, path = "/rest/sources/{id}/preferences/{key}/append",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("key" = String, Path, description = "Preference key"),
+    ),
+    request_body = ListItemRequest,
+    responses(
+        (status = 200, description = "Item appended to list preference"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn append_pref_list_item(
+    _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
     Json(body): Json<ListItemRequest>,
@@ -405,8 +741,23 @@ async fn append_pref_list_item(
     Ok(Json(json!({})))
 }
 
-async fn remove_pref_list_item(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
+#[utoipa::path(
+    post, path = "/rest/sources/{id}/preferences/{key}/remove_item",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("key" = String, Path, description = "Preference key"),
+    ),
+    request_body = ListItemRequest,
+    responses(
+        (status = 200, description = "Item removed from list preference"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn remove_pref_list_item(
+    _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
     Json(body): Json<ListItemRequest>,
@@ -416,8 +767,23 @@ async fn remove_pref_list_item(
     Ok(Json(json!({})))
 }
 
-async fn toggle_pref_select_item(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceConfigure>,
+#[utoipa::path(
+    post, path = "/rest/sources/{id}/preferences/{key}/toggle_select",
+    params(
+        ("id" = i64, Path, description = "Source ID"),
+        ("key" = String, Path, description = "Preference key"),
+    ),
+    request_body = ToggleSelectRequest,
+    responses(
+        (status = 200, description = "Select item toggled in preference"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn toggle_pref_select_item(
+    _: AuthGuard<crate::permissions::guards::SourceConfigure>,
     State(svc): State<Arc<dyn SourceDomain>>,
     Path((source_id, key)): Path<(i64, String)>,
     Json(body): Json<ToggleSelectRequest>,
@@ -427,21 +793,24 @@ async fn toggle_pref_select_item(
     Ok(Json(json!({})))
 }
 
-async fn list_metadata_providers(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, AppError> {
-    let registry = state.metadata_provider_registry.read().await;
-    Ok(Json(registry.list()))
-}
-
 #[derive(serde::Serialize)]
 struct SourceCapabilities {
     streaming_chapters: bool,
 }
 
-async fn get_capabilities(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/sources/{id}/capabilities",
+    params(("id" = i64, Path, description = "Source ID")),
+    responses(
+        (status = 200, description = "Capability flags for this source"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "Source not found"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_capabilities(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {

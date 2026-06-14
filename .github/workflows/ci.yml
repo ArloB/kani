@@ -24,6 +24,7 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       js: ${{ steps.filter.outputs.js }}
+      docs: ${{ steps.filter.outputs.docs }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
@@ -38,6 +39,13 @@ jobs:
               - 'kani-core/wit/**'
               - '.github/workflows/ci.yml'
             js:
+              - 'static/js/**'
+              - '!static/js/dist/**'
+              - '!static/js/vendor/**'
+              - '.github/workflows/ci.yml'
+            docs:
+              - 'docs/**'
+              - '**/*.md'
               - 'static/js/**'
               - '!static/js/dist/**'
               - '!static/js/vendor/**'
@@ -116,6 +124,7 @@ jobs:
         with:
           path: target/release/kani-cli
           key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
+          save-always: true
 
       - name: Build kani-cli
         if: steps.kani-cli-cache.outputs.cache-hit != 'true'
@@ -127,6 +136,7 @@ jobs:
         with:
           path: wasm_sources/
           key: wasm-${{ runner.os }}-${{ hashFiles('kani-extensions/**', 'kani-shared/**', 'kani-core/wit/**', 'kani-cli/**', 'Cargo.lock') }}
+          save-always: true
 
       - name: Build dev/test WASM extensions
         if: steps.wasm-cache.outputs.cache-hit != 'true'
@@ -141,7 +151,7 @@ jobs:
           SQLX_OFFLINE: "false"
         run: |
           cargo sqlx migrate run
-          cargo sqlx prepare --check --workspace -- --all-targets
+          cargo sqlx prepare --check --workspace -- --all-targets --tests
 
   js:
     name: JS
@@ -153,3 +163,33 @@ jobs:
 
       - name: Check JS syntax
         run: find static/js -name '*.js' -not -path '*/dist/*' -not -path '*/vendor/*' -print0 | xargs -0 node --check
+
+  docs:
+    name: Docs & i18n
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install mkdocs-material
+        run: pip install mkdocs-material
+
+      - name: Build docs (strict)
+        run: cd docs && mkdocs build --strict
+
+      - name: Markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v19
+        with:
+          globs: |
+            **/*.md
+            !SPECIFICATION.md
+          config: ".markdownlint.yml"
+
+      - name: i18n key check
+        run: node scripts/check-i18n-keys.js

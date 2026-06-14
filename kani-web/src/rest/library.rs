@@ -48,7 +48,24 @@ pub fn router() -> Router<AppState> {
 }
 
 // cross-domain: sign_image_url requires proxy_secret from AppState
-async fn get_library_filtered(
+#[utoipa::path(
+    get,
+    path = "/rest/library",
+    params(
+        ("page" = Option<u32>, Query, description = "Page number (default 1)"),
+        ("page_size" = Option<u32>, Query, description = "Items per page (default 20)"),
+        ("search" = Option<String>, Query, description = "Title filter"),
+        ("status_filter" = Option<String>, Query, description = "Manga status filter"),
+        ("sort_by" = Option<String>, Query, description = "Sort order"),
+    ),
+    responses(
+        (status = 200, description = "Paginated library listing"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn get_library_filtered(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<LibraryQuery>,
@@ -97,8 +114,17 @@ async fn get_library_filtered(
     }))
 }
 
-async fn scan_all_library(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
+#[utoipa::path(
+    post, path = "/rest/library/scan-all",
+    responses(
+        (status = 200, description = "All manga queued for chapter scan; returns count"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn scan_all_library(
+    _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     let queued = svc.scan_all_manga().await?;
@@ -110,8 +136,18 @@ async fn scan_all_library(
 /// so the frontend can use identical progress handling for both cases.
 ///
 /// Body: `{ "ids": "all" }` or `{ "ids": [1, 2, 3] }`
-async fn scan_manga_multiple(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
+#[utoipa::path(
+    post, path = "/rest/manga/scan",
+    request_body = ScanMangaRequest,
+    responses(
+        (status = 202, description = "Scan started for specified manga or entire library"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn scan_manga_multiple(
+    _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Json(body): Json<ScanMangaRequest>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -127,7 +163,17 @@ async fn scan_manga_multiple(
 }
 
 // cross-domain: sign_image_url requires proxy_secret from AppState
-async fn get_continue_reading_shelf(
+#[utoipa::path(
+    get, path = "/rest/library/continue_reading",
+    params(("limit" = Option<i64>, Query, description = "Max items to return (default 12)")),
+    responses(
+        (status = 200, description = "In-progress manga with next chapter and current page"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn get_continue_reading_shelf(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Query(q): Query<ContinueReadingShelfQuery>,
@@ -155,15 +201,39 @@ async fn get_continue_reading_shelf(
     Ok(Json(response))
 }
 
-async fn get_library(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/library/{page}/{order}",
+    params(
+        ("page" = i32, Path, description = "Page number"),
+        ("order" = i32, Path, description = "Sort order"),
+    ),
+    responses(
+        (status = 200, description = "Library listing (legacy paged endpoint)"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn get_library(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Path((page, order)): Path<(i32, i32)>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(svc.get_library(page, order).await?))
 }
 
-async fn library_backup(
+#[utoipa::path(
+    get, path = "/rest/library/backup",
+    params(("include_chapter_progress" = Option<bool>, Query, description = "Include chapter read progress in backup")),
+    responses(
+        (status = 200, description = "Backup ZIP download"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_backup(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Query(q): Query<LibraryBackupQuery>,
@@ -188,8 +258,19 @@ async fn library_backup(
         .map_err(|e| AppError::InternalServerError(e.to_string()))
 }
 
-async fn library_backup_preview(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/library/backup/preview",
+    request_body(content = inline(serde_json::Value), description = "Multipart form with backup ZIP file", content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "Backup preview showing what would be restored"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_backup_preview(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
@@ -198,7 +279,18 @@ async fn library_backup_preview(
     Ok(Json(preview))
 }
 
-async fn library_restore(
+#[utoipa::path(
+    post, path = "/rest/library/restore",
+    request_body(content = inline(serde_json::Value), description = "Multipart form with backup ZIP and restore option fields", content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "Backup restored; returns result summary"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_restore(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
@@ -288,8 +380,19 @@ async fn library_restore(
     Ok(Json(result))
 }
 
-async fn library_tachiyomi_preview(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/library/import/tachiyomi/preview",
+    request_body(content = inline(serde_json::Value), description = "Multipart form with Tachiyomi backup file", content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "Tachiyomi backup preview"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_tachiyomi_preview(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
@@ -298,7 +401,18 @@ async fn library_tachiyomi_preview(
     Ok(Json(preview))
 }
 
-async fn library_import_tachiyomi(
+#[utoipa::path(
+    post, path = "/rest/library/import/tachiyomi",
+    request_body(content = inline(serde_json::Value), description = "Multipart form with Tachiyomi backup and import option fields", content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "Tachiyomi backup imported; returns result summary"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_import_tachiyomi(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
@@ -364,7 +478,16 @@ async fn library_import_tachiyomi(
     Ok(Json(result))
 }
 
-async fn library_pending_imports(
+#[utoipa::path(
+    get, path = "/rest/library/pending-imports",
+    responses(
+        (status = 200, description = "Pending import items awaiting resolution"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_pending_imports(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -372,7 +495,17 @@ async fn library_pending_imports(
     Ok(Json(items))
 }
 
-async fn library_delete_pending_import(
+#[utoipa::path(
+    delete, path = "/rest/library/pending-imports/{id}",
+    params(("id" = i64, Path, description = "Pending import ID")),
+    responses(
+        (status = 204, description = "Pending import deleted"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_delete_pending_import(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Path(id): Path<i64>,
@@ -381,7 +514,19 @@ async fn library_delete_pending_import(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn library_resolve_pending_import(
+#[utoipa::path(
+    post, path = "/rest/library/pending-imports/{id}/resolve",
+    params(("id" = i64, Path, description = "Pending import ID")),
+    request_body(content = inline(serde_json::Value), description = r#"{"source_id":1,"source_manga_id":"..."}"#),
+    responses(
+        (status = 200, description = "Import resolved; returns manga db_id"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_resolve_pending_import(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Path(id): Path<i64>,
@@ -393,23 +538,53 @@ async fn library_resolve_pending_import(
     Ok(Json(json!({ "manga_id": manga_id })))
 }
 
-async fn library_orphaned(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/library/orphaned",
+    responses(
+        (status = 200, description = "Manga whose source extension has been removed"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_orphaned(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     let items = svc.list_orphaned_manga().await?;
     Ok(Json(items))
 }
 
-async fn library_duplicates(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    get, path = "/rest/library/duplicates",
+    responses(
+        (status = 200, description = "Detected duplicate manga pairs"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_duplicates(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     let pairs = svc.list_duplicates().await?;
     Ok(Json(pairs))
 }
 
-async fn library_merge_duplicate(
+#[utoipa::path(
+    post, path = "/rest/library/duplicates/merge",
+    request_body(content = inline(serde_json::Value), description = r#"{"keep_id":1,"discard_id":2}"#),
+    responses(
+        (status = 204, description = "Duplicate merged; discard entry removed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_merge_duplicate(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     Json(body): Json<MergeDuplicateBody>,
@@ -419,7 +594,17 @@ async fn library_merge_duplicate(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn library_duplicates_scan(
+#[utoipa::path(
+    post, path = "/rest/library/duplicates/scan",
+    responses(
+        (status = 200, description = "Scan complete; returns count of new duplicate pairs found"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_duplicates_scan(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -427,8 +612,22 @@ async fn library_duplicates_scan(
     Ok(Json(serde_json::json!({ "new_pairs": new_pairs })))
 }
 
-async fn library_dismiss_duplicate(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/library/duplicates/{a}/{b}/dismiss",
+    params(
+        ("a" = i64, Path, description = "First manga ID"),
+        ("b" = i64, Path, description = "Second manga ID"),
+    ),
+    responses(
+        (status = 204, description = "Duplicate pair dismissed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn library_dismiss_duplicate(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
     axum::extract::Path(path): axum::extract::Path<DismissDuplicatePath>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -436,9 +635,21 @@ async fn library_dismiss_duplicate(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// cross-domain: sign_image_url requires proxy_secret from AppState
-async fn get_recent_updates(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/recent_updates",
+    params(
+        ("page" = Option<u32>, Query, description = "Page number"),
+        ("page_size" = Option<u32>, Query, description = "Results per page"),
+    ),
+    responses(
+        (status = 200, description = "Recently updated chapters across all library manga"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn get_recent_updates(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<PageQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -459,9 +670,23 @@ async fn get_recent_updates(
     }))
 }
 
-// cross-domain: sign_image_url requires proxy_secret from AppState; direct state.db SQL query
-async fn global_search_handler(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SourceBrowse>,
+#[utoipa::path(
+    get, path = "/rest/global_search",
+    params(
+        ("query" = String, Query, description = "Search query"),
+        ("scope" = Option<String>, Query, description = "library or sources"),
+        ("page" = Option<u32>, Query, description = "Page number"),
+        ("page_size" = Option<u32>, Query, description = "Results per page"),
+    ),
+    responses(
+        (status = 200, description = "Search results across library and/or sources"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn global_search_handler(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
     State(state): State<AppState>,
     Query(q): Query<GlobalSearchQuery>,
 ) -> Result<impl IntoResponse, AppError> {

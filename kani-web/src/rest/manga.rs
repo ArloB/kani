@@ -56,15 +56,37 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-async fn get_manga(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/manga/{id}",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Manga row with source and tracking metadata"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "Manga not found"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_manga(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(svc.get_manga_by_id(id).await?))
 }
 
-async fn delete_manga(
+#[utoipa::path(
+    delete, path = "/rest/manga/{id}",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Manga deleted from library"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn delete_manga(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
@@ -73,7 +95,19 @@ async fn delete_manga(
     Ok(Json(json!({})))
 }
 
-async fn upload_manga_cover_handler(
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/cover",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body(content = inline(serde_json::Value), description = "Multipart form with image file", content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "Cover uploaded"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn upload_manga_cover_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -94,7 +128,18 @@ async fn upload_manga_cover_handler(
     Ok(Json(json!({})))
 }
 
-async fn clear_manga_cover_handler(
+#[utoipa::path(
+    delete, path = "/rest/manga/{id}/cover",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 204, description = "Cover override cleared"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn clear_manga_cover_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -103,9 +148,19 @@ async fn clear_manga_cover_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// cross-domain: sign_image_url needs proxy_secret from AppState
-async fn get_local_manga_details(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/details",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Full manga detail: display info, source info, local overrides, chapter stats"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "Manga not found"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_local_manga_details(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -175,7 +230,25 @@ async fn get_local_manga_details(
     })))
 }
 
-async fn get_local_chapters(
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/chapters",
+    params(
+        ("id" = i64, Path, description = "Manga ID"),
+        ("page" = Option<i32>, Query, description = "Page number (default 1)"),
+        ("page_size" = Option<i32>, Query, description = "Items per page (default 20, max 200)"),
+        ("sort_order" = Option<String>, Query, description = "asc or desc"),
+        ("filter_downloaded" = Option<bool>, Query, description = "true = downloaded only, false = undownloaded only"),
+        ("filter_unread" = Option<bool>, Query, description = "true = unread only"),
+        ("filter_scanlator" = Option<String>, Query, description = "Scanlator name"),
+    ),
+    responses(
+        (status = 200, description = "Paginated chapter list"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_local_chapters(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -200,7 +273,24 @@ async fn get_local_chapters(
     }))
 }
 
-async fn get_chapter_ids(
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/chapter_ids",
+    params(
+        ("id" = i64, Path, description = "Manga ID"),
+        ("sort_order" = Option<String>, Query, description = "asc or desc"),
+        ("filter_downloaded" = Option<bool>, Query, description = "Downloaded only"),
+        ("filter_unread" = Option<bool>, Query, description = "Unread only"),
+        ("filter_scanlator" = Option<String>, Query, description = "Scanlator name"),
+        ("preferred_only" = Option<bool>, Query, description = "Preferred scanlator only"),
+    ),
+    responses(
+        (status = 200, description = "All matching chapter IDs"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_chapter_ids(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -220,8 +310,18 @@ async fn get_chapter_ids(
     Ok(Json(json!({ "ids": ids })))
 }
 
-async fn download_all(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::ChapterDownload>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/download_all",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 202, description = "All chapters queued for download"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn download_all(
+    _: AuthGuard<crate::permissions::guards::ChapterDownload>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -238,8 +338,18 @@ async fn download_all(
     Ok((StatusCode::ACCEPTED, Json(json!({}))))
 }
 
-async fn cancel_all_downloads(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::ChapterDownload>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/cancel_all",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "All pending downloads for this manga cancelled"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn cancel_all_downloads(
+    _: AuthGuard<crate::permissions::guards::ChapterDownload>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -247,8 +357,18 @@ async fn cancel_all_downloads(
     Ok(Json(json!({})))
 }
 
-async fn refresh_manga(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/refresh",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Manga metadata refreshed from source"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn refresh_manga(
+    _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
     body: Option<Json<crate::models::RefreshMangaRequest>>,
@@ -259,8 +379,18 @@ async fn refresh_manga(
     Ok(Json(json!({})))
 }
 
-async fn scan_manga(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/scan",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Scanned for new chapters; returns count"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn scan_manga(
+    _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -268,8 +398,20 @@ async fn scan_manga(
     Ok(Json(json!({ "new_chapters": new_chapters })))
 }
 
-async fn toggle_auto_download(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/toggle_auto_download",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = ToggleAutoDownloadRequest,
+    responses(
+        (status = 200, description = "Auto-download setting updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn toggle_auto_download(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<ToggleAutoDownloadRequest>,
@@ -278,8 +420,20 @@ async fn toggle_auto_download(
     Ok(Json(json!({})))
 }
 
-async fn toggle_auto_scan_manga(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/toggle_auto_scan",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = ToggleAutoDownloadRequest,
+    responses(
+        (status = 200, description = "Auto-scan setting updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn toggle_auto_scan_manga(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<ToggleAutoDownloadRequest>,
@@ -288,8 +442,20 @@ async fn toggle_auto_scan_manga(
     Ok(Json(json!({})))
 }
 
-async fn toggle_download_all_preferred(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/toggle_download_all_preferred",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = ToggleAutoDownloadRequest,
+    responses(
+        (status = 200, description = "Download-all-preferred setting updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn toggle_download_all_preferred(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<ToggleAutoDownloadRequest>,
@@ -299,8 +465,20 @@ async fn toggle_download_all_preferred(
     Ok(Json(json!({})))
 }
 
-async fn update_manga_notes(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    patch, path = "/rest/manga/{id}/notes",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body(content = inline(serde_json::Value), description = r#"{"notes":"text or null"}"#),
+    responses(
+        (status = 200, description = "Notes updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn update_manga_notes(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<serde_json::Value>,
@@ -313,7 +491,19 @@ async fn update_manga_notes(
     Ok(Json(json!({})))
 }
 
-async fn update_local_metadata_handler(
+#[utoipa::path(
+    patch, path = "/rest/manga/{id}/local_metadata",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = crate::models::UpdateLocalMetadataRequest,
+    responses(
+        (status = 200, description = "Local metadata overrides updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn update_local_metadata_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -335,7 +525,17 @@ async fn update_local_metadata_handler(
     Ok(Json(json!({})))
 }
 
-async fn mark_manga_seen(
+#[utoipa::path(
+    patch, path = "/rest/manga/{id}/seen",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 204, description = "Manga marked as seen (clears new-chapter badge)"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn mark_manga_seen(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -344,8 +544,20 @@ async fn mark_manga_seen(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn preview_migration(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/preview_migration",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = PreviewMigrationRequest,
+    responses(
+        (status = 200, description = "Migration preview: chapters that would be matched/orphaned"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn preview_migration(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<PreviewMigrationRequest>,
@@ -356,8 +568,20 @@ async fn preview_migration(
     Ok(Json(preview))
 }
 
-async fn migrate_manga_handler(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/migrate",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = MigrateMangaRequest,
+    responses(
+        (status = 200, description = "Manga migrated to new source"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn migrate_manga_handler(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<MigrateMangaRequest>,
@@ -373,16 +597,38 @@ async fn migrate_manga_handler(
     Ok(Json(result))
 }
 
-async fn get_download_rules(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/download_rules",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Download rules for this manga"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_download_rules(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(svc.get_download_rules(manga_id).await?))
 }
 
-async fn add_download_rule(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/download_rules",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = AddDownloadRuleRequest,
+    responses(
+        (status = 201, description = "Download rule created"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn add_download_rule(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<AddDownloadRuleRequest>,
@@ -398,8 +644,19 @@ async fn add_download_rule(
     ))
 }
 
-async fn delete_download_rule(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    delete, path = "/rest/download_rules/{id}",
+    params(("id" = i64, Path, description = "Download rule ID")),
+    responses(
+        (status = 200, description = "Download rule deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn delete_download_rule(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(rule_id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -407,8 +664,20 @@ async fn delete_download_rule(
     Ok(Json(json!({})))
 }
 
-async fn update_download_rule(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    patch, path = "/rest/download_rules/{id}",
+    params(("id" = i64, Path, description = "Download rule ID")),
+    request_body = UpdateDownloadRuleRequest,
+    responses(
+        (status = 200, description = "Download rule updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn update_download_rule(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(rule_id): Path<i64>,
     Json(body): Json<UpdateDownloadRuleRequest>,
@@ -417,8 +686,20 @@ async fn update_download_rule(
     Ok(Json(json!({})))
 }
 
-async fn reorder_download_rules(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    put, path = "/rest/manga/{id}/download_rules/order",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = ReorderDownloadRulesRequest,
+    responses(
+        (status = 200, description = "Download rules reordered"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn reorder_download_rules(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<ReorderDownloadRulesRequest>,
@@ -428,8 +709,19 @@ async fn reorder_download_rules(
     Ok(Json(json!({})))
 }
 
-async fn preview_download_rules(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/download_rules/preview",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = PreviewDownloadRulesRequest,
+    responses(
+        (status = 200, description = "Count of chapters matching the given rules"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn preview_download_rules(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
     Json(body): Json<PreviewDownloadRulesRequest>,
@@ -439,11 +731,23 @@ async fn preview_download_rules(
 }
 
 #[derive(serde::Deserialize)]
-struct EnrichMetadataBody {
-    provider: String,
+pub(crate) struct EnrichMetadataBody {
+    pub(crate) provider: String,
 }
 
-async fn enrich_metadata_handler(
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/enrich-metadata",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body(content = inline(serde_json::Value), description = r#"{"provider":"provider-name"}"#),
+    responses(
+        (status = 200, description = "Metadata enriched from the named provider"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn enrich_metadata_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(manga_id): Path<MangaId>,
@@ -455,8 +759,22 @@ async fn enrich_metadata_handler(
     Ok(Json(result))
 }
 
-async fn trigger_chapter_stream(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/chapters/stream/{source_id}",
+    params(
+        ("id" = i64, Path, description = "Manga ID"),
+        ("source_id" = i64, Path, description = "Source ID"),
+    ),
+    responses(
+        (status = 202, description = "Streaming chapter fetch triggered"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn trigger_chapter_stream(
+    _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(state): State<AppState>,
     Path((manga_id, source_id)): Path<(MangaId, i64)>,
 ) -> Result<impl IntoResponse, AppError> {

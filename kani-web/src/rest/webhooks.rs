@@ -17,16 +17,37 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-async fn list_webhooks(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    get, path = "/rest/webhooks",
+    responses(
+        (status = 200, description = "All configured webhooks"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn list_webhooks(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let webhooks = state.webhook_service.list_webhooks().await?;
     Ok(Json(webhooks))
 }
 
-async fn create_webhook(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    post, path = "/rest/webhooks",
+    request_body(content = inline(serde_json::Value), description = "Webhook configuration (url, events, enabled)"),
+    responses(
+        (status = 201, description = "Webhook created"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn create_webhook(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Json(body): Json<kani_app::service::webhooks::CreateWebhookBody>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -34,8 +55,19 @@ async fn create_webhook(
     Ok((StatusCode::CREATED, Json(webhook)))
 }
 
-async fn update_webhook(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    patch, path = "/rest/webhooks/{id}",
+    params(("id" = i64, Path, description = "Webhook ID")),
+    request_body(content = inline(serde_json::Value), description = "Fields to update"),
+    responses(
+        (status = 200, description = "Webhook updated"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn update_webhook(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(body): Json<kani_app::service::webhooks::UpdateWebhookBody>,
@@ -44,8 +76,18 @@ async fn update_webhook(
     Ok(Json(webhook))
 }
 
-async fn delete_webhook(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    delete, path = "/rest/webhooks/{id}",
+    params(("id" = i64, Path, description = "Webhook ID")),
+    responses(
+        (status = 200, description = "Webhook deleted"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn delete_webhook(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -53,8 +95,18 @@ async fn delete_webhook(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn test_webhook(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    post, path = "/rest/webhooks/{id}/test",
+    params(("id" = i64, Path, description = "Webhook ID")),
+    responses(
+        (status = 200, description = "Test delivery result"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn test_webhook(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -64,8 +116,18 @@ async fn test_webhook(
     }
 }
 
-async fn list_webhook_deliveries(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    get, path = "/rest/webhooks/{id}/deliveries",
+    params(("id" = i64, Path, description = "Webhook ID")),
+    responses(
+        (status = 200, description = "Recent delivery attempts for this webhook"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn list_webhook_deliveries(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -73,8 +135,18 @@ async fn list_webhook_deliveries(
     Ok(Json(rows))
 }
 
-async fn get_manga_webhook_notify(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/webhook-notify",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Whether webhook notifications are enabled for this manga"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_manga_webhook_notify(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -82,8 +154,18 @@ async fn get_manga_webhook_notify(
     Ok(Json(json!({ "enabled": enabled })))
 }
 
-async fn set_manga_webhook_notify(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryManage>,
+#[utoipa::path(
+    put, path = "/rest/manga/{id}/webhook-notify",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Webhook notify setting updated"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn set_manga_webhook_notify(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
     Path(id): Path<MangaId>,
     Json(body): Json<serde_json::Value>,

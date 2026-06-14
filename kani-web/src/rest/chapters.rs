@@ -32,7 +32,18 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-async fn get_chapter_page_manifest(
+#[utoipa::path(
+    get, path = "/rest/chapter/{id}/pages",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    responses(
+        (status = 200, description = "Page manifest: ordered list of page URLs and dimensions"),
+        (status = 401, description = "Not authenticated"),
+        (status = 404, description = "Chapter not found"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn get_chapter_page_manifest(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(id): Path<ChapterId>,
@@ -41,7 +52,18 @@ async fn get_chapter_page_manifest(
     Ok(Json(manifest))
 }
 
-async fn set_chapter_progress_handler(
+#[utoipa::path(
+    put, path = "/rest/chapter/{id}/progress",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    request_body = SetChapterProgressRequest,
+    responses(
+        (status = 204, description = "Progress recorded"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn set_chapter_progress_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -52,7 +74,17 @@ async fn set_chapter_progress_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn get_bookmarks_handler(
+#[utoipa::path(
+    get, path = "/rest/chapter/{id}/bookmarks",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    responses(
+        (status = 200, description = "List of bookmarked page indices"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn get_bookmarks_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -61,7 +93,17 @@ async fn get_bookmarks_handler(
     Ok(Json(pages))
 }
 
-async fn toggle_bookmark_handler(
+#[utoipa::path(
+    post, path = "/rest/chapter/{id}/bookmarks",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    responses(
+        (status = 200, description = "Bookmark toggled; returns new bookmarked state"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn toggle_bookmark_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -73,7 +115,17 @@ async fn toggle_bookmark_handler(
     Ok(Json(json!({ "bookmarked": bookmarked })))
 }
 
-async fn get_chapter_note_handler(
+#[utoipa::path(
+    get, path = "/rest/chapter/{id}/note",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    responses(
+        (status = 200, description = "Reader note for this chapter"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn get_chapter_note_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -82,7 +134,18 @@ async fn get_chapter_note_handler(
     Ok(Json(json!({ "note": note })))
 }
 
-async fn set_chapter_note_handler(
+#[utoipa::path(
+    put, path = "/rest/chapter/{id}/note",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    request_body = SetChapterNoteRequest,
+    responses(
+        (status = 204, description = "Note saved"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn set_chapter_note_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(chapter_id): Path<ChapterId>,
@@ -93,7 +156,17 @@ async fn set_chapter_note_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn get_manga_chapter_notes_handler(
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/chapter-notes",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "All reader notes for chapters of this manga"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn get_manga_chapter_notes_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -110,7 +183,17 @@ async fn get_manga_chapter_notes_handler(
     Ok(Json(json!({ "notes": items })))
 }
 
-async fn set_chapter_read_status_handler(
+#[utoipa::path(
+    put, path = "/rest/chapters/read_status",
+    request_body = SetReadStatusRequest,
+    responses(
+        (status = 204, description = "Read status updated"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn set_chapter_read_status_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Json(body): Json<SetReadStatusRequest>,
@@ -120,7 +203,17 @@ async fn set_chapter_read_status_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn get_continue_reading_handler(
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/continue_reading",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Next chapter to read and current page, or null"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn get_continue_reading_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(manga_id): Path<MangaId>,
@@ -129,7 +222,18 @@ async fn get_continue_reading_handler(
     Ok(Json(info))
 }
 
-async fn mark_chapters_up_to_handler(
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/chapters/mark_up_to",
+    params(("id" = i64, Path, description = "Manga ID")),
+    request_body = MarkUpToRequest,
+    responses(
+        (status = 204, description = "Chapters marked read/unread up to the given chapter number"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn mark_chapters_up_to_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
     State(svc): State<Arc<dyn ChapterDomain>>,
     Path(manga_id): Path<MangaId>,

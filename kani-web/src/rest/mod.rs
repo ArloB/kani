@@ -11,12 +11,13 @@ use crate::{
         LoginRequest, MarkUpToRequest, MigrateMangaRequest, PageQuery, PasswordResetConfirmBody,
         PasswordResetRequestBody, PreviewDownloadRulesRequest, PreviewMigrationRequest, ProxyQuery,
         RenameCategoryRequest, ReorderCategoriesRequest, ReorderDownloadRulesRequest,
-        ScanMangaRequest, SearchMangaRequest, SendTestEmailBody, SetChapterProgressRequest,
-        SetMangaCategoriesRequest, SetMangaTrackingRequest, SetPreferenceRequest,
-        SetReadStatusRequest, SetScanlatorPrefRequest, SetTrackerConfigRequest,
-        SetTrackerMappingRequest, ToggleAutoDownloadRequest, ToggleEnabledRequest,
-        ToggleFavouritedRequest, ToggleSelectRequest, TokenQuery, TrackerAuthUrlQuery,
-        TrackerCallbackQuery, TrackerSearchQuery, UpdateDownloadRuleRequest, UpdateSource,
+        ScanMangaRequest, SearchMangaRequest, SendTestEmailBody, SetChapterNoteRequest,
+        SetChapterProgressRequest, SetMangaCategoriesRequest, SetMangaTrackingRequest,
+        SetPreferenceRequest, SetReadStatusRequest, SetScanlatorModeRequest,
+        SetScanlatorPrefRequest, SetTrackerConfigRequest, SetTrackerMappingRequest,
+        ToggleAutoDownloadRequest, ToggleEnabledRequest, ToggleFavouritedRequest,
+        ToggleSelectRequest, TokenQuery, TrackerAuthUrlQuery, TrackerCallbackQuery,
+        TrackerSearchQuery, UpdateDownloadRuleRequest, UpdateSource,
     },
     permissions::AuthRequirement,
     state::AppState,
@@ -48,28 +49,29 @@ use std::marker::PhantomData;
 use std::{convert::Infallible, sync::Arc};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
-mod admin;
-mod auth;
-mod categories;
-mod chapters;
-mod downloads;
-mod export;
-mod filters;
-mod library;
-mod manga;
-mod scanlators;
-mod settings;
-mod sources;
-mod sse;
-mod stats;
-mod trackers;
-mod webhooks;
+pub(crate) mod admin;
+pub(crate) mod auth;
+pub(crate) mod categories;
+pub(crate) mod chapters;
+pub(crate) mod downloads;
+pub(crate) mod export;
+pub(crate) mod filters;
+pub(crate) mod library;
+pub(crate) mod manga;
+pub(crate) mod scanlators;
+pub(crate) mod settings;
+pub(crate) mod sources;
+pub(crate) mod sse;
+pub(crate) mod stats;
+pub(crate) mod system;
+pub(crate) mod trackers;
+pub(crate) mod webhooks;
 
 fn sign_image_url(url: &str, referer: &str, state: &AppState, transform: Option<&str>) -> String {
     crate::proxy::make_proxy_url(url, referer, &state.proxy_secret, transform)
 }
 
-struct ValidatedJson<T>(T);
+pub(crate) struct ValidatedJson<T>(T);
 
 impl<S, T> axum::extract::FromRequest<S> for ValidatedJson<T>
 where
@@ -89,7 +91,7 @@ where
     }
 }
 
-struct ValidatedQuery<T>(T);
+pub(crate) struct ValidatedQuery<T>(T);
 
 impl<S, T> axum::extract::FromRequestParts<S> for ValidatedQuery<T>
 where
@@ -188,6 +190,7 @@ pub fn routes(state: AppState) -> Router {
         .merge(stats::router())
         .merge(export::router())
         .merge(webhooks::router())
+        .merge(system::router())
         .with_state(state)
         .layer(DefaultBodyLimit::max(MAX_WASM_BYTES))
 }
@@ -215,32 +218,32 @@ fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
 
 // ── Password strength endpoint (public — called before registration) ──────────
 
-#[derive(serde::Deserialize)]
-struct PasswordStrengthRequest {
-    password: String,
-    identity: Option<String>,
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub(crate) struct PasswordStrengthRequest {
+    pub(crate) password: String,
+    pub(crate) identity: Option<String>,
 }
 
 // ── Session inventory ─────────────────────────────────────────────────────────
 
 // ── TOTP 2FA ──────────────────────────────────────────────────────────────────
 
-#[derive(serde::Deserialize)]
-struct TotpCodeRequest {
-    code: String,
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub(crate) struct TotpCodeRequest {
+    pub(crate) code: String,
 }
 
 // ── Features endpoint ─────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(serde::Deserialize)]
-struct RegisterRequest {
-    username: String,
-    email: String,
-    password: String,
-    captcha_id: String,
-    captcha_answer: i64,
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub(crate) struct RegisterRequest {
+    pub(crate) username: String,
+    pub(crate) email: String,
+    pub(crate) password: String,
+    pub(crate) captcha_id: String,
+    pub(crate) captcha_answer: i64,
 }
 
 // ── Filesystem browser ────────────────────────────────────────────────────────
@@ -745,13 +748,13 @@ async fn reload_source(state: &AppState, id: i64) -> Result<(), AppError> {
 }
 
 #[derive(serde::Deserialize, Default)]
-struct ChapterListQuery {
-    sort: Option<String>,
+pub(crate) struct ChapterListQuery {
+    pub(crate) sort: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
-struct SaveToLibraryQuery {
-    force: Option<bool>,
+pub(crate) struct SaveToLibraryQuery {
+    pub(crate) force: Option<bool>,
 }
 
 async fn serve_manga_cover(
@@ -846,7 +849,7 @@ async fn serve_manga_cover(
 // ── Library ──────────────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
-struct DownloadHistoryQuery {
+pub(crate) struct DownloadHistoryQuery {
     #[serde(default = "default_history_limit")]
     limit: i64,
 }
@@ -1041,9 +1044,9 @@ const OAUTH_SUCCESS_HTML: &str = r#"<!DOCTYPE html>
 // ── Admin — user activity feed ────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
-struct UserActivityQuery {
-    limit: Option<i64>,
-    before: Option<String>,
+pub(crate) struct UserActivityQuery {
+    pub(crate) limit: Option<i64>,
+    pub(crate) before: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -1363,16 +1366,16 @@ mod tests {
 // ── Backup / Restore ─────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
-struct LibraryBackupQuery {
-    include_chapter_progress: Option<bool>,
+pub(crate) struct LibraryBackupQuery {
+    pub(crate) include_chapter_progress: Option<bool>,
 }
 
 // ── Pending imports ───────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
-struct ResolvePendingImportBody {
-    source_id: i64,
-    source_manga_id: String,
+pub(crate) struct ResolvePendingImportBody {
+    pub(crate) source_id: i64,
+    pub(crate) source_manga_id: String,
 }
 
 // ── Orphaned manga ────────────────────────────────────────────────────────────
@@ -1380,15 +1383,15 @@ struct ResolvePendingImportBody {
 // ── Duplicates ────────────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
-struct DismissDuplicatePath {
-    a: MangaId,
-    b: MangaId,
+pub(crate) struct DismissDuplicatePath {
+    pub(crate) a: MangaId,
+    pub(crate) b: MangaId,
 }
 
 #[derive(serde::Deserialize)]
-struct MergeDuplicateBody {
-    keep_id: i64,
-    discard_id: i64,
+pub(crate) struct MergeDuplicateBody {
+    pub(crate) keep_id: i64,
+    pub(crate) discard_id: i64,
 }
 
 // ── Backup multipart helper ───────────────────────────────────────────────────
@@ -1436,15 +1439,15 @@ fn csv_escape(s: &str) -> String {
 // ── CBZ / Export handlers ─────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize, Default)]
-struct ExportQuery {
-    profile: Option<String>,
+pub(crate) struct ExportQuery {
+    pub(crate) profile: Option<String>,
 }
 
 #[derive(serde::Deserialize, Default)]
-struct KccExportQuery {
-    profile: Option<String>,
-    format: Option<String>,
-    manga: Option<bool>,
+pub(crate) struct KccExportQuery {
+    pub(crate) profile: Option<String>,
+    pub(crate) format: Option<String>,
+    pub(crate) manga: Option<bool>,
 }
 
 // ── Webhooks ──────────────────────────────────────────────────────────────────

@@ -11,8 +11,18 @@ pub fn router() -> Router<AppState> {
         .route("/downloads/active", delete(cancel_all_global_downloads))
 }
 
-async fn get_download_history(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/downloads/history",
+    params(("limit" = Option<i64>, Query, description = "Max items to return (default 50)")),
+    responses(
+        (status = 200, description = "Recent download history entries"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn get_download_history(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn DownloadDomain>>,
     Query(q): Query<DownloadHistoryQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -20,8 +30,18 @@ async fn get_download_history(
     Ok(Json(items))
 }
 
-async fn start_download(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::ChapterDownload>,
+#[utoipa::path(
+    post, path = "/rest/chapter/{id}/download",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    responses(
+        (status = 202, description = "Download queued"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn start_download(
+    _: AuthGuard<crate::permissions::guards::ChapterDownload>,
     State(svc): State<Arc<dyn DownloadDomain>>,
     Path(id): Path<ChapterId>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -29,8 +49,18 @@ async fn start_download(
     Ok((StatusCode::ACCEPTED, Json(json!({}))))
 }
 
-async fn delete_downloaded(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::ChapterDelete>,
+#[utoipa::path(
+    delete, path = "/rest/chapter/{id}/delete",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    responses(
+        (status = 200, description = "Downloaded files removed"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn delete_downloaded(
+    _: AuthGuard<crate::permissions::guards::ChapterDelete>,
     State(svc): State<Arc<dyn DownloadDomain>>,
     Path(id): Path<ChapterId>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -38,8 +68,18 @@ async fn delete_downloaded(
     Ok((StatusCode::OK, Json(json!({}))))
 }
 
-async fn cancel_download(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::ChapterDownload>,
+#[utoipa::path(
+    post, path = "/rest/chapter/{id}/cancel",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    responses(
+        (status = 200, description = "Download cancelled"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn cancel_download(
+    _: AuthGuard<crate::permissions::guards::ChapterDownload>,
     State(svc): State<Arc<dyn DownloadDomain>>,
     Path(chapter_id): Path<ChapterId>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -47,8 +87,18 @@ async fn cancel_download(
     Ok(Json(json!({})))
 }
 
-async fn cancel_all_global_downloads(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::ServerManage>,
+#[utoipa::path(
+    delete, path = "/rest/downloads/active",
+    responses(
+        (status = 200, description = "All active downloads cancelled"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn cancel_all_global_downloads(
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(svc): State<Arc<dyn DownloadDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     svc.cancel_all_global_downloads().await?;

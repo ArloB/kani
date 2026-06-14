@@ -33,7 +33,18 @@ impl AppService {
             app_url: s.app_url.clone(),
             password_reset_enabled: s.password_reset_enabled,
             email_verification_required: s.email_verification_required,
+            first_run_complete: s.first_run_complete,
         }
+    }
+
+    pub async fn mark_first_run_complete(&self, user_id: UserId) -> Result<()> {
+        sqlx::query!("UPDATE settings SET first_run_complete = 1 WHERE id = 'singleton'")
+            .execute(&self.db)
+            .await?;
+        self.settings.write().await.first_run_complete = true;
+        self.audit(Some(user_id), "settings.first_run_complete", None, None)
+            .await;
+        Ok(())
     }
 
     /// Validates, persists, and applies a settings update. Audits the action.

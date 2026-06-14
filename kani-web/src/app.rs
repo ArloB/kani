@@ -5,7 +5,7 @@
 //! production-only concerns like rate-limiting, compression, or static files.
 //! Tests call it directly; `main.rs` calls it and adds the rest.
 
-use axum::Router;
+use axum::{Router, http::header, response::IntoResponse};
 use axum_login::{
     AuthManagerLayerBuilder,
     tower_sessions::{SessionManagerLayer, cookie::SameSite},
@@ -14,15 +14,15 @@ use tower_sessions_sqlx_store::SqliteStore;
 
 use crate::{auth::AuthBackend, rest, state::AppState};
 
-/// Build the REST API + auth/session stack as an axum [`Router`].
-///
-/// All REST endpoints are mounted under `/rest` so that the
-/// [`crate::auth::auth_guard`] path predicates (which check for
-/// `/rest/auth/` as the public prefix) function correctly.
-///
-/// Does **not** include rate-limiting, response compression, CORS, static
-/// file serving, or the OPDS catalog — the production `main.rs` adds those
-/// on top of this router.
+const CHANGELOG: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../CHANGELOG.md"));
+
+async fn serve_changelog() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        CHANGELOG,
+    )
+}
+
 pub async fn build_app(state: AppState) -> Router {
     let session_store = SqliteStore::new(state.db.clone());
     session_store
@@ -42,8 +42,21 @@ pub async fn build_app(state: AppState) -> Router {
     let auth_backend = AuthBackend::new(state.db.clone());
     let auth_layer = AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
 
-    Router::new()
+    let mut router = Router::new()
         .nest("/rest", rest::routes(state))
+        .route("/changelog.md", axum::routing::get(serve_changelog));
+
+    #[cfg(debug_assertions)]
+    {
+        use utoipa::OpenApi;
+        use utoipa_swagger_ui::SwaggerUi;
+        router = router.merge(
+            SwaggerUi::new("/api-docs")
+                .url("/api-docs/openapi.json", crate::openapi::ApiDoc::openapi()),
+        );
+    }
+
+    router
         .layer(axum::middleware::from_fn(crate::auth::auth_guard))
         .layer(auth_layer)
 }

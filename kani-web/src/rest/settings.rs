@@ -10,14 +10,35 @@ pub fn router() -> Router<AppState> {
         .route("/refresh/status", get(get_refresh_status))
 }
 
-async fn get_settings(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsView>,
+#[utoipa::path(
+    get, path = "/rest/settings",
+    responses(
+        (status = 200, description = "Server settings (download, scan, advanced, tracking, email)"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn get_settings(
+    _: AuthGuard<crate::permissions::guards::SettingsView>,
     State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(svc.get_settings().await))
 }
 
-async fn update_settings(
+#[utoipa::path(
+    patch, path = "/rest/settings",
+    request_body(content = inline(serde_json::Value), description = "Partial settings update; variant determines which permission is required"),
+    responses(
+        (status = 200, description = "Settings updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions for the given settings category"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn update_settings(
     auth: AuthSession,
     State(svc): State<Arc<dyn SettingsDomain>>,
     Json(update): Json<crate::types::SettingsUpdate>,
@@ -62,24 +83,53 @@ async fn update_settings(
     Ok(Json(json!({})))
 }
 
-async fn toggle_auto_scan(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditScan>,
+#[utoipa::path(
+    post, path = "/rest/scan/toggle_auto",
+    responses(
+        (status = 200, description = "Auto-scan toggled; returns new state"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn toggle_auto_scan(
+    _: AuthGuard<crate::permissions::guards::SettingsEditScan>,
     State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     let new_val = svc.toggle_auto_scan().await?;
     Ok(Json(json!({ "auto_scan": new_val })))
 }
 
+#[utoipa::path(
+    post, path = "/rest/refresh/start",
+    responses(
+        (status = 202, description = "Library metadata refresh started"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub async fn start_refresh_all_rest(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
+    _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     svc.start_refresh_all().await?;
     Ok((StatusCode::ACCEPTED, Json(json!({}))))
 }
 
-async fn get_refresh_status(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryRefresh>,
+#[utoipa::path(
+    get, path = "/rest/refresh/status",
+    responses(
+        (status = 200, description = "Whether a metadata refresh is currently running"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
+pub(crate) async fn get_refresh_status(
+    _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(json!({ "is_refreshing": svc.is_refreshing().await })))

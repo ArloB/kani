@@ -636,6 +636,9 @@ fn is_public_path(path: &str) -> bool {
         || path == "/sw.js"
         || path.starts_with("/icons/")
         || path.starts_with("/opds")
+        || path == "/rest/system/info"
+        || path == "/changelog.md"
+        || (cfg!(debug_assertions) && path.starts_with("/api-docs"))
 }
 
 /// Hashes a plaintext password using Argon2id.
@@ -772,6 +775,18 @@ mod tests {
     fn health_is_public() {
         assert!(is_public_path("/health"));
         assert!(is_public_path("/ready"));
+    }
+
+    #[test]
+    fn system_info_is_public() {
+        assert!(is_public_path("/rest/system/info"));
+        assert!(!is_public_path("/rest/system/first-run-complete"));
+    }
+
+    #[test]
+    fn api_docs_is_public() {
+        assert!(is_public_path("/api-docs"));
+        assert!(is_public_path("/api-docs/openapi.json"));
     }
 
     #[test]

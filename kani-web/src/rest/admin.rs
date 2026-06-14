@@ -54,7 +54,17 @@ pub fn router() -> Router<AppState> {
         .route("/system/capabilities", get(system_capabilities))
 }
 
-async fn server_stop(
+#[utoipa::path(
+    post, path = "/rest/server/stop",
+    responses(
+        (status = 200, description = "Server shutdown initiated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn server_stop(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -64,7 +74,17 @@ async fn server_stop(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn server_restart(
+#[utoipa::path(
+    post, path = "/rest/server/restart",
+    responses(
+        (status = 200, description = "Server restart initiated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn server_restart(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -78,8 +98,18 @@ async fn server_restart(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn admin_list_users(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::UserManage>,
+#[utoipa::path(
+    get, path = "/rest/admin/users",
+    responses(
+        (status = 200, description = "All user accounts"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_list_users(
+    _: AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let backend = AuthBackend::new(state.db.clone());
@@ -87,7 +117,18 @@ async fn admin_list_users(
     Ok(Json(users))
 }
 
-async fn admin_create_user(
+#[utoipa::path(
+    post, path = "/rest/admin/users",
+    request_body = AdminCreateUserRequest,
+    responses(
+        (status = 201, description = "User created"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_create_user(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Json(body): Json<AdminCreateUserRequest>,
@@ -119,7 +160,19 @@ async fn admin_create_user(
     Ok((StatusCode::CREATED, Json(created)))
 }
 
-async fn admin_update_user(
+#[utoipa::path(
+    patch, path = "/rest/admin/users/{id}",
+    params(("id" = i64, Path, description = "User ID")),
+    request_body = AdminUpdateUserRequest,
+    responses(
+        (status = 200, description = "User updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_update_user(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(user_id): Path<UserId>,
@@ -155,7 +208,18 @@ async fn admin_update_user(
     )?))
 }
 
-async fn admin_delete_user(
+#[utoipa::path(
+    delete, path = "/rest/admin/users/{id}",
+    params(("id" = i64, Path, description = "User ID")),
+    responses(
+        (status = 204, description = "User deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_delete_user(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(user_id): Path<UserId>,
@@ -191,7 +255,19 @@ async fn admin_delete_user(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn admin_grant_role(
+#[utoipa::path(
+    post, path = "/rest/admin/users/{id}/roles",
+    params(("id" = i64, Path, description = "User ID")),
+    request_body = AdminGrantRoleRequest,
+    responses(
+        (status = 204, description = "Role granted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_grant_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(user_id): Path<UserId>,
@@ -212,7 +288,21 @@ async fn admin_grant_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn admin_revoke_role(
+#[utoipa::path(
+    delete, path = "/rest/admin/users/{id}/roles/{role}",
+    params(
+        ("id" = i64, Path, description = "User ID"),
+        ("role" = String, Path, description = "Role slug to revoke"),
+    ),
+    responses(
+        (status = 204, description = "Role revoked"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_revoke_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path((user_id, role_slug)): Path<(UserId, String)>,
@@ -239,8 +329,23 @@ async fn admin_revoke_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn admin_user_activity(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::UserManage>,
+#[utoipa::path(
+    get, path = "/rest/admin/users/{id}/activity",
+    params(
+        ("id" = i64, Path, description = "User ID"),
+        ("limit" = Option<i64>, Query, description = "Max events (default 50, max 200)"),
+        ("before" = Option<String>, Query, description = "Cursor: ISO timestamp to paginate before"),
+    ),
+    responses(
+        (status = 200, description = "Recent audit events for this user"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_user_activity(
+    _: AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(user_id): Path<UserId>,
     Query(q): Query<UserActivityQuery>,
@@ -277,8 +382,18 @@ async fn admin_user_activity(
     Ok(Json(UserActivityResponse { events: rows }))
 }
 
-async fn admin_list_roles(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::UserManage>,
+#[utoipa::path(
+    get, path = "/rest/admin/roles",
+    responses(
+        (status = 200, description = "All defined roles"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_list_roles(
+    _: AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let backend = AuthBackend::new(state.db.clone());
@@ -286,7 +401,18 @@ async fn admin_list_roles(
     Ok(Json(roles))
 }
 
-async fn admin_create_role(
+#[utoipa::path(
+    post, path = "/rest/admin/roles",
+    request_body = AdminCreateRoleRequest,
+    responses(
+        (status = 201, description = "Role created"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_create_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Json(body): Json<AdminCreateRoleRequest>,
@@ -306,7 +432,19 @@ async fn admin_create_role(
     Ok(StatusCode::CREATED)
 }
 
-async fn admin_update_role(
+#[utoipa::path(
+    patch, path = "/rest/admin/roles/{slug}",
+    params(("slug" = String, Path, description = "Role slug")),
+    request_body = AdminUpdateRoleRequest,
+    responses(
+        (status = 204, description = "Role updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_update_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(slug): Path<String>,
@@ -326,7 +464,18 @@ async fn admin_update_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn admin_delete_role(
+#[utoipa::path(
+    delete, path = "/rest/admin/roles/{slug}",
+    params(("slug" = String, Path, description = "Role slug")),
+    responses(
+        (status = 204, description = "Role deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_delete_role(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(slug): Path<String>,
@@ -339,8 +488,18 @@ async fn admin_delete_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn run_maintenance(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::ServerManage>,
+#[utoipa::path(
+    post, path = "/rest/admin/maintenance",
+    responses(
+        (status = 200, description = "Database VACUUM run; returns before/after byte sizes"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn run_maintenance(
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let (before_bytes, after_bytes) = state.run_maintenance().await?;
@@ -349,24 +508,55 @@ async fn run_maintenance(
     ))
 }
 
-async fn clear_cache(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::ServerManage>,
+#[utoipa::path(
+    post, path = "/rest/admin/cache/clear",
+    responses(
+        (status = 200, description = "In-memory cache cleared"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn clear_cache(
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     state.cache.clear_all();
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn stop_scan(
-    AuthGuard(_, _): AuthGuard<crate::permissions::guards::ServerManage>,
+#[utoipa::path(
+    post, path = "/rest/admin/scan/stop",
+    responses(
+        (status = 200, description = "Active background scan aborted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn stop_scan(
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     state.abort_refresh().await;
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn admin_send_test_email(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    post, path = "/rest/admin/email/test",
+    request_body = SendTestEmailBody,
+    responses(
+        (status = 200, description = "Test email sent successfully"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_send_test_email(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Json(body): Json<SendTestEmailBody>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -377,7 +567,18 @@ async fn admin_send_test_email(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn admin_trigger_password_reset_handler(
+#[utoipa::path(
+    post, path = "/rest/admin/users/{id}/password-reset",
+    params(("id" = i64, Path, description = "User ID")),
+    responses(
+        (status = 200, description = "Password reset email triggered for the user"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_trigger_password_reset_handler(
     AuthGuard(admin, _): AuthGuard<crate::permissions::guards::UserManage>,
     State(state): State<AppState>,
     Path(user_id): Path<UserId>,
@@ -388,24 +589,63 @@ async fn admin_trigger_password_reset_handler(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn get_credential_encryption_status_handler(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    get, path = "/rest/admin/credentials/status",
+    responses(
+        (status = 200, description = "Credential encryption status"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn get_credential_encryption_status_handler(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let status = state.get_encryption_status().await?;
     Ok(Json(status))
 }
 
-async fn migrate_credentials_handler(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    post, path = "/rest/admin/credentials/encrypt",
+    responses(
+        (status = 200, description = "Credentials migrated to encrypted storage"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn migrate_credentials_handler(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     state.migrate_credentials_to_encrypted().await?;
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn admin_logs(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::AdminViewLogs>,
+#[utoipa::path(
+    get, path = "/rest/admin/logs",
+    params(
+        ("level" = Option<String>, Query, description = "Comma-separated log levels (e.g. error,warn)"),
+        ("source" = Option<String>, Query, description = "Comma-separated source modules"),
+        ("from" = Option<String>, Query, description = "Start timestamp (ISO 8601)"),
+        ("to" = Option<String>, Query, description = "End timestamp (ISO 8601)"),
+        ("search" = Option<String>, Query, description = "Full-text search"),
+        ("page" = Option<i32>, Query, description = "Page number"),
+        ("page_size" = Option<i32>, Query, description = "Results per page"),
+    ),
+    responses(
+        (status = 200, description = "Paginated log entries"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_logs(
+    _: AuthGuard<crate::permissions::guards::AdminViewLogs>,
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<crate::models::LogsQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -432,8 +672,22 @@ async fn admin_logs(
     })))
 }
 
-async fn admin_logs_stream(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::AdminViewLogs>,
+#[utoipa::path(
+    get, path = "/rest/admin/logs/stream",
+    params(
+        ("level" = Option<String>, Query, description = "Comma-separated log levels to filter"),
+        ("source" = Option<String>, Query, description = "Comma-separated source modules to filter"),
+    ),
+    responses(
+        (status = 200, description = "Server-sent event stream of live log entries (text/event-stream)"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_logs_stream(
+    _: AuthGuard<crate::permissions::guards::AdminViewLogs>,
     State(state): State<AppState>,
     Query(q): Query<crate::models::LogsQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -465,8 +719,26 @@ async fn admin_logs_stream(
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
-async fn admin_logs_download(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::AdminViewLogs>,
+#[utoipa::path(
+    get, path = "/rest/admin/logs/download",
+    params(
+        ("format" = Option<String>, Query, description = "json or plain (default plain)"),
+        ("level" = Option<String>, Query, description = "Comma-separated log levels"),
+        ("source" = Option<String>, Query, description = "Comma-separated source modules"),
+        ("from" = Option<String>, Query, description = "Start timestamp"),
+        ("to" = Option<String>, Query, description = "End timestamp"),
+        ("search" = Option<String>, Query, description = "Full-text search"),
+    ),
+    responses(
+        (status = 200, description = "Log file download (text/plain or application/json)"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_logs_download(
+    _: AuthGuard<crate::permissions::guards::AdminViewLogs>,
     State(state): State<AppState>,
     Query(q): Query<crate::models::LogsQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -509,8 +781,17 @@ async fn admin_logs_download(
         .map_err(|e| AppError::InternalServerError(e.to_string()))
 }
 
-/// POST /admin/logs/purge — clear the in-memory log ring buffer immediately.
-async fn admin_purge_logs(
+#[utoipa::path(
+    post, path = "/rest/admin/logs/purge",
+    responses(
+        (status = 204, description = "In-memory log buffer cleared"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_purge_logs(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminViewLogs>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
@@ -521,8 +802,27 @@ async fn admin_purge_logs(
     StatusCode::NO_CONTENT
 }
 
-async fn admin_audit_log(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::AdminViewAudit>,
+#[utoipa::path(
+    get, path = "/rest/admin/audit-log",
+    params(
+        ("user_id" = Option<i64>, Query, description = "Filter by user ID"),
+        ("action" = Option<String>, Query, description = "Filter by action name"),
+        ("from" = Option<String>, Query, description = "Start timestamp (ISO 8601)"),
+        ("to" = Option<String>, Query, description = "End timestamp (ISO 8601)"),
+        ("search" = Option<String>, Query, description = "Full-text search"),
+        ("page" = Option<i32>, Query, description = "Page number"),
+        ("page_size" = Option<i32>, Query, description = "Results per page"),
+    ),
+    responses(
+        (status = 200, description = "Paginated audit log entries"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_audit_log(
+    _: AuthGuard<crate::permissions::guards::AdminViewAudit>,
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<crate::models::AuditLogQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -550,8 +850,23 @@ async fn admin_audit_log(
     })))
 }
 
-async fn admin_audit_log_download(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::AdminViewAudit>,
+#[utoipa::path(
+    get, path = "/rest/admin/audit-log/download",
+    params(
+        ("format" = Option<String>, Query, description = "csv or json (default csv)"),
+        ("user_id" = Option<i64>, Query, description = "Filter by user ID"),
+        ("action" = Option<String>, Query, description = "Filter by action name"),
+    ),
+    responses(
+        (status = 200, description = "Audit log file download (CSV or JSON)"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_audit_log_download(
+    _: AuthGuard<crate::permissions::guards::AdminViewAudit>,
     State(state): State<AppState>,
     Query(q): Query<crate::models::AuditLogQuery>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -610,8 +925,19 @@ async fn admin_audit_log_download(
         .map_err(|e| AppError::InternalServerError(e.to_string()))
 }
 
-async fn fs_browse_handler(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    get, path = "/rest/admin/fs/browse",
+    params(("path" = String, Query, description = "Directory path to browse")),
+    responses(
+        (status = 200, description = "Directory listing with path segments and subdirectories"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn fs_browse_handler(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     ValidatedQuery(q): ValidatedQuery<crate::models::FsBrowseQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     use kani_app::service::fs_browse;
@@ -626,7 +952,18 @@ async fn fs_browse_handler(
     }))
 }
 
-async fn fs_mkdir_handler(
+#[utoipa::path(
+    post, path = "/rest/admin/fs/mkdir",
+    request_body = crate::models::FsMkdirBody,
+    responses(
+        (status = 200, description = "Directory created; returns new path"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn fs_mkdir_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Json(body): Json<crate::models::FsMkdirBody>,
@@ -644,8 +981,19 @@ async fn fs_mkdir_handler(
     Ok(Json(crate::models::FsMkdirResponse { path: path_str }))
 }
 
-async fn path_migrate_estimate_handler(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
+#[utoipa::path(
+    post, path = "/rest/admin/path/estimate",
+    request_body = crate::models::PathMigrateBody,
+    responses(
+        (status = 200, description = "Disk-space estimate for the path migration"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn path_migrate_estimate_handler(
+    _: AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Json(body): Json<crate::models::PathMigrateBody>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -661,7 +1009,18 @@ async fn path_migrate_estimate_handler(
     }))
 }
 
-async fn path_migrate_handler(
+#[utoipa::path(
+    post, path = "/rest/admin/path/migrate",
+    request_body = crate::models::PathMigrateBody,
+    responses(
+        (status = 202, description = "Path migration started in background"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn path_migrate_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::SettingsEditAdvanced>,
     State(state): State<AppState>,
     Json(body): Json<crate::models::PathMigrateBody>,
@@ -686,8 +1045,17 @@ async fn path_migrate_handler(
     Ok((StatusCode::ACCEPTED, Json(json!({ "started": true }))))
 }
 
-async fn system_capabilities(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/system/capabilities",
+    responses(
+        (status = 200, description = "Server capability flags (e.g. KCC availability)"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn system_capabilities(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(_state): State<AppState>,
 ) -> impl IntoResponse {
     let kcc_version = kani_app::AppService::kcc_version().await;

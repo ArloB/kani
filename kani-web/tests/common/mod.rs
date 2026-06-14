@@ -46,19 +46,7 @@ pub async fn test_state() -> AppState {
 /// Build a testable axum router. All REST routes are mounted under `/rest`,
 /// matching the production path prefix expected by `auth_guard`.
 pub async fn build_test_app(state: AppState) -> Router {
-    let session_store = SqliteStore::new(state.db.clone());
-    session_store.migrate().await.unwrap();
-    let session_layer = SessionManagerLayer::new(session_store)
-        .with_secure(false)
-        .with_http_only(true)
-        .with_same_site(SameSite::Lax);
-    let auth_backend = AuthBackend::new(state.db.clone());
-    let auth_layer = AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
-
-    Router::new()
-        .nest("/rest", kani_web::rest::routes(state))
-        .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
-        .layer(auth_layer)
+    kani_web::app::build_app(state).await
 }
 
 /// Create an admin user in the given state's DB and return (username, password).

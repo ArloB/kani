@@ -4,10 +4,13 @@
 import { initPermissions, getState, setState, subscribe, hasPermission } from './state.js';
 import { connectSSE } from './sse.js';
 import { initRouter, navigate, onNavigate } from './router.js';
-import { getBootId, logout, getFeatures } from './api.js';
+import { getBootId, logout, getFeatures, getSystemInfo } from './api.js';
 import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs } from './icons.js';
 import { mountNotificationsPanel } from './components/notifications-panel.js';
 import { mountAppHeader } from './components/app-header.js';
+import { initTooltip } from './components/tooltip.js';
+import { showAlert } from './components/modal.js';
+import { getLocal, setLocal } from './utils.js';
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -20,6 +23,7 @@ import { mountAppHeader } from './components/app-header.js';
   }
 
   await initPermissions();
+  initTooltip();
   connectSSE();
 
   try {
@@ -47,6 +51,8 @@ import { mountAppHeader } from './components/app-header.js';
     appEl.appendChild(pageContent);
 
     initRouter(pageContent);
+    _maybeRedirectFirstRun();
+    _maybeShowWhatsNew(appEl);
   }
 
   window.addEventListener('kani:server-restart', () => {
@@ -60,6 +66,34 @@ import { mountAppHeader } from './components/app-header.js';
 })();
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
+
+async function _maybeRedirectFirstRun() {
+  if (!hasPermission('admin:manage')) return;
+  try {
+    const info = await getSystemInfo();
+    if (info?.first_run && location.pathname !== '/onboarding') {
+      navigate('/onboarding');
+    }
+  } catch { /* non-fatal */ }
+}
+
+/** @param {HTMLElement} appEl */
+async function _maybeShowWhatsNew(appEl) {
+  try {
+    const info = await getSystemInfo();
+    if (!info?.version || info?.first_run) return;
+    const lastSeen = getLocal('kani_last_seen_version');
+    if (lastSeen === info.version) return;
+    setLocal('kani_last_seen_version', info.version);
+    const changelogRes = await fetch('/changelog.md').catch(() => null);
+    if (!changelogRes?.ok) return;
+    const text = await changelogRes.text();
+    const excerpt = text.split('\n').slice(0, 20).join('\n');
+    if (excerpt.trim()) {
+      showAlert(`What's new in v${info.version}\n\n${excerpt}`, { title: "What's new" });
+    }
+  } catch { /* non-fatal */ }
+}
 
 /** @param {HTMLElement} el */
 function _renderDesktopNav(el) {
