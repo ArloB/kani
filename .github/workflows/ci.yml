@@ -118,29 +118,41 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: test -f "$HOME/.cargo/bin/cargo-sqlx" || cargo binstall sqlx-cli --no-confirm --no-symlinks --force
 
-      - name: Cache kani-cli binary
-        uses: actions/cache@v5
+      - name: Restore kani-cli binary
+        uses: actions/cache/restore@v5
         id: kani-cli-cache
         with:
           path: target/release/kani-cli
           key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
-          save-always: true
 
       - name: Build kani-cli
         if: steps.kani-cli-cache.outputs.cache-hit != 'true'
         run: cargo build --release -p kani-cli
 
-      - name: Cache WASM extensions
-        uses: actions/cache@v5
+      - name: Save kani-cli binary
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          path: target/release/kani-cli
+          key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
+
+      - name: Restore WASM extensions
+        uses: actions/cache/restore@v5
         id: wasm-cache
         with:
           path: wasm_sources/
           key: wasm-${{ runner.os }}-${{ hashFiles('kani-extensions/**', 'kani-shared/**', 'kani-core/wit/**', 'kani-cli/**', 'Cargo.lock') }}
-          save-always: true
 
       - name: Build dev/test WASM extensions
         if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: ./target/release/kani-cli build --dev
+
+      - name: Save WASM extensions
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          path: wasm_sources/
+          key: wasm-${{ runner.os }}-${{ hashFiles('kani-extensions/**', 'kani-shared/**', 'kani-core/wit/**', 'kani-cli/**', 'Cargo.lock') }}
 
       - name: Test
         run: cargo nextest run --locked --profile ci
