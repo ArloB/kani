@@ -154,12 +154,13 @@ pub(crate) async fn scan_manga_multiple(
     match body {
         ScanMangaRequest::All { .. } => {
             svc.scan_all_manga().await?;
+            Ok(Json(json!({})))
         }
         ScanMangaRequest::Ids { ids } => {
-            svc.scan_manga_ids(ids).await?;
+            let job_id = svc.scan_manga_ids(ids).await?;
+            Ok(Json(json!({ "job_id": job_id })))
         }
     }
-    Ok(StatusCode::ACCEPTED)
 }
 
 // cross-domain: sign_image_url requires proxy_secret from AppState
@@ -757,7 +758,7 @@ mod tests {
         async fn scan_all_manga(&self) -> kani_app::error::Result<usize> {
             unimplemented!()
         }
-        async fn scan_manga_ids(&self, _: Vec<MangaId>) -> kani_app::error::Result<()> {
+        async fn scan_manga_ids(&self, _: Vec<MangaId>) -> kani_app::error::Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn get_library(&self, _: i32, _: i32) -> kani_app::error::Result<Vec<Manga>> {

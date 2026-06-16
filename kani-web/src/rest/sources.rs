@@ -18,6 +18,10 @@ pub fn router() -> Router<AppState> {
         .route("/sources/{id}/wasm/fetch", post(fetch_wasm))
         .route("/sources/{id}/reload", post(reload_source_handler))
         .route(
+            "/sources/{id}/download-concurrency",
+            put(set_download_concurrency),
+        )
+        .route(
             "/sources/{id}/popular/{page}/{page_size}",
             get(get_popular_manga),
         )
@@ -193,6 +197,33 @@ pub(crate) async fn update_source(
         return Ok(Json(json!({})));
     }
     svc.update_source(id, payload.name, payload.version).await?;
+    Ok(Json(json!({})))
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub(crate) struct SetDownloadConcurrencyRequest {
+    pub value: Option<i64>,
+}
+
+#[utoipa::path(
+    put, path = "/rest/sources/{id}/download-concurrency",
+    params(("id" = i64, Path, description = "Source ID")),
+    request_body = SetDownloadConcurrencyRequest,
+    responses(
+        (status = 200, description = "Concurrency override updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn set_download_concurrency(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
+    State(svc): State<Arc<dyn SourceDomain>>,
+    Path(id): Path<i64>,
+    Json(body): Json<SetDownloadConcurrencyRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    svc.set_source_download_concurrency(id, body.value).await?;
     Ok(Json(json!({})))
 }
 
@@ -851,6 +882,8 @@ mod tests {
                 enabled: true,
                 favourited: false,
                 unrestricted_http: false,
+                download_concurrency: None,
+                circuit_state: None,
             }])
         }
         async fn get_source(&self, _: i64) -> kani_app::error::Result<Source> {
@@ -936,6 +969,13 @@ mod tests {
             &self,
             _: i64,
         ) -> kani_app::error::Result<Vec<ChapterSortOption>> {
+            unimplemented!()
+        }
+        async fn set_source_download_concurrency(
+            &self,
+            _: i64,
+            _: Option<i64>,
+        ) -> kani_app::error::Result<()> {
             unimplemented!()
         }
         async fn delete_source(&self, _: i64, _: UserId) -> kani_app::error::Result<()> {

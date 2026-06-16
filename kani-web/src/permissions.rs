@@ -140,6 +140,7 @@ permissions! {
         ViewLogs  => "view_logs",
         ViewAudit => "view_audit",
         Manage    => "manage",
+        Jobs      => "jobs",
     },
 }
 
@@ -213,6 +214,7 @@ mod tests {
             "user:manage",
             "admin:view_logs",
             "admin:view_audit",
+            "admin:jobs",
         ];
         for raw in &perms {
             let parsed: Permission = raw.parse().expect(raw);

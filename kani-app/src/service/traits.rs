@@ -54,6 +54,11 @@ pub trait SourceDomain: Send + Sync {
         sort: Option<String>,
     ) -> Result<String>;
     async fn get_chapter_sort_list(&self, id: i64) -> Result<Vec<ChapterSortOption>>;
+    async fn set_source_download_concurrency(
+        &self,
+        id: i64,
+        concurrency: Option<i64>,
+    ) -> Result<()>;
     async fn delete_source(&self, id: i64, user_id: UserId) -> Result<()>;
     async fn list_active_source_ids(&self) -> Result<Vec<i64>>;
     async fn get_source_pref_schema(
@@ -152,6 +157,14 @@ impl SourceDomain for AppService {
         self.get_chapter_sort_list(id).await
     }
 
+    async fn set_source_download_concurrency(
+        &self,
+        id: i64,
+        concurrency: Option<i64>,
+    ) -> Result<()> {
+        self.set_source_download_concurrency(id, concurrency).await
+    }
+
     async fn delete_source(&self, id: i64, user_id: UserId) -> Result<()> {
         self.delete_source(id, user_id).await
     }
@@ -172,17 +185,26 @@ impl SourceDomain for AppService {
 
 #[async_trait::async_trait]
 pub trait DownloadDomain: Send + Sync {
-    async fn download_chapter(&self, chapter_id: ChapterId) -> Result<()>;
+    async fn download_chapter(&self, chapter_id: ChapterId) -> Result<uuid::Uuid>;
+    async fn retry_chapter_download(&self, chapter_id: ChapterId) -> Result<uuid::Uuid>;
     async fn delete_downloaded(&self, chapter_id: ChapterId) -> Result<()>;
     async fn cancel_download(&self, chapter_id: ChapterId) -> Result<()>;
     async fn cancel_all_global_downloads(&self) -> Result<()>;
     async fn get_download_history(&self, limit: i64) -> Result<Vec<serde_json::Value>>;
+    async fn get_manga_download_status(
+        &self,
+        manga_id: MangaId,
+    ) -> Result<serde_json::Value>;
 }
 
 #[async_trait::async_trait]
 impl DownloadDomain for AppService {
-    async fn download_chapter(&self, chapter_id: ChapterId) -> Result<()> {
+    async fn download_chapter(&self, chapter_id: ChapterId) -> Result<uuid::Uuid> {
         self.download_chapter(chapter_id).await
+    }
+
+    async fn retry_chapter_download(&self, chapter_id: ChapterId) -> Result<uuid::Uuid> {
+        self.retry_chapter_download(chapter_id).await
     }
 
     async fn delete_downloaded(&self, chapter_id: ChapterId) -> Result<()> {
@@ -199,6 +221,44 @@ impl DownloadDomain for AppService {
 
     async fn get_download_history(&self, limit: i64) -> Result<Vec<serde_json::Value>> {
         self.get_download_history(limit).await
+    }
+
+    async fn get_manga_download_status(
+        &self,
+        manga_id: MangaId,
+    ) -> Result<serde_json::Value> {
+        self.get_manga_download_status(manga_id).await
+    }
+}
+
+// ── JobDomain ──────────────────────────────────────────────────────────────────
+
+pub use crate::jobs::manager::{JobListFilter, JobStatus, JobSummary};
+
+#[async_trait::async_trait]
+pub trait JobDomain: Send + Sync {
+    async fn list_jobs(&self, filter: JobListFilter) -> Result<Vec<JobSummary>>;
+    async fn get_job_status(&self, id: uuid::Uuid) -> Result<JobStatus>;
+    async fn cancel_job(&self, id: uuid::Uuid) -> Result<()>;
+    fn active_job_summaries(&self) -> Vec<serde_json::Value>;
+}
+
+#[async_trait::async_trait]
+impl JobDomain for AppService {
+    async fn list_jobs(&self, filter: JobListFilter) -> Result<Vec<JobSummary>> {
+        self.job_manager.list_jobs(filter).await
+    }
+
+    async fn get_job_status(&self, id: uuid::Uuid) -> Result<JobStatus> {
+        self.job_manager.status(id).await
+    }
+
+    async fn cancel_job(&self, id: uuid::Uuid) -> Result<()> {
+        self.job_manager.cancel(id).await
+    }
+
+    fn active_job_summaries(&self) -> Vec<serde_json::Value> {
+        self.job_manager.active_job_summaries()
     }
 }
 
@@ -348,7 +408,7 @@ impl ChapterDomain for AppService {
 #[async_trait::async_trait]
 pub trait LibraryDomain: Send + Sync {
     async fn scan_all_manga(&self) -> Result<usize>;
-    async fn scan_manga_ids(&self, ids: Vec<MangaId>) -> Result<()>;
+    async fn scan_manga_ids(&self, ids: Vec<MangaId>) -> Result<uuid::Uuid>;
     async fn get_library(&self, page: i32, order: i32) -> Result<Vec<Manga>>;
     async fn export_backup(&self, user_id: UserId, include_progress: bool) -> Result<Vec<u8>>;
     async fn preview_backup(&self, data: &[u8]) -> Result<BackupPreview>;
@@ -387,7 +447,7 @@ impl LibraryDomain for AppService {
         self.scan_all_manga().await
     }
 
-    async fn scan_manga_ids(&self, ids: Vec<MangaId>) -> Result<()> {
+    async fn scan_manga_ids(&self, ids: Vec<MangaId>) -> Result<uuid::Uuid> {
         self.scan_manga_ids(ids).await
     }
 
@@ -502,7 +562,8 @@ pub trait MangaDomain: Send + Sync {
         filter_scanlator: Option<String>,
         preferred_only: bool,
     ) -> Result<Vec<ChapterId>>;
-    async fn download_all_chapters(&self, manga_id: MangaId) -> Result<()>;
+    async fn download_all_chapters(&self, manga_id: MangaId) -> Result<uuid::Uuid>;
+    async fn queue_manga_scan(&self, manga_id: MangaId, trigger: String) -> Result<uuid::Uuid>;
     async fn cancel_all_downloads(&self, manga_id: MangaId) -> Result<()>;
     async fn refresh_manga_with_options(
         &self,
@@ -619,8 +680,28 @@ impl MangaDomain for AppService {
         .await
     }
 
-    async fn download_all_chapters(&self, manga_id: MangaId) -> Result<()> {
+    async fn download_all_chapters(&self, manga_id: MangaId) -> Result<uuid::Uuid> {
         self.download_all_chapters(manga_id).await
+    }
+
+    async fn queue_manga_scan(&self, manga_id: MangaId, trigger: String) -> Result<uuid::Uuid> {
+        let row = sqlx::query!(
+            "SELECT source_id, name FROM manga WHERE id = ?",
+            manga_id
+        )
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or_else(|| crate::error::ServiceError::NotFound(format!("Manga {manga_id} not found")))?;
+        let job = crate::jobs::download::SourceScanJob::new(
+            manga_id.0,
+            row.name,
+            row.source_id,
+            trigger,
+        );
+        self.job_manager
+            .submit(job)
+            .await
+            .map_err(|e| crate::error::ServiceError::Internal(e.to_string()))
     }
 
     async fn cancel_all_downloads(&self, manga_id: MangaId) -> Result<()> {
@@ -1158,6 +1239,13 @@ mod tests {
         async fn get_chapter_sort_list(&self, _id: i64) -> Result<Vec<ChapterSortOption>> {
             unimplemented!()
         }
+        async fn set_source_download_concurrency(
+            &self,
+            _id: i64,
+            _concurrency: Option<i64>,
+        ) -> Result<()> {
+            unimplemented!()
+        }
         async fn delete_source(&self, _id: i64, _user_id: UserId) -> Result<()> {
             unimplemented!()
         }
@@ -1182,6 +1270,8 @@ mod tests {
             enabled: true,
             favourited: false,
             unrestricted_http: false,
+            download_concurrency: None,
+            circuit_state: None,
         };
         let svc: Arc<dyn SourceDomain> = Arc::new(FixedSources { list: vec![source] });
         let result = svc.list_sources().await.unwrap();
@@ -1198,16 +1288,22 @@ mod tests {
         async fn get_download_history(&self, _limit: i64) -> Result<Vec<serde_json::Value>> {
             Ok(self.history.clone())
         }
-        async fn download_chapter(&self, _chapter_id: ChapterId) -> Result<()> {
+        async fn download_chapter(&self, _: ChapterId) -> Result<uuid::Uuid> {
             unimplemented!()
         }
-        async fn delete_downloaded(&self, _chapter_id: ChapterId) -> Result<()> {
+        async fn retry_chapter_download(&self, _: ChapterId) -> Result<uuid::Uuid> {
             unimplemented!()
         }
-        async fn cancel_download(&self, _chapter_id: ChapterId) -> Result<()> {
+        async fn delete_downloaded(&self, _: ChapterId) -> Result<()> {
+            unimplemented!()
+        }
+        async fn cancel_download(&self, _: ChapterId) -> Result<()> {
             unimplemented!()
         }
         async fn cancel_all_global_downloads(&self) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_manga_download_status(&self, _: MangaId) -> Result<serde_json::Value> {
             unimplemented!()
         }
     }
@@ -1326,7 +1422,7 @@ mod tests {
         async fn scan_all_manga(&self) -> Result<usize> {
             unimplemented!()
         }
-        async fn scan_manga_ids(&self, _ids: Vec<MangaId>) -> Result<()> {
+        async fn scan_manga_ids(&self, _ids: Vec<MangaId>) -> Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn get_library(&self, _page: i32, _order: i32) -> Result<Vec<Manga>> {
@@ -1459,7 +1555,10 @@ mod tests {
         ) -> Result<Vec<ChapterId>> {
             unimplemented!()
         }
-        async fn download_all_chapters(&self, _manga_id: MangaId) -> Result<()> {
+        async fn download_all_chapters(&self, _manga_id: MangaId) -> Result<uuid::Uuid> {
+            unimplemented!()
+        }
+        async fn queue_manga_scan(&self, _manga_id: MangaId, _trigger: String) -> Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn cancel_all_downloads(&self, _manga_id: MangaId) -> Result<()> {

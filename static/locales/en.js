@@ -18,4 +18,48 @@ export default {
   'onboarding.step3.title': 'Install your first source',
   'onboarding.step3.desc': 'Sources let Kani fetch manga from the web. Visit the Sources page to browse and install one.',
   'onboarding.browse_sources': 'Browse sources →',
+
+  'nav.jobs': 'Jobs',
+
+  'jobs.title': 'Background Jobs',
+  'jobs.tab.active': 'Active',
+  'jobs.tab.completed': 'Completed',
+  'jobs.tab.failed': 'Failed',
+  'jobs.empty.active': 'No active jobs',
+  'jobs.empty.active.desc': 'Background jobs will appear here when running.',
+  'jobs.empty.completed': 'No completed jobs',
+  'jobs.empty.completed.desc': 'Recently completed jobs will appear here.',
+  'jobs.empty.failed': 'No failed jobs',
+  'jobs.cancel': 'Cancel',
+  'jobs.action.cancelled': 'Job cancelled',
+  'jobs.type.chapter_download': 'Chapter download',
+  'jobs.type.manga_download_all': 'Download all chapters',
+  'jobs.type.source_scan': 'Source scan',
+  'jobs.type.library_scan': 'Library scan',
+  'jobs.error.hide': 'Hide',
+  'jobs.error.details': 'Details',
+  'jobs.denied.title': 'Access denied',
+  'jobs.denied.desc': 'You do not have permission to view background jobs.',
+
+  'manga.download_all.queued': 'Download all started',
+  'manga.download_all.progress': '{current} / {total} chapters',
+  'manga.download_all.cancelled': 'Downloads cancelled',
+  'manga.download_all.done': 'All chapters queued for download',
+
+  'chapter.action.retry': 'Retry download',
+  'chapter.status.failed': 'Download failed',
+
+  'settings.downloads.per_source_concurrency': 'Per-source download concurrency',
+  'settings.downloads.per_source_concurrency.desc': 'Maximum simultaneous chapter downloads from a single source (1–16).',
+  'settings.downloads.scan_concurrency': 'Scan concurrency',
+  'settings.downloads.scan_concurrency.desc': 'Maximum simultaneous library scans running in parallel (1–32).',
+
+  'source.concurrency.title': 'Download concurrency override',
+  'source.concurrency.desc': 'Max simultaneous chapter downloads from this source. Leave empty to use the global default.',
+  'source.concurrency.placeholder': 'Global',
+  'source.circuit.open': 'Circuit open',
+  'source.circuit.half_open': 'Circuit half-open',
+
+  'common.save': 'Save',
+  'common.saving': 'Saving…',
 };

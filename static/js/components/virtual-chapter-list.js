@@ -7,12 +7,13 @@ import htm from 'htm';
 import { getState, subscribe, hasPermission } from '../state.js';
 import { formatDate, isChapterDownloaded } from '../utils.js';
 import { navigate } from '../router.js';
-import { downloadChapter, deleteChapter, cancelDownload, setChapterReadStatus, markChaptersUpTo } from '../api.js';
+import { downloadChapter, deleteChapter, cancelDownload, setChapterReadStatus, markChaptersUpTo, retryChapterDownload } from '../api.js';
 import { iconCheck, iconDownload, iconCloud, iconCloudCheck } from '../icons.js';
 import { Icon } from './icon.js';
 import { ContextMenu } from './menu.js';
 import { cacheChapter, evictChapter } from '../offline.js';
 import { showApiError } from './toast.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /** @typedef {import('../state.js').ChapterProgress} ChapterProgress */
@@ -130,8 +131,8 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
         </svg>
       `;
       statusIndicator = html`<span class="text-accent shrink-0" aria-label=${'Downloading' + (pct > 0 ? ` (${pct}%)` : '')}>${ring}</span>`;
-    } else if (isFailed) {
-      statusIndicator = html`<span class="text-danger text-xs shrink-0 font-medium" aria-label="Download failed">!</span>`;
+    } else if (isFailed || (chapter.download_error && !downloaded)) {
+      statusIndicator = html`<span class="text-danger text-xs shrink-0 font-medium" aria-label=${t('chapter.status.failed')}>!</span>`;
     } else if (downloaded && !isCancelled) {
       statusIndicator = null;
     } else if (isRead) {
@@ -200,7 +201,7 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
   }
 
   async function handleRetry() {
-    try { await downloadChapter(chapter.id); } catch (err) { showApiError(err); }
+    try { await retryChapterDownload(chapter.id); } catch (err) { showApiError(err); }
   }
 
   /** @type {import('./menu.js').MenuItem[]} */
@@ -214,7 +215,7 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
     ] : []),
     ...((canDownload || canDelete) ? [{ divider: /** @type {true} */ (true) }] : []),
     ...(isActive && canDownload ? [{ label: 'Cancel download', action: handleCancel }] : []),
-    ...(isFailed && canDownload ? [{ label: 'Retry download', action: handleRetry }] : []),
+    ...((isFailed || chapter.download_error) && canDownload ? [{ label: t('chapter.action.retry'), action: handleRetry }] : []),
     ...(!isActive && !isFailed && !downloaded && canDownload ? [{ label: 'Download', action: handleDownload }] : []),
     ...(!isActive && downloaded && !isCancelled && canDelete ? [{ label: 'Delete download', action: handleDelete, danger: true }] : []),
     // ── Offline caching ───────────────────────────────────────────────────
@@ -326,6 +327,9 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
         </div>
       </div>
       <div class="flex items-center gap-1 shrink-0">
+        ${(isFailed || chapter.download_error) && canDownload && html`
+          <button class="btn-ghost btn-xs text-accent" onClick=${(e) => { e.preventDefault(); e.stopPropagation(); handleRetry(); }} aria-label=${t('chapter.action.retry')}>Retry</button>
+        `}
         ${downloaded && !isActive && !isCancelled && html`
           <span
             class=${'icon-xs ' + (isCached ? 'text-accent' : 'text-text-faint')}

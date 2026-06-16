@@ -39,8 +39,8 @@ use axum_login::AuthzBackend;
 use futures::TryStreamExt;
 pub use kani_app::ids::{ChapterId, MangaId, UserId};
 pub use kani_app::service::traits::{
-    CategoryDomain, ChapterDomain, DownloadDomain, LibraryDomain, MangaDomain, ScanlatorDomain,
-    SettingsDomain, SourceDomain, TrackerDomain,
+    CategoryDomain, ChapterDomain, DownloadDomain, JobDomain, LibraryDomain, MangaDomain,
+    ScanlatorDomain, SettingsDomain, SourceDomain, TrackerDomain,
 };
 use kani_core::source_manager::SourceManager;
 use serde::de::DeserializeOwned;
@@ -56,6 +56,7 @@ pub(crate) mod chapters;
 pub(crate) mod downloads;
 pub(crate) mod export;
 pub(crate) mod filters;
+pub(crate) mod jobs;
 pub(crate) mod library;
 pub(crate) mod manga;
 pub(crate) mod scanlators;
@@ -183,6 +184,7 @@ pub fn routes(state: AppState) -> Router {
         .merge(scanlators::router())
         .merge(categories::router())
         .merge(downloads::router())
+        .merge(jobs::router())
         .merge(trackers::router())
         .merge(filters::router())
         .merge(settings::router())

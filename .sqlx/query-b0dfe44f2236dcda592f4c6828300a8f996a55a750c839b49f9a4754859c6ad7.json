@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id FROM chapters WHERE download_status = ?",
+  "query": "SELECT download_concurrency FROM sources WHERE id = ?",
   "describe": {
     "columns": [
       {
-        "name": "id",
+        "name": "download_concurrency",
         "ordinal": 0,
         "type_info": "Integer"
       }
@@ -13,8 +13,8 @@
       "Right": 1
     },
     "nullable": [
-      false
+      true
     ]
   },
-  "hash": "0eba9b852eaa706edddc5c97f53881f7e31e842a0e093cbc97c0332e21b11d4a"
+  "hash": "b0dfe44f2236dcda592f4c6828300a8f996a55a750c839b49f9a4754859c6ad7"
 }

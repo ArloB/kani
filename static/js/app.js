@@ -5,12 +5,13 @@ import { initPermissions, getState, setState, subscribe, hasPermission } from '.
 import { connectSSE } from './sse.js';
 import { initRouter, navigate, onNavigate } from './router.js';
 import { getBootId, logout, getFeatures, getSystemInfo } from './api.js';
-import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs } from './icons.js';
+import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs, iconRefresh } from './icons.js';
 import { mountNotificationsPanel } from './components/notifications-panel.js';
 import { mountAppHeader } from './components/app-header.js';
 import { initTooltip } from './components/tooltip.js';
 import { showAlert } from './components/modal.js';
 import { getLocal, setLocal } from './utils.js';
+import { t } from './i18n.js';
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -170,6 +171,7 @@ function _buildNavLinks() {
     { href: '/settings',  label: 'Settings',  icon: iconSettings,  perm: 'settings:view',  section: 'Admin' },
     { href: '/accounts',  label: 'Accounts',  icon: iconAccounts,  perm: 'user:manage' },
     { href: '/admin/logs', label: 'Logs',     icon: iconLogs,      perm: 'admin:view_logs', matchPrefix: '/admin' },
+    { href: '/jobs',       label: t('nav.jobs'), icon: iconRefresh,   perm: 'admin:jobs',      matchPrefix: '/jobs',  section: 'Admin' },
   ];
   const visible = defs.filter(d => !d.perm || hasPermission(d.perm));
   let html = '';

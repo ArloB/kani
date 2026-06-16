@@ -225,8 +225,12 @@ impl AppService {
 
         let source = sqlx::query_as!(
             kani_shared::types::Source,
-            "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http \
-             FROM sources WHERE id = ?",
+            "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, \
+             s.unrestricted_http, s.download_concurrency, \
+             scb.state as circuit_state \
+             FROM sources s \
+             LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id \
+             WHERE s.id = ?",
             manga.source_id
         )
         .fetch_optional(&self.db)

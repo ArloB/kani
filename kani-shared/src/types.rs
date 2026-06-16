@@ -731,6 +731,8 @@ pub struct Chapter {
     pub is_read: bool,
     #[serde(default)]
     pub last_page_read: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_error: Option<serde_json::Value>,
 }
 
 #[cfg(feature = "host")]
@@ -897,6 +899,8 @@ pub enum DownloadProgressEvent {
         manga_id: i64,
         manga_title: String,
         total_pages: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        job_id: Option<String>,
     },
     PageCompleted {
         chapter_id: i64,
@@ -919,11 +923,6 @@ pub enum DownloadProgressEvent {
         chapter_id: i64,
         chapter_name: String,
     },
-    ChapterDeferred {
-        chapter_id: i64,
-        chapter_name: String,
-        reason: String,
-    },
 }
 
 #[cfg(feature = "host")]
@@ -945,6 +944,12 @@ pub struct Source {
     pub enabled: bool,
     pub favourited: bool,
     pub unrestricted_http: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ssr", sqlx(default))]
+    pub download_concurrency: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ssr", sqlx(default))]
+    pub circuit_state: Option<String>,
 }
 
 #[cfg(feature = "host")]
@@ -1117,6 +1122,8 @@ pub struct AppSettings {
     pub password_reset_enabled: bool,
     pub email_verification_required: bool,
     pub first_run_complete: bool,
+    pub scan_concurrency: i64,
+    pub per_source_download_concurrency: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1208,6 +1215,8 @@ pub struct DownloadSettings {
     pub max_retries: i64,
     pub initial_retry_delay_ms: i64,
     pub auto_download_category_ids: Vec<i64>,
+    pub scan_concurrency: i64,
+    pub per_source_download_concurrency: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1499,6 +1508,7 @@ mod tests {
             page_count: Some(20),
             is_read: true,
             last_page_read: Some(10),
+            download_error: None,
         });
     }
 
@@ -1597,6 +1607,7 @@ mod tests {
                 manga_id: 10,
                 manga_title: "Manga".into(),
                 total_pages: 20,
+                job_id: None,
             },
             DownloadProgressEvent::PageCompleted {
                 chapter_id: 1,
@@ -1618,11 +1629,6 @@ mod tests {
             DownloadProgressEvent::ChapterCancelled {
                 chapter_id: 1,
                 chapter_name: "Ch1".into(),
-            },
-            DownloadProgressEvent::ChapterDeferred {
-                chapter_id: 1,
-                chapter_name: "Ch1".into(),
-                reason: "rate limited".into(),
             },
         ] {
             json_rt(ev);
@@ -1746,6 +1752,8 @@ mod tests {
             enabled: true,
             favourited: false,
             unrestricted_http: false,
+            download_concurrency: None,
+            circuit_state: None,
         });
     }
 
@@ -1795,6 +1803,8 @@ mod tests {
             max_retries: 3,
             initial_retry_delay_ms: 1000,
             auto_download_category_ids: vec![1, 2],
+            scan_concurrency: 3,
+            per_source_download_concurrency: 2,
         }));
         json_rt(&SettingsUpdate::Scan(ScanSettings {
             auto_scan: true,

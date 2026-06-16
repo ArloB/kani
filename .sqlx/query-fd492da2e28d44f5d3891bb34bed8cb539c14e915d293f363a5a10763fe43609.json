@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, name FROM manga WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id",
+  "query": "SELECT source_id, name FROM manga WHERE id = ?",
   "describe": {
     "columns": [
       {
-        "name": "id",
+        "name": "source_id",
         "ordinal": 0,
         "type_info": "Integer"
       },
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "1e8c1a2ea0d6fbb29fde43b146acec1d003c25fc763cedba3a52b31116ed5ba1"
+  "hash": "fd492da2e28d44f5d3891bb34bed8cb539c14e915d293f363a5a10763fe43609"
 }

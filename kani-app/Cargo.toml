@@ -36,6 +36,7 @@ infer         = "0.16"
 zxcvbn        = "3"
 sha1          = "0.10"
 async-trait   = "0.1"
+uuid          = { version = "1", features = ["v4", "serde"] }
 lettre        = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "smtp-transport", "builder"] }
 image         = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 zip           = "2"
@@ -50,14 +51,15 @@ fs2           = "0.4"
 dunce         = "1"
 
 [features]
-test-util = []
+test-util = ["kani-core/test-util"]
 streaming-chapters = ["kani-core/streaming-chapters"]
 
 [dev-dependencies]
-kani-core   = { path = "../kani-core" }
+kani-core   = { path = "../kani-core", features = ["test-util"] }
 kani-shared = { path = "../kani-shared", features = ["ssr"] }
 kani-shared-test = { path = "../kani-shared-test" }
 tokio-util  = { workspace = true }
+tokio = { version = "1", features = ["net"] }
 
 [build-dependencies]
 prost-build = "0.14.3"

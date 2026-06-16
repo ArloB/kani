@@ -34,6 +34,8 @@ impl AppService {
             password_reset_enabled: s.password_reset_enabled,
             email_verification_required: s.email_verification_required,
             first_run_complete: s.first_run_complete,
+            scan_concurrency: s.scan_concurrency,
+            per_source_download_concurrency: s.per_source_download_concurrency,
         }
     }
 
@@ -66,28 +68,48 @@ impl AppService {
                         "concurrent_manga_downloads must be 1-16".into(),
                     ));
                 }
+                if s.scan_concurrency < 1 || s.scan_concurrency > 32 {
+                    return Err(ServiceError::Validation(
+                        "scan_concurrency must be 1-32".into(),
+                    ));
+                }
+                if s.per_source_download_concurrency < 1
+                    || s.per_source_download_concurrency > 16
+                {
+                    return Err(ServiceError::Validation(
+                        "per_source_download_concurrency must be 1-16".into(),
+                    ));
+                }
                 let cat_ids_json = serde_json::to_string(&s.auto_download_category_ids)
                     .unwrap_or_else(|_| "[]".to_string());
                 sqlx::query!(
                     "UPDATE settings SET concurrent_page_downloads=?, concurrent_manga_downloads=?, \
                      chapter_queue_size=?, max_retries=?, initial_retry_delay_ms=?, \
-                     auto_download_category_ids=? WHERE id='singleton'",
+                     auto_download_category_ids=?, scan_concurrency=?, \
+                     per_source_download_concurrency=? WHERE id='singleton'",
                     s.concurrent_page_downloads,
                     s.concurrent_manga_downloads,
                     s.chapter_queue_size,
                     s.max_retries,
                     s.initial_retry_delay_ms,
-                    cat_ids_json
+                    cat_ids_json,
+                    s.scan_concurrency,
+                    s.per_source_download_concurrency,
                 )
                 .execute(&self.db)
                 .await?;
-                let mut settings = self.settings.write().await;
-                settings.concurrent_page_downloads = s.concurrent_page_downloads;
-                settings.concurrent_manga_downloads = s.concurrent_manga_downloads;
-                settings.chapter_queue_size = s.chapter_queue_size;
-                settings.max_retries = s.max_retries;
-                settings.initial_retry_delay_ms = s.initial_retry_delay_ms;
-                settings.auto_download_category_ids = cat_ids_json;
+                {
+                    let mut settings = self.settings.write().await;
+                    settings.concurrent_page_downloads = s.concurrent_page_downloads;
+                    settings.concurrent_manga_downloads = s.concurrent_manga_downloads;
+                    settings.chapter_queue_size = s.chapter_queue_size;
+                    settings.max_retries = s.max_retries;
+                    settings.initial_retry_delay_ms = s.initial_retry_delay_ms;
+                    settings.auto_download_category_ids = cat_ids_json;
+                    settings.scan_concurrency = s.scan_concurrency;
+                    settings.per_source_download_concurrency = s.per_source_download_concurrency;
+                }
+                self.job_manager.invalidate_all_source_semaphores();
                 self.audit(Some(user_id), "settings.update.download", None, None)
                     .await;
             }

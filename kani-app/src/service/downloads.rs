@@ -1,10 +1,9 @@
 use super::*;
 use crate::ids::{ChapterId, MangaId};
-use futures::stream::{FuturesUnordered, StreamExt};
 use kani_shared::types::DownloadStatus;
 
 impl AppService {
-    pub async fn download_chapter(&self, chapter_id: ChapterId) -> Result<()> {
+    pub async fn download_chapter(&self, chapter_id: ChapterId) -> Result<uuid::Uuid> {
         let claimed = sqlx::query!(
             "UPDATE chapters SET download_status = ? \
              WHERE id = ? AND download_status = ?",
@@ -15,8 +14,6 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
-        // Atomic claim failed: the chapter is already downloaded or in progress.
-        // This is a benign client conflict (409), not a server error (500).
         if claimed.rows_affected() == 0 {
             return Err(ServiceError::Conflict(format!(
                 "Chapter {chapter_id} is already downloaded or in progress."
@@ -26,14 +23,29 @@ impl AppService {
         self.enqueue_claimed_chapter(chapter_id).await
     }
 
-    pub async fn enqueue_claimed_chapter(&self, chapter_id: ChapterId) -> Result<()> {
+    pub async fn enqueue_claimed_chapter(&self, chapter_id: ChapterId) -> Result<uuid::Uuid> {
         let result = async {
-            let task = self.build_download_task(chapter_id).await?;
-            self.downloader
-                .queue_chapter(task)
+            let row = sqlx::query!(
+                "SELECT c.manga_id, m.source_id, m.name as manga_title \
+                 FROM chapters c JOIN manga m ON c.manga_id = m.id WHERE c.id = ?",
+                chapter_id
+            )
+            .fetch_optional(&self.db)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::NotFound(format!("Chapter {chapter_id} not found"))
+            })?;
+
+            let job = crate::jobs::download::ChapterDownloadJob::new(
+                chapter_id.0,
+                row.manga_id,
+                row.manga_title,
+                row.source_id,
+            );
+            self.job_manager
+                .submit(job)
                 .await
-                .map_err(ServiceError::Core)?;
-            Ok(())
+                .map_err(|e| ServiceError::Internal(e.to_string()))
         }
         .await;
 
@@ -50,96 +62,92 @@ impl AppService {
         result
     }
 
-    pub async fn download_all_chapters(&self, manga_id: MangaId) -> Result<()> {
-        let candidate_ids: Vec<ChapterId> = sqlx::query_scalar!(
-            "SELECT id FROM chapters \
-             WHERE manga_id = ? AND download_status = ? AND is_orphaned = 0",
-            manga_id,
-            DownloadStatus::Pending,
+    pub async fn retry_chapter_download(&self, chapter_id: ChapterId) -> Result<uuid::Uuid> {
+        let err_json = sqlx::query_scalar!(
+            "SELECT download_error FROM chapters WHERE id = ?",
+            chapter_id
         )
-        .fetch_all(&self.db)
+        .fetch_optional(&self.db)
         .await?
-        .into_iter()
-        .map(ChapterId)
-        .collect();
+        .ok_or_else(|| ServiceError::NotFound(format!("Chapter {chapter_id} not found")))?;
 
-        if candidate_ids.is_empty() {
-            tracing::info!(
-                "download_all_chapters: no undownloaded chapters for manga {}",
-                manga_id
-            );
-            return Ok(());
+        if let Some(raw) = err_json {
+            let v: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+            if v.get("kind").and_then(|k| k.as_str()) == Some("not_found") {
+                return Err(ServiceError::Conflict(
+                    "chapter_missing_from_source".into(),
+                ));
+            }
         }
 
-        let preferred_only = sqlx::query_scalar!(
-            "SELECT download_all_preferred_only FROM manga WHERE id = ?",
+        self.download_chapter(chapter_id).await
+    }
+
+    pub async fn get_manga_download_status(
+        &self,
+        manga_id: MangaId,
+    ) -> Result<serde_json::Value> {
+        let rows = sqlx::query!(
+            "SELECT download_status, download_error, id, name, chapter_number \
+             FROM chapters WHERE manga_id = ? AND is_orphaned = 0",
+            manga_id
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        let mut downloaded = 0i64;
+        let mut in_progress = 0i64;
+        let mut pending = 0i64;
+        let mut failed_chapters = vec![];
+
+        for r in rows {
+            match r.download_status {
+                2 => downloaded += 1,
+                1 => in_progress += 1,
+                _ => {
+                    pending += 1;
+                    if let Some(raw) = r.download_error {
+                        let err_val: serde_json::Value =
+                            serde_json::from_str(&raw).unwrap_or_default();
+                        failed_chapters.push(serde_json::json!({
+                            "id": r.id,
+                            "name": r.name,
+                            "chapterNumber": r.chapter_number,
+                            "error": err_val,
+                        }));
+                    }
+                }
+            }
+        }
+
+        Ok(serde_json::json!({
+            "total": downloaded + in_progress + pending,
+            "downloaded": downloaded,
+            "inProgress": in_progress,
+            "pending": pending,
+            "failedChapters": failed_chapters,
+        }))
+    }
+
+    pub async fn download_all_chapters(&self, manga_id: MangaId) -> Result<uuid::Uuid> {
+        let row = sqlx::query!(
+            "SELECT source_id, name, download_all_preferred_only FROM manga WHERE id = ?",
             manga_id
         )
         .fetch_optional(&self.db)
         .await?
-        .unwrap_or(true);
+        .ok_or_else(|| ServiceError::NotFound(format!("Manga {manga_id} not found")))?;
 
-        let preferred_ids = if preferred_only {
-            let filtered = self.filter_chapters_by_rules(manga_id, candidate_ids).await;
-            if filtered.is_empty() {
-                tracing::info!(
-                    "download_all_chapters: all candidates were filtered out for manga {}",
-                    manga_id
-                );
-                return Ok(());
-            }
-            filtered
-        } else {
-            candidate_ids
-        };
-
-        // Claim only the preferred chapters atomically; skip any that were
-        // already grabbed by a concurrent request.
-        let mut claimed_ids: Vec<ChapterId> = Vec::with_capacity(preferred_ids.len());
-        for id in preferred_ids {
-            let res: Option<i64> = sqlx::query_scalar!(
-                "UPDATE chapters SET download_status = ? \
-                 WHERE id = ? AND download_status = ? \
-                 RETURNING id",
-                DownloadStatus::InProgress,
-                id,
-                DownloadStatus::Pending,
-            )
-            .fetch_optional(&self.db)
-            .await?;
-            if let Some(claimed_id) = res {
-                claimed_ids.push(ChapterId(claimed_id));
-            }
-        }
-
-        if claimed_ids.is_empty() {
-            tracing::info!(
-                "download_all_chapters: no undownloaded chapters for manga {}",
-                manga_id
-            );
-            return Ok(());
-        }
-
-        let mut tasks: FuturesUnordered<_> = claimed_ids
-            .into_iter()
-            .map(|chapter_id| {
-                let this = self.clone();
-                async move { (chapter_id, this.enqueue_claimed_chapter(chapter_id).await) }
-            })
-            .collect();
-
-        while let Some((chapter_id, result)) = tasks.next().await {
-            if let Err(e) = result {
-                tracing::error!(
-                    "Failed to enqueue chapter {} (manga {}): {}",
-                    chapter_id,
-                    manga_id,
-                    e
-                );
-            }
-        }
-
-        Ok(())
+        let job = crate::jobs::download::MangaDownloadAllJob::new(
+            manga_id.0,
+            row.name,
+            row.source_id,
+            row.download_all_preferred_only,
+        );
+        self.job_manager
+            .submit(job)
+            .await
+            .map_err(|e| ServiceError::Internal(e.to_string()))
     }
 
     pub async fn delete_downloaded(&self, chapter_id: ChapterId) -> Result<()> {
@@ -171,68 +179,65 @@ impl AppService {
         Ok(())
     }
 
-    /// Cancels an in-progress download and resets the chapter's download_status.
     pub async fn cancel_download(&self, chapter_id: ChapterId) -> Result<()> {
-        let was_cancelled = self.downloader.cancel_download(chapter_id.0).await;
-        if was_cancelled {
-            sqlx::query!(
-                "UPDATE chapters SET download_status = ? WHERE id = ? AND download_status = ?",
-                DownloadStatus::Pending,
-                chapter_id,
-                DownloadStatus::InProgress,
-            )
-            .execute(&self.db)
-            .await?;
-        }
-        Ok(())
+        self.cancel_chapter_jobs_where("$.chapter_id", chapter_id.0).await
     }
 
-    /// Cancels all queued or in-progress downloads for a manga.
     pub async fn cancel_all_downloads(&self, manga_id: MangaId) -> Result<()> {
-        let chapter_ids: Vec<i64> = sqlx::query_scalar!(
-            "SELECT id FROM chapters WHERE manga_id = ? AND download_status = ?",
-            manga_id,
-            DownloadStatus::InProgress,
-        )
-        .fetch_all(&self.db)
-        .await?;
+        self.cancel_chapter_jobs_where("$.manga_id", manga_id.0).await?;
+        self.cancel_jobs_where_type_and_manga("manga_download_all", manga_id.0).await
+    }
 
-        for id in chapter_ids {
-            let was_cancelled = self.downloader.cancel_download(id).await;
-            if was_cancelled {
-                let _ = sqlx::query!(
-                    "UPDATE chapters SET download_status = ? WHERE id = ? AND download_status = ?",
-                    DownloadStatus::Pending,
-                    id,
-                    DownloadStatus::InProgress,
-                )
-                .execute(&self.db)
-                .await;
+    pub async fn cancel_all_global_downloads(&self) -> Result<()> {
+        for type_str in &["chapter_download", "manga_download_all"] {
+            let job_ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM jobs WHERE job_type = ? AND status IN ('pending', 'running')",
+            )
+            .bind(type_str)
+            .fetch_all(&self.db)
+            .await
+            .unwrap_or_default();
+
+            for id_str in job_ids {
+                if let Ok(job_id) = uuid::Uuid::parse_str(&id_str) {
+                    let _ = self.job_manager.cancel(job_id).await;
+                }
             }
         }
         Ok(())
     }
 
-    /// Cancels all in-progress downloads across all manga.
-    pub async fn cancel_all_global_downloads(&self) -> Result<()> {
-        let chapter_ids: Vec<i64> = sqlx::query_scalar!(
-            "SELECT id FROM chapters WHERE download_status = ?",
-            DownloadStatus::InProgress
+    async fn cancel_chapter_jobs_where(&self, json_path: &str, value: i64) -> Result<()> {
+        let job_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM jobs WHERE job_type = 'chapter_download' AND status IN ('pending', 'running') AND json_extract(params_json, ?) = ?"
         )
+        .bind(json_path)
+        .bind(value)
         .fetch_all(&self.db)
-        .await?;
+        .await
+        .unwrap_or_default();
 
-        for id in chapter_ids {
-            let was_cancelled = self.downloader.cancel_download(id).await;
-            if was_cancelled {
-                let _ = sqlx::query!(
-                    "UPDATE chapters SET download_status = ? WHERE id = ? AND download_status = ?",
-                    DownloadStatus::Pending,
-                    id,
-                    DownloadStatus::InProgress,
-                )
-                .execute(&self.db)
-                .await;
+        for id_str in job_ids {
+            if let Ok(job_id) = uuid::Uuid::parse_str(&id_str) {
+                let _ = self.job_manager.cancel(job_id).await;
+            }
+        }
+        Ok(())
+    }
+
+    async fn cancel_jobs_where_type_and_manga(&self, job_type: &str, manga_id: i64) -> Result<()> {
+        let job_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM jobs WHERE job_type = ? AND status IN ('pending', 'running') AND json_extract(params_json, '$.manga_id') = ?"
+        )
+        .bind(job_type)
+        .bind(manga_id)
+        .fetch_all(&self.db)
+        .await
+        .unwrap_or_default();
+
+        for id_str in job_ids {
+            if let Ok(job_id) = uuid::Uuid::parse_str(&id_str) {
+                let _ = self.job_manager.cancel(job_id).await;
             }
         }
         Ok(())
@@ -267,7 +272,23 @@ impl AppService {
             ))
         })?;
 
-        let source_manager = {
+        #[cfg(any(test, feature = "test-util"))]
+        let source_manager: Arc<dyn kani_core::downloader::PageListFetcher> =
+            if let Some(mock) = self
+                .mock_sources
+                .get(&record.source_id)
+                .map(|r| Arc::clone(r.value()))
+            {
+                mock
+            } else {
+                let sources = self.sources.read().await;
+                sources.get(&record.source_id).cloned().ok_or_else(|| {
+                    ServiceError::NotFound(format!("Source {} not found", record.source_id))
+                })?
+            };
+
+        #[cfg(not(any(test, feature = "test-util")))]
+        let source_manager: Arc<dyn kani_core::downloader::PageListFetcher> = {
             let sources = self.sources.read().await;
             sources.get(&record.source_id).cloned().ok_or_else(|| {
                 ServiceError::NotFound(format!("Source {} not found", record.source_id))

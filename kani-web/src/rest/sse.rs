@@ -14,13 +14,15 @@ pub async fn combined_sse(
 ) -> Result<impl IntoResponse, AppError> {
     let snapshot = state.downloader.snapshot().await;
     let is_refreshing = state.is_refreshing().await;
+    let active_jobs = state.job_manager.active_job_summaries();
 
     let snapshot_event = Ok::<Event, Infallible>(
         Event::default().data(
             serde_json::json!({
                 "type": "state_snapshot",
                 "chapters": snapshot,
-                "is_refreshing": is_refreshing
+                "is_refreshing": is_refreshing,
+                "active_jobs": active_jobs,
             })
             .to_string(),
         ),

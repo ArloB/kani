@@ -6,9 +6,11 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/downloads/history", get(get_download_history))
         .route("/chapter/{id}/download", post(start_download))
+        .route("/chapter/{id}/download/retry", post(retry_download))
         .route("/chapter/{id}/delete", delete(delete_downloaded))
         .route("/chapter/{id}/cancel", post(cancel_download))
         .route("/downloads/active", delete(cancel_all_global_downloads))
+        .route("/manga/{id}/download-status", get(get_manga_download_status))
 }
 
 #[utoipa::path(
@@ -45,8 +47,53 @@ pub(crate) async fn start_download(
     State(svc): State<Arc<dyn DownloadDomain>>,
     Path(id): Path<ChapterId>,
 ) -> Result<impl IntoResponse, AppError> {
-    svc.download_chapter(id).await?;
-    Ok((StatusCode::ACCEPTED, Json(json!({}))))
+    let job_id = svc.download_chapter(id).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({ "job_id": job_id.to_string(), "chapter_id": id.0 })),
+    ))
+}
+
+#[utoipa::path(
+    post, path = "/rest/chapter/{id}/download/retry",
+    params(("id" = i64, Path, description = "Chapter ID")),
+    responses(
+        (status = 202, description = "Download retry queued"),
+        (status = 401, description = "Not authenticated"),
+        (status = 409, description = "Chapter is missing from source — remove it from the library instead"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn retry_download(
+    _: AuthGuard<crate::permissions::guards::ChapterDownload>,
+    State(svc): State<Arc<dyn DownloadDomain>>,
+    Path(id): Path<ChapterId>,
+) -> Result<impl IntoResponse, AppError> {
+    let job_id = svc.retry_chapter_download(id).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({ "job_id": job_id.to_string(), "chapter_id": id.0 })),
+    ))
+}
+
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/download-status",
+    params(("id" = i64, Path, description = "Manga ID")),
+    responses(
+        (status = 200, description = "Download status counts and failed chapters"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn get_manga_download_status(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
+    State(svc): State<Arc<dyn DownloadDomain>>,
+    Path(id): Path<MangaId>,
+) -> Result<impl IntoResponse, AppError> {
+    let status = svc.get_manga_download_status(id).await?;
+    Ok(Json(status))
 }
 
 #[utoipa::path(
@@ -124,7 +171,13 @@ mod tests {
         ) -> kani_app::error::Result<Vec<serde_json::Value>> {
             Ok(vec![serde_json::json!({ "chapter_id": 1 })])
         }
-        async fn download_chapter(&self, _: ChapterId) -> kani_app::error::Result<()> {
+        async fn download_chapter(&self, _: ChapterId) -> kani_app::error::Result<uuid::Uuid> {
+            unimplemented!()
+        }
+        async fn retry_chapter_download(
+            &self,
+            _: ChapterId,
+        ) -> kani_app::error::Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn delete_downloaded(&self, _: ChapterId) -> kani_app::error::Result<()> {
@@ -134,6 +187,12 @@ mod tests {
             unimplemented!()
         }
         async fn cancel_all_global_downloads(&self) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn get_manga_download_status(
+            &self,
+            _: kani_app::ids::MangaId,
+        ) -> kani_app::error::Result<serde_json::Value> {
             unimplemented!()
         }
     }

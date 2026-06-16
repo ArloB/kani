@@ -43,6 +43,10 @@ pub struct Settings {
     pub password_reset_enabled: bool,
     pub email_verification_required: bool,
     pub first_run_complete: bool,
+    pub scan_concurrency: i64,
+    pub per_source_download_concurrency: i64,
+    pub job_max_history: i64,
+    pub job_shutdown_timeout_secs: i64,
 }
 
 #[derive(sqlx::FromRow)]
@@ -138,6 +142,7 @@ pub struct ChapterRow {
     pub page_count: Option<i64>,
     pub is_read: Option<bool>,
     pub last_page_read: Option<i64>,
+    pub download_error: Option<String>,
 }
 
 /// Slim row returned by filtered library queries (joins manga + source).

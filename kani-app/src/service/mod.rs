@@ -84,6 +84,10 @@ pub struct AppService {
     pub webhook_service: webhooks::WebhookService,
     pub metadata_provider_registry:
         Arc<tokio::sync::RwLock<metadata_provider::MetadataProviderRegistry>>,
+    pub job_manager: crate::jobs::JobManager,
+    #[cfg(any(test, feature = "test-util"))]
+    pub mock_sources:
+        Arc<DashMap<i64, Arc<dyn kani_core::downloader::PageListFetcher>>>,
 }
 
 /// Load a credential cipher from env vars, or auto-provision one at `data_dir/secret.key`.
@@ -191,7 +195,7 @@ impl AppService {
 
         let enc = load_or_provision_credential_cipher(data_dir);
 
-        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete FROM settings")
+        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
@@ -218,6 +222,37 @@ impl AppService {
         if let Ok(dir) = std::env::var("KANI_LIBRARY_DIR") {
             tracing::info!("Library path overridden by KANI_LIBRARY_DIR: {dir}");
             settings.library_path = std::path::PathBuf::from(dir);
+        }
+
+        // On first boot only, apply env var overrides for concurrency settings and
+        // persist them so subsequent boots use the DB value (precedence: DB > env > tuning).
+        if !settings.first_run_complete {
+            let mut concurrency_changed = false;
+            if let Ok(val) = std::env::var("KANI_SCAN_CONCURRENCY")
+                && let Ok(n) = val.trim().parse::<i64>()
+                && (1..=32).contains(&n)
+            {
+                tracing::info!("scan_concurrency set to {n} by KANI_SCAN_CONCURRENCY");
+                settings.scan_concurrency = n;
+                concurrency_changed = true;
+            }
+            if let Ok(val) = std::env::var("KANI_PER_SOURCE_DOWNLOAD_CONCURRENCY")
+                && let Ok(n) = val.trim().parse::<i64>()
+                && (1..=16).contains(&n)
+            {
+                tracing::info!("per_source_download_concurrency set to {n} by KANI_PER_SOURCE_DOWNLOAD_CONCURRENCY");
+                settings.per_source_download_concurrency = n;
+                concurrency_changed = true;
+            }
+            if concurrency_changed {
+                sqlx::query!(
+                    "UPDATE settings SET scan_concurrency = ?, per_source_download_concurrency = ? WHERE id = 'singleton'",
+                    settings.scan_concurrency,
+                    settings.per_source_download_concurrency,
+                )
+                .execute(&pool)
+                .await?;
+            }
         }
 
         let max_wasm_instances = settings.max_wasm_instances as u32;
@@ -247,7 +282,7 @@ impl AppService {
 
         let library_path = std::path::Path::new(&settings.library_path);
         if library_path.exists() {
-            if let Err(e) = cleanup_staging_dirs(library_path).await {
+            if let Err(e) = cleanup_staging_dirs(library_path, &pool).await {
                 tracing::warn!("Failed to read library path for cleanup: {}", e);
             }
             tracing::info!("Library cleanup complete");
@@ -281,7 +316,8 @@ impl AppService {
 
         let sources = sqlx::query_as!(
             Source,
-            "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http \
+            "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http, \
+             download_concurrency, CAST(NULL AS TEXT) as circuit_state \
              FROM sources WHERE enabled = 1 AND deleted_at IS NULL"
         )
         .fetch_all(&pool)
@@ -325,10 +361,8 @@ impl AppService {
             global_smart_client.clone(),
             DownloaderConfig {
                 concurrent_pages: settings.concurrent_page_downloads.try_into()?,
-                concurrent_manga: settings.concurrent_manga_downloads.try_into()?,
-                max_retries: settings.max_retries,
+                max_attempts: settings.max_retries,
                 initial_retry_delay_ms: settings.initial_retry_delay_ms,
-                chapter_queue_size: settings.chapter_queue_size.try_into()?,
             },
         )
         .await
@@ -353,6 +387,44 @@ impl AppService {
         let enc = enc.map(Arc::new);
         let webhook_service = webhooks::WebhookService::new(pool.clone());
 
+        let svc_cell: crate::jobs::framework::ServiceCell =
+            Arc::new(std::sync::Mutex::new(None));
+
+        let mut job_registry = crate::jobs::JobRegistry::new();
+        job_registry.register::<crate::jobs::download::ChapterDownloadJob>();
+        job_registry.register::<crate::jobs::download::MangaDownloadAllJob>();
+        job_registry.register::<crate::jobs::download::SourceScanJob>();
+        job_registry.register::<crate::jobs::download::LibraryScanJob>();
+
+        let job_manager = crate::jobs::JobManager::new(
+            pool.clone(),
+            refresh_tx.clone(),
+            shutdown_token.clone(),
+            crate::jobs::JobManagerConfig {
+                global_max_concurrent: crate::tuning::DEFAULT_MAX_CONCURRENT_JOBS,
+                job_shutdown_timeout: std::time::Duration::from_secs(
+                    settings.job_shutdown_timeout_secs.try_into().unwrap_or(
+                        crate::tuning::DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
+                    ),
+                ),
+                type_configs: std::collections::HashMap::new(),
+                registry: job_registry,
+                max_history: settings.job_max_history.try_into().unwrap_or(
+                    crate::tuning::DEFAULT_JOB_MAX_HISTORY,
+                ),
+                concurrency: crate::jobs::ConcurrencyConfig {
+                    page_concurrency: settings.concurrent_page_downloads.try_into()?,
+                    per_source_download_concurrency: settings
+                        .per_source_download_concurrency
+                        .try_into()?,
+                    scan_concurrency: settings.scan_concurrency.try_into()?,
+                },
+                svc_cell: Arc::clone(&svc_cell),
+            },
+        )
+        .await?;
+        tracing::info!("Job manager created");
+
         let svc = Self {
             db: pool,
             wasm_runtime,
@@ -374,7 +446,12 @@ impl AppService {
             metadata_provider_registry: Arc::new(tokio::sync::RwLock::new(
                 metadata_provider::MetadataProviderRegistry::new(),
             )),
+            job_manager,
+            #[cfg(any(test, feature = "test-util"))]
+            mock_sources: Arc::new(DashMap::new()),
         };
+
+        *svc_cell.lock().expect("svc_cell lock") = Some(svc.clone());
 
         // Encrypt any plaintext credentials left over from pre-encryption installs.
         if let Err(e) = svc.migrate_credentials_to_encrypted().await {
@@ -418,6 +495,10 @@ impl AppService {
             password_reset_enabled: false,
             email_verification_required: false,
             first_run_complete: false,
+            scan_concurrency: crate::tuning::DEFAULT_SCAN_CONCURRENCY as i64,
+            per_source_download_concurrency: crate::tuning::DEFAULT_PER_SOURCE_DOWNLOAD_CONCURRENCY as i64,
+            job_max_history: crate::tuning::DEFAULT_JOB_MAX_HISTORY as i64,
+            job_shutdown_timeout_secs: crate::tuning::DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS as i64,
         };
 
         let smart_client =
@@ -429,10 +510,8 @@ impl AppService {
             smart_client.clone(),
             DownloaderConfig {
                 concurrent_pages: 1,
-                concurrent_manga: 1,
-                max_retries: 0,
+                max_attempts: 0,
                 initial_retry_delay_ms: 0,
-                chapter_queue_size: 4,
             },
         )
         .await
@@ -442,8 +521,42 @@ impl AppService {
             .expect("TrackerRegistry::new failed in test");
         // Small capacity: tests have at most a couple of SSE subscribers.
         let (refresh_tx, _) = tokio::sync::broadcast::channel(16);
+        let shutdown_token = tokio_util::sync::CancellationToken::new();
 
-        Self {
+        let svc_cell: crate::jobs::framework::ServiceCell =
+            Arc::new(std::sync::Mutex::new(None));
+
+        let mut registry = crate::jobs::JobRegistry::new();
+        registry.register::<crate::jobs::test_jobs::TestJob>();
+        registry.register::<crate::jobs::test_jobs::SlowTestJob>();
+        registry.register::<crate::jobs::test_jobs::FailingDownloadJob>();
+        registry.register::<crate::jobs::download::ChapterDownloadJob>();
+        registry.register::<crate::jobs::download::MangaDownloadAllJob>();
+        registry.register::<crate::jobs::download::SourceScanJob>();
+        registry.register::<crate::jobs::download::LibraryScanJob>();
+
+        let job_manager = crate::jobs::JobManager::new(
+            pool.clone(),
+            refresh_tx.clone(),
+            shutdown_token.clone(),
+            crate::jobs::JobManagerConfig {
+                global_max_concurrent: crate::tuning::DEFAULT_MAX_CONCURRENT_JOBS,
+                job_shutdown_timeout: std::time::Duration::from_secs(5),
+                type_configs: std::collections::HashMap::new(),
+                registry,
+                max_history: crate::tuning::DEFAULT_JOB_MAX_HISTORY,
+                concurrency: crate::jobs::ConcurrencyConfig {
+                    page_concurrency: 1,
+                    per_source_download_concurrency: 1,
+                    scan_concurrency: 1,
+                },
+                svc_cell: Arc::clone(&svc_cell),
+            },
+        )
+        .await
+        .expect("JobManager::new failed in test");
+
+        let svc = Self {
             db: pool.clone(),
             wasm_runtime,
             sources: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
@@ -455,7 +568,7 @@ impl AppService {
             refresh_task: Arc::new(tokio::sync::Mutex::new(None)),
             cache: RequestCache::new(),
             ext_cache: std::sync::Arc::new(kani_core::cache::InMemoryCache::new()),
-            shutdown_token: tokio_util::sync::CancellationToken::new(),
+            shutdown_token,
             tracker_registry: Arc::new(tokio::sync::RwLock::new(tracker_registry)),
             cover_retry_queue: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             email_service: Arc::new(tokio::sync::RwLock::new(None)),
@@ -464,7 +577,20 @@ impl AppService {
             metadata_provider_registry: Arc::new(tokio::sync::RwLock::new(
                 metadata_provider::MetadataProviderRegistry::new(),
             )),
-        }
+            job_manager,
+            mock_sources: Arc::new(DashMap::new()),
+        };
+        *svc_cell.lock().expect("svc_cell lock") = Some(svc.clone());
+        svc
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn register_mock_source(
+        &self,
+        source_id: i64,
+        fetcher: Arc<dyn kani_core::downloader::PageListFetcher>,
+    ) {
+        self.mock_sources.insert(source_id, fetcher);
     }
 
     pub async fn rebuild_email_service(&self) {
@@ -823,7 +949,10 @@ pub fn chapter_name(volume: Option<i64>, chapter_number: f64, title: Option<Stri
     name
 }
 
-pub(crate) async fn cleanup_staging_dirs(library_path: &std::path::Path) -> std::io::Result<()> {
+pub(crate) async fn cleanup_staging_dirs(
+    library_path: &std::path::Path,
+    pool: &sqlx::sqlite::SqlitePool,
+) -> std::io::Result<()> {
     let mut manga_dirs = tokio::fs::read_dir(library_path).await?;
 
     while let Ok(Some(manga_dir)) = manga_dirs.next_entry().await {
@@ -845,7 +974,28 @@ pub(crate) async fn cleanup_staging_dirs(library_path: &std::path::Path) -> std:
                 continue;
             }
 
-            tracing::info!("Removing orphaned directory: {:?}", entry.path());
+            let suffix = &name[".tmp_staging_".len()..];
+            if let Ok(chapter_id) = suffix.parse::<i64>() {
+                let resume_offset: Option<i64> =
+                    sqlx::query_scalar!(
+                        "SELECT resume_offset FROM chapters WHERE id = ?",
+                        chapter_id
+                    )
+                    .fetch_optional(pool)
+                    .await
+                    .unwrap_or(None);
+
+                if resume_offset.is_some_and(|o| o > 0) {
+                    tracing::debug!(
+                        "Keeping staging dir for chapter {} (resume_offset={})",
+                        chapter_id,
+                        resume_offset.unwrap_or(0)
+                    );
+                    continue;
+                }
+            }
+
+            tracing::info!("Removing orphaned staging directory: {:?}", entry.path());
             if let Err(e) = tokio::fs::remove_dir_all(entry.path()).await {
                 tracing::warn!("Failed to remove {:?}: {}", entry.path(), e);
             }

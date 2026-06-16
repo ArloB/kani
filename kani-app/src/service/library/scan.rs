@@ -689,72 +689,21 @@ impl AppService {
             .collect();
         let ids: Vec<MangaId> = rows.iter().map(|(id, _)| *id).collect();
         let count = ids.len();
-        self.scan_manga_ids_inner(ids).await?;
+        self.scan_manga_ids(ids).await?;
         Ok(count)
     }
 
     /// Scans a specific list of manga IDs for new chapters, emitting SSE progress
     /// events compatible with the scan-all event stream. The caller receives
     /// `Started`, per-manga `MangaRefreshed`, and `Completed` events.
-    pub async fn scan_manga_ids(&self, ids: Vec<MangaId>) -> Result<()> {
-        self.scan_manga_ids_inner(ids).await
-    }
-
-    async fn scan_manga_ids_inner(&self, ids: Vec<MangaId>) -> Result<()> {
-        // Resolve manga names for the given IDs.
-        let ids_json = serde_json::to_string(&ids).unwrap_or_default();
-        let rows: Vec<(MangaId, String)> = sqlx::query!(
-            "SELECT id, name FROM manga WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id",
-            ids_json
-        )
-        .fetch_all(&self.db)
-        .await?
-        .into_iter()
-        .map(|r| (r.id.into(), r.name))
-        .collect();
-
-        let total = rows.len();
-        let manga_ids: Vec<MangaId> = rows.iter().map(|(id, _)| *id).collect();
-
-        let _ = self
-            .refresh_tx
-            .send(AppEvent::Refresh(RefreshProgressEvent::Started {
-                total,
-                manga_ids,
-            }));
-
-        let service = self.clone();
-        tokio::task::spawn(async move {
-            let mut failed = 0usize;
-            for (idx, (id, name)) in rows.into_iter().enumerate() {
-                let completed = idx + 1;
-                let result = service.scan_for_new_chapters(id).await;
-                let (success, new_chapters) = match result {
-                    Ok(ref ch_ids) => (true, ch_ids.len() as u32),
-                    Err(_) => {
-                        failed += 1;
-                        (false, 0)
-                    }
-                };
-                let _ = service.refresh_tx.send(AppEvent::Refresh(
-                    RefreshProgressEvent::MangaRefreshed {
-                        manga_id: id,
-                        manga_name: name,
-                        completed,
-                        total,
-                        success,
-                        new_chapters,
-                    },
-                ));
-            }
-            let _ = service
-                .refresh_tx
-                .send(AppEvent::Refresh(RefreshProgressEvent::Completed {
-                    total,
-                    failed,
-                }));
-        });
-        Ok(())
+    /// Returns the ID of the submitted `LibraryScanJob`.
+    pub async fn scan_manga_ids(&self, ids: Vec<MangaId>) -> Result<uuid::Uuid> {
+        let raw_ids: Vec<i64> = ids.iter().map(|id| id.0).collect();
+        let job = crate::jobs::download::LibraryScanJob::new(raw_ids, "manual".to_string());
+        self.job_manager
+            .submit(job)
+            .await
+            .map_err(|e| ServiceError::Internal(e.to_string()))
     }
 
     pub async fn fetch_and_store_remaining_chapters(

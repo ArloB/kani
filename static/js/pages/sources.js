@@ -13,6 +13,7 @@ import htm from 'htm';
 import { mountIntoModalRoot } from '../components/modal.js';
 import { SourcesSidebar, AddSourceModal, consumePendingSourceId } from '../components/sources-sidebar.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /** @type {HTMLElement | null} */
@@ -110,8 +111,12 @@ export async function init(container) {
         'focus-visible:outline-none focus-visible:text-accent hover:text-accent',
         src.enabled ? 'text-text' : 'text-text-muted opacity-60',
       ].join(' ');
+      const circuitDot = src.circuit_state && src.circuit_state !== 'closed'
+        ? `<span class="shrink-0 w-2 h-2 rounded-full ${src.circuit_state === 'open' ? 'bg-error' : 'bg-warning'}" title="${src.circuit_state === 'open' ? t('source.circuit.open') : t('source.circuit.half_open')}"></span>`
+        : '';
       a.innerHTML = `
         <span class="flex-1 font-medium truncate">${escapeHtml(src.name)}</span>
+        ${circuitDot}
         <span class="text-xs text-text-muted shrink-0">
           v${escapeHtml(src.version ?? '?')}${src.language ? ' · ' + escapeHtml(src.language) : ''}${!src.enabled ? ' · Disabled' : ''}
         </span>

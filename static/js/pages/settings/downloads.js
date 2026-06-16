@@ -8,6 +8,7 @@ import { getLocal, setLocal } from '../../utils.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
 import { Combobox } from '../../components/combobox.js';
+import { t } from '../../i18n.js';
 const html = htm.bind(h);
 
 
@@ -17,11 +18,13 @@ const html = htm.bind(h);
  */
 export function mount(el, settings) {
   const fields = [
-    { key: 'concurrent_page_downloads',   label: 'Concurrent page downloads',   desc: 'Number of pages downloaded in parallel per chapter.',   min: 1 },
-    { key: 'concurrent_manga_downloads',  label: 'Concurrent manga downloads',  desc: 'Number of chapters downloaded simultaneously.',          min: 1 },
-    { key: 'chapter_queue_size',          label: 'Chapter queue size',          desc: 'Maximum chapters waiting in the download queue.',        min: 1, tooltip: 'Chapters beyond this limit are deferred until queue space is available. Increase if chapters are frequently deferred during bulk downloads.' },
-    { key: 'max_retries',                 label: 'Max retries',                 desc: 'How many times to retry a failed page download.',        min: 0 },
-    { key: 'initial_retry_delay_ms',      label: 'Initial retry delay (ms)',    desc: 'Starting delay before the first retry.',                 min: 0 },
+    { key: 'concurrent_page_downloads',        label: 'Concurrent page downloads',        desc: 'Number of pages downloaded in parallel per chapter.',                             min: 1 },
+    { key: 'concurrent_manga_downloads',       label: 'Concurrent manga downloads',       desc: 'Number of chapters downloaded simultaneously.',                                   min: 1 },
+    { key: 'per_source_download_concurrency',  label: t('settings.downloads.per_source_concurrency'),  desc: t('settings.downloads.per_source_concurrency.desc'),            min: 1 },
+    { key: 'scan_concurrency',                 label: t('settings.downloads.scan_concurrency'),                 desc: t('settings.downloads.scan_concurrency.desc'),                 min: 1 },
+    { key: 'chapter_queue_size',               label: 'Chapter queue size',               desc: 'Maximum chapters waiting in the download queue.',                                 min: 1, tooltip: 'Chapters beyond this limit are deferred until queue space is available. Increase if chapters are frequently deferred during bulk downloads.' },
+    { key: 'max_retries',                      label: 'Max retries',                      desc: 'How many times to retry a failed page download.',                                 min: 0 },
+    { key: 'initial_retry_delay_ms',           label: 'Initial retry delay (ms)',         desc: 'Starting delay before the first retry.',                                         min: 0 },
   ];
 
   const serverGroup = mkSettingsGroup('Server download settings');

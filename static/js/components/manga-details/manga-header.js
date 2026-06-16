@@ -9,6 +9,7 @@ import { getLocal, setLocal, escapeHtml } from '../../utils.js';
 import { createCoverImage } from '../cover-image.js';
 import { showToast, showApiError } from '../toast.js';
 import { iconSpinner } from '../../icons.js';
+import { subscribeJob } from '../../sse.js';
 
 // ── Source filter URL builder ──────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ function _showExternalLinkDialog(url) {
  *   addedDbId: () => number|null,
  *   findNextPreferredChapter: () => any|null,
  *   getChapters: () => any[],
- *   onDownloadAll: () => Promise<void>,
+ *   onDownloadAll: () => Promise<{ jobId: string | null }>,
  *   onCancelAll: () => Promise<void>,
  *   onScan: () => Promise<{new_chapters?: number}>,
  *   onAddedToLibrary: (newDbId: number) => void,
@@ -494,12 +495,36 @@ function _renderBtnGroup(btnGroupEl, info, source, ctx) {
       cancelBtn.textContent = 'Cancel All';
       cancelBtn.style.display = 'none';
 
+      const _dlBtnOriginalText = dlBtn.textContent;
       dlBtn.addEventListener('click', async () => {
         dlBtn.disabled = true;
         try {
-          await onDownloadAll();
+          const { jobId } = await onDownloadAll();
           dlBtn.style.display = 'none';
           cancelBtn.style.display = '';
+          if (jobId) {
+            subscribeJob(jobId, {
+              onProgress: (e) => {
+                const cur = e.current ?? 0, tot = e.total ?? 0;
+                dlBtn.textContent = tot > 0 ? `${cur}/${tot}` : _dlBtnOriginalText;
+              },
+              onComplete: () => {
+                dlBtn.style.display = '';
+                cancelBtn.style.display = 'none';
+                dlBtn.textContent = _dlBtnOriginalText;
+              },
+              onFailed: () => {
+                dlBtn.style.display = '';
+                cancelBtn.style.display = 'none';
+                dlBtn.textContent = _dlBtnOriginalText;
+              },
+              onCancelled: () => {
+                dlBtn.style.display = '';
+                cancelBtn.style.display = 'none';
+                dlBtn.textContent = _dlBtnOriginalText;
+              },
+            });
+          }
         } finally { dlBtn.disabled = false; }
       });
       cancelBtn.addEventListener('click', async () => {

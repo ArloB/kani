@@ -6,8 +6,12 @@ impl AppService {
     pub async fn get_source(&self, id: i64) -> Result<Source> {
         let source = sqlx::query_as!(
             Source,
-            "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http \
-             FROM sources WHERE id = ? AND deleted_at IS NULL",
+            "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, \
+             s.unrestricted_http, s.download_concurrency, \
+             scb.state as circuit_state \
+             FROM sources s \
+             LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id \
+             WHERE s.id = ? AND s.deleted_at IS NULL",
             id
         )
         .fetch_optional(&self.db)
@@ -20,8 +24,13 @@ impl AppService {
     pub async fn list_sources(&self) -> Result<Vec<Source>> {
         sqlx::query_as!(
             Source,
-            "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http \
-             FROM sources WHERE deleted_at IS NULL LIMIT 1000"
+            "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, \
+             s.unrestricted_http, s.download_concurrency, \
+             scb.state as circuit_state \
+             FROM sources s \
+             LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id \
+             WHERE s.deleted_at IS NULL \
+             LIMIT 1000"
         )
         .fetch_all(&self.db)
         .await
@@ -57,6 +66,24 @@ impl AppService {
         )
         .execute(&self.db)
         .await?;
+        Ok(())
+    }
+
+    /// Sets or clears the per-source download concurrency override.
+    /// `None` clears the override, falling back to the global setting.
+    pub async fn set_source_download_concurrency(
+        &self,
+        id: i64,
+        concurrency: Option<i64>,
+    ) -> Result<()> {
+        sqlx::query!(
+            "UPDATE sources SET download_concurrency = ? WHERE id = ? AND deleted_at IS NULL",
+            concurrency,
+            id
+        )
+        .execute(&self.db)
+        .await?;
+        self.job_manager.invalidate_source_semaphore(id);
         Ok(())
     }
 

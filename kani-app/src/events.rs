@@ -56,6 +56,33 @@ pub enum AppEvent {
         manga_id: MangaId,
         error: String,
     },
+    JobStarted {
+        job_id: uuid::Uuid,
+        job_type: String,
+        description: String,
+    },
+    JobProgress {
+        job_id: uuid::Uuid,
+        job_type: String,
+        current: u64,
+        total: u64,
+        message: String,
+    },
+    JobCompleted {
+        job_id: uuid::Uuid,
+        job_type: String,
+        description: String,
+    },
+    JobFailed {
+        job_id: uuid::Uuid,
+        job_type: String,
+        message: String,
+        retryable: bool,
+    },
+    JobCancelled {
+        job_id: uuid::Uuid,
+        job_type: String,
+    },
     #[serde(untagged)]
     Refresh(RefreshProgressEvent),
 }

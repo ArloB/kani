@@ -29,6 +29,8 @@ import { mountCategoryPicker } from '../components/manga-details/category-picker
 import { mountDownloadRulesPanel } from '../components/manga-details/download-rules-panel.js';
 import { mountScanlatorPrefsPanel } from '../components/manga-details/scanlator-prefs-panel.js';
 import { mkSectionHeader, mkCard, mkTitledCard, mkRow, mkItem } from '../components/manga-details/_shared.js';
+import { subscribeJob } from '../sse.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 // ── URL state ─────────────────────────────────────────────────────────────────
@@ -285,18 +287,30 @@ export async function init(container, params) {
     findNextPreferredChapter: _findNextPreferredChapter,
     getChapters: () => _chapters,
     onDownloadAll: async () => {
-      await api.downloadAll(_dbId);
-      showToast('Queued all chapters for download');
-      _page = 1;
-      if (_activeTab !== 'chapters') {
-        /** @type {HTMLElement|null} */ (document.querySelector('[data-tab="chapters"]'))?.click();
-      } else if (_contentSection) {
-        _fetchChapters(_contentSection);
+      const { job_id } = await api.downloadAll(_dbId);
+      showToast(t('manga.download_all.queued'));
+      const refreshChapters = () => {
+        _page = 1;
+        if (_activeTab !== 'chapters') {
+          /** @type {HTMLElement|null} */ (document.querySelector('[data-tab="chapters"]'))?.click();
+        } else if (_contentSection) {
+          _fetchChapters(_contentSection);
+        }
+      };
+      if (job_id) {
+        subscribeJob(job_id, {
+          onComplete: () => { showToast(t('manga.download_all.done')); refreshChapters(); },
+          onFailed: (/** @type {any} */ e) => { showApiError(e); refreshChapters(); },
+          onCancelled: () => refreshChapters(),
+        });
+      } else {
+        refreshChapters();
       }
+      return { jobId: job_id ?? null };
     },
     onCancelAll: async () => {
       await api.cancelAllDownloads(_dbId);
-      showToast('Cancelled all downloads');
+      showToast(t('manga.download_all.cancelled'));
       _page = 1;
       if (_activeTab !== 'chapters') {
         /** @type {HTMLElement|null} */ (document.querySelector('[data-tab="chapters"]'))?.click();
@@ -686,6 +700,7 @@ function _mapChapter(ch) {
     read: ch.is_read ?? false,
     last_page_read: ch.last_page_read ?? 0,
     is_orphaned: ch.is_orphaned ?? false,
+    download_error: ch.download_error ?? null,
   };
 }
 

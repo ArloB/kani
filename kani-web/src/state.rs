@@ -4,8 +4,8 @@ use crate::rate_limit::AuthRateLimiter;
 use bytes::Bytes;
 use kani_app::AppService;
 use kani_app::service::traits::{
-    CategoryDomain, ChapterDomain, DownloadDomain, LibraryDomain, MangaDomain, ScanlatorDomain,
-    SettingsDomain, SourceDomain, TrackerDomain,
+    CategoryDomain, ChapterDomain, DownloadDomain, JobDomain, LibraryDomain, MangaDomain,
+    ScanlatorDomain, SettingsDomain, SourceDomain, TrackerDomain,
 };
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -154,6 +154,12 @@ impl axum::extract::FromRef<AppState> for Arc<dyn ScanlatorDomain> {
 impl axum::extract::FromRef<AppState> for Arc<dyn SettingsDomain> {
     fn from_ref(s: &AppState) -> Self {
         s.service.clone() as Arc<dyn SettingsDomain>
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<dyn JobDomain> {
+    fn from_ref(s: &AppState) -> Self {
+        s.service.clone() as Arc<dyn JobDomain>
     }
 }
 

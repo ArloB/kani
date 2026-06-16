@@ -314,7 +314,7 @@ pub(crate) async fn get_chapter_ids(
     post, path = "/rest/manga/{id}/download_all",
     params(("id" = i64, Path, description = "Manga ID")),
     responses(
-        (status = 202, description = "All chapters queued for download"),
+        (status = 200, description = "Aggregate download job queued; returns job_id"),
         (status = 401, description = "Not authenticated"),
     ),
     security(("session" = [])),
@@ -325,17 +325,8 @@ pub(crate) async fn download_all(
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    let svc = svc.clone();
-    tokio::spawn(async move {
-        if let Err(e) = svc.download_all_chapters(manga_id).await {
-            tracing::error!(
-                "Failed to queue all downloads for manga {}: {}",
-                manga_id,
-                e
-            );
-        }
-    });
-    Ok((StatusCode::ACCEPTED, Json(json!({}))))
+    let job_id = svc.download_all_chapters(manga_id).await?;
+    Ok(Json(json!({ "job_id": job_id })))
 }
 
 #[utoipa::path(
@@ -383,7 +374,7 @@ pub(crate) async fn refresh_manga(
     post, path = "/rest/manga/{id}/scan",
     params(("id" = i64, Path, description = "Manga ID")),
     responses(
-        (status = 200, description = "Scanned for new chapters; returns count"),
+        (status = 200, description = "Scan job queued; returns job_id"),
         (status = 401, description = "Not authenticated"),
     ),
     security(("session" = [])),
@@ -394,8 +385,8 @@ pub(crate) async fn scan_manga(
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    let new_chapters = svc.scan_for_new_chapters(id).await?.len() as i64;
-    Ok(Json(json!({ "new_chapters": new_chapters })))
+    let job_id = svc.queue_manga_scan(id, "manual".to_string()).await?;
+    Ok(Json(json!({ "job_id": job_id })))
 }
 
 #[utoipa::path(
@@ -883,7 +874,10 @@ mod tests {
         ) -> kani_app::error::Result<Vec<kani_app::ids::ChapterId>> {
             unimplemented!()
         }
-        async fn download_all_chapters(&self, _manga_id: MangaId) -> kani_app::error::Result<()> {
+        async fn download_all_chapters(&self, _manga_id: MangaId) -> kani_app::error::Result<uuid::Uuid> {
+            unimplemented!()
+        }
+        async fn queue_manga_scan(&self, _manga_id: MangaId, _trigger: String) -> kani_app::error::Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn cancel_all_downloads(&self, _manga_id: MangaId) -> kani_app::error::Result<()> {

@@ -23,6 +23,7 @@ import { createEmptyState } from '../components/empty-state.js';
 import { mountFilterModal } from '../components/filter-panel.js';
 import { renderTabs } from '../components/tabs.js';
 import { iconSearch, iconChevronDown, iconWarning } from '../icons.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -125,7 +126,10 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
   const [enabled, setEnabled] = useState(source.enabled ?? false);
   const [confirming, setConfirming] = useState(false);
 
-
+  const [dlConcurrency, setDlConcurrency] = useState(
+    /** @type {string} */ (source.download_concurrency != null ? String(source.download_concurrency) : '')
+  );
+  const [dlConcurrencySaving, setDlConcurrencySaving] = useState(false);
 
   const [schema, setSchema] = useState(/** @type {any[]} */ ([]));
   const [liveValues, setLiveValues] = useState(/** @type {Record<string,any>} */ ({}));
@@ -186,6 +190,16 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
       setEnabled(val);
       onEnabledChange?.(val);
     } catch { /* revert on error */ }
+  }
+
+  async function handleSaveDlConcurrency() {
+    const val = dlConcurrency.trim() === '' ? null : Number(dlConcurrency);
+    setDlConcurrencySaving(true);
+    try {
+      await api.setSourceDownloadConcurrency(sid, val);
+    } finally {
+      setDlConcurrencySaving(false);
+    }
   }
 
   async function handleReload() {
@@ -377,6 +391,32 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
                   <button class="btn-ghost btn-sm" disabled=${reloading} onClick=${handleReload}>
                     ${reloading ? 'Reloading…' : 'Reload'}
                   </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <p class="text-sm font-medium text-text">${t('source.concurrency.title')}</p>
+                  <p class="text-xs text-text-muted mt-0.5">${t('source.concurrency.desc')}</p>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <input
+                    type="number"
+                    class="input w-20 text-sm"
+                    min="1"
+                    max="16"
+                    placeholder=${t('source.concurrency.placeholder')}
+                    value=${dlConcurrency}
+                    disabled=${dlConcurrencySaving}
+                    onInput=${(/** @type {any} */ e) => setDlConcurrency(e.target.value)}
+                  />
+                  <button
+                    class="btn-ghost btn-sm"
+                    disabled=${dlConcurrencySaving}
+                    onClick=${handleSaveDlConcurrency}
+                  >${dlConcurrencySaving ? t('common.saving') : t('common.save')}</button>
                 </div>
               </div>
             </div>

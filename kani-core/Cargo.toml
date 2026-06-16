@@ -6,6 +6,7 @@ build = "build.rs"
 
 [features]
 streaming-chapters = []
+test-util = []
 
 [dependencies]
 kani-shared = { path = "../kani-shared", features = ["host"] }

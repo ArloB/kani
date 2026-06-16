@@ -200,123 +200,57 @@ async fn main() {
                 };
                 match event {
                     Ok(event) => match event {
-                        kani_shared::DownloadProgressEvent::ChapterStarted {
-                            chapter_id, ..
-                        } => {
-                            if let Err(e) = sqlx::query!(
-                                "UPDATE chapters SET download_status = ? WHERE id = ?",
-                                kani_shared::types::DownloadStatus::InProgress,
-                                chapter_id
-                            )
-                            .execute(&db)
-                            .await
-                            {
-                                tracing::warn!(
-                                    "Failed to update download_status=1 for chapter {}: {}",
-                                    chapter_id,
-                                    e
-                                );
-                            }
-                        }
                         kani_shared::DownloadProgressEvent::ChapterCompleted {
                             chapter_id,
                             successful_pages,
                             ..
                         } => {
                             let pc = successful_pages as i64;
-                            if let Err(e) = sqlx::query!(
-                                "UPDATE chapters SET download_status = ?, page_count = ?, downloaded_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                kani_shared::types::DownloadStatus::Complete,
+                            let _ = sqlx::query!(
+                                "UPDATE chapters SET page_count = ? WHERE id = ?",
                                 pc,
                                 chapter_id
                             )
                             .execute(&db)
-                            .await
-                            {
-                                tracing::warn!(
-                                    "Failed to update chapter {}: {}",
-                                    chapter_id,
-                                    e
-                                );
-                            } else {
-                                struct ChapterInfo {
-                                    manga_id: i64,
-                                    manga_name: String,
-                                    volume: Option<i64>,
-                                    chapter_number: f64,
-                                    name: Option<String>,
-                                }
-                                if let Ok(Some(info)) = sqlx::query_as!(
-                                    ChapterInfo,
-                                    "SELECT c.manga_id, m.name AS manga_name, \
-                                     c.volume, c.chapter_number, c.name \
-                                     FROM chapters c JOIN manga m ON m.id = c.manga_id \
-                                     WHERE c.id = ?",
-                                    chapter_id
-                                )
-                                .fetch_optional(&db)
-                                .await
-                                {
-                                    let chapter_name = kani_app::chapter_name(
-                                        info.volume,
-                                        info.chapter_number,
-                                        info.name,
-                                    );
-                                    listener_state
-                                        .webhook_service
-                                        .fire(
-                                            kani_app::service::webhooks::WebhookPayload::ChapterDownloaded {
-                                                chapter_id: kani_app::ids::ChapterId(chapter_id),
-                                                manga_id: kani_app::ids::MangaId(info.manga_id),
-                                                manga_name: info.manga_name,
-                                                chapter_name,
-                                            },
-                                        )
-                                        .await;
-                                }
+                            .await;
+                            struct ChapterInfo {
+                                manga_id: i64,
+                                manga_name: String,
+                                volume: Option<i64>,
+                                chapter_number: f64,
+                                name: Option<String>,
                             }
-                        }
-                        kani_shared::DownloadProgressEvent::ChapterFailed {
-                            chapter_id,
-                            error,
-                            ..
-                        } => {
-                            tracing::error!("Chapter failed to download: {}", error);
-                            if let Err(e) = sqlx::query!(
-                                "UPDATE chapters SET download_status = ? WHERE id = ?",
-                                kani_shared::types::DownloadStatus::Pending,
+                            if let Ok(Some(info)) = sqlx::query_as!(
+                                ChapterInfo,
+                                "SELECT c.manga_id, m.name AS manga_name, \
+                                 c.volume, c.chapter_number, c.name \
+                                 FROM chapters c JOIN manga m ON c.manga_id = m.id \
+                                 WHERE c.id = ?",
                                 chapter_id
                             )
-                            .execute(&db)
+                            .fetch_optional(&db)
                             .await
                             {
-                                tracing::warn!(
-                                    "Failed to reset download_status for failed chapter {}: {}",
-                                    chapter_id,
-                                    e
+                                let chapter_name = kani_app::chapter_name(
+                                    info.volume,
+                                    info.chapter_number,
+                                    info.name,
                                 );
+                                listener_state
+                                    .webhook_service
+                                    .fire(
+                                        kani_app::service::webhooks::WebhookPayload::ChapterDownloaded {
+                                            chapter_id: kani_app::ids::ChapterId(chapter_id),
+                                            manga_id: kani_app::ids::MangaId(info.manga_id),
+                                            manga_name: info.manga_name,
+                                            chapter_name,
+                                        },
+                                    )
+                                    .await;
                             }
                         }
-                        kani_shared::DownloadProgressEvent::ChapterCancelled {
-                            chapter_id, ..
-                        }
-                        | kani_shared::DownloadProgressEvent::ChapterDeferred {
-                            chapter_id, ..
-                        } => {
-                            if let Err(e) = sqlx::query!(
-                                "UPDATE chapters SET download_status = ? WHERE id = ?",
-                                kani_shared::types::DownloadStatus::Pending,
-                                chapter_id
-                            )
-                            .execute(&db)
-                            .await
-                            {
-                                tracing::warn!(
-                                    "Failed to reset download_status for cancelled/deferred chapter {}: {}",
-                                    chapter_id,
-                                    e
-                                );
-                            }
+                        kani_shared::DownloadProgressEvent::ChapterFailed { error, .. } => {
+                            tracing::error!("Chapter download failed: {}", error);
                         }
                         _ => {}
                     },
@@ -564,17 +498,14 @@ async fn main() {
         }
         tracing::info!("Stopping background tasks...");
         shutdown_token.cancel();
-        tokio::task::yield_now().await;
-        if let Err(e) = sqlx::query!(
-            "UPDATE chapters SET download_status = ? WHERE download_status = ?",
-            kani_shared::types::DownloadStatus::Pending,
-            kani_shared::types::DownloadStatus::InProgress
-        )
-        .execute(&state.db)
-        .await
-        {
-            tracing::warn!("Failed to reset in-flight download statuses on shutdown: {e}");
-        }
+        let drain_secs = std::env::var("KANI_JOB_SHUTDOWN_TIMEOUT_SECONDS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30);
+        state
+            .job_manager
+            .drain(std::time::Duration::from_secs(drain_secs))
+            .await;
         state.db.close().await;
         let exit_code = if state
             .restart_requested

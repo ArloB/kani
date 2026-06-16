@@ -344,6 +344,11 @@ export async function toggleSourceFavourite(sid, favourited) {
   return _req('PATCH', `/sources/${sid}/toggle_favourite`, { body: { favourited } });
 }
 
+/** @param {number} sid @param {number|null} value */
+export async function setSourceDownloadConcurrency(sid, value) {
+  return _req('PUT', `/sources/${sid}/download-concurrency`, { body: { value } });
+}
+
 /** @returns {Promise<number[]>} */
 export async function getActiveSourceIds() {
   return _req('GET', '/sources/active_ids');
@@ -483,7 +488,7 @@ export async function getChapterIds(id, opts = {}) {
   });
 }
 
-/** @param {number} id */
+/** @param {number} id @returns {Promise<{ job_id: string }>} */
 export async function downloadAll(id) {
   return _req('POST', `/manga/${id}/download_all`);
 }
@@ -498,7 +503,7 @@ export async function refreshManga(id, opts) {
   return _req('POST', `/manga/${id}/refresh`, opts ? { body: opts } : undefined);
 }
 
-/** @param {number} id @returns {Promise<{ new_chapters: number }>} */
+/** @param {number} id @returns {Promise<{ job_id: string }>} */
 export async function scanManga(id) {
   return _req('POST', `/manga/${id}/scan`);
 }
@@ -1327,4 +1332,41 @@ export async function listMetadataProviders() {
  */
 export async function enrichMangaMetadata(mangaId, provider) {
   return _req('POST', `/manga/${mangaId}/enrich-metadata`, { body: { provider } });
+}
+
+// ── Jobs ──────────────────────────────────────────────────────────────────────
+
+/** @param {{ job_type?: string, status?: string, limit?: number, offset?: number }} [params] */
+export async function getJobs(params) {
+  return _req('GET', '/jobs', { params });
+}
+
+/** @param {string} id */
+export async function getJob(id) {
+  return _req('GET', `/jobs/${id}`);
+}
+
+/** @param {string} id */
+export async function cancelJob(id) {
+  return _req('DELETE', `/jobs/${id}`);
+}
+
+/** @param {string} id */
+export async function pauseJob(id) {
+  return _req('POST', `/jobs/${id}/pause`);
+}
+
+/** @param {string} id */
+export async function resumeJob(id) {
+  return _req('POST', `/jobs/${id}/resume`);
+}
+
+/** @param {number} id */
+export async function retryChapterDownload(id) {
+  return _req('POST', `/chapter/${id}/download/retry`);
+}
+
+/** @param {number} mangaId */
+export async function getMangaDownloadStatus(mangaId) {
+  return _req('GET', `/manga/${mangaId}/download-status`);
 }

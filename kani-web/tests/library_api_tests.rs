@@ -158,8 +158,7 @@ async fn scan_manga_all_returns_200_for_authed_user() {
         .await
         .unwrap();
 
-    // Scan is dispatched asynchronously; handler returns 202 Accepted.
-    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    assert_eq!(res.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -178,7 +177,7 @@ async fn scan_manga_ids_empty_returns_200_for_authed_user() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    assert_eq!(res.status(), StatusCode::OK);
 }
 
 #[tokio::test]

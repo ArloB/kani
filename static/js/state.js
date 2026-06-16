@@ -8,6 +8,7 @@ import { getPermissions } from './api.js';
  * @typedef {{ id: number, name: string, mangaId: number, mangaTitle: string,
  *             totalPages: number, completedPages: number,
  *             number?: number | null, downloadedAt?: string | null,
+ *             jobId?: string | null,
  *             status: 'in_progress'|'completed'|'completed_hidden'|'failed'|'cancelled'|'deleted' }} ChapterProgress
  * @typedef {{ mangaId: number, mangaName: string, count: number, chapterNames: string[] }} ScanNotification
  * @typedef {{ type: 'idle' }

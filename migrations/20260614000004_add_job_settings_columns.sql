@@ -1,0 +1,4 @@
+ALTER TABLE settings ADD COLUMN scan_concurrency INTEGER NOT NULL DEFAULT 2;
+ALTER TABLE settings ADD COLUMN per_source_download_concurrency INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE settings ADD COLUMN job_max_history INTEGER NOT NULL DEFAULT 1000;
+ALTER TABLE settings ADD COLUMN job_shutdown_timeout_secs INTEGER NOT NULL DEFAULT 30;

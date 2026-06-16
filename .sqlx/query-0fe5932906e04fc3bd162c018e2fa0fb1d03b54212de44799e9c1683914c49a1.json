@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http FROM sources WHERE id = ? AND deleted_at IS NULL",
+  "query": "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, s.unrestricted_http, s.download_concurrency, scb.state as circuit_state FROM sources s LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id WHERE s.id = ? AND s.deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,16 @@
         "name": "unrestricted_http",
         "ordinal": 6,
         "type_info": "Bool"
+      },
+      {
+        "name": "download_concurrency",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "circuit_state",
+        "ordinal": 8,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -49,8 +59,10 @@
       false,
       false,
       false,
-      false
+      false,
+      true,
+      true
     ]
   },
-  "hash": "8003321e139ab2b41b4dfd67214c8da07519e8577e5d2657f8ec767ddaf269bc"
+  "hash": "0fe5932906e04fc3bd162c018e2fa0fb1d03b54212de44799e9c1683914c49a1"
 }

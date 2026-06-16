@@ -27,6 +27,8 @@ async fn update_download_settings_round_trips() {
             max_retries: 5,
             initial_retry_delay_ms: 200,
             auto_download_category_ids: vec![],
+            scan_concurrency: 4,
+            per_source_download_concurrency: 2,
         }),
         UserId(1),
     )
@@ -90,6 +92,8 @@ async fn update_download_settings_rejects_invalid_page_concurrency() {
                 max_retries: 3,
                 initial_retry_delay_ms: 100,
                 auto_download_category_ids: vec![],
+                scan_concurrency: 4,
+                per_source_download_concurrency: 2,
             }),
             UserId(1),
         )
@@ -121,6 +125,8 @@ async fn update_settings_does_not_affect_unrelated_fields() {
             max_retries: 3,
             initial_retry_delay_ms: 100,
             auto_download_category_ids: vec![],
+            scan_concurrency: 4,
+            per_source_download_concurrency: 2,
         }),
         UserId(1),
     )

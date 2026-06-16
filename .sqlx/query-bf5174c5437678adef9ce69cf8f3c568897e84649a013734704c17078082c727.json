@@ -1,20 +1,20 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id FROM chapters WHERE manga_id = ? AND download_status = ?",
+  "query": "SELECT resume_offset FROM chapters WHERE id = ?",
   "describe": {
     "columns": [
       {
-        "name": "id",
+        "name": "resume_offset",
         "ordinal": 0,
         "type_info": "Integer"
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 1
     },
     "nullable": [
       false
     ]
   },
-  "hash": "ec791c1ef48f336af18fe1bc04c331b516915a1d444366dde9c1225a928f86bd"
+  "hash": "bf5174c5437678adef9ce69cf8f3c568897e84649a013734704c17078082c727"
 }

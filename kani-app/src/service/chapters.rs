@@ -44,7 +44,7 @@ impl AppService {
         let sql = format!(
             r#"SELECT c.id, c.source_chapter_id, c.name, c.chapter_number, c.language,
                       c.volume, c.scanlator, c.uploaded_at, c.download_status, c.is_orphaned,
-                      c.page_count,
+                      c.page_count, c.download_error,
                       uct.is_read, uct.last_page_read
                FROM chapters c
                LEFT JOIN scanlator_preferences sp
@@ -92,6 +92,7 @@ impl AppService {
                 page_count: c.page_count,
                 is_read: c.is_read.unwrap_or(false),
                 last_page_read: c.last_page_read,
+                download_error: c.download_error.and_then(|s| serde_json::from_str(&s).ok()),
             })
             .collect();
 

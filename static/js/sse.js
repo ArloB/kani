@@ -18,6 +18,28 @@ let _retryTimer = null;
 let _scanNewChapters = /** @type {Map<number, number>} */ (new Map());
 
 /**
+ * Subscribe to lifecycle events for a single job id.
+ * Auto-unsubscribes on the first terminal event (completed, failed, cancelled).
+ * @param {string} jobId
+ * @param {{ onProgress?: (e: any) => void, onComplete?: (e: any) => void, onFailed?: (e: any) => void, onCancelled?: (e: any) => void }} callbacks
+ * @returns {() => void} cleanup function
+ */
+export function subscribeJob(jobId, { onProgress, onComplete, onFailed, onCancelled } = {}) {
+  function handler(/** @type {CustomEvent} */ e) {
+    const data = /** @type {any} */ (e).detail;
+    if (data.job_id !== jobId) return;
+    const type = data.type;
+    if (type === 'job_progress') { onProgress?.(data); return; }
+    if (type === 'job_completed') { onComplete?.(data); cleanup(); return; }
+    if (type === 'job_failed')    { onFailed?.(data);   cleanup(); return; }
+    if (type === 'job_cancelled') { onCancelled?.(data); cleanup(); return; }
+  }
+  function cleanup() { window.removeEventListener('kani:sse', handler); }
+  window.addEventListener('kani:sse', handler);
+  return cleanup;
+}
+
+/**
  * Opens the SSE connection to /rest/events.
  * Call once at app startup. Returns a `disconnect()` function.
  * @returns {{ disconnect: () => void }}
@@ -122,6 +144,7 @@ function _handleEvent(data) {
         totalPages: data.total_pages,
         completedPages: 0,
         status: 'in_progress',
+        jobId: data.job_id ?? null,
       });
       return m;
     });
@@ -168,7 +191,7 @@ function _handleEvent(data) {
     return;
   }
 
-  if (type === 'chapter_cancelled' || type === 'chapter_deferred') {
+  if (type === 'chapter_cancelled') {
     updateState('chaptersProgress', (map) => {
       const m = new Map(map);
       const id = Number(data.chapter_id);

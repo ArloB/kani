@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http FROM sources WHERE id = ?",
+  "query": "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http, download_concurrency, CAST(NULL AS TEXT) as circuit_state FROM sources WHERE enabled = 1 AND deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -37,10 +37,20 @@
         "name": "unrestricted_http",
         "ordinal": 6,
         "type_info": "Bool"
+      },
+      {
+        "name": "download_concurrency",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "circuit_state",
+        "ordinal": 8,
+        "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       false,
@@ -49,8 +59,10 @@
       false,
       false,
       false,
-      false
+      false,
+      true,
+      true
     ]
   },
-  "hash": "39f73c8f1f52a236fb3f9e0a5566f6df268f5b97907cf90fdf7f72367192c94a"
+  "hash": "ce4b4e2e4c38b1829a9f17b4e6d611f7eb9a5d599123398be36e336f01faeed0"
 }
