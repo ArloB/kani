@@ -296,8 +296,36 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
     </div>
   `;
 
+  let sourceLanguages = [];
+  if (source.languages) {
+    try {
+      const parsed = JSON.parse(source.languages);
+      if (Array.isArray(parsed)) sourceLanguages = parsed;
+    } catch { /* malformed languages column, ignore */ }
+  }
+
   return html`
     <div class="flex flex-col gap-8">
+
+      <!-- 0. About -->
+      <div class="flex flex-col gap-3">
+        <div class="bg-surface border border-border rounded-xl px-4 md:px-6 py-4 flex items-start gap-4">
+          ${source.icon
+            ? html`<img src=${`data:image/png;base64,${source.icon}`} alt="" class="w-12 h-12 rounded-lg shrink-0 object-contain bg-surface-2" />`
+            : html`<span class="w-12 h-12 rounded-lg shrink-0 flex items-center justify-center text-lg font-medium" style="background:var(--color-surface-3);color:var(--color-text-muted)">${(source.name ?? '?')[0]?.toUpperCase()}</span>`
+          }
+          <div class="flex flex-col gap-1.5 min-w-0">
+            <p class="text-sm font-medium text-text truncate">${source.name}</p>
+            <p class="text-xs text-text-muted">${source.description || t('source.about.no_description')}</p>
+            ${sourceLanguages.length > 0 && html`
+              <div class="flex items-center gap-1.5 flex-wrap mt-0.5">
+                <span class="text-2xs text-text-faint">${t('source.about.languages')}:</span>
+                ${sourceLanguages.map(lang => html`<span key=${lang} class="text-2xs px-1.5 py-0.5 rounded bg-surface-2 text-text-muted">${lang}</span>`)}
+              </div>
+            `}
+          </div>
+        </div>
+      </div>
 
       <!-- 1. General -->
       <div class="flex flex-col gap-3">

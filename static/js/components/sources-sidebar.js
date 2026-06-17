@@ -259,11 +259,14 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
                 }}
               >
                 <div class="flex items-center gap-3 border-b border-border-subtle last:border-0 w-full">
-                    <span
-                        class="avatar shrink-0"
-                        style="background:var(--color-surface-3);color:var(--color-text-muted)"
-                        aria-hidden="true"
-                    >${initial}</span>
+                    ${src.icon
+                      ? html`<img src=${`data:image/png;base64,${src.icon}`} alt="" class="avatar shrink-0 object-contain" style="background:var(--color-surface-3)" />`
+                      : html`<span
+                          class="avatar shrink-0"
+                          style="background:var(--color-surface-3);color:var(--color-text-muted)"
+                          aria-hidden="true"
+                      >${initial}</span>`
+                    }
                     <span class="flex flex-col min-w-0 flex-1">
                         <span class="li-title truncate">${src.name}</span>
                         <span class="li-sub flex items-center gap-1.5">

@@ -105,8 +105,7 @@ impl JobRegistry {
             .factories
             .get(job_type)
             .ok_or_else(|| format!("Unknown job_type: {job_type}"))?;
-        let v: serde_json::Value =
-            serde_json::from_str(params).map_err(|e| e.to_string())?;
+        let v: serde_json::Value = serde_json::from_str(params).map_err(|e| e.to_string())?;
         factory(v).map_err(|e| e.to_string())
     }
 }
@@ -655,7 +654,11 @@ impl JobManager {
                                  state=excluded.state, failure_count=excluded.failure_count, \
                                  last_failure_at=excluded.last_failure_at, \
                                  next_retry_at=excluded.next_retry_at",
-                                sid, state, fc, lf, nr,
+                                sid,
+                                state,
+                                fc,
+                                lf,
+                                nr,
                             )
                             .execute(&pool_t)
                             .await;
@@ -693,11 +696,9 @@ impl JobManager {
                     Err(e) => {
                         // Record failure in circuit breaker.
                         if let (Some(sid), JobError::Download(kind)) = (source_id, &e) {
-                            let mut entry = cb_t
-                                .entry(sid)
-                                .or_insert_with(|| {
-                                    crate::jobs::circuit_breaker::CircuitBreaker::new(sid)
-                                });
+                            let mut entry = cb_t.entry(sid).or_insert_with(|| {
+                                crate::jobs::circuit_breaker::CircuitBreaker::new(sid)
+                            });
                             entry.record_failure(kind, now);
                             let state = entry.state.to_string();
                             let fc = entry.failure_count as i64;
@@ -712,7 +713,11 @@ impl JobManager {
                                  state=excluded.state, failure_count=excluded.failure_count, \
                                  last_failure_at=excluded.last_failure_at, \
                                  next_retry_at=excluded.next_retry_at",
-                                sid, state, fc, lf, nr,
+                                sid,
+                                state,
+                                fc,
+                                lf,
+                                nr,
                             )
                             .execute(&pool_t)
                             .await;
@@ -1002,8 +1007,10 @@ impl JobManager {
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Job {job_id} not found")))?;
 
-        let progress = live_progress
-            .or_else(|| row.progress_json.and_then(|s| serde_json::from_str(&s).ok()));
+        let progress = live_progress.or_else(|| {
+            row.progress_json
+                .and_then(|s| serde_json::from_str(&s).ok())
+        });
 
         Ok(JobStatus {
             id: row.id,

@@ -105,6 +105,37 @@ async fn get_all_preferences_returns_all_set_values() {
 }
 
 #[tokio::test]
+async fn source_metadata_fields_round_trip() {
+    let svc = test_service().await;
+    let id = svc.add_source("meta-source", UserId(1)).await.unwrap();
+
+    sqlx::query!(
+        "UPDATE sources SET icon = ?, description = ?, languages = ?, schema_version = ? WHERE id = ?",
+        "aWNvbg==",
+        "A test source",
+        r#"["en","ja"]"#,
+        2_i64,
+        id
+    )
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    let source = svc.get_source(id).await.unwrap();
+    assert_eq!(source.icon, Some("aWNvbg==".to_string()));
+    assert_eq!(source.description, Some("A test source".to_string()));
+    assert_eq!(source.languages, Some(r#"["en","ja"]"#.to_string()));
+    assert_eq!(source.schema_version, 2);
+
+    let sources = svc.list_sources().await.unwrap();
+    let listed = sources.iter().find(|s| s.id == id).unwrap();
+    assert_eq!(listed.icon, Some("aWNvbg==".to_string()));
+    assert_eq!(listed.description, Some("A test source".to_string()));
+    assert_eq!(listed.languages, Some(r#"["en","ja"]"#.to_string()));
+    assert_eq!(listed.schema_version, 2);
+}
+
+#[tokio::test]
 async fn set_preference_overwrites_existing_value() {
     let svc = test_service().await;
     let id = svc.add_source("pref-src", UserId(1)).await.unwrap();

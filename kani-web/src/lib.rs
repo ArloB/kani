@@ -6,6 +6,7 @@ pub mod cache;
 pub mod csrf;
 pub mod error;
 pub mod i18n;
+pub mod install_gating;
 pub mod logging;
 pub mod models;
 pub mod opds;

@@ -59,6 +59,8 @@ export default {
   'source.concurrency.placeholder': 'Global',
   'source.circuit.open': 'Circuit open',
   'source.circuit.half_open': 'Circuit half-open',
+  'source.about.languages': 'Languages',
+  'source.about.no_description': 'No description provided by this extension.',
 
   'common.save': 'Save',
   'common.saving': 'Saving…',

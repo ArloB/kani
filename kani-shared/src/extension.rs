@@ -1,7 +1,7 @@
 use crate::{
     types::ActiveFilter,
     wit_types::{
-        Chapter, ChapterList, ChapterSortOption, FilterList, MangaInfo, MangaList, PreferenceSpec,
+        Chapter, ChapterList, FilterList, MangaInfo, MangaList, PreferenceSpec, SortOption,
     },
 };
 
@@ -224,9 +224,17 @@ pub trait MangaExtension {
 
     fn get_pages(&self, manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter>;
 
-    fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<ChapterSortOption>>;
+    fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<SortOption>>;
+
+    fn default_chapter_sort(&self) -> Option<String> {
+        None
+    }
 
     fn get_filter_list(&self) -> ExtensionResult<FilterList>;
+
+    fn get_fetched_option_sets(&self) -> ExtensionResult<String> {
+        Ok("[]".to_string())
+    }
 
     fn get_preferences(&self) -> ExtensionResult<Vec<PreferenceSpec>>;
 
@@ -238,7 +246,10 @@ pub trait MangaExtension {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(feature = "host", feature = "builder", feature = "meta"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct RateLimitConfig {
     pub requests_per_second: f32,
     pub burst: u32,
@@ -256,7 +267,25 @@ impl Default for RateLimitConfig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(feature = "host", feature = "builder", feature = "meta"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub struct Section {
+    pub id: String,
+    pub name: String,
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub nsfw: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder", feature = "meta"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct ExtensionMetadata {
     pub id: String,
     pub name: String,
@@ -265,10 +294,81 @@ pub struct ExtensionMetadata {
     pub language: String,
     pub nsfw: bool,
     pub unrestricted_http: bool,
-    #[cfg_attr(feature = "host", serde(default))]
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
     pub mihon_source_id: Option<i64>,
-    #[cfg_attr(feature = "host", serde(default))]
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
     pub rate_limit: Option<RateLimitConfig>,
+    /// Base64-encoded icon image (PNG/WebP/SVG); kept as a string to avoid a
+    /// byte-array WIT/JSON encoding blowup for what is already a small image.
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub icon: Option<String>,
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub languages: Vec<String>,
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub description: Option<String>,
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default = "default_schema_version")
+    )]
+    pub schema_version: u32,
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub min_kani_version: Option<String>,
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub requires_capabilities: Vec<String>,
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub sections: Vec<Section>,
+}
+
+#[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
+fn default_schema_version() -> u32 {
+    1
+}
+
+impl Default for ExtensionMetadata {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            version: String::new(),
+            base_url: String::new(),
+            language: String::new(),
+            nsfw: false,
+            unrestricted_http: false,
+            mihon_source_id: None,
+            rate_limit: None,
+            icon: None,
+            languages: Vec::new(),
+            description: None,
+            schema_version: 1,
+            min_kani_version: None,
+            requires_capabilities: Vec::new(),
+            sections: Vec::new(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -341,5 +441,62 @@ mod tests {
         let e = ExtensionError::from("oops".to_string());
         assert_eq!(e.kind, ExtensionErrorKind::Unknown);
         assert_eq!(e.message, "oops");
+    }
+
+    #[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
+    #[test]
+    fn metadata_serde_round_trip() {
+        let meta = ExtensionMetadata {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            version: "1.0.0".to_string(),
+            base_url: "https://example.com".to_string(),
+            language: "en".to_string(),
+            nsfw: false,
+            unrestricted_http: false,
+            mihon_source_id: Some(42),
+            rate_limit: Some(RateLimitConfig::default()),
+            icon: Some("aWNvbg==".to_string()),
+            languages: vec!["en".to_string(), "ja".to_string()],
+            description: Some("A test extension".to_string()),
+            schema_version: 1,
+            min_kani_version: Some("0.5.0".to_string()),
+            requires_capabilities: vec!["unrestricted_http".to_string()],
+            sections: vec![Section {
+                id: "latest".to_string(),
+                name: "Latest".to_string(),
+                nsfw: false,
+            }],
+        };
+
+        let json = crate::serde_json::to_string(&meta).expect("serializes");
+        let round_tripped: ExtensionMetadata =
+            crate::serde_json::from_str(&json).expect("deserializes");
+        assert_eq!(meta, round_tripped);
+    }
+
+    #[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
+    #[test]
+    fn metadata_deserializes_from_json_missing_new_fields() {
+        let legacy_json = r#"{
+            "id": "legacy",
+            "name": "Legacy",
+            "version": "1.0.0",
+            "base_url": "https://example.com",
+            "language": "en",
+            "nsfw": false,
+            "unrestricted_http": false
+        }"#;
+
+        let meta: ExtensionMetadata =
+            crate::serde_json::from_str(legacy_json).expect("deserializes despite missing fields");
+        assert_eq!(meta.id, "legacy");
+        assert_eq!(meta.icon, None);
+        assert!(meta.languages.is_empty());
+        assert_eq!(meta.description, None);
+        assert_eq!(meta.schema_version, 1);
+        assert_eq!(meta.min_kani_version, None);
+        assert!(meta.requires_capabilities.is_empty());
+        assert!(meta.sections.is_empty());
     }
 }

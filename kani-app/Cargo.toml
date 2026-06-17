@@ -36,6 +36,8 @@ infer         = "0.16"
 zxcvbn        = "3"
 sha1          = "0.10"
 async-trait   = "0.1"
+paste         = "1.0.15"
+semver        = "1"
 uuid          = { version = "1", features = ["v4", "serde"] }
 lettre        = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "smtp-transport", "builder"] }
 image         = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }

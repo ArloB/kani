@@ -102,6 +102,7 @@ async fn eval_json_field(
         method,
         headers,
         kind,
+        on_failure,
     } = expr
     {
         let url_val = eval_json_expr(url_expr, doc, current, env.clone()).await?;
@@ -118,7 +119,15 @@ async fn eval_json_field(
                 _ => return Err("Fetch: header keys and values must be strings".into()),
             }
         }
-        eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind).await
+        let result = eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind).await;
+        match (result, on_failure) {
+            (Ok(v), _) => Ok(v),
+            (Err(_), kani_shared::ast::OnFailurePolicy::Skip) => Ok(Value::Null),
+            (Err(e), kani_shared::ast::OnFailurePolicy::Fail) => Err(e),
+            (Err(_), kani_shared::ast::OnFailurePolicy::Use(fallback)) => {
+                eval_json_expr(fallback, doc, current, env).await
+            }
+        }
     } else {
         eval_json_expr(expr, doc, current, env).await
     }

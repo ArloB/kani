@@ -66,7 +66,10 @@ impl CircuitBreaker {
     }
 
     pub fn record_failure(&mut self, kind: &DownloadErrorKind, now: i64) {
-        if matches!(kind, DownloadErrorKind::NotFound | DownloadErrorKind::Cancelled) {
+        if matches!(
+            kind,
+            DownloadErrorKind::NotFound | DownloadErrorKind::Cancelled
+        ) {
             return;
         }
 

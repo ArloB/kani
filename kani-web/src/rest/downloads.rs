@@ -10,7 +10,10 @@ pub fn router() -> Router<AppState> {
         .route("/chapter/{id}/delete", delete(delete_downloaded))
         .route("/chapter/{id}/cancel", post(cancel_download))
         .route("/downloads/active", delete(cancel_all_global_downloads))
-        .route("/manga/{id}/download-status", get(get_manga_download_status))
+        .route(
+            "/manga/{id}/download-status",
+            get(get_manga_download_status),
+        )
 }
 
 #[utoipa::path(

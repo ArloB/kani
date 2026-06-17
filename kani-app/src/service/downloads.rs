@@ -32,9 +32,7 @@ impl AppService {
             )
             .fetch_optional(&self.db)
             .await?
-            .ok_or_else(|| {
-                ServiceError::NotFound(format!("Chapter {chapter_id} not found"))
-            })?;
+            .ok_or_else(|| ServiceError::NotFound(format!("Chapter {chapter_id} not found")))?;
 
             let job = crate::jobs::download::ChapterDownloadJob::new(
                 chapter_id.0,
@@ -74,19 +72,14 @@ impl AppService {
         if let Some(raw) = err_json {
             let v: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
             if v.get("kind").and_then(|k| k.as_str()) == Some("not_found") {
-                return Err(ServiceError::Conflict(
-                    "chapter_missing_from_source".into(),
-                ));
+                return Err(ServiceError::Conflict("chapter_missing_from_source".into()));
             }
         }
 
         self.download_chapter(chapter_id).await
     }
 
-    pub async fn get_manga_download_status(
-        &self,
-        manga_id: MangaId,
-    ) -> Result<serde_json::Value> {
+    pub async fn get_manga_download_status(&self, manga_id: MangaId) -> Result<serde_json::Value> {
         let rows = sqlx::query!(
             "SELECT download_status, download_error, id, name, chapter_number \
              FROM chapters WHERE manga_id = ? AND is_orphaned = 0",
@@ -180,12 +173,15 @@ impl AppService {
     }
 
     pub async fn cancel_download(&self, chapter_id: ChapterId) -> Result<()> {
-        self.cancel_chapter_jobs_where("$.chapter_id", chapter_id.0).await
+        self.cancel_chapter_jobs_where("$.chapter_id", chapter_id.0)
+            .await
     }
 
     pub async fn cancel_all_downloads(&self, manga_id: MangaId) -> Result<()> {
-        self.cancel_chapter_jobs_where("$.manga_id", manga_id.0).await?;
-        self.cancel_jobs_where_type_and_manga("manga_download_all", manga_id.0).await
+        self.cancel_chapter_jobs_where("$.manga_id", manga_id.0)
+            .await?;
+        self.cancel_jobs_where_type_and_manga("manga_download_all", manga_id.0)
+            .await
     }
 
     pub async fn cancel_all_global_downloads(&self) -> Result<()> {
@@ -273,19 +269,18 @@ impl AppService {
         })?;
 
         #[cfg(any(test, feature = "test-util"))]
-        let source_manager: Arc<dyn kani_core::downloader::PageListFetcher> =
-            if let Some(mock) = self
-                .mock_sources
+        let source_manager: Arc<dyn kani_core::downloader::PageListFetcher> = if let Some(mock) =
+            self.mock_sources
                 .get(&record.source_id)
                 .map(|r| Arc::clone(r.value()))
-            {
-                mock
-            } else {
-                let sources = self.sources.read().await;
-                sources.get(&record.source_id).cloned().ok_or_else(|| {
-                    ServiceError::NotFound(format!("Source {} not found", record.source_id))
-                })?
-            };
+        {
+            mock
+        } else {
+            let sources = self.sources.read().await;
+            sources.get(&record.source_id).cloned().ok_or_else(|| {
+                ServiceError::NotFound(format!("Source {} not found", record.source_id))
+            })?
+        };
 
         #[cfg(not(any(test, feature = "test-util")))]
         let source_manager: Arc<dyn kani_core::downloader::PageListFetcher> = {

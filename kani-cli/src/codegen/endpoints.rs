@@ -3,11 +3,95 @@
 use super::blueprint::{emit_blueprint_bytes, emit_blueprint_chain};
 use super::request::emit_request_block;
 use crate::yaml::model::{
-    FieldSource, ValidatedEndpoint, ValidatedHnp, ValidatedPopular, ValidatedTotalPages,
+    FieldSource, ValidatedEndpoint, ValidatedExtension, ValidatedHnp, ValidatedPopular,
+    ValidatedTotalPages,
 };
-use crate::yaml::schema::ResponseType;
+use crate::yaml::schema::{EndpointVia, ResponseType, YamlIdEncoding};
 
-pub fn emit_popular(popular: &ValidatedPopular, embedded_bytes: bool) -> String {
+/// Emits `let` bindings that decode each composite ID referenced by this
+/// endpoint's route/queries (e.g. `$manga.hid$`) into local `&str`s
+/// (`manga_hid`) before the request is built.
+fn emit_composite_id_decode_prologue(ep: &ValidatedEndpoint) -> String {
+    let mut out = String::new();
+    for decode in &ep.composite_id_decodes {
+        if decode.referenced_fields.is_empty() {
+            continue;
+        }
+        let encoding_str = match decode.encoding {
+            YamlIdEncoding::Base64Url => "kani_shared::ast::IdEncoding::Base64Url",
+            YamlIdEncoding::Base64 => "kani_shared::ast::IdEncoding::Base64",
+            YamlIdEncoding::Passthrough => "kani_shared::ast::IdEncoding::Passthrough",
+            YamlIdEncoding::Hex => "kani_shared::ast::IdEncoding::Hex",
+        };
+        let field_names = decode
+            .fields
+            .iter()
+            .map(|f| format!("\"{f}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let local = format!("__{}_decoded", decode.role);
+        out.push_str(&format!(
+            "let {local} = kani_shared::encoding::decode_composite({arg}, \"{delim}\", &{encoding_str}, &[{field_names}]).map_err(kani_shared::ExtensionError::parse)?;\n",
+            arg = decode.fn_arg,
+            delim = decode.delimiter,
+        ));
+        for (idx, field) in decode.fields.iter().enumerate() {
+            if !decode.referenced_fields.iter().any(|f| f == field) {
+                continue;
+            }
+            out.push_str(&format!(
+                "let {role}_{field} = {local}[{idx}].1.as_str();\n",
+                role = decode.role,
+            ));
+        }
+    }
+    out
+}
+
+/// Returns `Some(code)` when `ep.via` is `BrowserPayload`, where `code`
+/// emits a `capture_page_payload` call. The extraction step is a stub:
+/// the browser *runtime* (Chromium lifecycle + payload injection) is
+/// deferred and tracked in EXT_BROWSER_PAYLOAD_FEATURE_OVERVIEW.md.
+fn try_emit_browser_fetch(ep: &ValidatedEndpoint) -> Option<String> {
+    let EndpointVia::BrowserPayload = ep.via?;
+    let page_url = ep.page_url.as_deref().unwrap_or("");
+    let script_name = ep.script_name.as_deref().unwrap_or("");
+    let const_name = format!(
+        "SCRIPT_{}",
+        script_name.to_uppercase().replace(['-', '.'], "_")
+    );
+    let rust_page_url = page_url
+        .replace("$manga_id$", "{manga_id}")
+        .replace("$chapter_id$", "{chapter_id}");
+    let page_url_expr = if rust_page_url.contains('{') {
+        format!("&format!(\"{rust_page_url}\")")
+    } else {
+        format!("\"{}\"", rust_page_url)
+    };
+    let timeout = ep.timeout_ms;
+    Some(format!(
+        "let _payload = kani_shared::host_abi::capture_page_payload({page_url_expr}, {const_name}, {timeout})?;\n\
+         #[allow(unused_variables)]\n\
+         let rows = unimplemented!(\"browser_payload extraction requires the browser runtime (deferred)\");"
+    ))
+}
+
+pub fn emit_browser_script_statics(scripts: &std::collections::BTreeMap<String, String>) -> String {
+    scripts
+        .keys()
+        .map(|name| {
+            let const_name = format!("SCRIPT_{}", name.to_uppercase().replace(['-', '.'], "_"));
+            format!("static {const_name}: &str = include_str!(\"scripts/{name}.js\");")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn emit_popular(
+    popular: &ValidatedPopular,
+    ext: &ValidatedExtension,
+    embedded_bytes: bool,
+) -> String {
     match popular {
         ValidatedPopular::Delegated {
             delegate_to,
@@ -33,27 +117,51 @@ pub fn emit_popular(popular: &ValidatedPopular, embedded_bytes: bool) -> String 
             "get_popular_manga",
             "page: i32, page_size: i32, filters: &[ActiveFilter]",
             ep,
+            ext,
             embedded_bytes,
         ),
     }
 }
 
-pub fn emit_search(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String {
+pub fn emit_search(
+    ep: &ValidatedEndpoint,
+    ext: &ValidatedExtension,
+    embedded_bytes: bool,
+) -> String {
     emit_manga_list_method(
         "search_manga",
         "query: &str, page: i32, page_size: i32, filters: &[ActiveFilter]",
         ep,
+        ext,
         embedded_bytes,
     )
 }
 
-pub fn emit_manga_details(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String {
-    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[]);
-
+pub fn emit_manga_details(
+    ep: &ValidatedEndpoint,
+    ext: &ValidatedExtension,
+    embedded_bytes: bool,
+) -> String {
+    let decode_prologue = emit_composite_id_decode_prologue(ep);
     let row_assembly = emit_manga_info_assembly(ep);
+    let bp_chain = emit_blueprint_chain(ep, ext);
+
+    if let Some(browser_fetch) = try_emit_browser_fetch(ep) {
+        return format!(
+            "fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {{\n\
+             {decode_prologue}\
+             {bp_chain}\n\
+             {browser_fetch}\n\
+             let row = rows.rows_get(0).map_err(|_| kani_shared::ExtensionError::parse(\"no details row\".into()))?;\n\
+             {row_assembly}\n\
+             }}"
+        );
+    }
+
+    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[], None);
 
     if embedded_bytes {
-        let bp_bytes = emit_blueprint_bytes(ep);
+        let bp_bytes = emit_blueprint_bytes(ep, ext);
         let fetch = match ep.response_type {
             ResponseType::Html => {
                 "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
@@ -64,40 +172,46 @@ pub fn emit_manga_details(ep: &ValidatedEndpoint, embedded_bytes: bool) -> Strin
         };
         format!(
             "fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {{\n\
+             {decode_prologue}\
              {bp_bytes}\n\
              {req_block}\n\
              {fetch}\n\
-             let row = rows.rows_get(0).map_err(|_| kani_shared::ExtensionError::ParseError(\"no details row\".into()))?;\n\
+             let row = rows.rows_get(0).map_err(|_| kani_shared::ExtensionError::parse(\"no details row\".into()))?;\n\
              {row_assembly}\n\
              }}"
         )
     } else {
-        let bp_chain = emit_blueprint_chain(ep);
         let extract_call = match ep.response_type {
             ResponseType::Json => "extract::json(None, &bp)?",
             ResponseType::Html => "extract::html(None, &bp)?",
         };
         format!(
             "fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {{\n\
+             {decode_prologue}\
              {req_block}\n\
              {bp_chain}\n\
              let rows = {extract_call};\n\
-             let row = rows.rows_get(0).map_err(|_| kani_shared::ExtensionError::ParseError(\"no details row\".into()))?;\n\
+             let row = rows.rows_get(0).map_err(|_| kani_shared::ExtensionError::parse(\"no details row\".into()))?;\n\
              {row_assembly}\n\
              }}"
         )
     }
 }
 
-pub fn emit_chapter_list(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String {
-    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[]);
+pub fn emit_chapter_list(
+    ep: &ValidatedEndpoint,
+    ext: &ValidatedExtension,
+    embedded_bytes: bool,
+) -> String {
+    let decode_prologue = emit_composite_id_decode_prologue(ep);
+    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[], None);
 
     let hnp = emit_hnp_expr_static(&ep.has_next_page);
     let tp = emit_total_pages_static(&ep.total_pages);
     let row_assembly = emit_chapter_info_assembly(ep);
 
     if embedded_bytes {
-        let bp_bytes = emit_blueprint_bytes(ep);
+        let bp_bytes = emit_blueprint_bytes(ep, ext);
         let fetch = match ep.response_type {
             ResponseType::Html => {
                 "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
@@ -108,6 +222,7 @@ pub fn emit_chapter_list(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String
         };
         format!(
             "fn get_chapter_list(&self, manga_id: &str, _page: i32, _page_size: Option<i32>, _sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
+             {decode_prologue}\
              {bp_bytes}\n\
              {req_block}\n\
              {fetch}\n\
@@ -122,13 +237,14 @@ pub fn emit_chapter_list(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String
              }}"
         )
     } else {
-        let bp_chain = emit_blueprint_chain(ep);
+        let bp_chain = emit_blueprint_chain(ep, ext);
         let extract_call = match ep.response_type {
             ResponseType::Json => "extract::json(None, &bp)?",
             ResponseType::Html => "extract::html(None, &bp)?",
         };
         format!(
             "fn get_chapter_list(&self, manga_id: &str, _page: i32, _page_size: Option<i32>, _sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
+             {decode_prologue}\
              {req_block}\n\
              {bp_chain}\n\
              let rows = {extract_call};\n\
@@ -145,13 +261,24 @@ pub fn emit_chapter_list(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String
     }
 }
 
-pub fn emit_pages(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String {
-    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[]);
+pub fn emit_pages(
+    ep: &ValidatedEndpoint,
+    ext: &ValidatedExtension,
+    embedded_bytes: bool,
+) -> String {
+    let decode_prologue = emit_composite_id_decode_prologue(ep);
+    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[], None);
 
     let row_assembly = emit_pages_assembly(ep);
 
+    let manga_param = if ep.composite_id_decodes.iter().any(|d| d.role == "manga") {
+        "manga_id"
+    } else {
+        "_manga_id"
+    };
+
     if embedded_bytes {
-        let bp_bytes = emit_blueprint_bytes(ep);
+        let bp_bytes = emit_blueprint_bytes(ep, ext);
         let fetch = match ep.response_type {
             ResponseType::Html => {
                 "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
@@ -161,7 +288,8 @@ pub fn emit_pages(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String {
             }
         };
         format!(
-            "fn get_pages(&self, _manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter> {{\n\
+            "fn get_pages(&self, {manga_param}: &str, chapter_id: &str) -> ExtensionResult<Chapter> {{\n\
+             {decode_prologue}\
              {bp_bytes}\n\
              {req_block}\n\
              {fetch}\n\
@@ -175,13 +303,14 @@ pub fn emit_pages(ep: &ValidatedEndpoint, embedded_bytes: bool) -> String {
              }}"
         )
     } else {
-        let bp_chain = emit_blueprint_chain(ep);
+        let bp_chain = emit_blueprint_chain(ep, ext);
         let extract_call = match ep.response_type {
             ResponseType::Json => "extract::json(None, &bp)?",
             ResponseType::Html => "extract::html(None, &bp)?",
         };
         format!(
-            "fn get_pages(&self, _manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter> {{\n\
+            "fn get_pages(&self, {manga_param}: &str, chapter_id: &str) -> ExtensionResult<Chapter> {{\n\
+             {decode_prologue}\
              {req_block}\n\
              {bp_chain}\n\
              let rows = {extract_call};\n\
@@ -203,6 +332,7 @@ fn emit_manga_list_method(
     method_name: &str,
     params: &str,
     ep: &ValidatedEndpoint,
+    ext: &ValidatedExtension,
     embedded_bytes: bool,
 ) -> String {
     let req_block = emit_request_block(
@@ -211,11 +341,12 @@ fn emit_manga_list_method(
         &ep.headers,
         &ep.queries,
         &ep.filter_mapping,
+        ep.filter_format.as_ref(),
     );
     let row_assembly = emit_manga_list_item_assembly(ep);
 
     if embedded_bytes {
-        let bp_bytes = emit_blueprint_bytes(ep);
+        let bp_bytes = emit_blueprint_bytes(ep, ext);
         let (fetch, hnp_line, tp_line) = if ep.pagination.is_some() {
             (
                 "let rows = extract_raw::paginated_html(page, page_size, req, BP)?;".to_string(),
@@ -251,7 +382,7 @@ fn emit_manga_list_method(
              }}"
         )
     } else {
-        let bp_chain = emit_blueprint_chain(ep);
+        let bp_chain = emit_blueprint_chain(ep, ext);
         let (extract_call, hnp_line, tp_line): (String, String, String) = if ep.pagination.is_some()
         {
             (
@@ -322,12 +453,25 @@ fn manga_list_item_accessor(name: &str, optional: bool) -> String {
 /// Build `Ok(MangaInfo { ... })` from ValidatedFields.
 fn emit_manga_info_assembly(ep: &ValidatedEndpoint) -> String {
     let mut fields = Vec::new();
+    let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for f in &ep.fields {
         let accessor = match &f.source {
             FieldSource::FnArg(name) => format!("{name}.to_string()"),
             FieldSource::Blueprint(_) => manga_info_field_accessor(&f.name, f.optional),
         };
         fields.push(format!("    {}: {accessor}", f.name));
+        declared.insert(f.name.as_str());
+    }
+    for (name, default) in [
+        ("cover_url", "None"),
+        ("description", "None"),
+        ("authors", "vec![]"),
+        ("artists", "vec![]"),
+        ("tags", "vec![]"),
+    ] {
+        if !declared.contains(name) {
+            fields.push(format!("    {name}: {default}"));
+        }
     }
     // status is special — always extracted from blueprint then converted to enum
     let has_status = ep.fields.iter().any(|f| f.name == "status");

@@ -41,6 +41,9 @@ pub mod bindings {
 pub use bindings::kani::extension::types as wit_types;
 pub use bindings::kani::extension::{html, http, scripting, utility};
 
+#[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
+pub use serde_json;
+
 pub mod extension;
 pub use extension::*;
 
@@ -54,6 +57,11 @@ pub use ast::{OffsetType, PaginationConfig};
 
 pub mod filters;
 pub use filters::{ApplyFilters, ArrayFormat, FilterGroups};
+
+#[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
+pub mod filter_fetch;
+#[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
+pub use filter_fetch::FilterFetchDef;
 
 #[cfg(target_family = "wasm")]
 pub use talc::TalckWasm as __TalckWasm;

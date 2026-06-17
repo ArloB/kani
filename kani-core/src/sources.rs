@@ -115,10 +115,43 @@ impl SourceInstance {
         }
     }
 
-    /// Calls the `get_metadata` function in the WASM module.
-    pub async fn get_metadata(
-        &mut self,
-    ) -> Result<crate::wasm::kani::extension::types::ExtensionMetadata> {
+    /// Calls `get_fetched_option_sets`. Returns a JSON-encoded list of
+    /// `kani_shared::FilterFetchDef`.
+    pub async fn get_fetched_option_sets(&mut self) -> Result<String> {
+        let store = self
+            .store
+            .as_mut()
+            .ok_or_else(|| Error::Internal("Store not initialized".to_string()))?;
+        let bindings = self
+            .bindings
+            .as_ref()
+            .expect("Bindings should be initialized");
+
+        {
+            let data = store.data_mut();
+            data.call_started_at = Instant::now();
+            data.io_count = 0;
+            data.last_io_at = None;
+        }
+
+        store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
+        let provider = bindings.kani_extension_manga_provider();
+        let raw_result = provider
+            .call_get_fetched_option_sets(&mut *store)
+            .await
+            .map_err(|e| {
+                tracing::error!(target: "wasm", "trap in call_get_fetched_option_sets: {e:#}");
+                Error::Internal(format!("WASM function call failed: {e:#}"))
+            });
+
+        store.data_mut().clear_all();
+        let inner = raw_result?;
+        inner.map_err(|e| Error::Extension(crate::wasm::ext_error_from_wit(e)))
+    }
+
+    /// Calls the `get_metadata` function in the WASM module. Returns the
+    /// JSON-encoded `kani_shared::ExtensionMetadata` string.
+    pub async fn get_metadata(&mut self) -> Result<String> {
         let store = self
             .store
             .as_mut()

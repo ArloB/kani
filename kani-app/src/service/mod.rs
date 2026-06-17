@@ -86,8 +86,7 @@ pub struct AppService {
         Arc<tokio::sync::RwLock<metadata_provider::MetadataProviderRegistry>>,
     pub job_manager: crate::jobs::JobManager,
     #[cfg(any(test, feature = "test-util"))]
-    pub mock_sources:
-        Arc<DashMap<i64, Arc<dyn kani_core::downloader::PageListFetcher>>>,
+    pub mock_sources: Arc<DashMap<i64, Arc<dyn kani_core::downloader::PageListFetcher>>>,
 }
 
 /// Load a credential cipher from env vars, or auto-provision one at `data_dir/secret.key`.
@@ -240,7 +239,9 @@ impl AppService {
                 && let Ok(n) = val.trim().parse::<i64>()
                 && (1..=16).contains(&n)
             {
-                tracing::info!("per_source_download_concurrency set to {n} by KANI_PER_SOURCE_DOWNLOAD_CONCURRENCY");
+                tracing::info!(
+                    "per_source_download_concurrency set to {n} by KANI_PER_SOURCE_DOWNLOAD_CONCURRENCY"
+                );
                 settings.per_source_download_concurrency = n;
                 concurrency_changed = true;
             }
@@ -317,7 +318,8 @@ impl AppService {
         let sources = sqlx::query_as!(
             Source,
             "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http, \
-             download_concurrency, CAST(NULL AS TEXT) as circuit_state \
+             download_concurrency, icon, description, languages, schema_version, \
+             CAST(NULL AS TEXT) as circuit_state \
              FROM sources WHERE enabled = 1 AND deleted_at IS NULL"
         )
         .fetch_all(&pool)
@@ -387,8 +389,7 @@ impl AppService {
         let enc = enc.map(Arc::new);
         let webhook_service = webhooks::WebhookService::new(pool.clone());
 
-        let svc_cell: crate::jobs::framework::ServiceCell =
-            Arc::new(std::sync::Mutex::new(None));
+        let svc_cell: crate::jobs::framework::ServiceCell = Arc::new(std::sync::Mutex::new(None));
 
         let mut job_registry = crate::jobs::JobRegistry::new();
         job_registry.register::<crate::jobs::download::ChapterDownloadJob>();
@@ -403,15 +404,17 @@ impl AppService {
             crate::jobs::JobManagerConfig {
                 global_max_concurrent: crate::tuning::DEFAULT_MAX_CONCURRENT_JOBS,
                 job_shutdown_timeout: std::time::Duration::from_secs(
-                    settings.job_shutdown_timeout_secs.try_into().unwrap_or(
-                        crate::tuning::DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS,
-                    ),
+                    settings
+                        .job_shutdown_timeout_secs
+                        .try_into()
+                        .unwrap_or(crate::tuning::DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS),
                 ),
                 type_configs: std::collections::HashMap::new(),
                 registry: job_registry,
-                max_history: settings.job_max_history.try_into().unwrap_or(
-                    crate::tuning::DEFAULT_JOB_MAX_HISTORY,
-                ),
+                max_history: settings
+                    .job_max_history
+                    .try_into()
+                    .unwrap_or(crate::tuning::DEFAULT_JOB_MAX_HISTORY),
                 concurrency: crate::jobs::ConcurrencyConfig {
                     page_concurrency: settings.concurrent_page_downloads.try_into()?,
                     per_source_download_concurrency: settings
@@ -496,7 +499,8 @@ impl AppService {
             email_verification_required: false,
             first_run_complete: false,
             scan_concurrency: crate::tuning::DEFAULT_SCAN_CONCURRENCY as i64,
-            per_source_download_concurrency: crate::tuning::DEFAULT_PER_SOURCE_DOWNLOAD_CONCURRENCY as i64,
+            per_source_download_concurrency: crate::tuning::DEFAULT_PER_SOURCE_DOWNLOAD_CONCURRENCY
+                as i64,
             job_max_history: crate::tuning::DEFAULT_JOB_MAX_HISTORY as i64,
             job_shutdown_timeout_secs: crate::tuning::DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS as i64,
         };
@@ -523,8 +527,7 @@ impl AppService {
         let (refresh_tx, _) = tokio::sync::broadcast::channel(16);
         let shutdown_token = tokio_util::sync::CancellationToken::new();
 
-        let svc_cell: crate::jobs::framework::ServiceCell =
-            Arc::new(std::sync::Mutex::new(None));
+        let svc_cell: crate::jobs::framework::ServiceCell = Arc::new(std::sync::Mutex::new(None));
 
         let mut registry = crate::jobs::JobRegistry::new();
         registry.register::<crate::jobs::test_jobs::TestJob>();
@@ -976,14 +979,13 @@ pub(crate) async fn cleanup_staging_dirs(
 
             let suffix = &name[".tmp_staging_".len()..];
             if let Ok(chapter_id) = suffix.parse::<i64>() {
-                let resume_offset: Option<i64> =
-                    sqlx::query_scalar!(
-                        "SELECT resume_offset FROM chapters WHERE id = ?",
-                        chapter_id
-                    )
-                    .fetch_optional(pool)
-                    .await
-                    .unwrap_or(None);
+                let resume_offset: Option<i64> = sqlx::query_scalar!(
+                    "SELECT resume_offset FROM chapters WHERE id = ?",
+                    chapter_id
+                )
+                .fetch_optional(pool)
+                .await
+                .unwrap_or(None);
 
                 if resume_offset.is_some_and(|o| o > 0) {
                     tracing::debug!(

@@ -1,7 +1,10 @@
+use std::collections::BTreeMap;
+
 use crate::yaml::schema::{
-    FilterEntry, FilterMappingEntry, PaginationCfg, PreferenceEntry, ResponseType,
+    FilterEntry, FilterFormatCfg, FilterMappingEntry, IdEncodingBlock, OptionSetDef, PaginationCfg,
+    PreferenceEntry, ResponseType, YamlCacheScope, YamlIdEncoding,
 };
-use kani_shared::ast::Expr;
+use kani_shared::ast::{Expr, OnFailurePolicy};
 
 /// A fully-validated extension with all DSL strings compiled into `Expr` trees.
 pub struct ValidatedExtension {
@@ -19,10 +22,87 @@ pub struct ValidatedExtension {
     pub pages: Option<ValidatedEndpoint>,
     pub filters: Vec<FilterEntry>,
     pub preferences: Vec<PreferenceEntry>,
+    pub option_sets: BTreeMap<String, OptionSetDef>,
     /// Optional URL template, e.g. `"https://example.com/manga/$manga_id$"`.
     pub get_url: Option<String>,
     /// Optional Mihon/Tachiyomi source ID for cross-app import matching.
     pub mihon_source_id: Option<i64>,
+    /// Composite ID encode/decode declared for manga and/or chapter IDs.
+    pub id_encoding: Option<IdEncodingBlock>,
+    /// Named cache namespaces declared via the top-level `cache` block.
+    pub cache: Vec<ValidatedCacheEntry>,
+    /// Extended metadata (icon, languages, description, rate limit, sections).
+    pub metadata: ValidatedMetadata,
+    /// Schema version this YAML was authored against.
+    pub schema_version: u32,
+    /// Minimum host (kani-app) semver this extension requires, if any.
+    pub min_kani_version: Option<String>,
+    /// Host capability strings this extension requires to be installed.
+    pub requires_capabilities: Vec<String>,
+    /// Chapter sort options declared via the top-level `chapter_sort` block.
+    pub chapter_sort: Option<ValidatedChapterSort>,
+    /// Named browser scripts (name → JS source), ready for codegen to write as `src/scripts/<name>.js`.
+    pub browser_scripts: std::collections::BTreeMap<String, String>,
+}
+
+impl ValidatedExtension {
+    /// Look up a named endpoint by its YAML key.
+    pub fn endpoint_by_name(&self, name: &str) -> Option<&ValidatedEndpoint> {
+        match name {
+            "popular" => self.popular.as_ref().and_then(|p| match p {
+                ValidatedPopular::Full(ep) => Some(ep.as_ref()),
+                ValidatedPopular::Delegated { .. } => None,
+            }),
+            "search" => self.search.as_ref(),
+            "manga_details" => self.manga_details.as_ref(),
+            "chapter_list" => self.chapter_list.as_ref(),
+            "pages" => self.pages.as_ref(),
+            _ => None,
+        }
+    }
+}
+
+pub struct ValidatedChapterSort {
+    pub default: Option<String>,
+    pub options: Vec<ValidatedChapterSortOption>,
+}
+
+pub struct ValidatedChapterSortOption {
+    pub id: String,
+    pub label: String,
+}
+
+/// Validated extended metadata, ready for codegen to populate into the
+/// generated `metadata()` literal.
+#[derive(Default)]
+pub struct ValidatedMetadata {
+    pub icon: Option<String>,
+    pub rate_limit: Option<ValidatedRateLimit>,
+    pub languages: Vec<String>,
+    pub description: Option<String>,
+    pub sections: Vec<ValidatedSection>,
+}
+
+pub struct ValidatedRateLimit {
+    pub requests_per_second: f64,
+    pub burst: u32,
+    pub max_concurrent: u32,
+}
+
+pub struct ValidatedSection {
+    pub id: String,
+    pub name: String,
+    pub nsfw: bool,
+}
+
+/// A validated entry from the top-level `cache` block, ready for codegen to
+/// emit as a `kani_shared::CacheNamespace` registry entry.
+pub struct ValidatedCacheEntry {
+    pub name: String,
+    pub scope: YamlCacheScope,
+    pub ttl: u32,
+    pub max_entries: Option<u32>,
+    pub key_template: Option<String>,
 }
 
 pub enum ValidatedPopular {
@@ -39,6 +119,7 @@ pub struct ValidatedEndpoint {
     pub headers: Vec<(String, String)>,
     pub queries: Vec<QueryEntry>,
     pub filter_mapping: Vec<(String, FilterMappingEntry)>,
+    pub filter_format: Option<FilterFormatCfg>,
     pub response_type: ResponseType,
     pub container: String,
     pub bindings: Vec<ValidatedBinding>,
@@ -47,6 +128,54 @@ pub struct ValidatedEndpoint {
     pub has_next_page: ValidatedHnp,
     pub total_pages: ValidatedTotalPages,
     pub pagination: Option<PaginationCfg>,
+    pub composite_id_decodes: Vec<CompositeIdDecode>,
+    /// Document-level chained fetches (→ blueprint bindings).
+    pub then_steps: Vec<ValidatedThenStep>,
+    /// Per-element chained fetches (→ blueprint fields).
+    pub for_each_steps: Vec<ValidatedForEachStep>,
+    /// When Some, the endpoint is fetched via headless browser (`capture_page_payload`).
+    pub via: Option<crate::yaml::schema::EndpointVia>,
+    /// Absolute URL of the page to load. Present iff `via` is Some.
+    pub page_url: Option<String>,
+    /// Name of a declared browser script. Present iff `via` is Some.
+    pub script_name: Option<String>,
+    /// Browser page-load timeout in milliseconds.
+    pub timeout_ms: u32,
+}
+
+pub struct ValidatedThenStep {
+    pub url_expr: Expr,
+    /// Binding name (without `$`) for the fetched result.
+    pub merge_as: String,
+    /// Name of the endpoint whose blueprint to use for sub-extraction.
+    pub endpoint_name: String,
+    pub on_failure: OnFailurePolicy,
+}
+
+pub struct ValidatedForEachStep {
+    pub url_expr: Expr,
+    /// Field name in which the fetched result is stored per row.
+    pub merge_as: String,
+    /// Name of the endpoint whose blueprint to use for sub-extraction.
+    pub endpoint_name: String,
+    pub on_failure: OnFailurePolicy,
+    pub concurrency: u32,
+    pub deduplicate_by: Option<Expr>,
+}
+
+/// Describes a composite-id decode codegen must emit as a `let` binding
+/// prologue, derived from a `$role.field$` placeholder in a route or query.
+pub struct CompositeIdDecode {
+    /// `"manga"` or `"chapter"`.
+    pub role: String,
+    /// The Rust function argument holding the encoded composite ID (e.g. `manga_id`).
+    pub fn_arg: String,
+    /// All fields declared in `id_encoding.<role>.fields`, in encode/decode order.
+    pub fields: Vec<String>,
+    pub delimiter: String,
+    pub encoding: YamlIdEncoding,
+    /// Subset of `fields` actually referenced by this endpoint's route/queries.
+    pub referenced_fields: Vec<String>,
 }
 
 pub enum ValidatedHnp {

@@ -19,11 +19,129 @@ pub struct YamlExtension {
     pub filters: Vec<FilterEntry>,
     #[serde(default)]
     pub preferences: Vec<PreferenceEntry>,
+    #[serde(default)]
+    pub option_sets: BTreeMap<String, OptionSetDef>,
     /// Optional URL template for manga canonical URL. Use `$manga_id$` as placeholder.
     pub get_url: Option<String>,
     /// Optional Mihon/Tachiyomi source ID for cross-app import matching.
     #[serde(default)]
     pub mihon_source_id: Option<i64>,
+    /// Declares composite ID encode/decode for manga and/or chapter IDs.
+    #[serde(default)]
+    pub id_encoding: Option<IdEncodingBlock>,
+    /// Declares named cache namespaces this extension wants the host to manage.
+    #[serde(default)]
+    pub cache: BTreeMap<String, CacheEntry>,
+    /// Extended metadata (icon, languages, description, rate limit, sections).
+    #[serde(default)]
+    pub metadata: Option<MetadataBlock>,
+    /// Schema version this YAML was authored against (defaults to 1, the current version).
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
+    /// Minimum host (kani-app) semver this extension requires, if any.
+    #[serde(default)]
+    pub min_kani_version: Option<String>,
+    /// Host capability strings this extension requires to be installed.
+    #[serde(default)]
+    pub requires_capabilities: Vec<String>,
+    /// Declares the sort options this extension exposes for chapter lists.
+    #[serde(default)]
+    pub chapter_sort: Option<ChapterSortBlock>,
+    /// Multi-source factory: one YAML template → N WASM outputs.
+    #[serde(default)]
+    pub factory: Option<FactoryBlock>,
+    /// Named JavaScript scripts (name → source) executed in the headless browser context.
+    #[serde(default)]
+    pub browser_scripts: BTreeMap<String, String>,
+}
+
+// ── Multi-source factory ─────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct FactoryBlock {
+    /// Optional external template file path; if absent the containing YAML is the template.
+    pub template: Option<String>,
+    pub sources: Vec<FactorySource>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct FactorySource {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    #[serde(default = "default_language")]
+    pub language: String,
+    #[serde(default)]
+    pub mihon_source_id: Option<i64>,
+    /// Dot-path keyed overrides applied on top of the template (e.g. "endpoints.search.route").
+    #[serde(default)]
+    pub overrides: BTreeMap<String, serde_yaml::Value>,
+}
+
+// ── Chapter sort ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ChapterSortBlock {
+    pub default: Option<String>,
+    #[serde(default)]
+    pub options: Vec<ChapterSortOptionYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChapterSortOptionYaml {
+    pub id: String,
+    pub label: String,
+}
+
+pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+
+fn default_schema_version() -> u32 {
+    CURRENT_SCHEMA_VERSION
+}
+
+// ── Extended metadata ────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Default)]
+pub struct MetadataBlock {
+    /// Base64-encoded icon image (PNG/WebP/SVG), ≤64KB decoded.
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub rate_limit: Option<RateLimitCfg>,
+    #[serde(default)]
+    pub languages: Vec<String>,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub sections: Vec<SectionEntry>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RateLimitCfg {
+    #[serde(default = "default_rps")]
+    pub rps: f64,
+    #[serde(default = "default_burst")]
+    pub burst: u32,
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent: u32,
+}
+
+fn default_rps() -> f64 {
+    2.0
+}
+
+fn default_burst() -> u32 {
+    8
+}
+
+fn default_max_concurrent() -> u32 {
+    4
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SectionEntry {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub nsfw: bool,
 }
 
 fn default_language() -> String {
@@ -64,6 +182,8 @@ pub struct EndpointBody {
     pub queries: BTreeMap<String, String>,
     #[serde(default)]
     pub filter_mapping: BTreeMap<String, FilterMappingEntry>,
+    #[serde(default)]
+    pub filter_format: Option<FilterFormatCfg>,
     #[serde(rename = "type", default)]
     pub response_type: ResponseType,
     pub container: Option<String>,
@@ -81,6 +201,89 @@ pub struct EndpointBody {
     /// Optional u32 or DSL expression; populates total_pages in MangaList/ChapterList.
     pub total_pages: Option<TotalPages>,
     pub pagination: Option<PaginationCfg>,
+    /// Document-level chained fetches: evaluated once, result bound as `$merge_as`.
+    #[serde(default)]
+    pub then: Vec<ThenStep>,
+    /// Per-element chained fetches: evaluated for each row, result stored as `merge_as` field.
+    #[serde(default)]
+    pub for_each: Vec<ForEachStep>,
+    /// When set, the endpoint is fetched via a headless browser rather than direct HTTP.
+    #[serde(default)]
+    pub via: Option<EndpointVia>,
+    /// URL of the page to load in the headless browser. Required when `via: browser_payload`.
+    #[serde(default)]
+    pub page_url: Option<String>,
+    /// Name of a script declared in the top-level `browser_scripts` map.
+    #[serde(default)]
+    pub script: Option<String>,
+    /// Timeout for the browser page load, in milliseconds. Default: 30000.
+    #[serde(default = "default_timeout_ms")]
+    pub timeout_ms: u32,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointVia {
+    #[default]
+    BrowserPayload,
+}
+
+fn default_timeout_ms() -> u32 {
+    30_000
+}
+
+// ── Endpoint chaining (then / for_each) ──────────────────────────────────────
+
+/// What to do when a chained sub-fetch fails.
+#[derive(Debug)]
+pub enum OnFailure {
+    /// Propagate the error (default).
+    Fail,
+    /// Suppress the error and use `Value::Null`.
+    Skip,
+    /// Suppress the error and evaluate the given DSL expression as a fallback.
+    Use(String),
+}
+
+impl<'de> serde::Deserialize<'de> for OnFailure {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        match s.as_str() {
+            "skip" => Ok(OnFailure::Skip),
+            "fail" => Ok(OnFailure::Fail),
+            _ => Ok(OnFailure::Use(s)),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ThenStep {
+    /// Name of a declared endpoint whose blueprint to use for extraction.
+    pub endpoint: String,
+    /// DSL expression evaluating to the URL to fetch.
+    pub url_expr: String,
+    /// Binding name (without `$`) for the fetched result; accessible in fields.
+    pub merge_as: String,
+    pub on_failure: Option<OnFailure>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ForEachStep {
+    /// Name of a declared endpoint whose blueprint to use for extraction.
+    pub endpoint: String,
+    /// DSL expression evaluating to the URL to fetch (evaluated per-element).
+    pub url_expr: String,
+    /// Field name in which the fetched result is stored per row.
+    pub merge_as: String,
+    #[serde(default = "default_concurrency")]
+    pub concurrency: u32,
+    pub on_failure: Option<OnFailure>,
+    /// DSL expression for deduplication key; rows with duplicate keys are dropped.
+    pub deduplicate_by: Option<String>,
+}
+
+fn default_concurrency() -> u32 {
+    1
 }
 
 fn default_method() -> String {
@@ -111,7 +314,9 @@ pub enum ResponseType {
     Json,
 }
 
-/// A field definition is either a bare DSL expression string or `{expr, optional}`.
+/// A field definition is either a bare DSL expression string, `{expr, optional}`,
+/// or a composite-id map (subfield name -> DSL expression) consumed together with
+/// a top-level `id_encoding` block.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum FieldDef {
@@ -121,6 +326,7 @@ pub enum FieldDef {
         #[serde(default)]
         optional: bool,
     },
+    Composite(BTreeMap<String, String>),
 }
 
 impl FieldDef {
@@ -128,18 +334,27 @@ impl FieldDef {
         match self {
             FieldDef::Expr(e) => e,
             FieldDef::Full { expr, .. } => expr,
+            FieldDef::Composite(_) => "",
         }
     }
 
     pub fn optional(&self) -> bool {
         match self {
-            FieldDef::Expr(_) => false,
+            FieldDef::Expr(_) | FieldDef::Composite(_) => false,
             FieldDef::Full { optional, .. } => *optional,
+        }
+    }
+
+    pub fn as_composite(&self) -> Option<&BTreeMap<String, String>> {
+        match self {
+            FieldDef::Composite(map) => Some(map),
+            _ => None,
         }
     }
 }
 
-/// Filter mapping entry: simple query-param name or a sort-pair split.
+/// Filter mapping entry: simple query-param name, a sort-pair split, or a
+/// tuple split (value split at `:` into two separate query params).
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum FilterMappingEntry {
@@ -151,12 +366,24 @@ pub enum FilterMappingEntry {
         #[serde(default)]
         direction_param: Option<String>,
     },
+    TupleSplit {
+        #[allow(dead_code)]
+        kind: TupleSplitKind,
+        from_param: String,
+        to_param: String,
+    },
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SortPairKind {
     SortPair,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TupleSplitKind {
+    TupleSplit,
 }
 
 // ── Pagination ───────────────────────────────────────────────────────────────
@@ -193,6 +420,13 @@ pub struct FilterEntry {
     pub options: Vec<FilterOption>,
     pub default: Option<FilterDefault>,
     pub semantic: Option<FilterSemantic>,
+    /// Optional i18n key for the display name (display string for end users).
+    pub name_i18n: Option<String>,
+    /// References a top-level `option_sets` entry instead of inline `options`.
+    pub options_ref: Option<String>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub step: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
@@ -203,12 +437,16 @@ pub enum FilterKind {
     Sort,
     TextInput,
     Multiselect,
+    IntRange,
+    DateRange,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct FilterOption {
     pub name: String,
     pub value: String,
+    #[serde(default)]
+    pub nsfw: bool,
 }
 
 /// Default value for a filter — bool for checkbox, name+value for select/sort,
@@ -243,6 +481,8 @@ pub struct PreferenceEntry {
     pub description: Option<String>,
     #[serde(default)]
     pub secret: bool,
+    /// References a top-level `option_sets` entry instead of inline `options`.
+    pub options_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
@@ -258,4 +498,156 @@ pub enum PreferenceKind {
 pub struct PrefOption {
     pub name: String,
     pub value: String,
+}
+
+// ── Filter request formatting ───────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct FilterFormatCfg {
+    #[serde(default)]
+    pub multiselect: ArrayFormat,
+    #[serde(default = "default_omit_empty")]
+    pub omit_empty: bool,
+    #[serde(default)]
+    pub bool_format: BoolFormat,
+    #[serde(default = "default_array_separator")]
+    pub array_separator: String,
+}
+
+fn default_omit_empty() -> bool {
+    true
+}
+
+fn default_array_separator() -> String {
+    ",".to_string()
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ArrayFormat {
+    #[default]
+    Default,
+    Bracket,
+    CommaSeparated,
+    Repeated,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BoolFormat {
+    #[default]
+    TrueFalse,
+    OneZero,
+    YesNo,
+}
+
+// ── Option sets ──────────────────────────────────────────────────────────────
+
+/// Either a static inline list of options, or a definition for fetching them
+/// lazily from the host at filter-panel render time.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum OptionSetDef {
+    Static(Vec<OptionSetItem>),
+    Fetched {
+        options_fetched_by: FetchedOptionsDef,
+    },
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct OptionSetItem {
+    pub name: String,
+    pub value: String,
+    #[serde(default)]
+    pub nsfw: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct FetchedOptionsDef {
+    pub route: String,
+    #[serde(rename = "type", default)]
+    pub response_type: ResponseType,
+    pub container: Option<String>,
+    #[serde(default)]
+    pub fields: BTreeMap<String, String>,
+    pub nsfw_field: Option<String>,
+    pub cache: Option<InlineCacheEntry>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct InlineCacheEntry {
+    #[serde(default = "default_cache_ttl")]
+    pub ttl: u32,
+    pub key: String,
+}
+
+fn default_cache_ttl() -> u32 {
+    3600
+}
+
+// ── Composite ID encoding ───────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct IdEncodingBlock {
+    pub manga: Option<IdEncodingEntry>,
+    pub chapter: Option<IdEncodingEntry>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct IdEncodingEntry {
+    pub fields: Vec<String>,
+    #[serde(default = "default_id_delimiter")]
+    pub delimiter: String,
+    #[serde(default)]
+    pub encoding: YamlIdEncoding,
+}
+
+fn default_id_delimiter() -> String {
+    "|".to_string()
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum YamlIdEncoding {
+    #[default]
+    Base64Url,
+    Base64,
+    Passthrough,
+    Hex,
+}
+
+impl YamlIdEncoding {
+    pub fn to_ast(self) -> kani_shared::ast::IdEncoding {
+        match self {
+            YamlIdEncoding::Base64Url => kani_shared::ast::IdEncoding::Base64Url,
+            YamlIdEncoding::Base64 => kani_shared::ast::IdEncoding::Base64,
+            YamlIdEncoding::Passthrough => kani_shared::ast::IdEncoding::Passthrough,
+            YamlIdEncoding::Hex => kani_shared::ast::IdEncoding::Hex,
+        }
+    }
+}
+
+// ── Cache namespaces ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CacheEntry {
+    #[serde(default)]
+    pub scope: YamlCacheScope,
+    #[serde(default = "default_cache_block_ttl")]
+    pub ttl: u32,
+    pub max_entries: Option<u32>,
+    pub key_template: Option<String>,
+}
+
+fn default_cache_block_ttl() -> u32 {
+    3600
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum YamlCacheScope {
+    #[default]
+    Extension,
+    Installation,
+    User,
 }

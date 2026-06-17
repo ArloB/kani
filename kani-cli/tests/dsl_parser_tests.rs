@@ -3,7 +3,7 @@
 
 use chumsky::Parser;
 use kani_cli::dsl::parser;
-use kani_shared::ast::{Expr, Op};
+use kani_shared::ast::{Expr, Op, PadAlign};
 
 fn parse_ok(input: &str) -> Expr {
     let parse_expr = parser()
@@ -579,5 +579,238 @@ fn convert_error_map_literal_outside_lookup() {
     assert!(
         matches!(expr, Expr::Lookup { .. }),
         "lookup with map literal should succeed"
+    );
+}
+
+// ── §9 methods ────────────────────────────────────────────────────────────────
+
+#[test]
+fn parse_split_n() {
+    let expr = parse_ok(r#"self.text().split_n("/", 3)"#);
+    assert_eq!(
+        expr,
+        Expr::SplitN {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            }),
+            delimiter: "/".into(),
+            n: 3,
+        }
+    );
+}
+
+#[test]
+fn parse_take() {
+    let expr = parse_ok(r#"self.select("li").take(5)"#);
+    assert_eq!(
+        expr,
+        Expr::Take {
+            target: Box::new(Expr::Select {
+                target: Box::new(Expr::SelfRef),
+                selector: "li".into(),
+            }),
+            n: 5,
+        }
+    );
+}
+
+#[test]
+fn parse_skip() {
+    let expr = parse_ok(r#"self.select("li").skip(2)"#);
+    assert_eq!(
+        expr,
+        Expr::Skip {
+            target: Box::new(Expr::Select {
+                target: Box::new(Expr::SelfRef),
+                selector: "li".into(),
+            }),
+            n: 2,
+        }
+    );
+}
+
+#[test]
+fn parse_reverse() {
+    let expr = parse_ok(r#"self.select("li").reverse()"#);
+    assert_eq!(
+        expr,
+        Expr::Reverse {
+            target: Box::new(Expr::Select {
+                target: Box::new(Expr::SelfRef),
+                selector: "li".into(),
+            }),
+        }
+    );
+}
+
+#[test]
+fn parse_sort_by() {
+    let expr = parse_ok(r#"self.select("li").sort_by($item.text())"#);
+    assert_eq!(
+        expr,
+        Expr::SortBy {
+            target: Box::new(Expr::Select {
+                target: Box::new(Expr::SelfRef),
+                selector: "li".into(),
+            }),
+            key: Box::new(Expr::Text {
+                target: Box::new(Expr::Var("$item".into()))
+            }),
+        }
+    );
+}
+
+#[test]
+fn parse_unique() {
+    let expr = parse_ok(r#"self.select("li").map($item.text()).unique()"#);
+    assert_eq!(
+        expr,
+        Expr::Unique {
+            target: Box::new(Expr::Map {
+                target: Box::new(Expr::Select {
+                    target: Box::new(Expr::SelfRef),
+                    selector: "li".into(),
+                }),
+                transform: Box::new(Expr::Text {
+                    target: Box::new(Expr::Var("$item".into()))
+                }),
+            }),
+        }
+    );
+}
+
+#[test]
+fn parse_url_encode() {
+    let expr = parse_ok(r#"self.text().url_encode()"#);
+    assert_eq!(
+        expr,
+        Expr::UrlEncode {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            })
+        }
+    );
+}
+
+#[test]
+fn parse_url_encode_alias() {
+    let expr = parse_ok(r#"self.text().urlencode()"#);
+    assert_eq!(
+        expr,
+        Expr::UrlEncode {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            })
+        }
+    );
+}
+
+#[test]
+fn parse_url_decode() {
+    let expr = parse_ok(r#"self.text().url_decode()"#);
+    assert_eq!(
+        expr,
+        Expr::UrlDecode {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            })
+        }
+    );
+}
+
+#[test]
+fn parse_url_decode_alias() {
+    let expr = parse_ok(r#"self.text().urldecode()"#);
+    assert_eq!(
+        expr,
+        Expr::UrlDecode {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            })
+        }
+    );
+}
+
+#[test]
+fn parse_format_padded_left() {
+    let expr = parse_ok(r#"self.text().format_padded(10, "0", "left")"#);
+    assert_eq!(
+        expr,
+        Expr::FormatPadded {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            }),
+            width: 10,
+            fill: '0',
+            align: PadAlign::Left,
+        }
+    );
+}
+
+#[test]
+fn parse_format_padded_right() {
+    let expr = parse_ok(r#"self.text().format_padded(8, " ", "right")"#);
+    assert_eq!(
+        expr,
+        Expr::FormatPadded {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            }),
+            width: 8,
+            fill: ' ',
+            align: PadAlign::Right,
+        }
+    );
+}
+
+#[test]
+fn parse_format_padded_center() {
+    let expr = parse_ok(r#"self.text().format_padded(6, "-", "center")"#);
+    assert_eq!(
+        expr,
+        Expr::FormatPadded {
+            target: Box::new(Expr::Text {
+                target: Box::new(Expr::SelfRef)
+            }),
+            width: 6,
+            fill: '-',
+            align: PadAlign::Center,
+        }
+    );
+}
+
+#[test]
+fn convert_error_format_padded_bad_align() {
+    let parse_expr = parser()
+        .parse(r#"self.text().format_padded(10, "0", "diagonal")"#)
+        .into_result()
+        .expect("should parse syntactically");
+    let err = Expr::try_from(parse_expr).expect_err("bad align should fail conversion");
+    let msg = err
+        .iter()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        msg.contains("align") || msg.contains("diagonal"),
+        "got: {msg}"
+    );
+}
+
+#[test]
+fn convert_error_format_padded_empty_fill() {
+    let parse_expr = parser()
+        .parse(r#"self.text().format_padded(10, "", "left")"#)
+        .into_result()
+        .expect("should parse syntactically");
+    let err = Expr::try_from(parse_expr).expect_err("empty fill should fail conversion");
+    let msg = err
+        .iter()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        msg.contains("fill") || msg.contains("character"),
+        "got: {msg}"
     );
 }

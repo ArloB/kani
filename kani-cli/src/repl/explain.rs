@@ -453,5 +453,18 @@ fn describe_expr(expr: &Expr) -> (String, String, Vec<&Expr>) {
         Expr::ScalarOverride { name } => {
             ("ScalarOverride".into(), format!("scalar {name:?}"), vec![])
         }
+
+        Expr::EncodedField {
+            subfields,
+            delimiter,
+            encoding,
+        } => (
+            "EncodedField".into(),
+            format!(
+                "composite id ({} fields, delim={delimiter:?}, enc={encoding:?})",
+                subfields.len()
+            ),
+            subfields.iter().map(|(_, e)| e.as_ref()).collect(),
+        ),
     }
 }

@@ -581,7 +581,10 @@ impl DownloaderManager {
         } {
             match result {
                 Ok(data) => successful.push(data),
-                Err(e) => { page_error = Some(e); break; }
+                Err(e) => {
+                    page_error = Some(e);
+                    break;
+                }
             }
         }
         drop(stream);
@@ -659,7 +662,9 @@ impl DownloaderManager {
                         }
                     }
                 }
-                Ok(DownloadOutcome { successful_pages: successful_len })
+                Ok(DownloadOutcome {
+                    successful_pages: successful_len,
+                })
             }
             Err(e) => {
                 let err_str = e.to_string();
@@ -689,9 +694,15 @@ impl DownloaderManager {
         while let Ok(Some(entry)) = dir.next_entry().await {
             let name = entry.file_name();
             let s = name.to_string_lossy();
-            let Some(rest) = s.strip_suffix(".tmp") else { continue };
-            let Some((idx_str, ext)) = rest.split_once('.') else { continue };
-            let Ok(n) = idx_str.parse::<i32>() else { continue };
+            let Some(rest) = s.strip_suffix(".tmp") else {
+                continue;
+            };
+            let Some((idx_str, ext)) = rest.split_once('.') else {
+                continue;
+            };
+            let Ok(n) = idx_str.parse::<i32>() else {
+                continue;
+            };
             if !entry.metadata().await.map(|m| m.len() > 0).unwrap_or(false) {
                 continue;
             }
@@ -709,7 +720,6 @@ impl DownloaderManager {
             active.write().await.remove(&chapter_id);
         });
     }
-
 }
 
 pub fn ext_retry_params(kind: kani_shared::extension::ExtensionErrorKind) -> Option<(u32, u64)> {
@@ -738,7 +748,8 @@ async fn fetch_pages_with_retry(
             let pages = instance
                 .get_pages(source_manga_id, source_chapter_id)
                 .await?;
-            let metadata = instance.get_metadata().await?;
+            let raw_metadata = instance.get_metadata().await?;
+            let metadata: kani_shared::ExtensionMetadata = serde_json::from_str(&raw_metadata)?;
             Ok::<_, error::Error>((pages, metadata.base_url))
         }
         .await;
@@ -788,15 +799,30 @@ pub struct MockPageListFetcher {
 #[cfg(any(test, feature = "test-util"))]
 impl MockPageListFetcher {
     pub fn succeeding(page_count: usize, server_port: u16) -> Arc<Self> {
-        Arc::new(Self { page_count, server_port, error_msg: None, delay_ms: 0 })
+        Arc::new(Self {
+            page_count,
+            server_port,
+            error_msg: None,
+            delay_ms: 0,
+        })
     }
 
     pub fn failing(msg: impl Into<String>) -> Arc<Self> {
-        Arc::new(Self { page_count: 0, server_port: 0, error_msg: Some(msg.into()), delay_ms: 0 })
+        Arc::new(Self {
+            page_count: 0,
+            server_port: 0,
+            error_msg: Some(msg.into()),
+            delay_ms: 0,
+        })
     }
 
     pub fn slow(delay_ms: u64, page_count: usize, server_port: u16) -> Arc<Self> {
-        Arc::new(Self { page_count, server_port, error_msg: None, delay_ms })
+        Arc::new(Self {
+            page_count,
+            server_port,
+            error_msg: None,
+            delay_ms,
+        })
     }
 }
 
@@ -822,7 +848,10 @@ impl PageListFetcher for MockPageListFetcher {
                 transform: None,
             })
             .collect();
-        Ok((Chapter { pages }, format!("http://127.0.0.1:{}", self.server_port)))
+        Ok((
+            Chapter { pages },
+            format!("http://127.0.0.1:{}", self.server_port),
+        ))
     }
 }
 

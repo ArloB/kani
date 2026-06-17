@@ -1,7 +1,7 @@
 //! Emit Rust builder-chain source code from an `Expr` tree.
 //! The output calls `kani_shared::ast::Expr::*` constructors and chained methods.
 
-use kani_shared::ast::{Expr, Op, PadAlign};
+use kani_shared::ast::{Blueprint, Expr, IdEncoding, OnFailurePolicy, Op, PadAlign};
 
 pub fn emit_expr(expr: &Expr) -> String {
     match expr {
@@ -189,12 +189,36 @@ pub fn emit_expr(expr: &Expr) -> String {
             )
         }
         Expr::ScalarOverride { name } => format!("Expr::scalar(\"{}\")", escape(name)),
+        Expr::EncodedField {
+            subfields,
+            delimiter,
+            encoding,
+        } => {
+            let encoding_str = match encoding {
+                IdEncoding::Base64Url => "kani_shared::ast::IdEncoding::Base64Url",
+                IdEncoding::Base64 => "kani_shared::ast::IdEncoding::Base64",
+                IdEncoding::Passthrough => "kani_shared::ast::IdEncoding::Passthrough",
+                IdEncoding::Hex => "kani_shared::ast::IdEncoding::Hex",
+            };
+            let entries: Vec<String> = subfields
+                .iter()
+                .map(|(k, v)| format!("(\"{}\".to_string(), {})", escape(k), e(v)))
+                .collect();
+            format!(
+                "Expr::encoded_field(vec![{}], \"{}\", {})",
+                entries.join(", "),
+                escape(delimiter),
+                encoding_str
+            )
+        }
+
         Expr::Fetch {
             url_expr,
-            blueprint: _,
+            blueprint,
             method,
             headers,
             kind,
+            on_failure,
         } => {
             use kani_shared::ast::{HttpMethod, SubBlueprintKind};
             let method_str = match method {
@@ -211,15 +235,79 @@ pub fn emit_expr(expr: &Expr) -> String {
                 .iter()
                 .map(|(k, v)| format!(".with_header({}, {})", e(k), e(v)))
                 .collect();
+            let on_failure_chain = match on_failure {
+                OnFailurePolicy::Fail => String::new(),
+                OnFailurePolicy::Skip => {
+                    ".with_on_failure(kani_shared::ast::OnFailurePolicy::Skip)".into()
+                }
+                OnFailurePolicy::Use(fallback) => format!(
+                    ".with_on_failure(kani_shared::ast::OnFailurePolicy::Use(Box::new({})))",
+                    e(fallback)
+                ),
+            };
             format!(
-                "Expr::{}({}, /* blueprint */todo!()){}{}",
+                "Expr::{}({}, {}){}{}{}",
                 kind_fn,
                 e(url_expr),
+                emit_blueprint_from_struct(blueprint),
                 method_str,
-                headers_chain
+                headers_chain,
+                on_failure_chain
             )
         }
     }
+}
+
+/// Emit a `BlueprintBuilder::new(...)...build()` expression from a Blueprint struct.
+pub fn emit_blueprint_from_struct(bp: &Blueprint) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "BlueprintBuilder::new(\"{}\")",
+        escape(&bp.container)
+    ));
+    for b in &bp.bindings {
+        lines.push(format!(
+            "    .bind(\"{}\", {})",
+            escape(&b.name),
+            e(&b.expr)
+        ));
+    }
+    for f in &bp.fields {
+        let method = if f.optional { "field_opt" } else { "field" };
+        lines.push(format!(
+            "    .{method}(\"{}\", {})",
+            escape(&f.name),
+            e(&f.expr)
+        ));
+    }
+    for s in &bp.scalars {
+        let method = if s.optional { "scalar_opt" } else { "scalar" };
+        lines.push(format!(
+            "    .{method}(\"{}\", {})",
+            escape(&s.name),
+            e(&s.expr)
+        ));
+    }
+    if let Some(pag) = &bp.pagination {
+        let offset_type_code = match &pag.offset_type {
+            kani_shared::ast::OffsetType::ItemOffset => "OffsetType::ItemOffset".to_string(),
+            kani_shared::ast::OffsetType::PageNumber { start } => {
+                format!("OffsetType::PageNumber {{ start: {} }}", start)
+            }
+            kani_shared::ast::OffsetType::CursorToken { next_cursor_field } => format!(
+                "OffsetType::CursorToken {{ next_cursor_field: \"{}\".into() }}",
+                escape(next_cursor_field)
+            ),
+        };
+        lines.push(format!(
+            "    .paginated({}, \"{}\", {})",
+            pag.native_page_size,
+            escape(&pag.offset_param),
+            offset_type_code
+        ));
+    }
+    lines.push("    .build()".into());
+    lines.join("\n")
 }
 
 fn e(expr: &Expr) -> String {

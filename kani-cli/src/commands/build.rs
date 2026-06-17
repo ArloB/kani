@@ -20,6 +20,13 @@ pub fn run(
         ));
     }
 
+    if let Some(ext_arg) = extension
+        && (ext_arg.ends_with(".yaml") || ext_arg.ends_with(".yml"))
+    {
+        let out_dir = PathBuf::from(out_dir.unwrap_or("wasm_sources"));
+        return build_factory_yaml(ext_arg, set_version, &out_dir, debug);
+    }
+
     let extensions_dir = PathBuf::from(ext_dir.unwrap_or("kani-extensions"));
     if !extensions_dir.exists() {
         return Err(CliError::Other(format!(
@@ -62,6 +69,172 @@ pub fn run(
     }
 
     Ok(())
+}
+
+fn build_factory_yaml(
+    yaml_path: &str,
+    set_version: Option<&str>,
+    out_dir: &Path,
+    debug: bool,
+) -> Result<(), CliError> {
+    use crate::yaml::{schema::YamlExtension, validate};
+
+    let path = Path::new(yaml_path);
+    let source = fs::read_to_string(path)
+        .map_err(|e| CliError::Other(format!("cannot read {}: {e}", path.display())))?;
+
+    let ext: YamlExtension = serde_yaml::from_str(&source)
+        .map_err(|e| CliError::Other(format!("YAML parse error in {}: {e}", path.display())))?;
+
+    let factory = ext.factory.as_ref().ok_or_else(|| {
+        CliError::Other(format!(
+            "{} has no `factory:` block — use `kani-cli build <crate-name>` for non-factory builds",
+            path.display()
+        ))
+    })?;
+
+    let factory_errors = validate::validate_factory(factory);
+    if !factory_errors.is_empty() {
+        for e in &factory_errors {
+            eprintln!("error: {e}");
+        }
+        return Err(CliError::Other(format!(
+            "{} factory validation error(s)",
+            factory_errors.len()
+        )));
+    }
+
+    let base_value: serde_yaml::Value = serde_yaml::from_str(&source)
+        .map_err(|e| CliError::Other(format!("YAML re-parse error: {e}")))?;
+
+    let workspace_root = path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .ancestors()
+        .find(|p| p.join("Cargo.toml").exists())
+        .unwrap_or(Path::new("."));
+
+    let sources = factory.sources.clone();
+    for source_def in &sources {
+        println!("── Factory source: {}", source_def.id);
+
+        let expanded = apply_factory_overrides(base_value.clone(), source_def);
+
+        let expanded_src = serde_yaml::to_string(&expanded).map_err(|e| {
+            CliError::Other(format!(
+                "re-serialise error for source '{}': {e}",
+                source_def.id
+            ))
+        })?;
+
+        let expanded_ext: YamlExtension = serde_yaml::from_value(expanded).map_err(|e| {
+            CliError::Other(format!(
+                "override produced invalid YAML for source '{}': {e}",
+                source_def.id
+            ))
+        })?;
+
+        let validated = validate::validate(&expanded_ext, &expanded_src, path).map_err(|errs| {
+            for e in &errs {
+                eprintln!("error (source '{}'): {e}", source_def.id);
+            }
+            CliError::Other(format!(
+                "source '{}': {} validation error(s)",
+                source_def.id,
+                errs.len()
+            ))
+        })?;
+
+        let generated = crate::codegen::generate(&validated, false);
+
+        let crate_dir = workspace_root
+            .join("kani-extensions")
+            .join(format!("kani-{}", generated.id));
+
+        fs::create_dir_all(crate_dir.join("src"))?;
+        fs::write(crate_dir.join("Cargo.toml"), &generated.cargo_toml)?;
+        fs::write(crate_dir.join("src").join("lib.rs"), &generated.lib_rs)?;
+        println!("   Generated: {}", crate_dir.display());
+
+        let crate_name = format!("kani-{}", generated.id);
+        build_one(&crate_name, set_version, out_dir, debug)?;
+    }
+
+    Ok(())
+}
+
+/// Apply per-source field overrides onto the base YAML value tree.
+///
+/// Precedence (highest first):
+/// 1. `source.overrides` dot-path map
+/// 2. Named top-level fields (id, name, base_url, language, mihon_source_id)
+pub fn apply_factory_overrides(
+    mut base: serde_yaml::Value,
+    source: &crate::yaml::schema::FactorySource,
+) -> serde_yaml::Value {
+    {
+        let map = match &mut base {
+            serde_yaml::Value::Mapping(m) => m,
+            _ => return base,
+        };
+
+        map.insert(
+            serde_yaml::Value::String("id".to_string()),
+            serde_yaml::Value::String(source.id.clone()),
+        );
+        map.insert(
+            serde_yaml::Value::String("name".to_string()),
+            serde_yaml::Value::String(source.name.clone()),
+        );
+        map.insert(
+            serde_yaml::Value::String("base_url".to_string()),
+            serde_yaml::Value::String(source.base_url.clone()),
+        );
+        map.insert(
+            serde_yaml::Value::String("language".to_string()),
+            serde_yaml::Value::String(source.language.clone()),
+        );
+        match source.mihon_source_id {
+            Some(id) => {
+                map.insert(
+                    serde_yaml::Value::String("mihon_source_id".to_string()),
+                    serde_yaml::Value::Number(serde_yaml::Number::from(id)),
+                );
+            }
+            None => {
+                map.remove("mihon_source_id");
+            }
+        }
+    }
+
+    for (dot_path, value) in &source.overrides {
+        set_dot_path(&mut base, dot_path, value.clone());
+    }
+
+    base
+}
+
+fn set_dot_path(root: &mut serde_yaml::Value, path: &str, value: serde_yaml::Value) {
+    let mut parts = path.splitn(2, '.');
+    let key = parts.next().expect("non-empty path");
+    let rest = parts.next();
+
+    match root {
+        serde_yaml::Value::Mapping(map) => {
+            let k = serde_yaml::Value::String(key.to_string());
+            if let Some(tail) = rest {
+                let child = map
+                    .entry(k)
+                    .or_insert(serde_yaml::Value::Mapping(Default::default()));
+                set_dot_path(child, tail, value);
+            } else {
+                map.insert(k, value);
+            }
+        }
+        _ => {
+            eprintln!("warning: override path '{path}' traverses a non-mapping node; skipping");
+        }
+    }
 }
 
 fn build_one(

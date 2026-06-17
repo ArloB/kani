@@ -378,6 +378,13 @@ pub enum Expr {
         method: HttpMethod,
         headers: Vec<(Expr, Expr)>,
         kind: SubBlueprintKind,
+        on_failure: OnFailurePolicy,
+    },
+
+    EncodedField {
+        subfields: Vec<(String, Box<Expr>)>,
+        delimiter: String,
+        encoding: IdEncoding,
     },
 }
 
@@ -426,6 +433,22 @@ pub enum SubBlueprintKind {
     Json,
 }
 
+/// What to do when an `Expr::Fetch` sub-request fails.
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum OnFailurePolicy {
+    /// Propagate the error to the caller (default).
+    #[default]
+    Fail,
+    /// Suppress the error and produce `Value::Null`.
+    Skip,
+    /// Suppress the error and evaluate a fallback expression instead.
+    Use(Box<Expr>),
+}
+
 /// How the offset/page query parameter is calculated for each chunk fetch.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
@@ -453,6 +476,19 @@ pub enum PadAlign {
     Left,
     Right,
     Center,
+}
+
+/// Encoding scheme for composite ID fields produced by `Expr::EncodedField`.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    any(feature = "host", feature = "builder"),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum IdEncoding {
+    Base64Url,
+    Base64,
+    Passthrough,
+    Hex,
 }
 
 pub const DSL_SCHEMA_VERSION: u32 = 2;
@@ -1074,6 +1110,7 @@ impl Expr {
             method: HttpMethod::Get,
             headers: vec![],
             kind: SubBlueprintKind::Html,
+            on_failure: OnFailurePolicy::Fail,
         }
     }
     #[inline]
@@ -1084,6 +1121,7 @@ impl Expr {
             method: HttpMethod::Get,
             headers: vec![],
             kind: SubBlueprintKind::Json,
+            on_failure: OnFailurePolicy::Fail,
         }
     }
     #[inline]
@@ -1094,6 +1132,7 @@ impl Expr {
                 blueprint,
                 headers,
                 kind,
+                on_failure,
                 ..
             } => Expr::Fetch {
                 url_expr,
@@ -1101,6 +1140,7 @@ impl Expr {
                 method,
                 headers,
                 kind,
+                on_failure,
             },
             other => other,
         }
@@ -1114,6 +1154,7 @@ impl Expr {
                 method,
                 mut headers,
                 kind,
+                on_failure,
             } => {
                 headers.push((key, value));
                 Expr::Fetch {
@@ -1122,8 +1163,30 @@ impl Expr {
                     method,
                     headers,
                     kind,
+                    on_failure,
                 }
             }
+            other => other,
+        }
+    }
+    #[inline]
+    pub fn with_on_failure(self, policy: OnFailurePolicy) -> Self {
+        match self {
+            Expr::Fetch {
+                url_expr,
+                blueprint,
+                method,
+                headers,
+                kind,
+                ..
+            } => Expr::Fetch {
+                url_expr,
+                blueprint,
+                method,
+                headers,
+                kind,
+                on_failure: policy,
+            },
             other => other,
         }
     }
@@ -1222,6 +1285,22 @@ impl Expr {
             op: Op::Div,
             lhs: Box::new(self),
             rhs: Box::new(rhs),
+        }
+    }
+
+    #[inline]
+    pub fn encoded_field(
+        subfields: Vec<(String, Expr)>,
+        delimiter: impl Into<String>,
+        encoding: crate::ast::IdEncoding,
+    ) -> Self {
+        Expr::EncodedField {
+            subfields: subfields
+                .into_iter()
+                .map(|(k, v)| (k, Box::new(v)))
+                .collect(),
+            delimiter: delimiter.into(),
+            encoding,
         }
     }
 }
@@ -1848,6 +1927,43 @@ mod tests {
             let bytes = postcard::to_allocvec(cfg).unwrap();
             let back: PaginationConfig = postcard::from_bytes(&bytes).unwrap();
             assert_eq!(*cfg, back);
+        }
+    }
+
+    #[test]
+    fn encoded_field_postcard_round_trip() {
+        for encoding in &[
+            IdEncoding::Base64Url,
+            IdEncoding::Base64,
+            IdEncoding::Passthrough,
+            IdEncoding::Hex,
+        ] {
+            let expr = Expr::EncodedField {
+                subfields: vec![
+                    ("manga_id".into(), Box::new(Expr::Var("id".into()))),
+                    ("ch_id".into(), Box::new(Expr::Literal("ch1".into()))),
+                ],
+                delimiter: "|".into(),
+                encoding: encoding.clone(),
+            };
+            postcard_rt(&expr);
+        }
+    }
+
+    #[test]
+    fn fetch_on_failure_policy_postcard_round_trip() {
+        let sub_bp = BlueprintBuilder::new("")
+            .field("x", Expr::Literal("v".into()))
+            .build();
+        for policy in [
+            OnFailurePolicy::Fail,
+            OnFailurePolicy::Skip,
+            OnFailurePolicy::Use(Box::new(Expr::Literal("fallback".into()))),
+        ] {
+            let expr =
+                Expr::fetch_json(Expr::Literal("https://example.com".into()), sub_bp.clone())
+                    .with_on_failure(policy);
+            postcard_rt(&expr);
         }
     }
 }

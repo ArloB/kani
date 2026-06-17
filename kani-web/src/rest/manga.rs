@@ -874,10 +874,17 @@ mod tests {
         ) -> kani_app::error::Result<Vec<kani_app::ids::ChapterId>> {
             unimplemented!()
         }
-        async fn download_all_chapters(&self, _manga_id: MangaId) -> kani_app::error::Result<uuid::Uuid> {
+        async fn download_all_chapters(
+            &self,
+            _manga_id: MangaId,
+        ) -> kani_app::error::Result<uuid::Uuid> {
             unimplemented!()
         }
-        async fn queue_manga_scan(&self, _manga_id: MangaId, _trigger: String) -> kani_app::error::Result<uuid::Uuid> {
+        async fn queue_manga_scan(
+            &self,
+            _manga_id: MangaId,
+            _trigger: String,
+        ) -> kani_app::error::Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn cancel_all_downloads(&self, _manga_id: MangaId) -> kani_app::error::Result<()> {

@@ -1,6 +1,6 @@
 use crate::error::CliError;
 use chumsky::prelude::SimpleSpan;
-use kani_shared::ast::{Expr, Op};
+use kani_shared::ast::{Expr, Op, PadAlign};
 
 /// A `ParseExpr` paired with its source span, produced at the parse boundary.
 ///
@@ -325,6 +325,88 @@ impl TryFrom<ParseExpr> for Expr {
                     }
                     ("find", [k, v]) => {
                         accumulate!(target_res, Expr::try_from(k.clone()), Expr::try_from(v.clone()) => |t, k, v| Expr::JsonFind { target: t, key: k, value: v })
+                    }
+
+                    ("split_n", [ParseExpr::Literal(d), ParseExpr::Number(n)]) => {
+                        wrap_target!(target_res, |t| Expr::SplitN {
+                            target: t,
+                            delimiter: d.clone(),
+                            n: *n as usize,
+                        })
+                    }
+                    ("take", [ParseExpr::Number(n)]) => {
+                        wrap_target!(target_res, |t| Expr::Take {
+                            target: t,
+                            n: *n as usize
+                        })
+                    }
+                    ("skip", [ParseExpr::Number(n)]) => {
+                        wrap_target!(target_res, |t| Expr::Skip {
+                            target: t,
+                            n: *n as usize
+                        })
+                    }
+                    ("reverse", []) => wrap_target!(target_res, |t| Expr::Reverse { target: t }),
+                    ("sort_by", [k]) => {
+                        accumulate!(target_res, Expr::try_from(k.clone()) => |t, k| Expr::SortBy { target: t, key: k })
+                    }
+                    ("unique", []) => wrap_target!(target_res, |t| Expr::Unique { target: t }),
+                    ("url_encode" | "urlencode", []) => {
+                        wrap_target!(target_res, |t| Expr::UrlEncode { target: t })
+                    }
+                    ("url_decode" | "urldecode", []) => {
+                        wrap_target!(target_res, |t| Expr::UrlDecode { target: t })
+                    }
+                    (
+                        "format_padded",
+                        [
+                            ParseExpr::Number(w),
+                            ParseExpr::Literal(f),
+                            ParseExpr::Literal(a),
+                        ],
+                    ) => {
+                        let align_res: Result<PadAlign, CliError> = match a.as_str() {
+                            "left" => Ok(PadAlign::Left),
+                            "right" => Ok(PadAlign::Right),
+                            "center" => Ok(PadAlign::Center),
+                            _ => Err(CliError::DslConversion {
+                                message: format!(
+                                    "format_padded align must be \"left\", \"right\", or \"center\", got {:?}",
+                                    a
+                                ),
+                                span: span.into_range(),
+                            }),
+                        };
+                        let mut fc = f.chars();
+                        let fill_res: Result<char, CliError> = match (fc.next(), fc.next()) {
+                            (Some(c), None) => Ok(c),
+                            _ => Err(CliError::DslConversion {
+                                message: "format_padded fill must be exactly one character"
+                                    .to_string(),
+                                span: span.into_range(),
+                            }),
+                        };
+                        match (target_res, align_res, fill_res) {
+                            (Ok(t), Ok(align), Ok(fill)) => Ok(Expr::FormatPadded {
+                                target: Box::new(t),
+                                width: *w as usize,
+                                fill,
+                                align,
+                            }),
+                            (t_res, a_res, f_res) => {
+                                let mut errs = Vec::new();
+                                if let Err(mut e) = t_res {
+                                    errs.append(&mut e);
+                                }
+                                if let Err(e) = a_res {
+                                    errs.push(e);
+                                }
+                                if let Err(e) = f_res {
+                                    errs.push(e);
+                                }
+                                Err(errs)
+                            }
+                        }
                     }
 
                     _ => {

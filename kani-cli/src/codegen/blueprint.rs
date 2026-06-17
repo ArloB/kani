@@ -1,11 +1,52 @@
 //! Emit Rust source for a BlueprintBuilder chain from a ValidatedEndpoint.
 
 use super::expr::emit_expr;
-use crate::yaml::model::{FieldSource, ValidatedEndpoint, ValidatedHnp};
-use crate::yaml::schema::YamlOffsetType;
-use kani_shared::ast::{BlueprintBuilder, OffsetType};
+use crate::yaml::model::{FieldSource, ValidatedEndpoint, ValidatedExtension, ValidatedHnp};
+use crate::yaml::schema::{ResponseType, YamlOffsetType};
+use kani_shared::ast::{Blueprint, BlueprintBuilder, Expr, OffsetType};
 
-pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
+/// Build a sub-Blueprint struct from a ValidatedEndpoint (no request, no chaining steps).
+/// Used to embed sub-blueprints inside `Expr::Fetch` nodes.
+pub fn build_sub_blueprint(ep: &ValidatedEndpoint) -> Blueprint {
+    let mut builder = BlueprintBuilder::new(&ep.container);
+    for b in &ep.bindings {
+        builder = builder.bind(&b.name, b.expr.clone());
+    }
+    for f in &ep.fields {
+        if let FieldSource::Blueprint(expr) = &f.source {
+            if f.optional {
+                builder = builder.field_opt(&f.name, expr.clone());
+            } else {
+                builder = builder.field(&f.name, expr.clone());
+            }
+        }
+    }
+    for s in &ep.scalars {
+        if let FieldSource::Blueprint(expr) = &s.source {
+            if s.optional {
+                builder = builder.scalar_opt(&s.name, expr.clone());
+            } else {
+                builder = builder.scalar(&s.name, expr.clone());
+            }
+        }
+    }
+    builder.build()
+}
+
+fn make_fetch_expr(
+    url_expr: &Expr,
+    sub_ep: &ValidatedEndpoint,
+    on_failure: &kani_shared::ast::OnFailurePolicy,
+) -> Expr {
+    let sub_bp = build_sub_blueprint(sub_ep);
+    let fetch = match sub_ep.response_type {
+        ResponseType::Html => Expr::fetch_html(url_expr.clone(), sub_bp),
+        ResponseType::Json => Expr::fetch_json(url_expr.clone(), sub_bp),
+    };
+    fetch.with_on_failure(on_failure.clone())
+}
+
+pub fn emit_blueprint_chain(ep: &ValidatedEndpoint, ext: &ValidatedExtension) -> String {
     let mut lines = Vec::new();
 
     lines.push(format!(
@@ -13,11 +54,21 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
         ep.container
     ));
 
-    // Attach request (replaced by `let mut req` from emit_request_block and then `.request(req)`)
     lines.push("    .request(req)".into());
 
     for b in &ep.bindings {
         lines.push(format!("    .bind(\"{}\", {})", b.name, emit_expr(&b.expr)));
+    }
+
+    for step in &ep.then_steps {
+        if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
+            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure);
+            lines.push(format!(
+                "    .bind(\"{}\", {})",
+                step.merge_as,
+                emit_expr(&fetch)
+            ));
+        }
     }
 
     for f in &ep.fields {
@@ -30,7 +81,18 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
                     emit_expr(expr)
                 ));
             }
-            FieldSource::FnArg(_) => { /* not added to blueprint */ }
+            FieldSource::FnArg(_) => {}
+        }
+    }
+
+    for step in &ep.for_each_steps {
+        if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
+            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure);
+            lines.push(format!(
+                "    .field(\"{}\", {})",
+                step.merge_as,
+                emit_expr(&fetch)
+            ));
         }
     }
 
@@ -73,10 +135,8 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint) -> String {
 }
 
 /// Emit only the `BlueprintBuilder::new(...)...build()` without the `.request()` line.
-/// Used for endpoints where the request is not needed (e.g. doc handle passed externally).
-#[allow(dead_code)]
-pub fn emit_blueprint_chain_no_request(ep: &ValidatedEndpoint) -> String {
-    let src = emit_blueprint_chain(ep);
+pub fn emit_blueprint_chain_no_request(ep: &ValidatedEndpoint, ext: &ValidatedExtension) -> String {
+    let src = emit_blueprint_chain(ep, ext);
     src.lines()
         .filter(|l| !l.trim().starts_with(".request(req)"))
         .collect::<Vec<_>>()
@@ -85,16 +145,18 @@ pub fn emit_blueprint_chain_no_request(ep: &ValidatedEndpoint) -> String {
 
 /// Build a Blueprint from a ValidatedEndpoint at codegen time (no request attached),
 /// serialize it to postcard bytes, and return a Rust `const` declaration.
-///
-/// The generated constant looks like:
-/// ```ignore
-/// const BP: &[u8] = &[0x01, 0x02, ...];
-/// ```
-pub fn emit_blueprint_bytes(ep: &ValidatedEndpoint) -> String {
+pub fn emit_blueprint_bytes(ep: &ValidatedEndpoint, ext: &ValidatedExtension) -> String {
     let mut builder = BlueprintBuilder::new(&ep.container);
 
     for b in &ep.bindings {
         builder = builder.bind(&b.name, b.expr.clone());
+    }
+
+    for step in &ep.then_steps {
+        if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
+            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure);
+            builder = builder.bind(&step.merge_as, fetch);
+        }
     }
 
     for f in &ep.fields {
@@ -104,6 +166,13 @@ pub fn emit_blueprint_bytes(ep: &ValidatedEndpoint) -> String {
             } else {
                 builder = builder.field(&f.name, expr.clone());
             }
+        }
+    }
+
+    for step in &ep.for_each_steps {
+        if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
+            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure);
+            builder = builder.field(&step.merge_as, fetch);
         }
     }
 

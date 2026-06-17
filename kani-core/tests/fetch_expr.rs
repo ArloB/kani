@@ -280,3 +280,130 @@ async fn fetch_budget_exceeded_after_32_requests() {
         "expected budget exceeded error, got: {err}"
     );
 }
+
+// ── OnFailurePolicy tests ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn on_failure_skip_produces_null() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/list"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(r#"[{"id":1,"bad_url":"/no-such-path"}]"#),
+        )
+        .mount(&server)
+        .await;
+
+    let detail_bp = BlueprintBuilder::new("")
+        .field("x", Expr::self_ref().ptr("/x").str_val())
+        .build();
+
+    let list_bp = BlueprintBuilder::new("")
+        .with_request(RequestDef {
+            url: format!("{}/list", server.uri()),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+        })
+        .field("id", Expr::self_ref().ptr("/id").int_val())
+        .field_opt(
+            "detail",
+            Expr::fetch_json(
+                Expr::format(
+                    "{}{}",
+                    vec![
+                        Expr::lit(server.uri()),
+                        Expr::self_ref().ptr("/bad_url").str_val(),
+                    ],
+                ),
+                detail_bp,
+            )
+            .with_on_failure(kani_shared::ast::OnFailurePolicy::Skip),
+        )
+        .build();
+
+    let base_url = server.uri();
+    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let result = extract_json(&mut state, None, &list_bp).await.unwrap();
+    let rows = result["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], 1);
+    assert!(
+        rows[0]["detail"].is_null(),
+        "expected null on skip, got: {:?}",
+        rows[0]["detail"]
+    );
+}
+
+#[tokio::test]
+async fn on_failure_fail_propagates_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/list"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(r#"[{"id":1}]"#))
+        .mount(&server)
+        .await;
+
+    let detail_bp = BlueprintBuilder::new("")
+        .field("x", Expr::self_ref().ptr("/x").str_val())
+        .build();
+
+    let list_bp = BlueprintBuilder::new("")
+        .with_request(RequestDef {
+            url: format!("{}/list", server.uri()),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+        })
+        .field(
+            "detail",
+            Expr::fetch_json(Expr::lit(format!("{}/missing", server.uri())), detail_bp),
+        )
+        .build();
+
+    let base_url = server.uri();
+    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let result = extract_json(&mut state, None, &list_bp).await;
+    assert!(result.is_err(), "expected error to propagate");
+}
+
+#[tokio::test]
+async fn on_failure_use_evaluates_fallback() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/list"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(r#"[{"id":1}]"#))
+        .mount(&server)
+        .await;
+
+    let detail_bp = BlueprintBuilder::new("")
+        .field("x", Expr::self_ref().ptr("/x").str_val())
+        .build();
+
+    let list_bp = BlueprintBuilder::new("")
+        .with_request(RequestDef {
+            url: format!("{}/list", server.uri()),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+        })
+        .field("id", Expr::self_ref().ptr("/id").int_val())
+        .field(
+            "detail",
+            Expr::fetch_json(Expr::lit(format!("{}/missing", server.uri())), detail_bp)
+                .with_on_failure(kani_shared::ast::OnFailurePolicy::Use(Box::new(Expr::lit(
+                    "fallback_value",
+                )))),
+        )
+        .build();
+
+    let base_url = server.uri();
+    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+    let result = extract_json(&mut state, None, &list_bp).await.unwrap();
+    let rows = result["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["detail"], "fallback_value");
+}

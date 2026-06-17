@@ -2,9 +2,9 @@
 
 mod common;
 use common::{insert_chapter, insert_manga, insert_source, start_mock_page_server, test_service};
+use kani_app::jobs::BackgroundJob;
 use kani_app::jobs::download::MangaDownloadAllJob;
 use kani_app::jobs::test_jobs::{FailingDownloadJob, SlowTestJob, TestJob};
-use kani_app::jobs::BackgroundJob;
 use kani_core::downloader::MockPageListFetcher;
 use std::time::Duration;
 
@@ -26,7 +26,10 @@ async fn test_job_submits_and_completes() {
             panic!("job ended in unexpected state: {}", status.status);
         }
         if tokio::time::Instant::now() >= deadline {
-            panic!("timed out waiting for job to complete; last status: {}", status.status);
+            panic!(
+                "timed out waiting for job to complete; last status: {}",
+                status.status
+            );
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -46,7 +49,10 @@ async fn slow_job_cancel_transitions_to_cancelled() {
             break;
         }
         if tokio::time::Instant::now() >= start_deadline {
-            panic!("timed out waiting for slow job to start; status: {}", status.status);
+            panic!(
+                "timed out waiting for slow job to start; status: {}",
+                status.status
+            );
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -61,10 +67,16 @@ async fn slow_job_cancel_transitions_to_cancelled() {
             return;
         }
         if status.status == "completed" || status.status == "failed" {
-            panic!("job ended in unexpected state after cancel: {}", status.status);
+            panic!(
+                "job ended in unexpected state after cancel: {}",
+                status.status
+            );
         }
         if tokio::time::Instant::now() >= cancel_deadline {
-            panic!("timed out waiting for cancel; last status: {}", status.status);
+            panic!(
+                "timed out waiting for cancel; last status: {}",
+                status.status
+            );
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -103,7 +115,10 @@ async fn crashed_running_job_recovers_to_pending_on_startup() {
             panic!("recovered job ended in unexpected state: {}", status.status);
         }
         if tokio::time::Instant::now() >= deadline {
-            panic!("timed out waiting for recovered job; last status: {}", status.status);
+            panic!(
+                "timed out waiting for recovered job; last status: {}",
+                status.status
+            );
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -124,14 +139,21 @@ async fn circuit_breaker_opens_after_repeated_failures() {
                 break;
             }
             if tokio::time::Instant::now() >= deadline {
-                panic!("timed out waiting for job to fail; status: {}", status.status);
+                panic!(
+                    "timed out waiting for job to fail; status: {}",
+                    status.status
+                );
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
 
     let state = svc.job_manager.circuit_state(source_id);
-    assert_eq!(state.as_deref(), Some("open"), "circuit should be open after threshold failures");
+    assert_eq!(
+        state.as_deref(),
+        Some("open"),
+        "circuit should be open after threshold failures"
+    );
 }
 
 #[tokio::test]
@@ -224,13 +246,11 @@ async fn manga_download_all_job_claims_all_pending_chapters() {
     }
 
     for ch_id in [ch1, ch2, ch3] {
-        let dl_status: i64 = sqlx::query_scalar!(
-            "SELECT download_status FROM chapters WHERE id = ?",
-            ch_id,
-        )
-        .fetch_one(&svc.db)
-        .await
-        .unwrap();
+        let dl_status: i64 =
+            sqlx::query_scalar!("SELECT download_status FROM chapters WHERE id = ?", ch_id,)
+                .fetch_one(&svc.db)
+                .await
+                .unwrap();
         assert_ne!(
             dl_status, 0,
             "chapter {} should have been claimed (status 0 = still Pending)",
@@ -246,7 +266,10 @@ async fn manga_download_all_job_retryable_failure_submits_chapter_job() {
     let manga_id = insert_manga(&svc.db, source_id, "m1", "Manga").await;
     let _chapter_id = insert_chapter(&svc.db, manga_id, "ch-1", 1.0).await;
 
-    svc.register_mock_source(source_id, MockPageListFetcher::failing("simulated extension error"));
+    svc.register_mock_source(
+        source_id,
+        MockPageListFetcher::failing("simulated extension error"),
+    );
 
     let job = MangaDownloadAllJob::new(manga_id.0, "Manga".to_string(), source_id, false);
     let job_id = svc.job_manager.submit(job).await.unwrap();
@@ -258,17 +281,19 @@ async fn manga_download_all_job_retryable_failure_submits_chapter_job() {
             break;
         }
         if tokio::time::Instant::now() >= deadline {
-            panic!("timed out waiting for aggregate job; last status: {}", status.status);
+            panic!(
+                "timed out waiting for aggregate job; last status: {}",
+                status.status
+            );
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    let retry_job_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM jobs WHERE job_type = 'chapter_download'",
-    )
-    .fetch_one(&svc.db)
-    .await
-    .unwrap();
+    let retry_job_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE job_type = 'chapter_download'")
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
     assert!(
         retry_job_count > 0,
         "a retryable chapter failure should have submitted a standalone chapter_download job"
@@ -318,19 +343,20 @@ async fn manga_download_all_job_cancel_reverts_chapters_to_pending() {
             break;
         }
         if tokio::time::Instant::now() >= terminal_deadline {
-            panic!("timed out waiting for job to finish after cancel; status: {}", status.status);
+            panic!(
+                "timed out waiting for job to finish after cancel; status: {}",
+                status.status
+            );
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
     for ch_id in [ch1, ch2, ch3] {
-        let dl_status: i64 = sqlx::query_scalar!(
-            "SELECT download_status FROM chapters WHERE id = ?",
-            ch_id,
-        )
-        .fetch_one(&svc.db)
-        .await
-        .unwrap();
+        let dl_status: i64 =
+            sqlx::query_scalar!("SELECT download_status FROM chapters WHERE id = ?", ch_id,)
+                .fetch_one(&svc.db)
+                .await
+                .unwrap();
         assert_eq!(
             dl_status, 0,
             "chapter {} should have been reverted to Pending after cancel",
@@ -365,15 +391,23 @@ async fn chapter_download_full_pipeline_with_mock() {
             );
         }
         if tokio::time::Instant::now() >= deadline {
-            panic!("timed out waiting for chapter download; last status: {}", status.status);
+            panic!(
+                "timed out waiting for chapter download; last status: {}",
+                status.status
+            );
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    let dl_status: i64 =
-        sqlx::query_scalar!("SELECT download_status FROM chapters WHERE id = ?", chapter_id)
-            .fetch_one(&svc.db)
-            .await
-            .unwrap();
-    assert_eq!(dl_status, 2, "chapter should be marked Complete (download_status = 2)");
+    let dl_status: i64 = sqlx::query_scalar!(
+        "SELECT download_status FROM chapters WHERE id = ?",
+        chapter_id
+    )
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        dl_status, 2,
+        "chapter should be marked Complete (download_status = 2)"
+    );
 }

@@ -73,9 +73,7 @@ impl AppService {
                         "scan_concurrency must be 1-32".into(),
                     ));
                 }
-                if s.per_source_download_concurrency < 1
-                    || s.per_source_download_concurrency > 16
-                {
+                if s.per_source_download_concurrency < 1 || s.per_source_download_concurrency > 16 {
                     return Err(ServiceError::Validation(
                         "per_source_download_concurrency must be 1-16".into(),
                     ));

@@ -1,9 +1,9 @@
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::{
-    ExtensionResult, MangaExtension, MangaStatus, bindings, ext_version, to_shared_filters,
-    types::ActiveFilter, wit_types,
+    ExtensionMetadata, ExtensionResult, MangaExtension, MangaStatus, bindings, ext_version,
+    to_shared_filters, types::ActiveFilter, wit_types,
 };
-use wit_types::{Chapter, ChapterList, ExtensionMetadata, MangaInfo, MangaList, PreferenceSpec};
+use wit_types::{Chapter, ChapterList, MangaInfo, MangaList, PreferenceSpec};
 
 kani_shared::guest_alloc!();
 
@@ -35,13 +35,15 @@ impl Example {
             unrestricted_http: false,
             mihon_source_id: None,
             rate_limit: None,
+            ..Default::default()
         }
     }
 }
 
 impl Guest for Example {
-    fn get_metadata() -> Result<ExtensionMetadata, wit_types::ExtensionError> {
-        Ok(Example::metadata())
+    fn get_metadata() -> Result<String, wit_types::ExtensionError> {
+        Ok(kani_shared::serde_json::to_string(&Example::metadata())
+            .expect("ExtensionMetadata serializes to JSON"))
     }
 
     fn get_popular_manga(
@@ -71,6 +73,12 @@ impl Guest for Example {
         get_extension().get_filter_list().map_err(|e| e.into_wit())
     }
 
+    fn get_fetched_option_sets() -> Result<String, wit_types::ExtensionError> {
+        get_extension()
+            .get_fetched_option_sets()
+            .map_err(|e| e.into_wit())
+    }
+
     fn get_manga_details(manga_id: String) -> Result<MangaInfo, wit_types::ExtensionError> {
         get_extension()
             .get_manga_details(&manga_id)
@@ -88,8 +96,7 @@ impl Guest for Example {
             .map_err(|e| e.into_wit())
     }
 
-    fn get_chapter_sort_list()
-    -> Result<Vec<wit_types::ChapterSortOption>, wit_types::ExtensionError> {
+    fn get_chapter_sort_list() -> Result<Vec<wit_types::SortOption>, wit_types::ExtensionError> {
         get_extension()
             .get_chapter_sort_list()
             .map_err(|e| e.into_wit())
@@ -183,7 +190,7 @@ impl MangaExtension for Example {
         Ok(vec![])
     }
 
-    fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<wit_types::ChapterSortOption>> {
+    fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<wit_types::SortOption>> {
         Ok(vec![])
     }
 }

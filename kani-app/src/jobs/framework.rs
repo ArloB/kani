@@ -5,7 +5,9 @@ use crate::jobs::error::JobError;
 
 pub type JobId = uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[repr(i64)]
 pub enum JobPriority {
     Low = 0,
@@ -60,8 +62,7 @@ pub trait BackgroundJob: Send + Sync + 'static {
 
 /// Shared cell used to give jobs access to the `AppService` without a circular Arc.
 /// The manager populates this after `AppService` is fully constructed.
-pub(crate) type ServiceCell =
-    Arc<std::sync::Mutex<Option<crate::service::AppService>>>;
+pub(crate) type ServiceCell = Arc<std::sync::Mutex<Option<crate::service::AppService>>>;
 
 #[derive(Clone)]
 pub struct JobContext {

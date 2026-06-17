@@ -304,7 +304,9 @@ pub(crate) async fn upload_wasm(
     )
     .await?;
 
-    let _ = install_source(&state, id, &source, bytes.as_ref()).await?;
+    state
+        .install_source(id, &source.name, bytes.as_ref(), crate::KANI_VERSION)
+        .await?;
 
     Ok(StatusCode::OK)
 }
@@ -333,7 +335,9 @@ pub(crate) async fn fetch_wasm(
 
     let bytes = response.bytes_limited(MAX_WASM_BYTES).await?;
 
-    let _ = install_source(&state, id, &source, &bytes).await?;
+    state
+        .install_source(id, &source.name, &bytes, crate::KANI_VERSION)
+        .await?;
 
     Ok(StatusCode::OK)
 }
@@ -354,7 +358,7 @@ pub(crate) async fn reload_source_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    reload_source(&state, id).await?;
+    state.reload_source(id).await?;
     Ok(StatusCode::OK)
 }
 
@@ -866,7 +870,7 @@ mod tests {
     use kani_app::ids::UserId;
     use kani_app::models::SourceHealthRow;
     use kani_app::service::traits::SourceDomain;
-    use kani_shared::types::{ChapterSortOption, Source};
+    use kani_shared::types::{SortOption, Source};
     use std::sync::Arc;
 
     struct StubSources;
@@ -884,6 +888,10 @@ mod tests {
                 unrestricted_http: false,
                 download_concurrency: None,
                 circuit_state: None,
+                icon: None,
+                description: None,
+                languages: None,
+                schema_version: 1,
             }])
         }
         async fn get_source(&self, _: i64) -> kani_app::error::Result<Source> {
@@ -965,10 +973,7 @@ mod tests {
         ) -> kani_app::error::Result<String> {
             unimplemented!()
         }
-        async fn get_chapter_sort_list(
-            &self,
-            _: i64,
-        ) -> kani_app::error::Result<Vec<ChapterSortOption>> {
+        async fn get_chapter_sort_list(&self, _: i64) -> kani_app::error::Result<Vec<SortOption>> {
             unimplemented!()
         }
         async fn set_source_download_concurrency(

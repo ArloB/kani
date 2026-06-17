@@ -8,6 +8,7 @@ edition = "2024"
 wit-bindgen = "0.53.1"
 talc = { workspace = true }
 base64 = "0.22.1"
+hex = "0.4"
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
 postcard = { version = "1", features = ["alloc"], optional = true }
@@ -17,4 +18,7 @@ time = { version = "0.3", features = ["serde", "formatting", "macros", "parsing"
 [features]
 host    = ["dep:serde", "dep:serde_json", "dep:time"]
 ssr     = ["dep:sqlx", "host"]
-builder = ["dep:serde", "dep:postcard"]
+builder = ["dep:serde", "dep:serde_json", "dep:postcard"]
+# Lightweight guest-side feature: just enough serde to serialize ExtensionMetadata
+# to JSON across the WIT boundary, without builder's postcard/Blueprint machinery.
+meta    = ["dep:serde", "dep:serde_json"]

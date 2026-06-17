@@ -10,4 +10,4 @@ id = "example"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-kani-shared = { path = "../../kani-shared" }
+kani-shared = { path = "../../kani-shared", features = ["meta"] }

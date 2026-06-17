@@ -1,13 +1,14 @@
 //! Emit Cargo.toml and the lib.rs header / footer for a generated extension crate.
 
-use crate::yaml::model::ValidatedExtension;
+use crate::yaml::model::{ValidatedChapterSort, ValidatedExtension};
+use crate::yaml::schema::YamlCacheScope;
 
 pub fn emit_cargo_toml(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
     let id = &ext.id;
-    let features = if embedded_bytes {
-        String::new()
+    let features: &str = if embedded_bytes {
+        ", features = [\"meta\"]"
     } else {
-        ", features = [\"builder\"]".into()
+        ", features = [\"builder\"]"
     };
     format!(
         r#"[package]
@@ -42,6 +43,60 @@ pub fn emit_lib_header(ext: &ValidatedExtension, embedded_bytes: bool) -> String
         None => "None".to_string(),
     };
 
+    let icon = match &ext.metadata.icon {
+        Some(b64) => format!("Some(\"{}\".to_string())", escape_str(b64)),
+        None => "None".to_string(),
+    };
+    let rate_limit = match &ext.metadata.rate_limit {
+        Some(rl) => format!(
+            "Some(kani_shared::RateLimitConfig {{ requests_per_second: {rps}_f32, burst: {burst}_u32, max_concurrent: {max_concurrent}_u32 }})",
+            rps = rl.requests_per_second,
+            burst = rl.burst,
+            max_concurrent = rl.max_concurrent,
+        ),
+        None => "None".to_string(),
+    };
+    let languages = format!(
+        "vec![{}]",
+        ext.metadata
+            .languages
+            .iter()
+            .map(|l| format!("\"{}\".to_string()", escape_str(l)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let description = match &ext.metadata.description {
+        Some(d) => format!("Some(\"{}\".to_string())", escape_str(d)),
+        None => "None".to_string(),
+    };
+    let sections = format!(
+        "vec![{}]",
+        ext.metadata
+            .sections
+            .iter()
+            .map(|s| format!(
+                "kani_shared::Section {{ id: \"{}\".to_string(), name: \"{}\".to_string(), nsfw: {} }}",
+                escape_str(&s.id),
+                escape_str(&s.name),
+                s.nsfw
+            ))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let schema_version = ext.schema_version;
+    let min_kani_version = match &ext.min_kani_version {
+        Some(v) => format!("Some(\"{}\".to_string())", escape_str(v)),
+        None => "None".to_string(),
+    };
+    let requires_capabilities = format!(
+        "vec![{}]",
+        ext.requires_capabilities
+            .iter()
+            .map(|c| format!("\"{}\".to_string()", escape_str(c)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
     let pref_import = if ext.preferences.is_empty() {
         ""
     } else {
@@ -67,10 +122,10 @@ use std::sync::OnceLock;
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 {extract_import}
 use kani_shared::{{
-    ExtensionResult, MangaExtension, MangaStatus, bindings, wit_types,
+    ExtensionMetadata, ExtensionResult, MangaExtension, MangaStatus, bindings, wit_types,
     types::ActiveFilter, to_shared_filters, filter_list{pref_import}, FilterState,
 }};
-{ast_import}use wit_types::{{Chapter, ChapterList, ChapterInfo, ExtensionMetadata, MangaInfo, MangaList, MangaListItem, Page, PreferenceSpec}};
+{ast_import}use wit_types::{{Chapter, ChapterList, ChapterInfo, MangaInfo, MangaList, MangaListItem, Page, PreferenceSpec}};
 
 kani_shared::guest_alloc!();
 
@@ -97,6 +152,14 @@ impl {struct_name} {{
             nsfw:             {nsfw},
             unrestricted_http: {unrestricted_http},
             mihon_source_id:  {mihon_source_id},
+            rate_limit:       {rate_limit},
+            icon:             {icon},
+            languages:        {languages},
+            description:      {description},
+            schema_version:   {schema_version}_u32,
+            min_kani_version: {min_kani_version},
+            requires_capabilities: {requires_capabilities},
+            sections:         {sections},
         }}
     }}
 }}
@@ -114,7 +177,7 @@ pub fn emit_guest_impl(ext: &ValidatedExtension) -> String {
          }\n".to_string()
     } else {
         "    fn get_popular_manga(_page: i32, _page_size: i32, _filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, wit_types::ExtensionError> {\n\
-         Ok(MangaList { manga: vec![], has_next_page: false })\n\
+         Ok(MangaList { manga: vec![], has_next_page: false, total_pages: None })\n\
          }\n".to_string()
     };
 
@@ -125,20 +188,25 @@ pub fn emit_guest_impl(ext: &ValidatedExtension) -> String {
          }\n".to_string()
     } else {
         "    fn search_manga(_query: String, _page: i32, _page_size: i32, _filters: Vec<wit_types::ActiveFilter>) -> Result<MangaList, wit_types::ExtensionError> {\n\
-         Ok(MangaList { manga: vec![], has_next_page: false })\n\
+         Ok(MangaList { manga: vec![], has_next_page: false, total_pages: None })\n\
          }\n".to_string()
     };
 
     format!(
         r#"impl Guest for {struct_name} {{
-    fn get_metadata() -> Result<ExtensionMetadata, wit_types::ExtensionError> {{
-        Ok({struct_name}::metadata())
+    fn get_metadata() -> Result<String, wit_types::ExtensionError> {{
+        Ok(kani_shared::serde_json::to_string(&{struct_name}::metadata())
+            .expect("ExtensionMetadata serializes to JSON"))
     }}
 
 {popular_impl}
 {search_impl}
     fn get_filter_list() -> Result<wit_types::FilterList, wit_types::ExtensionError> {{
         get_extension().get_filter_list().map_err(|e| e.into_wit())
+    }}
+
+    fn get_fetched_option_sets() -> Result<String, wit_types::ExtensionError> {{
+        get_extension().get_fetched_option_sets().map_err(|e| e.into_wit())
     }}
 
     fn get_manga_details(manga_id: String) -> Result<MangaInfo, wit_types::ExtensionError> {{
@@ -149,7 +217,7 @@ pub fn emit_guest_impl(ext: &ValidatedExtension) -> String {
         get_extension().get_chapter_list(&manga_id, page, page_size, sort).map_err(|e| e.into_wit())
     }}
 
-    fn get_chapter_sort_list() -> Result<Vec<wit_types::ChapterSortOption>, wit_types::ExtensionError> {{
+    fn get_chapter_sort_list() -> Result<Vec<wit_types::SortOption>, wit_types::ExtensionError> {{
         get_extension().get_chapter_sort_list().map_err(|e| e.into_wit())
     }}
 
@@ -175,6 +243,79 @@ fn get_extension() -> &'static {struct_name} {{
 bindings::export!({struct_name});
 "#
     )
+}
+
+/// Emits a `pub static CACHE_REGISTRY: &[kani_shared::CacheNamespace]` declaring
+/// every namespace from the YAML `cache:` block. Empty when no `cache` block
+/// was declared, in which case the registry is still emitted (as `&[]`) so
+/// generated crates always expose a stable symbol.
+pub fn emit_cache_registry(ext: &ValidatedExtension) -> String {
+    let entries: Vec<String> = ext
+        .cache
+        .iter()
+        .map(|c| {
+            let name = escape_str(&c.name);
+            let scope = scope_token(c.scope);
+            let max_entries = match c.max_entries {
+                Some(n) => format!("Some({n}_u32)"),
+                None => "None".to_string(),
+            };
+            let key_template = match &c.key_template {
+                Some(t) => format!("Some(\"{}\")", escape_str(t)),
+                None => "None".to_string(),
+            };
+            format!(
+                "kani_shared::CacheNamespace {{ name: \"{name}\", scope: {scope}, ttl_seconds: {ttl}_u32, max_entries: {max_entries}, key_template: {key_template} }}",
+                ttl = c.ttl
+            )
+        })
+        .collect();
+
+    format!(
+        "pub static CACHE_REGISTRY: &[kani_shared::CacheNamespace] = &[{}];",
+        entries.join(", ")
+    )
+}
+
+/// Emits the `get_chapter_sort_list` (and optionally `default_chapter_sort`)
+/// `MangaExtension` impl methods from a validated `chapter_sort` block.
+pub fn emit_chapter_sort(cs: &ValidatedChapterSort) -> String {
+    let entries: Vec<String> = cs
+        .options
+        .iter()
+        .map(|o| {
+            format!(
+                "wit_types::SortOption {{ id: \"{id}\".to_string(), name: \"{label}\".to_string() }}",
+                id = escape_str(&o.id),
+                label = escape_str(&o.label),
+            )
+        })
+        .collect();
+
+    let sort_list = format!(
+        "fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<wit_types::SortOption>> {{\n    Ok(vec![{}])\n}}",
+        entries.join(", ")
+    );
+
+    match &cs.default {
+        Some(d) => format!(
+            "{sort_list}\n\nfn default_chapter_sort(&self) -> Option<String> {{\n    Some(\"{d}\".to_string())\n}}",
+            d = escape_str(d)
+        ),
+        None => sort_list,
+    }
+}
+
+fn scope_token(scope: YamlCacheScope) -> &'static str {
+    match scope {
+        YamlCacheScope::Extension => "kani_shared::CacheScope::Extension",
+        YamlCacheScope::Installation => "kani_shared::CacheScope::Installation",
+        YamlCacheScope::User => "kani_shared::CacheScope::User",
+    }
+}
+
+fn escape_str(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 pub fn to_pascal_case(s: &str) -> String {

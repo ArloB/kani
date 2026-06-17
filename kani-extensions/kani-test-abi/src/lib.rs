@@ -30,15 +30,16 @@ use kani_shared::bindings::kani::extension::{json, prefs as prefs_raw};
 use kani_shared::html;
 use kani_shared::utility;
 use kani_shared::{
-    ExtensionError, ExtensionResult, MangaExtension, MangaStatus, bindings, ext_version,
+    ExtensionError, ExtensionMetadata, ExtensionResult, MangaExtension, MangaStatus, bindings,
+    ext_version,
     host_abi::{extract, prefs},
     to_shared_filters,
     types::ActiveFilter,
     wit_types,
 };
 use wit_types::{
-    Chapter, ChapterList, ExtensionError as WitError, ExtensionMetadata, MangaInfo, MangaList,
-    MangaListItem, PreferenceSpec,
+    Chapter, ChapterList, ExtensionError as WitError, MangaInfo, MangaList, MangaListItem,
+    PreferenceSpec,
 };
 
 kani_shared::guest_alloc!();
@@ -67,6 +68,7 @@ impl TestAbi {
             unrestricted_http: false,
             mihon_source_id: None,
             rate_limit: None,
+            ..Default::default()
         }
     }
 }
@@ -441,8 +443,9 @@ fn test_error_kind(manga_id: &str) -> ExtensionResult<ChapterList> {
 // ── Guest trait (WIT boundary) ───────────────────────────────────────────────
 
 impl Guest for TestAbi {
-    fn get_metadata() -> Result<ExtensionMetadata, WitError> {
-        Ok(TestAbi::metadata())
+    fn get_metadata() -> Result<String, WitError> {
+        Ok(kani_shared::serde_json::to_string(&TestAbi::metadata())
+            .expect("ExtensionMetadata serializes to JSON"))
     }
 
     fn get_popular_manga(
@@ -472,6 +475,12 @@ impl Guest for TestAbi {
         get_extension().get_filter_list().map_err(|e| e.into_wit())
     }
 
+    fn get_fetched_option_sets() -> Result<String, WitError> {
+        get_extension()
+            .get_fetched_option_sets()
+            .map_err(|e| e.into_wit())
+    }
+
     fn get_manga_details(manga_id: String) -> Result<MangaInfo, WitError> {
         get_extension()
             .get_manga_details(&manga_id)
@@ -489,7 +498,7 @@ impl Guest for TestAbi {
             .map_err(|e| e.into_wit())
     }
 
-    fn get_chapter_sort_list() -> Result<Vec<wit_types::ChapterSortOption>, WitError> {
+    fn get_chapter_sort_list() -> Result<Vec<wit_types::SortOption>, WitError> {
         get_extension()
             .get_chapter_sort_list()
             .map_err(|e| e.into_wit())
@@ -583,7 +592,7 @@ impl MangaExtension for TestAbi {
         Ok(vec![])
     }
 
-    fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<wit_types::ChapterSortOption>> {
+    fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<wit_types::SortOption>> {
         Ok(vec![])
     }
 }

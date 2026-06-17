@@ -3153,6 +3153,40 @@ mod dsl_v2_tests {
         assert_eq!(v, serde_json::json!(["x", "y", "z"]));
     }
 
+    // ── EncodedField ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn encoded_field_passthrough_joins_subfields() {
+        use kani_shared::ast::IdEncoding;
+        let expr = Expr::EncodedField {
+            subfields: vec![
+                ("a".into(), Box::new(Expr::Literal("manga123".into()))),
+                ("b".into(), Box::new(Expr::Literal("ch456".into()))),
+            ],
+            delimiter: "|".into(),
+            encoding: IdEncoding::Passthrough,
+        };
+        let v = json_eval(expr).await;
+        assert_eq!(v, "manga123|ch456");
+    }
+
+    #[tokio::test]
+    async fn encoded_field_base64url_encodes() {
+        use base64::{Engine, engine::general_purpose};
+        use kani_shared::ast::IdEncoding;
+        let expr = Expr::EncodedField {
+            subfields: vec![
+                ("slug".into(), Box::new(Expr::Literal("my/manga".into()))),
+                ("ch".into(), Box::new(Expr::Literal("1".into()))),
+            ],
+            delimiter: "|".into(),
+            encoding: IdEncoding::Base64Url,
+        };
+        let v = json_eval(expr).await;
+        let expected = general_purpose::URL_SAFE_NO_PAD.encode("my/manga|1");
+        assert_eq!(v, expected);
+    }
+
     // ── UrlEncode / UrlDecode ────────────────────────────────────────────────
 
     #[tokio::test]

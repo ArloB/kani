@@ -147,8 +147,8 @@ interface types {
         total-pages: option<u32>,
     }
 
-    /// A single sort option that an extension can apply to its chapter list.
-    record chapter-sort-option {
+    /// A single sort option for ordering a list (chapter list or similar).
+    record sort-option {
         id: string,
         name: string,
     }
@@ -161,24 +161,6 @@ interface types {
 
     record chapter {
         pages: list<page>
-    }
-
-    record rate-limit-config {
-        requests-per-second: f32,
-        burst: u32,
-        max-concurrent: u32,
-    }
-
-    record extension-metadata {
-        id: string,
-        name: string,
-        version: string,
-        base-url: string,
-        language: string,
-        nsfw: bool,
-        unrestricted-http: bool,
-        mihon-source-id: option<s64>,
-        rate-limit: option<rate-limit-config>,
     }
 
     record chapter-list-chunk {
@@ -264,9 +246,12 @@ interface prefs {
 }
 
 interface manga-provider {
-    use types.{manga-list, manga-info, chapter-list, chapter, extension-metadata, preference-spec, filter-list, active-filter, chapter-sort-option, extension-error};
+    use types.{manga-list, manga-info, chapter-list, chapter, preference-spec, filter-list, active-filter, sort-option, extension-error};
 
-    get-metadata: func() -> result<extension-metadata, extension-error>;
+    // Returns a JSON-encoded `kani_shared::extension::ExtensionMetadata`. Encoded as a
+    // string (rather than a WIT record) so new metadata fields are serde-only additions
+    // with no WIT/binding churn.
+    get-metadata: func() -> result<string, extension-error>;
 
     get-popular-manga: func(page: s32, page-size: s32, filters: list<active-filter>) -> result<manga-list, extension-error>;
     search-manga: func(query: string, page: s32, page-size: s32, filters: list<active-filter>) -> result<manga-list, extension-error>;
@@ -274,8 +259,11 @@ interface manga-provider {
     get-chapter-list: func(manga-id: string, page: s32, page-size: option<s32>, sort: option<string>) -> result<chapter-list, extension-error>;
     get-pages: func(manga-id: string, chapter-id: string) -> result<chapter, extension-error>;
 
-    get-chapter-sort-list: func() -> result<list<chapter-sort-option>, extension-error>;
+    get-chapter-sort-list: func() -> result<list<sort-option>, extension-error>;
     get-filter-list: func() -> result<filter-list, extension-error>;
+    // Returns a JSON-encoded list of `kani_shared::FilterFetchDef`. Encoded as a
+    // string so new fields are serde-only additions with no WIT/binding churn.
+    get-fetched-option-sets: func() -> result<string, extension-error>;
     get-preferences: func() -> result<list<preference-spec>, extension-error>;
 
     get-url: func(manga-id: string) -> result<string, extension-error>;

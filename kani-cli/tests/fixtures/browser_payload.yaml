@@ -1,0 +1,25 @@
+id: browser-source
+name: BrowserSource
+version: "0.1.0"
+base_url: "https://example.com"
+
+browser_scripts:
+  fetch_popular: |
+    fetch('/api/popular')
+      .then(r => r.json())
+      .then(data => passPayload(JSON.stringify(data)));
+
+endpoints:
+  manga_details:
+    via: browser_payload
+    page_url: "https://example.com/manga/$manga_id$"
+    script: fetch_popular
+    timeout_ms: 15000
+    container: ":root"
+    fields:
+      id:
+        expr: "json(\"/id\").text()"
+      title:
+        expr: "json(\"/title\").text()"
+      status:
+        expr: "json(\"/status\").text()"

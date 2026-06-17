@@ -112,6 +112,7 @@ async fn eval_html_field(
         method,
         headers,
         kind,
+        on_failure,
     } = expr
     {
         let url_val =
@@ -131,7 +132,15 @@ async fn eval_html_field(
                 _ => return Err("Fetch: header keys and values must be strings".into()),
             }
         }
-        eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind).await
+        let result = eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind).await;
+        match (result, on_failure) {
+            (Ok(v), _) => Ok(v),
+            (Err(_), kani_shared::ast::OnFailurePolicy::Skip) => Ok(Value::Null),
+            (Err(e), kani_shared::ast::OnFailurePolicy::Fail) => Err(e),
+            (Err(_), kani_shared::ast::OnFailurePolicy::Use(fallback)) => {
+                eval_html_expr(fallback, doc, current, env, &state.selector_cache).await
+            }
+        }
     } else {
         eval_html_expr(expr, doc, current, env, &state.selector_cache).await
     }

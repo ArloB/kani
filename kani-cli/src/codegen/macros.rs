@@ -1,24 +1,54 @@
 //! Emit `filter_list!` and `preference_list!` macro invocations from schema entries.
 
+use std::collections::BTreeMap;
+
 use crate::yaml::schema::{
-    FilterDefault, FilterEntry, FilterKind, FilterOption, FilterSemantic, PrefOption,
-    PreferenceEntry, PreferenceKind,
+    FilterDefault, FilterEntry, FilterKind, FilterOption, FilterSemantic, OptionSetDef,
+    OptionSetItem, PrefOption, PreferenceEntry, PreferenceKind, ResponseType,
 };
 
-pub fn emit_filter_list(filters: &[FilterEntry]) -> String {
+pub fn emit_filter_list(
+    filters: &[FilterEntry],
+    option_sets: &BTreeMap<String, OptionSetDef>,
+) -> String {
     if filters.is_empty() {
         return "Ok(filter_list!{})".to_string();
     }
     let mut entries = Vec::new();
     for f in filters {
-        entries.push(emit_filter_entry(f));
+        entries.push(emit_filter_entry(f, option_sets));
     }
     format!("Ok(filter_list!{{\n{}\n}})", entries.join(";\n"))
 }
 
-fn emit_filter_entry(f: &FilterEntry) -> String {
+/// Resolves `options_ref` against `option_sets`: static sets are inlined as
+/// `FilterOption`s; fetched sets resolve to an empty list (populated by the
+/// host at render time in a later phase).
+fn resolve_options<'a>(
+    f: &'a FilterEntry,
+    option_sets: &'a BTreeMap<String, OptionSetDef>,
+) -> Vec<FilterOption> {
+    if let Some(options_ref) = &f.options_ref {
+        match option_sets.get(options_ref) {
+            Some(OptionSetDef::Static(items)) => items
+                .iter()
+                .map(|i: &OptionSetItem| FilterOption {
+                    name: i.name.clone(),
+                    value: i.value.clone(),
+                    nsfw: i.nsfw,
+                })
+                .collect(),
+            Some(OptionSetDef::Fetched { .. }) | None => Vec::new(),
+        }
+    } else {
+        f.options.clone()
+    }
+}
+
+fn emit_filter_entry(f: &FilterEntry, option_sets: &BTreeMap<String, OptionSetDef>) -> String {
     let id = escape_str(&f.id);
     let name = escape_str(&f.name);
+    let resolved_options = resolve_options(f, option_sets);
     let semantic_suffix = f
         .semantic
         .as_ref()
@@ -47,7 +77,7 @@ fn emit_filter_entry(f: &FilterEntry) -> String {
             } else {
                 "Select"
             };
-            let opts = emit_opts_with_values(&f.id, &f.options);
+            let opts = emit_opts_with_values(&resolved_options);
             let def = match &f.default {
                 Some(FilterDefault::Option { name: n, value: v }) => {
                     format!(", default: (\"{}\", \"{}\")", escape_str(n), escape_str(v))
@@ -59,11 +89,11 @@ fn emit_filter_entry(f: &FilterEntry) -> String {
         }
 
         FilterKind::Multiselect => {
-            let opts = emit_opts_multiselect(&f.id, &f.options);
+            let opts = emit_opts_multiselect(&resolved_options);
             format!("    \"{id}\", \"{name}\", Multiselect, [{opts}]{semantic_suffix}")
         }
 
-        FilterKind::TextInput => {
+        FilterKind::TextInput | FilterKind::IntRange | FilterKind::DateRange => {
             let def = match &f.default {
                 Some(FilterDefault::Text(s)) => format!(", default: \"{}\"", escape_str(s)),
                 _ => String::new(),
@@ -74,7 +104,7 @@ fn emit_filter_entry(f: &FilterEntry) -> String {
 }
 
 /// Emit Select/Sort options as `("Name", "value")` tuples (always tuple form).
-fn emit_opts_with_values(_filter_id: &str, opts: &[FilterOption]) -> String {
+fn emit_opts_with_values(opts: &[FilterOption]) -> String {
     opts.iter()
         .map(|o| {
             format!(
@@ -88,7 +118,7 @@ fn emit_opts_with_values(_filter_id: &str, opts: &[FilterOption]) -> String {
 }
 
 /// Emit Multiselect options: bare string if name==value, else tuple.
-fn emit_opts_multiselect(_filter_id: &str, opts: &[FilterOption]) -> String {
+fn emit_opts_multiselect(opts: &[FilterOption]) -> String {
     opts.iter()
         .map(|o| {
             if o.name == o.value {
@@ -105,18 +135,41 @@ fn emit_opts_multiselect(_filter_id: &str, opts: &[FilterOption]) -> String {
         .join(", ")
 }
 
-pub fn emit_preference_list(prefs: &[PreferenceEntry]) -> String {
+pub fn emit_preference_list(
+    prefs: &[PreferenceEntry],
+    option_sets: &BTreeMap<String, OptionSetDef>,
+) -> String {
     if prefs.is_empty() {
         return "Ok(vec![])".to_string();
     }
     let mut entries = Vec::new();
     for p in prefs {
-        entries.push(emit_pref_entry(p));
+        entries.push(emit_pref_entry(p, option_sets));
     }
     format!("Ok(preference_list![\n{}\n])", entries.join(";\n"))
 }
 
-fn emit_pref_entry(p: &PreferenceEntry) -> String {
+fn resolve_pref_options(
+    p: &PreferenceEntry,
+    option_sets: &BTreeMap<String, OptionSetDef>,
+) -> Vec<PrefOption> {
+    if let Some(options_ref) = &p.options_ref {
+        match option_sets.get(options_ref) {
+            Some(OptionSetDef::Static(items)) => items
+                .iter()
+                .map(|i: &OptionSetItem| PrefOption {
+                    name: i.name.clone(),
+                    value: i.value.clone(),
+                })
+                .collect(),
+            Some(OptionSetDef::Fetched { .. }) | None => Vec::new(),
+        }
+    } else {
+        p.options.clone()
+    }
+}
+
+fn emit_pref_entry(p: &PreferenceEntry, option_sets: &BTreeMap<String, OptionSetDef>) -> String {
     let key = escape_str(&p.key);
     let label = escape_str(&p.label);
     let desc_suffix = p
@@ -132,7 +185,7 @@ fn emit_pref_entry(p: &PreferenceEntry) -> String {
         }
 
         PreferenceKind::Select => {
-            let opts = emit_pref_opts(&p.options);
+            let opts = emit_pref_opts(&resolve_pref_options(p, option_sets));
             let def = escape_str(&p.default);
             format!("    \"{key}\", \"{label}\", Select, [{opts}], default: \"{def}\"{desc_suffix}")
         }
@@ -166,4 +219,51 @@ fn emit_pref_opts(opts: &[PrefOption]) -> String {
 
 fn escape_str(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Builds the JSON array literal (as a Rust string) for `get_fetched_option_sets`.
+/// For each filter with an `options_ref` pointing to a `Fetched` option_set, emits
+/// one `FilterFetchDef` entry so the host can fetch and merge options at render time.
+pub fn emit_fetched_option_sets(
+    filters: &[FilterEntry],
+    option_sets: &BTreeMap<String, OptionSetDef>,
+) -> String {
+    let entries: Vec<String> = filters
+        .iter()
+        .filter_map(|f| {
+            let options_ref = f.options_ref.as_ref()?;
+            let OptionSetDef::Fetched { options_fetched_by: def } = option_sets.get(options_ref)? else {
+                return None;
+            };
+            let response_type = match def.response_type {
+                ResponseType::Html => "html",
+                ResponseType::Json => "json",
+            };
+            let container = def.container.as_deref().map(|c| format!("\"{}\"", c.replace('\\', "\\\\").replace('"', "\\\""))).unwrap_or_else(|| "null".to_string());
+            let fields: String = def.fields.iter()
+                .map(|(k, v)| format!("\"{}\":\"{}\"", escape_str(k), escape_str(v)))
+                .collect::<Vec<_>>()
+                .join(",");
+            let (cache_key, cache_ttl) = match &def.cache {
+                Some(c) => (format!("\"{}\"", escape_str(&c.key)), c.ttl),
+                None => ("null".to_string(), 300),
+            };
+            let nsfw_field = def.nsfw_field.as_deref()
+                .map(|s| format!("\"{}\"", escape_str(s)))
+                .unwrap_or_else(|| "null".to_string());
+            Some(format!(
+                "{{\"filter_id\":\"{}\",\"option_set_name\":\"{}\",\"route\":\"{}\",\"response_type\":\"{}\",\"container\":{},\"fields\":{{{}}},\"nsfw_field\":{},\"cache_key\":{},\"cache_ttl\":{}}}",
+                escape_str(&f.id),
+                escape_str(options_ref),
+                escape_str(&def.route),
+                response_type,
+                container,
+                fields,
+                nsfw_field,
+                cache_key,
+                cache_ttl,
+            ))
+        })
+        .collect();
+    format!("r#\"[{}]\"#", entries.join(","))
 }

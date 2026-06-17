@@ -85,11 +85,13 @@ async fn example_get_metadata_returns_correct_fields() {
     let (_rt, mut store, instance) = example_instance().await;
 
     let provider = instance.kani_extension_manga_provider();
-    let meta = provider
+    let raw_meta = provider
         .call_get_metadata(&mut store)
         .await
         .expect("WASM call trapped")
         .expect("extension returned Err");
+    let meta: kani_shared::ExtensionMetadata =
+        serde_json::from_str(&raw_meta).expect("metadata is valid JSON");
 
     assert_eq!(meta.id, "example");
     assert_eq!(meta.name, "Example");
@@ -314,11 +316,13 @@ async fn example_instantiate_pre_and_call() {
         .expect("pre-instantiation failed");
 
     let provider = instance.kani_extension_manga_provider();
-    let meta = provider
+    let raw_meta = provider
         .call_get_metadata(&mut store)
         .await
         .expect("WASM call trapped")
         .expect("extension returned Err");
+    let meta: kani_shared::ExtensionMetadata =
+        serde_json::from_str(&raw_meta).expect("metadata is valid JSON");
 
     assert_eq!(meta.id, "example");
 }

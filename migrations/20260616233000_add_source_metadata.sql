@@ -1,0 +1,4 @@
+ALTER TABLE sources ADD COLUMN icon TEXT;
+ALTER TABLE sources ADD COLUMN description TEXT;
+ALTER TABLE sources ADD COLUMN languages TEXT;
+ALTER TABLE sources ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;

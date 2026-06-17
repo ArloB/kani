@@ -183,7 +183,7 @@ impl OwnedSourceInstance {
     /// Calls the `get_chapter_sort_list` function in the WASM module.
     pub async fn get_chapter_sort_list(
         &mut self,
-    ) -> Result<Vec<crate::wasm::kani::extension::types::ChapterSortOption>> {
+    ) -> Result<Vec<crate::wasm::kani::extension::types::SortOption>> {
         execute_wasm!(self, call_get_chapter_sort_list)
     }
 
@@ -196,10 +196,15 @@ impl OwnedSourceInstance {
         execute_wasm!(self, call_get_pages, manga_id, chapter_id)
     }
 
-    /// Calls the `get_metadata` function in the WASM module.
-    pub async fn get_metadata(
-        &mut self,
-    ) -> Result<crate::wasm::kani::extension::types::ExtensionMetadata> {
+    /// Calls `get_fetched_option_sets`. Returns a JSON-encoded list of
+    /// `kani_shared::FilterFetchDef`.
+    pub async fn get_fetched_option_sets(&mut self) -> Result<String> {
+        execute_wasm!(self, call_get_fetched_option_sets)
+    }
+
+    /// Calls the `get_metadata` function in the WASM module. Returns the
+    /// JSON-encoded `kani_shared::ExtensionMetadata` string.
+    pub async fn get_metadata(&mut self) -> Result<String> {
         execute_wasm!(self, call_get_metadata)
     }
 

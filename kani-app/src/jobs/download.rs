@@ -49,10 +49,12 @@ pub(crate) async fn run_chapter_download(
     cancel: tokio_util::sync::CancellationToken,
     on_page: impl Fn(u64, u64) + Send + Sync + 'static,
 ) -> Result<(), JobError> {
-    let status: Option<i64> =
-        sqlx::query_scalar!("SELECT download_status FROM chapters WHERE id = ?", chapter_id)
-            .fetch_optional(&svc.db)
-            .await?;
+    let status: Option<i64> = sqlx::query_scalar!(
+        "SELECT download_status FROM chapters WHERE id = ?",
+        chapter_id
+    )
+    .fetch_optional(&svc.db)
+    .await?;
 
     match status {
         None => {
@@ -65,11 +67,13 @@ pub(crate) async fn run_chapter_download(
         _ => {}
     }
 
-    let resume_offset: i64 =
-        sqlx::query_scalar!("SELECT resume_offset FROM chapters WHERE id = ?", chapter_id)
-            .fetch_one(&svc.db)
-            .await
-            .unwrap_or(0);
+    let resume_offset: i64 = sqlx::query_scalar!(
+        "SELECT resume_offset FROM chapters WHERE id = ?",
+        chapter_id
+    )
+    .fetch_one(&svc.db)
+    .await
+    .unwrap_or(0);
 
     let task = svc
         .build_download_task(chapter_id)
@@ -161,7 +165,10 @@ impl BackgroundJob for ChapterDownloadJob {
     }
 
     fn description(&self) -> String {
-        format!("Download chapter {} ({})", self.chapter_id, self.manga_title)
+        format!(
+            "Download chapter {} ({})",
+            self.chapter_id, self.manga_title
+        )
     }
 
     fn priority(&self) -> JobPriority {
@@ -516,10 +523,11 @@ impl BackgroundJob for LibraryScanJob {
                 });
             }
 
-            let Some(res) = join_set.join_next().await else { break };
-            let (manga_id, manga_name, scan_result) = res.map_err(|e| {
-                JobError::Internal(format!("scan task panicked: {e}"))
-            })?;
+            let Some(res) = join_set.join_next().await else {
+                break;
+            };
+            let (manga_id, manga_name, scan_result) =
+                res.map_err(|e| JobError::Internal(format!("scan task panicked: {e}")))?;
 
             completed += 1;
             let (success, new_chapters) = match scan_result {
@@ -530,18 +538,20 @@ impl BackgroundJob for LibraryScanJob {
                 }
             };
 
-            let _ = svc.refresh_tx.send(AppEvent::Refresh(
-                RefreshProgressEvent::MangaRefreshed {
+            let _ = svc
+                .refresh_tx
+                .send(AppEvent::Refresh(RefreshProgressEvent::MangaRefreshed {
                     manga_id,
                     manga_name,
                     completed,
                     total,
                     success,
                     new_chapters,
-                },
-            ));
+                }));
 
-            ctx.progress.report(completed as u64, total as u64, "").await;
+            ctx.progress
+                .report(completed as u64, total as u64, "")
+                .await;
 
             if ctx.cancel.is_cancelled() {
                 break;

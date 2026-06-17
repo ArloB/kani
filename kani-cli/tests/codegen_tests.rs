@@ -79,6 +79,177 @@ fn codegen_popular_id_in_cargo_toml() {
 }
 
 #[test]
+fn codegen_filter_format_snapshot() {
+    let validated = load_and_validate("filter_format.yaml");
+    let generated = codegen::generate(&validated, false);
+    insta::assert_snapshot!("filter_format_lib_rs", generated.lib_rs);
+}
+
+#[test]
+fn codegen_filter_format_default_matches_unformatted_output() {
+    // With filter_format omitted, multiselect/checkbox/sort_pair codegen
+    // must be byte-identical to the pre-Phase-3 emission.
+    let with_format = load_and_validate("search.yaml");
+    let generated = codegen::generate(&with_format, false);
+    assert!(
+        !generated.lib_rs.contains("filter_format"),
+        "search.yaml fixture has no filter_format and must not reference it: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
+fn codegen_id_encoding_snapshot() {
+    let validated = load_and_validate("id_encoding.yaml");
+    let generated = codegen::generate(&validated, false);
+    insta::assert_snapshot!("id_encoding_lib_rs", generated.lib_rs);
+}
+
+#[test]
+fn codegen_id_encoding_emits_encoded_field() {
+    let validated = load_and_validate("id_encoding.yaml");
+    let generated = codegen::generate(&validated, false);
+    assert!(
+        generated.lib_rs.contains("encoded_field"),
+        "manga_details.fields.id composite must emit encoded_field: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated
+            .lib_rs
+            .contains("kani_shared::ast::IdEncoding::Base64Url"),
+        "encoded_field must reference the fully-qualified IdEncoding variant: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
+fn codegen_id_encoding_emits_decode_prologue_in_chapter_list() {
+    let validated = load_and_validate("id_encoding.yaml");
+    let generated = codegen::generate(&validated, false);
+    assert!(
+        generated.lib_rs.contains("decode_composite"),
+        "chapter_list route referencing $manga.hid$/$manga.slug$ must emit a decode_composite call: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("manga_hid") && generated.lib_rs.contains("manga_slug"),
+        "decode prologue must bind sanitized manga_hid/manga_slug locals: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
+fn codegen_cache_snapshot() {
+    let validated = load_and_validate("cache.yaml");
+    let generated = codegen::generate(&validated, false);
+    insta::assert_snapshot!("cache_lib_rs", generated.lib_rs);
+}
+
+#[test]
+fn codegen_cache_emits_registry_entries() {
+    let validated = load_and_validate("cache.yaml");
+    let generated = codegen::generate(&validated, false);
+    assert!(
+        generated.lib_rs.contains("pub static CACHE_REGISTRY"),
+        "cache fixture must emit a CACHE_REGISTRY static: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("kani_shared::CacheNamespace"),
+        "registry entries must reference kani_shared::CacheNamespace: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated
+            .lib_rs
+            .contains("kani_shared::CacheScope::Extension")
+            && generated.lib_rs.contains("kani_shared::CacheScope::User"),
+        "registry entries must reference the declared scopes: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("\"search_results\""),
+        "registry must include the declared namespace name: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
+fn codegen_cache_empty_block_emits_empty_registry() {
+    let validated = load_and_validate("popular.yaml");
+    let generated = codegen::generate(&validated, false);
+    assert!(
+        generated
+            .lib_rs
+            .contains("pub static CACHE_REGISTRY: &[kani_shared::CacheNamespace] = &[];"),
+        "extensions with no cache block must still emit an empty registry: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
+fn codegen_metadata_snapshot() {
+    let validated = load_and_validate("metadata.yaml");
+    let generated = codegen::generate(&validated, false);
+    insta::assert_snapshot!("metadata_lib_rs", generated.lib_rs);
+}
+
+#[test]
+fn codegen_metadata_populates_all_fields() {
+    let validated = load_and_validate("metadata.yaml");
+    let generated = codegen::generate(&validated, false);
+    assert!(
+        generated.lib_rs.contains("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="),
+        "icon base64 must be embedded verbatim: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("requests_per_second: 5_f32")
+            && generated.lib_rs.contains("burst: 10_u32")
+            && generated.lib_rs.contains("max_concurrent: 2_u32"),
+        "rate_limit fields must be mapped through: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("\"en\".to_string()")
+            && generated.lib_rs.contains("\"ja\".to_string()"),
+        "languages must be emitted: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated
+            .lib_rs
+            .contains("A fixture extension exercising a fully populated metadata block."),
+        "description must be emitted: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("kani_shared::Section { id: \"latest\".to_string(), name: \"Latest\".to_string(), nsfw: false }")
+            && generated.lib_rs.contains("kani_shared::Section { id: \"popular\".to_string(), name: \"Popular\".to_string(), nsfw: false }"),
+        "sections must be emitted: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("schema_version:   1_u32"),
+        "schema_version must be emitted: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("Some(\"0.5.0\".to_string())"),
+        "min_kani_version must be emitted: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated
+            .lib_rs
+            .contains("vec![\"unrestricted_http\".to_string()]"),
+        "requires_capabilities must be emitted: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
 fn codegen_embedded_bytes_flag() {
     let validated = load_and_validate("popular.yaml");
     let plain = codegen::generate(&validated, false);
@@ -87,5 +258,107 @@ fn codegen_embedded_bytes_flag() {
     assert_ne!(
         plain.lib_rs, embedded.lib_rs,
         "embedded_bytes=true should produce different lib.rs output"
+    );
+}
+
+#[test]
+fn codegen_chapter_sort_snapshot() {
+    let validated = load_and_validate("chapter_sort.yaml");
+    let generated = codegen::generate(&validated, false);
+    insta::assert_snapshot!("chapter_sort_lib_rs", generated.lib_rs);
+    assert!(
+        generated.lib_rs.contains("get_chapter_sort_list"),
+        "chapter_sort fixture must emit get_chapter_sort_list: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("default_chapter_sort"),
+        "chapter_sort with default must emit default_chapter_sort: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("number_desc"),
+        "chapter_sort options must be emitted: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
+fn codegen_chapter_sort_stub_when_absent() {
+    let validated = load_and_validate("popular.yaml");
+    let generated = codegen::generate(&validated, false);
+    assert!(
+        generated.lib_rs.contains("get_chapter_sort_list"),
+        "stub must still emit get_chapter_sort_list: {}",
+        generated.lib_rs
+    );
+    assert!(
+        !generated.lib_rs.contains("default_chapter_sort"),
+        "stub must not emit default_chapter_sort: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
+fn codegen_for_each_snapshot() {
+    let validated = load_and_validate("for_each.yaml");
+    let generated = codegen::generate(&validated, false);
+    insta::assert_snapshot!("for_each_lib_rs", generated.lib_rs);
+    assert!(
+        generated.lib_rs.contains("fetch_html"),
+        "for_each must emit Expr::fetch_html: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("OnFailurePolicy::Skip"),
+        "for_each with on_failure: skip must emit Skip policy: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("details"),
+        "for_each merge_as 'details' must appear: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
+fn codegen_fetched_option_sets_emits_json_def() {
+    let validated = load_and_validate("fetched_opts.yaml");
+    let generated = codegen::generate(&validated, false);
+    assert!(
+        generated.lib_rs.contains("get_fetched_option_sets"),
+        "fetched option_sets must emit get_fetched_option_sets: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("genres-v1"),
+        "fetched option_sets must embed the cache key: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("https://example.com/api/genres"),
+        "fetched option_sets must embed the route: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("\"filter_id\":\"genre\""),
+        "fetched option_sets must embed the filter_id: {}",
+        generated.lib_rs
+    );
+    assert!(
+        generated.lib_rs.contains("\"nsfw_field\":\"nsfw\""),
+        "fetched option_sets must embed the nsfw_field when set: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
+fn codegen_no_fetched_option_sets_emits_empty_array() {
+    let validated = load_and_validate("popular.yaml");
+    let generated = codegen::generate(&validated, false);
+    assert!(
+        generated.lib_rs.contains("r#\"[]\"#"),
+        "extension with no fetched option_sets must emit empty array: {}",
+        generated.lib_rs
     );
 }

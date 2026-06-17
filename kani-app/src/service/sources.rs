@@ -2,12 +2,40 @@ use super::*;
 use crate::ids::UserId;
 use crate::models::SourceHealthRow;
 
+pub(crate) async fn resolve_option_set(
+    cache: &dyn kani_core::cache::CacheBackend,
+    client: &kani_core::http::SmartClient,
+    source_id: i64,
+    def: &kani_shared::FilterFetchDef,
+) -> Option<Vec<(String, String)>> {
+    use std::time::Duration;
+    let cache_ns = format!("fetched_opts:{source_id}");
+    let cache_key = def.cache_key.as_deref().unwrap_or(&def.option_set_name);
+    let ttl = Duration::from_secs(def.cache_ttl as u64);
+    if let Some(cached) = cache.get(&cache_ns, cache_key).await {
+        return Some(kani_shared::serde_json::from_slice(&cached).unwrap_or_default());
+    }
+    match kani_core::option_set_fetcher::fetch_option_set(client, def).await {
+        Ok(opts) => {
+            if let Ok(bytes) = kani_shared::serde_json::to_vec(&opts) {
+                cache.put(&cache_ns, cache_key, bytes, ttl).await;
+            }
+            Some(opts)
+        }
+        Err(e) => {
+            tracing::warn!(source_id, option_set = %def.option_set_name, "failed to fetch option set: {e}");
+            None
+        }
+    }
+}
+
 impl AppService {
     pub async fn get_source(&self, id: i64) -> Result<Source> {
         let source = sqlx::query_as!(
             Source,
             "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, \
              s.unrestricted_http, s.download_concurrency, \
+             s.icon, s.description, s.languages, s.schema_version, \
              scb.state as circuit_state \
              FROM sources s \
              LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id \
@@ -26,6 +54,7 @@ impl AppService {
             Source,
             "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, \
              s.unrestricted_http, s.download_concurrency, \
+             s.icon, s.description, s.languages, s.schema_version, \
              scb.state as circuit_state \
              FROM sources s \
              LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id \
@@ -261,7 +290,7 @@ impl AppService {
         match result {
             Ok(r) => {
                 self.record_source_success(id, elapsed).await;
-                serde_json::to_string(&r).map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                Ok(r)
             }
             Err(e) => {
                 self.record_source_error(id).await;
@@ -355,22 +384,61 @@ impl AppService {
                 .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
         };
         let t0 = std::time::Instant::now();
-        let result = source_manager
-            .lease_instance()
-            .await?
-            .get_filter_list()
-            .await;
+        let mut instance = source_manager.lease_instance().await?;
+        let filter_result = instance.get_filter_list().await;
+        let fetched_defs_json = instance
+            .get_fetched_option_sets()
+            .await
+            .unwrap_or_else(|_| "[]".to_string());
+        drop(instance);
         let elapsed = t0.elapsed().as_millis() as u64;
-        match result {
+        let mut filter_list = match filter_result {
             Ok(r) => {
                 self.record_source_success(id, elapsed).await;
-                Ok(r)
+                r
             }
             Err(e) => {
                 self.record_source_error(id).await;
-                Err(ServiceError::Core(e))
+                return Err(ServiceError::Core(e));
+            }
+        };
+        if let Ok(defs) = kani_shared::serde_json::from_str::<Vec<kani_shared::FilterFetchDef>>(
+            &fetched_defs_json,
+        ) {
+            filter_list = self.inject_fetched_options(id, filter_list, &defs).await;
+        }
+        Ok(filter_list)
+    }
+
+    async fn inject_fetched_options(
+        &self,
+        source_id: i64,
+        mut filter_list: kani_core::WitFilterList,
+        defs: &[kani_shared::FilterFetchDef],
+    ) -> kani_core::WitFilterList {
+        for def in defs {
+            let options =
+                resolve_option_set(&*self.ext_cache, &self.smart_client, source_id, def).await;
+            let Some(options) = options else { continue };
+
+            if let Some(filter) = filter_list
+                .filters
+                .iter_mut()
+                .find(|f| f.id == def.filter_id)
+            {
+                filter.options = options
+                    .into_iter()
+                    .map(
+                        |(name, value)| kani_core::wasm::kani::extension::types::FilterOption {
+                            filter_name: def.filter_id.clone(),
+                            name,
+                            value,
+                        },
+                    )
+                    .collect();
             }
         }
+        filter_list
     }
 
     pub async fn get_source_url(&self, id: i64, manga_id: &str) -> Result<String> {
@@ -487,7 +555,7 @@ impl AppService {
     pub async fn get_chapter_sort_list(
         &self,
         id: i64,
-    ) -> Result<Vec<kani_shared::types::ChapterSortOption>> {
+    ) -> Result<Vec<kani_shared::types::SortOption>> {
         self.require_source_active(id).await?;
         let source_manager = {
             let sources = self.sources.read().await;
@@ -503,7 +571,7 @@ impl AppService {
             .await?;
         Ok(wit_opts
             .into_iter()
-            .map(|o| kani_shared::types::ChapterSortOption {
+            .map(|o| kani_shared::types::SortOption {
                 id: o.id,
                 name: o.name,
             })
@@ -709,15 +777,14 @@ impl AppService {
                     (meta, schema)
                 };
 
-                let metadata = match serde_json::to_value(&raw_meta)
-                    .and_then(serde_json::from_value::<kani_shared::ExtensionMetadata>)
-                {
-                    Ok(m) => m,
-                    Err(e) => {
-                        tracing::error!("Failed to convert metadata for {}: {}", filename, e);
-                        continue;
-                    }
-                };
+                let metadata =
+                    match serde_json::from_str::<kani_shared::ExtensionMetadata>(&raw_meta) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            tracing::error!("Failed to convert metadata for {}: {}", filename, e);
+                            continue;
+                        }
+                    };
 
                 let canonical_id = metadata.id.clone();
                 let initially_enabled = if metadata.unrestricted_http {
@@ -885,5 +952,273 @@ impl AppService {
             }
         }
         Ok(())
+    }
+
+    pub async fn install_source(
+        &self,
+        id: i64,
+        current_source_name: &str,
+        bytes: &[u8],
+        host_version: &str,
+    ) -> Result<std::path::PathBuf> {
+        let bytes_owned = bytes.to_vec();
+        let runtime_clone = self.wasm_runtime.clone();
+
+        let component =
+            tokio::task::spawn_blocking(move || runtime_clone.compile_component(&bytes_owned))
+                .await
+                .map_err(|e| {
+                    ServiceError::Internal(format!("WASM compilation task panicked: {}", e))
+                })??;
+
+        let (metadata, raw_schema) = {
+            let mut inst =
+                kani_core::sources::SourceInstance::new(self.smart_client.clone(), None, false);
+            inst.load(
+                self.wasm_runtime.engine(),
+                &component,
+                self.wasm_runtime.linker(),
+            )
+            .await
+            .map_err(ServiceError::Core)?;
+            let raw_meta = inst.get_metadata().await.map_err(ServiceError::Core)?;
+            let meta: kani_shared::ExtensionMetadata = serde_json::from_str(&raw_meta)
+                .map_err(|e| ServiceError::Internal(format!("Invalid extension metadata: {e}")))?;
+            let schema = inst.get_preferences().await.ok();
+            (meta, schema)
+        };
+
+        const RESERVED_IDS: &[&str] = &["example", "test-abi"];
+        if RESERVED_IDS.contains(&metadata.id.as_str()) {
+            return Err(ServiceError::Validation(format!(
+                "Extension ID '{}' is reserved for development use and cannot be installed",
+                metadata.id
+            )));
+        }
+
+        crate::install_gating::check_min_kani_version(
+            metadata.min_kani_version.as_deref(),
+            host_version,
+        )
+        .map_err(ServiceError::Validation)?;
+        crate::install_gating::check_required_capabilities(&metadata.requires_capabilities)
+            .map_err(ServiceError::Validation)?;
+
+        let languages_json = serde_json::to_string(&metadata.languages)
+            .map_err(|e| ServiceError::Internal(format!("Failed to encode languages: {e}")))?;
+        let schema_version = metadata.schema_version as i64;
+
+        sqlx::query!(
+            "UPDATE sources SET name = ?, version = ?, base_url = ?, unrestricted_http = ?, \
+             icon = ?, description = ?, languages = ?, schema_version = ? WHERE id = ?",
+            metadata.id,
+            metadata.version,
+            metadata.base_url,
+            metadata.unrestricted_http,
+            metadata.icon,
+            metadata.description,
+            languages_json,
+            schema_version,
+            id
+        )
+        .execute(&self.db)
+        .await?;
+
+        let settings = self.settings.read().await;
+        let storage_path = settings
+            .wasm_storage_path
+            .to_str()
+            .ok_or_else(|| ServiceError::Internal("Failed to convert path".to_string()))?;
+
+        if current_source_name != metadata.id {
+            tracing::info!(
+                "Source name changed from {} to {}. Deleting old file.",
+                current_source_name,
+                metadata.id
+            );
+            let _ =
+                kani_core::file_storage::delete_wasm_file(storage_path, current_source_name).await;
+        }
+
+        let path = kani_core::file_storage::save_wasm(storage_path, &metadata.id, bytes)
+            .await
+            .map_err(ServiceError::Core)?;
+        drop(settings);
+
+        let source_manager = SourceManager::new(
+            self.wasm_runtime.engine().clone(),
+            self.wasm_runtime
+                .instantiate_pre(&component)
+                .map_err(ServiceError::Core)?,
+            self.smart_client.clone(),
+            Some(metadata.base_url.clone()),
+            metadata.unrestricted_http,
+            25,
+            self.load_pref_map(id).await.unwrap_or_default(),
+            std::sync::Arc::clone(&self.ext_cache),
+            format!("{}:", metadata.id),
+        );
+
+        self.sources
+            .write()
+            .await
+            .insert(id, Arc::new(source_manager));
+
+        if let Some(schema) = raw_schema {
+            self.cache.insert_preference_schema(id, schema);
+        }
+
+        self.cache.invalidate_source(id);
+
+        tracing::info!(
+            "Successfully installed source {}: {} v{}",
+            id,
+            metadata.name,
+            metadata.version
+        );
+
+        Ok(path)
+    }
+
+    pub async fn reload_source(&self, id: i64) -> Result<()> {
+        let source = self.get_source(id).await?;
+
+        let wasm_path = self
+            .settings
+            .read()
+            .await
+            .wasm_storage_path
+            .join(format!("{}.wasm", source.name));
+
+        let bytes = tokio::fs::read(&wasm_path)
+            .await
+            .map_err(|e| ServiceError::Internal(format!("Failed to read WASM: {e}")))?;
+
+        let runtime_clone = self.wasm_runtime.clone();
+        let component =
+            tokio::task::spawn_blocking(move || runtime_clone.compile_component(&bytes))
+                .await
+                .map_err(|e| {
+                    ServiceError::Internal(format!("WASM compile task panicked: {e}"))
+                })??;
+
+        let (metadata, raw_schema) = {
+            let mut inst =
+                kani_core::sources::SourceInstance::new(self.smart_client.clone(), None, false);
+            inst.load(
+                self.wasm_runtime.engine(),
+                &component,
+                self.wasm_runtime.linker(),
+            )
+            .await
+            .map_err(ServiceError::Core)?;
+            let raw_meta = inst.get_metadata().await.map_err(ServiceError::Core)?;
+            let meta: kani_shared::ExtensionMetadata = serde_json::from_str(&raw_meta)
+                .map_err(|e| ServiceError::Internal(format!("Invalid extension metadata: {e}")))?;
+            let schema = inst.get_preferences().await.ok();
+            (meta, schema)
+        };
+
+        sqlx::query!(
+            "UPDATE sources SET version = ?, base_url = ?, unrestricted_http = ? WHERE id = ?",
+            metadata.version,
+            metadata.base_url,
+            metadata.unrestricted_http,
+            id
+        )
+        .execute(&self.db)
+        .await?;
+
+        let source_manager = SourceManager::new(
+            self.wasm_runtime.engine().clone(),
+            self.wasm_runtime
+                .instantiate_pre(&component)
+                .map_err(ServiceError::Core)?,
+            self.smart_client.clone(),
+            Some(metadata.base_url.clone()),
+            metadata.unrestricted_http,
+            25,
+            self.load_pref_map(id).await.unwrap_or_default(),
+            std::sync::Arc::clone(&self.ext_cache),
+            format!("{}:", metadata.id),
+        );
+
+        self.sources
+            .write()
+            .await
+            .insert(id, Arc::new(source_manager));
+
+        if let Some(schema) = raw_schema {
+            self.cache.insert_preference_schema(id, schema);
+        }
+
+        self.cache.invalidate_source(id);
+
+        tracing::info!("Reloaded extension {} ({})", id, source.name);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::resolve_option_set;
+    use kani_core::cache::{CacheBackend, InMemoryCache};
+    use kani_shared::FilterFetchDef;
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    fn make_def(cache_key: Option<&str>) -> FilterFetchDef {
+        FilterFetchDef {
+            filter_id: "genre".to_string(),
+            option_set_name: "genres".to_string(),
+            route: "https://example.invalid/api/genres".to_string(),
+            response_type: "json".to_string(),
+            container: None,
+            fields: BTreeMap::new(),
+            nsfw_field: None,
+            cache_key: cache_key.map(str::to_owned),
+            cache_ttl: 600,
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_option_set_returns_cached_values_without_network_call() {
+        let cache = Arc::new(InMemoryCache::new());
+        let client = kani_core::http::SmartClient::new(None).unwrap();
+
+        let options: Vec<(String, String)> = vec![
+            ("Action".to_string(), "action".to_string()),
+            ("Comedy".to_string(), "comedy".to_string()),
+        ];
+        let bytes = kani_shared::serde_json::to_vec(&options).unwrap();
+        cache
+            .put(
+                "fetched_opts:1",
+                "genres-v1",
+                bytes,
+                std::time::Duration::from_secs(600),
+            )
+            .await;
+
+        let def = make_def(Some("genres-v1"));
+        let result = resolve_option_set(&*cache, &client, 1, &def).await;
+
+        let result = result.expect("cache hit must return Some");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("Action".to_string(), "action".to_string()));
+        assert_eq!(result[1], ("Comedy".to_string(), "comedy".to_string()));
+    }
+
+    #[tokio::test]
+    async fn resolve_option_set_returns_none_on_network_failure() {
+        let cache = Arc::new(InMemoryCache::new());
+        let client = kani_core::http::SmartClient::new(None).unwrap();
+        let def = make_def(None);
+        let result = resolve_option_set(&*cache, &client, 1, &def).await;
+        assert!(
+            result.is_none(),
+            "unreachable URL must return None (no cache, fetch fails)"
+        );
     }
 }

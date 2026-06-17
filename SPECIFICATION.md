@@ -825,6 +825,30 @@ Concatenates multiple lists. Each element of `"lists"` must evaluate to a `List`
 
 Reads the named value from the document-level `scalars` map, computed before per-element iteration begins. The scalar must be declared in the `scalars` section of the blueprint.
 
+#### Composite ID Encoding (`encoded_field`)
+
+```json
+{
+  "op": "encoded_field",
+  "subfields": [["manga_id", { "op": "var", "name": "$id" }], ["ch_id", { ... }]],
+  "delimiter": "|",
+  "encoding": "Base64Url"
+}
+```
+
+Evaluates each subfield expression to a string, joins the results with `delimiter`, then encodes the concatenated value with `encoding`. The result is a single string suitable for use as a composite identifier.
+
+`"encoding"` is one of:
+
+| Value | Encoding |
+|-------|----------|
+| `"Base64Url"` | URL-safe Base64 without padding |
+| `"Base64"` | Standard Base64 |
+| `"Passthrough"` | No encoding; the joined string is returned as-is |
+| `"Hex"` | Hexadecimal encoding of the UTF-8 bytes |
+
+`"subfields"` is an array of `[field_name, expr]` pairs. Field names are used as keys when decoding the composite ID back into its constituent parts (the inverse is `decode_composite`). Available via the Rust builder as `Expr::encoded_field(subfields, delimiter, IdEncoding::Base64Url)`.
+
 #### Sub-blueprint Fetch (Rust builder only)
 
 ```json
@@ -939,6 +963,14 @@ language: string        # ISO 639-1 code or "multi" (default: "en")
 nsfw: bool              # Whether the source contains NSFW content (default: false)
 unrestricted_http: bool # Whether the extension needs to contact external hosts (default: false)
 
+# === Schema/compatibility versioning ===
+schema_version: integer            # YAML schema version this file targets (default: current; error if newer than this kani-cli supports)
+min_kani_version: string           # Optional semver floor on the host version required to install this extension
+requires_capabilities: [string]    # Optional list of host capability flags this extension requires
+
+# === Extended metadata (icon, rate limiting, languages, sections, ...) ===
+metadata: MetadataBlock
+
 # === Endpoint definitions ===
 endpoints:
   popular: PopularEndpoint
@@ -950,6 +982,10 @@ endpoints:
 # === Optional sections ===
 filters: FilterList
 preferences: PreferenceList
+option_sets: OptionSetMap   # Named, reusable option lists referenced via `options_ref`
+id_encoding: IdEncodingBlock  # Composite ID encode/decode for manga and/or chapter IDs
+cache: CacheMap              # Named cache namespaces this extension wants the host to manage
+chapter_sort: ChapterSortBlock # Optional. Chapter sort options exposed to the host.
 ```
 
 ### 3.2 Endpoint Types
@@ -998,6 +1034,161 @@ Inside `route`, `queries`, and `headers`, values wrapped in `$...$` are replaced
 | `$manga_id$` | manga_details, chapter_list, pages | The manga identifier |
 | `$chapter_id$` | pages | The chapter identifier |
 | `$pref:key$` | any | Value of a user preference |
+| `$<role>.<field>$` | manga_details, chapter_list, pages | Subfield of a composite ID declared in `id_encoding.<role>` (see [Composite ID Encoding](#composite-id-encoding) below) |
+
+#### Composite ID Encoding
+
+Some sources expose IDs that are naturally composed of multiple sub-values (e.g. a manga "hid" plus a slug, or a chapter id plus a language code). The top-level `id_encoding` block declares how a multi-field composite ID is packed into the single string the client sees, and how to unpack it again when building requests.
+
+```yaml
+id_encoding:
+  manga:
+    fields: [hid, slug]
+    delimiter: "|"          # Default: "|"
+    encoding: base64_url    # base64_url (default) | base64 | passthrough | hex
+  chapter:
+    fields: [hid]
+    encoding: passthrough
+```
+
+`encoding` controls how the delimiter-joined field string is encoded for transport:
+
+| Value | Description |
+|-------|-------------|
+| `base64_url` | URL-safe base64, no padding (default) |
+| `base64` | Standard base64 |
+| `passthrough` | No encoding — the joined string is used as-is |
+| `hex` | Hex-encoded |
+
+**Encoding (building a composite ID field):** in `popular`/`search`/`manga_details` use role `manga`; in `chapter_list` use role `chapter`. Instead of a single DSL string, give `id` (or any field) a map of subfield name → DSL expression, with keys matching exactly the declared `fields` list for that role:
+
+```yaml
+fields:
+  id:
+    hid: 'self.attr("data-hid")'
+    slug: 'self.attr("data-slug")'
+```
+
+This compiles to an `encoded_field` expression that evaluates each subfield, joins the results with `delimiter`, and encodes the joined string per `encoding`.
+
+**Decoding (unpacking a composite ID in a route or query):** reference an individual subfield with a dotted placeholder `$<role>.<field>$`, e.g.:
+
+```yaml
+chapter_list:
+  route: "/manga/$manga.hid$/$manga.slug$"
+```
+
+Codegen decodes the incoming `manga_id`/`chapter_id` function argument once at the top of the method and binds one local per referenced subfield (sanitized to `<role>_<field>`, since `.` is not a valid Rust identifier character). Only roles actually referenced by an endpoint's `route`/`queries` incur a decode call.
+
+#### Cache Namespaces
+
+The top-level `cache` block declares named cache namespaces an extension intends to use, separate from the per-key `cache::*` calls described in [§4 Extension Cache Interface](#4-extension-cache-interface):
+
+```yaml
+cache:
+  search_results:
+    scope: extension       # extension (default) | installation | user
+    ttl: 1800               # Seconds; default 3600, max 30 days
+    max_entries: 200         # Optional cap; unset = backend default
+    key_template: "search:{query}:{page}"  # Optional, free-form; interpreted by the consuming runtime
+```
+
+Each entry is validated (non-empty name, no `:`/`/`, `ttl` ≤ 30 days, non-empty `key_template` when present) and emitted by codegen as a `kani_shared::CacheNamespace` entry in a generated `pub static CACHE_REGISTRY: &[kani_shared::CacheNamespace]`. This phase only declares the registry — the runtime call-sites that read/write entries under a declared namespace (driven by Rhai `pre_request:` hooks) are owned by the Rhai scripting extension cluster.
+
+#### Extension Metadata
+
+The top-level `metadata` block carries the parts of an extension's identity that aren't required to construct a request or run extraction — icon, rate limiting, supported languages, a description, and content sections — plus the top-level `schema_version`/`min_kani_version`/`requires_capabilities` fields that gate installation:
+
+```yaml
+schema_version: 1                  # Default: current schema version kani-cli supports
+min_kani_version: "0.5.0"          # Optional semver floor; install is rejected on older hosts
+requires_capabilities:
+  - "unrestricted_http"            # Optional; install is rejected if the host lacks a listed capability
+
+metadata:
+  icon: "<base64-encoded PNG/WebP/SVG, ≤ 64KB decoded>"
+  rate_limit:
+    rps: 2.0                       # Requests per second. Default: 2.0
+    burst: 8                       # Default: 8
+    max_concurrent: 4              # Default: 4
+  languages:
+    - "en"
+    - "ja"
+  description: "A short, human-readable description of this source."
+  sections:
+    - id: "latest"
+      name: "Latest"
+      nsfw: false                  # Default: false
+```
+
+All `metadata` fields are optional and additive — an extension YAML with no `metadata`/`schema_version`/`min_kani_version`/`requires_capabilities` keys at all continues to work unchanged. `metadata` is encoded into the generated `ExtensionMetadata` struct (`kani-shared/src/extension.rs`), which crosses the WIT boundary as a single JSON-encoded string returned by `get-metadata` — adding further fields to `ExtensionMetadata` in the future is a serde-only change and does not require touching the WIT interface.
+
+##### Install-time gating and host persistence
+
+`install_source` (`kani-web/src/rest/mod.rs`) decodes the `ExtensionMetadata` JSON string returned by `get-metadata` and, before persisting anything, runs two compatibility checks (`kani-web/src/install_gating.rs`):
+
+- **`min_kani_version`** — parsed as semver and compared against the running host's version (`kani_web::KANI_VERSION`). Install is rejected if the host is older than the declared floor.
+- **`requires_capabilities`** — each entry must appear in the host's `HOST_CAPABILITIES` allow-list (currently `["unrestricted_http"]`). Install is rejected if any requested capability is unrecognized.
+
+Both checks return a `Result<(), String>`; failures are surfaced as `AppError::ValidationError` with a human-readable message naming the offending version/capability. Installation that passes gating persists `icon`, `description`, `languages` (JSON-encoded `Vec<String>`), and `schema_version` onto the `sources` table row, alongside the existing `name`/`version`/`base_url`/`unrestricted_http` columns (`migrations/20260616233000_add_source_metadata.sql`). These four columns are also added to `kani_shared::types::Source` and round-trip through `get_source`/`list_sources`/library scan queries. The frontend (`static/js/pages/source-details.js`, `static/js/components/sources-sidebar.js`) reads them directly off the `Source` object: the sidebar list item swaps the initial-letter avatar for the decoded `icon` (`data:image/png;base64,...`) when present, and the source details page's "About" card shows the icon, description, and a `languages` chip list (parsed from the JSON column).
+
+#### Chapter Sort
+
+The top-level `chapter_sort` block declares the sort options this extension exposes for chapter lists. When present, codegen emits a real `get_chapter_sort_list()` returning the declared options and, if `default` is set, overrides `default_chapter_sort()` on the extension struct. When absent, the stub `get_chapter_sort_list()` returns an empty vec.
+
+```yaml
+chapter_sort:
+  default: "number_desc"   # Optional. Must match one of the declared option ids.
+  options:
+    - id: "number_desc"
+      label: "Chapter (descending)"
+    - id: "number_asc"
+      label: "Chapter (ascending)"
+    - id: "date_desc"
+      label: "Date added"
+```
+
+Validation rules: `options` must be non-empty; each option `id` must be non-empty; `default`, when present, must name one of the declared option ids.
+
+#### Endpoint Chaining (`then` / `for_each`)
+
+Endpoints can chain sub-fetches to enrich their results without writing Rust. Two flavours:
+
+- **`then`** — document-level (a single sub-fetch per main request). The result is bound as `$merge_as` in the blueprint's variable environment; subsequent field expressions can reference it.
+- **`for_each`** — per-element (one sub-fetch per main-result row). The result is stored as the `merge_as` field in each row's JSON object.
+
+```yaml
+endpoints:
+  search:
+    route: "https://example.com/search"
+    fields:
+      id: "dom('.id').text()"
+      title: "dom('.title').text()"
+    for_each:
+      - endpoint: manga_details    # Name of another declared endpoint; its blueprint is used.
+        url_expr: "dom('.link').attr('href')"  # DSL expression (evaluated per-element for for_each).
+        merge_as: details          # Output field / binding name.
+        concurrency: 1             # Max parallel sub-fetches (1–5, default 1).
+        on_failure: skip           # "skip" | "fail" | "<dsl fallback expr>" (default: "fail").
+    then:
+      - endpoint: manga_details
+        url_expr: "dom('.banner-link').attr('href')"
+        merge_as: banner_info
+        on_failure: "lit(\"\")"    # DSL fallback expression on error.
+```
+
+**`on_failure`** controls what happens when the sub-fetch or extraction fails:
+- `skip` — produce `null` for this field/binding; continue processing other rows.
+- `fail` — propagate the error (default).
+- `"<dsl expr>"` — any other string is treated as a DSL expression evaluated as a fallback value.
+
+**Validation rules:**
+- `endpoint` must name one of `popular`, `search`, `manga_details`, `chapter_list`, or `pages` declared in the same YAML.
+- `merge_as` must be non-empty.
+- `url_expr` must parse as a valid DSL expression.
+- `concurrency` must be between 1 and 5 (inclusive).
+- `deduplicate_by` (optional) must parse as a DSL expression.
+- Nested chaining (a referenced endpoint that itself has `then`/`for_each` steps) is not evaluated — the sub-blueprint is built from the referenced endpoint's fields only.
 
 #### PopularEndpoint
 
@@ -1185,7 +1376,69 @@ filters:
     default:
       name: All
       value: ""
+
+  - id: genres
+    name: Genres
+    type: multiselect
+    options_ref: genres    # Resolve options from a shared `option_sets` entry instead of inlining
+
+  - id: year_range
+    name: Year range
+    type: date_range       # Or int_range. Requires min and max.
+    min: 1900
+    max: 2100
 ```
+
+**Filter kinds:** `checkbox`, `select`, `multiselect`, `sort`, `text_input`, `int_range`, `date_range`. The WIT `filter-state` surface has no dedicated range variant yet, so `int_range`/`date_range` filters are emitted as `TextInput` in `filter_list!`; pair them with a `tuple_split` filter mapping (below) to submit the range as two query parameters from a single colon-delimited text value (e.g. `"1900:2100"`).
+
+**`name_i18n`:** optional alternate i18n key for the filter's display name, carried through validation but not yet consumed by codegen.
+
+**Option sets (`options_ref`):** instead of inlining `options:` on every filter or preference, declare a named, reusable list at the top level under `option_sets` and reference it via `options_ref`:
+
+```yaml
+option_sets:
+  genres:
+    - name: Action
+      value: action
+    - name: Romance
+      value: romance
+      nsfw: true            # Optional per-option NSFW flag
+
+  tags:
+    options_fetched_by:      # Lazily resolved by the host at filter-panel render time
+      route: "/api/tags"
+      type: json              # "html" (default) or "json"
+      container: "$.tags"
+      fields:
+        name: 'self.field("name").text()'
+        value: 'self.field("id").text()'
+        adult: 'self.field("adult").text()'  # Any extra fields are available for nsfw_field
+      nsfw_field: adult        # Optional. Options where this field is "true"/"1" are dropped unless NSFW is allowed
+      cache:
+        ttl: 600               # Seconds, max 30 days
+        key: tags-v1
+
+filters:
+  - id: genre
+    name: Genre
+    type: select
+    options_ref: genres
+
+  - id: tag
+    name: Tag
+    type: multiselect
+    options_ref: tags
+```
+
+A `Static` option set (a plain YAML sequence) is resolved and inlined directly into the generated `filter_list!`/`preference_list!` call at codegen time.
+
+A `Fetched` option set (`options_fetched_by`) declares a remote source for the options. Codegen emits an empty options list for the filter itself but also generates a `get_fetched_option_sets()` WIT export returning a JSON array of `FilterFetchDef` records. The host calls this at filter-panel render time, fetches each route using `SmartClient`, parses the response per `container` + `fields`, and injects the resolved options back into the returned `FilterList`. Results are cached in the host's `ext_cache` under the key `"fetched_opts:{source_id}"` with the TTL from the `cache:` block (default 300 s).
+
+**`fields` format:**
+- For HTML (`type: html`): values are CSS selectors yielding text. Attribute extraction uses `"selector|attribute"` (e.g., `"a|href"`); `"self"` or `"self|attr"` refers to the container element.
+- For JSON (`type: json`): values are JSON Pointer paths (e.g., `/name`, `/meta/id`).
+
+**NSFW filtering:** Set `nsfw_field` on an `options_fetched_by` block to the name of a field in the `fields` map. Options where that field's value is `"true"` or `"1"` are dropped by the host unless the source/install permits NSFW content. The field name is embedded in the emitted `FilterFetchDef` JSON.
 
 **Filter-to-query mapping:** When an endpoint receives filters, the codegen needs to know how to convert active filter values into query parameters. This is defined in the endpoint:
 
@@ -1195,12 +1448,34 @@ search:
   queries:
     q: $query$
   filter_mapping:
-    genre: genre          # Filter group "genre" maps to query param "genre"  
+    genre: genre          # Filter group "genre" maps to query param "genre"
     type: type            # Filter "type" maps to query param "type"
     status: status        # Filter "status" maps to query param "status"
+    year_range:
+      kind: tuple_split    # Splits a "from:to" TextInput value into two query params
+      from_param: year_from
+      to_param: year_to
   container: "..."
   fields: { ... }
 ```
+
+**`filter_format` (optional, per-endpoint):** controls how filter values are serialized into query parameters when the default encoding doesn't match the source's API:
+
+```yaml
+search:
+  route: "/search"
+  filter_mapping:
+    genres: genre
+  filter_format:
+    multiselect: bracket        # "default" (repeated param) | "bracket" (param[]) | "comma_separated" | "repeated"
+    omit_empty: false            # Default: true. When false, emits an explicit query for an unchecked checkbox.
+    bool_format: one_zero        # "true_false" (default) | "one_zero" | "yes_no"
+    array_separator: "|"         # Separator used by "comma_separated". Default: ",". Must not be empty.
+  container: "..."
+  fields: { ... }
+```
+
+When `filter_format` is omitted, codegen output is byte-identical to the pre-`filter_format` emission (repeated query params for multiselect, `"true"`/`"false"` literals for checkboxes, no explicit unchecked-checkbox query).
 
 ### 3.5 Preferences Section
 
@@ -1230,6 +1505,11 @@ preferences:
     label: "Show NSFW Content"
     kind: toggle
     default: "false"
+
+  - key: preferred_tags
+    label: "Preferred Tags"
+    kind: select
+    options_ref: tags    # Resolve options from a top-level `option_sets` entry (see §3.4)
 ```
 
 ### 3.6 Complete Schema Reference
@@ -1243,6 +1523,23 @@ base_url: string                # Required. Base URL.
 language: string                # Optional. Default: "en".
 nsfw: bool                      # Optional. Default: false.
 unrestricted_http: bool         # Optional. Default: false.
+schema_version: integer         # Optional. Default: current schema version.
+min_kani_version: string        # Optional. Semver floor on the host version.
+requires_capabilities: [string] # Optional. Host capability flags required to install.
+
+# Extension metadata (optional)
+metadata:
+  icon: string                  # Optional. Base64-encoded PNG/WebP/SVG, ≤ 64KB decoded.
+  rate_limit:
+    rps: number                 # Optional. Default: 2.0. Must be > 0.
+    burst: integer              # Optional. Default: 8.
+    max_concurrent: integer     # Optional. Default: 4.
+  languages: [string]           # Optional.
+  description: string           # Optional.
+  sections:
+    - id: string                 # Required, non-empty, unique within `sections`.
+      name: string
+      nsfw: bool                 # Optional. Default: false.
 
 # Endpoints (all optional but at least one should be defined)
 endpoints:
@@ -1253,7 +1550,8 @@ endpoints:
     method: string              # Default: "GET"
     headers: map<string, string>
     queries: map<string, string>
-    filter_mapping: map<string, string>
+    filter_mapping: map<string, FilterMappingEntry>
+    filter_format: FilterFormatCfg # Optional. Controls filter -> query serialization.
     type: "html" | "json"       # Default: "html"
     container: string
     bindings: map<string, string>
@@ -1267,7 +1565,8 @@ endpoints:
     method: string              # Default: "GET"
     headers: map<string, string>
     queries: map<string, string>
-    filter_mapping: map<string, string>
+    filter_mapping: map<string, FilterMappingEntry>
+    filter_format: FilterFormatCfg # Optional. Controls filter -> query serialization.
     type: "html" | "json"       # Default: "html"
     container: string
     bindings: map<string, string>
@@ -1320,23 +1619,58 @@ endpoints:
 filters:
   - id: string
     name: string
-    type: "checkbox" | "select" | "text_input" | "sort"
-    options:                    # For select/sort types
+    name_i18n: string           # Optional. Alternate i18n key for the display name.
+    type: "checkbox" | "select" | "text_input" | "sort" | "multiselect" | "int_range" | "date_range"
+    options:                    # For select/sort/multiselect types (inline)
       - name: string
         value: string
+        nsfw: bool               # Optional. Default: false.
+    options_ref: string         # Optional. Resolve options from `option_sets.<name>` instead of inlining.
+    min: number                  # Required for int_range/date_range
+    max: number                  # Required for int_range/date_range
+    step: number                 # Optional, for int_range/date_range
     default:                    # Optional
       name: string
       value: string
     semantic: "author" | "artist" | "tag"  # Optional hint
+
+# FilterMappingEntry is either:
+#   - A bare string (query param name; "simple" mapping)
+#   - A map with `kind: sort_pair` and asc_param/desc_param
+#   - A map with `kind: tuple_split`, from_param, to_param (splits a "from:to" TextInput value)
+
+# FilterFormatCfg (optional, per-endpoint)
+filter_format:
+  multiselect: "default" | "bracket" | "comma_separated" | "repeated"  # Default: "default"
+  omit_empty: bool                # Default: true
+  bool_format: "true_false" | "one_zero" | "yes_no"                     # Default: "true_false"
+  array_separator: string         # Default: ",". Must not be empty.
+
+# Option sets (top-level, optional)
+option_sets:
+  <name>:                         # Static: a plain sequence of options
+    - name: string
+      value: string
+      nsfw: bool                   # Optional. Default: false.
+  <name>:                         # Fetched: resolved lazily by the host at render time
+    options_fetched_by:
+      route: string
+      type: "html" | "json"        # Default: "html"
+      container: string
+      fields: map<string, string>  # DSL expressions, evaluated per resolved option
+      cache:
+        ttl: integer                # Seconds. Default: 3600. Max: 30 days.
+        key: string
 
 # Preferences
 preferences:
   - key: string
     label: string
     kind: "toggle" | "select" | "text" | "multi_value_list"
-    options:                    # For select kind
+    options:                    # For select kind (inline)
       - name: string
         value: string
+    options_ref: string         # Optional. Resolve options from `option_sets.<name>` instead of inlining.
     default: string
     description: string         # Optional
     secret: bool                # Optional, for text kind. Default: false.
@@ -1350,7 +1684,84 @@ pagination:
   cursor_field: string               # For "cursor" type: JSON Pointer to next-page token in response
 ```
 
-### 3.7 YAML Validation Rules
+### 3.7 Multi-Source Factory
+
+A single YAML file can act as a template that produces multiple extension WASM outputs via a top-level `factory:` block. This eliminates copy-paste when a content network hosts many regional or language-specific subdomains that share the same extraction logic.
+
+```yaml
+factory:
+  sources:
+    - id: my-source-en       # Required. Must be unique across all sources.
+      name: My Source (EN)   # Required. Display name for this source.
+      base_url: "https://en.example.com"
+      language: en
+      mihon_source_id: 123456789   # Optional.
+      overrides:                   # Optional. Dot-path keyed values applied on top of the template.
+        endpoints.search.route: "/en/search?q=$query$"
+
+    - id: my-source-ja
+      name: My Source (JA)
+      base_url: "https://ja.example.com"
+      language: ja
+      overrides:
+        endpoints.search.route: "/ja/search?q=$query$"
+        endpoints.popular.route: "/ja/top"
+```
+
+**How it works:**
+
+1. `kani-cli build my-source.yaml` detects the `.yaml` extension and enters factory mode.
+2. The factory block is validated (`validate_factory`): sources must be non-empty; IDs must be non-empty, unique, and non-duplicate; `base_url` and `name` must be non-empty.
+3. For each source entry, the template's YAML value tree is cloned and the source's named fields (`id`, `name`, `base_url`, `language`, `mihon_source_id`) are written as top-level overrides; then the dot-path `overrides` map is applied recursively.
+4. The expanded YAML is validated as a standalone extension (all standard validation rules apply).
+5. A Rust crate is generated to `kani-extensions/kani-{source.id}/` and then compiled to `wasm_sources/{source.id}.wasm`.
+
+**Dot-path override semantics:** keys use `.` as a path separator. Each segment descends into a YAML mapping. If an intermediate key is absent, a new empty mapping is created. Leaf values replace whatever was there. Unknown paths produce a stderr warning but do not abort the build.
+
+**Validation rules for `factory`:**
+- `factory.sources` must not be empty.
+- Each source's `id` must be non-empty and unique within the factory block.
+- Each source's `name` and `base_url` must be non-empty.
+
+### 3.8 Browser Payload Endpoints
+
+Endpoints can declare `via: browser_payload` to indicate that the page must be loaded in a headless browser rather than fetched via direct HTTP. Codegen emits a `capture_page_payload` call with the declared script and timeout; the browser *runtime* (Chromium lifecycle, `passPayload` injection, `AllowedHost` gating, resource caps) is tracked in `overviews/EXT_BROWSER_PAYLOAD_FEATURE_OVERVIEW.md`.
+
+```yaml
+browser_scripts:
+  fetch_manga: |
+    // Script injected into the headless browser page.
+    // Must call passPayload(jsonString) with the data to extract.
+    fetch('/api/manga')
+      .then(r => r.json())
+      .then(data => passPayload(JSON.stringify(data)));
+
+endpoints:
+  manga_details:
+    via: browser_payload          # Required: marks this as a browser endpoint.
+    page_url: "https://example.com/manga/$manga_id$"  # Required. Loaded in the browser.
+    script: fetch_manga           # Required. Must be declared in browser_scripts.
+    timeout_ms: 15000             # Optional. Default: 30000.
+    container: ":root"
+    fields:
+      id:   { expr: "json(\"/id\").text()" }
+      title: { expr: "json(\"/title\").text()" }
+      status: { expr: "json(\"/status\").text()" }
+```
+
+**`browser_scripts`:** top-level map from script name to JavaScript source. Each script is written to `src/scripts/<name>.js` in the generated crate and accessed via `static SCRIPT_<NAME>: &str = include_str!("scripts/<name>.js")`. Scripts that do not call `passPayload` produce a warning during validation.
+
+**`page_url`:** the absolute URL to load. May use `$manga_id$` and `$chapter_id$` placeholders (substituted from endpoint function arguments).
+
+**`route`:** ignored when `via: browser_payload` is set (produces a warning).
+
+**Validation rules for `via: browser_payload`:**
+- `page_url` must be present and non-empty.
+- `script` must be present, non-empty, and declared in `browser_scripts`.
+- `browser_scripts` entries must have non-empty names and non-empty source.
+- Scripts that do not call `passPayload` produce a warning (not an error).
+
+### 3.9 YAML Validation Rules
 
 The `kani-cli validate` command checks:
 
@@ -1364,6 +1775,15 @@ The `kani-cli validate` command checks:
 8. **Preference references:** All `$pref:key$` references must correspond to a declared preference.
 9. **Filter mapping:** All filter mapping keys must correspond to declared filter group IDs.
 10. **No unused bindings:** Warn if a top-level binding is declared but never referenced.
+11. **`filter_format`:** `array_separator` must not be empty.
+12. **`options_ref`:** every filter or preference `options_ref` must resolve to a declared `option_sets` entry.
+13. **Range filters:** `int_range`/`date_range` filters must declare both `min` and `max`.
+14. **Option sets:** a `Fetched` (`options_fetched_by`) entry's `route` must not be empty; its `cache.key` must not be empty and `cache.ttl` must not exceed 30 days.
+15. **`metadata.icon`:** must be valid base64, decode to ≤ 64KB, and match a recognized PNG/WebP/SVG signature.
+16. **`metadata.rate_limit.rps`:** must be greater than 0.
+17. **`metadata.sections`:** each entry's `id` must be non-empty and unique within `sections`.
+18. **`schema_version`:** must not exceed the schema version this `kani-cli` supports.
+19. **`min_kani_version`:** when present, must be a valid semver version string.
 
 ---
 

@@ -227,6 +227,7 @@ impl AppService {
             kani_shared::types::Source,
             "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, \
              s.unrestricted_http, s.download_concurrency, \
+             s.icon, s.description, s.languages, s.schema_version, \
              scb.state as circuit_state \
              FROM sources s \
              LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id \

@@ -12,9 +12,9 @@ use crate::service::import::tachiyomi::{
 };
 use crate::service::trackers::{TrackerMangaResult, TrackerMappingItem, TrackerStatusItem};
 use kani_shared::types::{
-    AppSettings, Category, Chapter, ChapterSortOption, ChapterSortOrder, ContinueReadingChapter,
-    DownloadRule, DownloadRuleKind, MangaTracking, MangaTrackingStatus, MigrationPreview,
-    MigrationResult, ScanlatorPreference, SettingsUpdate, Source,
+    AppSettings, Category, Chapter, ChapterSortOrder, ContinueReadingChapter, DownloadRule,
+    DownloadRuleKind, MangaTracking, MangaTrackingStatus, MigrationPreview, MigrationResult,
+    ScanlatorPreference, SettingsUpdate, SortOption, Source,
 };
 
 #[async_trait::async_trait]
@@ -53,7 +53,7 @@ pub trait SourceDomain: Send + Sync {
         page_size: i32,
         sort: Option<String>,
     ) -> Result<String>;
-    async fn get_chapter_sort_list(&self, id: i64) -> Result<Vec<ChapterSortOption>>;
+    async fn get_chapter_sort_list(&self, id: i64) -> Result<Vec<SortOption>>;
     async fn set_source_download_concurrency(
         &self,
         id: i64,
@@ -153,7 +153,7 @@ impl SourceDomain for AppService {
             .await
     }
 
-    async fn get_chapter_sort_list(&self, id: i64) -> Result<Vec<ChapterSortOption>> {
+    async fn get_chapter_sort_list(&self, id: i64) -> Result<Vec<SortOption>> {
         self.get_chapter_sort_list(id).await
     }
 
@@ -191,10 +191,7 @@ pub trait DownloadDomain: Send + Sync {
     async fn cancel_download(&self, chapter_id: ChapterId) -> Result<()>;
     async fn cancel_all_global_downloads(&self) -> Result<()>;
     async fn get_download_history(&self, limit: i64) -> Result<Vec<serde_json::Value>>;
-    async fn get_manga_download_status(
-        &self,
-        manga_id: MangaId,
-    ) -> Result<serde_json::Value>;
+    async fn get_manga_download_status(&self, manga_id: MangaId) -> Result<serde_json::Value>;
 }
 
 #[async_trait::async_trait]
@@ -223,10 +220,7 @@ impl DownloadDomain for AppService {
         self.get_download_history(limit).await
     }
 
-    async fn get_manga_download_status(
-        &self,
-        manga_id: MangaId,
-    ) -> Result<serde_json::Value> {
+    async fn get_manga_download_status(&self, manga_id: MangaId) -> Result<serde_json::Value> {
         self.get_manga_download_status(manga_id).await
     }
 }
@@ -685,19 +679,14 @@ impl MangaDomain for AppService {
     }
 
     async fn queue_manga_scan(&self, manga_id: MangaId, trigger: String) -> Result<uuid::Uuid> {
-        let row = sqlx::query!(
-            "SELECT source_id, name FROM manga WHERE id = ?",
-            manga_id
-        )
-        .fetch_optional(&self.db)
-        .await?
-        .ok_or_else(|| crate::error::ServiceError::NotFound(format!("Manga {manga_id} not found")))?;
-        let job = crate::jobs::download::SourceScanJob::new(
-            manga_id.0,
-            row.name,
-            row.source_id,
-            trigger,
-        );
+        let row = sqlx::query!("SELECT source_id, name FROM manga WHERE id = ?", manga_id)
+            .fetch_optional(&self.db)
+            .await?
+            .ok_or_else(|| {
+                crate::error::ServiceError::NotFound(format!("Manga {manga_id} not found"))
+            })?;
+        let job =
+            crate::jobs::download::SourceScanJob::new(manga_id.0, row.name, row.source_id, trigger);
         self.job_manager
             .submit(job)
             .await
@@ -1236,7 +1225,7 @@ mod tests {
         ) -> Result<String> {
             unimplemented!()
         }
-        async fn get_chapter_sort_list(&self, _id: i64) -> Result<Vec<ChapterSortOption>> {
+        async fn get_chapter_sort_list(&self, _id: i64) -> Result<Vec<SortOption>> {
             unimplemented!()
         }
         async fn set_source_download_concurrency(
@@ -1272,6 +1261,10 @@ mod tests {
             unrestricted_http: false,
             download_concurrency: None,
             circuit_state: None,
+            icon: None,
+            description: None,
+            languages: None,
+            schema_version: 1,
         };
         let svc: Arc<dyn SourceDomain> = Arc::new(FixedSources { list: vec![source] });
         let result = svc.list_sources().await.unwrap();
@@ -1558,7 +1551,11 @@ mod tests {
         async fn download_all_chapters(&self, _manga_id: MangaId) -> Result<uuid::Uuid> {
             unimplemented!()
         }
-        async fn queue_manga_scan(&self, _manga_id: MangaId, _trigger: String) -> Result<uuid::Uuid> {
+        async fn queue_manga_scan(
+            &self,
+            _manga_id: MangaId,
+            _trigger: String,
+        ) -> Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn cancel_all_downloads(&self, _manga_id: MangaId) -> Result<()> {

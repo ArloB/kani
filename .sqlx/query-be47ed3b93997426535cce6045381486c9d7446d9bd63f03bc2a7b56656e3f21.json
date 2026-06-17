@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, s.unrestricted_http, s.download_concurrency, scb.state as circuit_state FROM sources s LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id WHERE s.id = ? AND s.deleted_at IS NULL",
+  "query": "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http, download_concurrency, icon, description, languages, schema_version, CAST(NULL AS TEXT) as circuit_state FROM sources WHERE enabled = 1 AND deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -44,13 +44,33 @@
         "type_info": "Integer"
       },
       {
-        "name": "circuit_state",
+        "name": "icon",
         "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "description",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "languages",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "schema_version",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "circuit_state",
+        "ordinal": 12,
         "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       false,
@@ -61,8 +81,12 @@
       false,
       false,
       true,
+      true,
+      true,
+      true,
+      false,
       true
     ]
   },
-  "hash": "0fe5932906e04fc3bd162c018e2fa0fb1d03b54212de44799e9c1683914c49a1"
+  "hash": "be47ed3b93997426535cce6045381486c9d7446d9bd63f03bc2a7b56656e3f21"
 }

@@ -713,6 +713,30 @@ where
             .cloned()
             .unwrap_or(Value::Null))),
 
+        Expr::EncodedField {
+            subfields,
+            delimiter,
+            encoding,
+        } => Some(
+            (async {
+                let mut parts: Vec<String> = Vec::with_capacity(subfields.len());
+                for (_, expr) in subfields {
+                    let val = recurse(expr, env.clone()).await?;
+                    let s = match val {
+                        Value::Str(s) => s,
+                        Value::Null => String::new(),
+                        other => other.into_str("encoded_field")?,
+                    };
+                    parts.push(s);
+                }
+                let part_refs: Vec<&str> = parts.iter().map(String::as_str).collect();
+                Ok(Value::Str(crate::evaluator::id_encoding::encode_composite(
+                    &part_refs, delimiter, encoding,
+                )))
+            })
+            .await,
+        ),
+
         _ => None,
     }
 }

@@ -21,7 +21,6 @@ use crate::{
     },
     permissions::AuthRequirement,
     state::AppState,
-    types::Source,
 };
 use axum::{
     Json, Router,
@@ -42,7 +41,6 @@ pub use kani_app::service::traits::{
     CategoryDomain, ChapterDomain, DownloadDomain, JobDomain, LibraryDomain, MangaDomain,
     ScanlatorDomain, SettingsDomain, SourceDomain, TrackerDomain,
 };
-use kani_core::source_manager::SourceManager;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::marker::PhantomData;
@@ -565,188 +563,6 @@ async fn image_proxy(
         Body::from(body.clone()),
     )
         .into_response())
-}
-
-pub(crate) async fn install_source(
-    state: &AppState,
-    id: i64,
-    current_source: &Source,
-    bytes: &[u8],
-) -> Result<std::path::PathBuf, AppError> {
-    let bytes_owned = bytes.to_vec();
-    let runtime_clone = state.wasm_runtime.clone();
-
-    let component =
-        tokio::task::spawn_blocking(move || runtime_clone.compile_component(&bytes_owned))
-            .await
-            .map_err(|e| {
-                AppError::InternalServerError(format!("WASM compilation task panicked: {}", e))
-            })??;
-
-    let (metadata, raw_schema) = {
-        let mut inst =
-            kani_core::sources::SourceInstance::new(state.smart_client.clone(), None, false);
-        inst.load(
-            state.wasm_runtime.engine(),
-            &component,
-            state.wasm_runtime.linker(),
-        )
-        .await
-        .map_err(AppError::CoreError)?;
-        let meta = inst.get_metadata().await.map_err(AppError::CoreError)?;
-        let schema = inst.get_preferences().await.ok();
-        (meta, schema)
-    };
-
-    const RESERVED_IDS: &[&str] = &["example", "test-abi"];
-    if RESERVED_IDS.contains(&metadata.id.as_str()) {
-        return Err(AppError::ValidationError(format!(
-            "Extension ID '{}' is reserved for development use and cannot be installed",
-            metadata.id
-        )));
-    }
-
-    sqlx::query!(
-        "UPDATE sources SET name = ?, version = ?, base_url = ?, unrestricted_http = ? WHERE id = ?",
-        metadata.id,
-        metadata.version,
-        metadata.base_url,
-        metadata.unrestricted_http,
-        id
-    )
-    .execute(&state.db)
-    .await?;
-
-    let settings = state.settings.read().await;
-    let storage_path = settings
-        .wasm_storage_path
-        .to_str()
-        .ok_or_else(|| AppError::InternalServerError("Failed to convert path".to_string()))?;
-
-    if current_source.name != metadata.id {
-        tracing::info!(
-            "Source name changed from {} to {}. Deleting old file.",
-            current_source.name,
-            metadata.id
-        );
-        let _ = kani_core::file_storage::delete_wasm_file(storage_path, &current_source.name).await;
-    }
-
-    let path = kani_core::file_storage::save_wasm(storage_path, &metadata.id, bytes)
-        .await
-        .map_err(AppError::CoreError)?;
-    drop(settings);
-
-    let source_manager = SourceManager::new(
-        state.wasm_runtime.engine().clone(),
-        state
-            .wasm_runtime
-            .instantiate_pre(&component)
-            .map_err(AppError::CoreError)?,
-        state.smart_client.clone(),
-        Some(metadata.base_url.clone()),
-        metadata.unrestricted_http,
-        25,
-        state.load_pref_map(id).await.unwrap_or_default(),
-        std::sync::Arc::clone(&state.ext_cache),
-        format!("{}:", metadata.id),
-    );
-
-    state
-        .sources
-        .write()
-        .await
-        .insert(id, Arc::new(source_manager));
-
-    if let Some(schema) = raw_schema {
-        state.cache.insert_preference_schema(id, schema);
-    }
-
-    state.cache.invalidate_source(id);
-
-    tracing::info!(
-        "Successfully installed source {}: {} v{}",
-        id,
-        metadata.name,
-        metadata.version
-    );
-
-    Ok(path)
-}
-
-async fn reload_source(state: &AppState, id: i64) -> Result<(), AppError> {
-    let source = state.get_source(id).await?;
-
-    let wasm_path = state
-        .settings
-        .read()
-        .await
-        .wasm_storage_path
-        .join(format!("{}.wasm", source.name));
-
-    let bytes = tokio::fs::read(&wasm_path)
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("Failed to read WASM: {e}")))?;
-
-    let runtime_clone = state.wasm_runtime.clone();
-    let component = tokio::task::spawn_blocking(move || runtime_clone.compile_component(&bytes))
-        .await
-        .map_err(|e| AppError::InternalServerError(format!("WASM compile task panicked: {e}")))??;
-
-    let (metadata, raw_schema) = {
-        let mut inst =
-            kani_core::sources::SourceInstance::new(state.smart_client.clone(), None, false);
-        inst.load(
-            state.wasm_runtime.engine(),
-            &component,
-            state.wasm_runtime.linker(),
-        )
-        .await
-        .map_err(AppError::CoreError)?;
-        let meta = inst.get_metadata().await.map_err(AppError::CoreError)?;
-        let schema = inst.get_preferences().await.ok();
-        (meta, schema)
-    };
-
-    sqlx::query!(
-        "UPDATE sources SET version = ?, base_url = ?, unrestricted_http = ? WHERE id = ?",
-        metadata.version,
-        metadata.base_url,
-        metadata.unrestricted_http,
-        id
-    )
-    .execute(&state.db)
-    .await?;
-
-    let source_manager = SourceManager::new(
-        state.wasm_runtime.engine().clone(),
-        state
-            .wasm_runtime
-            .instantiate_pre(&component)
-            .map_err(AppError::CoreError)?,
-        state.smart_client.clone(),
-        Some(metadata.base_url.clone()),
-        metadata.unrestricted_http,
-        25,
-        state.load_pref_map(id).await.unwrap_or_default(),
-        std::sync::Arc::clone(&state.ext_cache),
-        format!("{}:", metadata.id),
-    );
-
-    state
-        .sources
-        .write()
-        .await
-        .insert(id, Arc::new(source_manager));
-
-    if let Some(schema) = raw_schema {
-        state.cache.insert_preference_schema(id, schema);
-    }
-
-    state.cache.invalidate_source(id);
-
-    tracing::info!("Reloaded extension {} ({})", id, source.name);
-    Ok(())
 }
 
 #[derive(serde::Deserialize, Default)]

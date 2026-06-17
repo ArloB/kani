@@ -248,11 +248,13 @@ async fn abi_get_metadata_returns_correct_extension_info() {
     let (_rt, mut store, instance) = make_instance(&bytes).await;
 
     let provider = instance.kani_extension_manga_provider();
-    let meta = provider
+    let raw_meta = provider
         .call_get_metadata(&mut store)
         .await
         .expect("WASM call failed")
         .expect("extension returned Err");
+    let meta: kani_shared::ExtensionMetadata =
+        serde_json::from_str(&raw_meta).expect("metadata is valid JSON");
 
     assert_eq!(meta.id, "test-abi");
     assert_eq!(meta.name, "TestAbi");
