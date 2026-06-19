@@ -193,14 +193,27 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a
         ))
         .boxed();
 
+        let fn_ident = text::ident().map(|s: &str| s.to_string()).padded_by(ws());
+
+        let user_fn_call = text::keyword("user")
+            .padded_by(ws())
+            .ignore_then(just('.'))
+            .ignore_then(fn_ident)
+            .then(arg_list.clone().delimited_by(just('('), just(')')))
+            .map_with(|(fn_name, args), extra| {
+                (format!("__user::{fn_name}"), args, extra.span())
+            });
+
         let method_call = ident.then(arg_list.delimited_by(just('('), just(')')));
 
         let chain = atom
             .foldl(
                 hws()
                     .ignore_then(just('.'))
-                    .ignore_then(method_call)
-                    .map_with(|(name, args), extra| (name, args, extra.span()))
+                    .ignore_then(choice((
+                        user_fn_call,
+                        method_call.map_with(|(name, args), extra| (name, args, extra.span())),
+                    )))
                     .repeated(),
                 |target, (name, args, span)| ParseExpr::MethodCall {
                     target: Box::new(target),

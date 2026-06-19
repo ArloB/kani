@@ -43,6 +43,17 @@ pub struct ValidatedExtension {
     pub chapter_sort: Option<ValidatedChapterSort>,
     /// Named browser scripts (name → JS source), ready for codegen to write as `src/scripts/<name>.js`.
     pub browser_scripts: std::collections::BTreeMap<String, String>,
+    /// Named pure Rhai scripts (name → source), ready for codegen to write as `src/scripts/<name>.rhai`.
+    pub pure_scripts: std::collections::BTreeMap<String, String>,
+    /// Source-level pre_request hook body. `None` means no hook.
+    pub pre_request: Option<String>,
+    /// Source-level on_status hook bodies keyed by status pattern.
+    pub on_status: std::collections::BTreeMap<String, String>,
+    /// Per-endpoint pre_request hooks: endpoint name → hook body.
+    pub endpoint_pre_request: std::collections::BTreeMap<String, String>,
+    /// Per-endpoint on_status hooks: endpoint name → (status pattern → hook body).
+    pub endpoint_on_status:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 }
 
 impl ValidatedExtension {
@@ -87,6 +98,7 @@ pub struct ValidatedRateLimit {
     pub requests_per_second: f64,
     pub burst: u32,
     pub max_concurrent: u32,
+    pub max_hook_requests: u32,
 }
 
 pub struct ValidatedSection {

@@ -219,6 +219,7 @@ pub fn emit_expr(expr: &Expr) -> String {
             headers,
             kind,
             on_failure,
+            ..
         } => {
             use kani_shared::ast::{HttpMethod, SubBlueprintKind};
             let method_str = match method {
@@ -254,6 +255,17 @@ pub fn emit_expr(expr: &Expr) -> String {
                 headers_chain,
                 on_failure_chain
             )
+        }
+        Expr::UserFn { name, args } => {
+            if args.is_empty() {
+                format!("Expr::user_fn(\"{}\", vec![])", escape(name))
+            } else {
+                format!(
+                    "Expr::user_fn(\"{}\", vec![{}])",
+                    escape(name),
+                    emit_list(args)
+                )
+            }
         }
     }
 }

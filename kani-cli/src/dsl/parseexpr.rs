@@ -167,6 +167,26 @@ impl TryFrom<ParseExpr> for Expr {
             } => {
                 let target_res = Expr::try_from(*target);
 
+                if let Some(fn_name) = name.strip_prefix("__user::") {
+                    let args_res = collect_results(args);
+                    return match (target_res, args_res) {
+                        (Ok(receiver), Ok(mut explicit_args)) => {
+                            explicit_args.insert(0, receiver);
+                            Ok(Expr::UserFn {
+                                name: fn_name.to_string(),
+                                args: explicit_args,
+                            })
+                        }
+                        (r_res, a_res) => {
+                            let mut errs = r_res.err().unwrap_or_default();
+                            if let Err(mut e) = a_res {
+                                errs.append(&mut e);
+                            }
+                            Err(errs)
+                        }
+                    };
+                }
+
                 match (name.as_str(), args.as_slice()) {
                     ("attr", [ParseExpr::Literal(n)]) => wrap_target!(target_res, |t| Expr::Attr {
                         target: t,

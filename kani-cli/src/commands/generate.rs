@@ -44,11 +44,14 @@ pub fn run(file: &str, force: bool, embedded_bytes: bool) -> Result<PathBuf, Cli
     std::fs::write(out_dir.join("Cargo.toml"), &generated.cargo_toml)?;
     std::fs::write(out_dir.join("src").join("lib.rs"), &generated.lib_rs)?;
 
-    if !generated.browser_scripts.is_empty() {
+    if !generated.browser_scripts.is_empty() || !generated.pure_scripts.is_empty() {
         let scripts_dir = out_dir.join("src").join("scripts");
         std::fs::create_dir_all(&scripts_dir)?;
         for (name, src) in &generated.browser_scripts {
             std::fs::write(scripts_dir.join(format!("{name}.js")), src)?;
+        }
+        for (name, src) in &generated.pure_scripts {
+            std::fs::write(scripts_dir.join(format!("{name}.rhai")), src)?;
         }
     }
 

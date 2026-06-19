@@ -37,16 +37,26 @@ fn make_fetch_expr(
     url_expr: &Expr,
     sub_ep: &ValidatedEndpoint,
     on_failure: &kani_shared::ast::OnFailurePolicy,
+    endpoint_id: Option<String>,
 ) -> Expr {
     let sub_bp = build_sub_blueprint(sub_ep);
     let fetch = match sub_ep.response_type {
         ResponseType::Html => Expr::fetch_html(url_expr.clone(), sub_bp),
         ResponseType::Json => Expr::fetch_json(url_expr.clone(), sub_bp),
     };
+    let fetch = if let Some(id) = endpoint_id {
+        fetch.with_endpoint_id(id)
+    } else {
+        fetch
+    };
     fetch.with_on_failure(on_failure.clone())
 }
 
-pub fn emit_blueprint_chain(ep: &ValidatedEndpoint, ext: &ValidatedExtension) -> String {
+pub fn emit_blueprint_chain(
+    ep: &ValidatedEndpoint,
+    ext: &ValidatedExtension,
+    parent_endpoint_name: &str,
+) -> String {
     let mut lines = Vec::new();
 
     lines.push(format!(
@@ -62,7 +72,8 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint, ext: &ValidatedExtension) ->
 
     for step in &ep.then_steps {
         if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
-            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure);
+            let endpoint_id = Some(format!("{parent_endpoint_name}/{}", step.merge_as));
+            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure, endpoint_id);
             lines.push(format!(
                 "    .bind(\"{}\", {})",
                 step.merge_as,
@@ -87,7 +98,8 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint, ext: &ValidatedExtension) ->
 
     for step in &ep.for_each_steps {
         if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
-            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure);
+            let endpoint_id = Some(format!("{parent_endpoint_name}/{}", step.merge_as));
+            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure, endpoint_id);
             lines.push(format!(
                 "    .field(\"{}\", {})",
                 step.merge_as,
@@ -135,8 +147,12 @@ pub fn emit_blueprint_chain(ep: &ValidatedEndpoint, ext: &ValidatedExtension) ->
 }
 
 /// Emit only the `BlueprintBuilder::new(...)...build()` without the `.request()` line.
-pub fn emit_blueprint_chain_no_request(ep: &ValidatedEndpoint, ext: &ValidatedExtension) -> String {
-    let src = emit_blueprint_chain(ep, ext);
+pub fn emit_blueprint_chain_no_request(
+    ep: &ValidatedEndpoint,
+    ext: &ValidatedExtension,
+    parent_endpoint_name: &str,
+) -> String {
+    let src = emit_blueprint_chain(ep, ext, parent_endpoint_name);
     src.lines()
         .filter(|l| !l.trim().starts_with(".request(req)"))
         .collect::<Vec<_>>()
@@ -145,7 +161,11 @@ pub fn emit_blueprint_chain_no_request(ep: &ValidatedEndpoint, ext: &ValidatedEx
 
 /// Build a Blueprint from a ValidatedEndpoint at codegen time (no request attached),
 /// serialize it to postcard bytes, and return a Rust `const` declaration.
-pub fn emit_blueprint_bytes(ep: &ValidatedEndpoint, ext: &ValidatedExtension) -> String {
+pub fn emit_blueprint_bytes(
+    ep: &ValidatedEndpoint,
+    ext: &ValidatedExtension,
+    parent_endpoint_name: &str,
+) -> String {
     let mut builder = BlueprintBuilder::new(&ep.container);
 
     for b in &ep.bindings {
@@ -154,7 +174,8 @@ pub fn emit_blueprint_bytes(ep: &ValidatedEndpoint, ext: &ValidatedExtension) ->
 
     for step in &ep.then_steps {
         if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
-            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure);
+            let endpoint_id = Some(format!("{parent_endpoint_name}/{}", step.merge_as));
+            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure, endpoint_id);
             builder = builder.bind(&step.merge_as, fetch);
         }
     }
@@ -171,7 +192,8 @@ pub fn emit_blueprint_bytes(ep: &ValidatedEndpoint, ext: &ValidatedExtension) ->
 
     for step in &ep.for_each_steps {
         if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
-            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure);
+            let endpoint_id = Some(format!("{parent_endpoint_name}/{}", step.merge_as));
+            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure, endpoint_id);
             builder = builder.field(&step.merge_as, fetch);
         }
     }

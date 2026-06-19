@@ -10,6 +10,7 @@ pub fn emit_request_block(
     queries: &[QueryEntry],
     filter_mapping: &[(String, FilterMappingEntry)],
     filter_format: Option<&FilterFormatCfg>,
+    endpoint_id: Option<&str>,
 ) -> String {
     let mut lines = Vec::new();
 
@@ -29,6 +30,10 @@ pub fn emit_request_block(
     lines.push(format!(
         "let {mutability}req = HttpRequest::{ctor}({url_expr})"
     ));
+
+    if let Some(id) = endpoint_id {
+        lines.push(format!("    .endpoint_id(\"{id}\")"));
+    }
 
     for (k, v) in headers {
         lines.push(format!("    .header(\"{}\", \"{}\")", k, v));

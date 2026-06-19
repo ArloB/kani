@@ -53,6 +53,23 @@ pub struct YamlExtension {
     /// Named JavaScript scripts (name → source) executed in the headless browser context.
     #[serde(default)]
     pub browser_scripts: BTreeMap<String, String>,
+    /// Pure Rhai scripts callable from the DSL via `.user.<name>(args...)`.
+    #[serde(default)]
+    pub scripts: ScriptsBlock,
+    /// Rhai script body to run before every HTTP request for this source.
+    #[serde(default)]
+    pub pre_request: Option<String>,
+    /// Rhai script bodies keyed by HTTP status pattern ("401", "5xx", "default").
+    /// Runs after the response is received; can Retry, Fail, or Proceed.
+    #[serde(default)]
+    pub on_status: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ScriptsBlock {
+    /// Pure Rhai functions (name → source). Callable as `.user.<name>(args...)` in DSL expressions.
+    #[serde(default)]
+    pub pure: BTreeMap<String, String>,
 }
 
 // ── Multi-source factory ─────────────────────────────────────────────────────
@@ -122,6 +139,8 @@ pub struct RateLimitCfg {
     pub burst: u32,
     #[serde(default = "default_max_concurrent")]
     pub max_concurrent: u32,
+    #[serde(default = "default_max_hook_requests")]
+    pub max_hook_requests: u32,
 }
 
 fn default_rps() -> f64 {
@@ -134,6 +153,10 @@ fn default_burst() -> u32 {
 
 fn default_max_concurrent() -> u32 {
     4
+}
+
+fn default_max_hook_requests() -> u32 {
+    3
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -219,6 +242,12 @@ pub struct EndpointBody {
     /// Timeout for the browser page load, in milliseconds. Default: 30000.
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u32,
+    /// Per-endpoint Rhai script body for pre_request (overrides source-level).
+    #[serde(default)]
+    pub pre_request: Option<String>,
+    /// Per-endpoint Rhai script bodies for on_status (overrides source-level).
+    #[serde(default)]
+    pub on_status: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]

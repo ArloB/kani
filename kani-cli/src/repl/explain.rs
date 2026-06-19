@@ -466,5 +466,10 @@ fn describe_expr(expr: &Expr) -> (String, String, Vec<&Expr>) {
             ),
             subfields.iter().map(|(_, e)| e.as_ref()).collect(),
         ),
+        Expr::UserFn { name, args } => (
+            "UserFn".into(),
+            format!(".user.{name}() — {} arg(s)", args.len()),
+            args.iter().collect(),
+        ),
     }
 }
