@@ -13,8 +13,6 @@ fn main() {
 }
 
 fn build_css(minify: bool) {
-    // Rerun this step whenever the CSS source files or any JS component changes
-    // (Tailwind scans JS for utility class names to include in the output).
     println!("cargo:rerun-if-changed=../static/css/app.css");
     println!("cargo:rerun-if-changed=../static/js");
 
@@ -28,9 +26,6 @@ fn build_css(minify: bool) {
     let binary = Path::new(esbuild_path).to_path_buf();
 
     if !binary.exists() {
-        // The binary is optional during `cargo build` — the Dockerfile handles
-        // CSS compilation in its own stage.  Developers who want the CSS
-        // rebuilt automatically should run `kani-cli setup --tailwind` first.
         println!(
             "cargo:warning=Tailwind CLI not found at {}; skipping CSS build. \
              Run `kani-cli setup --tailwind` to download it.",
