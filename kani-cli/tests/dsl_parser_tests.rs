@@ -814,3 +814,41 @@ fn convert_error_format_padded_empty_fill() {
         "got: {msg}"
     );
 }
+
+// ── User function calls (.user.name()) ───────────────────────────────────────
+
+#[test]
+fn parse_user_fn_no_extra_args() {
+    let expr = parse_ok(r#"self.text().user.slugify()"#);
+    assert!(
+        matches!(&expr, Expr::UserFn { name, args } if name == "slugify" && args.len() == 1),
+        "got: {:?}",
+        expr
+    );
+}
+
+#[test]
+fn parse_user_fn_with_extra_args() {
+    let expr = parse_ok(r#"self.text().user.format_date("YYYY-MM-DD")"#);
+    match &expr {
+        Expr::UserFn { name, args } => {
+            assert_eq!(name, "format_date");
+            assert_eq!(args.len(), 2, "receiver + 1 explicit arg");
+            assert!(matches!(&args[1], Expr::Literal(s) if s == "YYYY-MM-DD"));
+        }
+        other => panic!("expected UserFn, got {:?}", other),
+    }
+}
+
+#[test]
+fn parse_user_fn_receiver_is_first_arg() {
+    let expr = parse_ok(r#"self.attr("href").user.clean_url()"#);
+    match &expr {
+        Expr::UserFn { name, args } => {
+            assert_eq!(name, "clean_url");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(&args[0], Expr::Attr { name, .. } if name == "href"));
+        }
+        other => panic!("expected UserFn, got {:?}", other),
+    }
+}

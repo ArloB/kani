@@ -1,0 +1,37 @@
+id: hooks-test
+name: HooksTest
+version: "0.1.0"
+base_url: "https://example.com"
+
+metadata:
+  rate_limit:
+    rps: 2.0
+    burst: 4
+    max_concurrent: 4
+    max_hook_requests: 5
+
+pre_request: |
+  req.set_header("X-Auth", ctx.cache.get("auth", "token").or("").to_string());
+  proceed()
+
+on_status:
+  "401": |
+    ctx.cache.put("auth", "token", "refreshed", 300);
+    retry()
+  "5xx": |
+    retry_after(5)
+
+endpoints:
+  popular:
+    route: "/popular"
+    pre_request: |
+      req.set_header("X-Ep", "popular");
+      proceed()
+    on_status:
+      "default": |
+        proceed()
+    type: json
+    container: "/results"
+    fields:
+      id: 'self.ptr("/id").str()'
+      title: 'self.ptr("/title").str()'
