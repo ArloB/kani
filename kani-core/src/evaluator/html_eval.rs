@@ -106,6 +106,8 @@ async fn eval_html_field(
     current: Option<(&StoredNode, usize)>,
     env: Env,
 ) -> Result<Value, String> {
+    let registry_arc = state.pure_fn_registry.clone();
+    let registry = registry_arc.as_deref();
     if let Expr::Fetch {
         url_expr,
         blueprint: sub_bp,
@@ -113,36 +115,52 @@ async fn eval_html_field(
         headers,
         kind,
         on_failure,
+        endpoint_id,
     } = expr
     {
         let url_val =
-            eval_html_expr(url_expr, doc, current, env.clone(), &state.selector_cache).await?;
+            eval_html_expr(url_expr, doc, current, env.clone(), &state.selector_cache, registry)
+                .await?;
         let url = match url_val {
             Value::Str(s) => s,
             _ => return Err("Fetch: url_expr must evaluate to a String".into()),
         };
         let mut resolved_headers = Vec::with_capacity(headers.len());
         for (k_expr, v_expr) in headers {
-            let k =
-                eval_html_expr(k_expr, doc, current, env.clone(), &state.selector_cache).await?;
-            let v =
-                eval_html_expr(v_expr, doc, current, env.clone(), &state.selector_cache).await?;
+            let k = eval_html_expr(
+                k_expr,
+                doc,
+                current,
+                env.clone(),
+                &state.selector_cache,
+                registry,
+            )
+            .await?;
+            let v = eval_html_expr(
+                v_expr,
+                doc,
+                current,
+                env.clone(),
+                &state.selector_cache,
+                registry,
+            )
+            .await?;
             match (k, v) {
                 (Value::Str(k), Value::Str(v)) => resolved_headers.push((k, v)),
                 _ => return Err("Fetch: header keys and values must be strings".into()),
             }
         }
-        let result = eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind).await;
+        let result = eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind, endpoint_id.clone()).await;
         match (result, on_failure) {
             (Ok(v), _) => Ok(v),
             (Err(_), kani_shared::ast::OnFailurePolicy::Skip) => Ok(Value::Null),
             (Err(e), kani_shared::ast::OnFailurePolicy::Fail) => Err(e),
             (Err(_), kani_shared::ast::OnFailurePolicy::Use(fallback)) => {
-                eval_html_expr(fallback, doc, current, env, &state.selector_cache).await
+                eval_html_expr(fallback, doc, current, env, &state.selector_cache, registry).await
             }
         }
     } else {
-        eval_html_expr(expr, doc, current, env, &state.selector_cache).await
+        eval_html_expr(expr, doc, current, env, &state.selector_cache, registry).await
     }
 }
 
@@ -233,11 +251,15 @@ fn eval_html_expr<'a>(
     current: Option<(&'a StoredNode, usize)>,
     env: Env,
     cache: &'a std::cell::RefCell<HashMap<String, Selector>>,
+    registry: Option<&'a crate::scripting::PureFunctionRegistry>,
 ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + 'a>> {
     Box::pin(async move {
-        if let Some(result) = eval_common_expr(expression, env.clone(), &|e, env| {
-            eval_html_expr(e, doc, current, env, cache)
-        })
+        if let Some(result) = eval_common_expr(
+            expression,
+            env.clone(),
+            &|e, env| eval_html_expr(e, doc, current, env, cache, registry),
+            registry,
+        )
         .await
         {
             return result;
@@ -269,7 +291,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Attr { target, name } => {
-                match eval_html_expr(target, doc, current, env, cache)
+                match eval_html_expr(target, doc, current, env, cache, registry)
                     .await?
                     .into_html_element("attr")?
                 {
@@ -284,7 +306,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Text { target } => {
-                match eval_html_expr(target, doc, current, env, cache)
+                match eval_html_expr(target, doc, current, env, cache, registry)
                     .await?
                     .into_html_element("text")?
                 {
@@ -294,7 +316,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::InnerHtml { target } => {
-                match eval_html_expr(target, doc, current, env, cache)
+                match eval_html_expr(target, doc, current, env, cache, registry)
                     .await?
                     .into_html_element("inner_html")?
                 {
@@ -304,7 +326,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Select { target, selector } => {
-                match eval_html_expr(target, doc, current, env, cache)
+                match eval_html_expr(target, doc, current, env, cache, registry)
                     .await?
                     .into_html_element("select")?
                 {
@@ -326,7 +348,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::First { target, selector } => {
-                match eval_html_expr(target, doc, current, env, cache)
+                match eval_html_expr(target, doc, current, env, cache, registry)
                     .await?
                     .into_html_element("first")?
                 {
@@ -347,7 +369,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::HasClass { target, class } => {
-                match eval_html_expr(target, doc, current, env, cache)
+                match eval_html_expr(target, doc, current, env, cache, registry)
                     .await?
                     .into_html_element("has_class")?
                 {
@@ -362,7 +384,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Children { target } => {
-                match eval_html_expr(target, doc, current, env, cache)
+                match eval_html_expr(target, doc, current, env, cache, registry)
                     .await?
                     .into_html_element("children")?
                 {

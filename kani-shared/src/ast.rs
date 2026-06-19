@@ -379,12 +379,18 @@ pub enum Expr {
         headers: Vec<(Expr, Expr)>,
         kind: SubBlueprintKind,
         on_failure: OnFailurePolicy,
+        endpoint_id: Option<String>,
     },
 
     EncodedField {
         subfields: Vec<(String, Box<Expr>)>,
         delimiter: String,
         encoding: IdEncoding,
+    },
+
+    UserFn {
+        name: String,
+        args: Vec<Expr>,
     },
 }
 
@@ -491,7 +497,7 @@ pub enum IdEncoding {
     Hex,
 }
 
-pub const DSL_SCHEMA_VERSION: u32 = 2;
+pub const DSL_SCHEMA_VERSION: u32 = 5;
 
 /// Declares that a source paginates in fixed-size chunks, so the framework can
 /// handle the offset algebra instead of each extension doing it manually.
@@ -571,6 +577,11 @@ pub struct RequestDef {
     pub method: String,
     pub headers: Vec<(String, String)>,
     pub queries: Vec<(String, String)>,
+    #[cfg_attr(
+        any(feature = "host", feature = "builder"),
+        serde(default)
+    )]
+    pub endpoint_id: Option<String>,
 }
 
 // ============================================================
@@ -1111,6 +1122,7 @@ impl Expr {
             headers: vec![],
             kind: SubBlueprintKind::Html,
             on_failure: OnFailurePolicy::Fail,
+            endpoint_id: None,
         }
     }
     #[inline]
@@ -1122,14 +1134,16 @@ impl Expr {
             headers: vec![],
             kind: SubBlueprintKind::Json,
             on_failure: OnFailurePolicy::Fail,
+            endpoint_id: None,
         }
     }
     #[inline]
-    pub fn with_method(self, method: HttpMethod) -> Self {
+    pub fn with_endpoint_id(self, id: impl Into<String>) -> Self {
         match self {
             Expr::Fetch {
                 url_expr,
                 blueprint,
+                method,
                 headers,
                 kind,
                 on_failure,
@@ -1141,6 +1155,30 @@ impl Expr {
                 headers,
                 kind,
                 on_failure,
+                endpoint_id: Some(id.into()),
+            },
+            other => other,
+        }
+    }
+    #[inline]
+    pub fn with_method(self, method: HttpMethod) -> Self {
+        match self {
+            Expr::Fetch {
+                url_expr,
+                blueprint,
+                headers,
+                kind,
+                on_failure,
+                endpoint_id,
+                ..
+            } => Expr::Fetch {
+                url_expr,
+                blueprint,
+                method,
+                headers,
+                kind,
+                on_failure,
+                endpoint_id,
             },
             other => other,
         }
@@ -1155,6 +1193,7 @@ impl Expr {
                 mut headers,
                 kind,
                 on_failure,
+                endpoint_id,
             } => {
                 headers.push((key, value));
                 Expr::Fetch {
@@ -1164,6 +1203,7 @@ impl Expr {
                     headers,
                     kind,
                     on_failure,
+                    endpoint_id,
                 }
             }
             other => other,
@@ -1178,6 +1218,7 @@ impl Expr {
                 method,
                 headers,
                 kind,
+                endpoint_id,
                 ..
             } => Expr::Fetch {
                 url_expr,
@@ -1185,6 +1226,7 @@ impl Expr {
                 method,
                 headers,
                 kind,
+                endpoint_id,
                 on_failure: policy,
             },
             other => other,
@@ -1301,6 +1343,13 @@ impl Expr {
                 .collect(),
             delimiter: delimiter.into(),
             encoding,
+        }
+    }
+
+    pub fn user_fn(name: impl Into<String>, args: Vec<Expr>) -> Self {
+        Expr::UserFn {
+            name: name.into(),
+            args,
         }
     }
 }
@@ -1805,6 +1854,7 @@ mod tests {
                 method: "GET".into(),
                 headers: vec![("Accept".into(), "text/html".into())],
                 queries: vec![("page".into(), "1".into())],
+                endpoint_id: None,
             })
             .paginated(32, "offset", OffsetType::ItemOffset)
             .build();
@@ -1889,6 +1939,7 @@ mod tests {
             method: "POST".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         };
         let bp2 = bp.with_request_def(req);
 
@@ -1965,5 +2016,24 @@ mod tests {
                     .with_on_failure(policy);
             postcard_rt(&expr);
         }
+    }
+
+    #[test]
+    fn expr_postcard_round_trip_user_fn() {
+        for e in &[
+            Expr::user_fn("slugify", vec![Expr::SelfRef]),
+            Expr::user_fn(
+                "format_date",
+                vec![Expr::SelfRef, Expr::Literal("YYYY-MM-DD".into())],
+            ),
+            Expr::user_fn("noop", vec![]),
+        ] {
+            postcard_rt(e);
+        }
+    }
+
+    #[test]
+    fn schema_version_is_five() {
+        assert_eq!(DSL_SCHEMA_VERSION, 5);
     }
 }

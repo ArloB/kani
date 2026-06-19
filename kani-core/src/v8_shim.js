@@ -3,8 +3,6 @@ const vm = require('vm');
 const readline = require('readline');
 const contexts = new Map();
 
-// Prevent uncaught exceptions in timer callbacks (from VM-sandboxed code like
-// Jscrambler VMs that schedule deferred work) from crashing the process.
 process.on('uncaughtException', (err) => {
     process.stderr.write('v8_shim uncaughtException: ' + String(err) + '\n');
 });
@@ -31,27 +29,28 @@ function makeContext() {
     return ctx;
 }
 
-// Persistent Puppeteer browser — launched once on first use, reused across requests.
 let puppeteerBrowser = null;
 let activePagesCount = 0;
 let browserIdleTimer = null;
-// After all pages close, kill the browser process after this many ms to reclaim RAM.
-// Set BROWSER_IDLE_TIMEOUT_MS=0 to keep it alive indefinitely.
+
 const BROWSER_IDLE_MS = parseInt(process.env.BROWSER_IDLE_TIMEOUT_MS || '300000', 10);
 
-// Token cache: keyed by (pageUrl|urlPattern|param), entries are permanent until
-// explicitly invalidated on API failure. Avoids relaunching the browser for the
-// same manga/chapter across requests within a session.
 const tokenCache = new Map();
 
-function getCachedToken(key) { return tokenCache.get(key) ?? null; }
-function setCachedToken(key, token) { tokenCache.set(key, token); }
+function getCachedToken(key) {
+    const entry = tokenCache.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt !== null && Date.now() > entry.expiresAt) {
+        tokenCache.delete(key);
+        return null;
+    }
+    return entry.token;
+}
+function setCachedToken(key, token, ttlMs) {
+    tokenCache.set(key, { token, expiresAt: ttlMs != null ? Date.now() + ttlMs : null });
+}
 function deleteCachedToken(key) { tokenCache.delete(key); }
 
-// Load puppeteer-core cross-platform: try direct require first (works when
-// NODE_PATH includes the global npm dir), then well-known Linux paths, then
-// fall back to asking `npm root -g` — this handles Windows where the global
-// npm dir (%APPDATA%\npm\node_modules) is not in NODE_PATH by default.
 function loadPuppeteer() {
     try { return require('puppeteer-core'); } catch (_) {}
     for (const p of ['/usr/local/lib/node_modules/puppeteer-core', '/usr/lib/node_modules/puppeteer-core']) {
@@ -65,8 +64,6 @@ function loadPuppeteer() {
     return null;
 }
 
-// Resolve Chromium executable path. Checks CHROMIUM_PATH first, then probes
-// common Windows installation locations, then falls back to the Linux default.
 function findChromium() {
     if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH;
     if (process.platform === 'win32') {
@@ -179,22 +176,29 @@ rl.on('line', (line) => {
 
             } else if (action === 'capture_token') {
                 // name   = page URL to load
-                // script = "url_pattern|param_name|timeout_ms[|force]"
-                // force=1 skips the cache (used after an API 401/403 to refresh the token)
-                const parts = script.split('|');
-                const urlPattern  = parts[0];
-                const paramName   = parts[1] || '_';
-                const timeoutMs   = parseInt(parts[2], 10) || 30000;
-                const forceRefresh = parts[3] === '1';
-                const verbose      = parts[4] === '1';
+                // script = JSON with fields: urlPattern, paramName, headerName, timeoutMs,
+                //          forceRefresh, verbose, cacheTtlMs, extraHeaders
+                const params      = JSON.parse(script);
+                const urlPattern  = params.urlPattern;
+                const paramName   = params.paramName  ?? null;
+                const headerName  = params.headerName ?? null;
+                const timeoutMs   = params.timeoutMs  || 30000;
+                const forceRefresh = !!params.forceRefresh;
+                const verbose     = !!params.verbose;
+                const cacheTtlMs  = params.cacheTtlMs ?? null;
+                const extraHeaders = params.extraHeaders || {};
+
+                if (!paramName && !headerName) {
+                    throw new Error('capture_token: one of paramName or headerName must be provided');
+                }
 
                 const dbg = (msg) => { if (verbose) process.stderr.write(`[capture_token] ${msg}\n`); };
 
-                const cacheKey = name + '|' + urlPattern + '|' + paramName;
+                const cacheKey = name + '|' + urlPattern + '|' + (paramName ?? '') + '|' + (headerName ?? '');
                 if (!forceRefresh) {
                     const cached = getCachedToken(cacheKey);
                     if (cached) {
-                        dbg(`cache hit for ${name} (pattern: ${urlPattern})`);
+                        dbg(`cache hit for ${name}`);
                         process.stdout.write(JSON.stringify({ id, ok: true, value: cached }) + '\n');
                         return;
                     }
@@ -202,16 +206,25 @@ rl.on('line', (line) => {
                     deleteCachedToken(cacheKey);
                 }
 
+                const pageHost = (() => { try { return new URL(name).hostname; } catch (_) { return ''; } })();
+
                 dbg(`loading page: ${name}`);
                 dbg(`waiting for pattern: ${urlPattern}`);
+                if (headerName) dbg(`extracting header: ${headerName}`);
+                else dbg(`extracting param: ${paramName}`);
 
                 const browser = await getPuppeteerBrowser();
                 const page = await openPage(browser);
 
                 try {
-                    // Log page-level console messages and errors for visibility.
                     page.on('console', msg => dbg(`page console [${msg.type()}]: ${msg.text()}`));
                     page.on('pageerror', err => dbg(`page error: ${err}`));
+
+                    const extraHeaderKeys = Object.keys(extraHeaders);
+                    if (extraHeaderKeys.length > 0) {
+                        await page.setExtraHTTPHeaders(extraHeaders);
+                        dbg(`set ${extraHeaderKeys.length} extra request header(s)`);
+                    }
 
                     await page.setRequestInterception(true);
                     let resolved = false;
@@ -221,7 +234,7 @@ rl.on('line', (line) => {
                         const timer = setTimeout(() => {
                             if (!resolved) {
                                 resolved = true;
-                                dbg(`timeout after ${timeoutMs}ms — all non-trivial URLs seen (${seenUrls.length}):`);
+                                dbg(`timeout after ${timeoutMs}ms — URLs seen (${seenUrls.length}):`);
                                 seenUrls.forEach(u => dbg(`  ${u}`));
                                 reject(new Error(`Token not captured within ${timeoutMs}ms from: ${name}`));
                             }
@@ -230,13 +243,8 @@ rl.on('line', (line) => {
                         page.on('request', req => {
                             if (resolved) { req.abort().catch(() => {}); return; }
 
-                            // Abort resource types that carry no JS or API data.
-                            // Stylesheets are intentionally NOT aborted: Vite/Rolldown
-                            // bundles throw a fatal JS exception when a CSS preload
-                            // link.onerror fires, which crashes the reader before any
-                            // API calls are made.
                             const type = req.resourceType();
-                            if (type === 'image' || type === 'font' || type === 'media') {
+                            if (type === 'image' || type === 'font' || type === 'media' || type === 'stylesheet') {
                                 req.abort().catch(() => {});
                                 return;
                             }
@@ -247,28 +255,34 @@ rl.on('line', (line) => {
                             if (u.includes(urlPattern)) {
                                 dbg(`PATTERN MATCH: ${u}`);
                                 try {
-                                    const token = new URL(u).searchParams.get(paramName);
+                                    let token = null;
+                                    if (headerName) {
+                                        token = req.headers()[headerName.toLowerCase()] ?? null;
+                                        if (token) dbg(`header '${headerName}' captured (len=${token.length})`);
+                                        else dbg(`pattern matched but header '${headerName}' missing`);
+                                    } else {
+                                        token = new URL(u).searchParams.get(paramName);
+                                        if (token) dbg(`param '${paramName}' captured (len=${token.length})`);
+                                        else dbg(`pattern matched but param '${paramName}' missing in: ${u}`);
+                                    }
                                     if (token) {
-                                        dbg(`token captured (len=${token.length})`);
                                         resolved = true;
                                         clearTimeout(timer);
                                         resolve(token);
                                         req.abort().catch(() => {});
                                         return;
-                                    } else {
-                                        dbg(`pattern matched but param '${paramName}' missing in: ${u}`);
                                     }
                                 } catch (_) {}
                             }
 
-                            // Only pass comix.to requests through; block everything else
-                            // to avoid unnecessary network traffic.
+                            // Allow requests to the same host as the page; block everything else
+                            // to reduce unnecessary network traffic.
                             let allow = false;
                             try {
                                 const host = new URL(u).hostname;
-                                if (host === 'comix.to' || host.endsWith('.comix.to')) allow = true;
+                                if (pageHost && (host === pageHost || host.endsWith('.' + pageHost))) allow = true;
                             } catch (_) {}
-                            if (!allow) dbg(`blocking non-comix request: ${u}`);
+                            if (!allow) dbg(`blocking off-origin request: ${u}`);
                             (allow ? req.continue() : req.abort()).catch(() => {});
                         });
                     });
@@ -278,8 +292,8 @@ rl.on('line', (line) => {
                     page.goto(name, { timeout: timeoutMs + 5000 }).catch(e => dbg(`goto error: ${e}`));
 
                     const token = await tokenPromise;
-                    dbg(`success, caching token for key: ${cacheKey}`);
-                    setCachedToken(cacheKey, token);
+                    dbg(`success, caching token`);
+                    setCachedToken(cacheKey, token, cacheTtlMs);
                     process.stdout.write(JSON.stringify({ id, ok: true, value: token }) + '\n');
                 } finally {
                     await closePage(page);

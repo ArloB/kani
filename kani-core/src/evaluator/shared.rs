@@ -142,6 +142,7 @@ pub async fn eval_common_expr<'a, F>(
     expr: &'a Expr,
     env: Env,
     recurse: &F,
+    registry: Option<&'a crate::scripting::PureFunctionRegistry>,
 ) -> Option<Result<Value, String>>
 where
     F: Fn(&'a Expr, Env) -> Pin<Box<dyn Future<Output = Result<Value, String>> + 'a>>,
@@ -737,6 +738,23 @@ where
             .await,
         ),
 
+        Expr::UserFn { name, args } => Some(
+            (async {
+                let Some(reg) = registry else {
+                    return Err(format!(
+                        "UserFn '{}': no script registry available for this source",
+                        name
+                    ));
+                };
+                let mut evaluated = Vec::with_capacity(args.len());
+                for arg in args {
+                    evaluated.push(recurse(arg, env.clone()).await?);
+                }
+                reg.call(name, &evaluated)
+            })
+            .await,
+        ),
+
         _ => None,
     }
 }
@@ -768,63 +786,136 @@ pub async fn fetch_body(
     state: &mut crate::wasm::HostState,
     req: &kani_shared::ast::RequestDef,
 ) -> Result<String, String> {
-    let mut url = url::Url::parse(&req.url).map_err(|e| format!("Invalid URL: {}", e))?;
-    if !req.queries.is_empty() {
-        url.query_pairs_mut().extend_pairs(req.queries.iter());
-    }
+    use crate::scripting::{HookActionKind, ScriptableCtx, ScriptableRequest, ScriptableResponse};
 
-    state.check_allowed_host(url.host_str().unwrap_or(""))?;
+    let hook_registry = state.hook_registry.clone();
 
-    state.charge_io()?;
-
-    let method = match req.method.to_uppercase().as_str() {
-        "GET" => rquest::Method::GET,
-        "POST" => rquest::Method::POST,
-        "PUT" => rquest::Method::PUT,
-        "DELETE" => rquest::Method::DELETE,
-        m => return Err(format!("Unsupported HTTP method: {}", m)),
+    let mut working = ScriptableRequest {
+        method: req.method.clone(),
+        url: req.url.clone(),
+        headers: req.headers.clone(),
+        queries: req.queries.clone(),
+        body: None,
+        endpoint_id: req.endpoint_id.clone(),
     };
 
-    let rquest_url = url
-        .to_string()
-        .parse::<rquest::Url>()
-        .map_err(|e| format!("Invalid URL: {}", e))?;
+    let max_hook_retries = state.max_hook_requests;
+    let mut hook_retries = 0u32;
 
-    let mut builder = state.http_client.inner().request(method, rquest_url);
-    for (k, v) in &req.headers {
-        builder = builder.header(k, v);
-    }
-    let request = builder.build().map_err(|e| e.to_string())?;
+    loop {
+        if let Some(ref registry) = hook_registry {
+            let ctx = ScriptableCtx {
+                cache_backend: Arc::clone(&state.ext_cache),
+                cache_namespace: state.ext_cache_namespace.clone(),
+                prefs: state.preferences.clone(),
+            };
+            let action = registry
+                .run_pre_request(&mut working, ctx)
+                .map_err(|e| format!("pre_request hook: {e}"))?;
+            if let HookActionKind::Fail { kind, reason } = action.kind {
+                return Err(format!("hook rejected request: {kind}: {reason}"));
+            }
+        }
 
-    let ttfb_start = std::time::Instant::now();
-    let response = match tokio::time::timeout(
-        std::time::Duration::from_secs(90),
-        state.http_client.send_request(request),
-    )
-    .await
-    {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => return Err(e.to_string()),
-        Err(_) => return Err("HTTP request timed out after 90 seconds".into()),
-    };
-    let ttfb = ttfb_start.elapsed();
-    state.last_io_at = Some(std::time::Instant::now());
-    if crate::HTTP_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
-        tracing::info!(
-            ttfb_ms = ttfb.as_millis(),
-            status_code = response.status().as_u16(),
-            url = url.to_string(),
-            "fetch_body: connection established"
-        );
-    }
+        let mut url =
+            url::Url::parse(&working.url).map_err(|e| format!("Invalid URL: {}", e))?;
+        if !working.queries.is_empty() {
+            url.query_pairs_mut().extend_pairs(working.queries.iter());
+        }
 
-    const MAX_BYTES: usize = 15 * 1024 * 1024;
-    let body = response
-        .bytes_limited(MAX_BYTES)
+        state.check_allowed_host(url.host_str().unwrap_or(""))?;
+        state.charge_io()?;
+
+        let method = match working.method.to_uppercase().as_str() {
+            "GET" => rquest::Method::GET,
+            "POST" => rquest::Method::POST,
+            "PUT" => rquest::Method::PUT,
+            "DELETE" => rquest::Method::DELETE,
+            m => return Err(format!("Unsupported HTTP method: {}", m)),
+        };
+
+        let rquest_url = url
+            .to_string()
+            .parse::<rquest::Url>()
+            .map_err(|e| format!("Invalid URL: {}", e))?;
+
+        let mut builder = state.http_client.inner().request(method, rquest_url);
+        for (k, v) in &working.headers {
+            builder = builder.header(k, v);
+        }
+        let request = builder.build().map_err(|e| e.to_string())?;
+
+        let ttfb_start = std::time::Instant::now();
+        let response = match tokio::time::timeout(
+            std::time::Duration::from_secs(90),
+            state.http_client.send_request(request),
+        )
         .await
-        .map_err(|e| e.to_string())?
-        .to_vec();
-    String::from_utf8(body).map_err(|_| "Invalid UTF-8 in response body".to_string())
+        {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => return Err(e.to_string()),
+            Err(_) => return Err("HTTP request timed out after 90 seconds".into()),
+        };
+        let ttfb = ttfb_start.elapsed();
+        state.last_io_at = Some(std::time::Instant::now());
+
+        let status = response.status();
+        if crate::HTTP_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+            tracing::info!(
+                ttfb_ms = ttfb.as_millis(),
+                status_code = status.as_u16(),
+                url = url.to_string(),
+                "fetch_body: connection established"
+            );
+        }
+
+        if let Some(ref registry) = hook_registry {
+            let resp_headers: Vec<(String, String)> = response
+                .headers()
+                .iter()
+                .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect();
+            let scriptable_resp = ScriptableResponse {
+                status: status.as_u16() as i64,
+                headers: resp_headers,
+            };
+            let ctx = ScriptableCtx {
+                cache_backend: Arc::clone(&state.ext_cache),
+                cache_namespace: state.ext_cache_namespace.clone(),
+                prefs: state.preferences.clone(),
+            };
+            let action = registry
+                .run_on_status(&working, &scriptable_resp, ctx)
+                .map_err(|e| format!("on_status hook: {e}"))?;
+
+            match action.kind {
+                HookActionKind::Proceed => {}
+                HookActionKind::Retry if hook_retries < max_hook_retries => {
+                    hook_retries += 1;
+                    continue;
+                }
+                HookActionKind::RetryAfter { seconds } if hook_retries < max_hook_retries => {
+                    hook_retries += 1;
+                    tokio::time::sleep(std::time::Duration::from_secs(seconds.max(0) as u64))
+                        .await;
+                    continue;
+                }
+                HookActionKind::Fail { kind, reason } => {
+                    return Err(format!("hook: {kind}: {reason}"));
+                }
+                _ => {}
+            }
+        }
+
+        const MAX_BYTES: usize = 15 * 1024 * 1024;
+        let body = response
+            .bytes_limited(MAX_BYTES)
+            .await
+            .map_err(|e| e.to_string())?
+            .to_vec();
+        return String::from_utf8(body)
+            .map_err(|_| "Invalid UTF-8 in response body".to_string());
+    }
 }
 
 fn expr_has_fetch(expr: &kani_shared::ast::Expr) -> bool {
@@ -901,6 +992,7 @@ pub async fn eval_fetch_field(
     headers: Vec<(String, String)>,
     sub_blueprint: &kani_shared::ast::Blueprint,
     kind: &kani_shared::ast::SubBlueprintKind,
+    endpoint_id: Option<String>,
 ) -> Result<Value, String> {
     if blueprint_has_fetch(sub_blueprint) {
         return Err("Nested Expr::Fetch inside a sub-blueprint is not allowed".into());
@@ -918,6 +1010,7 @@ pub async fn eval_fetch_field(
         method: method_str.to_string(),
         headers,
         queries: vec![],
+        endpoint_id,
     };
 
     let body = fetch_body(state, &req).await?;
@@ -1001,5 +1094,85 @@ fn numeric_op(op: &Op, l: Value, r: Value) -> Result<Value, String> {
         Op::Le => Ok(Value::Bool(a <= b)),
         Op::Ge => Ok(Value::Bool(a >= b)),
         _ => Err(format!("{:?}: not a numeric operator", op)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::fetch_body;
+    use crate::scripting::{HookRegistry, HookScripts};
+    use crate::wasm::{AllowedHost, HostState};
+    use kani_shared::ast::RequestDef;
+    use std::sync::Arc;
+
+    fn simple_request(url: &str) -> RequestDef {
+        RequestDef {
+            url: url.to_string(),
+            method: "GET".to_string(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn pre_request_hook_disallowed_host_after_mutation_errors() {
+        let mut state = HostState::default();
+        state.allowed_host = AllowedHost::Restricted("example.com".to_string());
+
+        let scripts = HookScripts {
+            pre_request: Some(
+                r#"req.url = "https://evil.com/api"; proceed()"#.to_string(),
+            ),
+            ..Default::default()
+        };
+        let registry = HookRegistry::compile(&scripts).unwrap();
+        state.hook_registry = Some(Arc::new(registry));
+
+        let req = simple_request("https://example.com/api");
+        let result = fetch_body(&mut state, &req).await;
+        assert!(result.is_err(), "should fail after hook mutates URL to disallowed host");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("blocked") || err.contains("not permitted") || err.contains("evil.com"),
+            "error should reflect host policy: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_status_retry_bounded_by_max_hook_requests() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let mut state = HostState::default();
+        state.allowed_host = AllowedHost::Unrestricted;
+        state.max_hook_requests = 2;
+
+        let mut on_status = std::collections::BTreeMap::new();
+        on_status.insert("401".to_string(), "retry()".to_string());
+        let scripts = HookScripts {
+            on_status,
+            ..Default::default()
+        };
+        let registry = HookRegistry::compile(&scripts).unwrap();
+        state.hook_registry = Some(Arc::new(registry));
+
+        let url = format!("{}/test", server.uri());
+        let req = simple_request(&url);
+        let _result = fetch_body(&mut state, &req).await;
+
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(
+            received.len(),
+            3,
+            "should make initial + 2 retries = 3 total requests"
+        );
     }
 }

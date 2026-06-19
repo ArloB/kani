@@ -134,13 +134,20 @@ pub fn v8_context_drop(handle: &V8ProcessHandle, name: &str) {
     let _ = with_process(handle, |p| p.request("drop", name, ""));
 }
 
+pub struct CaptureUrlParamOpts<'a> {
+    pub url_pattern: &'a str,
+    pub param_name: Option<&'a str>,
+    pub header_name: Option<&'a str>,
+    pub timeout_ms: u32,
+    pub force_refresh: bool,
+    pub cache_ttl_ms: Option<u32>,
+    pub extra_headers: &'a [(String, String)],
+}
+
 pub fn capture_url_param(
     handle: &V8ProcessHandle,
     page_url: &str,
-    url_pattern: &str,
-    param: &str,
-    timeout_ms: u32,
-    force_refresh: bool,
+    opts: &CaptureUrlParamOpts<'_>,
 ) -> Result<String, String> {
     let enabled = std::env::var("KANI_BROWSER_ENABLED")
         .map(|v| v != "false" && v != "0")
@@ -153,20 +160,23 @@ pub fn capture_url_param(
         );
     }
     let verbose = V8_DEBUG_LOGGING.load(Ordering::Relaxed);
-    with_process(handle, |p| {
-        p.request(
-            "capture_token",
-            page_url,
-            &format!(
-                "{}|{}|{}|{}|{}",
-                url_pattern,
-                param,
-                timeout_ms,
-                if force_refresh { 1 } else { 0 },
-                if verbose { 1 } else { 0 },
-            ),
-        )
+    let extra_headers_obj: serde_json::Map<String, serde_json::Value> = opts
+        .extra_headers
+        .iter()
+        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+        .collect();
+    let script = serde_json::json!({
+        "urlPattern": opts.url_pattern,
+        "paramName": opts.param_name,
+        "headerName": opts.header_name,
+        "timeoutMs": opts.timeout_ms,
+        "forceRefresh": opts.force_refresh,
+        "cacheTtlMs": opts.cache_ttl_ms,
+        "verbose": verbose,
+        "extraHeaders": extra_headers_obj,
     })
+    .to_string();
+    with_process(handle, |p| p.request("capture_token", page_url, &script))
 }
 
 pub fn capture_page_payload(
@@ -219,8 +229,19 @@ mod tests {
         for val in &["false", "0"] {
             // SAFETY: tests hold ENV_LOCK; no other test mutates this var concurrently.
             unsafe { std::env::set_var("KANI_BROWSER_ENABLED", val) };
-            let result =
-                capture_url_param(&handle, "http://example.com", ".*", "token", 100, false);
+            let result = capture_url_param(
+                &handle,
+                "http://example.com",
+                &CaptureUrlParamOpts {
+                    url_pattern: ".*",
+                    param_name: Some("token"),
+                    header_name: None,
+                    timeout_ms: 100,
+                    force_refresh: false,
+                    cache_ttl_ms: None,
+                    extra_headers: &[],
+                },
+            );
             let err = result.unwrap_err();
             assert!(
                 err.contains("disabled") || err.contains("KANI_BROWSER_ENABLED"),

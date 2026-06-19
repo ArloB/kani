@@ -5,6 +5,7 @@
 
 pub mod cache;
 pub mod cbz;
+pub mod scripting;
 pub mod comic_info;
 pub mod downloader;
 pub mod error;

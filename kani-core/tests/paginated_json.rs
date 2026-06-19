@@ -51,6 +51,7 @@ async fn offset_pagination_two_pages() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .paginated(20, "offset", OffsetType::ItemOffset)
         .field("id", Expr::self_ref().ptr("/id").int_val())
@@ -93,6 +94,7 @@ async fn page_number_pagination() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .paginated(10, "page", OffsetType::PageNumber { start: 1 })
         .field("n", Expr::self_ref().ptr("/n").int_val())
@@ -145,6 +147,7 @@ async fn cursor_token_pagination_three_chunks() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .paginated(
             10,
@@ -194,6 +197,7 @@ async fn stops_when_has_next_page_false() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .paginated(20, "offset", OffsetType::ItemOffset)
         .scalar(

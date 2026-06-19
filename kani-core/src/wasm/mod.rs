@@ -117,6 +117,13 @@ pub struct HostState {
     pub ext_cache_namespace: String,
     /// Handle to the shared Node.js V8 subprocess. Lazy-spawned on first use.
     pub v8_process: crate::v8_process::V8ProcessHandle,
+    /// Compiled Rhai pure-function registry for `.user.<name>()` DSL calls.
+    /// `None` when the source has no `scripts.pure` block.
+    pub pure_fn_registry: Option<std::sync::Arc<crate::scripting::PureFunctionRegistry>>,
+    /// Compiled Rhai hook registry for `pre_request` / `on_status` hooks.
+    /// `None` when the source has no hooks defined.
+    pub hook_registry: Option<std::sync::Arc<crate::scripting::HookRegistry>>,
+    pub max_hook_requests: u32,
 }
 
 impl StoredNode {
@@ -190,6 +197,9 @@ impl HostState {
             ext_cache,
             ext_cache_namespace,
             v8_process,
+            pure_fn_registry: None,
+            hook_registry: None,
+            max_hook_requests: 3,
         })
     }
 

@@ -96,6 +96,8 @@ async fn eval_json_field(
     current: Option<(&serde_json::Value, usize)>,
     env: Env,
 ) -> Result<Value, String> {
+    let registry_arc = state.pure_fn_registry.clone();
+    let registry = registry_arc.as_deref();
     if let Expr::Fetch {
         url_expr,
         blueprint: sub_bp,
@@ -103,50 +105,51 @@ async fn eval_json_field(
         headers,
         kind,
         on_failure,
+        endpoint_id,
     } = expr
     {
-        let url_val = eval_json_expr(url_expr, doc, current, env.clone()).await?;
+        let url_val = eval_json_expr(url_expr, doc, current, env.clone(), registry).await?;
         let url = match url_val {
             Value::Str(s) => s,
             _ => return Err("Fetch: url_expr must evaluate to a String".into()),
         };
         let mut resolved_headers = Vec::with_capacity(headers.len());
         for (k_expr, v_expr) in headers {
-            let k = eval_json_expr(k_expr, doc, current, env.clone()).await?;
-            let v = eval_json_expr(v_expr, doc, current, env.clone()).await?;
+            let k = eval_json_expr(k_expr, doc, current, env.clone(), registry).await?;
+            let v = eval_json_expr(v_expr, doc, current, env.clone(), registry).await?;
             match (k, v) {
                 (Value::Str(k), Value::Str(v)) => resolved_headers.push((k, v)),
                 _ => return Err("Fetch: header keys and values must be strings".into()),
             }
         }
-        let result = eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind).await;
+        let result = eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind, endpoint_id.clone()).await;
         match (result, on_failure) {
             (Ok(v), _) => Ok(v),
             (Err(_), kani_shared::ast::OnFailurePolicy::Skip) => Ok(Value::Null),
             (Err(e), kani_shared::ast::OnFailurePolicy::Fail) => Err(e),
             (Err(_), kani_shared::ast::OnFailurePolicy::Use(fallback)) => {
-                eval_json_expr(fallback, doc, current, env).await
+                eval_json_expr(fallback, doc, current, env, registry).await
             }
         }
     } else {
-        eval_json_expr(expr, doc, current, env).await
+        eval_json_expr(expr, doc, current, env, registry).await
     }
 }
 
-/// Evaluates an expression in a JSON document context.
-///
-/// Returns a boxed future (rather than `async fn`) so recursive calls through
-/// `eval_common_expr` don't produce an infinitely-sized state machine.
 fn eval_json_expr<'a>(
     expression: &'a Expr,
     doc: &'a serde_json::Value,
     current: Option<(&'a serde_json::Value, usize)>,
     env: Env,
+    registry: Option<&'a crate::scripting::PureFunctionRegistry>,
 ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + 'a>> {
     Box::pin(async move {
-        if let Some(result) = eval_common_expr(expression, env.clone(), &|e, env| {
-            eval_json_expr(e, doc, current, env)
-        })
+        if let Some(result) = eval_common_expr(
+            expression,
+            env.clone(),
+            &|e, env| eval_json_expr(e, doc, current, env, registry),
+            registry,
+        )
         .await
         {
             return result;
@@ -166,7 +169,7 @@ fn eval_json_expr<'a>(
                 .map(|(_, i)| Value::Int(i as i64))
                 .ok_or_else(|| "Index used outside of a container loop".into()),
 
-            Expr::JsonPtr { target, pointer } => eval_json_expr(target, doc, current, env)
+            Expr::JsonPtr { target, pointer } => eval_json_expr(target, doc, current, env, registry)
                 .await
                 .and_then(|v| v.into_json("ptr"))
                 .map(|v| {
@@ -175,7 +178,7 @@ fn eval_json_expr<'a>(
                         .unwrap_or(Value::Null)
                 }),
 
-            Expr::JsonStr { target } => eval_json_expr(target, doc, current, env)
+            Expr::JsonStr { target } => eval_json_expr(target, doc, current, env, registry)
                 .await
                 .and_then(|v| v.into_json("str"))
                 .map(|v| {
@@ -184,27 +187,27 @@ fn eval_json_expr<'a>(
                         .unwrap_or(Value::Null)
                 }),
 
-            Expr::JsonInt { target } => eval_json_expr(target, doc, current, env)
+            Expr::JsonInt { target } => eval_json_expr(target, doc, current, env, registry)
                 .await
                 .and_then(|v| v.into_json("int"))
                 .map(|v| v.as_i64().map(Value::Int).unwrap_or(Value::Null)),
 
-            Expr::JsonFloat { target } => eval_json_expr(target, doc, current, env)
+            Expr::JsonFloat { target } => eval_json_expr(target, doc, current, env, registry)
                 .await
                 .and_then(|v| v.into_json("float"))
                 .map(|v| v.as_f64().map(Value::Num).unwrap_or(Value::Null)),
 
-            Expr::JsonBool { target } => eval_json_expr(target, doc, current, env)
+            Expr::JsonBool { target } => eval_json_expr(target, doc, current, env, registry)
                 .await
                 .and_then(|v| v.into_json("bool"))
                 .map(|v| v.as_bool().map(Value::Bool).unwrap_or(Value::Null)),
 
-            Expr::ArrayLen { target } => eval_json_expr(target, doc, current, env)
+            Expr::ArrayLen { target } => eval_json_expr(target, doc, current, env, registry)
                 .await
                 .and_then(|v| v.into_json("array_len"))
                 .map(|v| Value::Int(v.as_array().map(|a| a.len() as i64).unwrap_or(0))),
 
-            Expr::JsonKeys { target } => eval_json_expr(target, doc, current, env)
+            Expr::JsonKeys { target } => eval_json_expr(target, doc, current, env, registry)
                 .await
                 .and_then(|v| v.into_json("keys"))
                 .map(|v| {
@@ -216,10 +219,10 @@ fn eval_json_expr<'a>(
                 }),
 
             Expr::JsonGet { target, key } => {
-                let val = eval_json_expr(target, doc, current, env.clone())
+                let val = eval_json_expr(target, doc, current, env.clone(), registry)
                     .await
                     .and_then(|v| v.into_json("get"))?;
-                let key_str = eval_json_expr(key, doc, current, env)
+                let key_str = eval_json_expr(key, doc, current, env, registry)
                     .await
                     .and_then(|v| v.into_str("get"))?;
                 Ok(val
@@ -229,13 +232,13 @@ fn eval_json_expr<'a>(
             }
 
             Expr::JsonFind { target, key, value } => {
-                let arr = eval_json_expr(target, doc, current, env.clone())
+                let arr = eval_json_expr(target, doc, current, env.clone(), registry)
                     .await
                     .and_then(|v| v.into_json("find"))?;
-                let key_str = eval_json_expr(key, doc, current, env.clone())
+                let key_str = eval_json_expr(key, doc, current, env.clone(), registry)
                     .await
                     .and_then(|v| v.into_str("find"))?;
-                let val_str = eval_json_expr(value, doc, current, env)
+                let val_str = eval_json_expr(value, doc, current, env, registry)
                     .await
                     .and_then(|v| v.into_str("find"))?;
                 Ok(arr
@@ -252,14 +255,14 @@ fn eval_json_expr<'a>(
             Expr::JsonArray(items) => {
                 let mut arr = Vec::with_capacity(items.len());
                 for item in items {
-                    let v = eval_json_expr(item, doc, current, env.clone()).await?;
+                    let v = eval_json_expr(item, doc, current, env.clone(), registry).await?;
                     arr.push(v.to_json().unwrap_or(serde_json::Value::Null));
                 }
                 Ok(Value::Json(serde_json::Value::Array(arr)))
             }
 
             Expr::JsonFold { target } => {
-                let items = eval_json_expr(target, doc, current, env)
+                let items = eval_json_expr(target, doc, current, env, registry)
                     .await
                     .and_then(|v| v.into_list("json_fold"))?;
                 let mut merged: Option<serde_json::Value> = None;

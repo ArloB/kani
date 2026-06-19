@@ -19,6 +19,26 @@ pub trait CacheBackend: Send + Sync + 'static {
     async fn prune_expired(&self);
 }
 
+/// Returns the cached value if present; otherwise calls `compute`, stores the result, and returns it.
+pub async fn get_or_insert<F, Fut>(
+    cache: &dyn CacheBackend,
+    namespace: &str,
+    key: &str,
+    ttl: Duration,
+    compute: F,
+) -> Vec<u8>
+where
+    F: FnOnce() -> Fut + Send,
+    Fut: std::future::Future<Output = Vec<u8>> + Send,
+{
+    if let Some(cached) = cache.get(namespace, key).await {
+        return cached;
+    }
+    let value = compute().await;
+    cache.put(namespace, key, value.clone(), ttl).await;
+    value
+}
+
 struct Entry {
     key: String,
     value: Vec<u8>,
@@ -284,5 +304,35 @@ mod tests {
             .await;
         assert_eq!(cache.get(ns_v1, "k").await, Some(b"v1".to_vec()));
         assert_eq!(cache.get(ns_v2, "k").await, Some(b"v2".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn get_or_insert_computes_on_miss() {
+        let cache = InMemoryCache::new();
+        let mut computed = false;
+        let value = get_or_insert(&cache, "ns", "key", Duration::from_secs(60), || {
+            computed = true;
+            async { b"computed".to_vec() }
+        })
+        .await;
+        assert_eq!(value, b"computed".to_vec());
+        assert!(computed);
+        assert_eq!(cache.get("ns", "key").await, Some(b"computed".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn get_or_insert_returns_cached_on_hit() {
+        let cache = InMemoryCache::new();
+        cache
+            .put("ns", "key", b"cached".to_vec(), Duration::from_secs(60))
+            .await;
+        let mut computed = false;
+        let value = get_or_insert(&cache, "ns", "key", Duration::from_secs(60), || {
+            computed = true;
+            async { b"should_not_compute".to_vec() }
+        })
+        .await;
+        assert_eq!(value, b"cached".to_vec());
+        assert!(!computed, "compute must not be called on cache hit");
     }
 }
