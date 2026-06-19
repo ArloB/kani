@@ -260,11 +260,8 @@ impl AppService {
             let prefs = self.load_pref_map(id).await?;
 
             let (pure_registry, hook_registry, max_hook_requests) = {
-                let mut inst = kani_core::sources::SourceInstance::new(
-                    self.smart_client.clone(),
-                    None,
-                    false,
-                );
+                let mut inst =
+                    kani_core::sources::SourceInstance::new(self.smart_client.clone(), None, false);
                 if inst
                     .load(
                         self.wasm_runtime.engine(),
@@ -274,11 +271,9 @@ impl AppService {
                     .await
                     .is_ok()
                 {
-                    let meta = inst
-                        .get_metadata()
-                        .await
-                        .ok()
-                        .and_then(|raw| serde_json::from_str::<kani_shared::ExtensionMetadata>(&raw).ok());
+                    let meta = inst.get_metadata().await.ok().and_then(|raw| {
+                        serde_json::from_str::<kani_shared::ExtensionMetadata>(&raw).ok()
+                    });
                     let max_hk = meta
                         .as_ref()
                         .and_then(|m| m.rate_limit.as_ref())

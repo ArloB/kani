@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rhai::{Dynamic, Engine, Scope, AST};
+use rhai::{AST, Dynamic, Engine, Scope};
 
 use crate::evaluator::shared::Value;
 use crate::scripting::engine::make_pure_sandbox;
@@ -31,7 +31,11 @@ impl PureFunctionRegistry {
         let Some(ast) = self.asts.get(name) else {
             return Err(format!("Rhai function '{name}' not found in registry"));
         };
-        if args.first().map(|v| matches!(v, Value::Null)).unwrap_or(false) {
+        if args
+            .first()
+            .map(|v| matches!(v, Value::Null))
+            .unwrap_or(false)
+        {
             return Ok(Value::Null);
         }
         let rhai_args: Vec<Dynamic> = args
@@ -146,12 +150,8 @@ mod tests {
     use super::*;
 
     fn make_registry(name: &str, src: &str) -> PureFunctionRegistry {
-        PureFunctionRegistry::compile(
-            &[(name.to_string(), src.to_string())]
-                .into_iter()
-                .collect(),
-        )
-        .unwrap()
+        PureFunctionRegistry::compile(&[(name.to_string(), src.to_string())].into_iter().collect())
+            .unwrap()
     }
 
     #[test]
@@ -188,17 +188,18 @@ mod tests {
             "loop_forever",
             "fn loop_forever(s) { let i = 0; loop { i += 1; } s }",
         );
-        assert!(reg
-            .call("loop_forever", &[Value::Str("x".into())])
-            .is_err());
+        assert!(reg.call("loop_forever", &[Value::Str("x".into())]).is_err());
     }
 
     #[test]
     fn compile_rejects_syntax_error() {
         let result = PureFunctionRegistry::compile(
-            &[("bad".to_string(), "fn bad(s) { s.to_upper( // missing paren".to_string())]
-                .into_iter()
-                .collect(),
+            &[(
+                "bad".to_string(),
+                "fn bad(s) { s.to_upper( // missing paren".to_string(),
+            )]
+            .into_iter()
+            .collect(),
         );
         assert!(result.is_err());
     }
@@ -231,10 +232,7 @@ mod tests {
 
     #[test]
     fn list_roundtrip() {
-        let reg = make_registry(
-            "first_elem",
-            "fn first_elem(arr) { arr[0] }",
-        );
+        let reg = make_registry("first_elem", "fn first_elem(arr) { arr[0] }");
         let list = Value::List(vec![Value::Str("a".into()), Value::Str("b".into())]);
         assert_eq!(
             reg.call("first_elem", &[list]).unwrap(),

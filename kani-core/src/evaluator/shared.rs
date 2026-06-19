@@ -817,8 +817,7 @@ pub async fn fetch_body(
             }
         }
 
-        let mut url =
-            url::Url::parse(&working.url).map_err(|e| format!("Invalid URL: {}", e))?;
+        let mut url = url::Url::parse(&working.url).map_err(|e| format!("Invalid URL: {}", e))?;
         if !working.queries.is_empty() {
             url.query_pairs_mut().extend_pairs(working.queries.iter());
         }
@@ -896,8 +895,7 @@ pub async fn fetch_body(
                 }
                 HookActionKind::RetryAfter { seconds } if hook_retries < max_hook_retries => {
                     hook_retries += 1;
-                    tokio::time::sleep(std::time::Duration::from_secs(seconds.max(0) as u64))
-                        .await;
+                    tokio::time::sleep(std::time::Duration::from_secs(seconds.max(0) as u64)).await;
                     continue;
                 }
                 HookActionKind::Fail { kind, reason } => {
@@ -913,8 +911,7 @@ pub async fn fetch_body(
             .await
             .map_err(|e| e.to_string())?
             .to_vec();
-        return String::from_utf8(body)
-            .map_err(|_| "Invalid UTF-8 in response body".to_string());
+        return String::from_utf8(body).map_err(|_| "Invalid UTF-8 in response body".to_string());
     }
 }
 
@@ -1122,9 +1119,7 @@ mod tests {
         state.allowed_host = AllowedHost::Restricted("example.com".to_string());
 
         let scripts = HookScripts {
-            pre_request: Some(
-                r#"req.url = "https://evil.com/api"; proceed()"#.to_string(),
-            ),
+            pre_request: Some(r#"req.url = "https://evil.com/api"; proceed()"#.to_string()),
             ..Default::default()
         };
         let registry = HookRegistry::compile(&scripts).unwrap();
@@ -1132,7 +1127,10 @@ mod tests {
 
         let req = simple_request("https://example.com/api");
         let result = fetch_body(&mut state, &req).await;
-        assert!(result.is_err(), "should fail after hook mutates URL to disallowed host");
+        assert!(
+            result.is_err(),
+            "should fail after hook mutates URL to disallowed host"
+        );
         let err = result.unwrap_err();
         assert!(
             err.contains("blocked") || err.contains("not permitted") || err.contains("evil.com"),

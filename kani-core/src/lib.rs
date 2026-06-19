@@ -5,7 +5,6 @@
 
 pub mod cache;
 pub mod cbz;
-pub mod scripting;
 pub mod comic_info;
 pub mod downloader;
 pub mod error;
@@ -15,6 +14,7 @@ pub mod http;
 pub mod image_transform;
 pub mod network;
 pub mod option_set_fetcher;
+pub mod scripting;
 pub mod source_manager;
 pub mod sources;
 pub mod utilities;

@@ -577,10 +577,7 @@ pub struct RequestDef {
     pub method: String,
     pub headers: Vec<(String, String)>,
     pub queries: Vec<(String, String)>,
-    #[cfg_attr(
-        any(feature = "host", feature = "builder"),
-        serde(default)
-    )]
+    #[cfg_attr(any(feature = "host", feature = "builder"), serde(default))]
     pub endpoint_id: Option<String>,
 }
 

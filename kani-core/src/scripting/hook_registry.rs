@@ -65,9 +65,9 @@ impl HookRegistry {
 
         let mut endpoint_pre_request = HashMap::new();
         for (endpoint_id, src) in &scripts.endpoint_pre_request {
-            let ast = engine.compile(src).map_err(|e| {
-                format!("endpoint '{endpoint_id}' pre_request compile error: {e}")
-            })?;
+            let ast = engine
+                .compile(src)
+                .map_err(|e| format!("endpoint '{endpoint_id}' pre_request compile error: {e}"))?;
             endpoint_pre_request.insert(endpoint_id.clone(), ast);
         }
 
@@ -122,11 +122,9 @@ impl HookRegistry {
             *req = mutated;
         }
 
-        Ok(result
-            .try_cast::<HookAction>()
-            .unwrap_or(HookAction {
-                kind: HookActionKind::Proceed,
-            }))
+        Ok(result.try_cast::<HookAction>().unwrap_or(HookAction {
+            kind: HookActionKind::Proceed,
+        }))
     }
 
     pub fn run_on_status(
@@ -158,11 +156,9 @@ impl HookRegistry {
             .eval_ast_with_scope::<Dynamic>(&mut scope, ast)
             .map_err(|e| format!("on_status hook error: {e}"))?;
 
-        Ok(result
-            .try_cast::<HookAction>()
-            .unwrap_or(HookAction {
-                kind: HookActionKind::Proceed,
-            }))
+        Ok(result.try_cast::<HookAction>().unwrap_or(HookAction {
+            kind: HookActionKind::Proceed,
+        }))
     }
 
     fn find_on_status_ast(&self, endpoint_id: &str, status: u16) -> Option<&AST> {
@@ -227,7 +223,10 @@ mod tests {
             ..Default::default()
         };
         let err = HookRegistry::compile(&scripts).unwrap_err();
-        assert!(err.contains("pre_request"), "error must mention pre_request: {err}");
+        assert!(
+            err.contains("pre_request"),
+            "error must mention pre_request: {err}"
+        );
     }
 
     #[test]
@@ -239,8 +238,13 @@ mod tests {
         let action: HookAction = engine.eval("retry()").unwrap();
         assert!(matches!(action.kind, HookActionKind::Retry));
         let action: HookAction = engine.eval("retry_after(30)").unwrap();
-        assert!(matches!(action.kind, HookActionKind::RetryAfter { seconds: 30 }));
-        let action: HookAction = engine.eval(r#"fail("rate_limited", "too many requests")"#).unwrap();
+        assert!(matches!(
+            action.kind,
+            HookActionKind::RetryAfter { seconds: 30 }
+        ));
+        let action: HookAction = engine
+            .eval(r#"fail("rate_limited", "too many requests")"#)
+            .unwrap();
         assert!(matches!(action.kind, HookActionKind::Fail { .. }));
     }
 
@@ -261,7 +265,9 @@ mod tests {
         let action = action.unwrap();
         assert!(matches!(action.kind, HookActionKind::Proceed));
         assert!(
-            req.headers.iter().any(|(k, v)| k == "X-Signed" && v == "yes"),
+            req.headers
+                .iter()
+                .any(|(k, v)| k == "X-Signed" && v == "yes"),
             "mutation must propagate back: {:?}",
             req.headers
         );
@@ -271,7 +277,10 @@ mod tests {
     fn on_status_exact_match() {
         let mut on_status = std::collections::BTreeMap::new();
         on_status.insert("401".to_string(), "retry()".to_string());
-        let scripts = HookScripts { on_status, ..Default::default() };
+        let scripts = HookScripts {
+            on_status,
+            ..Default::default()
+        };
         let registry = HookRegistry::compile(&scripts).unwrap();
         let req = dummy_req(None);
         let resp = dummy_resp(401);
@@ -283,19 +292,31 @@ mod tests {
     fn on_status_class_match() {
         let mut on_status = std::collections::BTreeMap::new();
         on_status.insert("5xx".to_string(), "retry_after(10)".to_string());
-        let scripts = HookScripts { on_status, ..Default::default() };
+        let scripts = HookScripts {
+            on_status,
+            ..Default::default()
+        };
         let registry = HookRegistry::compile(&scripts).unwrap();
         let req = dummy_req(None);
         let resp = dummy_resp(503);
         let action = registry.run_on_status(&req, &resp, dummy_ctx()).unwrap();
-        assert!(matches!(action.kind, HookActionKind::RetryAfter { seconds: 10 }));
+        assert!(matches!(
+            action.kind,
+            HookActionKind::RetryAfter { seconds: 10 }
+        ));
     }
 
     #[test]
     fn on_status_default_fallback() {
         let mut on_status = std::collections::BTreeMap::new();
-        on_status.insert("default".to_string(), r#"fail("unexpected", "status")"#.to_string());
-        let scripts = HookScripts { on_status, ..Default::default() };
+        on_status.insert(
+            "default".to_string(),
+            r#"fail("unexpected", "status")"#.to_string(),
+        );
+        let scripts = HookScripts {
+            on_status,
+            ..Default::default()
+        };
         let registry = HookRegistry::compile(&scripts).unwrap();
         let req = dummy_req(None);
         let resp = dummy_resp(429);
@@ -315,7 +336,10 @@ mod tests {
     #[test]
     fn endpoint_specific_hook_takes_precedence() {
         let mut ep_pre = std::collections::BTreeMap::new();
-        ep_pre.insert("search".to_string(), r#"req.set_header("X-Ep", "search"); proceed()"#.to_string());
+        ep_pre.insert(
+            "search".to_string(),
+            r#"req.set_header("X-Ep", "search"); proceed()"#.to_string(),
+        );
         let scripts = HookScripts {
             pre_request: Some(r#"req.set_header("X-Ep", "global"); proceed()"#.to_string()),
             endpoint_pre_request: ep_pre,
@@ -323,10 +347,17 @@ mod tests {
         };
         let registry = HookRegistry::compile(&scripts).unwrap();
         let mut req = dummy_req(Some("search"));
-        tokio::task::block_in_place(|| {
-            registry.run_pre_request(&mut req, dummy_ctx())
-        }).unwrap();
-        let header_val = req.headers.iter().find(|(k, _)| k == "X-Ep").map(|(_, v)| v.as_str());
-        assert_eq!(header_val, Some("search"), "endpoint hook must win: {:?}", req.headers);
+        tokio::task::block_in_place(|| registry.run_pre_request(&mut req, dummy_ctx())).unwrap();
+        let header_val = req
+            .headers
+            .iter()
+            .find(|(k, _)| k == "X-Ep")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(
+            header_val,
+            Some("search"),
+            "endpoint hook must win: {:?}",
+            req.headers
+        );
     }
 }

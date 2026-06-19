@@ -160,8 +160,15 @@ pub fn emit_manga_details(
         );
     }
 
-    let req_block =
-        emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[], None, Some("manga_details"));
+    let req_block = emit_request_block(
+        &ep.route,
+        &ep.method,
+        &ep.headers,
+        &ep.queries,
+        &[],
+        None,
+        Some("manga_details"),
+    );
 
     if embedded_bytes {
         let bp_bytes = emit_blueprint_bytes(ep, ext, "manga_details");
@@ -207,8 +214,15 @@ pub fn emit_chapter_list(
     embedded_bytes: bool,
 ) -> String {
     let decode_prologue = emit_composite_id_decode_prologue(ep);
-    let req_block =
-        emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[], None, Some("chapter_list"));
+    let req_block = emit_request_block(
+        &ep.route,
+        &ep.method,
+        &ep.headers,
+        &ep.queries,
+        &[],
+        None,
+        Some("chapter_list"),
+    );
 
     let hnp = emit_hnp_expr_static(&ep.has_next_page);
     let tp = emit_total_pages_static(&ep.total_pages);
@@ -271,8 +285,15 @@ pub fn emit_pages(
     embedded_bytes: bool,
 ) -> String {
     let decode_prologue = emit_composite_id_decode_prologue(ep);
-    let req_block =
-        emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[], None, Some("pages"));
+    let req_block = emit_request_block(
+        &ep.route,
+        &ep.method,
+        &ep.headers,
+        &ep.queries,
+        &[],
+        None,
+        Some("pages"),
+    );
 
     let row_assembly = emit_pages_assembly(ep);
 

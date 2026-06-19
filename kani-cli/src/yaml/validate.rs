@@ -1424,9 +1424,7 @@ fn validate_pure_scripts(scripts: &std::collections::BTreeMap<String, String>) -
                 "scripts.pure.{name}: script source must not be empty"
             )));
         } else if let Err(e) = engine.compile(src) {
-            errors.push(CliError::Other(format!(
-                "scripts.pure.{name}: {e}"
-            )));
+            errors.push(CliError::Other(format!("scripts.pure.{name}: {e}")));
         }
     }
     errors
@@ -1435,7 +1433,9 @@ fn validate_pure_scripts(scripts: &std::collections::BTreeMap<String, String>) -
 fn validate_hook_body(context: &str, src: &str, engine: &rhai::Engine) -> Vec<CliError> {
     let mut errors = Vec::new();
     if src.is_empty() {
-        errors.push(CliError::Other(format!("{context}: hook body must not be empty")));
+        errors.push(CliError::Other(format!(
+            "{context}: hook body must not be empty"
+        )));
     } else if let Err(e) = engine.compile(src) {
         errors.push(CliError::Other(format!("{context}: {e}")));
     }
@@ -1471,7 +1471,11 @@ fn validate_hook_scripts(ext: &super::schema::YamlExtension) -> Vec<CliError> {
                 "on_status key `{pattern}` is not valid — use a 3-digit status code (e.g. `401`), a wildcard pattern (e.g. `4xx`), or `default`"
             )));
         }
-        errors.append(&mut validate_hook_body(&format!("on_status.{pattern}"), body, &engine));
+        errors.append(&mut validate_hook_body(
+            &format!("on_status.{pattern}"),
+            body,
+            &engine,
+        ));
     }
 
     for (ep_name, ep_body) in endpoint_iter(ext) {
@@ -1498,9 +1502,7 @@ fn validate_hook_scripts(ext: &super::schema::YamlExtension) -> Vec<CliError> {
     errors
 }
 
-fn endpoint_iter(
-    ext: &super::schema::YamlExtension,
-) -> Vec<(&str, &super::schema::EndpointBody)> {
+fn endpoint_iter(ext: &super::schema::YamlExtension) -> Vec<(&str, &super::schema::EndpointBody)> {
     use super::schema::PopularEndpoint;
     let mut out = Vec::new();
     if let Some(PopularEndpoint::Full(body)) = &ext.endpoints.popular {
@@ -1527,7 +1529,9 @@ fn collect_endpoint_pre_requests(
     endpoint_iter(ext)
         .into_iter()
         .filter_map(|(name, ep)| {
-            ep.pre_request.as_ref().map(|body| (name.to_string(), body.clone()))
+            ep.pre_request
+                .as_ref()
+                .map(|body| (name.to_string(), body.clone()))
         })
         .collect()
 }
@@ -1639,11 +1643,11 @@ mod tests {
     #[test]
     fn validate_hook_body_accepts_valid_rhai() {
         let engine = super::make_validation_sandbox();
-        let errors = super::validate_hook_body(
-            "pre_request",
-            r#"req.set_header("X-Foo", "bar")"#,
-            &engine,
+        let errors =
+            super::validate_hook_body("pre_request", r#"req.set_header("X-Foo", "bar")"#, &engine);
+        assert!(
+            errors.is_empty(),
+            "valid Rhai expression should produce no errors"
         );
-        assert!(errors.is_empty(), "valid Rhai expression should produce no errors");
     }
 }

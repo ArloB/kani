@@ -353,13 +353,9 @@ impl AppService {
                     .await
                     .is_ok()
                 {
-                    let meta = inst
-                        .get_metadata()
-                        .await
-                        .ok()
-                        .and_then(|raw| {
-                            serde_json::from_str::<kani_shared::ExtensionMetadata>(&raw).ok()
-                        });
+                    let meta = inst.get_metadata().await.ok().and_then(|raw| {
+                        serde_json::from_str::<kani_shared::ExtensionMetadata>(&raw).ok()
+                    });
                     let max_hk = meta
                         .as_ref()
                         .and_then(|m| m.rate_limit.as_ref())
@@ -380,9 +376,7 @@ impl AppService {
                             }
                         }
                     });
-                    let hook_reg = meta
-                        .as_ref()
-                        .and_then(sources::compile_hook_registry);
+                    let hook_reg = meta.as_ref().and_then(sources::compile_hook_registry);
                     (pure_reg, hook_reg, max_hk)
                 } else {
                     (None, None, 3u32)

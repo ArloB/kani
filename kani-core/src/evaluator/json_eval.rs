@@ -122,7 +122,16 @@ async fn eval_json_field(
                 _ => return Err("Fetch: header keys and values must be strings".into()),
             }
         }
-        let result = eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind, endpoint_id.clone()).await;
+        let result = eval_fetch_field(
+            state,
+            &url,
+            method,
+            resolved_headers,
+            sub_bp,
+            kind,
+            endpoint_id.clone(),
+        )
+        .await;
         match (result, on_failure) {
             (Ok(v), _) => Ok(v),
             (Err(_), kani_shared::ast::OnFailurePolicy::Skip) => Ok(Value::Null),
@@ -169,14 +178,16 @@ fn eval_json_expr<'a>(
                 .map(|(_, i)| Value::Int(i as i64))
                 .ok_or_else(|| "Index used outside of a container loop".into()),
 
-            Expr::JsonPtr { target, pointer } => eval_json_expr(target, doc, current, env, registry)
-                .await
-                .and_then(|v| v.into_json("ptr"))
-                .map(|v| {
-                    v.pointer(pointer)
-                        .map(|v| Value::Json(v.clone()))
-                        .unwrap_or(Value::Null)
-                }),
+            Expr::JsonPtr { target, pointer } => {
+                eval_json_expr(target, doc, current, env, registry)
+                    .await
+                    .and_then(|v| v.into_json("ptr"))
+                    .map(|v| {
+                        v.pointer(pointer)
+                            .map(|v| Value::Json(v.clone()))
+                            .unwrap_or(Value::Null)
+                    })
+            }
 
             Expr::JsonStr { target } => eval_json_expr(target, doc, current, env, registry)
                 .await

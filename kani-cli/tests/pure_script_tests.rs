@@ -46,12 +46,16 @@ fn pure_scripts_codegen_emits_include_str() {
     let validated = load_and_validate("pure_scripts.yaml");
     let generated = codegen::generate(&validated, false);
     assert!(
-        generated.lib_rs.contains("include_str!(\"scripts/slug.rhai\")"),
+        generated
+            .lib_rs
+            .contains("include_str!(\"scripts/slug.rhai\")"),
         "generated lib.rs must reference slug.rhai: {}",
         generated.lib_rs
     );
     assert!(
-        generated.lib_rs.contains("include_str!(\"scripts/clean_title.rhai\")"),
+        generated
+            .lib_rs
+            .contains("include_str!(\"scripts/clean_title.rhai\")"),
         "generated lib.rs must reference clean_title.rhai: {}",
         generated.lib_rs
     );
@@ -67,7 +71,9 @@ fn pure_scripts_codegen_emits_scripts_field_in_metadata() {
         generated.lib_rs
     );
     assert!(
-        generated.lib_rs.contains("std::collections::BTreeMap::from"),
+        generated
+            .lib_rs
+            .contains("std::collections::BTreeMap::from"),
         "generated lib.rs must use BTreeMap::from for non-empty scripts: {}",
         generated.lib_rs
     );
@@ -100,7 +106,10 @@ base_url: "https://example.com"
     .unwrap();
     let generated = codegen::generate(&validated, false);
     assert!(
-        generated.lib_rs.contains("scripts:") && generated.lib_rs.contains("std::collections::BTreeMap::new()"),
+        generated.lib_rs.contains("scripts:")
+            && generated
+                .lib_rs
+                .contains("std::collections::BTreeMap::new()"),
         "generated lib.rs must emit empty BTreeMap for extensions without scripts: {}",
         generated.lib_rs
     );
@@ -119,7 +128,10 @@ scripts:
     bad_fn: "fn bad_fn(s) { s.to_upper( // missing paren"
 "#,
     );
-    assert!(result.is_err(), "syntax error in pure script must fail validation");
+    assert!(
+        result.is_err(),
+        "syntax error in pure script must fail validation"
+    );
     let errs = result.err().unwrap();
     assert!(
         errs.iter().any(|e| e.to_string().contains("bad_fn")),
@@ -141,7 +153,10 @@ scripts:
     "": "fn foo(s) { s }"
 "#,
     );
-    assert!(result.is_err(), "empty pure script name must fail validation");
+    assert!(
+        result.is_err(),
+        "empty pure script name must fail validation"
+    );
 }
 
 #[test]
@@ -157,5 +172,8 @@ scripts:
     my_fn: ""
 "#,
     );
-    assert!(result.is_err(), "empty pure script body must fail validation");
+    assert!(
+        result.is_err(),
+        "empty pure script body must fail validation"
+    );
 }

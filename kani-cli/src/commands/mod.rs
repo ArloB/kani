@@ -185,7 +185,10 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             esbuild,
         } => setup::run(vendors, tailwind, esbuild),
         Command::Icons => icons::run(),
-        Command::Dsl { expression, scripts } => dsl_cmd::run(&expression, scripts.as_deref()),
+        Command::Dsl {
+            expression,
+            scripts,
+        } => dsl_cmd::run(&expression, scripts.as_deref()),
         Command::Lint => lint::run(),
         Command::Repl(repl_cmd) => match repl_cmd {
             ReplCommand::Inspect { file } => crate::repl::inspect::run(&file),

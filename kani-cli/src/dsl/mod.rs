@@ -200,9 +200,7 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a
             .ignore_then(just('.'))
             .ignore_then(fn_ident)
             .then(arg_list.clone().delimited_by(just('('), just(')')))
-            .map_with(|(fn_name, args), extra| {
-                (format!("__user::{fn_name}"), args, extra.span())
-            });
+            .map_with(|(fn_name, args), extra| (format!("__user::{fn_name}"), args, extra.span()));
 
         let method_call = ident.then(arg_list.delimited_by(just('('), just(')')));
 

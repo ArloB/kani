@@ -118,9 +118,15 @@ async fn eval_html_field(
         endpoint_id,
     } = expr
     {
-        let url_val =
-            eval_html_expr(url_expr, doc, current, env.clone(), &state.selector_cache, registry)
-                .await?;
+        let url_val = eval_html_expr(
+            url_expr,
+            doc,
+            current,
+            env.clone(),
+            &state.selector_cache,
+            registry,
+        )
+        .await?;
         let url = match url_val {
             Value::Str(s) => s,
             _ => return Err("Fetch: url_expr must evaluate to a String".into()),
@@ -150,7 +156,16 @@ async fn eval_html_field(
                 _ => return Err("Fetch: header keys and values must be strings".into()),
             }
         }
-        let result = eval_fetch_field(state, &url, method, resolved_headers, sub_bp, kind, endpoint_id.clone()).await;
+        let result = eval_fetch_field(
+            state,
+            &url,
+            method,
+            resolved_headers,
+            sub_bp,
+            kind,
+            endpoint_id.clone(),
+        )
+        .await;
         match (result, on_failure) {
             (Ok(v), _) => Ok(v),
             (Err(_), kani_shared::ast::OnFailurePolicy::Skip) => Ok(Value::Null),

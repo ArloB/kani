@@ -52,8 +52,12 @@ fn load_pure_scripts(path: Option<&Path>) -> Result<BTreeMap<String, String>, Cl
     let src = std::fs::read_to_string(path)
         .map_err(|e| CliError::Other(format!("--scripts: cannot read {}: {e}", path.display())))?;
 
-    let ext: crate::yaml::schema::YamlExtension = serde_yaml::from_str(&src)
-        .map_err(|e| CliError::Other(format!("--scripts: YAML parse error in {}: {e}", path.display())))?;
+    let ext: crate::yaml::schema::YamlExtension = serde_yaml::from_str(&src).map_err(|e| {
+        CliError::Other(format!(
+            "--scripts: YAML parse error in {}: {e}",
+            path.display()
+        ))
+    })?;
 
     let scripts = ext.scripts.pure;
 
@@ -140,7 +144,11 @@ fn collect_user_fn_names(expr: &Expr, out: &mut Vec<String>) {
         | Expr::FormatPadded { target, .. } => {
             collect_user_fn_names(target, out);
         }
-        Expr::Prepend { target, prefix } | Expr::Append { target, suffix: prefix } => {
+        Expr::Prepend { target, prefix }
+        | Expr::Append {
+            target,
+            suffix: prefix,
+        } => {
             collect_user_fn_names(target, out);
             collect_user_fn_names(prefix, out);
         }
@@ -156,7 +164,11 @@ fn collect_user_fn_names(expr: &Expr, out: &mut Vec<String>) {
             collect_user_fn_names(target, out);
             collect_user_fn_names(filter, out);
         }
-        Expr::Fold { target, transform, base } => {
+        Expr::Fold {
+            target,
+            transform,
+            base,
+        } => {
             collect_user_fn_names(target, out);
             collect_user_fn_names(transform, out);
             collect_user_fn_names(base, out);
@@ -165,7 +177,11 @@ fn collect_user_fn_names(expr: &Expr, out: &mut Vec<String>) {
             collect_user_fn_names(value, out);
             collect_user_fn_names(body, out);
         }
-        Expr::If { condition, then, else_ } => {
+        Expr::If {
+            condition,
+            then,
+            else_,
+        } => {
             collect_user_fn_names(condition, out);
             collect_user_fn_names(then, out);
             collect_user_fn_names(else_, out);
@@ -187,10 +203,7 @@ fn collect_user_fn_names(expr: &Expr, out: &mut Vec<String>) {
             collect_user_fn_names(target, out);
             collect_user_fn_names(key, out);
         }
-        Expr::Concat(items)
-        | Expr::List(items)
-        | Expr::JsonArray(items)
-        | Expr::Merge(items) => {
+        Expr::Concat(items) | Expr::List(items) | Expr::JsonArray(items) | Expr::Merge(items) => {
             for item in items {
                 collect_user_fn_names(item, out);
             }
@@ -205,7 +218,9 @@ fn collect_user_fn_names(expr: &Expr, out: &mut Vec<String>) {
                 collect_user_fn_names(expr, out);
             }
         }
-        Expr::Fetch { url_expr, headers, .. } => {
+        Expr::Fetch {
+            url_expr, headers, ..
+        } => {
             collect_user_fn_names(url_expr, out);
             for (k, v) in headers {
                 collect_user_fn_names(k, out);

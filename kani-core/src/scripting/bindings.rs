@@ -100,8 +100,7 @@ fn ctx_pref(ctx: &mut ScriptableCtx, key: String) -> Dynamic {
 
 fn ctx_cache_get(ctx: &mut ScriptableCtx, namespace: String, key: String) -> Dynamic {
     let result = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current()
-            .block_on(ctx.cache_backend.get(&namespace, &key))
+        tokio::runtime::Handle::current().block_on(ctx.cache_backend.get(&namespace, &key))
     });
     match result {
         Some(bytes) => Dynamic::from(String::from_utf8_lossy(&bytes).to_string()),
@@ -118,15 +117,18 @@ fn ctx_cache_put(
 ) {
     let dur = Duration::from_secs(ttl_secs.max(0) as u64);
     tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current()
-            .block_on(ctx.cache_backend.put(&namespace, &key, value.into_bytes(), dur))
+        tokio::runtime::Handle::current().block_on(ctx.cache_backend.put(
+            &namespace,
+            &key,
+            value.into_bytes(),
+            dur,
+        ))
     });
 }
 
 fn ctx_cache_delete(ctx: &mut ScriptableCtx, namespace: String, key: String) {
     tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current()
-            .block_on(ctx.cache_backend.delete(&namespace, &key))
+        tokio::runtime::Handle::current().block_on(ctx.cache_backend.delete(&namespace, &key))
     });
 }
 
