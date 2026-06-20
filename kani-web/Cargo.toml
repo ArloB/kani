@@ -6,11 +6,6 @@ build = "build.rs"
 
 [features]
 test-util = ["kani-app/test-util"]
-# Passkeys/WebAuthn deferred — see overviews plan. The audited server crate
-# (webauthn-rs) pulls OpenSSL, which conflicts at link time with rquest's
-# bundled BoringSSL (boring2). A hand-rolled verifier was rejected as unsafe for
-# an auth feature. The recommended path is the pure-RustCrypto `webauthn_rp`
-# crate (no OpenSSL/ring/boring) — to be implemented when passkeys are revisited.
 
 [dependencies]
 serde.workspace = true

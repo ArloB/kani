@@ -26,6 +26,8 @@ pub struct GeneratedCrate {
     pub lib_rs: String,
     /// Browser scripts to write as `src/scripts/<name>.js`.
     pub browser_scripts: std::collections::BTreeMap<String, String>,
+    /// Pure Rhai scripts to write as `src/scripts/<name>.rhai`.
+    pub pure_scripts: std::collections::BTreeMap<String, String>,
 }
 
 pub fn generate(ext: &ValidatedExtension, embedded_bytes: bool) -> GeneratedCrate {
@@ -36,6 +38,7 @@ pub fn generate(ext: &ValidatedExtension, embedded_bytes: bool) -> GeneratedCrat
         cargo_toml,
         lib_rs,
         browser_scripts: ext.browser_scripts.clone(),
+        pure_scripts: ext.pure_scripts.clone(),
     }
 }
 

@@ -136,6 +136,8 @@ pub fn validate(
     });
 
     errors.append(&mut validate_browser_scripts(&ext.browser_scripts));
+    errors.append(&mut validate_pure_scripts(&ext.scripts.pure));
+    errors.append(&mut validate_hook_scripts(ext));
 
     // Validate filter IDs: non-empty, no whitespace, no leading/trailing ':', at most one ':'.
     for filter in &ext.filters {
@@ -276,6 +278,11 @@ pub fn validate(
             requires_capabilities: ext.requires_capabilities.clone(),
             chapter_sort,
             browser_scripts: ext.browser_scripts.clone(),
+            pure_scripts: ext.scripts.pure.clone(),
+            pre_request: ext.pre_request.clone(),
+            on_status: ext.on_status.clone(),
+            endpoint_pre_request: collect_endpoint_pre_requests(ext),
+            endpoint_on_status: collect_endpoint_on_status(ext),
         })
     } else {
         Err(errors)
@@ -462,6 +469,7 @@ fn validate_metadata(metadata: Option<&MetadataBlock>) -> Result<ValidatedMetada
             requests_per_second: cfg.rps,
             burst: cfg.burst,
             max_concurrent: cfg.max_concurrent,
+            max_hook_requests: cfg.max_hook_requests,
         }
     });
 
@@ -1402,6 +1410,156 @@ fn validate_browser_scripts(scripts: &std::collections::BTreeMap<String, String>
     errors
 }
 
+fn validate_pure_scripts(scripts: &std::collections::BTreeMap<String, String>) -> Vec<CliError> {
+    let mut errors = Vec::new();
+    let engine = make_validation_sandbox();
+    for (name, src) in scripts {
+        if name.is_empty() {
+            errors.push(CliError::Other(
+                "scripts.pure: function name must not be empty".to_string(),
+            ));
+        }
+        if src.is_empty() {
+            errors.push(CliError::Other(format!(
+                "scripts.pure.{name}: script source must not be empty"
+            )));
+        } else if let Err(e) = engine.compile(src) {
+            errors.push(CliError::Other(format!("scripts.pure.{name}: {e}")));
+        }
+    }
+    errors
+}
+
+fn validate_hook_body(context: &str, src: &str, engine: &rhai::Engine) -> Vec<CliError> {
+    let mut errors = Vec::new();
+    if src.is_empty() {
+        errors.push(CliError::Other(format!(
+            "{context}: hook body must not be empty"
+        )));
+    } else if let Err(e) = engine.compile(src) {
+        errors.push(CliError::Other(format!("{context}: {e}")));
+    }
+    errors
+}
+
+fn is_valid_on_status_key(key: &str) -> bool {
+    if key == "default" {
+        return true;
+    }
+    let bytes = key.as_bytes();
+    if bytes.len() == 3 {
+        if bytes.iter().all(|b| b.is_ascii_digit()) {
+            return true;
+        }
+        if bytes[0].is_ascii_digit() && bytes[1] == b'x' && bytes[2] == b'x' {
+            return true;
+        }
+    }
+    false
+}
+
+fn validate_hook_scripts(ext: &super::schema::YamlExtension) -> Vec<CliError> {
+    let engine = make_validation_sandbox();
+    let mut errors = Vec::new();
+
+    if let Some(body) = &ext.pre_request {
+        errors.append(&mut validate_hook_body("pre_request", body, &engine));
+    }
+    for (pattern, body) in &ext.on_status {
+        if !is_valid_on_status_key(pattern) {
+            errors.push(CliError::Other(format!(
+                "on_status key `{pattern}` is not valid — use a 3-digit status code (e.g. `401`), a wildcard pattern (e.g. `4xx`), or `default`"
+            )));
+        }
+        errors.append(&mut validate_hook_body(
+            &format!("on_status.{pattern}"),
+            body,
+            &engine,
+        ));
+    }
+
+    for (ep_name, ep_body) in endpoint_iter(ext) {
+        if let Some(body) = &ep_body.pre_request {
+            errors.append(&mut validate_hook_body(
+                &format!("endpoints.{ep_name}.pre_request"),
+                body,
+                &engine,
+            ));
+        }
+        for (pattern, body) in &ep_body.on_status {
+            if !is_valid_on_status_key(pattern) {
+                errors.push(CliError::Other(format!(
+                    "endpoints.{ep_name}.on_status key `{pattern}` is not valid — use a 3-digit status code, a wildcard pattern (e.g. `4xx`), or `default`"
+                )));
+            }
+            errors.append(&mut validate_hook_body(
+                &format!("endpoints.{ep_name}.on_status.{pattern}"),
+                body,
+                &engine,
+            ));
+        }
+    }
+    errors
+}
+
+fn endpoint_iter(ext: &super::schema::YamlExtension) -> Vec<(&str, &super::schema::EndpointBody)> {
+    use super::schema::PopularEndpoint;
+    let mut out = Vec::new();
+    if let Some(PopularEndpoint::Full(body)) = &ext.endpoints.popular {
+        out.push(("popular", body.as_ref()));
+    }
+    if let Some(ep) = &ext.endpoints.search {
+        out.push(("search", ep));
+    }
+    if let Some(ep) = &ext.endpoints.manga_details {
+        out.push(("manga_details", ep));
+    }
+    if let Some(ep) = &ext.endpoints.chapter_list {
+        out.push(("chapter_list", ep));
+    }
+    if let Some(ep) = &ext.endpoints.pages {
+        out.push(("pages", ep));
+    }
+    out
+}
+
+fn collect_endpoint_pre_requests(
+    ext: &super::schema::YamlExtension,
+) -> std::collections::BTreeMap<String, String> {
+    endpoint_iter(ext)
+        .into_iter()
+        .filter_map(|(name, ep)| {
+            ep.pre_request
+                .as_ref()
+                .map(|body| (name.to_string(), body.clone()))
+        })
+        .collect()
+}
+
+fn collect_endpoint_on_status(
+    ext: &super::schema::YamlExtension,
+) -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
+    endpoint_iter(ext)
+        .into_iter()
+        .filter(|(_, ep)| !ep.on_status.is_empty())
+        .map(|(name, ep)| (name.to_string(), ep.on_status.clone()))
+        .collect()
+}
+
+pub fn make_validation_sandbox() -> rhai::Engine {
+    let mut engine = rhai::Engine::new();
+    engine.set_max_operations(100_000);
+    engine.set_max_expr_depths(64, 32);
+    engine.set_max_call_levels(16);
+    engine.set_max_string_size(1_000_000);
+    engine.set_max_array_size(10_000);
+    engine.set_max_map_size(1_000);
+    engine.disable_symbol("eval");
+    engine.disable_symbol("import");
+    engine.disable_symbol("export");
+    engine
+}
+
 pub fn validate_factory(block: &super::schema::FactoryBlock) -> Vec<CliError> {
     let mut errors = Vec::new();
 
@@ -1439,4 +1597,57 @@ pub fn validate_factory(block: &super::schema::FactoryBlock) -> Vec<CliError> {
     }
 
     errors
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::is_valid_on_status_key;
+
+    #[test]
+    fn on_status_key_accepts_specific_codes() {
+        assert!(is_valid_on_status_key("401"));
+        assert!(is_valid_on_status_key("200"));
+        assert!(is_valid_on_status_key("500"));
+    }
+
+    #[test]
+    fn on_status_key_accepts_wildcard_patterns() {
+        assert!(is_valid_on_status_key("4xx"));
+        assert!(is_valid_on_status_key("5xx"));
+        assert!(is_valid_on_status_key("2xx"));
+    }
+
+    #[test]
+    fn on_status_key_accepts_default() {
+        assert!(is_valid_on_status_key("default"));
+    }
+
+    #[test]
+    fn on_status_key_rejects_invalid() {
+        assert!(!is_valid_on_status_key("40x"));
+        assert!(!is_valid_on_status_key("4X0"));
+        assert!(!is_valid_on_status_key(""));
+        assert!(!is_valid_on_status_key("xx"));
+        assert!(!is_valid_on_status_key("4000"));
+        assert!(!is_valid_on_status_key("retry"));
+    }
+
+    #[test]
+    fn validate_hook_body_rejects_broken_rhai() {
+        let engine = super::make_validation_sandbox();
+        let errors = super::validate_hook_body("pre_request", "let", &engine);
+        assert!(!errors.is_empty(), "broken Rhai should produce errors");
+    }
+
+    #[test]
+    fn validate_hook_body_accepts_valid_rhai() {
+        let engine = super::make_validation_sandbox();
+        let errors =
+            super::validate_hook_body("pre_request", r#"req.set_header("X-Foo", "bar")"#, &engine);
+        assert!(
+            errors.is_empty(),
+            "valid Rhai expression should produce no errors"
+        );
+    }
 }

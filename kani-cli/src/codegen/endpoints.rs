@@ -119,6 +119,7 @@ pub fn emit_popular(
             ep,
             ext,
             embedded_bytes,
+            "popular",
         ),
     }
 }
@@ -134,6 +135,7 @@ pub fn emit_search(
         ep,
         ext,
         embedded_bytes,
+        "search",
     )
 }
 
@@ -144,7 +146,7 @@ pub fn emit_manga_details(
 ) -> String {
     let decode_prologue = emit_composite_id_decode_prologue(ep);
     let row_assembly = emit_manga_info_assembly(ep);
-    let bp_chain = emit_blueprint_chain(ep, ext);
+    let bp_chain = emit_blueprint_chain(ep, ext, "manga_details");
 
     if let Some(browser_fetch) = try_emit_browser_fetch(ep) {
         return format!(
@@ -158,10 +160,18 @@ pub fn emit_manga_details(
         );
     }
 
-    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[], None);
+    let req_block = emit_request_block(
+        &ep.route,
+        &ep.method,
+        &ep.headers,
+        &ep.queries,
+        &[],
+        None,
+        Some("manga_details"),
+    );
 
     if embedded_bytes {
-        let bp_bytes = emit_blueprint_bytes(ep, ext);
+        let bp_bytes = emit_blueprint_bytes(ep, ext, "manga_details");
         let fetch = match ep.response_type {
             ResponseType::Html => {
                 "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
@@ -204,14 +214,22 @@ pub fn emit_chapter_list(
     embedded_bytes: bool,
 ) -> String {
     let decode_prologue = emit_composite_id_decode_prologue(ep);
-    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[], None);
+    let req_block = emit_request_block(
+        &ep.route,
+        &ep.method,
+        &ep.headers,
+        &ep.queries,
+        &[],
+        None,
+        Some("chapter_list"),
+    );
 
     let hnp = emit_hnp_expr_static(&ep.has_next_page);
     let tp = emit_total_pages_static(&ep.total_pages);
     let row_assembly = emit_chapter_info_assembly(ep);
 
     if embedded_bytes {
-        let bp_bytes = emit_blueprint_bytes(ep, ext);
+        let bp_bytes = emit_blueprint_bytes(ep, ext, "chapter_list");
         let fetch = match ep.response_type {
             ResponseType::Html => {
                 "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
@@ -237,7 +255,7 @@ pub fn emit_chapter_list(
              }}"
         )
     } else {
-        let bp_chain = emit_blueprint_chain(ep, ext);
+        let bp_chain = emit_blueprint_chain(ep, ext, "chapter_list");
         let extract_call = match ep.response_type {
             ResponseType::Json => "extract::json(None, &bp)?",
             ResponseType::Html => "extract::html(None, &bp)?",
@@ -267,7 +285,15 @@ pub fn emit_pages(
     embedded_bytes: bool,
 ) -> String {
     let decode_prologue = emit_composite_id_decode_prologue(ep);
-    let req_block = emit_request_block(&ep.route, &ep.method, &ep.headers, &ep.queries, &[], None);
+    let req_block = emit_request_block(
+        &ep.route,
+        &ep.method,
+        &ep.headers,
+        &ep.queries,
+        &[],
+        None,
+        Some("pages"),
+    );
 
     let row_assembly = emit_pages_assembly(ep);
 
@@ -278,7 +304,7 @@ pub fn emit_pages(
     };
 
     if embedded_bytes {
-        let bp_bytes = emit_blueprint_bytes(ep, ext);
+        let bp_bytes = emit_blueprint_bytes(ep, ext, "pages");
         let fetch = match ep.response_type {
             ResponseType::Html => {
                 "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
@@ -303,7 +329,7 @@ pub fn emit_pages(
              }}"
         )
     } else {
-        let bp_chain = emit_blueprint_chain(ep, ext);
+        let bp_chain = emit_blueprint_chain(ep, ext, "pages");
         let extract_call = match ep.response_type {
             ResponseType::Json => "extract::json(None, &bp)?",
             ResponseType::Html => "extract::html(None, &bp)?",
@@ -334,6 +360,7 @@ fn emit_manga_list_method(
     ep: &ValidatedEndpoint,
     ext: &ValidatedExtension,
     embedded_bytes: bool,
+    endpoint_id: &str,
 ) -> String {
     let req_block = emit_request_block(
         &ep.route,
@@ -342,11 +369,12 @@ fn emit_manga_list_method(
         &ep.queries,
         &ep.filter_mapping,
         ep.filter_format.as_ref(),
+        Some(endpoint_id),
     );
     let row_assembly = emit_manga_list_item_assembly(ep);
 
     if embedded_bytes {
-        let bp_bytes = emit_blueprint_bytes(ep, ext);
+        let bp_bytes = emit_blueprint_bytes(ep, ext, endpoint_id);
         let (fetch, hnp_line, tp_line) = if ep.pagination.is_some() {
             (
                 "let rows = extract_raw::paginated_html(page, page_size, req, BP)?;".to_string(),
@@ -382,7 +410,7 @@ fn emit_manga_list_method(
              }}"
         )
     } else {
-        let bp_chain = emit_blueprint_chain(ep, ext);
+        let bp_chain = emit_blueprint_chain(ep, ext, endpoint_id);
         let (extract_call, hnp_line, tp_line): (String, String, String) = if ep.pagination.is_some()
         {
             (

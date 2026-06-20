@@ -23,6 +23,7 @@ pub struct HttpRequest {
     headers: Vec<(String, String)>,
     body: Option<Vec<u8>>,
     queries: Vec<(String, String)>,
+    endpoint_id: Option<String>,
 }
 
 impl HttpRequest {
@@ -34,6 +35,7 @@ impl HttpRequest {
             headers: Vec::new(),
             body: None,
             queries: Vec::new(),
+            endpoint_id: None,
         }
     }
 
@@ -43,7 +45,8 @@ impl HttpRequest {
             method,
             headers: Vec::new(),
             body: None,
-            queries: Vec::new(), // Assuming you added this from the previous step
+            queries: Vec::new(),
+            endpoint_id: None,
         }
     }
 
@@ -76,6 +79,12 @@ impl HttpRequest {
     /// Set the URL
     pub fn url<S: Into<String>>(mut self, url: S) -> Self {
         self.url = Some(url.into());
+        self
+    }
+
+    /// Tag this request with a named endpoint ID (used by hook dispatch).
+    pub fn endpoint_id<S: Into<String>>(mut self, id: S) -> Self {
+        self.endpoint_id = Some(id.into());
         self
     }
 
@@ -641,6 +650,7 @@ fn http_request_to_def(req: HttpRequest) -> crate::ast::RequestDef {
         .to_string(),
         headers: req.headers,
         queries: req.queries,
+        endpoint_id: req.endpoint_id,
     }
 }
 
@@ -893,18 +903,9 @@ pub mod js_context {
 
     pub fn capture_url_param(
         page_url: &str,
-        url_pattern: &str,
-        param: &str,
-        timeout_ms: u32,
-        force_refresh: bool,
+        opts: crate::bindings::kani::extension::scripting::CaptureUrlParamOpts,
     ) -> Result<String, ExtensionError> {
-        super::v8_context::capture_url_param(
-            page_url,
-            url_pattern,
-            param,
-            timeout_ms,
-            force_refresh,
-        )
+        super::v8_context::capture_url_param(page_url, opts)
     }
 }
 
@@ -940,18 +941,14 @@ pub mod v8_context {
     }
 
     /// Loads `page_url` in a headless Chromium instance, intercepts network requests
-    /// whose URL contains `url_pattern`, and returns the value of `param` from the
-    /// first matching request's query string. `timeout_ms` controls the deadline.
-    /// Set `force_refresh` to bypass the per-URL cache after an API 401/403.
+    /// whose URL contains `opts.url_pattern`, and returns the value of the named
+    /// query-string parameter or request header from the first matching request.
+    /// Exactly one of `param_name` or `header_name` must be set in `opts`.
     pub fn capture_url_param(
         page_url: &str,
-        url_pattern: &str,
-        param: &str,
-        timeout_ms: u32,
-        force_refresh: bool,
+        opts: scripting::CaptureUrlParamOpts,
     ) -> Result<String, ExtensionError> {
-        scripting::capture_url_param(page_url, url_pattern, param, timeout_ms, force_refresh)
-            .map_err(ExtensionError::unknown)
+        scripting::capture_url_param(page_url, &opts).map_err(ExtensionError::unknown)
     }
 
     pub fn capture_page_payload(

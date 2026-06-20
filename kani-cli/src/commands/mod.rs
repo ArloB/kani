@@ -92,6 +92,9 @@ pub enum Command {
     Dsl {
         /// DSL expression string
         expression: String,
+        /// Path to a YAML extension file whose `scripts.pure` block defines user functions
+        #[arg(long, value_name = "FILE")]
+        scripts: Option<std::path::PathBuf>,
     },
     /// Run the workspace quality checks (clippy, machete, deny, fmt) in sequence
     Lint,
@@ -182,7 +185,10 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             esbuild,
         } => setup::run(vendors, tailwind, esbuild),
         Command::Icons => icons::run(),
-        Command::Dsl { expression } => dsl_cmd::run(&expression),
+        Command::Dsl {
+            expression,
+            scripts,
+        } => dsl_cmd::run(&expression, scripts.as_deref()),
         Command::Lint => lint::run(),
         Command::Repl(repl_cmd) => match repl_cmd {
             ReplCommand::Inspect { file } => crate::repl::inspect::run(&file),

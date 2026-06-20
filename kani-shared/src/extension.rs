@@ -254,6 +254,15 @@ pub struct RateLimitConfig {
     pub requests_per_second: f32,
     pub burst: u32,
     pub max_concurrent: u32,
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default = "default_max_hook_requests")
+    )]
+    pub max_hook_requests: u32,
+}
+
+fn default_max_hook_requests() -> u32 {
+    3
 }
 
 impl Default for RateLimitConfig {
@@ -262,6 +271,7 @@ impl Default for RateLimitConfig {
             requests_per_second: 2.0,
             burst: 8,
             max_concurrent: 4,
+            max_hook_requests: 3,
         }
     }
 }
@@ -341,6 +351,36 @@ pub struct ExtensionMetadata {
         serde(default)
     )]
     pub sections: Vec<Section>,
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub scripts: std::collections::BTreeMap<String, String>,
+    /// Source-level pre_request Rhai hook body. `None` means no hook.
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub pre_request: Option<String>,
+    /// Source-level on_status Rhai hook bodies keyed by status pattern.
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub on_status: std::collections::BTreeMap<String, String>,
+    /// Per-endpoint pre_request hooks: endpoint_id → hook body.
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub endpoint_pre_request: std::collections::BTreeMap<String, String>,
+    /// Per-endpoint on_status hooks: endpoint_id → (status_pattern → hook body).
+    #[cfg_attr(
+        any(feature = "host", feature = "builder", feature = "meta"),
+        serde(default)
+    )]
+    pub endpoint_on_status:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 }
 
 #[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
@@ -367,6 +407,11 @@ impl Default for ExtensionMetadata {
             min_kani_version: None,
             requires_capabilities: Vec::new(),
             sections: Vec::new(),
+            scripts: std::collections::BTreeMap::new(),
+            pre_request: None,
+            on_status: std::collections::BTreeMap::new(),
+            endpoint_pre_request: std::collections::BTreeMap::new(),
+            endpoint_on_status: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -467,6 +512,11 @@ mod tests {
                 name: "Latest".to_string(),
                 nsfw: false,
             }],
+            scripts: std::collections::BTreeMap::new(),
+            pre_request: None,
+            on_status: std::collections::BTreeMap::new(),
+            endpoint_pre_request: std::collections::BTreeMap::new(),
+            endpoint_on_status: std::collections::BTreeMap::new(),
         };
 
         let json = crate::serde_json::to_string(&meta).expect("serializes");

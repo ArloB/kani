@@ -17,6 +17,9 @@ const ROOT = join(__dirname, '..');
 const JS_DIR = join(ROOT, 'static', 'js');
 const LOCALE_FILE = join(ROOT, 'static', 'locales', 'en.js');
 
+/**
+ * @param {string} dir
+ */
 function walk(dir) {
   /** @type {string[]} */
   const files = [];
@@ -52,12 +55,12 @@ for (const file of allFiles) {
 }
 
 if (missing.size === 0) {
-  console.log('✓ All i18n keys are defined in the catalog.');
+  console.log('All i18n keys are defined in the catalog.');
   process.exit(0);
 } else {
-  console.error(`✗ ${missing.size} i18n key(s) referenced but not in catalog:`);
+  console.error(`${missing.size} i18n key(s) referenced but not in catalog:`);
   for (const [key, files] of missing) {
-    console.error(`  "${key}"  →  ${[...new Set(files)].join(', ')}`);
+    console.error(`  "${key}"  ->  ${[...new Set(files)].join(', ')}`);
   }
   process.exit(1);
 }

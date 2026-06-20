@@ -15,10 +15,12 @@ pub struct SourceManager {
     base_url: Option<String>,
     unrestricted_http: bool,
     preferences: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
-    /// Shared Node.js V8 subprocess handle. Lazy-spawned on first use, shared across all leases.
     v8_process: crate::v8_process::V8ProcessHandle,
     ext_cache: Arc<dyn crate::cache::CacheBackend>,
     ext_cache_namespace: String,
+    pure_fn_registry: Option<Arc<crate::scripting::PureFunctionRegistry>>,
+    hook_registry: Option<Arc<crate::scripting::HookRegistry>>,
+    max_hook_requests: u32,
 }
 
 impl SourceManager {
@@ -33,6 +35,9 @@ impl SourceManager {
         preferences: std::collections::HashMap<String, String>,
         ext_cache: Arc<dyn crate::cache::CacheBackend>,
         ext_cache_namespace: String,
+        pure_fn_registry: Option<Arc<crate::scripting::PureFunctionRegistry>>,
+        hook_registry: Option<Arc<crate::scripting::HookRegistry>>,
+        max_hook_requests: u32,
     ) -> Self {
         Self {
             engine,
@@ -45,6 +50,9 @@ impl SourceManager {
             v8_process: Arc::new(Mutex::new(None)),
             ext_cache,
             ext_cache_namespace,
+            pure_fn_registry,
+            hook_registry,
+            max_hook_requests,
         }
     }
 
@@ -68,16 +76,17 @@ impl SourceManager {
             (None, false) => AllowedHost::MetadataOnly,
         };
 
-        let mut store = Store::new(
-            &self.engine,
-            HostState::new(
-                self.smart_client.clone(),
-                allowed_host,
-                Arc::clone(&self.ext_cache),
-                self.ext_cache_namespace.clone(),
-                Arc::clone(&self.v8_process),
-            )?,
-        );
+        let mut host_state = HostState::new(
+            self.smart_client.clone(),
+            allowed_host,
+            Arc::clone(&self.ext_cache),
+            self.ext_cache_namespace.clone(),
+            Arc::clone(&self.v8_process),
+        )?;
+        host_state.pure_fn_registry = self.pure_fn_registry.clone();
+        host_state.hook_registry = self.hook_registry.clone();
+        host_state.max_hook_requests = self.max_hook_requests;
+        let mut store = Store::new(&self.engine, host_state);
 
         store.set_epoch_deadline(crate::sources::EPOCH_DEADLINE_TICKS);
         store.epoch_deadline_callback(|ctx| {

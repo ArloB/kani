@@ -54,6 +54,7 @@ async fn json_fetch_list_then_detail() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .field("id", Expr::self_ref().ptr("/id").int_val())
         .field(
@@ -117,6 +118,7 @@ async fn html_fetch_sub_blueprint() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .field("href", Expr::self_ref().first("a").attr("href"))
         .field(
@@ -167,6 +169,7 @@ async fn fetch_disallowed_host_is_rejected() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .field(
             "data",
@@ -212,6 +215,7 @@ async fn nested_fetch_is_rejected() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .field(
             "data",
@@ -257,6 +261,7 @@ async fn fetch_budget_exceeded_after_32_requests() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .field(
             "data",
@@ -305,6 +310,7 @@ async fn on_failure_skip_produces_null() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .field("id", Expr::self_ref().ptr("/id").int_val())
         .field_opt(
@@ -356,6 +362,7 @@ async fn on_failure_fail_propagates_error() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .field(
             "detail",
@@ -389,6 +396,7 @@ async fn on_failure_use_evaluates_fallback() {
             method: "GET".into(),
             headers: vec![],
             queries: vec![],
+            endpoint_id: None,
         })
         .field("id", Expr::self_ref().ptr("/id").int_val())
         .field(

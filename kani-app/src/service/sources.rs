@@ -2,6 +2,48 @@ use super::*;
 use crate::ids::UserId;
 use crate::models::SourceHealthRow;
 
+fn compile_pure_registry(
+    metadata: &kani_shared::ExtensionMetadata,
+) -> Option<std::sync::Arc<kani_core::scripting::PureFunctionRegistry>> {
+    if metadata.scripts.is_empty() {
+        return None;
+    }
+    match kani_core::scripting::PureFunctionRegistry::compile(&metadata.scripts) {
+        Ok(reg) => Some(std::sync::Arc::new(reg)),
+        Err(e) => {
+            tracing::warn!(
+                source = %metadata.id,
+                "Failed to compile pure scripts, running without script support: {e}"
+            );
+            None
+        }
+    }
+}
+
+pub(crate) fn compile_hook_registry(
+    metadata: &kani_shared::ExtensionMetadata,
+) -> Option<std::sync::Arc<kani_core::scripting::HookRegistry>> {
+    let scripts = kani_core::scripting::HookScripts {
+        pre_request: metadata.pre_request.clone(),
+        on_status: metadata.on_status.clone(),
+        endpoint_pre_request: metadata.endpoint_pre_request.clone(),
+        endpoint_on_status: metadata.endpoint_on_status.clone(),
+    };
+    if scripts.is_empty() {
+        return None;
+    }
+    match kani_core::scripting::HookRegistry::compile(&scripts) {
+        Ok(reg) => Some(std::sync::Arc::new(reg)),
+        Err(e) => {
+            tracing::warn!(
+                source = %metadata.id,
+                "Failed to compile hook scripts, running without hook support: {e}"
+            );
+            None
+        }
+    }
+}
+
 pub(crate) async fn resolve_option_set(
     cache: &dyn kani_core::cache::CacheBackend,
     client: &kani_core::http::SmartClient,
@@ -217,6 +259,34 @@ impl AppService {
 
             let prefs = self.load_pref_map(id).await?;
 
+            let (pure_registry, hook_registry, max_hook_requests) = {
+                let mut inst =
+                    kani_core::sources::SourceInstance::new(self.smart_client.clone(), None, false);
+                if inst
+                    .load(
+                        self.wasm_runtime.engine(),
+                        &component,
+                        self.wasm_runtime.linker(),
+                    )
+                    .await
+                    .is_ok()
+                {
+                    let meta = inst.get_metadata().await.ok().and_then(|raw| {
+                        serde_json::from_str::<kani_shared::ExtensionMetadata>(&raw).ok()
+                    });
+                    let max_hk = meta
+                        .as_ref()
+                        .and_then(|m| m.rate_limit.as_ref())
+                        .map(|rl| rl.max_hook_requests)
+                        .unwrap_or(3);
+                    let pure_reg = meta.as_ref().and_then(compile_pure_registry);
+                    let hook_reg = meta.as_ref().and_then(compile_hook_registry);
+                    (pure_reg, hook_reg, max_hk)
+                } else {
+                    (None, None, 3u32)
+                }
+            };
+
             let ns = format!("{}:", source.name);
             let source_manager = SourceManager::new(
                 self.wasm_runtime.engine().clone(),
@@ -228,6 +298,9 @@ impl AppService {
                 prefs,
                 std::sync::Arc::clone(&self.ext_cache),
                 ns,
+                pure_registry,
+                hook_registry,
+                max_hook_requests,
             );
 
             self.sources
@@ -1045,6 +1118,13 @@ impl AppService {
             .map_err(ServiceError::Core)?;
         drop(settings);
 
+        let pure_registry = compile_pure_registry(&metadata);
+        let hook_registry = compile_hook_registry(&metadata);
+        let max_hook_requests = metadata
+            .rate_limit
+            .as_ref()
+            .map(|rl| rl.max_hook_requests)
+            .unwrap_or(3);
         let source_manager = SourceManager::new(
             self.wasm_runtime.engine().clone(),
             self.wasm_runtime
@@ -1057,6 +1137,9 @@ impl AppService {
             self.load_pref_map(id).await.unwrap_or_default(),
             std::sync::Arc::clone(&self.ext_cache),
             format!("{}:", metadata.id),
+            pure_registry,
+            hook_registry,
+            max_hook_requests,
         );
 
         self.sources
@@ -1129,6 +1212,13 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
+        let pure_registry = compile_pure_registry(&metadata);
+        let hook_registry = compile_hook_registry(&metadata);
+        let max_hook_requests = metadata
+            .rate_limit
+            .as_ref()
+            .map(|rl| rl.max_hook_requests)
+            .unwrap_or(3);
         let source_manager = SourceManager::new(
             self.wasm_runtime.engine().clone(),
             self.wasm_runtime
@@ -1141,6 +1231,9 @@ impl AppService {
             self.load_pref_map(id).await.unwrap_or_default(),
             std::sync::Arc::clone(&self.ext_cache),
             format!("{}:", metadata.id),
+            pure_registry,
+            hook_registry,
+            max_hook_requests,
         );
 
         self.sources

@@ -154,6 +154,16 @@ fn build_factory_yaml(
         fs::create_dir_all(crate_dir.join("src"))?;
         fs::write(crate_dir.join("Cargo.toml"), &generated.cargo_toml)?;
         fs::write(crate_dir.join("src").join("lib.rs"), &generated.lib_rs)?;
+        if !generated.browser_scripts.is_empty() || !generated.pure_scripts.is_empty() {
+            let scripts_dir = crate_dir.join("src").join("scripts");
+            fs::create_dir_all(&scripts_dir)?;
+            for (name, src) in &generated.browser_scripts {
+                fs::write(scripts_dir.join(format!("{name}.js")), src)?;
+            }
+            for (name, src) in &generated.pure_scripts {
+                fs::write(scripts_dir.join(format!("{name}.rhai")), src)?;
+            }
+        }
         println!("   Generated: {}", crate_dir.display());
 
         let crate_name = format!("kani-{}", generated.id);

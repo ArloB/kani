@@ -523,6 +523,7 @@ impl extraction::Host for HostState {
             method,
             headers,
             queries,
+            endpoint_id: None,
         });
         let value = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
@@ -571,6 +572,7 @@ impl extraction::Host for HostState {
             method,
             headers,
             queries,
+            endpoint_id: None,
         });
         let value = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
@@ -604,19 +606,21 @@ impl scripting::Host for HostState {
     fn capture_url_param(
         &mut self,
         page_url: String,
-        url_pattern: String,
-        param: String,
-        timeout_ms: u32,
-        force_refresh: bool,
+        opts: scripting::CaptureUrlParamOpts,
     ) -> Result<String, String> {
         self.charge_io()?;
         let result = crate::v8_process::capture_url_param(
             &self.v8_process,
             &page_url,
-            &url_pattern,
-            &param,
-            timeout_ms,
-            force_refresh,
+            &crate::v8_process::CaptureUrlParamOpts {
+                url_pattern: &opts.url_pattern,
+                param_name: opts.param_name.as_deref(),
+                header_name: opts.header_name.as_deref(),
+                timeout_ms: opts.timeout_ms,
+                force_refresh: opts.force_refresh,
+                cache_ttl_ms: opts.cache_ttl_ms,
+                extra_headers: &opts.extra_headers,
+            },
         );
         // Reset the epoch deadline reference point so the post-browser-wait WASM
         // code doesn't immediately trip the "no recent IO" deadline check.

@@ -362,3 +362,32 @@ fn codegen_no_fetched_option_sets_emits_empty_array() {
         generated.lib_rs
     );
 }
+
+#[test]
+fn codegen_hooks_snapshot() {
+    let validated = load_and_validate("hooks.yaml");
+    let generated = codegen::generate(&validated, false);
+    insta::assert_snapshot!("hooks_lib_rs", generated.lib_rs);
+}
+
+#[test]
+fn codegen_hooks_metadata_contains_pre_request() {
+    let validated = load_and_validate("hooks.yaml");
+    let generated = codegen::generate(&validated, false);
+    assert!(
+        generated.lib_rs.contains("pre_request:"),
+        "hooks fixture must emit pre_request in metadata: {}",
+        generated.lib_rs
+    );
+}
+
+#[test]
+fn codegen_hooks_rate_limit_max_hook_requests() {
+    let validated = load_and_validate("hooks.yaml");
+    let generated = codegen::generate(&validated, false);
+    assert!(
+        generated.lib_rs.contains("max_hook_requests: 5_u32"),
+        "hooks fixture must emit max_hook_requests from rate_limit config: {}",
+        generated.lib_rs
+    );
+}

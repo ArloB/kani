@@ -49,10 +49,11 @@ pub fn emit_lib_header(ext: &ValidatedExtension, embedded_bytes: bool) -> String
     };
     let rate_limit = match &ext.metadata.rate_limit {
         Some(rl) => format!(
-            "Some(kani_shared::RateLimitConfig {{ requests_per_second: {rps}_f32, burst: {burst}_u32, max_concurrent: {max_concurrent}_u32 }})",
+            "Some(kani_shared::RateLimitConfig {{ requests_per_second: {rps}_f32, burst: {burst}_u32, max_concurrent: {max_concurrent}_u32, max_hook_requests: {max_hook_requests}_u32 }})",
             rps = rl.requests_per_second,
             burst = rl.burst,
             max_concurrent = rl.max_concurrent,
+            max_hook_requests = rl.max_hook_requests,
         ),
         None => "None".to_string(),
     };
@@ -96,6 +97,48 @@ pub fn emit_lib_header(ext: &ValidatedExtension, embedded_bytes: bool) -> String
             .collect::<Vec<_>>()
             .join(", ")
     );
+
+    let scripts = if ext.pure_scripts.is_empty() {
+        "std::collections::BTreeMap::new()".to_string()
+    } else {
+        let entries = ext
+            .pure_scripts
+            .keys()
+            .map(|name| {
+                format!(
+                    "(\"{name}\".to_string(), include_str!(\"scripts/{name}.rhai\").to_string())"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("std::collections::BTreeMap::from([{entries}])")
+    };
+
+    let pre_request = match &ext.pre_request {
+        Some(body) => format!("Some({}.to_string())", escape_rust_string_lit(body)),
+        None => "None".to_string(),
+    };
+
+    let on_status = emit_btreemap_string_string(&ext.on_status);
+
+    let endpoint_pre_request = emit_btreemap_string_string(&ext.endpoint_pre_request);
+
+    let endpoint_on_status = if ext.endpoint_on_status.is_empty() {
+        "std::collections::BTreeMap::new()".to_string()
+    } else {
+        let entries = ext
+            .endpoint_on_status
+            .iter()
+            .map(|(ep, patterns)| {
+                format!(
+                    "(\"{ep}\".to_string(), {})",
+                    emit_btreemap_string_string(patterns)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("std::collections::BTreeMap::from([{entries}])")
+    };
 
     let pref_import = if ext.preferences.is_empty() {
         ""
@@ -160,6 +203,11 @@ impl {struct_name} {{
             min_kani_version: {min_kani_version},
             requires_capabilities: {requires_capabilities},
             sections:         {sections},
+            scripts:          {scripts},
+            pre_request:      {pre_request},
+            on_status:        {on_status},
+            endpoint_pre_request: {endpoint_pre_request},
+            endpoint_on_status: {endpoint_on_status},
         }}
     }}
 }}
@@ -316,6 +364,29 @@ fn scope_token(scope: YamlCacheScope) -> &'static str {
 
 fn escape_str(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn escape_rust_string_lit(s: &str) -> String {
+    format!("\"{}\"", escape_str(s))
+}
+
+fn emit_btreemap_string_string(map: &std::collections::BTreeMap<String, String>) -> String {
+    if map.is_empty() {
+        "std::collections::BTreeMap::new()".to_string()
+    } else {
+        let entries = map
+            .iter()
+            .map(|(k, v)| {
+                format!(
+                    "({}.to_string(), {}.to_string())",
+                    escape_rust_string_lit(k),
+                    escape_rust_string_lit(v)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("std::collections::BTreeMap::from([{entries}])")
+    }
 }
 
 pub fn to_pascal_case(s: &str) -> String {

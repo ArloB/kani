@@ -47,6 +47,9 @@ dunce = "1"
 imagesize = "0.13"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
+# Scripting
+rhai = { version = "1.19", features = ["sync"] }
+
 # Logging
 tracing.workspace = true
 async-trait = "0.1"

@@ -342,6 +342,47 @@ impl AppService {
 
             let prefs = Self::load_pref_map_static(&pool, source.id).await?;
 
+            let (pure_registry, hook_registry, max_hook_requests) = {
+                let mut inst = kani_core::sources::SourceInstance::new(
+                    global_smart_client.clone(),
+                    None,
+                    false,
+                );
+                if inst
+                    .load(wasm_runtime.engine(), &component, wasm_runtime.linker())
+                    .await
+                    .is_ok()
+                {
+                    let meta = inst.get_metadata().await.ok().and_then(|raw| {
+                        serde_json::from_str::<kani_shared::ExtensionMetadata>(&raw).ok()
+                    });
+                    let max_hk = meta
+                        .as_ref()
+                        .and_then(|m| m.rate_limit.as_ref())
+                        .map(|rl| rl.max_hook_requests)
+                        .unwrap_or(3);
+                    let pure_reg = meta.as_ref().and_then(|m| {
+                        if m.scripts.is_empty() {
+                            return None;
+                        }
+                        match kani_core::scripting::PureFunctionRegistry::compile(&m.scripts) {
+                            Ok(reg) => Some(Arc::new(reg)),
+                            Err(e) => {
+                                tracing::warn!(
+                                    source = %source.name,
+                                    "Failed to compile pure scripts: {e}"
+                                );
+                                None
+                            }
+                        }
+                    });
+                    let hook_reg = meta.as_ref().and_then(sources::compile_hook_registry);
+                    (pure_reg, hook_reg, max_hk)
+                } else {
+                    (None, None, 3u32)
+                }
+            };
+
             let ns = format!("{}:", source.name);
             let source_manager = SourceManager::new(
                 wasm_runtime.engine().clone(),
@@ -353,6 +394,9 @@ impl AppService {
                 prefs,
                 std::sync::Arc::clone(&ext_cache),
                 ns,
+                pure_registry,
+                hook_registry,
+                max_hook_requests,
             );
 
             sources_map.insert(source.id, Arc::new(source_manager));

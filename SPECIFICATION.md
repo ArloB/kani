@@ -228,6 +228,34 @@ When operating on a `Json` value (from `json()` root or within a JSON-mode bluep
 | `.json_fold()` | Json | Json | Reduce all elements of a JSON array into a single merged value. Objects are merged by key (later keys win); arrays are concatenated. E.g. `[{"en":"A"},{"ja":"B"}]` → `{"en":"A","ja":"B"}`. Returns the target unchanged if it is not an array. |
 | `.coalesce_keys([key1, key2, ...])` | Json | String/Null | Try each key expression in order via `.get(key).str()`, returning the first non-null string value. Equivalent to chained `.get(k1).str().fallback(.get(k2).str()).fallback(...)`. Keys can be literals, `pref()` calls, variables, or any expression returning a string. **Rust builder convenience only** — in the text DSL, write the equivalent `.get().str().fallback()` chain directly. |
 
+#### User Script Methods
+
+Pure functions declared in `scripts.pure:` (§3.10) are callable from any DSL expression via `.user.<name>(args...)`.
+
+| Syntax | Description |
+|--------|-------------|
+| `.user.<name>()` | Call the named pure function with no arguments. Receiver (the value before the dot) is passed as the first argument. |
+| `.user.<name>(arg1, arg2, ...)` | Call with additional arguments. Each argument is a DSL expression evaluated before the call. |
+
+**Null propagation:** If the receiver or any argument evaluates to `Null`, the call is skipped and `Null` is returned without invoking the Rhai function.
+
+**Constraints:** Pure functions run in the same Rhai sandbox as hook scripts (§3.10) but without access to `req`, `ctx`, or `HookAction` constructors. They may only produce and consume `String`, `Int`, `Number`, `Bool`, `List<String>`, and `Null`. Any other type causes a runtime error.
+
+**Example:**
+
+```yaml
+scripts:
+  pure:
+    slugify: |
+      let s = arg0.to_lower();
+      s.replace(" ", "-")
+
+endpoints:
+  popular:
+    fields:
+      slug: 'self.first("h2").text().user.slugify()'
+```
+
 ### 1.6 Examples
 
 **Simple attribute extraction:**
@@ -858,11 +886,28 @@ Evaluates each subfield expression to a string, joins the results with `delimite
   "blueprint": { ... },
   "method": "Get",
   "headers": [],
-  "kind": "Json"
+  "kind": "Json",
+  "endpoint_id": "manga_details/chapters"
 }
 ```
 
-`"method"` is one of `"Get"`, `"Post"`, `"Put"`, `"Delete"`. `"kind"` is `"Html"` or `"Json"` and determines how the fetched response is parsed before the sub-blueprint is applied. The sub-blueprint is a full blueprint object (§2.3). The host evaluates `url_expr`, fetches the URL (subject to the SSRF `AllowedHost` gate and the per-extension I/O budget), and returns the first row of the sub-extraction as a `Json` value, or `Null` if the result is empty. Nesting `fetch` inside another fetch's sub-blueprint is rejected at evaluation time. Available in the Rust builder via `Expr::fetch_html(url_expr, blueprint)` and `Expr::fetch_json(url_expr, blueprint)`.
+`"method"` is one of `"Get"`, `"Post"`, `"Put"`, `"Delete"`. `"kind"` is `"Html"` or `"Json"` and determines how the fetched response is parsed before the sub-blueprint is applied. The sub-blueprint is a full blueprint object (§2.3). The host evaluates `url_expr`, fetches the URL (subject to the SSRF `AllowedHost` gate and the per-extension I/O budget), and returns the first row of the sub-extraction as a `Json` value, or `Null` if the result is empty. Nesting `fetch` inside another fetch's sub-blueprint is rejected at evaluation time.
+
+`"endpoint_id"` is an optional string identifying the logical source endpoint that owns this sub-fetch. Codegen sets it automatically to `"<parent_endpoint>/<merge_as>"` for `then:` and `for_each:` steps (e.g. `"manga_details/chapters"`). The hook runtime uses it to dispatch per-endpoint `pre_request:` / `on_status:` hooks (§3.10). Available in the Rust builder via `Expr::fetch_html(url_expr, blueprint)` / `Expr::fetch_json(...)` followed by `.with_endpoint_id(id)`.
+
+#### User Function Call
+
+Calls a pure function registered under `scripts.pure:` by name. Produced by the text DSL when `.user.<name>(args...)` syntax is encountered; not emittable as raw JSON (the `user_fn` variant is a DSL-parser artifact, not a hand-authored node).
+
+```json
+{
+  "op": "user_fn",
+  "name": "slugify",
+  "args": [{ "op": "self" }]
+}
+```
+
+`"name"` matches a key in `ExtensionMetadata.scripts.pure`. `"args"` is the evaluated argument list; the receiver (the value before `.user.`) is always prepended as `args[0]` by the parser. Null propagation applies: if any arg is `Null`, the host returns `Null` without calling the function. The function runs in the Rhai pure sandbox (§3.10 sandbox limits).
 
 ### 2.3 Blueprint Encoding
 
@@ -939,7 +984,17 @@ When `pagination` is set, the blueprint must be submitted via `paginated-extract
 
 Blueprints are serialized with **[`postcard`](https://docs.rs/postcard)** (a compact binary format) for the FFI call across the WASM boundary. The `Expr` enum's `serde` derives handle this transparently. Call `blueprint.to_bytes()` (from `BlueprintBuilder::build()`) to get the postcard bytes; the host deserializes via `postcard::from_bytes(&blueprint)`.
 
-**DSL schema versioning.** The binary payload is prefixed with a `u32` schema version. The current version is **2** (introduced when the v2 `Expr` variants — `SplitN`, `Take`, `Skip`, `Reverse`, `SortBy`, `Unique`, `UrlEncode`, `UrlDecode`, `FormatPadded`, `ScalarOverride`, `Fetch` — were added). If a host receives a blueprint with a version it does not support, it returns a human-readable error (`"DSL schema version 2 requires Kani ≥ x.y.z"`) rather than an opaque decode failure. Version 1 blueprints (no prefix) remain decodable by v2 hosts for backward compatibility.
+**DSL schema versioning.** The binary payload is prefixed with a `u32` schema version (`DSL_SCHEMA_VERSION` constant in `kani-shared/src/ast.rs`). `decode_blueprint` on the host hard-rejects any version mismatch with a human-readable error rather than an opaque decode failure. Adding or changing enum variants changes the postcard layout, so every version bump requires all installed extensions to be rebuilt.
+
+| Version | Change |
+|---------|--------|
+| 1 | Original blueprint encoding (no version prefix). |
+| 2 | Added `SplitN`, `Take`, `Skip`, `Reverse`, `SortBy`, `Unique`, `UrlEncode`, `UrlDecode`, `FormatPadded`, `ScalarOverride`, `Fetch` variants. Version prefix introduced. |
+| 3 | Added `Expr::UserFn { name, args }` for pure-script bridge (§3.10). |
+| 4 | Added `endpoint_id: Option<String>` to `RequestDef` for per-endpoint hook dispatch (§3.10). |
+| 5 | Added `endpoint_id: Option<String>` to `Expr::Fetch` so sub-fetches (`then:` / `for_each:` steps) participate in per-endpoint hook dispatch. |
+
+The current version is **5**. Version 1 blueprints (no prefix) are decodable by v2+ hosts for backward compatibility; any other mismatch is a hard error.
 
 The JSON IM described in §2.2 reflects the logical structure of the AST and is useful for debugging; the wire format is binary, not JSON.
 
@@ -986,6 +1041,17 @@ option_sets: OptionSetMap   # Named, reusable option lists referenced via `optio
 id_encoding: IdEncodingBlock  # Composite ID encode/decode for manga and/or chapter IDs
 cache: CacheMap              # Named cache namespaces this extension wants the host to manage
 chapter_sort: ChapterSortBlock # Optional. Chapter sort options exposed to the host.
+
+# === Scripting (optional) ===
+scripts:
+  pure:                        # Named pure Rhai functions callable from the DSL via `.user.<name>()`
+    <name>: string             # Rhai expression body; receives args as arg0, arg1, ...
+
+pre_request: string            # Top-level Rhai hook body: runs before every HTTP request (§3.10)
+on_status:                     # Top-level Rhai hook bodies keyed by status pattern (§3.10)
+  "401": string
+  "5xx": string
+  "default": string
 ```
 
 ### 3.2 Endpoint Types
@@ -1534,6 +1600,7 @@ metadata:
     rps: number                 # Optional. Default: 2.0. Must be > 0.
     burst: integer              # Optional. Default: 8.
     max_concurrent: integer     # Optional. Default: 4.
+    max_hook_requests: integer  # Optional. Default: 3. Max hook-driven retries per request (§3.10).
   languages: [string]           # Optional.
   description: string           # Optional.
   sections:
@@ -1682,6 +1749,21 @@ pagination:
   offset_type: "item" | "page" | "cursor"
   page_start: integer                # For "page" type: starting page number (default: 1)
   cursor_field: string               # For "cursor" type: JSON Pointer to next-page token in response
+
+# Scripting (top-level, optional; see §3.10)
+scripts:
+  pure:
+    <name>: string                   # Rhai function body (arg0, arg1, ... as params)
+
+pre_request: string                  # Rhai hook body; runs before every source-level HTTP request
+on_status:                           # Rhai hook bodies by status pattern
+  "401" | "4xx" | "5xx" | "default": string
+
+# Per-endpoint hooks (subset of above, on any endpoint block)
+# endpoints.<name>:
+#   pre_request: string              # Overrides source-level pre_request for this endpoint
+#   on_status:
+#     <pattern>: string
 ```
 
 ### 3.7 Multi-Source Factory
@@ -1785,6 +1867,105 @@ The `kani-cli validate` command checks:
 18. **`schema_version`:** must not exceed the schema version this `kani-cli` supports.
 19. **`min_kani_version`:** when present, must be a valid semver version string.
 
+### 3.10 Scripting Hooks
+
+Scripting hooks let YAML extensions run sandboxed [Rhai](https://rhai.rs) scripts at two points in every HTTP request cycle: before the request is sent (`pre_request:`) and after a response is received with a specific status (`on_status:`). Pure helper functions (§1.5, User Script Methods) are compiled from `scripts.pure:` and are callable from any DSL expression.
+
+#### Hook locations
+
+Hooks can be declared at two levels:
+
+- **Source-level** — top-level `pre_request:` / `on_status:` keys; fire on every HTTP request made by this extension.
+- **Per-endpoint** — the same keys inside an endpoint block (e.g. `endpoints.manga_details.pre_request:`); fire only when the request's `endpoint_id` matches this endpoint's name. Per-endpoint hooks receive the same sandbox bindings and override the source-level hook for that status code/event.
+
+Sub-fetches (`then:` / `for_each:` steps) carry an `endpoint_id` of the form `"<parent_endpoint>/<merge_as>"` (e.g. `"manga_details/chapters"`), enabling per-endpoint hooks to target them specifically.
+
+#### Execution order
+
+1. Source-level `pre_request` runs first (if present).
+2. Per-endpoint `pre_request` runs second (if present and `endpoint_id` matches).
+3. The (possibly mutated) request is sent.
+4. On response, source-level `on_status` is checked by key, then per-endpoint `on_status`.
+
+#### Sandbox bindings
+
+Each hook body is a Rhai expression body (not a function declaration) evaluated with the following variables in scope:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `req` | `ScriptableRequest` | Mutable HTTP request: `req.url`, `req.method`, `req.set_header(k,v)`, `req.set_query(k,v)`, `req.set_body(s)`. |
+| `ctx` | `ScriptableCtx` | Read-only context: `ctx.filters`, `ctx.prefs`, and `ctx.cache` (see Cache below). |
+| `response` | `ScriptableResponse` | Available in `on_status` only: `response.status` (integer), `response.header(k)`. |
+
+The body must return a `HookAction` value:
+
+| Constructor | Meaning |
+|-------------|---------|
+| `proceed()` | Continue with the (possibly mutated) request/response as-is. |
+| `retry()` | Re-send the request immediately (counts against `max_hook_requests`). |
+| `retry_after(seconds)` | Re-send after a delay (counts against `max_hook_requests`). |
+| `fail(reason)` | Abort with a `ExtensionError::Network` error. |
+
+#### Cache in hook scripts
+
+Inside `ctx.cache`, the following methods are available:
+
+| Method | Description |
+|--------|-------------|
+| `ctx.cache.get(namespace, key)` | Retrieve a string value. Returns `""` if absent. |
+| `ctx.cache.put(namespace, key, value, ttl_seconds)` | Store a string value with a TTL. |
+
+The host uses `get_or_insert` internally for caching auth tokens; scripts express the same pattern via `get` + `put`.
+
+#### Retry composition
+
+`SmartClient` already retries `429`/`502`/`504` responses automatically (with `Retry-After` header parsing). These retries are exhausted before the response reaches any hook. `on_status` hooks fire on the *final* response after `SmartClient`'s own retry budget is consumed. Hook-driven retries (`retry()` / `retry_after()`) are a separate bounded loop, counted against `metadata.rate_limit.max_hook_requests` (default: 3). This budget exists for statuses `SmartClient` does *not* auto-retry, such as `401` → token-refresh → retry. Authors should not use hook retries to re-fight `429`/`5xx` exhaustion as this compounds with `SmartClient`'s own retries.
+
+#### Sandbox limits
+
+| Limit | Default | Override (env var) |
+|-------|---------|-------------------|
+| Max Rhai operations | 100,000 | `KANI_RHAI_MAX_OPS` |
+| Max string length | 1 MB | `KANI_RHAI_MAX_STRING` |
+| Max array length | 10,000 | `KANI_RHAI_MAX_ARRAY` |
+| Max expression depth | 64 / 32 | — |
+| Max call levels | 16 | — |
+
+`eval` and module `import`/`export` are disabled. Closures and `FnPtr` are not available to scripts.
+
+#### Deferred
+
+`RefreshAuth { endpoint_id }` dispatch (invoking a named YAML endpoint from within a hook) is **not yet implemented**. The host-side endpoint-by-name registry required for this is tracked under `EXT_INTERPRETED_BACKEND_AND_DISTRIBUTION`. As a workaround, scripts can refresh auth imperatively via `ctx.cache.put` and return `retry()`.
+
+#### Example
+
+```yaml
+metadata:
+  rate_limit:
+    max_hook_requests: 2
+
+pre_request: |
+  let token = ctx.cache.get("auth", "token");
+  if token != "" {
+    req.set_header("Authorization", "Bearer " + token);
+  }
+  proceed()
+
+on_status:
+  "401": |
+    let new_token = ctx.cache.get("auth", "pending_token");
+    ctx.cache.put("auth", "token", new_token, 3600);
+    retry()
+  "5xx": |
+    retry_after(5)
+
+endpoints:
+  popular:
+    pre_request: |
+      req.set_header("X-Endpoint", "popular");
+      proceed()
+```
+
 ---
 
 ## 4. Extension Cache Interface
@@ -1799,6 +1980,8 @@ Extensions can store and retrieve values across invocations using the host-provi
 | `cache::put(key, value, ttl_seconds)` | `string, string, u64 → ()` | Store a value with a TTL. Pass `0` for no expiry (evicted only by capacity limits). |
 | `cache::delete(key)` | `string → ()` | Remove a specific key immediately. |
 | `cache::clear_namespace()` | `→ ()` | Remove all keys for this extension's namespace. |
+
+**`get_or_insert`** is a host-side convenience provided by the `CacheBackend` trait that composes `get` + `put`: retrieve a value if present, otherwise compute it and store it with a TTL. This is used internally by the hook runtime (§3.10) for auth-token caching. It is not exposed as a separate WIT export — scripts in §3.10 express the same pattern via `ctx.cache.get` + `ctx.cache.put`.
 
 All values are serialized as strings at the boundary. Extensions are responsible for encoding/decoding structured values (e.g. JSON).
 
