@@ -1,4 +1,6 @@
-use crate::evaluator::shared::{EvalBudget, Env, Value, eval_common_expr, eval_fetch_field, fetch_body};
+use crate::evaluator::shared::{
+    Env, EvalBudget, Value, eval_common_expr, eval_fetch_field, fetch_body,
+};
 use crate::wasm::StoredNode;
 use kani_shared::ast::{Blueprint, Expr, OffsetType};
 use scraper::{Element, Selector};
@@ -176,11 +178,29 @@ async fn eval_html_field(
             (Err(_), kani_shared::ast::OnFailurePolicy::Skip) => Ok(Value::Null),
             (Err(e), kani_shared::ast::OnFailurePolicy::Fail) => Err(e),
             (Err(_), kani_shared::ast::OnFailurePolicy::Use(fallback)) => {
-                eval_html_expr(fallback, doc, current, env, &state.selector_cache, registry, budget).await
+                eval_html_expr(
+                    fallback,
+                    doc,
+                    current,
+                    env,
+                    &state.selector_cache,
+                    registry,
+                    budget,
+                )
+                .await
             }
         }
     } else {
-        eval_html_expr(expr, doc, current, env, &state.selector_cache, registry, budget).await
+        eval_html_expr(
+            expr,
+            doc,
+            current,
+            env,
+            &state.selector_cache,
+            registry,
+            budget,
+        )
+        .await
     }
 }
 
@@ -315,9 +335,17 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Attr { target, name } => {
-                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
-                    .await?
-                    .into_html_element("attr")?
+                match eval_html_expr(
+                    target,
+                    doc,
+                    current,
+                    env,
+                    cache,
+                    registry,
+                    Arc::clone(&budget),
+                )
+                .await?
+                .into_html_element("attr")?
                 {
                     None => Ok(Value::Null),
                     Some(node) => node.with_element(|el| {
@@ -330,9 +358,17 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Text { target } => {
-                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
-                    .await?
-                    .into_html_element("text")?
+                match eval_html_expr(
+                    target,
+                    doc,
+                    current,
+                    env,
+                    cache,
+                    registry,
+                    Arc::clone(&budget),
+                )
+                .await?
+                .into_html_element("text")?
                 {
                     None => Ok(Value::Null),
                     Some(node) => node.with_element(|el| Ok(Value::Str(el.text().collect()))),
@@ -340,9 +376,17 @@ fn eval_html_expr<'a>(
             }
 
             Expr::InnerHtml { target } => {
-                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
-                    .await?
-                    .into_html_element("inner_html")?
+                match eval_html_expr(
+                    target,
+                    doc,
+                    current,
+                    env,
+                    cache,
+                    registry,
+                    Arc::clone(&budget),
+                )
+                .await?
+                .into_html_element("inner_html")?
                 {
                     None => Ok(Value::Null),
                     Some(node) => node.with_element(|el| Ok(Value::Str(el.inner_html()))),
@@ -350,9 +394,17 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Select { target, selector } => {
-                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
-                    .await?
-                    .into_html_element("select")?
+                match eval_html_expr(
+                    target,
+                    doc,
+                    current,
+                    env,
+                    cache,
+                    registry,
+                    Arc::clone(&budget),
+                )
+                .await?
+                .into_html_element("select")?
                 {
                     None => Ok(Value::Null),
                     Some(node) => {
@@ -372,9 +424,17 @@ fn eval_html_expr<'a>(
             }
 
             Expr::First { target, selector } => {
-                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
-                    .await?
-                    .into_html_element("first")?
+                match eval_html_expr(
+                    target,
+                    doc,
+                    current,
+                    env,
+                    cache,
+                    registry,
+                    Arc::clone(&budget),
+                )
+                .await?
+                .into_html_element("first")?
                 {
                     None => Ok(Value::Null),
                     Some(node) => {
@@ -393,9 +453,17 @@ fn eval_html_expr<'a>(
             }
 
             Expr::HasClass { target, class } => {
-                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
-                    .await?
-                    .into_html_element("has_class")?
+                match eval_html_expr(
+                    target,
+                    doc,
+                    current,
+                    env,
+                    cache,
+                    registry,
+                    Arc::clone(&budget),
+                )
+                .await?
+                .into_html_element("has_class")?
                 {
                     None => Ok(Value::Null),
                     Some(node) => node.with_element(|el| {

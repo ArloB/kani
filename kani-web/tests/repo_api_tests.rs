@@ -146,7 +146,10 @@ async fn refresh_repo_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
     let res = app
-        .oneshot(post_json("/rest/sources/repos/1/refresh", serde_json::json!({})))
+        .oneshot(post_json(
+            "/rest/sources/repos/1/refresh",
+            serde_json::json!({}),
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
@@ -327,7 +330,10 @@ async fn get_repo_returns_200_for_seeded_repo() {
     let cookie = login(&app, username, password).await;
 
     let res = app
-        .oneshot(authed_get(&format!("/rest/sources/repos/{repo_id}"), &cookie))
+        .oneshot(authed_get(
+            &format!("/rest/sources/repos/{repo_id}"),
+            &cookie,
+        ))
         .await
         .unwrap();
 
@@ -341,13 +347,22 @@ async fn get_repo_returns_200_for_seeded_repo() {
 async fn delete_repo_returns_no_content() {
     let state = test_state().await;
     let key = gen_key();
-    let repo_id = seed_repo(&state, "https://to-delete.example.com", "Repo", &pk_b64(&key)).await;
+    let repo_id = seed_repo(
+        &state,
+        "https://to-delete.example.com",
+        "Repo",
+        &pk_b64(&key),
+    )
+    .await;
     let (username, password) = create_admin(&state).await;
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;
 
     let res = app
-        .oneshot(authed_delete(&format!("/rest/sources/repos/{repo_id}"), &cookie))
+        .oneshot(authed_delete(
+            &format!("/rest/sources/repos/{repo_id}"),
+            &cookie,
+        ))
         .await
         .unwrap();
 
@@ -358,8 +373,13 @@ async fn delete_repo_returns_no_content() {
 async fn list_repo_extensions_returns_empty_for_seeded_repo() {
     let state = test_state().await;
     let key = gen_key();
-    let repo_id =
-        seed_repo(&state, "https://ext-list.example.com", "Ext Repo", &pk_b64(&key)).await;
+    let repo_id = seed_repo(
+        &state,
+        "https://ext-list.example.com",
+        "Ext Repo",
+        &pk_b64(&key),
+    )
+    .await;
     let (username, password) = create_admin(&state).await;
     let app = build_test_app(state).await;
     let cookie = login(&app, username, password).await;

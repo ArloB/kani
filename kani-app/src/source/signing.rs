@@ -72,7 +72,9 @@ pub fn verify_sha256(artifact: &[u8], expected_hex: &str) -> Result<(), SigningE
 
 pub fn sign_artifact(artifact: &[u8], signing_key_bytes: &[u8; 32]) -> [u8; 64] {
     use ed25519_dalek::Signer as _;
-    SigningKey::from_bytes(signing_key_bytes).sign(artifact).to_bytes()
+    SigningKey::from_bytes(signing_key_bytes)
+        .sign(artifact)
+        .to_bytes()
 }
 
 pub fn pubkey_b64(signing_key: &SigningKey) -> String {

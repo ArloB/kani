@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::{
-    commands::publish::{load_index, RepoEntry, RepoIndex},
+    commands::publish::{RepoEntry, RepoIndex, load_index},
     error::CliError,
     signing,
 };
@@ -52,7 +52,8 @@ pub fn run_verify(repo_dir: &Path, repo_key_path: Option<&Path>) -> Result<(), C
     let sig_path = repo_dir.join("index.json.sig");
     if !sig_path.exists() {
         return Err(CliError::Other(
-            "index.json.sig not found — run publish with --repo-sign-key to sign the index".to_string(),
+            "index.json.sig not found — run publish with --repo-sign-key to sign the index"
+                .to_string(),
         ));
     }
     let sig_b64 = std::fs::read_to_string(&sig_path)
@@ -67,7 +68,8 @@ pub fn run_verify(repo_dir: &Path, repo_key_path: Option<&Path>) -> Result<(), C
     let mut failures = 0usize;
 
     for entry in &index.extensions {
-        let artifact_path = if entry.url.starts_with("http://") || entry.url.starts_with("https://") {
+        let artifact_path = if entry.url.starts_with("http://") || entry.url.starts_with("https://")
+        {
             return Err(CliError::Other(format!(
                 "Extension '{}' has an absolute URL '{}'; repo verify only works on local repositories",
                 entry.id, entry.url
@@ -86,7 +88,10 @@ pub fn run_verify(repo_dir: &Path, repo_key_path: Option<&Path>) -> Result<(), C
                 } else if let Err(e) =
                     signing::verify_artifact(&bytes, &entry.author_key, &entry.signature)
                 {
-                    eprintln!("FAIL {}@{}: author signature invalid: {e}", entry.id, entry.version);
+                    eprintln!(
+                        "FAIL {}@{}: author signature invalid: {e}",
+                        entry.id, entry.version
+                    );
                     ok = false;
                 }
 
@@ -114,7 +119,10 @@ pub fn run_verify(repo_dir: &Path, repo_key_path: Option<&Path>) -> Result<(), C
         )));
     }
 
-    println!("\nAll {} extension(s) verified successfully.", index.extensions.len());
+    println!(
+        "\nAll {} extension(s) verified successfully.",
+        index.extensions.len()
+    );
     Ok(())
 }
 
@@ -205,10 +213,7 @@ pub fn run_add(
         ));
     };
 
-    let artifact_dir = repo_dir
-        .join("extensions")
-        .join(&ext_id)
-        .join(&ext_version);
+    let artifact_dir = repo_dir.join("extensions").join(&ext_id).join(&ext_version);
     std::fs::create_dir_all(&artifact_dir)?;
 
     let artifact_filename = format!("extension.{format}");
@@ -220,14 +225,12 @@ pub fn run_add(
 
     let artifact_url = format!("extensions/{ext_id}/{ext_version}/{artifact_filename}");
 
-    let version_override = min_kani_version
-        .map(str::to_string)
-        .or_else(|| {
-            env!("CARGO_PKG_VERSION")
-                .parse::<semver::Version>()
-                .ok()
-                .map(|v| v.to_string())
-        });
+    let version_override = min_kani_version.map(str::to_string).or_else(|| {
+        env!("CARGO_PKG_VERSION")
+            .parse::<semver::Version>()
+            .ok()
+            .map(|v| v.to_string())
+    });
 
     let entry = RepoEntry {
         id: ext_id.clone(),

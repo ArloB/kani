@@ -495,7 +495,10 @@ impl AppService {
             .sources
             .get_backend(id)
             .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
-        backend.get_source_url(&manga_id_d).await.map_err(ServiceError::Core)
+        backend
+            .get_source_url(&manga_id_d)
+            .await
+            .map_err(ServiceError::Core)
     }
 
     pub async fn get_manga_details(&self, id: i64, manga_id: &str) -> Result<String> {
@@ -790,7 +793,11 @@ impl AppService {
                         (Some(ext), err)
                     }
                     Err(errs) => {
-                        let msg = errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ");
+                        let msg = errs
+                            .iter()
+                            .map(|e| e.to_string())
+                            .collect::<Vec<_>>()
+                            .join("; ");
                         tracing::warn!("YAML source {:?} failed validation: {}", path, msg);
                         (None, Some(msg))
                     }
@@ -824,12 +831,10 @@ impl AppService {
                 let mihon_id: Option<i64> = ext.as_ref().and_then(|e| e.mihon_source_id);
                 let enabled_i = enabled as i64;
 
-                let existing = sqlx::query(
-                    "SELECT id FROM sources WHERE name = ?",
-                )
-                .bind(&canonical_id)
-                .fetch_optional(db)
-                .await?;
+                let existing = sqlx::query("SELECT id FROM sources WHERE name = ?")
+                    .bind(&canonical_id)
+                    .fetch_optional(db)
+                    .await?;
 
                 if let Some(row) = existing {
                     let id: i64 = row.try_get("id")?;

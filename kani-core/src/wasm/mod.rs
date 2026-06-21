@@ -274,7 +274,9 @@ impl HostState {
     /// Returns a reference to the compiled selector, parsing and caching it on
     /// the first call for a given `selector` string.
     pub fn get_or_parse_selector(&mut self, selector: &str) -> Result<&scraper::Selector> {
-        let cache = self.selector_cache.get_mut()
+        let cache = self
+            .selector_cache
+            .get_mut()
             .map_err(|_| crate::error::Error::Internal("selector cache lock poisoned".into()))?;
         if !cache.contains_key(selector) {
             let parsed = scraper::Selector::parse(selector)

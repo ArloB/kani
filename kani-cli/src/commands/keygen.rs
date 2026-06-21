@@ -7,7 +7,9 @@ use crate::{error::CliError, signing::key_fingerprint};
 
 pub fn run(out_dir: &PathBuf, name: &str, passphrase_env: Option<&str>) -> Result<(), CliError> {
     if passphrase_env.is_some() {
-        eprintln!("warning: --passphrase-env is not yet implemented; key will be stored unencrypted");
+        eprintln!(
+            "warning: --passphrase-env is not yet implemented; key will be stored unencrypted"
+        );
     }
 
     std::fs::create_dir_all(out_dir)?;

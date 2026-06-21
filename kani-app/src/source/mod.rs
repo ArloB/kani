@@ -113,7 +113,12 @@ impl SourceBackend {
         chapter_id: &str,
     ) -> kani_core::error::Result<kani_core::wasm::kani::extension::types::Chapter> {
         match self {
-            Self::Wasm(w) => w.lease_instance().await?.get_pages(manga_id, chapter_id).await,
+            Self::Wasm(w) => {
+                w.lease_instance()
+                    .await?
+                    .get_pages(manga_id, chapter_id)
+                    .await
+            }
             Self::Yaml(y) => y.get_pages(manga_id, chapter_id).await,
         }
     }
@@ -147,7 +152,8 @@ impl SourceBackend {
 
     pub async fn get_preferences(
         &self,
-    ) -> kani_core::error::Result<Vec<kani_core::wasm::kani::extension::types::PreferenceSpec>> {
+    ) -> kani_core::error::Result<Vec<kani_core::wasm::kani::extension::types::PreferenceSpec>>
+    {
         match self {
             Self::Wasm(w) => w.lease_instance().await?.get_preferences().await,
             Self::Yaml(y) => y.get_preferences().await,

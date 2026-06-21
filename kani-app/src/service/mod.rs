@@ -50,9 +50,9 @@ pub mod path_migration;
 pub mod pending_imports;
 mod preferences;
 mod progress;
+pub mod repos;
 mod scanlators;
 pub mod sessions;
-pub mod repos;
 mod settings;
 mod sources;
 mod stats;
@@ -366,11 +366,7 @@ impl AppService {
                             .map(|e| e.to_string())
                             .collect::<Vec<_>>()
                             .join("; ");
-                        tracing::error!(
-                            "Failed to load YAML source '{}': {}",
-                            source.name,
-                            msg
-                        );
+                        tracing::error!("Failed to load YAML source '{}': {}", source.name, msg);
                         continue;
                     }
                 }
@@ -699,11 +695,10 @@ impl AppService {
         .await?;
 
         use sqlx::Row as _;
-        let rows = sqlx::query(
-            "SELECT id, name FROM sources WHERE enabled = 1 AND deleted_at IS NULL",
-        )
-        .fetch_all(&self.db)
-        .await?;
+        let rows =
+            sqlx::query("SELECT id, name FROM sources WHERE enabled = 1 AND deleted_at IS NULL")
+                .fetch_all(&self.db)
+                .await?;
         let sources: Vec<(i64, String)> = rows
             .into_iter()
             .filter_map(|r| {
@@ -723,8 +718,7 @@ impl AppService {
                 .map_err(|e| crate::error::ServiceError::Core(kani_core::Error::Io(e)))?;
             match kani_yaml::parse_and_validate(&text, &yaml_path) {
                 Ok(ext) => {
-                    let prefs =
-                        Self::load_pref_map_static(&self.db, source_id).await?;
+                    let prefs = Self::load_pref_map_static(&self.db, source_id).await?;
                     let backend = crate::source::loader::build_yaml_source(
                         std::sync::Arc::new(ext),
                         self.smart_client.clone(),
@@ -753,11 +747,10 @@ impl AppService {
         wasm_dir: &std::path::Path,
     ) -> crate::error::Result<()> {
         use sqlx::Row as _;
-        let rows = sqlx::query(
-            "SELECT id, name FROM sources WHERE enabled = 1 AND deleted_at IS NULL",
-        )
-        .fetch_all(&self.db)
-        .await?;
+        let rows =
+            sqlx::query("SELECT id, name FROM sources WHERE enabled = 1 AND deleted_at IS NULL")
+                .fetch_all(&self.db)
+                .await?;
 
         for row in rows {
             let source_id: i64 = row.try_get("id").unwrap_or_default();

@@ -427,7 +427,9 @@ fn validate_cache(
 /// Validates the optional `metadata` block: icon must be valid base64 decoding
 /// to a PNG/WebP/SVG payload no larger than 64KB; rate_limit.rps must be
 /// positive; section ids must be non-empty.
-fn validate_metadata(metadata: Option<&MetadataBlock>) -> Result<ValidatedMetadata, Vec<YamlError>> {
+fn validate_metadata(
+    metadata: Option<&MetadataBlock>,
+) -> Result<ValidatedMetadata, Vec<YamlError>> {
     const MAX_ICON_BYTES: usize = 64 * 1024;
     let mut errors = Vec::new();
 
@@ -1281,9 +1283,11 @@ fn parse_dsl(dsl: &str, field_path: &str) -> Result<Expr, Vec<YamlError>> {
         ))]);
     }
 
-    let parse_ast = result
-        .into_result()
-        .map_err(|_| vec![YamlError::Validation(format!("DSL parse failed in {field_path}"))])?;
+    let parse_ast = result.into_result().map_err(|_| {
+        vec![YamlError::Validation(format!(
+            "DSL parse failed in {field_path}"
+        ))]
+    })?;
 
     let expr: Result<Expr, Vec<YamlError>> = parse_ast.try_into();
     expr
@@ -1380,7 +1384,9 @@ fn build_query_entries(
     }
 }
 
-fn validate_browser_scripts(scripts: &std::collections::BTreeMap<String, String>) -> Vec<YamlError> {
+fn validate_browser_scripts(
+    scripts: &std::collections::BTreeMap<String, String>,
+) -> Vec<YamlError> {
     let mut errors = Vec::new();
     for (name, src) in scripts {
         if name.is_empty() {

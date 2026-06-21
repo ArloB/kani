@@ -5,7 +5,7 @@ use std::path::Path;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use ed25519_dalek::SigningKey;
 use kani_cli::{
-    commands::publish::{load_index, RepoIndex},
+    commands::publish::{RepoIndex, load_index},
     signing,
 };
 
@@ -19,7 +19,11 @@ fn gen_signing_key() -> SigningKey {
     SigningKey::from_bytes(&seed)
 }
 
-fn write_key_file(dir: &Path, name: &str, key: &SigningKey) -> (std::path::PathBuf, std::path::PathBuf) {
+fn write_key_file(
+    dir: &Path,
+    name: &str,
+    key: &SigningKey,
+) -> (std::path::PathBuf, std::path::PathBuf) {
     let pub_path = dir.join(format!("{name}.pub"));
     let key_path = dir.join(format!("{name}.key"));
     std::fs::write(&pub_path, signing::pubkey_b64(key)).unwrap();
@@ -69,14 +73,7 @@ fn publish_yaml_creates_artifact_and_signature() {
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
 
-    kani_cli::commands::publish::run(
-        &yaml_path,
-        &author_key_path,
-        &repo_dir,
-        None,
-        None,
-    )
-    .unwrap();
+    kani_cli::commands::publish::run(&yaml_path, &author_key_path, &repo_dir, None, None).unwrap();
 
     let artifact_path = repo_dir.join("extensions/test-source/1.0.0/extension.yaml");
     assert!(artifact_path.exists(), "artifact file should exist");
@@ -211,12 +208,7 @@ fn repo_verify_detects_tampered_artifact() {
 #[test]
 fn keygen_creates_pub_and_key_files() {
     let tmp = tempfile::tempdir().unwrap();
-    kani_cli::commands::keygen::run(
-        &tmp.path().to_path_buf(),
-        "author",
-        None,
-    )
-    .unwrap();
+    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "author", None).unwrap();
 
     let pub_path = tmp.path().join("author.pub");
     let key_path = tmp.path().join("author.key");
@@ -230,15 +222,11 @@ fn keygen_creates_pub_and_key_files() {
 #[test]
 fn keygen_pub_matches_private_key() {
     let tmp = tempfile::tempdir().unwrap();
-    kani_cli::commands::keygen::run(
-        &tmp.path().to_path_buf(),
-        "test",
-        None,
-    )
-    .unwrap();
+    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "test", None).unwrap();
 
     let signing_key = signing::load_signing_key(&tmp.path().join("test.key")).unwrap();
-    let (verifying_bytes, verifying_b64) = signing::load_verifying_key(&tmp.path().join("test.pub")).unwrap();
+    let (verifying_bytes, verifying_b64) =
+        signing::load_verifying_key(&tmp.path().join("test.pub")).unwrap();
 
     assert_eq!(signing_key.verifying_key().to_bytes(), verifying_bytes);
     assert_eq!(signing::pubkey_b64(&signing_key), verifying_b64);
@@ -251,7 +239,10 @@ fn show_fingerprint_prints_sha256_prefix() {
 
     let (key_bytes, _) = signing::load_verifying_key(&tmp.path().join("test.pub")).unwrap();
     let fp = signing::key_fingerprint(&key_bytes);
-    assert!(fp.starts_with("SHA256:"), "fingerprint should start with SHA256:");
+    assert!(
+        fp.starts_with("SHA256:"),
+        "fingerprint should start with SHA256:"
+    );
 }
 
 #[test]
@@ -306,14 +297,8 @@ fn repo_add_copies_artifact_and_updates_index() {
     let repo_dir = tmp.path().join("repo");
     kani_cli::commands::repo::run_init(&repo_dir, "Curated Repo", &author_pub_path).unwrap();
 
-    kani_cli::commands::repo::run_add(
-        &staged_artifact,
-        &author_pub_path,
-        &repo_dir,
-        None,
-        None,
-    )
-    .unwrap();
+    kani_cli::commands::repo::run_add(&staged_artifact, &author_pub_path, &repo_dir, None, None)
+        .unwrap();
 
     let artifact_dest = repo_dir.join("extensions/test-source/1.0.0/extension.yaml");
     assert!(artifact_dest.exists(), "artifact should be copied to repo");
@@ -348,13 +333,8 @@ fn repo_add_rejects_tampered_artifact() {
     let repo_dir = tmp.path().join("repo");
     std::fs::create_dir_all(&repo_dir).unwrap();
 
-    let result = kani_cli::commands::repo::run_add(
-        &artifact_path,
-        &author_pub_path,
-        &repo_dir,
-        None,
-        None,
-    );
+    let result =
+        kani_cli::commands::repo::run_add(&artifact_path, &author_pub_path, &repo_dir, None, None);
     assert!(result.is_err(), "add should fail on tampered artifact");
 }
 

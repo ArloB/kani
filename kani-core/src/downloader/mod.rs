@@ -726,7 +726,6 @@ pub fn ext_retry_params(kind: kani_shared::extension::ExtensionErrorKind) -> Opt
     }
 }
 
-
 #[cfg(any(test, feature = "test-util"))]
 pub struct MockPageListFetcher {
     pub page_count: usize,

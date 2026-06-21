@@ -276,18 +276,14 @@ impl AppService {
         {
             mock
         } else {
-            self.sources
-                .get_backend(record.source_id)
-                .ok_or_else(|| {
-                    ServiceError::NotFound(format!("Source {} not found", record.source_id))
-                })?
+            self.sources.get_backend(record.source_id).ok_or_else(|| {
+                ServiceError::NotFound(format!("Source {} not found", record.source_id))
+            })?
         };
 
         #[cfg(not(any(test, feature = "test-util")))]
-        let source_manager: Arc<dyn kani_core::downloader::PageListFetcher> = self
-            .sources
-            .get_backend(record.source_id)
-            .ok_or_else(|| {
+        let source_manager: Arc<dyn kani_core::downloader::PageListFetcher> =
+            self.sources.get_backend(record.source_id).ok_or_else(|| {
                 ServiceError::NotFound(format!("Source {} not found", record.source_id))
             })?;
 

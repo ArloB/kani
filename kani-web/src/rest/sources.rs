@@ -67,7 +67,10 @@ pub fn router() -> Router<AppState> {
             post(toggle_pref_select_item),
         )
         .route("/sources/{id}/capabilities", get(get_capabilities))
-        .route("/sources/repos", get(list_repos_handler).post(add_repo_handler))
+        .route(
+            "/sources/repos",
+            get(list_repos_handler).post(add_repo_handler),
+        )
         .route(
             "/sources/repos/{id}",
             get(get_repo_handler).delete(remove_repo_handler),
@@ -963,7 +966,10 @@ pub(crate) async fn add_repo_handler(
         RepoAddResult::Added { id, name } => {
             Ok((StatusCode::OK, Json(json!({ "id": id, "name": name }))))
         }
-        RepoAddResult::ConfirmationRequired { fingerprint, repo_url } => Ok((
+        RepoAddResult::ConfirmationRequired {
+            fingerprint,
+            repo_url,
+        } => Ok((
             StatusCode::PRECONDITION_REQUIRED,
             Json(json!({
                 "error": "TOFU_CONFIRMATION_REQUIRED",

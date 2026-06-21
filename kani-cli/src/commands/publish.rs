@@ -56,14 +56,24 @@ pub fn run(
     let (ext_id, ext_name, ext_version, description, language, nsfw) = if format == "yaml" {
         let text = std::str::from_utf8(&artifact_bytes)
             .map_err(|_| CliError::Other("YAML file is not valid UTF-8".to_string()))?;
-        let validated = kani_yaml::parse_and_validate(text, file)
-            .map_err(|errs| CliError::Other(errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ")))?;
+        let validated = kani_yaml::parse_and_validate(text, file).map_err(|errs| {
+            CliError::Other(
+                errs.into_iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            )
+        })?;
         (
             validated.id.clone(),
             validated.name.clone(),
             validated.version.clone(),
             validated.metadata.description.clone(),
-            if validated.language.is_empty() { None } else { Some(validated.language.clone()) },
+            if validated.language.is_empty() {
+                None
+            } else {
+                Some(validated.language.clone())
+            },
             validated.nsfw,
         )
     } else {
@@ -79,10 +89,7 @@ pub fn run(
     let sig_bytes = signing::sign_artifact(&artifact_bytes, &author_key);
     let signature = signing::signature_b64(&sig_bytes);
 
-    let artifact_dir = repo_dir
-        .join("extensions")
-        .join(&ext_id)
-        .join(&ext_version);
+    let artifact_dir = repo_dir.join("extensions").join(&ext_id).join(&ext_version);
     std::fs::create_dir_all(&artifact_dir)?;
 
     let artifact_filename = format!("extension.{format}");
@@ -94,9 +101,12 @@ pub fn run(
 
     let artifact_url = format!("extensions/{ext_id}/{ext_version}/{artifact_filename}");
 
-    let version_override = min_kani_version
-        .map(str::to_string)
-        .or_else(|| env!("CARGO_PKG_VERSION").parse::<semver::Version>().ok().map(|v| v.to_string()));
+    let version_override = min_kani_version.map(str::to_string).or_else(|| {
+        env!("CARGO_PKG_VERSION")
+            .parse::<semver::Version>()
+            .ok()
+            .map(|v| v.to_string())
+    });
 
     let entry = RepoEntry {
         id: ext_id.clone(),
@@ -147,8 +157,9 @@ pub fn run(
 
 pub fn load_index(repo_dir: &Path) -> Result<(RepoIndex, Vec<u8>), CliError> {
     let index_path = repo_dir.join("index.json");
-    let raw = std::fs::read(&index_path)
-        .map_err(|_| CliError::Other(format!("index.json not found in '{}'", repo_dir.display())))?;
+    let raw = std::fs::read(&index_path).map_err(|_| {
+        CliError::Other(format!("index.json not found in '{}'", repo_dir.display()))
+    })?;
     let index: RepoIndex = serde_json::from_slice(&raw)
         .map_err(|e| CliError::Other(format!("Failed to parse index.json: {e}")))?;
     Ok((index, raw))

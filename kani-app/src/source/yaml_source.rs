@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use kani_core::error::{Error, Result};
+use kani_core::wasm::AllowedHost;
 use kani_core::wasm::kani::extension::types::{
     Chapter, ChapterInfo, ChapterList, FilterDef, FilterList, FilterOption, FilterSemantic,
     FilterState, FilterTypeTag, MangaInfo, MangaList, MangaListItem, MangaStatus, OptionState,
     Page, PrefKind, PreferenceSpec, SortOption,
 };
-use kani_core::wasm::AllowedHost;
 
 pub struct YamlSource {
     pub config: Arc<kani_yaml::ValidatedExtension>,
@@ -102,11 +102,7 @@ impl YamlSource {
             self.cache_namespace.clone(),
             Arc::clone(&self.v8_process),
         )?;
-        state.preferences = self
-            .prefs
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        state.preferences = self.prefs.read().unwrap_or_else(|e| e.into_inner()).clone();
         state.hook_registry = self.hook_registry.clone();
         state.pure_fn_registry = self.pure_fn_registry.clone();
         state.max_hook_requests = self.max_hook_requests;
@@ -158,9 +154,7 @@ impl YamlSource {
 
         let req = Self::make_request(ep, &self.config, args, endpoint_name);
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
-        let mut state = self
-            .make_host_state()
-            .map_err(|e| e.to_string())?;
+        let mut state = self.make_host_state().map_err(|e| e.to_string())?;
 
         match ep.response_type {
             ResponseType::Html => html_eval::extract_html(&mut state, None, &bp).await,
@@ -195,8 +189,7 @@ impl YamlSource {
                         ));
                     }
                     retries_left -= 1;
-                    let auth_endpoint_name =
-                        e.strip_prefix("__refresh_auth__:").unwrap_or("login");
+                    let auth_endpoint_name = e.strip_prefix("__refresh_auth__:").unwrap_or("login");
                     if let Some(auth_ep) = self.config.endpoint_by_name(auth_endpoint_name) {
                         let auth_args = HashMap::new();
                         let _ = self
@@ -207,7 +200,7 @@ impl YamlSource {
                 Err(e) => {
                     return Err(Error::Extension(
                         kani_shared::extension::ExtensionError::parse(e),
-                    ))
+                    ));
                 }
             }
         }
@@ -415,7 +408,9 @@ impl YamlSource {
     }
 
     pub async fn get_filter_list(&self) -> Result<FilterList> {
-        use kani_yaml::yaml::schema::{FilterDefault, FilterKind, FilterSemantic as YSemantic, OptionSetDef};
+        use kani_yaml::yaml::schema::{
+            FilterDefault, FilterKind, FilterSemantic as YSemantic, OptionSetDef,
+        };
 
         let filters = self
             .config
@@ -457,12 +452,10 @@ impl YamlSource {
 
                 let default_value = entry.default.as_ref().map(|d| match d {
                     FilterDefault::Bool(b) => FilterState::Checkbox(*b),
-                    FilterDefault::Option { name, value } => {
-                        FilterState::Selection(OptionState {
-                            name: name.clone(),
-                            value: value.clone(),
-                        })
-                    }
+                    FilterDefault::Option { name, value } => FilterState::Selection(OptionState {
+                        name: name.clone(),
+                        value: value.clone(),
+                    }),
                     FilterDefault::Text(t) => FilterState::TextInput(t.clone()),
                 });
 
@@ -529,10 +522,7 @@ impl YamlSource {
     }
 }
 
-fn unpack_manga_list(
-    result: &serde_json::Value,
-    ep: &kani_yaml::ValidatedEndpoint,
-) -> MangaList {
+fn unpack_manga_list(result: &serde_json::Value, ep: &kani_yaml::ValidatedEndpoint) -> MangaList {
     use kani_yaml::yaml::model::{ValidatedHnp, ValidatedTotalPages};
 
     let empty = vec![];
@@ -693,8 +683,7 @@ impl YamlSource {
         let cache = Arc::new(kani_core::cache::InMemoryCache::new());
         Self {
             config: Arc::new(kani_yaml::ValidatedExtension::default()),
-            http: kani_core::http::SmartClient::new(None)
-                .expect("SmartClient::new"),
+            http: kani_core::http::SmartClient::new(None).expect("SmartClient::new"),
             cache,
             cache_namespace: String::new(),
             v8_process: Arc::new(Mutex::new(None)),

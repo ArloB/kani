@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
+use std::sync::Arc;
 
 use super::SourceBackend;
 
@@ -162,4 +162,3 @@ mod tests {
         assert!(!Arc::ptr_eq(&first, &second));
     }
 }
-

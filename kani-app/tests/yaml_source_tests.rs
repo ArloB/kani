@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use kani_app::source::{SourceBackend, SourceRegistry, YamlSource};
+use kani_shared::ast::Expr;
 use kani_yaml::yaml::model::{
     FieldSource, ValidatedEndpoint, ValidatedExtension, ValidatedField, ValidatedHnp,
     ValidatedPopular, ValidatedTotalPages,
@@ -15,7 +16,6 @@ use kani_yaml::yaml::schema::{
     FilterEntry, FilterKind, FilterOption as SchemaFilterOption, FilterSemantic, PreferenceEntry,
     PreferenceKind, ResponseType,
 };
-use kani_shared::ast::Expr;
 
 async fn start_html_server(html: &'static str) -> u16 {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -183,10 +183,7 @@ async fn manga_details_extracts_title_and_id() {
 
     let details_ep = ValidatedEndpoint {
         route: "/manga/$manga_id$".into(),
-        fields: vec![
-            self_attr_field("id", "data-id"),
-            text_field("title", "h1"),
-        ],
+        fields: vec![self_attr_field("id", "data-id"), text_field("title", "h1")],
         container: ".manga".into(),
         ..list_endpoint("/manga/$manga_id$", ".manga")
     };
@@ -277,7 +274,7 @@ async fn empty_without_filters_returns_empty_list_without_http() {
 #[test]
 fn capability_mismatch_produces_load_error() {
     let result = kani_app::install_gating::check_required_capabilities(&[
-        "nonexistent_capability".to_string(),
+        "nonexistent_capability".to_string()
     ]);
     assert!(result.is_err());
     let msg = result.unwrap_err();
@@ -360,7 +357,10 @@ async fn chapter_list_extracts_chapters_from_html() {
         },
     );
 
-    let result = src.get_chapter_list("manga-1", 1, None, None).await.unwrap();
+    let result = src
+        .get_chapter_list("manga-1", 1, None, None)
+        .await
+        .unwrap();
 
     assert_eq!(result.chapters.len(), 2);
     assert_eq!(result.chapters[0].id, "ch-1");
@@ -638,13 +638,16 @@ endpoints:
     std::fs::write(dir.path().join("scan-test-source.yaml"), &yaml_content).unwrap();
 
     let svc = test_service().await;
-    svc.scan_and_load_yaml_dir_for_test(dir.path()).await.unwrap();
-
-    use sqlx::Row as _;
-    let row = sqlx::query("SELECT enabled, load_error FROM sources WHERE name = 'scan-test-source'")
-        .fetch_one(&svc.db)
+    svc.scan_and_load_yaml_dir_for_test(dir.path())
         .await
         .unwrap();
+
+    use sqlx::Row as _;
+    let row =
+        sqlx::query("SELECT enabled, load_error FROM sources WHERE name = 'scan-test-source'")
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
     let enabled: i64 = row.try_get("enabled").unwrap();
     let load_error: Option<String> = row.try_get("load_error").unwrap();
     assert_eq!(enabled, 1, "source should be enabled after successful scan");
@@ -682,7 +685,9 @@ endpoints: {}
     std::fs::write(dir.path().join("bad-cap-source.yaml"), yaml_content).unwrap();
 
     let svc = test_service().await;
-    svc.scan_and_load_yaml_dir_for_test(dir.path()).await.unwrap();
+    svc.scan_and_load_yaml_dir_for_test(dir.path())
+        .await
+        .unwrap();
 
     use sqlx::Row as _;
     let row = sqlx::query("SELECT enabled, load_error FROM sources WHERE name = 'bad-cap-source'")
@@ -743,13 +748,14 @@ endpoints:
     std::fs::write(dir.path().join("supersede-src.yaml"), &yaml_content).unwrap();
 
     let svc = test_service().await;
-    svc.scan_and_load_yaml_dir_for_test(dir.path()).await.unwrap();
+    svc.scan_and_load_yaml_dir_for_test(dir.path())
+        .await
+        .unwrap();
 
-    let source_id: i64 =
-        sqlx::query_scalar("SELECT id FROM sources WHERE name = 'supersede-src'")
-            .fetch_one(&svc.db)
-            .await
-            .unwrap();
+    let source_id: i64 = sqlx::query_scalar("SELECT id FROM sources WHERE name = 'supersede-src'")
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
 
     std::fs::write(dir.path().join("supersede-src.wasm"), b"not-a-real-wasm").unwrap();
 
@@ -830,7 +836,10 @@ async fn refresh_auth_retries_and_succeeds() {
                     if prev == 0 {
                         (401, "")
                     } else {
-                        (200, r#"<html><body><div class="item" data-id="r-1"><span class="title">Retried</span></div></body></html>"#)
+                        (
+                            200,
+                            r#"<html><body><div class="item" data-id="r-1"><span class="title">Retried</span></div></body></html>"#,
+                        )
                     }
                 };
                 let response = format!(
@@ -847,10 +856,7 @@ async fn refresh_auth_retries_and_succeeds() {
     let base_url = format!("http://127.0.0.1:{port}");
 
     let mut on_status = std::collections::BTreeMap::new();
-    on_status.insert(
-        "401".to_string(),
-        r#"refresh_auth("search")"#.to_string(),
-    );
+    on_status.insert("401".to_string(), r#"refresh_auth("search")"#.to_string());
 
     let src = yaml_source(
         &base_url,
@@ -947,7 +953,10 @@ async fn yaml_hot_swap_in_flight_call_completes_with_old_config() {
 
     // In-flight call completes with old config.
     let old_result = old_backend.get_popular_manga(1, 20, &[]).await.unwrap();
-    assert_eq!(old_result.manga[0].id, "old-1", "in-flight call must use pre-swap config");
+    assert_eq!(
+        old_result.manga[0].id, "old-1",
+        "in-flight call must use pre-swap config"
+    );
 
     // New call through the registry resolves to the swapped config.
     let new_result = registry
@@ -956,5 +965,8 @@ async fn yaml_hot_swap_in_flight_call_completes_with_old_config() {
         .get_popular_manga(1, 20, &[])
         .await
         .unwrap();
-    assert_eq!(new_result.manga[0].id, "new-1", "post-swap call must use new config");
+    assert_eq!(
+        new_result.manga[0].id, "new-1",
+        "post-swap call must use new config"
+    );
 }

@@ -149,9 +149,7 @@ pub fn build_url_with_args(
             let start = i + 1;
             let mut end = start;
             while end < bytes.len()
-                && (bytes[end].is_ascii_alphanumeric()
-                    || bytes[end] == b'_'
-                    || bytes[end] == b'.')
+                && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_' || bytes[end] == b'.')
             {
                 end += 1;
             }
@@ -216,9 +214,12 @@ pub fn resolve_composite_ids(
             YamlIdEncoding::Hex => IdEncoding::Hex,
         };
         let field_names: Vec<&str> = decode.fields.iter().map(|f| f.as_str()).collect();
-        if let Ok(decoded) =
-            kani_shared::encoding::decode_composite(&raw_id, &decode.delimiter, &encoding, &field_names)
-        {
+        if let Ok(decoded) = kani_shared::encoding::decode_composite(
+            &raw_id,
+            &decode.delimiter,
+            &encoding,
+            &field_names,
+        ) {
             for (field, value) in decoded {
                 args.insert(format!("{}_{}", decode.role, field), value);
             }

@@ -433,9 +433,7 @@ impl AppService {
         let backend = self
             .sources
             .get_backend(ids.source_id)
-            .ok_or_else(|| {
-                ServiceError::NotFound(format!("Source {} not found", ids.source_id))
-            })?;
+            .ok_or_else(|| ServiceError::NotFound(format!("Source {} not found", ids.source_id)))?;
 
         let mut tx = self.db.begin().await?;
         let mut new_chapter_ids = Vec::new();
@@ -629,9 +627,7 @@ impl AppService {
             .sources
             .get_backend(source_id)
             .ok_or_else(|| ServiceError::NotFound(format!("Source {} not found", source_id)))?;
-        let res = backend
-            .get_chapter_list(manga_id, page, None, None)
-            .await?;
+        let res = backend.get_chapter_list(manga_id, page, None, None).await?;
         let json = serde_json::to_string(&res)
             .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))?;
         let chapter_list: wit_types::ChapterList = serde_json::from_str(&json)

@@ -113,7 +113,10 @@ impl AppService {
         }
         let backend = self.sources.get_backend(source_id);
         let raw = if let Some(backend) = backend {
-            backend.get_preferences().await.map_err(ServiceError::Core)?
+            backend
+                .get_preferences()
+                .await
+                .map_err(ServiceError::Core)?
         } else {
             let name = sqlx::query_scalar!("SELECT name FROM sources WHERE id=?", source_id)
                 .fetch_optional(&self.db)

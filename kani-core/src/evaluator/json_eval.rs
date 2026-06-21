@@ -1,9 +1,10 @@
-use crate::evaluator::shared::{EvalBudget, Env, Value, eval_common_expr, eval_fetch_field, fetch_body};
+use crate::evaluator::shared::{
+    Env, EvalBudget, Value, eval_common_expr, eval_fetch_field, fetch_body,
+};
 use kani_shared::ast::{Blueprint, Expr, OffsetType};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-
 
 pub async fn extract_json(
     state: &mut crate::wasm::HostState,
@@ -112,15 +113,39 @@ async fn eval_json_field(
         endpoint_id,
     } = expr
     {
-        let url_val = eval_json_expr(url_expr, doc, current, env.clone(), registry, Arc::clone(&budget)).await?;
+        let url_val = eval_json_expr(
+            url_expr,
+            doc,
+            current,
+            env.clone(),
+            registry,
+            Arc::clone(&budget),
+        )
+        .await?;
         let url = match url_val {
             Value::Str(s) => s,
             _ => return Err("Fetch: url_expr must evaluate to a String".into()),
         };
         let mut resolved_headers = Vec::with_capacity(headers.len());
         for (k_expr, v_expr) in headers {
-            let k = eval_json_expr(k_expr, doc, current, env.clone(), registry, Arc::clone(&budget)).await?;
-            let v = eval_json_expr(v_expr, doc, current, env.clone(), registry, Arc::clone(&budget)).await?;
+            let k = eval_json_expr(
+                k_expr,
+                doc,
+                current,
+                env.clone(),
+                registry,
+                Arc::clone(&budget),
+            )
+            .await?;
+            let v = eval_json_expr(
+                v_expr,
+                doc,
+                current,
+                env.clone(),
+                registry,
+                Arc::clone(&budget),
+            )
+            .await?;
             match (k, v) {
                 (Value::Str(k), Value::Str(v)) => resolved_headers.push((k, v)),
                 _ => return Err("Fetch: header keys and values must be strings".into()),
@@ -211,36 +236,51 @@ fn eval_json_expr<'a>(
                 .and_then(|v| v.into_json("int"))
                 .map(|v| v.as_i64().map(Value::Int).unwrap_or(Value::Null)),
 
-            Expr::JsonFloat { target } => eval_json_expr(target, doc, current, env, registry, budget)
-                .await
-                .and_then(|v| v.into_json("float"))
-                .map(|v| v.as_f64().map(Value::Num).unwrap_or(Value::Null)),
+            Expr::JsonFloat { target } => {
+                eval_json_expr(target, doc, current, env, registry, budget)
+                    .await
+                    .and_then(|v| v.into_json("float"))
+                    .map(|v| v.as_f64().map(Value::Num).unwrap_or(Value::Null))
+            }
 
-            Expr::JsonBool { target } => eval_json_expr(target, doc, current, env, registry, budget)
-                .await
-                .and_then(|v| v.into_json("bool"))
-                .map(|v| v.as_bool().map(Value::Bool).unwrap_or(Value::Null)),
+            Expr::JsonBool { target } => {
+                eval_json_expr(target, doc, current, env, registry, budget)
+                    .await
+                    .and_then(|v| v.into_json("bool"))
+                    .map(|v| v.as_bool().map(Value::Bool).unwrap_or(Value::Null))
+            }
 
-            Expr::ArrayLen { target } => eval_json_expr(target, doc, current, env, registry, budget)
-                .await
-                .and_then(|v| v.into_json("array_len"))
-                .map(|v| Value::Int(v.as_array().map(|a| a.len() as i64).unwrap_or(0))),
+            Expr::ArrayLen { target } => {
+                eval_json_expr(target, doc, current, env, registry, budget)
+                    .await
+                    .and_then(|v| v.into_json("array_len"))
+                    .map(|v| Value::Int(v.as_array().map(|a| a.len() as i64).unwrap_or(0)))
+            }
 
-            Expr::JsonKeys { target } => eval_json_expr(target, doc, current, env, registry, budget)
-                .await
-                .and_then(|v| v.into_json("keys"))
-                .map(|v| {
-                    Value::List(
-                        v.as_object()
-                            .map(|o| o.keys().map(|k| Value::Str(k.clone())).collect())
-                            .unwrap_or_default(),
-                    )
-                }),
+            Expr::JsonKeys { target } => {
+                eval_json_expr(target, doc, current, env, registry, budget)
+                    .await
+                    .and_then(|v| v.into_json("keys"))
+                    .map(|v| {
+                        Value::List(
+                            v.as_object()
+                                .map(|o| o.keys().map(|k| Value::Str(k.clone())).collect())
+                                .unwrap_or_default(),
+                        )
+                    })
+            }
 
             Expr::JsonGet { target, key } => {
-                let val = eval_json_expr(target, doc, current, env.clone(), registry, Arc::clone(&budget))
-                    .await
-                    .and_then(|v| v.into_json("get"))?;
+                let val = eval_json_expr(
+                    target,
+                    doc,
+                    current,
+                    env.clone(),
+                    registry,
+                    Arc::clone(&budget),
+                )
+                .await
+                .and_then(|v| v.into_json("get"))?;
                 let key_str = eval_json_expr(key, doc, current, env, registry, budget)
                     .await
                     .and_then(|v| v.into_str("get"))?;
@@ -251,12 +291,26 @@ fn eval_json_expr<'a>(
             }
 
             Expr::JsonFind { target, key, value } => {
-                let arr = eval_json_expr(target, doc, current, env.clone(), registry, Arc::clone(&budget))
-                    .await
-                    .and_then(|v| v.into_json("find"))?;
-                let key_str = eval_json_expr(key, doc, current, env.clone(), registry, Arc::clone(&budget))
-                    .await
-                    .and_then(|v| v.into_str("find"))?;
+                let arr = eval_json_expr(
+                    target,
+                    doc,
+                    current,
+                    env.clone(),
+                    registry,
+                    Arc::clone(&budget),
+                )
+                .await
+                .and_then(|v| v.into_json("find"))?;
+                let key_str = eval_json_expr(
+                    key,
+                    doc,
+                    current,
+                    env.clone(),
+                    registry,
+                    Arc::clone(&budget),
+                )
+                .await
+                .and_then(|v| v.into_str("find"))?;
                 let val_str = eval_json_expr(value, doc, current, env, registry, budget)
                     .await
                     .and_then(|v| v.into_str("find"))?;
@@ -274,7 +328,15 @@ fn eval_json_expr<'a>(
             Expr::JsonArray(items) => {
                 let mut arr = Vec::with_capacity(items.len());
                 for item in items {
-                    let v = eval_json_expr(item, doc, current, env.clone(), registry, Arc::clone(&budget)).await?;
+                    let v = eval_json_expr(
+                        item,
+                        doc,
+                        current,
+                        env.clone(),
+                        registry,
+                        Arc::clone(&budget),
+                    )
+                    .await?;
                     arr.push(v.to_json().unwrap_or(serde_json::Value::Null));
                 }
                 Ok(Value::Json(serde_json::Value::Array(arr)))

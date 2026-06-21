@@ -34,11 +34,11 @@ impl EvalBudget {
     }
 
     pub fn charge_step(&self) -> Result<(), String> {
-        let prev = self.steps_remaining.fetch_update(
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-            |n| if n > 0 { Some(n - 1) } else { None },
-        );
+        let prev = self
+            .steps_remaining
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                if n > 0 { Some(n - 1) } else { None }
+            });
         if prev.is_err() {
             Err(format!("limit:max_iterations:{MAX_EVAL_ITERATIONS}"))
         } else {
@@ -52,7 +52,9 @@ impl EvalBudget {
             self.depth_current.fetch_sub(1, Ordering::Relaxed);
             Err(format!("limit:max_depth:{MAX_EVAL_DEPTH}"))
         } else {
-            Ok(DepthGuard { budget: Arc::clone(self) })
+            Ok(DepthGuard {
+                budget: Arc::clone(self),
+            })
         }
     }
 }
@@ -299,8 +301,7 @@ where
                 match (s, p) {
                     (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
                     (s, p) => {
-                        let result =
-                            p.into_str("prepend")? + s.into_str("prepend")?.as_str();
+                        let result = p.into_str("prepend")? + s.into_str("prepend")?.as_str();
                         if result.len() > MAX_STRING_LENGTH {
                             return Err(format!("limit:max_string_length:{MAX_STRING_LENGTH}"));
                         }
@@ -318,8 +319,7 @@ where
                 match (s, x) {
                     (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
                     (s, x) => {
-                        let result =
-                            s.into_str("append")? + x.into_str("append")?.as_str();
+                        let result = s.into_str("append")? + x.into_str("append")?.as_str();
                         if result.len() > MAX_STRING_LENGTH {
                             return Err(format!("limit:max_string_length:{MAX_STRING_LENGTH}"));
                         }
@@ -1323,14 +1323,16 @@ mod tests {
 
     #[tokio::test]
     async fn json_eval_depth_limit() {
+        use super::MAX_EVAL_DEPTH;
         use crate::evaluator::json_eval;
         use crate::wasm::HostState;
         use kani_shared::ast::{BlueprintBuilder, Expr};
-        use super::MAX_EVAL_DEPTH;
 
         let mut e = Expr::Json("/x".to_string());
         for _ in 0..=(MAX_EVAL_DEPTH as usize + 10) {
-            e = Expr::JsonStr { target: Box::new(e) };
+            e = Expr::JsonStr {
+                target: Box::new(e),
+            };
         }
         let bp = BlueprintBuilder::new("/items").field("val", e).build();
         let doc = serde_json::json!({ "items": [{"x": "hi"}] });

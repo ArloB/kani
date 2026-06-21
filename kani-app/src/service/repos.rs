@@ -41,9 +41,19 @@ pub struct RepoExtensionEntry {
 
 #[derive(Debug)]
 pub enum RepoAddResult {
-    Added { id: i64, name: String },
-    ConfirmationRequired { fingerprint: String, repo_url: String },
-    KeyChanged { old_fingerprint: String, new_fingerprint: String, repo_url: String },
+    Added {
+        id: i64,
+        name: String,
+    },
+    ConfirmationRequired {
+        fingerprint: String,
+        repo_url: String,
+    },
+    KeyChanged {
+        old_fingerprint: String,
+        new_fingerprint: String,
+        repo_url: String,
+    },
 }
 
 impl AppService {
@@ -78,8 +88,7 @@ impl AppService {
 
         let (index, index_bytes) = self.fetch_and_verify_index(url).await?;
         let new_key = index.maintainer_key.clone();
-        let new_fp = fingerprint_from_b64(&new_key)
-            .map_err(ServiceError::Validation)?;
+        let new_fp = fingerprint_from_b64(&new_key).map_err(ServiceError::Validation)?;
 
         let existing = sqlx::query!(
             r#"SELECT id as "id!", maintainer_key FROM repo_trust WHERE url = ?"#,
@@ -90,16 +99,16 @@ impl AppService {
 
         if let Some(row) = existing {
             if row.maintainer_key != new_key {
-                let old_fp = fingerprint_from_b64(&row.maintainer_key)
-                    .map_err(ServiceError::Validation)?;
+                let old_fp =
+                    fingerprint_from_b64(&row.maintainer_key).map_err(ServiceError::Validation)?;
                 return Ok(RepoAddResult::KeyChanged {
                     old_fingerprint: old_fp,
                     new_fingerprint: new_fp,
                     repo_url: url.to_string(),
                 });
             }
-            let index_json = serde_json::to_string(&index)
-                .map_err(|e| ServiceError::Internal(e.to_string()))?;
+            let index_json =
+                serde_json::to_string(&index).map_err(|e| ServiceError::Internal(e.to_string()))?;
             let name = index.name.clone();
             sqlx::query!(
                 "UPDATE repo_trust SET name = ?, last_refreshed_at = datetime('now'), \
@@ -122,8 +131,8 @@ impl AppService {
                     repo_url: url.to_string(),
                 });
             }
-            let index_json = serde_json::to_string(&index)
-                .map_err(|e| ServiceError::Internal(e.to_string()))?;
+            let index_json =
+                serde_json::to_string(&index).map_err(|e| ServiceError::Internal(e.to_string()))?;
             let name = index.name.clone();
             let id = sqlx::query_scalar!(
                 "INSERT INTO repo_trust (url, name, maintainer_key, index_cache) \
@@ -151,11 +160,7 @@ impl AppService {
         }
     }
 
-    pub async fn refresh_repo(
-        &self,
-        id: i64,
-        user_id: Option<crate::ids::UserId>,
-    ) -> Result<()> {
+    pub async fn refresh_repo(&self, id: i64, user_id: Option<crate::ids::UserId>) -> Result<()> {
         let repo = self.get_repo(id).await?;
         self.check_repo_blocked(&repo.url).await?;
 
@@ -180,7 +185,8 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
-        self.audit(user_id, "repo.refresh", Some(&repo.url), None).await;
+        self.audit(user_id, "repo.refresh", Some(&repo.url), None)
+            .await;
         let _ = self.refresh_tx.send(AppEvent::RepoRefreshed {
             repo_id: id,
             repo_name: name,
@@ -208,16 +214,13 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn remove_repo(
-        &self,
-        id: i64,
-        user_id: Option<crate::ids::UserId>,
-    ) -> Result<()> {
+    pub async fn remove_repo(&self, id: i64, user_id: Option<crate::ids::UserId>) -> Result<()> {
         let repo = self.get_repo(id).await?;
         sqlx::query!("DELETE FROM repo_trust WHERE id = ?", id)
             .execute(&self.db)
             .await?;
-        self.audit(user_id, "repo.remove", Some(&repo.url), None).await;
+        self.audit(user_id, "repo.remove", Some(&repo.url), None)
+            .await;
         Ok(())
     }
 
@@ -233,7 +236,8 @@ impl AppService {
         extension_id: &str,
         user_id: Option<crate::ids::UserId>,
     ) -> Result<i64> {
-        self.install_or_update_from_repo(repo_id, extension_id, None, user_id).await
+        self.install_or_update_from_repo(repo_id, extension_id, None, user_id)
+            .await
     }
 
     pub async fn update_source_from_repo(
@@ -243,13 +247,8 @@ impl AppService {
         existing_source_id: i64,
         user_id: Option<crate::ids::UserId>,
     ) -> Result<()> {
-        self.install_or_update_from_repo(
-            repo_id,
-            extension_id,
-            Some(existing_source_id),
-            user_id,
-        )
-        .await?;
+        self.install_or_update_from_repo(repo_id, extension_id, Some(existing_source_id), user_id)
+            .await?;
         Ok(())
     }
 
@@ -287,11 +286,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn unblock_repo(
-        &self,
-        url: &str,
-        user_id: Option<crate::ids::UserId>,
-    ) -> Result<()> {
+    pub async fn unblock_repo(&self, url: &str, user_id: Option<crate::ids::UserId>) -> Result<()> {
         sqlx::query!("DELETE FROM blocked_repos WHERE url = ?", url)
             .execute(&self.db)
             .await?;
@@ -304,13 +299,10 @@ impl AppService {
         id: i64,
         user_id: Option<crate::ids::UserId>,
     ) -> Result<()> {
-        let url = sqlx::query_scalar!(
-            r#"SELECT url FROM blocked_repos WHERE id = ?"#,
-            id
-        )
-        .fetch_optional(&self.db)
-        .await?
-        .ok_or_else(|| ServiceError::NotFound(format!("Blocked repo {id} not found")))?;
+        let url = sqlx::query_scalar!(r#"SELECT url FROM blocked_repos WHERE id = ?"#, id)
+            .fetch_optional(&self.db)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound(format!("Blocked repo {id} not found")))?;
         sqlx::query!("DELETE FROM blocked_repos WHERE id = ?", id)
             .execute(&self.db)
             .await?;
@@ -318,11 +310,7 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn bootstrap_official_repo(
-        &self,
-        url: &str,
-        maintainer_key_b64: &str,
-    ) -> Result<()> {
+    pub async fn bootstrap_official_repo(&self, url: &str, maintainer_key_b64: &str) -> Result<()> {
         let existing = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM repo_trust WHERE url = ? AND trusted_level = 'official'",
             url
@@ -350,7 +338,9 @@ impl AppService {
                     "Official repo bootstrap skipped: key mismatch (expected {fp}, fetched {fingerprint})"
                 );
             }
-            RepoAddResult::KeyChanged { new_fingerprint, .. } => {
+            RepoAddResult::KeyChanged {
+                new_fingerprint, ..
+            } => {
                 tracing::warn!(
                     "Official repo bootstrap skipped: key changed since last trust \
                      (expected {fp}, fetched {new_fingerprint})"
@@ -362,12 +352,9 @@ impl AppService {
     }
 
     async fn check_repo_blocked(&self, url: &str) -> Result<()> {
-        let blocked = sqlx::query_scalar!(
-            "SELECT reason FROM blocked_repos WHERE url = ?",
-            url
-        )
-        .fetch_optional(&self.db)
-        .await?;
+        let blocked = sqlx::query_scalar!("SELECT reason FROM blocked_repos WHERE url = ?", url)
+            .fetch_optional(&self.db)
+            .await?;
         if let Some(reason) = blocked {
             return Err(ServiceError::Forbidden(format!(
                 "Repository is blocked: {reason}"
@@ -401,9 +388,7 @@ impl AppService {
             .map_err(|e| ServiceError::Internal(format!("Failed to fetch index.json.sig: {e}")))?
             .bytes_limited(512)
             .await
-            .map_err(|e| {
-                ServiceError::Internal(format!("Failed to read index.json.sig: {e}"))
-            })?;
+            .map_err(|e| ServiceError::Internal(format!("Failed to read index.json.sig: {e}")))?;
         let sig_b64 = std::str::from_utf8(&sig_raw)
             .map_err(|_| ServiceError::Validation("index.json.sig is not valid UTF-8".to_string()))?
             .trim()
@@ -471,9 +456,7 @@ impl AppService {
         signing::verify_sha256(&artifact_bytes, &entry.sha256)
             .map_err(|e| ServiceError::Validation(format!("Integrity check failed: {e}")))?;
         signing::verify_artifact(&artifact_bytes, &entry.author_key, &entry.signature)
-            .map_err(|e| {
-                ServiceError::Validation(format!("Signature verification failed: {e}"))
-            })?;
+            .map_err(|e| ServiceError::Validation(format!("Signature verification failed: {e}")))?;
 
         let settings = self.settings.read().await;
         let storage_path = settings
@@ -484,8 +467,14 @@ impl AppService {
         drop(settings);
 
         let source_id = match entry.format.as_str() {
-            "yaml" => self.install_yaml_artifact(&artifact_bytes, &storage_path, existing_source_id).await?,
-            "wasm" => self.install_wasm_artifact(&artifact_bytes, &storage_path, existing_source_id).await?,
+            "yaml" => {
+                self.install_yaml_artifact(&artifact_bytes, &storage_path, existing_source_id)
+                    .await?
+            }
+            "wasm" => {
+                self.install_wasm_artifact(&artifact_bytes, &storage_path, existing_source_id)
+                    .await?
+            }
             fmt => {
                 return Err(ServiceError::Validation(format!(
                     "Unknown extension format: {fmt}"
@@ -520,11 +509,16 @@ impl AppService {
         storage_path: &str,
         existing_id: Option<i64>,
     ) -> Result<i64> {
-        let text = std::str::from_utf8(bytes)
-            .map_err(|_| ServiceError::Validation("YAML artifact is not valid UTF-8".to_string()))?;
+        let text = std::str::from_utf8(bytes).map_err(|_| {
+            ServiceError::Validation("YAML artifact is not valid UTF-8".to_string())
+        })?;
         let dummy_path = std::path::Path::new("extension.yaml");
         let validated = kani_yaml::parse_and_validate(text, dummy_path).map_err(|errs| {
-            let msg = errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ");
+            let msg = errs
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
             ServiceError::Validation(format!("Invalid YAML extension: {msg}"))
         })?;
 
@@ -563,10 +557,11 @@ impl AppService {
     ) -> Result<i64> {
         let bytes_owned = bytes.to_vec();
         let runtime_clone = self.wasm_runtime.clone();
-        let component = tokio::task::spawn_blocking(move || runtime_clone.compile_component(&bytes_owned))
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Compile task panicked: {e}")))?
-            .map_err(ServiceError::Core)?;
+        let component =
+            tokio::task::spawn_blocking(move || runtime_clone.compile_component(&bytes_owned))
+                .await
+                .map_err(|e| ServiceError::Internal(format!("Compile task panicked: {e}")))?
+                .map_err(ServiceError::Core)?;
 
         let (metadata, raw_schema) = {
             let mut inst =
@@ -772,14 +767,12 @@ impl AppService {
 
         Ok(id)
     }
-
 }
 
 fn parse_index_cache(repo: &RepoRow) -> Result<RepoIndex> {
-    let json = repo
-        .index_cache
-        .as_deref()
-        .ok_or_else(|| ServiceError::Internal("Repository index not yet fetched — refresh first".to_string()))?;
+    let json = repo.index_cache.as_deref().ok_or_else(|| {
+        ServiceError::Internal("Repository index not yet fetched — refresh first".to_string())
+    })?;
     serde_json::from_str(json)
         .map_err(|e| ServiceError::Internal(format!("Failed to parse repo index: {e}")))
 }
@@ -808,7 +801,9 @@ fn is_newer_version(candidate: &str, installed: &str) -> bool {
 
 fn fingerprint_from_b64(b64: &str) -> std::result::Result<String, String> {
     use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
-    let bytes = B64.decode(b64).map_err(|e| format!("Invalid base64 public key: {e}"))?;
+    let bytes = B64
+        .decode(b64)
+        .map_err(|e| format!("Invalid base64 public key: {e}"))?;
     let arr: [u8; 32] = bytes
         .try_into()
         .map_err(|_| "Public key must be 32 bytes".to_string())?;

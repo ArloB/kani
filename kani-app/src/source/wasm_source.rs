@@ -169,8 +169,7 @@ impl WasmSource {
                 let mut instance = self.lease_instance().await?;
                 let pages = instance.get_pages(manga_id, chapter_id).await?;
                 let raw_metadata = instance.get_metadata().await?;
-                let metadata: kani_shared::ExtensionMetadata =
-                    serde_json::from_str(&raw_metadata)?;
+                let metadata: kani_shared::ExtensionMetadata = serde_json::from_str(&raw_metadata)?;
                 Ok::<_, kani_core::error::Error>((pages, metadata.base_url))
             }
             .await;
@@ -267,7 +266,14 @@ impl OwnedSourceInstance {
         filters: &[kani_shared::types::ActiveFilter],
     ) -> Result<kani_core::wasm::kani::extension::types::MangaList> {
         let wit_filters = kani_core::wasm::filter_conversions::to_wit_active_filters(filters);
-        kani_core::execute_wasm!(self, call_search_manga, query, page, page_size, &wit_filters)
+        kani_core::execute_wasm!(
+            self,
+            call_search_manga,
+            query,
+            page,
+            page_size,
+            &wit_filters
+        )
     }
 
     pub async fn get_manga_details(

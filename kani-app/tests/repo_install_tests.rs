@@ -43,7 +43,12 @@ impl TestRepo {
         let artifact_yaml = format!(
             "id: {ext_id}\nname: Test Extension\nversion: \"0.1.0\"\nbase_url: \"https://example.com\"\n"
         );
-        Self { maintainer_key, author_key, ext_id: ext_id.to_string(), artifact_yaml }
+        Self {
+            maintainer_key,
+            author_key,
+            ext_id: ext_id.to_string(),
+            artifact_yaml,
+        }
     }
 
     fn build_routes(&self, repo_name: &str) -> Arc<HashMap<String, Vec<u8>>> {
@@ -129,7 +134,9 @@ async fn start_mock_server(routes: Arc<HashMap<String, Vec<u8>>>) -> u16 {
 
     tokio::spawn(async move {
         loop {
-            let Ok((mut stream, _)) = listener.accept().await else { break };
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
             let routes = Arc::clone(&routes);
             tokio::spawn(async move {
                 let mut buf = vec![0u8; 8192];
@@ -269,7 +276,10 @@ async fn add_repo_wrong_fingerprint_returns_confirmation_required() {
         matches!(result, RepoAddResult::ConfirmationRequired { .. }),
         "expected ConfirmationRequired on fingerprint mismatch, got {result:?}"
     );
-    assert!(svc.list_repos().await.unwrap().is_empty(), "no row should have been inserted");
+    assert!(
+        svc.list_repos().await.unwrap().is_empty(),
+        "no row should have been inserted"
+    );
 }
 
 #[tokio::test]
@@ -283,8 +293,15 @@ async fn add_same_repo_twice_with_same_key_returns_added() {
     svc.add_repo(&url, Some(&fp), None).await.unwrap();
 
     let result = svc.add_repo(&url, None, None).await.unwrap();
-    assert!(matches!(result, RepoAddResult::Added { .. }), "re-add same key should succeed");
-    assert_eq!(svc.list_repos().await.unwrap().len(), 1, "still only one repo row");
+    assert!(
+        matches!(result, RepoAddResult::Added { .. }),
+        "re-add same key should succeed"
+    );
+    assert_eq!(
+        svc.list_repos().await.unwrap().len(),
+        1,
+        "still only one repo row"
+    );
 }
 
 #[tokio::test]
@@ -324,7 +341,9 @@ async fn blocked_url_prevents_add_repo_even_with_confirmation() {
     let fp = fingerprint(&repo.maintainer_key);
 
     let svc = test_service().await;
-    svc.block_repo(&url, "blocked for tests", None).await.unwrap();
+    svc.block_repo(&url, "blocked for tests", None)
+        .await
+        .unwrap();
 
     let result = svc.add_repo(&url, Some(&fp), None).await;
     assert!(result.is_err(), "blocked URL must return an error");
@@ -340,8 +359,7 @@ async fn refresh_repo_succeeds_with_same_key() {
     let fp = fingerprint(&repo.maintainer_key);
 
     let svc = test_service().await;
-    let RepoAddResult::Added { id, .. } = svc.add_repo(&url, Some(&fp), None).await.unwrap()
-    else {
+    let RepoAddResult::Added { id, .. } = svc.add_repo(&url, Some(&fp), None).await.unwrap() else {
         panic!("add_repo must return Added");
     };
 
@@ -452,5 +470,8 @@ async fn bootstrap_wrong_key_is_skipped_without_error() {
     let svc = test_service().await;
     svc.bootstrap_official_repo(&url, &wrong_pk).await.unwrap();
 
-    assert!(svc.list_repos().await.unwrap().is_empty(), "mismatched key must not add repo");
+    assert!(
+        svc.list_repos().await.unwrap().is_empty(),
+        "mismatched key must not add repo"
+    );
 }
