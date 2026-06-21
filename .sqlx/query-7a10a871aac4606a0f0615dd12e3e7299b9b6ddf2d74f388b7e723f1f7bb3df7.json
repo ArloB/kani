@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", url, name, maintainer_key, trusted_level, last_refreshed_at, index_cache, created_at FROM repo_trust WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "url",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "maintainer_key",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "trusted_level",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "last_refreshed_at",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "index_cache",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 7,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "7a10a871aac4606a0f0615dd12e3e7299b9b6ddf2d74f388b7e723f1f7bb3df7"
+}

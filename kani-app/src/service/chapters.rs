@@ -396,20 +396,15 @@ impl AppService {
         source_id: i64,
         source_manga_id: &str,
     ) -> Result<Vec<wit_types::ChapterInfo>> {
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&source_id)
-                .cloned()
-                .ok_or_else(|| ServiceError::NotFound(format!("Source {source_id} not found")))?
-        };
+        let backend = self
+            .sources
+            .get_backend(source_id)
+            .ok_or_else(|| ServiceError::NotFound(format!("Source {source_id} not found")))?;
 
         let mut all: Vec<wit_types::ChapterInfo> = Vec::new();
         let mut page = 1i32;
         loop {
-            let res = source_manager
-                .lease_instance()
-                .await?
+            let res = backend
                 .get_chapter_list(source_manga_id, page, None, None)
                 .await?;
             let json = serde_json::to_string(&res)

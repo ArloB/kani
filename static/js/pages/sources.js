@@ -13,34 +13,63 @@ import htm from 'htm';
 import { mountIntoModalRoot } from '../components/modal.js';
 import { SourcesSidebar, AddSourceModal, consumePendingSourceId } from '../components/sources-sidebar.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
+import { mountRepoManager } from '../components/repo-manager.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /** @type {HTMLElement | null} */
 let _asideEl = null;
+/** @type {{ destroy: () => void } | null} */
+let _repoManager = null;
 
 /** @param {HTMLElement} container */
 export async function init(container) {
   document.title = 'Sources - Kani';
 
-  const _headerActions = (() => {
-    if (!hasPermission('source:install')) return undefined;
+  if (!hasPermission('source:browse')) {
+    setPageHeader({ crumbs: [{ label: 'Sources' }] });
+    container.innerHTML = '';
+    container.appendChild(createErrorState({ message: 'You do not have permission to browse sources.' }));
+    return;
+  }
+
+  const canInstall = hasPermission('source:install');
+
+  const _tabsEl = document.createElement('div');
+  _tabsEl.className = 'flex gap-1';
+
+  const _sourcesTabBtn = document.createElement('button');
+  _sourcesTabBtn.type = 'button';
+  _sourcesTabBtn.className = 'btn-ghost btn-sm';
+  _sourcesTabBtn.textContent = 'Extensions';
+
+  const _reposTabBtn = document.createElement('button');
+  _reposTabBtn.type = 'button';
+  _reposTabBtn.className = 'btn-ghost btn-sm';
+  _reposTabBtn.textContent = t('repo.tab');
+
+  _tabsEl.appendChild(_sourcesTabBtn);
+  _tabsEl.appendChild(_reposTabBtn);
+
+  const _addSourceBtn = (() => {
+    if (!canInstall) return undefined;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn-primary btn-sm';
     btn.textContent = 'Add source';
     return btn;
   })();
-  setPageHeader({ crumbs: [{ label: 'Sources' }], actions: _headerActions });
 
-  if (!hasPermission('source:browse')) {
-    container.innerHTML = '';
-    container.appendChild(createErrorState({ message: 'You do not have permission to browse sources.' }));
-    return;
-  }
+  const _actionsEl = document.createElement('div');
+  _actionsEl.className = 'flex items-center gap-2';
+  _actionsEl.appendChild(_tabsEl);
+  if (_addSourceBtn) _actionsEl.appendChild(_addSourceBtn);
+
+  setPageHeader({ crumbs: [{ label: 'Sources' }], actions: _actionsEl });
 
   container.innerHTML = `
-    <div class="flex">
+    <!-- Sources view -->
+    <div class="js-sources-view flex">
 
       <!-- Sidebar (lg+) — SourcesSidebar mounts here -->
       <aside
@@ -71,7 +100,35 @@ export async function init(container) {
 
       </div>
     </div>
+
+    <!-- Repos view (hidden initially) -->
+    <div class="js-repos-view hidden" style="min-height:calc(100vh - var(--header-h));"></div>
   `;
+
+  const sourcesView = /** @type {HTMLElement} */ (container.querySelector('.js-sources-view'));
+  const reposView = /** @type {HTMLElement} */ (container.querySelector('.js-repos-view'));
+
+  function _switchTab(tab) {
+    _sourcesTabBtn.classList.toggle('bg-surface-2', tab === 'extensions');
+    _reposTabBtn.classList.toggle('bg-surface-2', tab === 'repos');
+
+    if (tab === 'repos') {
+      _addSourceBtn?.classList.add('hidden');
+      sourcesView.classList.add('hidden');
+      reposView.classList.remove('hidden');
+      if (!_repoManager) {
+        _repoManager = mountRepoManager(reposView);
+      }
+    } else {
+      _addSourceBtn?.classList.remove('hidden');
+      reposView.classList.add('hidden');
+      sourcesView.classList.remove('hidden');
+    }
+  }
+
+  _sourcesTabBtn.addEventListener('click', () => _switchTab('extensions'));
+  _reposTabBtn.addEventListener('click', () => _switchTab('repos'));
+  _switchTab('extensions');
 
   _asideEl = /** @type {HTMLElement} */ (container.querySelector('aside'));
   const mobileList   = /** @type {HTMLElement} */ (container.querySelector('.js-mobile-list'));
@@ -202,7 +259,7 @@ export async function init(container) {
 
   // ── Add source modal ─────────────────────────────────────────────────────
 
-  if (hasPermission('source:install') && _headerActions) {
+  if (canInstall && _addSourceBtn) {
     let _modalOpen = false;
     const _setOpen = (open) => {
       _modalOpen = open;
@@ -214,7 +271,7 @@ export async function init(container) {
         />
       `);
     };
-    _headerActions.addEventListener('click', () => _setOpen(true));
+    _addSourceBtn.addEventListener('click', () => _setOpen(true));
   }
 }
 
@@ -225,6 +282,8 @@ export function destroy(container) {
   if (pendingId !== null) api.deleteSource(pendingId).catch(() => {});
   if (_asideEl) render(null, _asideEl);
   _asideEl = null;
+  _repoManager?.destroy();
+  _repoManager = null;
   mountIntoModalRoot(null);
   container.innerHTML = '';
 }

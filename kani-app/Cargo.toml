@@ -7,6 +7,8 @@ build = "build.rs"
 [dependencies]
 kani-core   = { path = "../kani-core" }
 kani-shared = { path = "../kani-shared", features = ["ssr"] }
+kani-yaml   = { path = "../kani-yaml" }
+wasmtime    = { version = "41.0.2", features = ["async", "component-model"] }
 
 serde.workspace = true
 serde_json.workspace = true
@@ -22,9 +24,11 @@ indexmap.workspace = true
 ordered-float.workspace = true
 moka.workspace = true
 dashmap.workspace = true
+arc-swap.workspace = true
 time          = { workspace = true, features = ["serde", "formatting", "macros"] }
 base64.workspace = true
-sha2          = "0.10"
+sha2.workspace = true
+ed25519-dalek.workspace = true
 hmac          = "0.12"
 chacha20poly1305 = "0.10.1"
 rand          = "0.10"
@@ -57,11 +61,12 @@ test-util = ["kani-core/test-util"]
 streaming-chapters = ["kani-core/streaming-chapters"]
 
 [dev-dependencies]
-kani-core   = { path = "../kani-core", features = ["test-util"] }
-kani-shared = { path = "../kani-shared", features = ["ssr"] }
+kani-core        = { path = "../kani-core", features = ["test-util"] }
+kani-shared      = { path = "../kani-shared", features = ["ssr"] }
 kani-shared-test = { path = "../kani-shared-test" }
 tokio-util  = { workspace = true }
 tokio = { version = "1", features = ["net"] }
+ed25519-dalek.workspace = true
 
 [build-dependencies]
 prost-build = "0.14.3"

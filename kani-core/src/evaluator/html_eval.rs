@@ -1,11 +1,11 @@
-use crate::evaluator::shared::{Env, Value, eval_common_expr, eval_fetch_field, fetch_body};
+use crate::evaluator::shared::{EvalBudget, Env, Value, eval_common_expr, eval_fetch_field, fetch_body};
 use crate::wasm::StoredNode;
 use kani_shared::ast::{Blueprint, Expr, OffsetType};
 use scraper::{Element, Selector};
-use std::cell::Ref;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
 pub async fn extract_html(
     state: &mut crate::wasm::HostState,
@@ -45,6 +45,7 @@ async fn extract_html_with_doc(
     doc: StoredNode,
     blueprint: &Blueprint,
 ) -> Result<serde_json::Value, String> {
+    state.eval_budget.reset();
     let mut env = Env::new();
     for (k, v) in &state.preferences {
         env.set(&format!("$pref:{}", k), Value::Str(v.clone()));
@@ -108,6 +109,7 @@ async fn eval_html_field(
 ) -> Result<Value, String> {
     let registry_arc = state.pure_fn_registry.clone();
     let registry = registry_arc.as_deref();
+    let budget = Arc::clone(&state.eval_budget);
     if let Expr::Fetch {
         url_expr,
         blueprint: sub_bp,
@@ -125,6 +127,7 @@ async fn eval_html_field(
             env.clone(),
             &state.selector_cache,
             registry,
+            Arc::clone(&budget),
         )
         .await?;
         let url = match url_val {
@@ -140,6 +143,7 @@ async fn eval_html_field(
                 env.clone(),
                 &state.selector_cache,
                 registry,
+                Arc::clone(&budget),
             )
             .await?;
             let v = eval_html_expr(
@@ -149,6 +153,7 @@ async fn eval_html_field(
                 env.clone(),
                 &state.selector_cache,
                 registry,
+                Arc::clone(&budget),
             )
             .await?;
             match (k, v) {
@@ -171,11 +176,11 @@ async fn eval_html_field(
             (Err(_), kani_shared::ast::OnFailurePolicy::Skip) => Ok(Value::Null),
             (Err(e), kani_shared::ast::OnFailurePolicy::Fail) => Err(e),
             (Err(_), kani_shared::ast::OnFailurePolicy::Use(fallback)) => {
-                eval_html_expr(fallback, doc, current, env, &state.selector_cache, registry).await
+                eval_html_expr(fallback, doc, current, env, &state.selector_cache, registry, budget).await
             }
         }
     } else {
-        eval_html_expr(expr, doc, current, env, &state.selector_cache, registry).await
+        eval_html_expr(expr, doc, current, env, &state.selector_cache, registry, budget).await
     }
 }
 
@@ -265,14 +270,18 @@ fn eval_html_expr<'a>(
     doc: &'a StoredNode,
     current: Option<(&'a StoredNode, usize)>,
     env: Env,
-    cache: &'a std::cell::RefCell<HashMap<String, Selector>>,
+    cache: &'a Mutex<HashMap<String, Arc<Selector>>>,
     registry: Option<&'a crate::scripting::PureFunctionRegistry>,
-) -> Pin<Box<dyn Future<Output = Result<Value, String>> + 'a>> {
+    budget: Arc<EvalBudget>,
+) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>> {
     Box::pin(async move {
+        budget.charge_step()?;
+        let _depth_guard = budget.enter_depth()?;
+
         if let Some(result) = eval_common_expr(
             expression,
             env.clone(),
-            &|e, env| eval_html_expr(e, doc, current, env, cache, registry),
+            &|e, env| eval_html_expr(e, doc, current, env, cache, registry, Arc::clone(&budget)),
             registry,
         )
         .await
@@ -306,7 +315,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Attr { target, name } => {
-                match eval_html_expr(target, doc, current, env, cache, registry)
+                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
                     .await?
                     .into_html_element("attr")?
                 {
@@ -321,7 +330,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Text { target } => {
-                match eval_html_expr(target, doc, current, env, cache, registry)
+                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
                     .await?
                     .into_html_element("text")?
                 {
@@ -331,7 +340,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::InnerHtml { target } => {
-                match eval_html_expr(target, doc, current, env, cache, registry)
+                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
                     .await?
                     .into_html_element("inner_html")?
                 {
@@ -341,7 +350,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Select { target, selector } => {
-                match eval_html_expr(target, doc, current, env, cache, registry)
+                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
                     .await?
                     .into_html_element("select")?
                 {
@@ -363,7 +372,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::First { target, selector } => {
-                match eval_html_expr(target, doc, current, env, cache, registry)
+                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
                     .await?
                     .into_html_element("first")?
                 {
@@ -384,7 +393,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::HasClass { target, class } => {
-                match eval_html_expr(target, doc, current, env, cache, registry)
+                match eval_html_expr(target, doc, current, env, cache, registry, Arc::clone(&budget))
                     .await?
                     .into_html_element("has_class")?
                 {
@@ -399,7 +408,7 @@ fn eval_html_expr<'a>(
             }
 
             Expr::Children { target } => {
-                match eval_html_expr(target, doc, current, env, cache, registry)
+                match eval_html_expr(target, doc, current, env, cache, registry, budget)
                     .await?
                     .into_html_element("children")?
                 {
@@ -426,18 +435,26 @@ fn eval_html_expr<'a>(
     })
 }
 
-/// Parse `selector` into the cache if not already present, returning a `Ref` that keeps
-/// the cache borrowed until dropped.
-fn get_or_cache_selector<'a>(
-    cache: &'a std::cell::RefCell<HashMap<String, Selector>>,
+fn get_or_cache_selector(
+    cache: &Mutex<HashMap<String, Arc<Selector>>>,
     selector: &str,
-) -> Result<Ref<'a, Selector>, String> {
-    if !cache.borrow().contains_key(selector) {
-        let parsed = Selector::parse(selector)
-            .map_err(|e| format!("Invalid CSS selector '{}': {:?}", selector, e))?;
-        cache.borrow_mut().insert(selector.to_owned(), parsed);
+) -> Result<Arc<Selector>, String> {
+    {
+        let guard = cache
+            .lock()
+            .map_err(|_| "selector cache lock poisoned".to_string())?;
+        if let Some(sel) = guard.get(selector) {
+            return Ok(sel.clone());
+        }
     }
-    Ok(Ref::map(cache.borrow(), |m| m.get(selector).unwrap()))
+    let parsed = Selector::parse(selector)
+        .map_err(|e| format!("Invalid CSS selector '{}': {:?}", selector, e))?;
+    let arc_sel = Arc::new(parsed);
+    cache
+        .lock()
+        .map_err(|_| "selector cache lock poisoned".to_string())?
+        .insert(selector.to_owned(), arc_sel.clone());
+    Ok(arc_sel)
 }
 
 async fn fetch_and_parse_html(
@@ -462,7 +479,7 @@ async fn fetch_and_parse_html(
 fn select_all(
     node: &StoredNode,
     container: &str,
-    cache: &std::cell::RefCell<HashMap<String, Selector>>,
+    cache: &Mutex<HashMap<String, Arc<Selector>>>,
 ) -> Result<Vec<StoredNode>, String> {
     if container == ":root" {
         return Ok(vec![node.clone()]);

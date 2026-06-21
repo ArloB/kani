@@ -144,6 +144,7 @@ async fn restore_backup_merge_mode_keeps_existing_manga() {
         import_tracking: true,
         import_chapter_progress: false,
         import_settings: false,
+        import_repos: true,
     };
     svc.restore_backup(UserId(1), &zip, opts).await.unwrap();
 

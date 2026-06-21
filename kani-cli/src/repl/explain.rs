@@ -57,9 +57,9 @@ pub fn explain(expression: &str) -> Result<ExplainTrace, CliError> {
         .into_result()
         .map_err(|_| CliError::Other("DSL parse failed".to_string()))?;
 
-    let expr: Expr = parse_ast.try_into().map_err(|errs: Vec<CliError>| {
+    let expr: Expr = parse_ast.try_into().map_err(|errs: Vec<kani_yaml::YamlError>| {
         for e in &errs {
-            if let CliError::DslConversion { message, span } = e {
+            if let kani_yaml::YamlError::DslConversion { message, span } = e {
                 report_custom_error("<expression>", expression, message, span.clone());
             }
         }

@@ -1,11 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web", "kani-app", "kani-cli", "kani-shared-test"]
+members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web", "kani-app", "kani-cli", "kani-yaml", "kani-shared-test"]
 # Extensions are WASM-only; their WIT-generated ABI symbols (e.g. `cabi_post_kani:...#...`)
 # are invalid in the GNU ld version script used when linking native binaries. Excluding them
 # from default-members means `cargo test` / `cargo clippy` skip them on the native target.
 # They remain workspace members so `kani-cli build` can reach them via -p.
-default-members = ["kani-core", "kani-shared", "kani-app", "kani-web", "kani-cli"]
+default-members = ["kani-core", "kani-shared", "kani-app", "kani-web", "kani-cli", "kani-yaml"]
 
 [profile.dev]
 opt-level = 0
@@ -49,12 +49,15 @@ dashmap     = "6"
 moka        = { version = "0.12", features = ["future"] }
 indexmap    = "2"
 base64      = "0.22"
+sha2        = "0.10"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
 futures     = "0.3"
 bytes       = "1"
 tokio-util  = "0.7"
 urlencoding = "2.1"
 talc        = { version = "4", default-features = false, features = ["lock_api"] }
 governor    = { version = "0.10", default-features = false, features = ["std", "dashmap"] }
+arc-swap    = "1"
 ordered-float = "5"
 
 [workspace.lints.clippy]

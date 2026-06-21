@@ -35,6 +35,29 @@ pub async fn save_wasm(wasm_storage_path: &str, name: &str, bytes: &[u8]) -> Res
     Ok(path)
 }
 
+/// Saves YAML content to disk, creating directories as needed.
+/// Returns the full path where the file was saved.
+pub async fn save_yaml(wasm_storage_path: &str, name: &str, content: &str) -> Result<PathBuf> {
+    let name = crate::utilities::sanitize_filename(name);
+
+    let dir = PathBuf::from(wasm_storage_path);
+    fs::create_dir_all(&dir).await?;
+
+    let filename = format!("{}.yaml", name);
+    let path = dir.join(&filename);
+
+    let canonical_dir = dir.canonicalize()?;
+
+    if let Some(parent) = path.parent()
+        && parent.canonicalize()? != canonical_dir
+    {
+        return Err(Error::PathTraversal(name));
+    }
+
+    fs::write(&path, content.as_bytes()).await?;
+    Ok(path)
+}
+
 /// Deletes a WASM file at the given path.
 pub async fn delete_wasm_file(wasm_storage_path: &str, name: &str) -> Result<()> {
     let name = crate::utilities::sanitize_filename(name);
@@ -167,5 +190,37 @@ mod tests {
         save_wasm(storage, "ext", &valid_wasm()).await.unwrap();
         let result = save_wasm(storage, "ext", &valid_wasm()).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn save_yaml_creates_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_yaml(dir.path().to_str().unwrap(), "my-source", "id: my-source\n")
+            .await
+            .unwrap();
+        assert!(path.exists());
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("yaml"));
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "id: my-source\n");
+    }
+
+    #[tokio::test]
+    async fn save_yaml_sanitizes_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_yaml(dir.path().to_str().unwrap(), "my:source/ext", "content")
+            .await
+            .unwrap();
+        assert!(path.exists());
+        assert_eq!(path.parent(), Some(dir.path()));
+    }
+
+    #[tokio::test]
+    async fn save_yaml_overwrites_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = dir.path().to_str().unwrap();
+        save_yaml(storage, "src", "v1").await.unwrap();
+        let path = save_yaml(storage, "src", "v2").await.unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "v2");
     }
 }

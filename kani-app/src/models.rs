@@ -334,6 +334,28 @@ impl TryFrom<DownloadRuleRow> for DownloadRule {
     }
 }
 
+// ── Repository trust ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct RepoRow {
+    pub id: i64,
+    pub url: String,
+    pub name: String,
+    pub maintainer_key: String,
+    pub trusted_level: String,
+    pub last_refreshed_at: Option<String>,
+    pub index_cache: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct BlockedRepo {
+    pub id: i64,
+    pub url: String,
+    pub reason: String,
+    pub created_at: String,
+}
+
 // ── Audit log ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, sqlx::FromRow)]

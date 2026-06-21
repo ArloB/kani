@@ -323,6 +323,16 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
                 ${sourceLanguages.map(lang => html`<span key=${lang} class="text-2xs px-1.5 py-0.5 rounded bg-surface-2 text-text-muted">${lang}</span>`)}
               </div>
             `}
+            ${source.backend && html`
+              <div class="flex items-center gap-1.5 mt-0.5">
+                <span
+                  class="text-2xs px-1.5 py-0.5 rounded bg-surface-2 text-text-muted cursor-help"
+                  data-tooltip=${t('source.backend.tooltip')}
+                >
+                  ${source.backend === 'yaml' ? t('source.backend.yaml') : t('source.backend.wasm')}
+                </span>
+              </div>
+            `}
           </div>
         </div>
       </div>

@@ -7,7 +7,7 @@ use std::time::Instant;
 use wasmtime::Store;
 use wasmtime::component::Linker;
 
-pub(crate) const EPOCH_DEADLINE_TICKS: u64 = 500;
+pub const EPOCH_DEADLINE_TICKS: u64 = 500;
 
 #[macro_export]
 macro_rules! execute_wasm {

@@ -7,6 +7,7 @@ use crate::yaml::schema::{
 use kani_shared::ast::{Expr, OnFailurePolicy};
 
 /// A fully-validated extension with all DSL strings compiled into `Expr` trees.
+#[derive(Default)]
 pub struct ValidatedExtension {
     pub id: String,
     pub name: String,

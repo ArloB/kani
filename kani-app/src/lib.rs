@@ -13,6 +13,7 @@ pub mod jobs;
 pub mod models;
 pub mod permissions;
 pub mod service;
+pub mod source;
 pub mod tuning;
 pub mod utils;
 

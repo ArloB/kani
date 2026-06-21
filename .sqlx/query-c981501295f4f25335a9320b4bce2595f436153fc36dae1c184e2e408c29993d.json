@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE repo_trust SET name = ?, last_refreshed_at = datetime('now'), index_cache = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c981501295f4f25335a9320b4bce2595f436153fc36dae1c184e2e408c29993d"
+}

@@ -116,7 +116,7 @@ fn selector_cache_miss_then_hit() {
     let mut state = HostState::default();
     let _sel = state.get_or_parse_selector("div.card").unwrap();
     assert!(state.get_or_parse_selector("div.card").is_ok());
-    assert_eq!(state.selector_cache.borrow().len(), 1);
+    assert_eq!(state.selector_cache.lock().expect("lock").len(), 1);
 }
 
 #[test]

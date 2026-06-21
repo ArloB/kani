@@ -121,6 +121,32 @@ async fn main() {
         std::sync::atomic::Ordering::Relaxed,
     );
 
+    kani_web::SOURCE_INSTALL_ALLOWED.store(
+        std::env::var("KANI_SOURCE_INSTALL_ALLOWED")
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
+    {
+        let official_url = std::env::var("KANI_OFFICIAL_REPO_URL").unwrap_or_default();
+        let official_key = std::env::var("KANI_OFFICIAL_REPO_KEY")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| kani_web::repo_keys::OFFICIAL_REPO_KEY.to_string());
+        if !official_url.is_empty() && !official_key.is_empty() {
+            let bootstrap_state = state.clone();
+            tokio::spawn(async move {
+                if let Err(e) = bootstrap_state
+                    .bootstrap_official_repo(&official_url, &official_key)
+                    .await
+                {
+                    tracing::warn!("Official repo bootstrap failed: {e}");
+                }
+            });
+        }
+    }
+
     state.spawn_auto_scan();
     state.spawn_cover_retry();
     state.spawn_credential_refresh();

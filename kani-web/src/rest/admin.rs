@@ -52,6 +52,14 @@ pub fn router() -> Router<AppState> {
         .route("/admin/path/estimate", post(path_migrate_estimate_handler))
         .route("/admin/path/migrate", post(path_migrate_handler))
         .route("/system/capabilities", get(system_capabilities))
+        .route(
+            "/admin/sources/blocked-repos",
+            get(list_blocked_repos_handler).post(block_repo_handler),
+        )
+        .route(
+            "/admin/sources/blocked-repos/{id}",
+            delete(delete_blocked_repo_handler),
+        )
 }
 
 #[utoipa::path(
@@ -1063,4 +1071,64 @@ pub(crate) async fn system_capabilities(
         "kcc": kcc_version.is_some(),
         "kcc_version": kcc_version,
     }))
+}
+
+#[utoipa::path(
+    get, path = "/rest/admin/sources/blocked-repos",
+    responses(
+        (status = 200, description = "All blocked repository URLs"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn list_blocked_repos_handler(
+    _: AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(state.list_blocked_repos().await?))
+}
+
+#[utoipa::path(
+    post, path = "/rest/admin/sources/blocked-repos",
+    request_body = BlockRepoRequest,
+    responses(
+        (status = 204, description = "Repository blocked"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn block_repo_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+    ValidatedJson(payload): ValidatedJson<BlockRepoRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    state
+        .block_repo(&payload.url, &payload.reason, Some(user.id))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    delete, path = "/rest/admin/sources/blocked-repos/{id}",
+    params(("id" = i64, Path, description = "Blocked repo ID")),
+    responses(
+        (status = 204, description = "Blocked repo entry removed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+        (status = 404, description = "Blocked repo not found"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn delete_blocked_repo_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    state.delete_blocked_repo(id, Some(user.id)).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

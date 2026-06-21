@@ -354,6 +354,60 @@ export async function getActiveSourceIds() {
   return _req('GET', '/sources/active_ids');
 }
 
+// ── Source Repositories ───────────────────────────────────────────────────────
+
+export async function listRepos() {
+  return _req('GET', '/sources/repos');
+}
+
+/**
+ * Add a repository. Returns the repo on success or throws with status 428
+ * (TOFU confirmation required) or 409 (key changed).
+ * @param {string} url
+ * @param {string} [confirmFingerprint]
+ */
+export async function addRepo(url, confirmFingerprint) {
+  return _req('POST', '/sources/repos', {
+    body: confirmFingerprint
+      ? { url, confirm_fingerprint: confirmFingerprint }
+      : { url },
+  });
+}
+
+/** @param {number} id */
+export async function getRepo(id) {
+  return _req('GET', `/sources/repos/${id}`);
+}
+
+/** @param {number} id */
+export async function refreshRepo(id) {
+  return _req('POST', `/sources/repos/${id}/refresh`);
+}
+
+/** @param {number} id */
+export async function removeRepo(id) {
+  return _req('DELETE', `/sources/repos/${id}`);
+}
+
+/** @param {number} id */
+export async function listRepoExtensions(id) {
+  return _req('GET', `/sources/repos/${id}/extensions`);
+}
+
+/** @param {number} repoId @param {string} extensionId */
+export async function installFromRepo(repoId, extensionId) {
+  return _req('POST', '/sources/install', { body: { repo_id: repoId, extension_id: extensionId } });
+}
+
+/**
+ * @param {number} repoId
+ * @param {string} extensionId
+ * @param {number} sourceId
+ */
+export async function updateFromRepo(repoId, extensionId, sourceId) {
+  return _req('POST', `/sources/${sourceId}/update`, { body: { repo_id: repoId, extension_id: extensionId } });
+}
+
 // ── Source Preferences ────────────────────────────────────────────────────────
 
 /** @param {number} sid */

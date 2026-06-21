@@ -83,6 +83,26 @@ pub enum AppEvent {
         job_id: uuid::Uuid,
         job_type: String,
     },
+    SourceInstalled {
+        source_id: i64,
+        source_name: String,
+        from_repo: String,
+    },
+    RepoRefreshed {
+        repo_id: i64,
+        repo_name: String,
+    },
+    UpdateAvailable {
+        source_id: i64,
+        source_name: String,
+        installed_version: String,
+        available_version: String,
+        repo_id: i64,
+    },
+    SourceUpdating {
+        source_id: i64,
+        source_name: String,
+    },
     #[serde(untagged)]
     Refresh(RefreshProgressEvent),
 }

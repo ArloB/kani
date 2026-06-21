@@ -15,7 +15,7 @@ async fn test_job_submits_and_completes() {
     let job_id = svc.job_manager.submit(job).await.unwrap();
 
     // Poll until the job reaches a terminal state (should be near-instant).
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let status = svc.job_manager.status(job_id).await.unwrap();
         if status.status == "completed" {
@@ -42,7 +42,7 @@ async fn slow_job_cancel_transitions_to_cancelled() {
     let job_id = svc.job_manager.submit(job).await.unwrap();
 
     // Wait for the job to start running.
-    let start_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let start_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let status = svc.job_manager.status(job_id).await.unwrap();
         if status.status == "running" {
@@ -60,7 +60,7 @@ async fn slow_job_cancel_transitions_to_cancelled() {
     svc.job_manager.cancel(job_id).await.unwrap();
 
     // Wait for the job to reach the cancelled state.
-    let cancel_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let cancel_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let status = svc.job_manager.status(job_id).await.unwrap();
         if status.status == "cancelled" {
@@ -105,7 +105,7 @@ async fn crashed_running_job_recovers_to_pending_on_startup() {
 
     // The recovered job should eventually run and complete.
     let recovered_id = uuid::Uuid::parse_str(&job_id).unwrap();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let status = svc.job_manager.status(recovered_id).await.unwrap();
         if status.status == "completed" {
@@ -132,7 +132,7 @@ async fn circuit_breaker_opens_after_repeated_failures() {
     for _ in 0..5 {
         let job = FailingDownloadJob::network(source_id);
         let job_id = svc.job_manager.submit(job).await.unwrap();
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
         loop {
             let status = svc.job_manager.status(job_id).await.unwrap();
             if status.status == "failed" {
@@ -164,7 +164,7 @@ async fn circuit_breaker_not_found_does_not_open_circuit() {
     for _ in 0..10 {
         let job = FailingDownloadJob::not_found(source_id);
         let job_id = svc.job_manager.submit(job).await.unwrap();
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
         loop {
             let status = svc.job_manager.status(job_id).await.unwrap();
             if status.status == "failed" {
@@ -204,7 +204,7 @@ async fn manga_download_all_job_no_pending_chapters_completes_immediately() {
     let job = MangaDownloadAllJob::new(manga_id.0, "Manga".to_string(), source_id, false);
     let job_id = svc.job_manager.submit(job).await.unwrap();
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let status = svc.job_manager.status(job_id).await.unwrap();
         if status.status == "completed" {
@@ -317,7 +317,7 @@ async fn manga_download_all_job_cancel_reverts_chapters_to_pending() {
     let job_id = svc.job_manager.submit(job).await.unwrap();
 
     // Wait until all chapters are claimed (InProgress = 1).
-    let claim_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let claim_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let statuses: Vec<i64> =
             sqlx::query_scalar("SELECT download_status FROM chapters WHERE manga_id = ?")

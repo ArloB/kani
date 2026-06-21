@@ -8,8 +8,9 @@ use ordered_float::OrderedFloat;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use kani_core::downloader::{DownloadTask, DownloaderConfig, DownloaderManager};
-use kani_core::source_manager::SourceManager;
 use kani_core::wasm::WasmRuntime;
+
+use crate::source::{SourceRegistry, loader};
 
 use crate::cache::RequestCache;
 use crate::error::{Result, ServiceError};
@@ -51,6 +52,7 @@ mod preferences;
 mod progress;
 mod scanlators;
 pub mod sessions;
+pub mod repos;
 mod settings;
 mod sources;
 mod stats;
@@ -64,7 +66,7 @@ pub mod webhooks;
 pub struct AppService {
     pub db: SqlitePool,
     pub wasm_runtime: Arc<WasmRuntime>,
-    pub sources: Arc<tokio::sync::RwLock<HashMap<i64, Arc<SourceManager>>>>,
+    pub sources: Arc<SourceRegistry>,
     pub settings: Arc<tokio::sync::RwLock<Settings>>,
     pub downloader: DownloaderManager,
     pub smart_client: kani_core::http::SmartClient,
@@ -85,6 +87,10 @@ pub struct AppService {
     pub metadata_provider_registry:
         Arc<tokio::sync::RwLock<metadata_provider::MetadataProviderRegistry>>,
     pub job_manager: crate::jobs::JobManager,
+    /// Per-extension install/update locks, keyed by extension id. Serializes
+    /// concurrent install/update of the same extension so the upsert (which keys on
+    /// `sources.name`) cannot race two writers into duplicate rows + backends.
+    pub install_locks: Arc<DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     #[cfg(any(test, feature = "test-util"))]
     pub mock_sources: Arc<DashMap<i64, Arc<dyn kani_core::downloader::PageListFetcher>>>,
 }
@@ -190,7 +196,7 @@ impl AppService {
 
         sqlx::migrate!("../migrations").run(&pool).await?;
 
-        let mut sources_map = HashMap::new();
+        let sources_registry = SourceRegistry::new();
 
         let enc = load_or_provision_credential_cipher(data_dir);
 
@@ -326,80 +332,115 @@ impl AppService {
         .await?;
 
         for source in sources {
-            let bytes = tokio::fs::read(
-                &settings
-                    .wasm_storage_path
-                    .join(format!("{}.wasm", source.name)),
-            )
-            .await?;
-            let component = wasm_runtime
-                .compile_component(&bytes)
-                .map_err(ServiceError::Core)?;
-
-            let instance_pre = wasm_runtime
-                .instantiate_pre(&component)
-                .map_err(ServiceError::Core)?;
-
             let prefs = Self::load_pref_map_static(&pool, source.id).await?;
+            let ns = format!("{}:", source.name);
 
-            let (pure_registry, hook_registry, max_hook_requests) = {
-                let mut inst = kani_core::sources::SourceInstance::new(
-                    global_smart_client.clone(),
-                    None,
-                    false,
-                );
-                if inst
-                    .load(wasm_runtime.engine(), &component, wasm_runtime.linker())
-                    .await
-                    .is_ok()
-                {
-                    let meta = inst.get_metadata().await.ok().and_then(|raw| {
-                        serde_json::from_str::<kani_shared::ExtensionMetadata>(&raw).ok()
-                    });
-                    let max_hk = meta
-                        .as_ref()
-                        .and_then(|m| m.rate_limit.as_ref())
-                        .map(|rl| rl.max_hook_requests)
-                        .unwrap_or(3);
-                    let pure_reg = meta.as_ref().and_then(|m| {
-                        if m.scripts.is_empty() {
-                            return None;
+            let yaml_path = settings
+                .wasm_storage_path
+                .join(format!("{}.yaml", source.name));
+            let wasm_path = settings
+                .wasm_storage_path
+                .join(format!("{}.wasm", source.name));
+
+            let backend = if yaml_path.exists() {
+                let text = tokio::fs::read_to_string(&yaml_path).await?;
+                match kani_yaml::parse_and_validate(&text, &yaml_path) {
+                    Ok(ext) => {
+                        if wasm_path.exists() {
+                            tracing::info!(
+                                "YAML supersedes WASM for source '{}'; WASM retained for rollback",
+                                source.name
+                            );
                         }
-                        match kani_core::scripting::PureFunctionRegistry::compile(&m.scripts) {
-                            Ok(reg) => Some(Arc::new(reg)),
-                            Err(e) => {
-                                tracing::warn!(
-                                    source = %source.name,
-                                    "Failed to compile pure scripts: {e}"
-                                );
-                                None
-                            }
-                        }
-                    });
-                    let hook_reg = meta.as_ref().and_then(sources::compile_hook_registry);
-                    (pure_reg, hook_reg, max_hk)
-                } else {
-                    (None, None, 3u32)
+                        loader::build_yaml_source(
+                            std::sync::Arc::new(ext),
+                            global_smart_client.clone(),
+                            std::sync::Arc::clone(&ext_cache),
+                            ns,
+                            prefs,
+                        )
+                    }
+                    Err(errs) => {
+                        let msg = errs
+                            .iter()
+                            .map(|e| e.to_string())
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        tracing::error!(
+                            "Failed to load YAML source '{}': {}",
+                            source.name,
+                            msg
+                        );
+                        continue;
+                    }
                 }
+            } else {
+                let bytes = tokio::fs::read(&wasm_path).await?;
+                let component = wasm_runtime
+                    .compile_component(&bytes)
+                    .map_err(ServiceError::Core)?;
+
+                let instance_pre = wasm_runtime
+                    .instantiate_pre(&component)
+                    .map_err(ServiceError::Core)?;
+
+                let (pure_registry, hook_registry, max_hook_requests) = {
+                    let mut inst = kani_core::sources::SourceInstance::new(
+                        global_smart_client.clone(),
+                        None,
+                        false,
+                    );
+                    if inst
+                        .load(wasm_runtime.engine(), &component, wasm_runtime.linker())
+                        .await
+                        .is_ok()
+                    {
+                        let meta = inst.get_metadata().await.ok().and_then(|raw| {
+                            serde_json::from_str::<kani_shared::ExtensionMetadata>(&raw).ok()
+                        });
+                        let max_hk = meta
+                            .as_ref()
+                            .and_then(|m| m.rate_limit.as_ref())
+                            .map(|rl| rl.max_hook_requests)
+                            .unwrap_or(3);
+                        let pure_reg = meta.as_ref().and_then(|m| {
+                            if m.scripts.is_empty() {
+                                return None;
+                            }
+                            match kani_core::scripting::PureFunctionRegistry::compile(&m.scripts) {
+                                Ok(reg) => Some(Arc::new(reg)),
+                                Err(e) => {
+                                    tracing::warn!(
+                                        source = %source.name,
+                                        "Failed to compile pure scripts: {e}"
+                                    );
+                                    None
+                                }
+                            }
+                        });
+                        let hook_reg = meta.as_ref().and_then(sources::compile_hook_registry);
+                        (pure_reg, hook_reg, max_hk)
+                    } else {
+                        (None, None, 3u32)
+                    }
+                };
+
+                loader::build_wasm_source(
+                    wasm_runtime.engine().clone(),
+                    instance_pre,
+                    global_smart_client.clone(),
+                    Some(source.base_url),
+                    source.unrestricted_http,
+                    prefs,
+                    std::sync::Arc::clone(&ext_cache),
+                    ns,
+                    pure_registry,
+                    hook_registry,
+                    max_hook_requests,
+                )
             };
 
-            let ns = format!("{}:", source.name);
-            let source_manager = SourceManager::new(
-                wasm_runtime.engine().clone(),
-                instance_pre,
-                global_smart_client.clone(),
-                Some(source.base_url),
-                source.unrestricted_http,
-                25,
-                prefs,
-                std::sync::Arc::clone(&ext_cache),
-                ns,
-                pure_registry,
-                hook_registry,
-                max_hook_requests,
-            );
-
-            sources_map.insert(source.id, Arc::new(source_manager));
+            sources_registry.insert(source.id, backend);
         }
         tracing::info!("Sources loaded");
 
@@ -475,7 +516,7 @@ impl AppService {
         let svc = Self {
             db: pool,
             wasm_runtime,
-            sources: Arc::new(tokio::sync::RwLock::new(sources_map)),
+            sources: Arc::new(sources_registry),
             settings: Arc::new(tokio::sync::RwLock::new(settings)),
             downloader,
             smart_client: global_smart_client,
@@ -494,6 +535,7 @@ impl AppService {
                 metadata_provider::MetadataProviderRegistry::new(),
             )),
             job_manager,
+            install_locks: Arc::new(DashMap::new()),
             #[cfg(any(test, feature = "test-util"))]
             mock_sources: Arc::new(DashMap::new()),
         };
@@ -606,7 +648,7 @@ impl AppService {
         let svc = Self {
             db: pool.clone(),
             wasm_runtime,
-            sources: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            sources: Arc::new(SourceRegistry::new()),
             settings: Arc::new(tokio::sync::RwLock::new(settings)),
             downloader,
             smart_client,
@@ -625,6 +667,7 @@ impl AppService {
                 metadata_provider::MetadataProviderRegistry::new(),
             )),
             job_manager,
+            install_locks: Arc::new(DashMap::new()),
             mock_sources: Arc::new(DashMap::new()),
         };
         *svc_cell.lock().expect("svc_cell lock") = Some(svc.clone());
@@ -638,6 +681,117 @@ impl AppService {
         fetcher: Arc<dyn kani_core::downloader::PageListFetcher>,
     ) {
         self.mock_sources.insert(source_id, fetcher);
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn scan_and_load_yaml_dir_for_test(
+        &self,
+        wasm_dir: &std::path::Path,
+    ) -> crate::error::Result<()> {
+        let pref_schemas: DashMap<i64, Vec<kani_core::PreferenceSpec>> = DashMap::new();
+        Self::scan_and_register_sources(
+            &self.db,
+            wasm_dir,
+            self.smart_client.clone(),
+            &self.wasm_runtime,
+            &pref_schemas,
+        )
+        .await?;
+
+        use sqlx::Row as _;
+        let rows = sqlx::query(
+            "SELECT id, name FROM sources WHERE enabled = 1 AND deleted_at IS NULL",
+        )
+        .fetch_all(&self.db)
+        .await?;
+        let sources: Vec<(i64, String)> = rows
+            .into_iter()
+            .filter_map(|r| {
+                let id: i64 = r.try_get("id").ok()?;
+                let name: String = r.try_get("name").ok()?;
+                Some((id, name))
+            })
+            .collect();
+
+        for (source_id, source_name) in sources {
+            let yaml_path = wasm_dir.join(format!("{source_name}.yaml"));
+            if !yaml_path.exists() {
+                continue;
+            }
+            let text = tokio::fs::read_to_string(&yaml_path)
+                .await
+                .map_err(|e| crate::error::ServiceError::Core(kani_core::Error::Io(e)))?;
+            match kani_yaml::parse_and_validate(&text, &yaml_path) {
+                Ok(ext) => {
+                    let prefs =
+                        Self::load_pref_map_static(&self.db, source_id).await?;
+                    let backend = crate::source::loader::build_yaml_source(
+                        std::sync::Arc::new(ext),
+                        self.smart_client.clone(),
+                        std::sync::Arc::clone(&self.ext_cache),
+                        format!("{source_name}:"),
+                        prefs,
+                    );
+                    self.sources.insert(source_id, backend);
+                }
+                Err(errs) => {
+                    let msg = errs
+                        .iter()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    tracing::warn!("YAML source '{source_name}' skipped in test: {msg}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn load_yaml_sources_from_dir_for_test(
+        &self,
+        wasm_dir: &std::path::Path,
+    ) -> crate::error::Result<()> {
+        use sqlx::Row as _;
+        let rows = sqlx::query(
+            "SELECT id, name FROM sources WHERE enabled = 1 AND deleted_at IS NULL",
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        for row in rows {
+            let source_id: i64 = row.try_get("id").unwrap_or_default();
+            let source_name: String = row.try_get("name").unwrap_or_default();
+            let yaml_path = wasm_dir.join(format!("{source_name}.yaml"));
+            if !yaml_path.exists() {
+                continue;
+            }
+            let text = tokio::fs::read_to_string(&yaml_path)
+                .await
+                .map_err(|e| crate::error::ServiceError::Core(kani_core::Error::Io(e)))?;
+            match kani_yaml::parse_and_validate(&text, &yaml_path) {
+                Ok(ext) => {
+                    let prefs = Self::load_pref_map_static(&self.db, source_id).await?;
+                    let backend = crate::source::loader::build_yaml_source(
+                        std::sync::Arc::new(ext),
+                        self.smart_client.clone(),
+                        std::sync::Arc::clone(&self.ext_cache),
+                        format!("{source_name}:"),
+                        prefs,
+                    );
+                    self.sources.insert(source_id, backend);
+                }
+                Err(errs) => {
+                    let msg = errs
+                        .iter()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    tracing::warn!("YAML source '{source_name}' skipped in test: {msg}");
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn rebuild_email_service(&self) {

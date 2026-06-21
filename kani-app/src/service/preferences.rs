@@ -35,8 +35,8 @@ impl AppService {
 
     pub async fn reload_preferences(&self, source_id: i64) -> Result<()> {
         let prefs = self.load_pref_map(source_id).await?;
-        if let Some(mgr) = self.sources.read().await.get(&source_id) {
-            mgr.update_preferences(prefs);
+        if let Some(backend) = self.sources.get_backend(source_id) {
+            backend.update_preferences(prefs);
         }
         Ok(())
     }
@@ -111,10 +111,9 @@ impl AppService {
         if let Some(cached) = self.cache.get_preference_schema(source_id) {
             return Ok(cached);
         }
-        let mgr = { self.sources.read().await.get(&source_id).cloned() };
-        let raw = if let Some(mgr) = mgr {
-            let mut inst = mgr.lease_instance().await.map_err(ServiceError::Core)?;
-            inst.get_preferences().await.map_err(ServiceError::Core)?
+        let backend = self.sources.get_backend(source_id);
+        let raw = if let Some(backend) = backend {
+            backend.get_preferences().await.map_err(ServiceError::Core)?
         } else {
             let name = sqlx::query_scalar!("SELECT name FROM sources WHERE id=?", source_id)
                 .fetch_optional(&self.db)

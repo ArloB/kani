@@ -14,11 +14,14 @@ pub mod openapi;
 pub mod permissions;
 pub mod proxy;
 pub mod rate_limit;
+pub mod repo_keys;
 pub mod rest;
 pub mod session_touch;
 pub mod state;
 pub mod types;
 pub mod utils;
 
-/// Re-export so callers in kani-web can still use `crate::HTTP_LOGGING_ENABLED`.
 pub use kani_core::HTTP_LOGGING_ENABLED;
+
+pub static SOURCE_INSTALL_ALLOWED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);

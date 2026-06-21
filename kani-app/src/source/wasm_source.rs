@@ -1,0 +1,334 @@
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use wasmtime::Store;
+
+use kani_core::{
+    error::Result,
+    wasm::{AllowedHost, HostState, KaniExtensionPre},
+};
+
+pub struct WasmSource {
+    engine: wasmtime::Engine,
+    instance_pre: KaniExtensionPre<HostState>,
+    semaphore: Arc<Semaphore>,
+    smart_client: kani_core::http::SmartClient,
+    base_url: Option<String>,
+    unrestricted_http: bool,
+    preferences: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
+    v8_process: kani_core::v8_process::V8ProcessHandle,
+    ext_cache: Arc<dyn kani_core::cache::CacheBackend>,
+    ext_cache_namespace: String,
+    pure_fn_registry: Option<Arc<kani_core::scripting::PureFunctionRegistry>>,
+    hook_registry: Option<Arc<kani_core::scripting::HookRegistry>>,
+    max_hook_requests: u32,
+    draining: AtomicBool,
+    lease_count: Arc<AtomicUsize>,
+}
+
+impl WasmSource {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        engine: wasmtime::Engine,
+        instance_pre: KaniExtensionPre<HostState>,
+        smart_client: kani_core::http::SmartClient,
+        base_url: Option<String>,
+        unrestricted_http: bool,
+        max_concurrent: usize,
+        preferences: std::collections::HashMap<String, String>,
+        ext_cache: Arc<dyn kani_core::cache::CacheBackend>,
+        ext_cache_namespace: String,
+        pure_fn_registry: Option<Arc<kani_core::scripting::PureFunctionRegistry>>,
+        hook_registry: Option<Arc<kani_core::scripting::HookRegistry>>,
+        max_hook_requests: u32,
+    ) -> Self {
+        Self {
+            engine,
+            instance_pre,
+            semaphore: Arc::new(Semaphore::new(max_concurrent)),
+            smart_client,
+            base_url,
+            unrestricted_http,
+            preferences: Arc::new(std::sync::RwLock::new(preferences)),
+            v8_process: Arc::new(Mutex::new(None)),
+            ext_cache,
+            ext_cache_namespace,
+            pure_fn_registry,
+            hook_registry,
+            max_hook_requests,
+            draining: AtomicBool::new(false),
+            lease_count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    pub fn update_preferences(&self, prefs: std::collections::HashMap<String, String>) {
+        if let Ok(mut lock) = self.preferences.write() {
+            *lock = prefs;
+        }
+    }
+
+    pub async fn lease_instance(&self) -> Result<OwnedSourceInstance> {
+        self.lease_count.fetch_add(1, Ordering::AcqRel);
+
+        if self.draining.load(Ordering::Acquire) {
+            self.lease_count.fetch_sub(1, Ordering::AcqRel);
+            return Err(kani_core::error::Error::Extension(
+                kani_shared::extension::ExtensionError::source_updating(),
+            ));
+        }
+
+        let lease_guard = LeaseGuard(Arc::clone(&self.lease_count));
+
+        let permit = self
+            .semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| kani_core::error::Error::Internal("Semaphore closed".into()))?;
+
+        let allowed_host = match (self.base_url.as_deref(), self.unrestricted_http) {
+            (_, true) => AllowedHost::Unrestricted,
+            (Some(url), false) => AllowedHost::Restricted(url.to_string()),
+            (None, false) => AllowedHost::MetadataOnly,
+        };
+
+        let mut host_state = HostState::new(
+            self.smart_client.clone(),
+            allowed_host,
+            Arc::clone(&self.ext_cache),
+            self.ext_cache_namespace.clone(),
+            Arc::clone(&self.v8_process),
+        )?;
+        host_state.pure_fn_registry = self.pure_fn_registry.clone();
+        host_state.hook_registry = self.hook_registry.clone();
+        host_state.max_hook_requests = self.max_hook_requests;
+        let mut store = Store::new(&self.engine, host_state);
+
+        store.set_epoch_deadline(kani_core::sources::EPOCH_DEADLINE_TICKS);
+        store.epoch_deadline_callback(|ctx| {
+            let data = ctx.data();
+            if data
+                .last_io_at
+                .map(|t| {
+                    t.elapsed().as_millis()
+                        < (kani_core::sources::EPOCH_DEADLINE_TICKS as u128 * 10)
+                })
+                .unwrap_or(false)
+            {
+                Ok(wasmtime::UpdateDeadline::Continue(
+                    kani_core::sources::EPOCH_DEADLINE_TICKS,
+                ))
+            } else {
+                Err(wasmtime::Error::msg("WASM computation deadline exceeded"))
+            }
+        });
+
+        {
+            let prefs = self.preferences.read().unwrap_or_else(|e| e.into_inner());
+            store.data_mut().preferences = prefs.clone();
+        }
+
+        let bindings = self.instance_pre.instantiate_async(&mut store).await?;
+
+        Ok(OwnedSourceInstance {
+            store,
+            bindings,
+            _permit: permit,
+            _lease_guard: lease_guard,
+        })
+    }
+
+    pub async fn drain(&self, timeout: std::time::Duration) {
+        self.draining.store(true, Ordering::Release);
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if self.lease_count.load(Ordering::Acquire) == 0 {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                tracing::warn!(
+                    "WasmSource drain timed out after {:?}, forcing swap",
+                    timeout
+                );
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    pub(super) async fn fetch_page_list_impl(
+        &self,
+        manga_id: &str,
+        chapter_id: &str,
+    ) -> Result<(kani_core::wasm::kani::extension::types::Chapter, String)> {
+        let mut attempts = 0u32;
+        loop {
+            let result = async {
+                let mut instance = self.lease_instance().await?;
+                let pages = instance.get_pages(manga_id, chapter_id).await?;
+                let raw_metadata = instance.get_metadata().await?;
+                let metadata: kani_shared::ExtensionMetadata =
+                    serde_json::from_str(&raw_metadata)?;
+                Ok::<_, kani_core::error::Error>((pages, metadata.base_url))
+            }
+            .await;
+
+            let err = match result {
+                Ok(data) => return Ok(data),
+                Err(e) => e,
+            };
+
+            let retry = if let kani_core::error::Error::Extension(ref ext_err) = err {
+                kani_core::downloader::ext_retry_params(ext_err.kind)
+            } else {
+                None
+            };
+
+            match retry {
+                Some((max_attempts, delay_ms)) if attempts < max_attempts => {
+                    attempts += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                }
+                _ => return Err(err),
+            }
+        }
+    }
+}
+
+struct LeaseGuard(Arc<AtomicUsize>);
+
+impl Drop for LeaseGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::LeaseGuard;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[test]
+    fn lease_guard_decrements_on_drop() {
+        let count = Arc::new(AtomicUsize::new(1));
+        {
+            let _guard = LeaseGuard(Arc::clone(&count));
+            assert_eq!(count.load(Ordering::SeqCst), 1);
+        }
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn multiple_lease_guards_decrement_independently() {
+        let count = Arc::new(AtomicUsize::new(2));
+        let g1 = LeaseGuard(Arc::clone(&count));
+        let g2 = LeaseGuard(Arc::clone(&count));
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        drop(g1);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        drop(g2);
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+}
+
+pub struct OwnedSourceInstance {
+    store: Store<HostState>,
+    bindings: kani_core::wasm::KaniExtension,
+    _permit: OwnedSemaphorePermit,
+    _lease_guard: LeaseGuard,
+}
+
+impl OwnedSourceInstance {
+    pub fn set_preference_map(&mut self, prefs: std::collections::HashMap<String, String>) {
+        self.store.data_mut().preferences = prefs;
+    }
+
+    pub async fn get_popular_manga(
+        &mut self,
+        page: i32,
+        page_size: i32,
+        filters: &[kani_shared::types::ActiveFilter],
+    ) -> Result<kani_core::wasm::kani::extension::types::MangaList> {
+        let wit_filters = kani_core::wasm::filter_conversions::to_wit_active_filters(filters);
+        kani_core::execute_wasm!(self, call_get_popular_manga, page, page_size, &wit_filters)
+    }
+
+    pub async fn search_manga(
+        &mut self,
+        query: &str,
+        page: i32,
+        page_size: i32,
+        filters: &[kani_shared::types::ActiveFilter],
+    ) -> Result<kani_core::wasm::kani::extension::types::MangaList> {
+        let wit_filters = kani_core::wasm::filter_conversions::to_wit_active_filters(filters);
+        kani_core::execute_wasm!(self, call_search_manga, query, page, page_size, &wit_filters)
+    }
+
+    pub async fn get_manga_details(
+        &mut self,
+        manga_id: &str,
+    ) -> Result<kani_core::wasm::kani::extension::types::MangaInfo> {
+        kani_core::execute_wasm!(self, call_get_manga_details, manga_id)
+    }
+
+    pub async fn get_chapter_list(
+        &mut self,
+        manga_id: &str,
+        page: i32,
+        page_size: Option<i32>,
+        sort: Option<String>,
+    ) -> Result<kani_core::wasm::kani::extension::types::ChapterList> {
+        kani_core::execute_wasm!(
+            self,
+            call_get_chapter_list,
+            manga_id,
+            page,
+            page_size,
+            sort.as_deref()
+        )
+    }
+
+    pub async fn get_chapter_sort_list(
+        &mut self,
+    ) -> Result<Vec<kani_core::wasm::kani::extension::types::SortOption>> {
+        kani_core::execute_wasm!(self, call_get_chapter_sort_list)
+    }
+
+    pub async fn get_pages(
+        &mut self,
+        manga_id: &str,
+        chapter_id: &str,
+    ) -> Result<kani_core::wasm::kani::extension::types::Chapter> {
+        kani_core::execute_wasm!(self, call_get_pages, manga_id, chapter_id)
+    }
+
+    pub async fn get_fetched_option_sets(&mut self) -> Result<String> {
+        kani_core::execute_wasm!(self, call_get_fetched_option_sets)
+    }
+
+    pub async fn get_metadata(&mut self) -> Result<String> {
+        kani_core::execute_wasm!(self, call_get_metadata)
+    }
+
+    pub async fn get_filter_list(
+        &mut self,
+    ) -> Result<kani_core::wasm::kani::extension::types::FilterList> {
+        kani_core::execute_wasm!(self, call_get_filter_list)
+    }
+
+    pub async fn get_preferences(
+        &mut self,
+    ) -> Result<Vec<kani_core::wasm::kani::extension::types::PreferenceSpec>> {
+        kani_core::execute_wasm!(self, call_get_preferences)
+    }
+
+    pub async fn get_url(&mut self, manga_id: &str) -> Result<String> {
+        kani_core::execute_wasm!(self, call_get_url, manga_id)
+    }
+}

@@ -1,4 +1,5 @@
-pub const HOST_CAPABILITIES: &[&str] = &["unrestricted_http"];
+pub const HOST_CAPABILITIES: &[&str] =
+    &["unrestricted_http", "browser_payload", "rhai_scripting", "scoped_cache"];
 
 pub fn check_min_kani_version(min_version: Option<&str>, host_version: &str) -> Result<(), String> {
     let Some(min_version) = min_version else {
