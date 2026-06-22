@@ -20,12 +20,12 @@ pub fn run(expression: &str, scripts_path: Option<&Path>) -> Result<(), CliError
 
     let parse_ast = result.into_result().unwrap();
 
-    let ast_raw: Result<Expr, Vec<CliError>> = parse_ast.clone().try_into();
+    let ast_raw: Result<Expr, Vec<kani_yaml::YamlError>> = parse_ast.clone().try_into();
 
     if let Err(item) = ast_raw {
         for error in item {
             match error {
-                CliError::DslConversion { message, span } => {
+                kani_yaml::YamlError::DslConversion { message, span } => {
                     report_custom_error("<stdin>", expression, &message, span);
                 }
                 e => println!("err when validating: {}", e),

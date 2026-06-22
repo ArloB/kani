@@ -142,6 +142,12 @@ permissions! {
         Manage    => "manage",
         Jobs      => "jobs",
     },
+    Repo => "repo" {
+        Add     => "add",
+        Remove  => "remove",
+        Trust   => "trust",
+        Refresh => "refresh",
+    },
 }
 
 impl serde::Serialize for Permission {
@@ -215,6 +221,10 @@ mod tests {
             "admin:view_logs",
             "admin:view_audit",
             "admin:jobs",
+            "repo:add",
+            "repo:remove",
+            "repo:trust",
+            "repo:refresh",
         ];
         for raw in &perms {
             let parsed: Permission = raw.parse().expect(raw);
@@ -245,6 +255,10 @@ mod tests {
             Permission::Server(Server::Manage),
             Permission::Admin(Admin::ViewLogs),
             Permission::Admin(Admin::ViewAudit),
+            Permission::Repo(Repo::Add),
+            Permission::Repo(Repo::Remove),
+            Permission::Repo(Repo::Trust),
+            Permission::Repo(Repo::Refresh),
         ];
         let mut seen = std::collections::HashSet::new();
         for p in &perms {

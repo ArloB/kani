@@ -3,8 +3,11 @@ pub mod css;
 pub mod dsl_cmd;
 pub mod generate;
 pub mod icons;
+pub mod keygen;
 pub mod lint;
 pub mod new;
+pub mod publish;
+pub mod repo;
 pub mod setup;
 pub mod validate;
 
@@ -20,10 +23,13 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Scaffold a new YAML extension
+    /// Scaffold a new extension (YAML by default, or a Rust/WASM crate with --rust)
     New {
         /// Extension name (e.g. my-source)
         name: String,
+        /// Scaffold a Rust/WASM crate instead of a declarative YAML file
+        #[arg(long)]
+        rust: bool,
     },
     /// Validate a YAML extension file
     Validate {
@@ -98,9 +104,95 @@ pub enum Command {
     },
     /// Run the workspace quality checks (clippy, machete, deny, fmt) in sequence
     Lint,
+    /// Generate an Ed25519 signing keypair for extension authoring
+    Keygen {
+        /// Directory to write the keypair files into (default: current directory)
+        #[arg(long, value_name = "PATH", default_value = ".")]
+        out_dir: std::path::PathBuf,
+        /// Base name for the generated files (e.g. "author" → author.pub + author.key)
+        #[arg(long, default_value = "author")]
+        name: String,
+        /// Environment variable holding the passphrase for key encryption (not yet implemented)
+        #[arg(long, value_name = "ENV_VAR")]
+        passphrase_env: Option<String>,
+    },
+    /// Sign an extension and publish it to a local repository
+    Publish {
+        /// Path to the extension file (.yaml or .wasm) to publish
+        file: std::path::PathBuf,
+        /// Path to the author Ed25519 private key file (.key)
+        #[arg(long, value_name = "PATH")]
+        sign_key: std::path::PathBuf,
+        /// Repository root directory (default: current directory)
+        #[arg(long, value_name = "PATH", default_value = ".")]
+        repo_dir: std::path::PathBuf,
+        /// Path to the maintainer private key for signing index.json
+        #[arg(long, value_name = "PATH")]
+        repo_sign_key: Option<std::path::PathBuf>,
+        /// Minimum Kani version required to install this extension
+        #[arg(long, value_name = "SEMVER")]
+        min_kani_version: Option<String>,
+    },
+    /// Manage a local extension repository
+    #[command(subcommand)]
+    Repo(RepoCommand),
     /// REPL: inspect, explain, test, replay, or record a YAML extension
     #[command(subcommand)]
     Repl(ReplCommand),
+}
+
+#[derive(Subcommand)]
+pub enum RepoCommand {
+    /// Initialise a new repository directory with an empty index.json
+    Init {
+        /// Path to the maintainer public key file (.pub)
+        #[arg(long, value_name = "PATH")]
+        maintainer_key: std::path::PathBuf,
+        /// Human-readable repository name
+        #[arg(long)]
+        name: String,
+        /// Directory to initialise as the repository root (default: current directory)
+        #[arg(long, value_name = "PATH", default_value = ".")]
+        repo_dir: std::path::PathBuf,
+    },
+    /// Add an already-signed extension artifact to the repository index
+    Add {
+        /// Path to the signed extension artifact (.yaml or .wasm); its .sig must be alongside
+        artifact: std::path::PathBuf,
+        /// Path to the author public key file (.pub) used to verify the artifact signature
+        #[arg(long, value_name = "PATH")]
+        author_key: std::path::PathBuf,
+        /// Repository root directory (default: current directory)
+        #[arg(long, value_name = "PATH", default_value = ".")]
+        repo_dir: std::path::PathBuf,
+        /// Minimum Kani version required to install this extension
+        #[arg(long, value_name = "SEMVER")]
+        min_kani_version: Option<String>,
+        /// Path to the maintainer private key for re-signing index.json after update
+        #[arg(long, value_name = "PATH")]
+        repo_sign_key: Option<std::path::PathBuf>,
+    },
+    /// List extensions in a repository's index.json
+    List {
+        /// Repository root directory (default: current directory)
+        #[arg(long, value_name = "PATH", default_value = ".")]
+        repo_dir: std::path::PathBuf,
+    },
+    /// Print the fingerprint of a public key file
+    ShowFingerprint {
+        /// Path to the public key file (.pub)
+        #[arg(long, value_name = "PATH")]
+        key: std::path::PathBuf,
+    },
+    /// Verify all extension signatures and SHA-256 digests in a local repository
+    Verify {
+        /// Repository root directory (default: current directory)
+        #[arg(long, value_name = "PATH", default_value = ".")]
+        repo_dir: std::path::PathBuf,
+        /// Path to maintainer public key to verify index.json (defaults to key in index.json)
+        #[arg(long, value_name = "PATH")]
+        repo_key: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -154,7 +246,7 @@ pub enum ReplCommand {
 
 pub fn run(cli: Cli) -> Result<(), CliError> {
     match cli.command {
-        Command::New { name } => new::run(&name),
+        Command::New { name, rust } => new::run(&name, rust),
         Command::Validate { file } => validate::run(&file),
         Command::Generate {
             file,
@@ -190,6 +282,49 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             scripts,
         } => dsl_cmd::run(&expression, scripts.as_deref()),
         Command::Lint => lint::run(),
+        Command::Keygen {
+            out_dir,
+            name,
+            passphrase_env,
+        } => keygen::run(&out_dir, &name, passphrase_env.as_deref()),
+        Command::Publish {
+            file,
+            sign_key,
+            repo_dir,
+            repo_sign_key,
+            min_kani_version,
+        } => publish::run(
+            &file,
+            &sign_key,
+            &repo_dir,
+            repo_sign_key.as_deref(),
+            min_kani_version.as_deref(),
+        ),
+        Command::Repo(repo_cmd) => match repo_cmd {
+            RepoCommand::Init {
+                maintainer_key,
+                name,
+                repo_dir,
+            } => repo::run_init(&repo_dir, &name, &maintainer_key),
+            RepoCommand::Add {
+                artifact,
+                author_key,
+                repo_dir,
+                min_kani_version,
+                repo_sign_key,
+            } => repo::run_add(
+                &artifact,
+                &author_key,
+                &repo_dir,
+                min_kani_version.as_deref(),
+                repo_sign_key.as_deref(),
+            ),
+            RepoCommand::List { repo_dir } => repo::run_list(&repo_dir),
+            RepoCommand::ShowFingerprint { key } => repo::run_show_fingerprint(&key),
+            RepoCommand::Verify { repo_dir, repo_key } => {
+                repo::run_verify(&repo_dir, repo_key.as_deref())
+            }
+        },
         Command::Repl(repl_cmd) => match repl_cmd {
             ReplCommand::Inspect { file } => crate::repl::inspect::run(&file),
             ReplCommand::Explain { expression } => crate::repl::explain::run(&expression),

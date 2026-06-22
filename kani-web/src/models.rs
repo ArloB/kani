@@ -583,3 +583,33 @@ pub struct PathMigrateEstimateResponse {
     pub can_migrate: bool,
     pub reason: Option<String>,
 }
+
+// ── Repository management ─────────────────────────────────────────────────────
+
+#[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
+pub struct AddRepoRequest {
+    #[garde(length(min = 1, max = 2048), custom(validate_https_url))]
+    pub url: String,
+    #[garde(skip)]
+    pub confirm_fingerprint: Option<String>,
+}
+
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
+pub struct InstallFromRepoRequest {
+    pub repo_id: i64,
+    pub extension_id: String,
+}
+
+#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
+pub struct UpdateFromRepoRequest {
+    pub repo_id: i64,
+    pub extension_id: String,
+}
+
+#[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
+pub struct BlockRepoRequest {
+    #[garde(length(min = 1, max = 2048), custom(validate_https_url))]
+    pub url: String,
+    #[garde(length(min = 1, max = 500))]
+    pub reason: String,
+}

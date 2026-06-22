@@ -1,8 +1,10 @@
 use super::*;
 use crate::ids::UserId;
 use crate::models::SourceHealthRow;
+use crate::source::loader;
+use sqlx::Row as _;
 
-fn compile_pure_registry(
+pub(crate) fn compile_pure_registry(
     metadata: &kani_shared::ExtensionMetadata,
 ) -> Option<std::sync::Arc<kani_core::scripting::PureFunctionRegistry>> {
     if metadata.scripts.is_empty() {
@@ -200,7 +202,7 @@ impl AppService {
                 .await
                 .map_err(ServiceError::Core)?;
 
-            self.sources.write().await.remove(&id);
+            self.sources.remove(id);
             self.cache.invalidate_source(id);
             self.audit(
                 Some(user_id),
@@ -215,7 +217,7 @@ impl AppService {
     }
 
     pub async fn list_active_source_ids(&self) -> Result<Vec<i64>> {
-        Ok(self.sources.read().await.keys().copied().collect())
+        Ok(self.sources.active_ids())
     }
 
     pub async fn toggle_source_enabled(&self, id: i64, enabled: bool) -> Result<()> {
@@ -288,13 +290,12 @@ impl AppService {
             };
 
             let ns = format!("{}:", source.name);
-            let source_manager = SourceManager::new(
+            let backend = loader::build_wasm_source(
                 self.wasm_runtime.engine().clone(),
                 instance_pre,
                 self.smart_client.clone(),
                 Some(source.base_url),
                 source.unrestricted_http,
-                25,
                 prefs,
                 std::sync::Arc::clone(&self.ext_cache),
                 ns,
@@ -303,10 +304,7 @@ impl AppService {
                 max_hook_requests,
             );
 
-            self.sources
-                .write()
-                .await
-                .insert(id, Arc::new(source_manager));
+            self.sources.insert(id, backend);
         } else {
             // Remove from the in-memory map immediately so in-flight requests fail fast
             // rather than operating on a disabled source.
@@ -318,7 +316,7 @@ impl AppService {
             {
                 self.smart_client.deregister_rate_limit(&domain);
             }
-            self.sources.write().await.remove(&id);
+            self.sources.remove(id);
             self.cache.invalidate_source(id);
         }
 
@@ -349,16 +347,13 @@ impl AppService {
 
     pub async fn get_metadata(&self, id: i64) -> Result<String> {
         self.require_source_active(id).await?;
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
-        };
+        let backend = self
+            .sources
+            .get_backend(id)
+            .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
 
         let t0 = std::time::Instant::now();
-        let result = source_manager.lease_instance().await?.get_metadata().await;
+        let result = backend.get_metadata().await;
         let elapsed = t0.elapsed().as_millis() as u64;
         match result {
             Ok(r) => {
@@ -390,16 +385,10 @@ impl AppService {
 
         self.cache
             .get_or_fetch_popular_manga(id, page, page_size, filters_key, async move {
-                let source_manager = {
-                    let sources = sources.read().await;
-                    sources
-                        .get(&id)
-                        .cloned()
-                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
-                };
-                let result = source_manager
-                    .lease_instance()
-                    .await?
+                let backend = sources
+                    .get_backend(id)
+                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                let result = backend
                     .get_popular_manga(page, page_size, &active_filters)
                     .await?;
                 serde_json::to_string(&result)
@@ -428,16 +417,10 @@ impl AppService {
         let q = query.to_string();
         self.cache
             .get_or_fetch_search_results(id, query, page, page_size, filters_key, async move {
-                let source_manager = {
-                    let sources = sources.read().await;
-                    sources
-                        .get(&id)
-                        .cloned()
-                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
-                };
-                let result = source_manager
-                    .lease_instance()
-                    .await?
+                let backend = sources
+                    .get_backend(id)
+                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                let result = backend
                     .search_manga(&q, page, page_size, &active_filters)
                     .await?;
                 serde_json::to_string(&result)
@@ -449,32 +432,23 @@ impl AppService {
 
     pub async fn get_filter_list(&self, id: i64) -> Result<kani_core::WitFilterList> {
         self.require_source_active(id).await?;
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
-        };
+        let backend = self
+            .sources
+            .get_backend(id)
+            .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
         let t0 = std::time::Instant::now();
-        let mut instance = source_manager.lease_instance().await?;
-        let filter_result = instance.get_filter_list().await;
-        let fetched_defs_json = instance
-            .get_fetched_option_sets()
-            .await
-            .unwrap_or_else(|_| "[]".to_string());
-        drop(instance);
-        let elapsed = t0.elapsed().as_millis() as u64;
-        let mut filter_list = match filter_result {
-            Ok(r) => {
-                self.record_source_success(id, elapsed).await;
-                r
-            }
-            Err(e) => {
-                self.record_source_error(id).await;
-                return Err(ServiceError::Core(e));
-            }
-        };
+        let (mut filter_list, fetched_defs_json) =
+            match backend.get_filter_list_with_options().await {
+                Ok(pair) => {
+                    self.record_source_success(id, t0.elapsed().as_millis() as u64)
+                        .await;
+                    pair
+                }
+                Err(e) => {
+                    self.record_source_error(id).await;
+                    return Err(ServiceError::Core(e));
+                }
+            };
         if let Ok(defs) = kani_shared::serde_json::from_str::<Vec<kani_shared::FilterFetchDef>>(
             &fetched_defs_json,
         ) {
@@ -517,17 +491,12 @@ impl AppService {
     pub async fn get_source_url(&self, id: i64, manga_id: &str) -> Result<String> {
         self.require_source_active(id).await?;
         let manga_id_d = decode_manga_id(manga_id);
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
-        };
-        source_manager
-            .lease_instance()
-            .await?
-            .get_url(&manga_id_d)
+        let backend = self
+            .sources
+            .get_backend(id)
+            .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+        backend
+            .get_source_url(&manga_id_d)
             .await
             .map_err(ServiceError::Core)
     }
@@ -539,18 +508,10 @@ impl AppService {
 
         self.cache
             .get_or_fetch_manga_details(id, &manga_id_d.clone(), async move {
-                let source_manager = {
-                    let sources = sources.read().await;
-                    sources
-                        .get(&id)
-                        .cloned()
-                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
-                };
-                let result = source_manager
-                    .lease_instance()
-                    .await?
-                    .get_manga_details(&manga_id_d)
-                    .await?;
+                let backend = sources
+                    .get_backend(id)
+                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                let result = backend.get_manga_details(&manga_id_d).await?;
                 serde_json::to_string(&convert_to_shared_manga_info(result))
                     .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
             })
@@ -566,18 +527,10 @@ impl AppService {
 
         self.cache
             .get_or_fetch_pages(id, &manga_id_d.clone(), &chapter_id_d.clone(), async move {
-                let source_manager = {
-                    let sources = sources.read().await;
-                    sources
-                        .get(&id)
-                        .cloned()
-                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
-                };
-                let result = source_manager
-                    .lease_instance()
-                    .await?
-                    .get_pages(&manga_id_d, &chapter_id_d)
-                    .await?;
+                let backend = sources
+                    .get_backend(id)
+                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                let result = backend.get_pages(&manga_id_d, &chapter_id_d).await?;
                 serde_json::to_string(&result)
                     .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
             })
@@ -606,15 +559,10 @@ impl AppService {
                 page_size,
                 &sort_key,
                 async move {
-                    let source_manager = {
-                        let sources = sources.read().await;
-                        sources.get(&id).cloned().ok_or_else(|| {
-                            ServiceError::NotFound(format!("Source {id} not found"))
-                        })?
-                    };
-                    let result = source_manager
-                        .lease_instance()
-                        .await?
+                    let backend = sources
+                        .get_backend(id)
+                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                    let result = backend
                         .get_chapter_list(&manga_id_d, page, Some(page_size), sort)
                         .await?;
                     serde_json::to_string(&result)
@@ -630,18 +578,11 @@ impl AppService {
         id: i64,
     ) -> Result<Vec<kani_shared::types::SortOption>> {
         self.require_source_active(id).await?;
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?
-        };
-        let wit_opts = source_manager
-            .lease_instance()
-            .await?
-            .get_chapter_sort_list()
-            .await?;
+        let backend = self
+            .sources
+            .get_backend(id)
+            .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+        let wit_opts = backend.get_chapter_sort_list().await?;
         Ok(wit_opts
             .into_iter()
             .map(|o| kani_shared::types::SortOption {
@@ -652,11 +593,8 @@ impl AppService {
     }
 
     async fn require_source_active(&self, id: i64) -> Result<()> {
-        {
-            let sources = self.sources.read().await;
-            if sources.contains_key(&id) {
-                return Ok(());
-            }
+        if self.sources.contains_key(id) {
+            return Ok(());
         }
         let row = sqlx::query!(
             "SELECT enabled FROM sources WHERE id = ? AND deleted_at IS NULL",
@@ -823,7 +761,120 @@ impl AppService {
             .map_err(|e| ServiceError::Core(kani_core::Error::Io(e)))?
         {
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
+            let ext_str = path.extension().and_then(|s| s.to_str());
+            if ext_str == Some("yaml") {
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_owned();
+
+                let text = match tokio::fs::read_to_string(&path).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::warn!("Failed to read YAML source {:?}: {}", path, e);
+                        continue;
+                    }
+                };
+
+                let (ext, load_error) = match kani_yaml::parse_and_validate(&text, &path) {
+                    Ok(ext) => {
+                        let err = crate::install_gating::check_required_capabilities(
+                            &ext.requires_capabilities,
+                        )
+                        .err()
+                        .or_else(|| {
+                            crate::install_gating::check_min_kani_version(
+                                ext.min_kani_version.as_deref(),
+                                env!("CARGO_PKG_VERSION"),
+                            )
+                            .err()
+                        });
+                        (Some(ext), err)
+                    }
+                    Err(errs) => {
+                        let msg = errs
+                            .iter()
+                            .map(|e| e.to_string())
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        tracing::warn!("YAML source {:?} failed validation: {}", path, msg);
+                        (None, Some(msg))
+                    }
+                };
+
+                let canonical_id = ext.as_ref().map(|e| e.id.clone()).unwrap_or(stem);
+                let enabled = ext.is_some() && load_error.is_none();
+
+                if let Some(ref ext) = ext
+                    && let Some(ref rl) = ext.metadata.rate_limit
+                    && let Some(domain) = ext
+                        .base_url
+                        .parse::<rquest::Url>()
+                        .ok()
+                        .and_then(|u| u.host_str().map(|h| h.to_owned()))
+                {
+                    smart_client.register_rate_limit(
+                        &domain,
+                        &kani_shared::extension::RateLimitConfig {
+                            requests_per_second: rl.requests_per_second as f32,
+                            burst: rl.burst,
+                            max_concurrent: rl.max_concurrent,
+                            max_hook_requests: rl.max_hook_requests,
+                        },
+                    );
+                }
+
+                let version = ext.as_ref().map(|e| e.version.as_str()).unwrap_or("0.0.0");
+                let base_url = ext.as_ref().map(|e| e.base_url.as_str()).unwrap_or("");
+                let unrestricted = ext.as_ref().map(|e| e.unrestricted_http).unwrap_or(false);
+                let mihon_id: Option<i64> = ext.as_ref().and_then(|e| e.mihon_source_id);
+                let enabled_i = enabled as i64;
+
+                let existing = sqlx::query("SELECT id FROM sources WHERE name = ?")
+                    .bind(&canonical_id)
+                    .fetch_optional(db)
+                    .await?;
+
+                if let Some(row) = existing {
+                    let id: i64 = row.try_get("id")?;
+                    sqlx::query(
+                        "UPDATE sources SET version = ?, base_url = ?, unrestricted_http = ?, \
+                         mihon_source_id = ?, load_error = ?, \
+                         enabled = CASE WHEN ? IS NULL THEN enabled ELSE 0 END, \
+                         deleted_at = NULL WHERE id = ?",
+                    )
+                    .bind(version)
+                    .bind(base_url)
+                    .bind(unrestricted)
+                    .bind(mihon_id)
+                    .bind(load_error.as_deref())
+                    .bind(load_error.as_deref())
+                    .bind(id)
+                    .execute(db)
+                    .await?;
+                } else {
+                    sqlx::query(
+                        "INSERT INTO sources (name, version, base_url, enabled, unrestricted_http, \
+                         mihon_source_id, load_error) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    )
+                    .bind(&canonical_id)
+                    .bind(version)
+                    .bind(base_url)
+                    .bind(enabled_i)
+                    .bind(unrestricted)
+                    .bind(mihon_id)
+                    .bind(load_error.as_deref())
+                    .execute(db)
+                    .await?;
+                    if enabled {
+                        tracing::info!("Registered YAML source: {}", canonical_id);
+                    } else {
+                        tracing::warn!("Registered YAML source '{}' with load error", canonical_id);
+                    }
+                }
+                continue;
+            } else if ext_str == Some("wasm") {
                 let filename = path
                     .file_stem()
                     .and_then(|s| s.to_str())
@@ -1125,7 +1176,7 @@ impl AppService {
             .as_ref()
             .map(|rl| rl.max_hook_requests)
             .unwrap_or(3);
-        let source_manager = SourceManager::new(
+        let backend = loader::build_wasm_source(
             self.wasm_runtime.engine().clone(),
             self.wasm_runtime
                 .instantiate_pre(&component)
@@ -1133,7 +1184,6 @@ impl AppService {
             self.smart_client.clone(),
             Some(metadata.base_url.clone()),
             metadata.unrestricted_http,
-            25,
             self.load_pref_map(id).await.unwrap_or_default(),
             std::sync::Arc::clone(&self.ext_cache),
             format!("{}:", metadata.id),
@@ -1142,10 +1192,7 @@ impl AppService {
             max_hook_requests,
         );
 
-        self.sources
-            .write()
-            .await
-            .insert(id, Arc::new(source_manager));
+        self.sources.insert(id, backend);
 
         if let Some(schema) = raw_schema {
             self.cache.insert_preference_schema(id, schema);
@@ -1219,7 +1266,7 @@ impl AppService {
             .as_ref()
             .map(|rl| rl.max_hook_requests)
             .unwrap_or(3);
-        let source_manager = SourceManager::new(
+        let backend = loader::build_wasm_source(
             self.wasm_runtime.engine().clone(),
             self.wasm_runtime
                 .instantiate_pre(&component)
@@ -1227,7 +1274,6 @@ impl AppService {
             self.smart_client.clone(),
             Some(metadata.base_url.clone()),
             metadata.unrestricted_http,
-            25,
             self.load_pref_map(id).await.unwrap_or_default(),
             std::sync::Arc::clone(&self.ext_cache),
             format!("{}:", metadata.id),
@@ -1236,10 +1282,7 @@ impl AppService {
             max_hook_requests,
         );
 
-        self.sources
-            .write()
-            .await
-            .insert(id, Arc::new(source_manager));
+        self.sources.insert(id, backend);
 
         if let Some(schema) = raw_schema {
             self.cache.insert_preference_schema(id, schema);

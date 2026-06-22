@@ -29,7 +29,8 @@ Review extension permissions before installing sources from untrusted repositori
 
 ## Source repositories
 
-<!-- TODO: document the official extension repository URL and how to add third-party repos -->
+Extensions can be installed from signed repositories, enabling one-click install and verified updates.
+See [Extension Repositories](./extension-repositories.md) for the full guide.
 
 ## Writing a source
 

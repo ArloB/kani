@@ -57,17 +57,6 @@ pub trait PageListFetcher: Send + Sync {
     ) -> Result<(crate::wasm::kani::extension::types::Chapter, String)>;
 }
 
-#[async_trait::async_trait]
-impl PageListFetcher for crate::source_manager::SourceManager {
-    async fn fetch_page_list(
-        &self,
-        manga_id: &str,
-        chapter_id: &str,
-    ) -> Result<(crate::wasm::kani::extension::types::Chapter, String)> {
-        fetch_pages_with_retry(self, manga_id, chapter_id).await
-    }
-}
-
 pub struct DownloadTask {
     pub chapter_id: i64,
     pub manga_id: i64,
@@ -733,58 +722,7 @@ pub fn ext_retry_params(kind: kani_shared::extension::ExtensionErrorKind) -> Opt
         ExtensionErrorKind::Network | ExtensionErrorKind::Timeout => Some((3, 2_000)),
         ExtensionErrorKind::RateLimited => Some((1, 60_000)),
         ExtensionErrorKind::Internal | ExtensionErrorKind::Unknown => Some((2, 4_000)),
-    }
-}
-
-async fn fetch_pages_with_retry(
-    source_manager: &crate::source_manager::SourceManager,
-    source_manga_id: &str,
-    source_chapter_id: &str,
-) -> Result<(crate::wasm::kani::extension::types::Chapter, String)> {
-    let mut attempts = 0u32;
-    loop {
-        let result = async {
-            let mut instance = source_manager.lease_instance().await?;
-            let pages = instance
-                .get_pages(source_manga_id, source_chapter_id)
-                .await?;
-            let raw_metadata = instance.get_metadata().await?;
-            let metadata: kani_shared::ExtensionMetadata = serde_json::from_str(&raw_metadata)?;
-            Ok::<_, error::Error>((pages, metadata.base_url))
-        }
-        .await;
-
-        let err = match result {
-            Ok(data) => return Ok(data),
-            Err(e) => e,
-        };
-
-        let retry = if let error::Error::Extension(ref ext_err) = err {
-            if let Some((max_retries, delay_ms)) = ext_retry_params(ext_err.kind) {
-                attempts += 1;
-                if attempts < max_retries {
-                    tracing::warn!(
-                        "Retry {}/{} for get_pages (kind={}): {}",
-                        attempts,
-                        max_retries,
-                        ext_err.kind,
-                        ext_err.message
-                    );
-                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                    true
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        if !retry {
-            return Err(err);
-        }
+        ExtensionErrorKind::Updating => Some((3, 2_000)),
     }
 }
 

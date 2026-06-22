@@ -6,7 +6,7 @@ use std::path::Path;
 
 fn validate_str(
     yaml: &str,
-) -> Result<kani_cli::yaml::model::ValidatedExtension, Vec<kani_cli::error::CliError>> {
+) -> Result<kani_cli::yaml::model::ValidatedExtension, Vec<kani_yaml::YamlError>> {
     let path = Path::new("test.yaml");
     let ext: YamlExtension = serde_yaml::from_str(yaml).expect("fixture must parse as YAML");
     validate::validate(&ext, yaml, path)

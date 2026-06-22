@@ -353,6 +353,7 @@ function RestoreModal({ file, preview, onClose }) {
     import_tracking: !!preview.has_tracking,
     import_chapter_progress: false,
     import_settings: !!preview.has_settings,
+    import_repos: !!preview.repo_count,
   });
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(/** @type {{ completed: number, total: number, title: string } | null} */ (null));
@@ -381,6 +382,7 @@ function RestoreModal({ file, preview, onClose }) {
     ['Import reading status', 'import_tracking', !!preview.has_tracking],
     ['Import chapter progress', 'import_chapter_progress', !!preview.has_chapter_progress],
     ['Import settings', 'import_settings', !!preview.has_settings],
+    [`Import repositories (${preview.repo_count || 0})`, 'import_repos', !!preview.repo_count],
   ];
 
   async function doImport() {

@@ -67,6 +67,21 @@ pub fn router() -> Router<AppState> {
             post(toggle_pref_select_item),
         )
         .route("/sources/{id}/capabilities", get(get_capabilities))
+        .route(
+            "/sources/repos",
+            get(list_repos_handler).post(add_repo_handler),
+        )
+        .route(
+            "/sources/repos/{id}",
+            get(get_repo_handler).delete(remove_repo_handler),
+        )
+        .route("/sources/repos/{id}/refresh", post(refresh_repo_handler))
+        .route(
+            "/sources/repos/{id}/extensions",
+            get(list_repo_extensions_handler),
+        )
+        .route("/sources/install", post(install_from_repo_handler))
+        .route("/sources/{id}/update", post(update_from_repo_handler))
 }
 
 #[utoipa::path(
@@ -155,6 +170,14 @@ pub(crate) async fn list_metadata_providers(
     Ok(Json(registry.list()))
 }
 
+#[derive(serde::Serialize)]
+struct SourceDetail {
+    #[serde(flatten)]
+    source: kani_shared::types::Source,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backend: Option<&'static str>,
+}
+
 #[utoipa::path(
     get, path = "/rest/sources/{id}",
     params(("id" = i64, Path, description = "Source ID")),
@@ -168,11 +191,29 @@ pub(crate) async fn list_metadata_providers(
 )]
 pub(crate) async fn get_source(
     _: AuthGuard<crate::permissions::guards::SourceBrowse>,
-    State(svc): State<Arc<dyn SourceDomain>>,
+    State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let source = svc.get_source(id).await?;
-    Ok(Json(source))
+    let source = state.service.get_source(id).await?;
+    let backend = if let Some(b) = state.service.sources.get_backend(id) {
+        Some(b.backend_kind())
+    } else {
+        let storage = state
+            .service
+            .settings
+            .read()
+            .await
+            .wasm_storage_path
+            .clone();
+        if storage.join(format!("{}.yaml", source.name)).exists() {
+            Some("yaml")
+        } else if storage.join(format!("{}.wasm", source.name)).exists() {
+            Some("wasm")
+        } else {
+            None
+        }
+    };
+    Ok(Json(SourceDetail { source, backend }))
 }
 
 #[utoipa::path(
@@ -284,6 +325,11 @@ pub(crate) async fn upload_wasm(
     Path(id): Path<i64>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
+    if !crate::SOURCE_INSTALL_ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AppError::Forbidden(
+            "Source installation is disabled by the administrator".into(),
+        ));
+    }
     let source = state.get_source(id).await?;
 
     let field = multipart
@@ -329,6 +375,11 @@ pub(crate) async fn fetch_wasm(
     Path(id): Path<i64>,
     ValidatedJson(payload): ValidatedJson<FetchWasmRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    if !crate::SOURCE_INSTALL_ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AppError::Forbidden(
+            "Source installation is disabled by the administrator".into(),
+        ));
+    }
     let source = state.get_source(id).await?;
 
     let response = state.proxy_client.safe_get(&payload.url, None).await?;
@@ -860,6 +911,231 @@ pub(crate) async fn get_capabilities(
     Ok(Json(SourceCapabilities {
         streaming_chapters: streaming,
     }))
+}
+
+#[utoipa::path(
+    get, path = "/rest/sources/repos",
+    responses(
+        (status = 200, description = "All trusted repositories"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn list_repos_handler(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(state.list_repos().await?))
+}
+
+#[utoipa::path(
+    post, path = "/rest/sources/repos",
+    request_body = AddRepoRequest,
+    responses(
+        (status = 200, description = "Repository added or refreshed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 409, description = "Repository key changed since last trust"),
+        (status = 428, description = "TOFU confirmation required — re-submit with X-Confirm-Key-Fingerprint header"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn add_repo_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::RepoAdd>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    ValidatedJson(payload): ValidatedJson<AddRepoRequest>,
+) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
+    if !crate::SOURCE_INSTALL_ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AppError::Forbidden(
+            "Source installation is disabled by the administrator".into(),
+        ));
+    }
+    use kani_app::service::repos::RepoAddResult;
+    let confirm_fp = headers
+        .get("X-Confirm-Key-Fingerprint")
+        .and_then(|v| v.to_str().ok())
+        .or(payload.confirm_fingerprint.as_deref());
+    match state
+        .add_repo(&payload.url, confirm_fp, Some(user.id))
+        .await?
+    {
+        RepoAddResult::Added { id, name } => {
+            Ok((StatusCode::OK, Json(json!({ "id": id, "name": name }))))
+        }
+        RepoAddResult::ConfirmationRequired {
+            fingerprint,
+            repo_url,
+        } => Ok((
+            StatusCode::PRECONDITION_REQUIRED,
+            Json(json!({
+                "error": "TOFU_CONFIRMATION_REQUIRED",
+                "fingerprint": fingerprint,
+                "repo_url": repo_url,
+            })),
+        )),
+        RepoAddResult::KeyChanged {
+            old_fingerprint,
+            new_fingerprint,
+            repo_url,
+        } => Ok((
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "REPO_KEY_CHANGED",
+                "old_fingerprint": old_fingerprint,
+                "new_fingerprint": new_fingerprint,
+                "repo_url": repo_url,
+            })),
+        )),
+    }
+}
+
+#[utoipa::path(
+    get, path = "/rest/sources/repos/{id}",
+    params(("id" = i64, Path, description = "Repository ID")),
+    responses(
+        (status = 200, description = "Repository details"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Repository not found"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_repo_handler(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(state.get_repo(id).await?))
+}
+
+#[utoipa::path(
+    post, path = "/rest/sources/repos/{id}/refresh",
+    params(("id" = i64, Path, description = "Repository ID")),
+    responses(
+        (status = 200, description = "Repository index refreshed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Repository not found"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn refresh_repo_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::RepoRefresh>,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    state.refresh_repo(id, Some(user.id)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[utoipa::path(
+    delete, path = "/rest/sources/repos/{id}",
+    params(("id" = i64, Path, description = "Repository ID")),
+    responses(
+        (status = 204, description = "Repository removed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Repository not found"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn remove_repo_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::RepoRemove>,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    state.remove_repo(id, Some(user.id)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get, path = "/rest/sources/repos/{id}/extensions",
+    params(("id" = i64, Path, description = "Repository ID")),
+    responses(
+        (status = 200, description = "Extensions available in the repository"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Repository not found"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn list_repo_extensions_handler(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(state.list_repo_extensions(id).await?))
+}
+
+#[utoipa::path(
+    post, path = "/rest/sources/install",
+    request_body = InstallFromRepoRequest,
+    responses(
+        (status = 201, description = "Source installed from repository; returns new source ID"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions or repo blocked"),
+        (status = 404, description = "Repository or extension not found"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn install_from_repo_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::SourceInstall>,
+    State(state): State<AppState>,
+    Json(payload): Json<InstallFromRepoRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    if !crate::SOURCE_INSTALL_ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AppError::Forbidden(
+            "Source installation is disabled by the administrator".into(),
+        ));
+    }
+    let id = state
+        .install_source_from_repo(payload.repo_id, &payload.extension_id, Some(user.id))
+        .await?;
+    Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
+}
+
+#[utoipa::path(
+    post, path = "/rest/sources/{id}/update",
+    params(("id" = i64, Path, description = "Source ID to update")),
+    request_body = UpdateFromRepoRequest,
+    responses(
+        (status = 200, description = "Source updated to latest repository version"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Source, repository, or extension not found"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn update_from_repo_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::SourceInstall>,
+    State(state): State<AppState>,
+    Path(source_id): Path<i64>,
+    Json(payload): Json<UpdateFromRepoRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    if !crate::SOURCE_INSTALL_ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AppError::Forbidden(
+            "Source installation is disabled by the administrator".into(),
+        ));
+    }
+    state
+        .update_source_from_repo(
+            payload.repo_id,
+            &payload.extension_id,
+            source_id,
+            Some(user.id),
+        )
+        .await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 #[cfg(test)]

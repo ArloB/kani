@@ -17,6 +17,26 @@ pub struct BackupData {
     pub manga: Vec<BackupManga>,
     pub categories: Vec<BackupCategory>,
     pub settings: Option<BackupSettings>,
+    #[serde(default)]
+    pub repos: Vec<BackupRepo>,
+    #[serde(default)]
+    pub blocked_repos: Vec<BackupBlockedRepo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BackupRepo {
+    pub url: String,
+    pub name: String,
+    pub maintainer_key: String,
+    pub trusted_level: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_cache: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BackupBlockedRepo {
+    pub url: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -79,6 +99,8 @@ pub struct BackupPreview {
     pub has_tracking: bool,
     pub has_chapter_progress: bool,
     pub has_settings: bool,
+    pub repo_count: u32,
+    pub blocked_repo_count: u32,
     pub sources: Vec<BackupSourceSummary>,
 }
 
@@ -100,6 +122,12 @@ pub struct RestoreOptions {
     pub import_tracking: bool,
     pub import_chapter_progress: bool,
     pub import_settings: bool,
+    #[serde(default = "default_true")]
+    pub import_repos: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for RestoreOptions {
@@ -112,6 +140,7 @@ impl Default for RestoreOptions {
             import_tracking: true,
             import_chapter_progress: false,
             import_settings: false,
+            import_repos: true,
         }
     }
 }
@@ -122,6 +151,7 @@ pub struct RestoreResult {
     pub skipped_manga: u32,
     pub possible_duplicates: u32,
     pub imported_categories: u32,
+    pub imported_repos: u32,
     pub pending_imports_added: u32,
     pub warnings: Vec<String>,
 }
@@ -226,6 +256,8 @@ impl AppService {
             has_tracking,
             has_chapter_progress,
             has_settings: backup.settings.is_some(),
+            repo_count: backup.repos.len() as u32,
+            blocked_repo_count: backup.blocked_repos.len() as u32,
             sources,
         })
     }
@@ -344,12 +376,40 @@ impl AppService {
         });
         drop(s);
 
+        let repos: Vec<BackupRepo> = sqlx::query!(
+            "SELECT url, name, maintainer_key, trusted_level, index_cache FROM repo_trust ORDER BY url"
+        )
+        .fetch_all(&self.db)
+        .await?
+        .into_iter()
+        .map(|r| BackupRepo {
+            url: r.url,
+            name: r.name,
+            maintainer_key: r.maintainer_key,
+            trusted_level: r.trusted_level,
+            index_cache: r.index_cache,
+        })
+        .collect();
+
+        let blocked_repos: Vec<BackupBlockedRepo> =
+            sqlx::query!("SELECT url, reason FROM blocked_repos ORDER BY url")
+                .fetch_all(&self.db)
+                .await?
+                .into_iter()
+                .map(|r| BackupBlockedRepo {
+                    url: r.url,
+                    reason: r.reason,
+                })
+                .collect();
+
         let backup = BackupData {
             version: 1,
             exported_at: now,
             manga: manga_out,
             categories,
             settings,
+            repos,
+            blocked_repos,
         };
 
         let bytes = build_zip(&backup)?;
@@ -371,6 +431,7 @@ impl AppService {
             skipped_manga: 0,
             possible_duplicates: 0,
             imported_categories: 0,
+            imported_repos: 0,
             pending_imports_added: 0,
             warnings: vec![],
         };
@@ -626,6 +687,38 @@ impl AppService {
             )
             .execute(&self.db)
             .await?;
+        }
+
+        if opts.import_repos {
+            for repo in &backup.repos {
+                sqlx::query!(
+                    "INSERT INTO repo_trust (url, name, maintainer_key, trusted_level, index_cache) \
+                     VALUES (?, ?, ?, ?, ?) \
+                     ON CONFLICT(url) DO UPDATE SET \
+                         name = excluded.name, \
+                         maintainer_key = excluded.maintainer_key, \
+                         trusted_level = excluded.trusted_level, \
+                         index_cache = excluded.index_cache",
+                    repo.url,
+                    repo.name,
+                    repo.maintainer_key,
+                    repo.trusted_level,
+                    repo.index_cache
+                )
+                .execute(&self.db)
+                .await?;
+                result.imported_repos += 1;
+            }
+            for blocked in &backup.blocked_repos {
+                sqlx::query!(
+                    "INSERT INTO blocked_repos (url, reason) VALUES (?, ?) \
+                     ON CONFLICT(url) DO UPDATE SET reason = excluded.reason",
+                    blocked.url,
+                    blocked.reason
+                )
+                .execute(&self.db)
+                .await?;
+            }
         }
 
         if !new_manga_ids.is_empty() {

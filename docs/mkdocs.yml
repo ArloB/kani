@@ -57,6 +57,7 @@ nav:
     - Storage: admin/storage.md
     - Upgrades: admin/upgrade.md
     - Sources: admin/sources.md
+    - Extension Repositories: admin/extension-repositories.md
     - Trackers: admin/trackers.md
     - Email / SMTP: admin/email-smtp.md
     - Webhooks: admin/webhooks.md
@@ -64,6 +65,7 @@ nav:
     - YAML schema: extension-authoring/yaml-schema.md
     - DSL grammar: extension-authoring/dsl-grammar.md
     - Rhai hooks: extension-authoring/rhai-hooks.md
+    - Publishing & Distribution: extension-authoring/publishing.md
   - Developer Guide:
     - Architecture: developer/architecture.md
     - Crate map: developer/crate-map.md

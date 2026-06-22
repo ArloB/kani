@@ -19,7 +19,7 @@ use super::schema::{
     ThenStep, TotalPages, YamlExtension,
 };
 use crate::dsl::parser as dsl_parser;
-use crate::error::{CliError, report_custom_error, report_errors};
+use crate::error::YamlError;
 use kani_shared::ast::OnFailurePolicy;
 
 const POPULAR_ARGS: &[&str] = &["page", "page_size", "filters"];
@@ -37,8 +37,8 @@ pub fn validate(
     ext: &YamlExtension,
     _source: &str,
     path: &Path,
-) -> Result<ValidatedExtension, Vec<CliError>> {
-    let mut errors: Vec<CliError> = Vec::new();
+) -> Result<ValidatedExtension, Vec<YamlError>> {
+    let mut errors: Vec<YamlError> = Vec::new();
     let filename = path.to_string_lossy().into_owned();
 
     let id_encoding = ext.id_encoding.as_ref();
@@ -143,22 +143,22 @@ pub fn validate(
     for filter in &ext.filters {
         let id = &filter.id;
         if id.is_empty() {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "filters: filter ID must not be empty (filter name: '{}')",
                 filter.name
             )));
         } else if id.chars().any(|c| c.is_whitespace()) {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "filters: filter ID '{}' must not contain whitespace",
                 id
             )));
         } else if id.starts_with(':') || id.ends_with(':') {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "filters: filter ID '{}' must not start or end with ':'",
                 id
             )));
         } else if id.chars().filter(|&c| c == ':').count() > 1 {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "filters: filter ID '{}' must contain at most one ':' separator",
                 id
             )));
@@ -235,7 +235,7 @@ pub fn validate(
         let Some(ep) = ep_opt else { continue };
         for step in &ep.then_steps {
             if !known_endpoint_names.contains(step.endpoint_name.as_str()) {
-                errors.push(CliError::Other(format!(
+                errors.push(YamlError::Validation(format!(
                     "endpoints.{ep_name}.then: endpoint '{}' is not defined",
                     step.endpoint_name
                 )));
@@ -243,7 +243,7 @@ pub fn validate(
         }
         for step in &ep.for_each_steps {
             if !known_endpoint_names.contains(step.endpoint_name.as_str()) {
-                errors.push(CliError::Other(format!(
+                errors.push(YamlError::Validation(format!(
                     "endpoints.{ep_name}.for_each: endpoint '{}' is not defined",
                     step.endpoint_name
                 )));
@@ -296,14 +296,14 @@ fn validate_filters_and_option_sets(
     filters: &[FilterEntry],
     preferences: &[PreferenceEntry],
     option_sets: &BTreeMap<String, OptionSetDef>,
-) -> Vec<CliError> {
+) -> Vec<YamlError> {
     let mut errors = Vec::new();
 
     for filter in filters {
         if let Some(options_ref) = &filter.options_ref
             && !option_sets.contains_key(options_ref)
         {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "filters.{}: options_ref '{}' does not match any entry in option_sets",
                 filter.id, options_ref
             )));
@@ -312,7 +312,7 @@ fn validate_filters_and_option_sets(
         if matches!(filter.kind, FilterKind::IntRange | FilterKind::DateRange)
             && (filter.min.is_none() || filter.max.is_none())
         {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "filters.{}: {:?} filters require both 'min' and 'max'",
                 filter.id, filter.kind
             )));
@@ -323,7 +323,7 @@ fn validate_filters_and_option_sets(
         if let Some(options_ref) = &pref.options_ref
             && !option_sets.contains_key(options_ref)
         {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "preferences.{}: options_ref '{}' does not match any entry in option_sets",
                 pref.key, options_ref
             )));
@@ -332,25 +332,25 @@ fn validate_filters_and_option_sets(
 
     for (name, def) in option_sets {
         if name.is_empty() {
-            errors.push(CliError::Other(
+            errors.push(YamlError::Validation(
                 "option_sets: option set name must not be empty".to_string(),
             ));
         }
         if let OptionSetDef::Fetched { options_fetched_by } = def {
             if options_fetched_by.route.is_empty() {
-                errors.push(CliError::Other(format!(
+                errors.push(YamlError::Validation(format!(
                     "option_sets.{name}.options_fetched_by: 'route' must not be empty"
                 )));
             }
             if let Some(cache) = &options_fetched_by.cache {
                 const MAX_TTL_SECONDS: u32 = 30 * 24 * 60 * 60;
                 if cache.key.is_empty() {
-                    errors.push(CliError::Other(format!(
+                    errors.push(YamlError::Validation(format!(
                         "option_sets.{name}.options_fetched_by.cache: 'key' must not be empty"
                     )));
                 }
                 if cache.ttl > MAX_TTL_SECONDS {
-                    errors.push(CliError::Other(format!(
+                    errors.push(YamlError::Validation(format!(
                         "option_sets.{name}.options_fetched_by.cache: ttl must not exceed 30 days ({MAX_TTL_SECONDS} seconds)"
                     )));
                 }
@@ -363,10 +363,10 @@ fn validate_filters_and_option_sets(
 
 /// Validates a `filter_format` block: `array_separator` must be non-empty
 /// when `multiselect: comma_separated` is used.
-fn validate_filter_format(fmt: &FilterFormatCfg, endpoint: &str) -> Vec<CliError> {
+fn validate_filter_format(fmt: &FilterFormatCfg, endpoint: &str) -> Vec<YamlError> {
     let mut errors = Vec::new();
     if fmt.array_separator.is_empty() {
-        errors.push(CliError::Other(format!(
+        errors.push(YamlError::Validation(format!(
             "endpoints.{endpoint}.filter_format: 'array_separator' must not be empty"
         )));
     }
@@ -378,24 +378,24 @@ fn validate_filter_format(fmt: &FilterFormatCfg, endpoint: &str) -> Vec<CliError
 /// days. Returns the validated entries when there are no errors.
 fn validate_cache(
     cache: &BTreeMap<String, CacheEntry>,
-) -> Result<Vec<ValidatedCacheEntry>, Vec<CliError>> {
+) -> Result<Vec<ValidatedCacheEntry>, Vec<YamlError>> {
     const MAX_TTL_SECONDS: u32 = 30 * 24 * 60 * 60;
     let mut errors = Vec::new();
     let mut entries = Vec::new();
 
     for (name, entry) in cache {
         if name.is_empty() {
-            errors.push(CliError::Other(
+            errors.push(YamlError::Validation(
                 "cache: namespace name must not be empty".to_string(),
             ));
         } else if name.contains(':') || name.contains('/') {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "cache.{name}: namespace name must not contain ':' or '/'"
             )));
         }
 
         if entry.ttl > MAX_TTL_SECONDS {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "cache.{name}: ttl must not exceed 30 days ({MAX_TTL_SECONDS} seconds)"
             )));
         }
@@ -403,7 +403,7 @@ fn validate_cache(
         if let Some(key_template) = &entry.key_template
             && key_template.is_empty()
         {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "cache.{name}: 'key_template' must not be empty when present"
             )));
         }
@@ -427,7 +427,9 @@ fn validate_cache(
 /// Validates the optional `metadata` block: icon must be valid base64 decoding
 /// to a PNG/WebP/SVG payload no larger than 64KB; rate_limit.rps must be
 /// positive; section ids must be non-empty.
-fn validate_metadata(metadata: Option<&MetadataBlock>) -> Result<ValidatedMetadata, Vec<CliError>> {
+fn validate_metadata(
+    metadata: Option<&MetadataBlock>,
+) -> Result<ValidatedMetadata, Vec<YamlError>> {
     const MAX_ICON_BYTES: usize = 64 * 1024;
     let mut errors = Vec::new();
 
@@ -440,19 +442,19 @@ fn validate_metadata(metadata: Option<&MetadataBlock>) -> Result<ValidatedMetada
         match base64::engine::general_purpose::STANDARD.decode(icon) {
             Ok(bytes) => {
                 if bytes.len() > MAX_ICON_BYTES {
-                    errors.push(CliError::Other(format!(
+                    errors.push(YamlError::Validation(format!(
                         "metadata.icon: decoded icon is {} bytes, exceeding the {MAX_ICON_BYTES}-byte limit",
                         bytes.len()
                     )));
                 }
                 if !is_known_image_format(&bytes) {
-                    errors.push(CliError::Other(
+                    errors.push(YamlError::Validation(
                         "metadata.icon: decoded bytes do not match a supported PNG/WebP/SVG signature".to_string(),
                     ));
                 }
             }
             Err(e) => {
-                errors.push(CliError::Other(format!(
+                errors.push(YamlError::Validation(format!(
                     "metadata.icon: not valid base64: {e}"
                 )));
             }
@@ -461,7 +463,7 @@ fn validate_metadata(metadata: Option<&MetadataBlock>) -> Result<ValidatedMetada
 
     let rate_limit = metadata.rate_limit.as_ref().map(|cfg| {
         if cfg.rps <= 0.0 {
-            errors.push(CliError::Other(
+            errors.push(YamlError::Validation(
                 "metadata.rate_limit.rps: must be greater than 0".to_string(),
             ));
         }
@@ -477,11 +479,11 @@ fn validate_metadata(metadata: Option<&MetadataBlock>) -> Result<ValidatedMetada
     let mut sections = Vec::new();
     for SectionEntry { id, name, nsfw } in &metadata.sections {
         if id.is_empty() {
-            errors.push(CliError::Other(
+            errors.push(YamlError::Validation(
                 "metadata.sections: section 'id' must not be empty".to_string(),
             ));
         } else if !seen_ids.insert(id.as_str()) {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "metadata.sections: duplicate section id '{id}'"
             )));
         }
@@ -525,18 +527,18 @@ fn is_known_image_format(bytes: &[u8]) -> bool {
 /// Validates the `chapter_sort` block: `options` must be non-empty, each
 /// option id must be non-empty, and `default` (when present) must name one of
 /// the declared option ids.
-fn validate_chapter_sort(block: &ChapterSortBlock) -> Result<ValidatedChapterSort, Vec<CliError>> {
+fn validate_chapter_sort(block: &ChapterSortBlock) -> Result<ValidatedChapterSort, Vec<YamlError>> {
     let mut errors = Vec::new();
 
     if block.options.is_empty() {
-        errors.push(CliError::Other(
+        errors.push(YamlError::Validation(
             "chapter_sort: 'options' must not be empty".to_string(),
         ));
     }
 
     for opt in &block.options {
         if opt.id.is_empty() {
-            errors.push(CliError::Other(
+            errors.push(YamlError::Validation(
                 "chapter_sort: option 'id' must not be empty".to_string(),
             ));
         }
@@ -545,7 +547,7 @@ fn validate_chapter_sort(block: &ChapterSortBlock) -> Result<ValidatedChapterSor
     if let Some(default) = &block.default
         && !block.options.iter().any(|o| &o.id == default)
     {
-        errors.push(CliError::Other(format!(
+        errors.push(YamlError::Validation(format!(
             "chapter_sort: default '{}' is not listed in options",
             default
         )));
@@ -571,11 +573,11 @@ fn validate_chapter_sort(block: &ChapterSortBlock) -> Result<ValidatedChapterSor
 /// Validates top-level schema/version metadata: `schema_version` must not
 /// exceed the version this `kani-cli` understands, and `min_kani_version`
 /// (when present) must be a valid semver requirement string.
-fn validate_versioning(schema_version: u32, min_kani_version: Option<&str>) -> Vec<CliError> {
+fn validate_versioning(schema_version: u32, min_kani_version: Option<&str>) -> Vec<YamlError> {
     let mut errors = Vec::new();
 
     if schema_version > CURRENT_SCHEMA_VERSION {
-        errors.push(CliError::Other(format!(
+        errors.push(YamlError::Validation(format!(
             "schema_version: {schema_version} is newer than the schema version this kani-cli supports ({CURRENT_SCHEMA_VERSION})"
         )));
     }
@@ -583,7 +585,7 @@ fn validate_versioning(schema_version: u32, min_kani_version: Option<&str>) -> V
     if let Some(v) = min_kani_version
         && semver::Version::parse(v).is_err()
     {
-        errors.push(CliError::Other(format!(
+        errors.push(YamlError::Validation(format!(
             "min_kani_version: '{v}' is not a valid semver version"
         )));
     }
@@ -594,28 +596,28 @@ fn validate_versioning(schema_version: u32, min_kani_version: Option<&str>) -> V
 /// Validates the top-level `id_encoding` block: each declared role's `fields`
 /// must be non-empty with no duplicates, and `delimiter` must be non-empty
 /// when more than one field is declared.
-fn validate_id_encoding(block: &IdEncodingBlock) -> Vec<CliError> {
+fn validate_id_encoding(block: &IdEncodingBlock) -> Vec<YamlError> {
     let mut errors = Vec::new();
     for (role, entry) in [("manga", &block.manga), ("chapter", &block.chapter)] {
         let Some(entry) = entry else { continue };
         if entry.fields.is_empty() {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "id_encoding.{role}: 'fields' must not be empty"
             )));
         }
         if entry.fields.len() > 1 && entry.delimiter.is_empty() {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "id_encoding.{role}: 'delimiter' must not be empty when more than one field is declared"
             )));
         }
         let mut seen: HashSet<&str> = HashSet::new();
         for f in &entry.fields {
             if f.is_empty() {
-                errors.push(CliError::Other(format!(
+                errors.push(YamlError::Validation(format!(
                     "id_encoding.{role}: field names must not be empty"
                 )));
             } else if !seen.insert(f.as_str()) {
-                errors.push(CliError::Other(format!(
+                errors.push(YamlError::Validation(format!(
                     "id_encoding.{role}: duplicate field name '{f}'"
                 )));
             }
@@ -666,31 +668,31 @@ fn validate_dollar_var(
     location: &str,
     fn_args: &[&str],
     id_encoding: Option<&IdEncodingBlock>,
-) -> Option<CliError> {
+) -> Option<YamlError> {
     if let Some((role, field)) = var.split_once('.') {
         let Some(fn_arg) = role_fn_arg(role) else {
-            return Some(CliError::Other(format!(
+            return Some(YamlError::Validation(format!(
                 "endpoints.{endpoint}.{location}: '${var}$' has unknown id_encoding role '{role}' (expected 'manga' or 'chapter')"
             )));
         };
         if !fn_args.contains(&fn_arg) {
-            return Some(CliError::Other(format!(
+            return Some(YamlError::Validation(format!(
                 "endpoints.{endpoint}.{location}: '${var}$' is not available ('{fn_arg}' is not an argument of this endpoint)"
             )));
         }
         match id_encoding_entry_for_role(id_encoding, role) {
-            None => Some(CliError::Other(format!(
+            None => Some(YamlError::Validation(format!(
                 "endpoints.{endpoint}.{location}: '${var}$' references id_encoding.{role}, but no such block is declared"
             ))),
             Some(entry) if !entry.fields.iter().any(|f| f == field) => {
-                Some(CliError::Other(format!(
+                Some(YamlError::Validation(format!(
                     "endpoints.{endpoint}.{location}: '${var}$' references field '{field}', which is not declared in id_encoding.{role}.fields"
                 )))
             }
             Some(_) => None,
         }
     } else if !fn_args.contains(&var) {
-        Some(CliError::Other(format!(
+        Some(YamlError::Validation(format!(
             "endpoints.{endpoint}.{location}: '${var}$' is not available \
              (available args: {})",
             fn_args.join(", ")
@@ -765,15 +767,15 @@ fn build_composite_field(
     field_name: &str,
     field_path_base: &str,
     id_encoding: Option<&IdEncodingBlock>,
-) -> Result<Expr, Vec<CliError>> {
+) -> Result<Expr, Vec<YamlError>> {
     let mut errors = Vec::new();
     let Some(role) = default_composite_role(endpoint_name) else {
-        return Err(vec![CliError::Other(format!(
+        return Err(vec![YamlError::Validation(format!(
             "endpoints.{endpoint_name}.fields.{field_name}: composite id fields are not supported on this endpoint"
         ))]);
     };
     let Some(entry) = id_encoding_entry_for_role(id_encoding, role) else {
-        return Err(vec![CliError::Other(format!(
+        return Err(vec![YamlError::Validation(format!(
             "endpoints.{endpoint_name}.fields.{field_name}: declares a composite id, but id_encoding.{role} is not configured"
         ))]);
     };
@@ -783,7 +785,7 @@ fn build_composite_field(
     if declared != provided {
         let mut provided_sorted: Vec<&str> = provided.into_iter().collect();
         provided_sorted.sort();
-        return Err(vec![CliError::Other(format!(
+        return Err(vec![YamlError::Validation(format!(
             "endpoints.{endpoint_name}.fields.{field_name}: composite id keys {:?} do not match id_encoding.{role}.fields {:?}",
             provided_sorted, entry.fields
         ))]);
@@ -818,7 +820,7 @@ fn validate_popular(
     _filters: &[FilterEntry],
     id_encoding: Option<&IdEncodingBlock>,
     browser_scripts: &std::collections::BTreeMap<String, String>,
-) -> Result<ValidatedPopular, Vec<CliError>> {
+) -> Result<ValidatedPopular, Vec<YamlError>> {
     match popular {
         PopularEndpoint::Delegated {
             delegate_to,
@@ -826,7 +828,7 @@ fn validate_popular(
         } => {
             let valid = ["search", "manga_details", "chapter_list", "pages"];
             if !valid.contains(&delegate_to.as_str()) {
-                return Err(vec![CliError::Other(format!(
+                return Err(vec![YamlError::Validation(format!(
                     "popular.delegate_to '{}' must be one of: search, manga_details, chapter_list, pages",
                     delegate_to
                 ))]);
@@ -859,9 +861,9 @@ fn validate_endpoint(
     filename: &str,
     id_encoding: Option<&IdEncodingBlock>,
     browser_scripts: &std::collections::BTreeMap<String, String>,
-) -> Result<ValidatedEndpoint, Vec<CliError>> {
+) -> Result<ValidatedEndpoint, Vec<YamlError>> {
     use super::schema::EndpointVia;
-    let mut errors: Vec<CliError> = Vec::new();
+    let mut errors: Vec<YamlError> = Vec::new();
 
     let (via, page_url, script_name) = if let Some(via) = body.via {
         match via {
@@ -869,7 +871,7 @@ fn validate_endpoint(
                 let page_url = match &body.page_url {
                     Some(u) if !u.is_empty() => Some(u.clone()),
                     _ => {
-                        errors.push(CliError::Other(format!(
+                        errors.push(YamlError::Validation(format!(
                             "endpoints.{name}: 'page_url' is required when 'via: browser_payload' is set"
                         )));
                         None
@@ -878,14 +880,14 @@ fn validate_endpoint(
                 let script_name = match &body.script {
                     Some(s) if !s.is_empty() => {
                         if !browser_scripts.contains_key(s.as_str()) {
-                            errors.push(CliError::Other(format!(
+                            errors.push(YamlError::Validation(format!(
                                 "endpoints.{name}: script '{s}' is not declared in browser_scripts"
                             )));
                         }
                         Some(s.clone())
                     }
                     _ => {
-                        errors.push(CliError::Other(format!(
+                        errors.push(YamlError::Validation(format!(
                             "endpoints.{name}: 'script' is required when 'via: browser_payload' is set"
                         )));
                         None
@@ -913,7 +915,7 @@ fn validate_endpoint(
                 r.clone()
             }
             None => {
-                errors.push(CliError::Other(format!(
+                errors.push(YamlError::Validation(format!(
                     "endpoints.{name}: 'route' is required"
                 )));
                 String::new()
@@ -952,7 +954,7 @@ fn validate_endpoint(
         if let FilterMappingEntry::SortPair { key_template, .. } = entry
             && !key_template.contains("{}")
         {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "endpoints.{name}.filter_mapping.{key}: sort_pair key_template must contain '{{}}'"
             )));
         }
@@ -997,7 +999,7 @@ fn validate_endpoint(
 
         let source = if let Some(arg_name) = extract_fn_arg_literal(dsl) {
             if !fn_args.contains(&arg_name.as_str()) {
-                errors.push(CliError::Other(format!(
+                errors.push(YamlError::Validation(format!(
                     "endpoints.{name}.fields.{field_name}: '${arg_name}$' is not available \
                      (available args: {})",
                     fn_args.join(", ")
@@ -1024,7 +1026,7 @@ fn validate_endpoint(
 
     for req in required_fields {
         if !present_fields.contains(*req) {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "endpoints.{name}: required field '{req}' is missing"
             )));
         }
@@ -1135,7 +1137,7 @@ fn validate_endpoint(
 fn compile_on_failure(
     on_failure: Option<&OnFailure>,
     path: &str,
-) -> Result<OnFailurePolicy, Vec<CliError>> {
+) -> Result<OnFailurePolicy, Vec<YamlError>> {
     match on_failure {
         None | Some(OnFailure::Fail) => Ok(OnFailurePolicy::Fail),
         Some(OnFailure::Skip) => Ok(OnFailurePolicy::Skip),
@@ -1146,11 +1148,11 @@ fn compile_on_failure(
     }
 }
 
-fn validate_then_step(step: &ThenStep, path: &str) -> Result<ValidatedThenStep, Vec<CliError>> {
+fn validate_then_step(step: &ThenStep, path: &str) -> Result<ValidatedThenStep, Vec<YamlError>> {
     let mut errors = Vec::new();
 
     if step.merge_as.is_empty() {
-        errors.push(CliError::Other(format!(
+        errors.push(YamlError::Validation(format!(
             "{path}: 'merge_as' must not be empty"
         )));
     }
@@ -1186,16 +1188,16 @@ fn validate_then_step(step: &ThenStep, path: &str) -> Result<ValidatedThenStep, 
 fn validate_for_each_step(
     step: &ForEachStep,
     path: &str,
-) -> Result<ValidatedForEachStep, Vec<CliError>> {
+) -> Result<ValidatedForEachStep, Vec<YamlError>> {
     let mut errors = Vec::new();
 
     if step.merge_as.is_empty() {
-        errors.push(CliError::Other(format!(
+        errors.push(YamlError::Validation(format!(
             "{path}: 'merge_as' must not be empty"
         )));
     }
     if step.concurrency == 0 || step.concurrency > 5 {
-        errors.push(CliError::Other(format!(
+        errors.push(YamlError::Validation(format!(
             "{path}: 'concurrency' must be between 1 and 5 (got {})",
             step.concurrency
         )));
@@ -1271,31 +1273,24 @@ fn normalize_multiline_chain(dsl: &str) -> String {
     result
 }
 
-fn parse_dsl(dsl: &str, field_path: &str) -> Result<Expr, Vec<CliError>> {
+fn parse_dsl(dsl: &str, field_path: &str) -> Result<Expr, Vec<YamlError>> {
     let normalized = normalize_multiline_chain(dsl.trim_end());
     let result = dsl_parser().parse(normalized.as_str());
 
     if result.has_errors() {
-        let errs: Vec<_> = result.errors().cloned().collect();
-        report_errors(field_path, &normalized, errs);
-        return Err(vec![CliError::Other(format!(
+        return Err(vec![YamlError::Validation(format!(
             "DSL parse failed in {field_path}"
         ))]);
     }
 
-    let parse_ast = result
-        .into_result()
-        .map_err(|_| vec![CliError::Other(format!("DSL parse failed in {field_path}"))])?;
+    let parse_ast = result.into_result().map_err(|_| {
+        vec![YamlError::Validation(format!(
+            "DSL parse failed in {field_path}"
+        ))]
+    })?;
 
-    let expr: Result<Expr, Vec<CliError>> = parse_ast.try_into();
-
-    expr.inspect_err(|errs| {
-        for e in errs {
-            if let CliError::DslConversion { message, span } = e {
-                report_custom_error(field_path, &normalized, message, span.clone());
-            }
-        }
-    })
+    let expr: Result<Expr, Vec<YamlError>> = parse_ast.try_into();
+    expr
 }
 
 /// Detects `"$varname$"` — a DSL string literal wrapping a dollar-fenced identifier.
@@ -1346,7 +1341,7 @@ fn validate_route_vars(
     endpoint: &str,
     fn_args: &[&str],
     id_encoding: Option<&IdEncodingBlock>,
-) -> Vec<CliError> {
+) -> Vec<YamlError> {
     extract_dollar_vars(route)
         .into_iter()
         .filter_map(|v| validate_dollar_var(&v, endpoint, "route", fn_args, id_encoding))
@@ -1358,7 +1353,7 @@ fn build_query_entries(
     endpoint: &str,
     fn_args: &[&str],
     id_encoding: Option<&IdEncodingBlock>,
-) -> Result<Vec<QueryEntry>, Vec<CliError>> {
+) -> Result<Vec<QueryEntry>, Vec<YamlError>> {
     let mut entries = Vec::new();
     let mut errors = Vec::new();
 
@@ -1389,16 +1384,18 @@ fn build_query_entries(
     }
 }
 
-fn validate_browser_scripts(scripts: &std::collections::BTreeMap<String, String>) -> Vec<CliError> {
+fn validate_browser_scripts(
+    scripts: &std::collections::BTreeMap<String, String>,
+) -> Vec<YamlError> {
     let mut errors = Vec::new();
     for (name, src) in scripts {
         if name.is_empty() {
-            errors.push(CliError::Other(
+            errors.push(YamlError::Validation(
                 "browser_scripts: script name must not be empty".to_string(),
             ));
         }
         if src.is_empty() {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "browser_scripts.{name}: script source must not be empty"
             )));
         } else if !src.contains("passPayload") {
@@ -1410,34 +1407,34 @@ fn validate_browser_scripts(scripts: &std::collections::BTreeMap<String, String>
     errors
 }
 
-fn validate_pure_scripts(scripts: &std::collections::BTreeMap<String, String>) -> Vec<CliError> {
+fn validate_pure_scripts(scripts: &std::collections::BTreeMap<String, String>) -> Vec<YamlError> {
     let mut errors = Vec::new();
     let engine = make_validation_sandbox();
     for (name, src) in scripts {
         if name.is_empty() {
-            errors.push(CliError::Other(
+            errors.push(YamlError::Validation(
                 "scripts.pure: function name must not be empty".to_string(),
             ));
         }
         if src.is_empty() {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "scripts.pure.{name}: script source must not be empty"
             )));
         } else if let Err(e) = engine.compile(src) {
-            errors.push(CliError::Other(format!("scripts.pure.{name}: {e}")));
+            errors.push(YamlError::Validation(format!("scripts.pure.{name}: {e}")));
         }
     }
     errors
 }
 
-fn validate_hook_body(context: &str, src: &str, engine: &rhai::Engine) -> Vec<CliError> {
+fn validate_hook_body(context: &str, src: &str, engine: &rhai::Engine) -> Vec<YamlError> {
     let mut errors = Vec::new();
     if src.is_empty() {
-        errors.push(CliError::Other(format!(
+        errors.push(YamlError::Validation(format!(
             "{context}: hook body must not be empty"
         )));
     } else if let Err(e) = engine.compile(src) {
-        errors.push(CliError::Other(format!("{context}: {e}")));
+        errors.push(YamlError::Validation(format!("{context}: {e}")));
     }
     errors
 }
@@ -1458,7 +1455,7 @@ fn is_valid_on_status_key(key: &str) -> bool {
     false
 }
 
-fn validate_hook_scripts(ext: &super::schema::YamlExtension) -> Vec<CliError> {
+fn validate_hook_scripts(ext: &super::schema::YamlExtension) -> Vec<YamlError> {
     let engine = make_validation_sandbox();
     let mut errors = Vec::new();
 
@@ -1467,7 +1464,7 @@ fn validate_hook_scripts(ext: &super::schema::YamlExtension) -> Vec<CliError> {
     }
     for (pattern, body) in &ext.on_status {
         if !is_valid_on_status_key(pattern) {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "on_status key `{pattern}` is not valid — use a 3-digit status code (e.g. `401`), a wildcard pattern (e.g. `4xx`), or `default`"
             )));
         }
@@ -1488,7 +1485,7 @@ fn validate_hook_scripts(ext: &super::schema::YamlExtension) -> Vec<CliError> {
         }
         for (pattern, body) in &ep_body.on_status {
             if !is_valid_on_status_key(pattern) {
-                errors.push(CliError::Other(format!(
+                errors.push(YamlError::Validation(format!(
                     "endpoints.{ep_name}.on_status key `{pattern}` is not valid — use a 3-digit status code, a wildcard pattern (e.g. `4xx`), or `default`"
                 )));
             }
@@ -1560,11 +1557,11 @@ pub fn make_validation_sandbox() -> rhai::Engine {
     engine
 }
 
-pub fn validate_factory(block: &super::schema::FactoryBlock) -> Vec<CliError> {
+pub fn validate_factory(block: &super::schema::FactoryBlock) -> Vec<YamlError> {
     let mut errors = Vec::new();
 
     if block.sources.is_empty() {
-        errors.push(CliError::Other(
+        errors.push(YamlError::Validation(
             "factory.sources must not be empty".to_string(),
         ));
         return errors;
@@ -1573,23 +1570,23 @@ pub fn validate_factory(block: &super::schema::FactoryBlock) -> Vec<CliError> {
     let mut seen_ids = std::collections::HashSet::new();
     for source in &block.sources {
         if source.id.is_empty() {
-            errors.push(CliError::Other(
+            errors.push(YamlError::Validation(
                 "factory.sources: source id must not be empty".to_string(),
             ));
         } else if !seen_ids.insert(source.id.as_str()) {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "factory.sources: duplicate source id '{}'",
                 source.id
             )));
         }
         if source.base_url.is_empty() {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "factory.sources.{}: base_url must not be empty",
                 source.id
             )));
         }
         if source.name.is_empty() {
-            errors.push(CliError::Other(format!(
+            errors.push(YamlError::Validation(format!(
                 "factory.sources.{}: name must not be empty",
                 source.id
             )));

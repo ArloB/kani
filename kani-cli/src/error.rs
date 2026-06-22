@@ -19,6 +19,17 @@ pub enum CliError {
     Other(String),
 }
 
+impl From<kani_yaml::YamlError> for CliError {
+    fn from(e: kani_yaml::YamlError) -> Self {
+        match e {
+            kani_yaml::YamlError::DslConversion { message, span } => {
+                Self::DslConversion { message, span }
+            }
+            kani_yaml::YamlError::Validation(msg) => Self::Other(msg),
+        }
+    }
+}
+
 use ariadne::{Color, Label, Report, ReportKind, Source};
 
 pub fn report_errors(filename: &str, source: &str, errors: Vec<chumsky::error::Rich<char>>) {

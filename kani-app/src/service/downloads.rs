@@ -276,19 +276,16 @@ impl AppService {
         {
             mock
         } else {
-            let sources = self.sources.read().await;
-            sources.get(&record.source_id).cloned().ok_or_else(|| {
+            self.sources.get_backend(record.source_id).ok_or_else(|| {
                 ServiceError::NotFound(format!("Source {} not found", record.source_id))
             })?
         };
 
         #[cfg(not(any(test, feature = "test-util")))]
-        let source_manager: Arc<dyn kani_core::downloader::PageListFetcher> = {
-            let sources = self.sources.read().await;
-            sources.get(&record.source_id).cloned().ok_or_else(|| {
+        let source_manager: Arc<dyn kani_core::downloader::PageListFetcher> =
+            self.sources.get_backend(record.source_id).ok_or_else(|| {
                 ServiceError::NotFound(format!("Source {} not found", record.source_id))
-            })?
-        };
+            })?;
 
         let library_path = self.settings.read().await.library_path.clone();
         let name = chapter_name(record.volume, record.chapter_number, record.name.clone());

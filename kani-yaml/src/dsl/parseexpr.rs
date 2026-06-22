@@ -1,4 +1,4 @@
-use crate::error::CliError;
+use crate::error::YamlError;
 use chumsky::prelude::SimpleSpan;
 use kani_shared::ast::{Expr, Op, PadAlign};
 
@@ -54,7 +54,7 @@ pub enum ParseExpr {
     Index,
 }
 
-fn collect_results(items: Vec<ParseExpr>) -> Result<Vec<Expr>, Vec<CliError>> {
+fn collect_results(items: Vec<ParseExpr>) -> Result<Vec<Expr>, Vec<YamlError>> {
     let mut exprs = Vec::with_capacity(items.len());
     let mut errors = Vec::new();
     for item in items {
@@ -71,7 +71,7 @@ fn collect_results(items: Vec<ParseExpr>) -> Result<Vec<Expr>, Vec<CliError>> {
 }
 
 impl TryFrom<ParseExpr> for Expr {
-    type Error = Vec<CliError>;
+    type Error = Vec<YamlError>;
 
     fn try_from(value: ParseExpr) -> Result<Self, Self::Error> {
         macro_rules! accumulate {
@@ -154,7 +154,7 @@ impl TryFrom<ParseExpr> for Expr {
                 collect_results(args).map(|a| Expr::Format { template, args: a })
             }
 
-            ParseExpr::MapLiteral(_) => Err(vec![CliError::DslConversion {
+            ParseExpr::MapLiteral(_) => Err(vec![YamlError::DslConversion {
                 message: "Map literals '{...}' can only be used inside .lookup()".to_string(),
                 span: 0..0,
             }]),
@@ -385,11 +385,11 @@ impl TryFrom<ParseExpr> for Expr {
                             ParseExpr::Literal(a),
                         ],
                     ) => {
-                        let align_res: Result<PadAlign, CliError> = match a.as_str() {
+                        let align_res: Result<PadAlign, YamlError> = match a.as_str() {
                             "left" => Ok(PadAlign::Left),
                             "right" => Ok(PadAlign::Right),
                             "center" => Ok(PadAlign::Center),
-                            _ => Err(CliError::DslConversion {
+                            _ => Err(YamlError::DslConversion {
                                 message: format!(
                                     "format_padded align must be \"left\", \"right\", or \"center\", got {:?}",
                                     a
@@ -398,9 +398,9 @@ impl TryFrom<ParseExpr> for Expr {
                             }),
                         };
                         let mut fc = f.chars();
-                        let fill_res: Result<char, CliError> = match (fc.next(), fc.next()) {
+                        let fill_res: Result<char, YamlError> = match (fc.next(), fc.next()) {
                             (Some(c), None) => Ok(c),
-                            _ => Err(CliError::DslConversion {
+                            _ => Err(YamlError::DslConversion {
                                 message: "format_padded fill must be exactly one character"
                                     .to_string(),
                                 span: span.into_range(),
@@ -431,7 +431,7 @@ impl TryFrom<ParseExpr> for Expr {
 
                     _ => {
                         let mut errs = target_res.err().unwrap_or_default();
-                        errs.push(CliError::DslConversion {
+                        errs.push(YamlError::DslConversion {
                             message: format!("Unknown method '{}' or invalid arguments", name),
                             span: span.into_range(),
                         });
@@ -452,11 +452,11 @@ impl TryFrom<ParseExpr> for Expr {
 /// literal outside `.lookup()`). All other variants delegate to the inner
 /// `TryFrom<ParseExpr>` implementation which uses embedded spans where available.
 impl TryFrom<SpannedParseExpr> for Expr {
-    type Error = Vec<CliError>;
+    type Error = Vec<YamlError>;
 
     fn try_from(SpannedParseExpr(value, span): SpannedParseExpr) -> Result<Self, Self::Error> {
         match value {
-            ParseExpr::MapLiteral(_) => Err(vec![CliError::DslConversion {
+            ParseExpr::MapLiteral(_) => Err(vec![YamlError::DslConversion {
                 message: "Map literals '{...}' can only be used inside .lookup()".to_string(),
                 span: span.into_range(),
             }]),

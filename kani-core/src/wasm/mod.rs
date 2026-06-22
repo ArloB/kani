@@ -105,7 +105,7 @@ pub struct HostState {
     pub html_docs: HashMap<i32, StoredNode>,
     pub html_lists: HashMap<i32, Vec<StoredNode>>,
     pub json_docs: HashMap<i32, serde_json::Value>,
-    pub selector_cache: std::cell::RefCell<HashMap<String, scraper::Selector>>,
+    pub selector_cache: std::sync::Mutex<HashMap<String, std::sync::Arc<scraper::Selector>>>,
     pub last_error: Option<i32>,
     pub preferences: std::collections::HashMap<String, String>,
     pub call_started_at: std::time::Instant,
@@ -124,6 +124,8 @@ pub struct HostState {
     /// `None` when the source has no hooks defined.
     pub hook_registry: Option<std::sync::Arc<crate::scripting::HookRegistry>>,
     pub max_hook_requests: u32,
+    /// Per-eval resource budget (iterations, depth). Reset at the start of each blueprint eval.
+    pub eval_budget: std::sync::Arc<crate::evaluator::shared::EvalBudget>,
 }
 
 impl StoredNode {
@@ -188,7 +190,7 @@ impl HostState {
             html_docs: HashMap::new(),
             html_lists: HashMap::new(),
             json_docs: HashMap::new(),
-            selector_cache: std::cell::RefCell::new(HashMap::new()),
+            selector_cache: std::sync::Mutex::new(HashMap::new()),
             last_error: None,
             preferences: HashMap::new(),
             call_started_at: std::time::Instant::now(),
@@ -200,6 +202,7 @@ impl HostState {
             pure_fn_registry: None,
             hook_registry: None,
             max_hook_requests: 3,
+            eval_budget: std::sync::Arc::new(crate::evaluator::shared::EvalBudget::new()),
         })
     }
 
@@ -271,13 +274,16 @@ impl HostState {
     /// Returns a reference to the compiled selector, parsing and caching it on
     /// the first call for a given `selector` string.
     pub fn get_or_parse_selector(&mut self, selector: &str) -> Result<&scraper::Selector> {
-        let cache = self.selector_cache.get_mut();
+        let cache = self
+            .selector_cache
+            .get_mut()
+            .map_err(|_| crate::error::Error::Internal("selector cache lock poisoned".into()))?;
         if !cache.contains_key(selector) {
             let parsed = scraper::Selector::parse(selector)
                 .map_err(|e| crate::error::Error::Internal(format!("Invalid selector: {:?}", e)))?;
-            cache.insert(selector.to_string(), parsed);
+            cache.insert(selector.to_string(), std::sync::Arc::new(parsed));
         }
-        Ok(cache.get(selector).unwrap())
+        Ok(&**cache.get(selector).expect("selector was just inserted"))
     }
 }
 

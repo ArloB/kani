@@ -12,19 +12,12 @@ impl AppService {
         manga_id: &str,
         force: bool,
     ) -> Result<MangaId> {
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&source_id)
-                .cloned()
-                .ok_or_else(|| ServiceError::NotFound(format!("Source {source_id} not found")))?
-        };
+        let backend = self
+            .sources
+            .get_backend(source_id)
+            .ok_or_else(|| ServiceError::NotFound(format!("Source {source_id} not found")))?;
 
-        let result = source_manager
-            .lease_instance()
-            .await?
-            .get_manga_details(manga_id)
-            .await?;
+        let result = backend.get_manga_details(manga_id).await?;
 
         let manga = convert_to_shared_manga_info(result);
 
@@ -437,21 +430,17 @@ impl AppService {
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Manga {manga_row_id} not found")))?;
 
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources.get(&ids.source_id).cloned().ok_or_else(|| {
-                ServiceError::NotFound(format!("Source {} not found", ids.source_id))
-            })?
-        };
+        let backend = self
+            .sources
+            .get_backend(ids.source_id)
+            .ok_or_else(|| ServiceError::NotFound(format!("Source {} not found", ids.source_id)))?;
 
         let mut tx = self.db.begin().await?;
         let mut new_chapter_ids = Vec::new();
         let mut page = 1;
 
         loop {
-            let res = source_manager
-                .lease_instance()
-                .await?
+            let res = backend
                 .get_chapter_list(&ids.source_manga_id, page, None, None)
                 .await?;
             let json = serde_json::to_string(&res)
@@ -634,18 +623,11 @@ impl AppService {
         manga_row_id: MangaId,
         page: i32,
     ) -> Result<bool> {
-        let source_manager = {
-            let sources = self.sources.read().await;
-            sources
-                .get(&source_id)
-                .cloned()
-                .ok_or_else(|| ServiceError::NotFound(format!("Source {} not found", source_id)))?
-        };
-        let res = source_manager
-            .lease_instance()
-            .await?
-            .get_chapter_list(manga_id, page, None, None)
-            .await?;
+        let backend = self
+            .sources
+            .get_backend(source_id)
+            .ok_or_else(|| ServiceError::NotFound(format!("Source {} not found", source_id)))?;
+        let res = backend.get_chapter_list(manga_id, page, None, None).await?;
         let json = serde_json::to_string(&res)
             .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))?;
         let chapter_list: wit_types::ChapterList = serde_json::from_str(&json)

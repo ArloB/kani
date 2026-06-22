@@ -2022,3 +2022,88 @@ cache::delete("auth_token")?;
 ### 4.5 TTL and Pruning
 
 Expired entries are not returned by `cache::get` and are pruned by a background job running every 10 minutes (`spawn_cache_prune`). There is no guarantee of exact expiry timing — entries may persist slightly past their TTL until the next prune cycle, but will never be returned to callers after expiry.
+
+## 5. Runtime Backends
+
+A source is loaded by one of two interchangeable backends, abstracted behind `SourceBackend` (`kani-app/src/source/mod.rs`) and held in the `SourceRegistry` (`DashMap<i64, Arc<ArcSwap<SourceBackend>>>`). Both expose the same async dispatch surface; callers never branch on the backend kind.
+
+| Backend | Artifact | Toolchain | Execution |
+|---------|----------|-----------|-----------|
+| `Wasm`  | `<name>.wasm` | `wasm32-unknown-unknown` → `wasm-opt` → component | leased WASM instance over the WIT boundary |
+| `Yaml`  | `<name>.yaml` | none (parsed at load) | host-native blueprint evaluation, no WIT call |
+
+### 5.1 Interpreted YAML backend
+
+A `.yaml` extension is parsed and validated by `kani-yaml::parse_and_validate` into a `ValidatedExtension` (DSL strings already compiled to `Expr` trees) and wrapped in a `YamlSource`. Each dispatch method resolves the relevant endpoint, builds a `Blueprint`, constructs a `HostState`, and calls the same `extract_html`/`extract_json` evaluators the WASM path uses — there is no WIT/FFI hop. Preferences are injected as `$pref:key`; `browser_payload` endpoints first run the V8 subprocess.
+
+### 5.2 Evaluator resource limits
+
+The evaluator (`kani-core/src/evaluator/shared.rs`) enforces host-side caps (not author-overridable): `MAX_EVAL_ITERATIONS` (100 000), `MAX_EVAL_DEPTH` (50), `MAX_LIST_SIZE` (10 000), `MAX_STRING_LENGTH` (1 000 000). Exceeding a cap aborts evaluation with a limit error.
+
+### 5.3 Selection and supersession
+
+Sources live in a single directory (`wasm_storage_path`). When both `<name>.yaml` and `<name>.wasm` exist for one source, **YAML wins**; the WASM file is retained for rollback and the choice is logged. Load failures (validation, missing capabilities, `min_kani_version`, `schema_version`) leave the row `enabled = 0` with the reason stored in `sources.load_error`.
+
+### 5.4 Hot-swap
+
+`SourceRegistry::hot_swap` installs a new backend atomically via `ArcSwap`. For WASM it first drains in-flight leases (30 s default) before swapping the `InstancePre`; new leases during draining return a "source updating" error. YAML swaps are immediate (no leases).
+
+## 6. Signed Distribution
+
+Extensions are distributed from git-hosted **repositories** described by a signed `index.json`. Integrity and provenance are enforced with Ed25519 signatures + SHA-256 digests; third-party repositories use Trust-On-First-Use (TOFU) key pinning.
+
+### 6.1 Repository index (`index.json`)
+
+```jsonc
+{
+  "name": "Example Repo",
+  "maintainer_key": "<base64 Ed25519 public key>",   // signs index.json
+  "extensions": [
+    {
+      "id": "example",
+      "name": "Example",
+      "version": "1.2.0",
+      "format": "yaml",            // or "wasm"
+      "sha256": "<hex>",           // of the artifact bytes
+      "signature": "<base64>",     // author Ed25519 signature over the artifact
+      "author_key": "<base64>",    // author public key
+      "min_kani_version": "0.1.0", // optional
+      "url": "extensions/example/1.2.0/extension.yaml",
+      "description": "…",          // optional
+      "language": "en",            // optional
+      "nsfw": false                // optional
+    }
+  ]
+}
+```
+
+`index.json` is accompanied by `index.json.sig` (the maintainer signature over the index bytes).
+
+### 6.2 Trust model
+
+- **TOFU.** Adding an unpinned repo returns HTTP `428` with the maintainer key fingerprint (`SHA256:…`). The operator verifies the fingerprint out-of-band and re-submits with `confirm_fingerprint` (or the `X-Confirm-Key-Fingerprint` header); the server pins the key only if the confirmed fingerprint matches the freshly-fetched key.
+- **Key change after trust** returns HTTP `409` (`REPO_KEY_CHANGED`); re-trust requires an explicit re-add.
+- **Blocked repos** (admin-managed `blocked_repos`, merged with a compile-time list) return HTTP `403`.
+
+### 6.3 Install pipeline
+
+`install_or_update_from_repo` (serialized per extension id by an install lock): locate the manifest entry → check `min_kani_version` → download the artifact through the SSRF-protected client with size caps (`MAX_INDEX_BYTES` 1 MiB, `MAX_ARTIFACT_BYTES` 10 MiB) → verify `sha256` → verify the author Ed25519 signature → **only then** write the file (`save_yaml`/`save_wasm`, both path-traversal guarded) → upsert the `sources` row (`name` is UNIQUE) → `registry.insert` (new) or `registry.hot_swap` (update). A verification failure writes no file and makes no DB change. Repo add/trust/install/update/remove and block/unblock are audit-logged.
+
+### 6.4 SSE events
+
+`SourceInstalled`, `RepoRefreshed`, `UpdateAvailable` (emitted by `refresh_repo` when a repo version exceeds the installed version, by semver compare), and `SourceUpdating` (emitted at the start of an update) are broadcast for live frontend indicators.
+
+### 6.5 Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `KANI_OFFICIAL_REPO_URL` | empty (bootstrap disabled) | Official repo `index.json` URL, pinned on first run |
+| `KANI_OFFICIAL_REPO_KEY` | baked-in `OFFICIAL_REPO_KEY` | Base64 Ed25519 maintainer key for the official repo |
+| `KANI_SOURCE_INSTALL_ALLOWED` | `true` | When `false`/`0`, install, repo, update, and the legacy unsigned upload/fetch routes return `403` |
+
+### 6.6 Author tooling (`kani-cli`)
+
+- `kani-cli keygen` — generate an author keypair (`author.pub` / passphrase-encrypted `author.key`).
+- `kani-cli publish` — validate, hash, sign an extension and upsert its `index.json` entry.
+- `kani-cli repo init|add|list|verify` — manage a local repo; `verify` recomputes hashes + checks signatures (non-zero exit on failure, for CI).
+- `kani-cli new <name>` scaffolds a YAML extension; `--rust` scaffolds a Rust/WASM crate instead.

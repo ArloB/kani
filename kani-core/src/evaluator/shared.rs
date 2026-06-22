@@ -5,7 +5,70 @@ use kani_shared::ast::{Expr, Op, PadAlign};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+
+pub const MAX_EVAL_ITERATIONS: u32 = 100_000;
+pub const MAX_EVAL_DEPTH: u32 = 50;
+pub const MAX_LIST_SIZE: usize = 10_000;
+pub const MAX_STRING_LENGTH: usize = 1_000_000;
+
+#[derive(Debug)]
+pub struct EvalBudget {
+    pub steps_remaining: AtomicU32,
+    pub depth_current: AtomicU32,
+}
+
+impl EvalBudget {
+    pub fn new() -> Self {
+        Self {
+            steps_remaining: AtomicU32::new(MAX_EVAL_ITERATIONS),
+            depth_current: AtomicU32::new(0),
+        }
+    }
+
+    pub fn reset(&self) {
+        self.steps_remaining
+            .store(MAX_EVAL_ITERATIONS, Ordering::Relaxed);
+        self.depth_current.store(0, Ordering::Relaxed);
+    }
+
+    pub fn charge_step(&self) -> Result<(), String> {
+        let prev = self
+            .steps_remaining
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                if n > 0 { Some(n - 1) } else { None }
+            });
+        if prev.is_err() {
+            Err(format!("limit:max_iterations:{MAX_EVAL_ITERATIONS}"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn enter_depth(self: &Arc<Self>) -> Result<DepthGuard, String> {
+        let d = self.depth_current.fetch_add(1, Ordering::Relaxed);
+        if d >= MAX_EVAL_DEPTH {
+            self.depth_current.fetch_sub(1, Ordering::Relaxed);
+            Err(format!("limit:max_depth:{MAX_EVAL_DEPTH}"))
+        } else {
+            Ok(DepthGuard {
+                budget: Arc::clone(self),
+            })
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DepthGuard {
+    budget: Arc<EvalBudget>,
+}
+
+impl Drop for DepthGuard {
+    fn drop(&mut self) {
+        self.budget.depth_current.fetch_sub(1, Ordering::Relaxed);
+    }
+}
 
 #[derive(Clone)]
 pub enum Value {
@@ -145,7 +208,7 @@ pub async fn eval_common_expr<'a, F>(
     registry: Option<&'a crate::scripting::PureFunctionRegistry>,
 ) -> Option<Result<Value, String>>
 where
-    F: Fn(&'a Expr, Env) -> Pin<Box<dyn Future<Output = Result<Value, String>> + 'a>>,
+    F: Fn(&'a Expr, Env) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>,
 {
     match expr {
         Expr::Literal(s) => Some(Ok(Value::Str(s.clone()))),
@@ -193,11 +256,14 @@ where
 
         Expr::Split { target, delimiter } => Some(recurse(target, env).await.and_then(|v| {
             v.map_str("split", |s| {
-                Ok(Value::List(
-                    s.split(delimiter.as_str())
-                        .map(|p| Value::Str(p.to_owned()))
-                        .collect(),
-                ))
+                let parts: Vec<_> = s
+                    .split(delimiter.as_str())
+                    .map(|p| Value::Str(p.to_owned()))
+                    .collect();
+                if parts.len() > MAX_LIST_SIZE {
+                    return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                }
+                Ok(Value::List(parts))
             })
         })),
 
@@ -234,9 +300,13 @@ where
                 let p = recurse(prefix, env).await?;
                 match (s, p) {
                     (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
-                    (s, p) => Ok(Value::Str(
-                        p.into_str("prepend")? + s.into_str("prepend")?.as_str(),
-                    )),
+                    (s, p) => {
+                        let result = p.into_str("prepend")? + s.into_str("prepend")?.as_str();
+                        if result.len() > MAX_STRING_LENGTH {
+                            return Err(format!("limit:max_string_length:{MAX_STRING_LENGTH}"));
+                        }
+                        Ok(Value::Str(result))
+                    }
                 }
             })
             .await,
@@ -248,9 +318,13 @@ where
                 let x = recurse(suffix, env).await?;
                 match (s, x) {
                     (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
-                    (s, x) => Ok(Value::Str(
-                        s.into_str("append")? + x.into_str("append")?.as_str(),
-                    )),
+                    (s, x) => {
+                        let result = s.into_str("append")? + x.into_str("append")?.as_str();
+                        if result.len() > MAX_STRING_LENGTH {
+                            return Err(format!("limit:max_string_length:{MAX_STRING_LENGTH}"));
+                        }
+                        Ok(Value::Str(result))
+                    }
                 }
             })
             .await,
@@ -395,6 +469,9 @@ where
                             .await
                             .and_then(|v| v.into_str("concat"))?,
                     );
+                    if s.len() > MAX_STRING_LENGTH {
+                        return Err(format!("limit:max_string_length:{MAX_STRING_LENGTH}"));
+                    }
                 }
                 Ok(Value::Str(s))
             })
@@ -417,6 +494,9 @@ where
                 let items = recurse(target, env.clone())
                     .await
                     .and_then(|v| v.into_list("map"))?;
+                if items.len() > MAX_LIST_SIZE {
+                    return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                }
                 let mut results = Vec::with_capacity(items.len());
                 for (i, item) in items.into_iter().enumerate() {
                     let mut inner = env.clone();
@@ -437,6 +517,9 @@ where
                 let items = recurse(target, env.clone())
                     .await
                     .and_then(|v| v.into_list("flat_map"))?;
+                if items.len() > MAX_LIST_SIZE {
+                    return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                }
                 let mut results = Vec::new();
                 for (i, item) in items.into_iter().enumerate() {
                     let mut inner = env.clone();
@@ -457,6 +540,9 @@ where
                 let items = recurse(target, env.clone())
                     .await
                     .and_then(|v| v.into_list("filter"))?;
+                if items.len() > MAX_LIST_SIZE {
+                    return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                }
                 let mut results = Vec::new();
                 for (i, item) in items.into_iter().enumerate() {
                     let mut inner = env.clone();
@@ -482,6 +568,9 @@ where
                 let items = recurse(target, env.clone())
                     .await
                     .and_then(|v| v.into_list("fold"))?;
+                if items.len() > MAX_LIST_SIZE {
+                    return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                }
                 let mut acc = recurse(base, env.clone()).await?;
                 for (i, item) in items.into_iter().enumerate() {
                     let mut inner = env.clone();
@@ -543,12 +632,22 @@ where
                 .await
                 .and_then(|v| v.into_list("join"))
                 .and_then(|items| {
+                    if items.len() > MAX_LIST_SIZE {
+                        return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                    }
                     items
                         .into_iter()
                         .filter(|v| !matches!(v, Value::Null))
                         .map(|v| v.into_str("join"))
                         .collect::<Result<Vec<_>, _>>()
-                        .map(|parts| Value::Str(parts.join(delimiter)))
+                        .and_then(|parts| {
+                            let result = parts.join(delimiter);
+                            if result.len() > MAX_STRING_LENGTH {
+                                Err(format!("limit:max_string_length:{MAX_STRING_LENGTH}"))
+                            } else {
+                                Ok(Value::Str(result))
+                            }
+                        })
                 }),
         ),
 
@@ -901,6 +1000,9 @@ pub async fn fetch_body(
                 HookActionKind::Fail { kind, reason } => {
                     return Err(format!("hook: {kind}: {reason}"));
                 }
+                HookActionKind::RefreshAuth { endpoint_id } => {
+                    return Err(format!("__refresh_auth__:{endpoint_id}"));
+                }
                 _ => {}
             }
         }
@@ -1171,6 +1273,77 @@ mod tests {
             received.len(),
             3,
             "should make initial + 2 retries = 3 total requests"
+        );
+    }
+
+    #[test]
+    fn eval_budget_iteration_cap() {
+        use super::{EvalBudget, MAX_EVAL_ITERATIONS};
+        use std::sync::Arc;
+        let budget = Arc::new(EvalBudget::new());
+        for _ in 0..MAX_EVAL_ITERATIONS {
+            budget.charge_step().unwrap();
+        }
+        let err = budget.charge_step().unwrap_err();
+        assert!(
+            err.starts_with("limit:max_iterations:"),
+            "expected limit sentinel, got: {err}"
+        );
+    }
+
+    #[test]
+    fn eval_budget_depth_cap() {
+        use super::{EvalBudget, MAX_EVAL_DEPTH};
+        use std::sync::Arc;
+        let budget = Arc::new(EvalBudget::new());
+        let mut guards = Vec::new();
+        for _ in 0..MAX_EVAL_DEPTH {
+            guards.push(budget.enter_depth().unwrap());
+        }
+        let err = budget.enter_depth().unwrap_err();
+        assert!(
+            err.starts_with("limit:max_depth:"),
+            "expected depth sentinel, got: {err}"
+        );
+        drop(guards);
+        budget.enter_depth().unwrap();
+    }
+
+    #[test]
+    fn eval_budget_reset_restores_budget() {
+        use super::{EvalBudget, MAX_EVAL_ITERATIONS};
+        use std::sync::Arc;
+        let budget = Arc::new(EvalBudget::new());
+        for _ in 0..MAX_EVAL_ITERATIONS {
+            budget.charge_step().unwrap();
+        }
+        budget.reset();
+        budget.charge_step().unwrap();
+    }
+
+    #[tokio::test]
+    async fn json_eval_depth_limit() {
+        use super::MAX_EVAL_DEPTH;
+        use crate::evaluator::json_eval;
+        use crate::wasm::HostState;
+        use kani_shared::ast::{BlueprintBuilder, Expr};
+
+        let mut e = Expr::Json("/x".to_string());
+        for _ in 0..=(MAX_EVAL_DEPTH as usize + 10) {
+            e = Expr::JsonStr {
+                target: Box::new(e),
+            };
+        }
+        let bp = BlueprintBuilder::new("/items").field("val", e).build();
+        let doc = serde_json::json!({ "items": [{"x": "hi"}] });
+        let mut state = HostState::default();
+
+        let result = json_eval::extract_json_str(&mut state, &doc.to_string(), &bp).await;
+        assert!(result.is_err(), "deeply nested expr should hit depth limit");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("limit:max_depth"),
+            "expected depth-limit sentinel, got: {err}"
         );
     }
 }

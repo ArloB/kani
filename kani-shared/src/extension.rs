@@ -19,6 +19,7 @@ pub enum ExtensionErrorKind {
     InvalidInput,
     Internal,
     Unknown,
+    Updating,
 }
 
 impl std::fmt::Display for ExtensionErrorKind {
@@ -34,6 +35,7 @@ impl std::fmt::Display for ExtensionErrorKind {
             Self::InvalidInput => write!(f, "invalid-input"),
             Self::Internal => write!(f, "internal"),
             Self::Unknown => write!(f, "unknown"),
+            Self::Updating => write!(f, "source-updating"),
         }
     }
 }
@@ -146,6 +148,15 @@ impl ExtensionError {
         }
     }
 
+    pub fn source_updating() -> Self {
+        Self {
+            kind: ExtensionErrorKind::Updating,
+            message: "Source is being updated".to_string(),
+            source_url: None,
+            retry_after_secs: Some(2),
+        }
+    }
+
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.source_url = Some(url.into());
         self
@@ -166,6 +177,7 @@ impl ExtensionError {
             ExtensionErrorKind::InvalidInput => WitKind::InvalidInput,
             ExtensionErrorKind::Internal => WitKind::Internal,
             ExtensionErrorKind::Unknown => WitKind::Unknown,
+            ExtensionErrorKind::Updating => WitKind::Internal,
         };
         WitErr {
             kind: wit_kind,
@@ -486,6 +498,29 @@ mod tests {
         let e = ExtensionError::from("oops".to_string());
         assert_eq!(e.kind, ExtensionErrorKind::Unknown);
         assert_eq!(e.message, "oops");
+    }
+
+    #[test]
+    fn source_updating_kind_is_updating() {
+        let e = ExtensionError::source_updating();
+        assert_eq!(e.kind, ExtensionErrorKind::Updating);
+    }
+
+    #[test]
+    fn source_updating_retry_after_is_2() {
+        let e = ExtensionError::source_updating();
+        assert_eq!(e.retry_after_secs, Some(2));
+    }
+
+    #[test]
+    fn source_updating_has_no_source_url() {
+        let e = ExtensionError::source_updating();
+        assert!(e.source_url.is_none());
+    }
+
+    #[test]
+    fn updating_kind_display_is_source_updating() {
+        assert_eq!(ExtensionErrorKind::Updating.to_string(), "source-updating");
     }
 
     #[cfg(any(feature = "host", feature = "builder", feature = "meta"))]

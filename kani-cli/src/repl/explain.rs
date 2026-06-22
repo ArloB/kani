@@ -57,14 +57,16 @@ pub fn explain(expression: &str) -> Result<ExplainTrace, CliError> {
         .into_result()
         .map_err(|_| CliError::Other("DSL parse failed".to_string()))?;
 
-    let expr: Expr = parse_ast.try_into().map_err(|errs: Vec<CliError>| {
-        for e in &errs {
-            if let CliError::DslConversion { message, span } = e {
-                report_custom_error("<expression>", expression, message, span.clone());
+    let expr: Expr = parse_ast
+        .try_into()
+        .map_err(|errs: Vec<kani_yaml::YamlError>| {
+            for e in &errs {
+                if let kani_yaml::YamlError::DslConversion { message, span } = e {
+                    report_custom_error("<expression>", expression, message, span.clone());
+                }
             }
-        }
-        CliError::Other("DSL conversion failed".to_string())
-    })?;
+            CliError::Other("DSL conversion failed".to_string())
+        })?;
 
     let mut steps = Vec::new();
     collect_steps(&expr, 0, &mut steps);
