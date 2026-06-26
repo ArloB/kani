@@ -9,7 +9,7 @@ impl AppService {
     /// calls `assert_within_root` before returning.
     pub async fn get_manga_cover_path(&self, manga_id: MangaId) -> Result<std::path::PathBuf> {
         let row = sqlx::query!("SELECT local_cover_path FROM manga WHERE id = ?", manga_id)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Manga {manga_id} not found")))?;
 

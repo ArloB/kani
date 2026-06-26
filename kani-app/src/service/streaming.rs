@@ -38,7 +38,7 @@ mod enabled {
                 "SELECT streaming_chapters FROM sources WHERE id = ? AND deleted_at IS NULL",
             )
             .bind(source_id)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await
             .map_err(ServiceError::Db)?
             .map(|v| v != 0)

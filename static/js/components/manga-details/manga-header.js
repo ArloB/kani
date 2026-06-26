@@ -111,7 +111,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   const { isLocal, dbId, sid, mangaId } = ctx;
 
   const coverUrl = isLocal
-    ? api.getMangaCoverUrl(dbId) + '?v=' + Date.now()
+    ? api.getMangaCoverUrl(dbId, 'lg') + '&v=' + Date.now()
     : (info?.cover_url ?? info?.cover_image_url ?? null);
 
   const isDesktop = () => window.innerWidth >= 768;

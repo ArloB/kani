@@ -40,7 +40,7 @@ impl AppService {
             "SELECT COUNT(*) FROM user_totp WHERE user_id = ? AND verified_at IS NOT NULL",
         )
         .bind(user_id)
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await
         .unwrap_or(0);
 
@@ -120,7 +120,7 @@ impl AppService {
             "SELECT id FROM user_backup_codes WHERE user_id = ? AND used_at IS NULL",
         )
         .bind(user_id)
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         // IMPORTANT: we must check all rows to avoid early-exit timing oracles.
@@ -131,7 +131,7 @@ impl AppService {
             let hash: Option<String> =
                 sqlx::query_scalar("SELECT code_hash FROM user_backup_codes WHERE id = ?")
                     .bind(row_id)
-                    .fetch_optional(&self.db)
+                    .fetch_optional(&self.db_read)
                     .await
                     .unwrap_or(None);
             if let Some(h) = hash
@@ -195,7 +195,7 @@ impl AppService {
             "SELECT secret FROM user_totp WHERE user_id = ? AND verified_at IS NULL",
         )
         .bind(user_id)
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
         let stored =
             stored.ok_or_else(|| ServiceError::NotFound("No pending TOTP setup found".into()))?;
@@ -207,7 +207,7 @@ impl AppService {
             "SELECT secret FROM user_totp WHERE user_id = ? AND verified_at IS NOT NULL",
         )
         .bind(user_id)
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
         let stored = stored
             .ok_or_else(|| ServiceError::NotFound("TOTP is not enabled for this user".into()))?;

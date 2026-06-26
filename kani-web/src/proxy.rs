@@ -5,6 +5,30 @@ use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
+const BUST_PARAMS: &[&str] = &["cb", "ts", "t", "_", "v", "ver", "nc"];
+
+/// Return a canonical cache key by stripping well-known cache-bust query params.
+pub fn canonical_proxy_key(url: &str) -> String {
+    let Ok(mut parsed) = rquest::Url::parse(url) else {
+        return url.to_string();
+    };
+    let kept: Vec<(String, String)> = parsed
+        .query_pairs()
+        .filter(|(k, _)| !BUST_PARAMS.contains(&k.as_ref()))
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    if kept.is_empty() {
+        parsed.set_query(None);
+    } else {
+        let mut setter = parsed.query_pairs_mut();
+        setter.clear();
+        for (k, v) in &kept {
+            setter.append_pair(k, v);
+        }
+    }
+    parsed.to_string()
+}
+
 type HmacSha256 = Hmac<Sha256>;
 
 const NONCE_LEN: usize = 12;
@@ -124,6 +148,35 @@ pub fn compute_etag(url: &str, referer: &str, secret: &[u8; 32]) -> String {
     mac.update(b"|");
     mac.update(referer.as_bytes());
     format!("\"{}\"", hex::encode(mac.finalize().into_bytes()))
+}
+
+pub fn range_response_status(is_partial: bool) -> axum::http::StatusCode {
+    if is_partial {
+        axum::http::StatusCode::PARTIAL_CONTENT
+    } else {
+        axum::http::StatusCode::OK
+    }
+}
+
+pub fn build_range_response_headers(
+    upstream: &rquest::header::HeaderMap,
+    etag: &str,
+) -> axum::http::HeaderMap {
+    let mut out = axum::http::HeaderMap::new();
+    if let Some(ct) = upstream.get(rquest::header::CONTENT_TYPE)
+        && let Ok(hv) = axum::http::header::HeaderValue::from_bytes(ct.as_bytes())
+    {
+        out.insert(axum::http::header::CONTENT_TYPE, hv);
+    }
+    if let Some(cr) = upstream.get(rquest::header::CONTENT_RANGE)
+        && let Ok(hv) = axum::http::header::HeaderValue::from_bytes(cr.as_bytes())
+    {
+        out.insert(axum::http::header::CONTENT_RANGE, hv);
+    }
+    if let Ok(ev) = axum::http::header::HeaderValue::from_str(etag) {
+        out.insert(axum::http::header::ETAG, ev);
+    }
+    out
 }
 
 /// Build an opaque proxy URL for use in `src` attributes.
@@ -368,5 +421,44 @@ mod tests {
         let inner = &etag[1..etag.len() - 1];
         assert!(!inner.is_empty());
         assert!(inner.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn canonical_key_strips_single_bust_param() {
+        let url = "https://cdn.example.com/img.jpg?cb=12345";
+        assert_eq!(canonical_proxy_key(url), "https://cdn.example.com/img.jpg");
+    }
+
+    #[test]
+    fn canonical_key_strips_all_bust_params() {
+        let url = "https://cdn.example.com/img.jpg?cb=1&ts=2&t=3&_=4&v=5&ver=6&nc=7";
+        assert_eq!(canonical_proxy_key(url), "https://cdn.example.com/img.jpg");
+    }
+
+    #[test]
+    fn canonical_key_preserves_non_bust_params() {
+        let url = "https://cdn.example.com/img.jpg?size=800&quality=90&cb=99";
+        let result = canonical_proxy_key(url);
+        assert!(result.contains("size=800"));
+        assert!(result.contains("quality=90"));
+        assert!(!result.contains("cb="));
+    }
+
+    #[test]
+    fn canonical_key_no_query_unchanged() {
+        let url = "https://cdn.example.com/img.jpg";
+        assert_eq!(canonical_proxy_key(url), url);
+    }
+
+    #[test]
+    fn canonical_key_only_non_bust_params_unchanged() {
+        let url = "https://cdn.example.com/img.jpg?page=2";
+        assert_eq!(canonical_proxy_key(url), url);
+    }
+
+    #[test]
+    fn canonical_key_invalid_url_passthrough() {
+        let url = "not a url at all !!";
+        assert_eq!(canonical_proxy_key(url), url);
     }
 }

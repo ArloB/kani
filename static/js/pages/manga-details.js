@@ -646,7 +646,7 @@ async function _renderManageTab(contentEl) {
       migrateBtn.className = 'btn-ghost btn-sm';
       migrateBtn.textContent = 'Migrate';
       migrateBtn.addEventListener('click', () => {
-        const coverUrl = api.getMangaCoverUrl(_dbId);
+        const coverUrl = api.getMangaCoverUrl(_dbId, 'lg');
         _unmountMigration = mountMigrationDialogue({
           dbId: _dbId,
           currentSourceId: _sid,

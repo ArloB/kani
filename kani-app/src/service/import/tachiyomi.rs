@@ -224,7 +224,7 @@ impl AppService {
 
                 let cat_id: Option<i64> =
                     sqlx::query_scalar!("SELECT id FROM categories WHERE name = ?", cat.name)
-                        .fetch_optional(&self.db)
+                        .fetch_optional(&self.db_read)
                         .await?;
 
                 if let Some(id) = cat_id {
@@ -283,7 +283,7 @@ impl AppService {
                 source_id,
                 m.url
             )
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?;
 
             let (manga_id, is_new) = if let Some(id) = existing_id {
@@ -459,7 +459,7 @@ impl AppService {
 
                 let tracker_id: Option<i64> =
                     sqlx::query_scalar!("SELECT id FROM trackers WHERE name = ?", tracker_name)
-                        .fetch_optional(&self.db)
+                        .fetch_optional(&self.db_read)
                         .await?
                         .flatten();
 
@@ -524,7 +524,7 @@ impl AppService {
                         manga_id,
                         ch.url
                     )
-                    .fetch_optional(&self.db)
+                    .fetch_optional(&self.db_read)
                     .await?;
 
                     if let Some(ch_id) = chapter_id {

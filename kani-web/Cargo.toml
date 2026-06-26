@@ -49,6 +49,7 @@ hex = "0.4.3"
 uuid = { version = "1", features = ["v4"] }
 dashmap.workspace = true
 pulldown-cmark = { version = "0.13.1", default-features = false, features = ["html"] }
+image           = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 ammonia = "4.1.2"
 axum-login = "0.18"
 argon2 = { version = "0.5.3", features = ["std"] }

@@ -153,6 +153,7 @@ async fn main() {
     state.spawn_webhook_listener();
     state.spawn_login_attempt_prune();
     state.spawn_cache_prune();
+    state.spawn_progress_flush();
 
     // Rate limiter settings.
     // API: enough for normal UI use while protecting against abuse.

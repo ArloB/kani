@@ -86,7 +86,7 @@ impl AppService {
              WHERE s.id = ? AND s.deleted_at IS NULL",
             id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound("Source not found".into()))?;
 
@@ -105,7 +105,7 @@ impl AppService {
              WHERE s.deleted_at IS NULL \
              LIMIT 1000"
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await
         .map_err(Into::into)
     }
@@ -168,7 +168,7 @@ impl AppService {
             "SELECT name FROM sources WHERE id = ? AND deleted_at IS NULL",
             id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
 
         if let Some(row) = row {
@@ -234,7 +234,7 @@ impl AppService {
                 "SELECT name, base_url, unrestricted_http FROM sources WHERE id = ? AND deleted_at IS NULL",
                 id
             )
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
 
@@ -340,7 +340,7 @@ impl AppService {
             "SELECT base_url FROM sources WHERE id = ? AND deleted_at IS NULL",
             id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .unwrap_or_default())
     }
@@ -600,7 +600,7 @@ impl AppService {
             "SELECT enabled FROM sources WHERE id = ? AND deleted_at IS NULL",
             id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
         match row {
             None => Err(ServiceError::NotFound(format!("Source {id} not found"))),
@@ -622,7 +622,7 @@ impl AppService {
             "SELECT id, name FROM sources WHERE enabled = 1 AND deleted_at IS NULL AND (favourited = 1 OR ? = 0)",
             favourited_only
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?
         .into_iter()
         .filter(|r| match &scope {
@@ -702,7 +702,7 @@ impl AppService {
             WHERE s.deleted_at IS NULL
             ORDER BY s.name"#,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(rows)
     }

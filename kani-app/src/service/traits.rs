@@ -680,7 +680,7 @@ impl MangaDomain for AppService {
 
     async fn queue_manga_scan(&self, manga_id: MangaId, trigger: String) -> Result<uuid::Uuid> {
         let row = sqlx::query!("SELECT source_id, name FROM manga WHERE id = ?", manga_id)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .ok_or_else(|| {
                 crate::error::ServiceError::NotFound(format!("Manga {manga_id} not found"))

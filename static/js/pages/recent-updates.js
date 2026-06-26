@@ -175,7 +175,7 @@ async function _fetch(listEl, paginEl) {
       groupEl.className = 'flex flex-col gap-2 bg-surface border border-border rounded-xl p-4 min-w-0';
 
       // Header: cover + title link
-      const coverUrl = getMangaCoverUrl(group.manga_id);
+      const coverUrl = getMangaCoverUrl(group.manga_id, 'sm');
       const mangaHref = `/manga/${group.manga_id}`;
 
       groupEl.innerHTML = `

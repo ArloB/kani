@@ -1,5 +1,26 @@
 use super::*;
 use crate::ids::{ChapterId, MangaId, UserId};
+use std::collections::HashMap;
+
+#[derive(Clone, Default)]
+pub struct ReadProgressBuffer(std::sync::Arc<std::sync::Mutex<HashMap<(i64, i64), i64>>>);
+
+impl ReadProgressBuffer {
+    pub fn record(&self, user_id: i64, chapter_id: i64, page: i64) {
+        let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        map.insert((user_id, chapter_id), page);
+    }
+
+    pub fn remove(&self, user_id: i64, chapter_id: i64) {
+        let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        map.remove(&(user_id, chapter_id));
+    }
+
+    fn drain(&self) -> HashMap<(i64, i64), i64> {
+        let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut *map)
+    }
+}
 
 impl AppService {
     pub async fn set_chapter_progress(
@@ -8,30 +29,84 @@ impl AppService {
         chapter_id: ChapterId,
         page: i64,
     ) -> Result<()> {
-        sqlx::query!(
-            r#"
-            INSERT INTO user_chapter_tracking (user_id, chapter_id, last_page_read, is_read, last_read_at)
-            VALUES (
-                ?1,
-                ?2,
-                ?3,
-                COALESCE(?3 >= ((SELECT page_count FROM chapters WHERE id = ?2) - 1), false),
-                datetime('now')
-            )
-            ON CONFLICT (user_id, chapter_id) DO UPDATE SET
-                last_page_read = excluded.last_page_read,
-                is_read = user_chapter_tracking.is_read OR excluded.is_read,
-                last_read_at = datetime('now')
-            "#,
-            user_id,
-            chapter_id,
-            page
-        )
-        .execute(&self.db)
-        .await?;
-
-        self.cache.invalidate_stats(user_id);
+        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM chapters WHERE id = ?)")
+            .bind(chapter_id)
+            .fetch_one(&self.db_read)
+            .await?;
+        if !exists {
+            return Err(crate::error::ServiceError::NotFound(format!(
+                "Chapter {chapter_id} not found"
+            )));
+        }
+        self.progress_buffer.record(user_id.0, chapter_id.0, page);
         Ok(())
+    }
+
+    pub async fn flush_progress_buffer(&self) {
+        let entries = self.progress_buffer.drain();
+        if entries.is_empty() {
+            return;
+        }
+        let mut tx = match self.db.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::warn!("Progress flush begin failed: {e}");
+                return;
+            }
+        };
+        let mut affected_users: HashSet<i64> = HashSet::new();
+        for ((user_id, chapter_id), page) in &entries {
+            let result = sqlx::query(
+                r#"INSERT INTO user_chapter_tracking (user_id, chapter_id, last_page_read, is_read, last_read_at)
+                   VALUES (?1, ?2, ?3,
+                       COALESCE(?3 >= ((SELECT page_count FROM chapters WHERE id = ?2) - 1), false),
+                       datetime('now'))
+                   ON CONFLICT (user_id, chapter_id) DO UPDATE SET
+                       last_page_read = excluded.last_page_read,
+                       is_read = user_chapter_tracking.is_read OR excluded.is_read,
+                       last_read_at = datetime('now')"#,
+            )
+            .bind(user_id)
+            .bind(chapter_id)
+            .bind(page)
+            .execute(&mut *tx)
+            .await;
+            match result {
+                Ok(_) => {
+                    affected_users.insert(*user_id);
+                }
+                Err(e) => {
+                    tracing::warn!("Progress flush: user={user_id} chapter={chapter_id}: {e}");
+                }
+            }
+        }
+        if let Err(e) = tx.commit().await {
+            tracing::warn!("Progress flush commit failed: {e}");
+            return;
+        }
+        for user_id in affected_users {
+            self.cache.invalidate_stats(UserId(user_id));
+        }
+    }
+
+    pub fn spawn_progress_flush(&self) {
+        let svc = self.clone();
+        let token = self.shutdown_token.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        svc.flush_progress_buffer().await;
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        svc.flush_progress_buffer().await;
+                    }
+                }
+            }
+        });
     }
 
     pub async fn set_chapter_read_status(
@@ -62,6 +137,9 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
+        for chapter_id in &chapter_ids {
+            self.progress_buffer.remove(user_id.0, chapter_id.0);
+        }
         self.cache.invalidate_stats(user_id);
         Ok(())
     }
@@ -105,7 +183,7 @@ impl AppService {
             user_id,
             chapter_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
 
         Ok(row.map(|r| (r.last_page_read, r.is_read)))
@@ -221,7 +299,7 @@ impl AppService {
             user_id,
             manga_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
 
         // Count distinct chapter numbers read (coalesces multiple scanlator versions).
@@ -235,7 +313,7 @@ impl AppService {
             user_id,
             manga_id
         )
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await?;
 
         // Count distinct chapter numbers (not rows) so scanlator dupes don't inflate total.
@@ -243,7 +321,7 @@ impl AppService {
             r#"SELECT COUNT(DISTINCT chapter_number) as "count: i64" FROM chapters WHERE manga_id = ?"#,
             manga_id
         )
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await?;
 
         let (status, score, tracking_enabled, notify_new_chapters, reading_direction, reader_prefs) =
@@ -341,7 +419,7 @@ impl AppService {
             manga_id,
             user_id,
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
 
         if let Some(row) = in_progress {
@@ -379,7 +457,7 @@ impl AppService {
             manga_id,
             user_id,
         )
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await?;
 
         let Some(chapter_number) = next_number else {
@@ -406,7 +484,7 @@ impl AppService {
             manga_id,
             chapter_number,
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
 
         Ok(chapter.map(|r| kani_shared::types::ContinueReadingChapter {
@@ -428,7 +506,7 @@ impl AppService {
             manga_id,
             chapter_number,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(ids.into_iter().map(ChapterId).collect())
     }
@@ -443,7 +521,7 @@ impl AppService {
             user_id,
             chapter_id,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(pages)
     }
@@ -489,7 +567,7 @@ impl AppService {
             user_id,
             chapter_id,
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
         Ok(note)
     }
@@ -508,7 +586,7 @@ impl AppService {
             user_id,
             manga_id,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(ids.into_iter().map(ChapterId).collect())
     }
@@ -530,7 +608,7 @@ impl AppService {
             user_id,
             manga_id,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(rows
             .into_iter()

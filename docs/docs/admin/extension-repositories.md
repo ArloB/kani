@@ -1,14 +1,19 @@
 # Extension Repositories
 
-Extension repositories are signed, git-hostable catalogs of Kani extensions. Adding a repository lets you browse and install extensions from it in one click, with automatic signature and integrity verification.
+Extension repositories are signed, git-hostable catalogs of Kani extensions. Adding a repository lets you browse and
+install extensions from it in one click, with automatic signature and integrity verification.
 
 ## Trust model
 
-Every repository has a **maintainer keypair** (Ed25519). When you add a repo for the first time, Kani fetches its `index.json` and shows you the maintainer's key fingerprint. You must explicitly confirm that fingerprint before the repo is trusted — this is called **Trust-on-First-Use (TOFU)**. Once confirmed, Kani pins the fingerprint and rejects any future index signed by a different key, preventing silent key substitution.
+Every repository has a **maintainer keypair** (Ed25519). When you add a repo for the first time, Kani fetches its
+`index.json` and shows you the maintainer's key fingerprint. You must explicitly confirm that fingerprint before the
+repo is trusted — this is called **Trust-on-First-Use (TOFU)**. Once confirmed, Kani pins the fingerprint and rejects
+any future index signed by a different key, preventing silent key substitution.
 
-Each extension inside the index is also signed individually by its **author keypair**. Kani verifies both the index signature and the per-extension signature before writing a single byte to disk.
+Each extension inside the index is also signed individually by its **author keypair**. Kani verifies both the index
+signature and the per-extension signature before writing a single byte to disk.
 
-```
+```text
 index.json   ←  signed by maintainer key
 ├── extension A  ←  signed by author A's key
 └── extension B  ←  signed by author B's key
@@ -27,7 +32,7 @@ index.json   ←  signed by maintainer key
 2. Click **Add repository** and paste the repository URL.
 3. Kani fetches the index and displays the maintainer key fingerprint:
 
-    ```
+    ```text
     SHA256:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789ABCDEF=
     ```
 
@@ -54,6 +59,7 @@ On first add the server returns **428 Precondition Required**:
 
 Confirm by re-submitting with the fingerprint. You can provide it either in the request body or as a header:
 
+<!-- markdownlint-disable MD046 -->
 === "Body field"
 
     ```http
@@ -75,6 +81,7 @@ Confirm by re-submitting with the fingerprint. You can provide it either in the 
 
     { "url": "https://extensions.example.com" }
     ```
+<!-- markdownlint-enable MD046 -->
 
 A successful add returns **200 OK** with `{ "id": 3, "name": "Example Extensions" }`.
 
@@ -91,17 +98,19 @@ If a repository's maintainer key changes after you've already trusted it, Kani r
 }
 ```
 
-Treat this as a serious security event. Confirm the new key through a trusted channel (the repo maintainer's announcement, signed release notes, etc.) before re-confirming.
+Treat this as a serious security event. Confirm the new key through a trusted channel (the repo maintainer's
+announcement, signed release notes, etc.) before re-confirming.
 
 ## Browsing and installing extensions
 
 1. Go to **Settings → Sources → Repositories → [repo name]**.
 2. Extensions available in the repo are listed with name, version, and a description.
-3. Click **Install** on any extension. Kani downloads the artifact, verifies its SHA-256 hash and the author's signature, then loads it into the runtime.
+3. Click **Install** on any extension. Kani downloads the artifact, verifies its SHA-256 hash and the author's
+   signature, then loads it into the runtime.
 
 If the installed version is behind the latest in the repo, an **Update available** badge appears on the source card.
 
-### Via the REST API
+### Via the REST API (install)
 
 ```http
 # List extensions available in a repo
@@ -129,7 +138,8 @@ Kani caches the repository index. To pick up new or updated extensions, refresh 
 
 ## Removing a repository
 
-Removing a repository deletes the trust record but does **not** uninstall extensions that were already installed from it. Those sources continue to work normally.
+Removing a repository deletes the trust record but does **not** uninstall extensions that were already installed
+from it. Those sources continue to work normally.
 
 - **Web UI**: Settings → Sources → Repositories → [repo name] → **Remove**.
 - **API**: `DELETE /rest/sources/repos/{id}`
@@ -171,13 +181,17 @@ To run Kani with a fixed, administrator-controlled set of sources and prevent an
 KANI_SOURCE_INSTALL_ALLOWED=false
 ```
 
-This blocks all install paths: direct WASM upload, URL fetch, and repository-based install. Reload (`POST /rest/sources/{id}/reload`) is not affected, so the operator can still hot-swap on-disk files.
+This blocks all install paths: direct WASM upload, URL fetch, and repository-based install. Reload
+(`POST /rest/sources/{id}/reload`) is not affected, so the operator can still hot-swap on-disk files.
 
 ## Security considerations
 
-- All repository and artifact fetches go through Kani's SSRF-protected HTTP client. Private IPs, loopback addresses, and other RFC-1918 ranges are blocked.
-- Extension artifacts are verified against their SHA-256 hash **and** the author's Ed25519 signature before any bytes are written to disk. A verification failure leaves the existing source and database row unchanged.
-- The `trusted_level` column distinguishes `official` (bootstrapped from `KANI_OFFICIAL_REPO_URL`) from `community` repos. The UI may surface this visually.
+- All repository and artifact fetches go through Kani's SSRF-protected HTTP client. Private IPs, loopback
+  addresses, and other RFC-1918 ranges are blocked.
+- Extension artifacts are verified against their SHA-256 hash **and** the author's Ed25519 signature before any
+  bytes are written to disk. A verification failure leaves the existing source and database row unchanged.
+- The `trusted_level` column distinguishes `official` (bootstrapped from `KANI_OFFICIAL_REPO_URL`) from
+  `community` repos. The UI may surface this visually.
 - Backup and restore include the `repo_trust` and `blocked_repos` tables, so TOFU pins are preserved across migrations.
 
 ## Publishing your own repository

@@ -12,7 +12,7 @@ impl AppService {
              WHERE manga_id=? ORDER BY priority DESC",
             manga_id
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await
         .map_err(ServiceError::Db)?;
         let prefs = rows
@@ -62,7 +62,7 @@ impl AppService {
             "SELECT DISTINCT scanlator FROM chapters WHERE manga_id = ? AND scanlator IS NOT NULL ORDER BY scanlator",
             manga_id
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(rows.into_iter().flatten().collect())
     }
@@ -73,7 +73,7 @@ impl AppService {
             "SELECT DISTINCT language FROM chapters WHERE manga_id = ? ORDER BY language",
             manga_id
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(rows)
     }
@@ -84,7 +84,7 @@ impl AppService {
             "SELECT COALESCE(scanlator_mode, 'priority') FROM manga WHERE id = ?",
             manga_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .unwrap_or_else(|| "priority".into());
         Ok(mode)

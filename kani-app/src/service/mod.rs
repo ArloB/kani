@@ -49,7 +49,7 @@ pub mod password_reset;
 pub mod path_migration;
 pub mod pending_imports;
 mod preferences;
-mod progress;
+pub(crate) mod progress;
 pub mod repos;
 mod scanlators;
 pub mod sessions;
@@ -57,6 +57,7 @@ mod settings;
 mod sources;
 mod stats;
 pub mod streaming;
+pub mod thumbnails;
 pub mod totp;
 pub mod trackers;
 pub mod traits;
@@ -65,6 +66,7 @@ pub mod webhooks;
 #[derive(Clone)]
 pub struct AppService {
     pub db: SqlitePool,
+    pub db_read: SqlitePool,
     pub wasm_runtime: Arc<WasmRuntime>,
     pub sources: Arc<SourceRegistry>,
     pub settings: Arc<tokio::sync::RwLock<Settings>>,
@@ -91,6 +93,9 @@ pub struct AppService {
     /// concurrent install/update of the same extension so the upsert (which keys on
     /// `sources.name`) cannot race two writers into duplicate rows + backends.
     pub install_locks: Arc<DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    pub(crate) progress_buffer: progress::ReadProgressBuffer,
+    pub thumbnail_inflight: thumbnails::ThumbnailInflight,
+    pub(crate) thumbnail_formats: Vec<String>,
     #[cfg(any(test, feature = "test-util"))]
     pub mock_sources: Arc<DashMap<i64, Arc<dyn kani_core::downloader::PageListFetcher>>>,
 }
@@ -168,29 +173,66 @@ fn parse_cipher_hex(hex: &str) -> Option<encryption::CredentialCipher> {
     }
 }
 
+async fn make_write_pool(url: &str) -> sqlx::Result<SqlitePool> {
+    SqlitePoolOptions::new()
+        .max_connections(1)
+        .after_connect(|conn, _| {
+            Box::pin(async move {
+                apply_pragmas(conn, false).await?;
+                Ok(())
+            })
+        })
+        .connect(url)
+        .await
+}
+
+async fn make_read_pool(url: &str, size: u32) -> sqlx::Result<SqlitePool> {
+    SqlitePoolOptions::new()
+        .max_connections(size)
+        .after_connect(|conn, _| {
+            Box::pin(async move {
+                apply_pragmas(conn, true).await?;
+                Ok(())
+            })
+        })
+        .connect(url)
+        .await
+}
+
+async fn apply_pragmas(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    query_only: bool,
+) -> sqlx::Result<()> {
+    let pragmas = [
+        "PRAGMA journal_mode=WAL;",
+        "PRAGMA synchronous=NORMAL;",
+        "PRAGMA busy_timeout=5000;",
+        "PRAGMA foreign_keys=ON;",
+        "PRAGMA cache_size=-65536;",
+        "PRAGMA temp_store=MEMORY;",
+        "PRAGMA mmap_size=1073741824;",
+        "PRAGMA wal_autocheckpoint=1000;",
+    ];
+    for pragma in pragmas {
+        sqlx::query(pragma).execute(&mut *conn).await?;
+    }
+    if query_only {
+        sqlx::query("PRAGMA query_only=ON;")
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
+}
+
 impl AppService {
     pub async fn new(data_dir: &std::path::Path) -> Result<Self> {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(20)
-            .after_connect(|conn, _meta| {
-                Box::pin(async move {
-                    sqlx::query("PRAGMA journal_mode=WAL;")
-                        .execute(&mut *conn)
-                        .await?;
-                    sqlx::query("PRAGMA synchronous=NORMAL;")
-                        .execute(&mut *conn)
-                        .await?;
-                    sqlx::query("PRAGMA busy_timeout=5000;")
-                        .execute(&mut *conn)
-                        .await?;
-                    sqlx::query("PRAGMA foreign_keys=ON;")
-                        .execute(&mut *conn)
-                        .await?;
-                    Ok(())
-                })
-            })
-            .connect("sqlite://kani.db?mode=rwc")
-            .await?;
+        let db_url = "sqlite://kani.db?mode=rwc";
+        let read_pool_size: u32 = std::env::var("KANI_DB_READ_POOL_SIZE")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(8);
+        let pool = make_write_pool(db_url).await?;
+        let read_pool = make_read_pool(db_url, read_pool_size).await?;
 
         tracing::info!("SQL Pool Created");
 
@@ -331,6 +373,8 @@ impl AppService {
         .fetch_all(&pool)
         .await?;
 
+        let mut live_wasm_hashes: HashSet<String> = HashSet::new();
+
         for source in sources {
             let prefs = Self::load_pref_map_static(&pool, source.id).await?;
             let ns = format!("{}:", source.name);
@@ -372,6 +416,8 @@ impl AppService {
                 }
             } else {
                 let bytes = tokio::fs::read(&wasm_path).await?;
+                live_wasm_hashes
+                    .insert(kani_core::wasm::cache::WasmModuleCache::sha256_hex(&bytes));
                 let component = wasm_runtime
                     .compile_component(&bytes)
                     .map_err(ServiceError::Core)?;
@@ -439,6 +485,7 @@ impl AppService {
             sources_registry.insert(source.id, backend);
         }
         tracing::info!("Sources loaded");
+        wasm_runtime.prune_module_cache(&live_wasm_hashes);
 
         let downloader = DownloaderManager::new(
             global_smart_client.clone(),
@@ -457,6 +504,7 @@ impl AppService {
             global_smart_client.credentials.clone(),
             global_smart_client.solving.clone(),
             global_smart_client.host_circuits.clone(),
+            global_smart_client.circuit_event_tx.clone(),
         )?;
         tracing::info!("Proxy client created");
 
@@ -464,11 +512,34 @@ impl AppService {
             tokio::sync::broadcast::channel(crate::tuning::SSE_BROADCAST_CAPACITY);
         let refresh_task = Arc::new(tokio::sync::Mutex::new(None));
 
+        {
+            let mut rx = global_smart_client.subscribe_circuit_events();
+            let tx = refresh_tx.clone();
+            let cancel = shutdown_token.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = cancel.cancelled() => break,
+                        msg = rx.recv() => match msg {
+                            Ok(ev) => {
+                                let _ = tx.send(crate::events::AppEvent::CircuitOpen {
+                                    host: ev.host,
+                                    failure_count: ev.failure_count,
+                                });
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                        }
+                    }
+                }
+            });
+        }
+
         let tracker_registry = TrackerRegistry::new(&pool, enc.as_ref()).await?;
 
         let email_svc = email::EmailService::from_settings(&settings);
         let enc = enc.map(Arc::new);
-        let webhook_service = webhooks::WebhookService::new(pool.clone());
+        let webhook_service = webhooks::WebhookService::new(pool.clone(), read_pool.clone());
 
         let svc_cell: crate::jobs::framework::ServiceCell = Arc::new(std::sync::Mutex::new(None));
 
@@ -477,6 +548,8 @@ impl AppService {
         job_registry.register::<crate::jobs::download::MangaDownloadAllJob>();
         job_registry.register::<crate::jobs::download::SourceScanJob>();
         job_registry.register::<crate::jobs::download::LibraryScanJob>();
+        job_registry.register::<crate::jobs::maintenance::AnalyzeJob>();
+        job_registry.register::<crate::jobs::maintenance::VacuumJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),
@@ -511,6 +584,7 @@ impl AppService {
 
         let svc = Self {
             db: pool,
+            db_read: read_pool,
             wasm_runtime,
             sources: Arc::new(sources_registry),
             settings: Arc::new(tokio::sync::RwLock::new(settings)),
@@ -532,6 +606,9 @@ impl AppService {
             )),
             job_manager,
             install_locks: Arc::new(DashMap::new()),
+            progress_buffer: progress::ReadProgressBuffer::default(),
+            thumbnail_inflight: thumbnails::ThumbnailInflight::default(),
+            thumbnail_formats: crate::images::thumbnail_formats_from_env(),
             #[cfg(any(test, feature = "test-util"))]
             mock_sources: Arc::new(DashMap::new()),
         };
@@ -552,10 +629,15 @@ impl AppService {
     pub async fn new_for_test(pool: SqlitePool) -> Self {
         use crate::models::Settings;
 
+        let test_dir = tempfile::Builder::new()
+            .prefix("kani-test-")
+            .tempdir()
+            .expect("tempdir")
+            .keep();
         let settings = Settings {
             flaresolverr_url: String::new(),
-            library_path: std::env::temp_dir(),
-            wasm_storage_path: std::env::temp_dir(),
+            library_path: test_dir.clone(),
+            wasm_storage_path: test_dir,
             concurrent_page_downloads: 4,
             concurrent_manga_downloads: 2,
             chapter_queue_size: 32,
@@ -591,7 +673,8 @@ impl AppService {
             kani_core::http::SmartClient::new(None).expect("SmartClient::new failed in test");
         let proxy_client =
             kani_core::http::SmartClient::new(None).expect("proxy SmartClient::new failed in test");
-        let wasm_runtime = Arc::new(WasmRuntime::new(1).expect("WasmRuntime::new failed in test"));
+        let wasm_runtime =
+            Arc::new(WasmRuntime::new_on_demand().expect("WasmRuntime::new failed in test"));
         let downloader = DownloaderManager::new(
             smart_client.clone(),
             DownloaderConfig {
@@ -619,6 +702,8 @@ impl AppService {
         registry.register::<crate::jobs::download::MangaDownloadAllJob>();
         registry.register::<crate::jobs::download::SourceScanJob>();
         registry.register::<crate::jobs::download::LibraryScanJob>();
+        registry.register::<crate::jobs::maintenance::AnalyzeJob>();
+        registry.register::<crate::jobs::maintenance::VacuumJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),
@@ -643,6 +728,7 @@ impl AppService {
 
         let svc = Self {
             db: pool.clone(),
+            db_read: pool.clone(),
             wasm_runtime,
             sources: Arc::new(SourceRegistry::new()),
             settings: Arc::new(tokio::sync::RwLock::new(settings)),
@@ -658,12 +744,15 @@ impl AppService {
             cover_retry_queue: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             email_service: Arc::new(tokio::sync::RwLock::new(None)),
             encryption: None,
-            webhook_service: webhooks::WebhookService::new(pool),
+            webhook_service: webhooks::WebhookService::new(pool.clone(), pool),
             metadata_provider_registry: Arc::new(tokio::sync::RwLock::new(
                 metadata_provider::MetadataProviderRegistry::new(),
             )),
             job_manager,
             install_locks: Arc::new(DashMap::new()),
+            progress_buffer: progress::ReadProgressBuffer::default(),
+            thumbnail_inflight: thumbnails::ThumbnailInflight::default(),
+            thumbnail_formats: crate::images::thumbnail_formats_from_env(),
             mock_sources: Arc::new(DashMap::new()),
         };
         *svc_cell.lock().expect("svc_cell lock") = Some(svc.clone());
@@ -697,7 +786,7 @@ impl AppService {
         use sqlx::Row as _;
         let rows =
             sqlx::query("SELECT id, name FROM sources WHERE enabled = 1 AND deleted_at IS NULL")
-                .fetch_all(&self.db)
+                .fetch_all(&self.db_read)
                 .await?;
         let sources: Vec<(i64, String)> = rows
             .into_iter()
@@ -749,7 +838,7 @@ impl AppService {
         use sqlx::Row as _;
         let rows =
             sqlx::query("SELECT id, name FROM sources WHERE enabled = 1 AND deleted_at IS NULL")
-                .fetch_all(&self.db)
+                .fetch_all(&self.db_read)
                 .await?;
 
         for row in rows {
@@ -1059,6 +1148,35 @@ impl AppService {
         });
     }
 
+    pub fn spawn_db_maintenance(&self) {
+        let svc = self.clone();
+        let token = self.shutdown_token.clone();
+        tokio::spawn(async move {
+            let mut daily = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
+            daily.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            daily.tick().await;
+            let mut weekly_ticks: u8 = 0;
+            loop {
+                tokio::select! {
+                    _ = token.cancelled() => break,
+                    _ = daily.tick() => {}
+                }
+                let analyze = crate::jobs::maintenance::AnalyzeJob::new();
+                if let Err(e) = svc.job_manager.submit(analyze).await {
+                    tracing::warn!("Failed to schedule AnalyzeJob: {e}");
+                }
+                weekly_ticks += 1;
+                if weekly_ticks >= 7 {
+                    weekly_ticks = 0;
+                    let vacuum = crate::jobs::maintenance::VacuumJob::new();
+                    if let Err(e) = svc.job_manager.submit(vacuum).await {
+                        tracing::warn!("Failed to schedule VacuumJob: {e}");
+                    }
+                }
+            }
+        });
+    }
+
     pub fn spawn_cache_prune(&self) {
         let cache = std::sync::Arc::clone(&self.ext_cache);
         let token = self.shutdown_token.clone();
@@ -1122,6 +1240,11 @@ impl AppService {
 
     pub fn subscribe_refresh(&self) -> tokio::sync::broadcast::Receiver<AppEvent> {
         self.refresh_tx.subscribe()
+    }
+
+    pub fn invalidate_library(&self) {
+        self.cache.invalidate_library();
+        let _ = self.refresh_tx.send(AppEvent::LibraryInvalidated);
     }
 }
 

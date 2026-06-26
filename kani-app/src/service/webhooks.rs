@@ -18,13 +18,15 @@ fn now_rfc3339() -> String {
 #[derive(Clone)]
 pub struct WebhookService {
     pub db: SqlitePool,
+    pub db_read: SqlitePool,
     pub http: rquest::Client,
 }
 
 impl WebhookService {
-    pub fn new(db: SqlitePool) -> Self {
+    pub fn new(db: SqlitePool, db_read: SqlitePool) -> Self {
         Self {
             db,
+            db_read,
             http: rquest::Client::new(),
         }
     }
@@ -268,7 +270,7 @@ impl WebhookService {
                  )"#,
             event_type,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let Some(mid) = manga_id else {
@@ -281,7 +283,7 @@ impl WebhookService {
              WHERE manga_id = ? AND enabled = FALSE",
             mid,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let opted_out_set: std::collections::HashSet<i64> = opted_out.into_iter().collect();
@@ -304,7 +306,7 @@ impl WebhookService {
             r#"SELECT id, url, secret, events, enabled AS "enabled: bool", created_at
                FROM webhooks ORDER BY id ASC"#,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(rows)
     }
@@ -316,7 +318,7 @@ impl WebhookService {
                FROM webhooks WHERE id = ?"#,
             id,
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Webhook {id} not found")))
     }
@@ -397,7 +399,7 @@ impl WebhookService {
              LIMIT 50",
             webhook_id,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(rows)
     }
@@ -413,7 +415,7 @@ impl WebhookService {
              WHERE webhook_id = 0 AND manga_id = ? AND enabled = FALSE",
             manga_id,
         )
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await?;
         Ok(opted_out == 0)
     }

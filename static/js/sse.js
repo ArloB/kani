@@ -243,6 +243,11 @@ function _handleEvent(data) {
     return;
   }
 
+  if (type === 'library_invalidated') {
+    updateState('libraryInvalidation', (n) => n + 1);
+    return;
+  }
+
   // ── New chapters ─────────────────────────────────────────────────────────
   if (type === 'new_chapters') {
     // In-app badge notifications

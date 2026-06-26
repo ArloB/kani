@@ -319,6 +319,87 @@ async fn host_semaphore(
         .await
 }
 
+fn proxy_max_mem_bytes() -> usize {
+    std::env::var("KANI_IMAGE_PROXY_MAX_MEMORY_MB")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(128)
+        * 1024
+        * 1024
+}
+
+fn transcode_image_sync(
+    bytes: &[u8],
+    target_w: Option<u32>,
+    format: Option<&str>,
+    quality: u8,
+    max_mem_bytes: usize,
+) -> Result<(bytes::Bytes, &'static str), String> {
+    use image::ImageReader;
+    use std::io::Cursor;
+
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(max_mem_bytes as u64);
+
+    let mut reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| format!("format guess failed: {e}"))?;
+    reader.limits(limits);
+    let img = reader.decode().map_err(|e| format!("decode failed: {e}"))?;
+
+    let img = match target_w {
+        Some(w) if img.width() > w => {
+            img.resize(w, u32::MAX, image::imageops::FilterType::Lanczos3)
+        }
+        _ => img,
+    };
+
+    let pixel_mem = img.width() as usize * img.height() as usize * 4;
+    if pixel_mem > max_mem_bytes {
+        return Err(format!(
+            "decoded image exceeds memory limit ({pixel_mem} > {max_mem_bytes})"
+        ));
+    }
+
+    let (encoded, ct): (Vec<u8>, &'static str) = match format {
+        Some("webp") => {
+            let mut out = Vec::new();
+            img.write_to(&mut Cursor::new(&mut out), image::ImageFormat::WebP)
+                .map_err(|e| format!("webp encode failed: {e}"))?;
+            (out, "image/webp")
+        }
+        Some("png") => {
+            let mut out = Vec::new();
+            img.write_to(&mut Cursor::new(&mut out), image::ImageFormat::Png)
+                .map_err(|e| format!("png encode failed: {e}"))?;
+            (out, "image/png")
+        }
+        _ => {
+            let mut out = Vec::new();
+            let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality);
+            img.write_with_encoder(enc)
+                .map_err(|e| format!("jpeg encode failed: {e}"))?;
+            (out, "image/jpeg")
+        }
+    };
+
+    Ok((bytes::Bytes::from(encoded), ct))
+}
+
+fn record_bandwidth(
+    bandwidth: &dashmap::DashMap<String, Arc<std::sync::atomic::AtomicU64>>,
+    host: &str,
+    bytes: u64,
+) {
+    use std::sync::atomic::Ordering;
+    bandwidth
+        .entry(host.to_string())
+        .or_insert_with(|| Arc::new(std::sync::atomic::AtomicU64::new(0)))
+        .fetch_add(bytes, Ordering::Relaxed);
+}
+
 async fn image_proxy(
     AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
@@ -329,6 +410,13 @@ async fn image_proxy(
         .ok_or_else(|| AppError::Other("Invalid or expired proxy token".into()))?;
 
     let transform_hint = query.transform.as_deref().filter(|s| !s.is_empty());
+    let target_w: Option<u32> = query.w.filter(|&w| w > 0 && w <= 4096);
+    let req_format: Option<String> = query.format.as_deref().and_then(|f| match f {
+        "jpeg" | "png" | "webp" => Some(f.to_string()),
+        _ => None,
+    });
+    let quality: u8 = query.q.map(|q| q.clamp(1, 100)).unwrap_or(85);
+    let needs_transcode = target_w.is_some() || req_format.is_some();
 
     let etag = crate::proxy::compute_etag(&url, &referer, &state.proxy_secret);
 
@@ -378,9 +466,26 @@ async fn image_proxy(
         *last = std::time::Instant::now();
     }
 
-    let cache_key = match transform_hint {
-        Some(t) => format!("{}|t:{}", url, t),
-        None => url.clone(),
+    if let Some(range) = headers.get(header::RANGE) {
+        return proxy_range_request(&state, &url, &referer, &host, &etag, range).await;
+    }
+
+    let canonical = crate::proxy::canonical_proxy_key(&url);
+    let cache_key = {
+        let mut key = canonical;
+        if let Some(t) = transform_hint {
+            key = format!("{}|t:{}", key, t);
+        }
+        if needs_transcode {
+            key = format!(
+                "{}|w:{}|f:{}|q:{}",
+                key,
+                target_w.unwrap_or(0),
+                req_format.as_deref().unwrap_or(""),
+                quality
+            );
+        }
+        key
     };
 
     let fetched: Arc<(bytes::Bytes, String)> = state
@@ -410,7 +515,7 @@ async fn image_proxy(
                     req_headers.insert(
                         rquest::header::ACCEPT,
                         rquest::header::HeaderValue::from_static(
-                            "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                            "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
                         ),
                     );
 
@@ -524,12 +629,27 @@ async fn image_proxy(
                     buf.extend_from_slice(&chunk);
                 }
 
-                let (final_bytes, final_ct) = if let Some(seed) = scramble_seed {
+                let (processed_bytes, processed_ct) = if let Some(seed) = scramble_seed {
                     let descrambled = kani_core::image_transform::lcg_tile_descramble(&buf, seed)
                         .map_err(|e| AppError::InternalServerError(format!("Descramble failed: {e}")))?;
                     (bytes::Bytes::from(descrambled), "image/jpeg".to_string())
                 } else {
                     (buf.freeze(), ct_string)
+                };
+
+                let (final_bytes, final_ct) = if needs_transcode {
+                    let fmt = req_format.clone();
+                    let max_mem = proxy_max_mem_bytes();
+                    let input = processed_bytes.clone();
+                    let (b, ct_str) = tokio::task::spawn_blocking(move || {
+                        transcode_image_sync(&input, target_w, fmt.as_deref(), quality, max_mem)
+                    })
+                    .await
+                    .map_err(|e| AppError::InternalServerError(format!("Transcode panicked: {e}")))?
+                    .map_err(|e| AppError::Other(format!("Transcode failed: {e}")))?;
+                    (b, ct_str.to_string())
+                } else {
+                    (processed_bytes, processed_ct)
                 };
 
                 Ok::<_, AppError>(Arc::new((final_bytes, final_ct)))
@@ -540,6 +660,8 @@ async fn image_proxy(
             Ok(err) => err,
             Err(arc) => AppError::InternalServerError(arc.to_string()),
         })?;
+
+    record_bandwidth(&state.proxy_bandwidth, &host, fetched.0.len() as u64);
 
     let (body, ct_str): &(bytes::Bytes, String) = &fetched;
     let ct_value = header::HeaderValue::from_str(ct_str)
@@ -566,6 +688,77 @@ async fn image_proxy(
         .into_response())
 }
 
+async fn proxy_range_request(
+    state: &AppState,
+    url: &str,
+    referer: &str,
+    host: &str,
+    etag: &str,
+    range: &header::HeaderValue,
+) -> Result<axum::response::Response, AppError> {
+    let semaphore = host_semaphore(&state.proxy_semaphores, host).await;
+    let _permit = Arc::clone(&semaphore)
+        .acquire_owned()
+        .await
+        .map_err(|_| AppError::InternalServerError("Semaphore closed".into()))?;
+
+    let mut req_headers = rquest::header::HeaderMap::new();
+    req_headers.insert(
+        rquest::header::REFERER,
+        rquest::header::HeaderValue::from_str(referer).map_err(AppError::InvalidHeaderValue)?,
+    );
+    req_headers.insert(
+        rquest::header::ACCEPT,
+        rquest::header::HeaderValue::from_static(
+            "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        ),
+    );
+    req_headers.insert(
+        rquest::header::RANGE,
+        rquest::header::HeaderValue::from_bytes(range.as_bytes())
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?,
+    );
+
+    let resp = tokio::time::timeout(
+        std::time::Duration::from_secs(35),
+        state.proxy_client.safe_get(url, Some(req_headers)),
+    )
+    .await
+    .map_err(|_| AppError::Other("Upstream timed out on range request".into()))?
+    .map_err(|e| AppError::Other(format!("Upstream range fetch failed: {e}")))?;
+
+    let upstream_status = resp.status();
+    if !upstream_status.is_success() {
+        return Err(AppError::Other(format!(
+            "Upstream returned {} for range request",
+            upstream_status.as_u16()
+        )));
+    }
+
+    let is_partial = upstream_status == rquest::StatusCode::PARTIAL_CONTENT;
+    let out_headers = crate::proxy::build_range_response_headers(resp.headers(), etag);
+
+    const MAX_RANGE_BYTES: usize = 50 * 1024 * 1024;
+    let mut buf = bytes::BytesMut::new();
+    let mut resp = resp;
+    while let Ok(Some(chunk)) = resp.chunk().await {
+        if buf.len() + chunk.len() > MAX_RANGE_BYTES {
+            return Err(AppError::Other("Range response exceeded size limit".into()));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+
+    let body_bytes = buf.freeze();
+    record_bandwidth(&state.proxy_bandwidth, host, body_bytes.len() as u64);
+
+    Ok((
+        crate::proxy::range_response_status(is_partial),
+        out_headers,
+        Body::from(body_bytes),
+    )
+        .into_response())
+}
+
 #[derive(serde::Deserialize, Default)]
 pub(crate) struct ChapterListQuery {
     pub(crate) sort: Option<String>,
@@ -576,12 +769,104 @@ pub(crate) struct SaveToLibraryQuery {
     pub(crate) force: Option<bool>,
 }
 
+#[derive(serde::Deserialize, Default)]
+struct CoverQuery {
+    size: Option<String>,
+    h: Option<String>,
+}
+
 async fn serve_manga_cover(
     AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<MangaId>,
     headers: HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<CoverQuery>,
 ) -> Result<impl IntoResponse, AppError> {
+    const VALID_SIZES: &[&str] = &["xs", "sm", "md", "lg"];
+
+    if let Some(ref size) = query.size
+        && VALID_SIZES.contains(&size.as_str())
+    {
+        if let Some((thumb_path, format, cover_hash)) =
+            state.get_thumbnail_for_size(id, size).await?
+        {
+            let thumb_etag = format!("\"{cover_hash}-{size}-{format}\"");
+            let hash_matches = query
+                .h
+                .as_deref()
+                .map(|h| !h.is_empty() && cover_hash.starts_with(h))
+                .unwrap_or(false);
+
+            if let Some(inm) = headers.get(header::IF_NONE_MATCH)
+                && inm.as_bytes() == thumb_etag.as_bytes()
+            {
+                let mut resp_headers = axum::http::HeaderMap::new();
+                resp_headers.insert(
+                    header::ETAG,
+                    header::HeaderValue::from_str(&thumb_etag)
+                        .map_err(|e| AppError::InternalServerError(e.to_string()))?,
+                );
+                if hash_matches {
+                    resp_headers.insert(
+                        header::CACHE_CONTROL,
+                        header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+                    );
+                }
+                return Ok((
+                    StatusCode::NOT_MODIFIED,
+                    resp_headers,
+                    axum::body::Body::empty(),
+                )
+                    .into_response());
+            }
+
+            let bytes = tokio::fs::read(&thumb_path)
+                .await
+                .map_err(AppError::IoError)?;
+
+            let content_type: &'static str = match format.as_str() {
+                "webp" => "image/webp",
+                _ => "image/jpeg",
+            };
+
+            let mut resp_headers = axum::http::HeaderMap::new();
+            resp_headers.insert(
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static(content_type),
+            );
+            resp_headers.insert(
+                header::ETAG,
+                header::HeaderValue::from_str(&thumb_etag)
+                    .map_err(|e| AppError::InternalServerError(e.to_string()))?,
+            );
+            resp_headers.insert(
+                header::CONTENT_LENGTH,
+                header::HeaderValue::from(bytes.len()),
+            );
+            resp_headers.insert(
+                header::X_CONTENT_TYPE_OPTIONS,
+                header::HeaderValue::from_static("nosniff"),
+            );
+            if hash_matches {
+                resp_headers.insert(
+                    header::CACHE_CONTROL,
+                    header::HeaderValue::from_static("public, max-age=31536000, immutable"),
+                );
+            } else {
+                resp_headers.insert(
+                    header::CACHE_CONTROL,
+                    header::HeaderValue::from_static("public, max-age=3600"),
+                );
+            }
+
+            return Ok(
+                (StatusCode::OK, resp_headers, axum::body::Body::from(bytes)).into_response(),
+            );
+        }
+
+        state.spawn_thumbnail_generation(id);
+    }
+
     let full_path = state.get_manga_cover_path(id).await?;
 
     let metadata = tokio::fs::metadata(&full_path)

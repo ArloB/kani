@@ -19,7 +19,7 @@ impl AppService {
                ORDER BY pi.created_at DESC"#,
             user_id
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(rows)
     }
@@ -56,7 +56,7 @@ impl AppService {
             id,
             user_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound("Pending import not found".into()))?;
 
@@ -64,7 +64,7 @@ impl AppService {
             "SELECT id FROM sources WHERE id = ? AND deleted_at IS NULL",
             source_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .is_some();
 
@@ -137,7 +137,7 @@ impl AppService {
                WHERE m.is_orphaned = TRUE
                ORDER BY m.name"#
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(rows)
     }

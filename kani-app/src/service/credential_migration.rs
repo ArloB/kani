@@ -16,7 +16,7 @@ impl AppService {
 
         let email_config: String =
             sqlx::query_scalar("SELECT email_provider_config FROM settings WHERE id='singleton'")
-                .fetch_one(&self.db)
+                .fetch_one(&self.db_read)
                 .await
                 .unwrap_or_default();
 
@@ -25,7 +25,7 @@ impl AppService {
         }
 
         let secret_rows = sqlx::query("SELECT client_secret FROM tracker_app_config")
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await
             .unwrap_or_default();
 
@@ -41,7 +41,7 @@ impl AppService {
 
         let token_rows =
             sqlx::query("SELECT access_token, refresh_token FROM user_tracker_credentials")
-                .fetch_all(&self.db)
+                .fetch_all(&self.db_read)
                 .await
                 .unwrap_or_default();
 
@@ -76,7 +76,7 @@ impl AppService {
 
         let email_config: String =
             sqlx::query_scalar("SELECT email_provider_config FROM settings WHERE id='singleton'")
-                .fetch_one(&self.db)
+                .fetch_one(&self.db_read)
                 .await
                 .unwrap_or_default();
 
@@ -90,7 +90,7 @@ impl AppService {
         }
 
         let secret_rows = sqlx::query("SELECT tracker_id, client_secret FROM tracker_app_config")
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await?;
 
         let mut secrets_migrated = 0u32;
@@ -114,7 +114,7 @@ impl AppService {
         let token_rows = sqlx::query(
             "SELECT user_id, tracker_id, access_token, refresh_token FROM user_tracker_credentials",
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         for row in &token_rows {

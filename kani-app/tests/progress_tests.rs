@@ -12,6 +12,7 @@ async fn set_chapter_progress_creates_tracking_row() {
     let ch_id = insert_chapter(&svc.db, manga_id, "ch1", 1.0).await;
 
     svc.set_chapter_progress(user_id, ch_id, 5).await.unwrap();
+    svc.flush_progress_buffer().await;
 
     let (chapters, _, _) = svc
         .get_local_chapters(
@@ -47,6 +48,7 @@ async fn set_chapter_progress_higher_page_marks_read() {
         .unwrap();
 
     svc.set_chapter_progress(user_id, ch_id, 9).await.unwrap();
+    svc.flush_progress_buffer().await;
 
     let (chapters, _, _) = svc
         .get_local_chapters(

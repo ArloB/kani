@@ -310,6 +310,107 @@ async fn admin_delete_second_admin_succeeds() {
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
 }
 
+// ── Source circuit-breaker endpoints ─────────────────────────────────────────
+
+#[tokio::test]
+async fn list_source_circuits_returns_200_for_admin() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_get("/rest/admin/sources/circuits", &cookie))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_array(res).await;
+    assert!(body.is_empty(), "fresh instance has no circuit state");
+}
+
+#[tokio::test]
+async fn list_source_circuits_returns_401_without_auth() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+
+    let res = app
+        .oneshot(get_req("/rest/admin/sources/circuits"))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn list_source_circuits_returns_403_for_regular_user() {
+    let state = test_state().await;
+    let (username, password) = create_regular_user(&state, "bob").await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_get("/rest/admin/sources/circuits", &cookie))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn reset_source_circuit_returns_204_for_admin() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/admin/sources/circuits/example.com/reset",
+            &cookie,
+            serde_json::json!(null),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn reset_source_circuit_returns_401_without_auth() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+
+    let res = app
+        .oneshot(post_json(
+            "/rest/admin/sources/circuits/example.com/reset",
+            serde_json::json!(null),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn reset_source_circuit_returns_403_for_regular_user() {
+    let state = test_state().await;
+    let (username, password) = create_regular_user(&state, "carol").await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/admin/sources/circuits/example.com/reset",
+            &cookie,
+            serde_json::json!(null),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
 /// A user with `user:manage` permission (but without the admin role) must not
 /// be able to delete the only admin, as that would create a lockout.
 #[tokio::test]

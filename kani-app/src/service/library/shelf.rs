@@ -37,7 +37,7 @@ impl AppService {
             user_id,
             limit,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let mut items = Vec::new();

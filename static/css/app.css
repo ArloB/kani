@@ -450,6 +450,9 @@
   /* ── Manga card ── */
   .manga-card {
     @apply relative flex flex-col cursor-pointer;
+    contain: layout style paint;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 260px;
   }
   .manga-card a {
     @apply block;

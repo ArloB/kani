@@ -124,6 +124,7 @@ pub struct Manga {
     pub download_all_preferred_only: bool,
     pub notes: Option<String>,
     pub is_orphaned: bool,
+    pub cover_hash: Option<String>,
 }
 
 /// DB row fetched when listing chapters for a manga.

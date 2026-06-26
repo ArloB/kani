@@ -175,6 +175,58 @@ fn unique_ext_id() -> String {
     format!("test-ext-{n:x}")
 }
 
+async fn start_mock_server_etag(routes: Arc<HashMap<String, Vec<u8>>>) -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    const ETAG: &str = "\"v1\"";
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let routes = Arc::clone(&routes);
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                let path = request
+                    .lines()
+                    .next()
+                    .and_then(|l| l.split(' ').nth(1))
+                    .unwrap_or("/");
+                let has_if_none_match = request
+                    .lines()
+                    .any(|l| l.to_ascii_lowercase().starts_with("if-none-match:"));
+
+                let response = if path == "/index.json" && has_if_none_match {
+                    b"HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n".to_vec()
+                } else if let Some(body) = routes.get(path) {
+                    let header = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: {ETAG}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let mut resp = header.into_bytes();
+                    resp.extend_from_slice(body);
+                    resp
+                } else {
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_vec()
+                };
+
+                let _ = stream.write_all(&response).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+
+    port
+}
+
 // ── Blocked-repo tests (no HTTP) ──────────────────────────────────────────────
 
 #[tokio::test]
@@ -371,6 +423,38 @@ async fn refresh_nonexistent_repo_returns_error() {
     let svc = test_service().await;
     let result = svc.refresh_repo(99999, None).await;
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn refresh_repo_304_preserves_index_cache_updates_timestamp() {
+    let repo = TestRepo::new(&unique_ext_id());
+    let port = start_mock_server_etag(repo.build_routes("Cached Repo")).await;
+    let url = format!("http://127.0.0.1:{port}");
+    let fp = fingerprint(&repo.maintainer_key);
+
+    let svc = test_service().await;
+    let RepoAddResult::Added { id, .. } = svc.add_repo(&url, Some(&fp), None).await.unwrap() else {
+        panic!("expected Added");
+    };
+
+    // First refresh: cond_cache is empty → no If-None-Match → 200 → primes cond_cache.
+    svc.refresh_repo(id, None).await.unwrap();
+    let after_first = svc.get_repo(id).await.unwrap();
+    let index_cache_after_first = after_first.index_cache.clone().unwrap();
+
+    // Second refresh: cond_cache has ETag → sends If-None-Match → server returns 304.
+    svc.refresh_repo(id, None).await.unwrap();
+    let after_second = svc.get_repo(id).await.unwrap();
+
+    assert_eq!(
+        after_second.index_cache.as_deref(),
+        Some(index_cache_after_first.as_str()),
+        "304 must not overwrite index_cache"
+    );
+    assert!(
+        after_second.last_refreshed_at.is_some(),
+        "304 must still update last_refreshed_at"
+    );
 }
 
 // ── Install ───────────────────────────────────────────────────────────────────

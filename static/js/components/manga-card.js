@@ -16,18 +16,19 @@ import { iconEllipsisVertical } from '../icons.js';
  *   href: string,
  *   badge?: string | null,
  *   extraClass?: string,
+ *   eager?: boolean,
  *   onCardClick?: ((manga: MangaCardData) => void) | null,
  *   onMenuClick?: ((manga: MangaCardData, btnEl: HTMLElement) => void) | null,
  * }} props
  * @returns {HTMLElement}
  */
-export function createMangaCard({ manga, href, badge = null, extraClass = '', onCardClick = null, onMenuClick = null }) {
+export function createMangaCard({ manga, href, badge = null, extraClass = '', eager = false, onCardClick = null, onMenuClick = null }) {
   const card = document.createElement('div');
   card.className = ['manga-card', extraClass].filter(Boolean).join(' ');
   card.dataset.mangaId = String(manga.id);
 
   const coverUrl = manga.cover_image_url ?? (manga.source_id != null
-    ? getMangaCoverUrl(manga.id)
+    ? getMangaCoverUrl(manga.id, 'sm')
     : null);
   const link = document.createElement('a');
   link.href = href;
@@ -35,7 +36,12 @@ export function createMangaCard({ manga, href, badge = null, extraClass = '', on
   const coverWrap = document.createElement('div');
   coverWrap.className = 'relative w-full overflow-hidden rounded-sm bg-surface-2';
   coverWrap.style.aspectRatio = '2/3';
-  coverWrap.appendChild(createCoverImage({ url: coverUrl, alt: manga.title }));
+  coverWrap.appendChild(createCoverImage({
+    url: coverUrl,
+    alt: manga.title,
+    loading: eager ? 'eager' : 'lazy',
+    fetchpriority: eager ? 'high' : 'auto',
+  }));
 
   const titleEl = document.createElement('p');
   titleEl.className = 'title';
@@ -176,19 +182,22 @@ export function setMangaCardDownloadProgress(mangaId, pct, root = document) {
  *   getHref: (manga: MangaCardData) => string,
  *   getBadge?: (manga: MangaCardData) => string | null,
  *   large?: boolean,
+ *   eagerCount?: number,
  *   onCardClick?: ((manga: MangaCardData) => void) | null,
  *   onMenuClick?: ((manga: MangaCardData, btnEl: HTMLElement) => void) | null,
  * }} props
  */
-export function renderMangaGrid(container, { items, getHref, getBadge, large = false, onCardClick = null, onMenuClick = null }) {
+export function renderMangaGrid(container, { items, getHref, getBadge, large = false, onCardClick = null, onMenuClick = null, eagerCount = 16 }) {
   const grid = document.createElement('div');
   grid.className = large ? 'manga-grid manga-grid--large' : 'manga-grid';
 
-  for (const manga of items) {
+  for (let i = 0; i < items.length; i++) {
+    const manga = items[i];
     const card = createMangaCard({
       manga,
       href: getHref(manga),
       badge: getBadge ? getBadge(manga) : null,
+      eager: i < eagerCount,
       onCardClick: onCardClick ? () => onCardClick(manga) : null,
       onMenuClick: onMenuClick ? (m, btn) => onMenuClick(m, btn) : null,
     });

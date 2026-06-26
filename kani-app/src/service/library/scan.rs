@@ -71,10 +71,19 @@ impl AppService {
         tx.commit().await?;
 
         if we_inserted {
+            self.update_manga_fts(manga_row_id)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!("FTS update failed for manga {manga_row_id}: {e}");
+                });
+            self.cache.invalidate_library();
+        }
+
+        if we_inserted {
             if let Some(ref url) = manga.cover_url {
                 let base_url =
                     sqlx::query_scalar!("SELECT base_url FROM sources WHERE id = ?", source_id)
-                        .fetch_optional(&self.db)
+                        .fetch_optional(&self.db_read)
                         .await?
                         .unwrap_or_default();
 
@@ -215,7 +224,7 @@ impl AppService {
             WHERE m.id = ?",
             manga_row_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Manga {manga_row_id} not found")))?;
 
@@ -225,7 +234,7 @@ impl AppService {
             "SELECT * FROM manga WHERE id = ?",
             manga_row_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Manga {manga_row_id} not found")))?;
 
@@ -336,6 +345,13 @@ impl AppService {
 
         tx.commit().await?;
 
+        self.update_manga_fts(manga_row_id)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("FTS update failed for manga {manga_row_id}: {e}");
+            });
+        self.cache.invalidate_library();
+
         let cover_overridden_now = if opts.clear_overrides && opts.fields.cover {
             false
         } else {
@@ -426,7 +442,7 @@ impl AppService {
             "SELECT source_id, source_manga_id FROM manga WHERE id = ?",
             manga_row_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Manga {manga_row_id} not found")))?;
 
@@ -489,7 +505,7 @@ impl AppService {
         if !new_chapter_ids.is_empty() {
             let manga_name =
                 sqlx::query_scalar!("SELECT name FROM manga WHERE id = ?", manga_row_id)
-                    .fetch_optional(&self.db)
+                    .fetch_optional(&self.db_read)
                     .await
                     .unwrap_or(None)
                     .unwrap_or_default();
@@ -505,7 +521,7 @@ impl AppService {
                 "SELECT volume, chapter_number, name FROM chapters WHERE id IN (SELECT value FROM json_each(?))",
                 ids_json
             )
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await
             .unwrap_or_default();
             let chapter_names: Vec<String> = chapter_rows
@@ -535,7 +551,7 @@ impl AppService {
         }
 
         let ids: Vec<(MangaId, String)> = sqlx::query!("SELECT id, name FROM manga ORDER BY id")
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await?
             .into_iter()
             .map(|r| (r.id.into(), r.name))
@@ -664,7 +680,7 @@ impl AppService {
     /// Returns immediately with the count of manga queued.
     pub async fn scan_all_manga(&self) -> Result<usize> {
         let rows: Vec<(MangaId, String)> = sqlx::query!("SELECT id, name FROM manga ORDER BY id")
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await?
             .into_iter()
             .map(|r| (r.id.into(), r.name))

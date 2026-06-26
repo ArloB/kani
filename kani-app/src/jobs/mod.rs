@@ -2,6 +2,7 @@ pub mod circuit_breaker;
 pub mod download;
 pub mod error;
 pub mod framework;
+pub mod maintenance;
 pub mod manager;
 
 pub use error::{DownloadErrorKind, JobError, RetryPolicy};

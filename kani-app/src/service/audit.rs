@@ -78,7 +78,7 @@ impl AppService {
 
         let mut rows: Vec<AuditEntry> = qb
             .build_query_as::<AuditEntry>()
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await?;
 
         let has_next = rows.len() > page_size as usize;

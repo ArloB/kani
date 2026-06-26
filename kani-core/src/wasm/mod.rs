@@ -1,6 +1,7 @@
 //! WASM runtime and host ABI for extensions.
 
 pub mod abi;
+pub mod cache;
 
 #[cfg(test)]
 mod tests;
@@ -304,6 +305,7 @@ impl Default for HostState {
 pub struct WasmRuntime {
     engine: Engine,
     linker: Linker<HostState>,
+    module_cache: Option<std::sync::Mutex<cache::WasmModuleCache>>,
 }
 
 impl WasmRuntime {
@@ -318,12 +320,31 @@ impl WasmRuntime {
 
         config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(pool));
 
+        Self::new_with_config(config)
+    }
+
+    pub fn new_on_demand() -> Result<Self> {
+        let mut config = Config::new();
+        config.async_support(true);
+        config.wasm_component_model(true);
+        config.epoch_interruption(true);
+
+        Self::new_with_config(config)
+    }
+
+    fn new_with_config(config: Config) -> Result<Self> {
         let engine = Engine::new(&config)?;
         let mut linker = Linker::new(&engine);
 
         KaniExtension::add_to_linker::<_, HasSelf<HostState>>(&mut linker, |state| state)?;
 
-        Ok(Self { engine, linker })
+        let module_cache = cache::WasmModuleCache::from_env().map(std::sync::Mutex::new);
+
+        Ok(Self {
+            engine,
+            linker,
+            module_cache,
+        })
     }
 
     /// Returns a reference to the engine.
@@ -331,10 +352,39 @@ impl WasmRuntime {
         &self.engine
     }
 
-    /// Compiles a WASM component from bytes.
+    /// Compiles a WASM component from bytes, consulting the on-disk module cache first.
     pub fn compile_component(&self, bytes: &[u8]) -> Result<Component> {
+        let sha256 = cache::WasmModuleCache::sha256_hex(bytes);
+
+        if let Some(mc) = &self.module_cache {
+            let cached = mc
+                .lock()
+                .map_err(|_| {
+                    crate::error::Error::Internal("wasm module cache lock poisoned".into())
+                })?
+                .try_get(&self.engine, &sha256)?;
+            if let Some(c) = cached {
+                return Ok(c);
+            }
+        }
+
         let component = Component::new(&self.engine, bytes)?;
+
+        if let Some(mc) = &self.module_cache
+            && let Ok(mut guard) = mc.lock()
+        {
+            guard.insert(&sha256, component.clone());
+        }
+
         Ok(component)
+    }
+
+    pub fn prune_module_cache(&self, live_hashes: &std::collections::HashSet<String>) {
+        if let Some(mc) = &self.module_cache
+            && let Ok(guard) = mc.lock()
+        {
+            guard.prune(live_hashes);
+        }
     }
 
     /// Creates a new store with fresh host state.

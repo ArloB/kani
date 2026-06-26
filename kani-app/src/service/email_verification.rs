@@ -11,7 +11,7 @@ impl AppService {
             "SELECT username, email, email_verified_at FROM users WHERE id = ?",
             user_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound("User not found".into()))?;
 
@@ -59,7 +59,7 @@ impl AppService {
              WHERE token_hash = ? AND used_at IS NULL AND expires_at > CURRENT_TIMESTAMP",
             hash
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::Validation("Token is invalid or has expired.".into()))?;
 
@@ -91,7 +91,7 @@ impl AppService {
              WHERE user_id = ? AND created_at > datetime('now', '-1 hour')",
             user_id
         )
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await?;
 
         if recent >= 3 {
@@ -108,7 +108,7 @@ impl AppService {
         let svc = self.clone();
         tokio::spawn(async move {
             let user = sqlx::query!("SELECT username, email FROM users WHERE id = ?", user_id)
-                .fetch_optional(&svc.db)
+                .fetch_optional(&svc.db_read)
                 .await;
             if let Ok(Some(u)) = user {
                 let (subject, html) = email_templates::welcome_email(&u.username);

@@ -72,6 +72,12 @@ pub struct ProxyQuery {
     pub token: String,
     #[garde(skip)]
     pub transform: Option<String>,
+    #[garde(skip)]
+    pub w: Option<u32>,
+    #[garde(skip)]
+    pub format: Option<String>,
+    #[garde(skip)]
+    pub q: Option<u8>,
 }
 
 #[derive(sqlx::FromRow)]

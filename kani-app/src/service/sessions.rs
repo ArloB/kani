@@ -55,7 +55,7 @@ impl AppService {
              ORDER BY last_seen_at DESC",
         )
         .bind(user_id)
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let records = rows
@@ -113,7 +113,7 @@ impl AppService {
         let table_exists: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='user_totp'",
         )
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await
         .unwrap_or(0);
 
@@ -125,7 +125,7 @@ impl AppService {
             "SELECT COUNT(*) FROM user_totp WHERE user_id = ? AND verified_at IS NOT NULL",
         )
         .bind(user_id)
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await
         .unwrap_or(0);
 
@@ -139,7 +139,7 @@ impl AppService {
             "SELECT COUNT(*) FROM user_sessions WHERE id = ? AND revoked_at IS NULL",
         )
         .bind(session_id)
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await
         .unwrap_or(0)
             > 0

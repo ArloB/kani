@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use kani_core::http::SmartResponse;
+
 use crate::{
     events::AppEvent,
     models::{BlockedRepo, RepoRow},
@@ -62,7 +64,7 @@ impl AppService {
             RepoRow,
             r#"SELECT id as "id!", url, name, maintainer_key, trusted_level, last_refreshed_at, index_cache, created_at FROM repo_trust ORDER BY name"#
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(rows)
     }
@@ -73,7 +75,7 @@ impl AppService {
             r#"SELECT id as "id!", url, name, maintainer_key, trusted_level, last_refreshed_at, index_cache, created_at FROM repo_trust WHERE id = ?"#,
             id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Repository {id} not found")))
     }
@@ -94,7 +96,7 @@ impl AppService {
             r#"SELECT id as "id!", maintainer_key FROM repo_trust WHERE url = ?"#,
             url
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
 
         if let Some(row) = existing {
@@ -164,7 +166,69 @@ impl AppService {
         let repo = self.get_repo(id).await?;
         self.check_repo_blocked(&repo.url).await?;
 
-        let (index, _) = self.fetch_and_verify_index(&repo.url).await?;
+        let base = repo.url.trim_end_matches('/');
+        let index_url = format!("{base}/index.json");
+
+        let index_resp = self
+            .proxy_client
+            .safe_get_conditional(&index_url, None)
+            .await
+            .map_err(|e| ServiceError::Internal(format!("Failed to fetch index.json: {e}")))?;
+
+        let index = if matches!(index_resp, SmartResponse::NotModified { .. }) {
+            sqlx::query!(
+                "UPDATE repo_trust SET last_refreshed_at = datetime('now') WHERE id = ?",
+                id
+            )
+            .execute(&self.db)
+            .await?;
+            parse_index_cache(&repo)?
+        } else {
+            let index_bytes = index_resp
+                .bytes_limited(MAX_INDEX_BYTES)
+                .await
+                .map_err(|e| ServiceError::Internal(format!("Failed to read index.json: {e}")))?
+                .to_vec();
+            let parsed: RepoIndex = serde_json::from_slice(&index_bytes)
+                .map_err(|e| ServiceError::Validation(format!("Invalid index.json: {e}")))?;
+
+            let sig_url = format!("{base}/index.json.sig");
+            let sig_raw = self
+                .proxy_client
+                .safe_get(&sig_url, None)
+                .await
+                .map_err(|e| {
+                    ServiceError::Internal(format!("Failed to fetch index.json.sig: {e}"))
+                })?
+                .bytes_limited(512)
+                .await
+                .map_err(|e| {
+                    ServiceError::Internal(format!("Failed to read index.json.sig: {e}"))
+                })?;
+            let sig_b64 = std::str::from_utf8(&sig_raw)
+                .map_err(|_| {
+                    ServiceError::Validation("index.json.sig is not valid UTF-8".to_string())
+                })?
+                .trim()
+                .to_string();
+
+            signing::verify_artifact(&index_bytes, &parsed.maintainer_key, &sig_b64)
+                .map_err(|e| ServiceError::Validation(format!("Index signature invalid: {e}")))?;
+
+            let index_json = serde_json::to_string(&parsed)
+                .map_err(|e| ServiceError::Internal(e.to_string()))?;
+            sqlx::query!(
+                "UPDATE repo_trust SET name = ?, last_refreshed_at = datetime('now'), \
+                 index_cache = ? WHERE id = ?",
+                parsed.name,
+                index_json,
+                id
+            )
+            .execute(&self.db)
+            .await?;
+
+            parsed
+        };
 
         if index.maintainer_key != repo.maintainer_key {
             return Err(ServiceError::Validation(
@@ -172,24 +236,11 @@ impl AppService {
             ));
         }
 
-        let name = index.name.clone();
-        let index_json =
-            serde_json::to_string(&index).map_err(|e| ServiceError::Internal(e.to_string()))?;
-        sqlx::query!(
-            "UPDATE repo_trust SET name = ?, last_refreshed_at = datetime('now'), \
-             index_cache = ? WHERE id = ?",
-            name,
-            index_json,
-            id
-        )
-        .execute(&self.db)
-        .await?;
-
         self.audit(user_id, "repo.refresh", Some(&repo.url), None)
             .await;
         let _ = self.refresh_tx.send(AppEvent::RepoRefreshed {
             repo_id: id,
-            repo_name: name,
+            repo_name: index.name.clone(),
         });
 
         for entry in &index.extensions {
@@ -197,7 +248,7 @@ impl AppService {
                 "SELECT id as \"id!\", version FROM sources WHERE name = ? AND deleted_at IS NULL",
                 entry.id
             )
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?;
             if let Some(row) = installed
                 && is_newer_version(&entry.version, &row.version)
@@ -257,7 +308,7 @@ impl AppService {
             BlockedRepo,
             r#"SELECT id as "id!", url, reason, created_at FROM blocked_repos ORDER BY url"#
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
         Ok(rows)
     }
@@ -300,7 +351,7 @@ impl AppService {
         user_id: Option<crate::ids::UserId>,
     ) -> Result<()> {
         let url = sqlx::query_scalar!(r#"SELECT url FROM blocked_repos WHERE id = ?"#, id)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Blocked repo {id} not found")))?;
         sqlx::query!("DELETE FROM blocked_repos WHERE id = ?", id)
@@ -315,7 +366,7 @@ impl AppService {
             "SELECT COUNT(*) FROM repo_trust WHERE url = ? AND trusted_level = 'official'",
             url
         )
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await?;
         if existing > 0 {
             return Ok(());
@@ -353,7 +404,7 @@ impl AppService {
 
     async fn check_repo_blocked(&self, url: &str) -> Result<()> {
         let blocked = sqlx::query_scalar!("SELECT reason FROM blocked_repos WHERE url = ?", url)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?;
         if let Some(reason) = blocked {
             return Err(ServiceError::Forbidden(format!(
@@ -657,7 +708,7 @@ impl AppService {
         }
 
         let existing = sqlx::query_scalar!("SELECT id FROM sources WHERE name = ?", ext.id)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?;
 
         if let Some(id) = existing {
@@ -727,7 +778,7 @@ impl AppService {
         }
 
         let existing = sqlx::query_scalar!("SELECT id FROM sources WHERE name = ?", meta.id)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?;
 
         let id = if let Some(id) = existing {

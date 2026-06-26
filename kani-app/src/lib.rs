@@ -8,6 +8,7 @@ pub mod cache;
 pub mod error;
 pub mod events;
 pub mod ids;
+pub mod images;
 pub mod install_gating;
 pub mod jobs;
 pub mod models;

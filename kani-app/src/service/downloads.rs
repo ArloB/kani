@@ -30,7 +30,7 @@ impl AppService {
                  FROM chapters c JOIN manga m ON c.manga_id = m.id WHERE c.id = ?",
                 chapter_id
             )
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Chapter {chapter_id} not found")))?;
 
@@ -65,7 +65,7 @@ impl AppService {
             "SELECT download_error FROM chapters WHERE id = ?",
             chapter_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Chapter {chapter_id} not found")))?;
 
@@ -85,7 +85,7 @@ impl AppService {
              FROM chapters WHERE manga_id = ? AND is_orphaned = 0",
             manga_id
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let mut downloaded = 0i64;
@@ -127,7 +127,7 @@ impl AppService {
             "SELECT source_id, name, download_all_preferred_only FROM manga WHERE id = ?",
             manga_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Manga {manga_id} not found")))?;
 
@@ -152,7 +152,7 @@ impl AppService {
 
         let is_orphaned: bool =
             sqlx::query_scalar!("SELECT is_orphaned FROM chapters WHERE id = ?", chapter_id)
-                .fetch_one(&self.db)
+                .fetch_one(&self.db_read)
                 .await?;
 
         if is_orphaned {
@@ -190,7 +190,7 @@ impl AppService {
                 "SELECT id FROM jobs WHERE job_type = ? AND status IN ('pending', 'running')",
             )
             .bind(type_str)
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await
             .unwrap_or_default();
 
@@ -209,7 +209,7 @@ impl AppService {
         )
         .bind(json_path)
         .bind(value)
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await
         .unwrap_or_default();
 
@@ -227,7 +227,7 @@ impl AppService {
         )
         .bind(job_type)
         .bind(manga_id)
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await
         .unwrap_or_default();
 
@@ -260,7 +260,7 @@ impl AppService {
             WHERE c.id = ?",
             chapter_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| {
             ServiceError::NotFound(format!(
@@ -332,7 +332,7 @@ impl AppService {
             "SELECT id, manga_id, rule_type, value FROM download_rules WHERE manga_id=? ORDER BY priority, id",
         )
         .bind(manga_id)
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         Ok(rows
@@ -454,7 +454,7 @@ impl AppService {
             DownloadStatus::Complete,
             limit
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let items = rows

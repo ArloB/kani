@@ -5,17 +5,18 @@ const MAX_RETRIES = 3;
 
 /**
  * Creates a cover image element. Returns a DOM node ready to insert.
- * @param {{ url?: string | null, alt?: string }} props
+ * @param {{ url?: string | null, alt?: string, loading?: 'lazy' | 'eager', fetchpriority?: 'high' | 'low' | 'auto' }} props
  * @returns {HTMLElement}
  */
-export function createCoverImage({ url, alt = '' }) {
+export function createCoverImage({ url, alt = '', loading = 'lazy', fetchpriority = 'auto' }) {
   const wrap = document.createElement('div');
   wrap.className = 'block relative w-full h-full overflow-hidden bg-surface-2';
 
   if (url) {
     const img = document.createElement('img');
     img.alt = alt;
-    img.loading = 'lazy';
+    img.loading = loading;
+    img.fetchPriority = fetchpriority;
     img.decoding = 'async';
     img.className = 'absolute inset-0 w-full h-full object-cover';
 

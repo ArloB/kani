@@ -14,7 +14,7 @@ impl AppService {
             "SELECT id, username, email FROM users WHERE email = ? AND is_active = TRUE",
             email
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
 
         let Some(user) = user else {
@@ -31,7 +31,7 @@ impl AppService {
              WHERE user_id = ? AND created_at > datetime('now', '-1 hour') AND used_at IS NULL",
             user.id
         )
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await?;
 
         if recent_count >= 3 {
@@ -76,7 +76,7 @@ impl AppService {
                AND prt.expires_at > CURRENT_TIMESTAMP",
             hash
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
 
         let row =
@@ -120,7 +120,7 @@ impl AppService {
             "SELECT id, username, email FROM users WHERE id = ? AND is_active = TRUE",
             user_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound("User not found".into()))?;
 
@@ -168,7 +168,7 @@ impl AppService {
         let svc = self.clone();
         tokio::spawn(async move {
             let user = sqlx::query!("SELECT username, email FROM users WHERE id = ?", user_id)
-                .fetch_optional(&svc.db)
+                .fetch_optional(&svc.db_read)
                 .await;
             if let Ok(Some(u)) = user {
                 let (subject, html) = email_templates::password_changed_email(&u.username);

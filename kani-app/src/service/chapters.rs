@@ -69,7 +69,7 @@ impl AppService {
             .bind(filter_scanlator)
             .bind(limit)
             .bind(offset)
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await?;
 
         let has_next_page = rows.len() == limit as usize;
@@ -106,7 +106,7 @@ impl AppService {
             .bind(manga_id)
             .bind(scanlator_for_count.clone())
             .bind(scanlator_for_count)
-            .fetch_one(&self.db)
+            .fetch_one(&self.db_read)
             .await?;
         let ps = page_size as i64;
         let total_pages = Some(((total_count + ps - 1) / ps).max(0) as u32);
@@ -167,7 +167,7 @@ impl AppService {
             .bind(manga_id)
             .bind(filter_scanlator.clone())
             .bind(filter_scanlator)
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await?
             .into_iter()
             .map(ChapterId)
@@ -194,7 +194,7 @@ impl AppService {
              WHERE c.id = ?",
             chapter_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Chapter {chapter_id} not found")))?;
 
@@ -313,7 +313,7 @@ impl AppService {
             chapter_number,
             chapter_id,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let scanlator_alternatives = alt_rows
@@ -371,7 +371,7 @@ impl AppService {
         let id: Option<i64> = sqlx::query_scalar(&sql)
             .bind(manga_id)
             .bind(chapter_number)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?;
         Ok(id.map(ChapterId))
     }

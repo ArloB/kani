@@ -2,13 +2,14 @@ use crate::error::AppError;
 use crate::logging::LogHandle;
 use crate::rate_limit::AuthRateLimiter;
 use bytes::Bytes;
+use dashmap::DashMap;
 use kani_app::AppService;
 use kani_app::service::traits::{
     CategoryDomain, ChapterDomain, DownloadDomain, JobDomain, LibraryDomain, MangaDomain,
     ScanlatorDomain, SettingsDomain, SourceDomain, TrackerDomain,
 };
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 
 /// Helper that generates a random [u8; 32] for ephemeral per-process secrets.
 fn random_secret() -> [u8; 32] {
@@ -30,6 +31,7 @@ pub struct AppState {
     pub proxy_semaphores: moka::future::Cache<String, Arc<tokio::sync::Semaphore>>,
     pub proxy_throttle: moka::future::Cache<String, Arc<tokio::sync::Mutex<std::time::Instant>>>,
     pub proxy_coalesce: moka::future::Cache<String, Arc<(Bytes, String)>>,
+    pub proxy_bandwidth: Arc<DashMap<String, Arc<AtomicU64>>>,
     pub boot_id: String,
     /// Set to `true` by the restart handler; causes `main` to exit with code 42
     /// instead of 0, so an entrypoint wrapper can restart the process.
@@ -65,6 +67,7 @@ impl AppState {
                 .time_to_live(std::time::Duration::from_secs(30))
                 .weigher(|_k, v: &Arc<(Bytes, String)>| v.0.len().min(u32::MAX as usize) as u32)
                 .build(),
+            proxy_bandwidth: Arc::new(DashMap::new()),
             boot_id: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -179,6 +182,7 @@ impl AppState {
             proxy_semaphores: moka::future::Cache::builder().max_capacity(100).build(),
             proxy_throttle: moka::future::Cache::builder().max_capacity(100).build(),
             proxy_coalesce: moka::future::Cache::builder().max_capacity(100).build(),
+            proxy_bandwidth: Arc::new(DashMap::new()),
             boot_id: "test-boot-id".to_string(),
             restart_requested: Arc::new(AtomicBool::new(false)),
             log_handle,

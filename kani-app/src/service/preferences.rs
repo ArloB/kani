@@ -7,7 +7,7 @@ impl AppService {
             "SELECT key, value FROM source_preferences WHERE source_id=?",
             source_id
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?
         .into_iter()
         .map(|r| (r.key, r.value))
@@ -21,7 +21,7 @@ impl AppService {
             source_id,
             key
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await
         .map_err(Into::into)
     }
@@ -119,7 +119,7 @@ impl AppService {
                 .map_err(ServiceError::Core)?
         } else {
             let name = sqlx::query_scalar!("SELECT name FROM sources WHERE id=?", source_id)
-                .fetch_optional(&self.db)
+                .fetch_optional(&self.db_read)
                 .await?
                 .ok_or_else(|| ServiceError::NotFound(format!("Source {source_id} not found")))?;
             let wasm_path = self

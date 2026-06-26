@@ -31,6 +31,7 @@ serde_json.workspace = true
 postcard = { version = "1", features = ["alloc"] }
 quick-xml = { version = "0.39.2", features = ["serialize"] }
 base64 = "0.22"
+sha2.workspace = true
 
 # HTML parsing (for extensions)
 scraper = "0.25.0"

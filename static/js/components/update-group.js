@@ -27,7 +27,7 @@ export function createUpdateGroup({ group }) {
   el.className = 'flex flex-col gap-2 py-3 border-b border-border last:border-b-0';
 
   const mangaHref = `/manga/${group.manga_id}`;
-  const coverUrl = getMangaCoverUrl(group.manga_id);
+  const coverUrl = getMangaCoverUrl(group.manga_id, 'sm');
 
   // Header: cover thumb + manga title link
   const header = document.createElement('div');

@@ -102,6 +102,11 @@
         "name": "is_orphaned",
         "ordinal": 19,
         "type_info": "Bool"
+      },
+      {
+        "name": "cover_hash",
+        "ordinal": 20,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -127,7 +132,8 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
   "hash": "fb9a7e6792619e6c64865e767ecd8723841985cbbafccd94dd5907da2c7d55fa"

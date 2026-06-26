@@ -5,12 +5,16 @@ use axum_login::{
     AuthManagerLayerBuilder,
     tower_sessions::{SessionManagerLayer, cookie::SameSite},
 };
+use dashmap::DashMap;
 use http_body_util::BodyExt;
 use kani_app::AppService;
 use kani_web::{
     auth::AuthBackend, logging::RingBufferLayer, rate_limit::AuthRateLimiter, state::AppState,
 };
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64},
+};
 use tower::ServiceExt;
 use tower_sessions_sqlx_store::SqliteStore;
 
@@ -37,6 +41,7 @@ pub async fn test_state() -> AppState {
         proxy_semaphores: moka::future::Cache::builder().max_capacity(100).build(),
         proxy_throttle: moka::future::Cache::builder().max_capacity(100).build(),
         proxy_coalesce: moka::future::Cache::builder().max_capacity(100).build(),
+        proxy_bandwidth: Arc::new(DashMap::<String, Arc<AtomicU64>>::new()),
         boot_id: "test".to_string(),
         restart_requested: Arc::new(AtomicBool::new(false)),
         log_handle,

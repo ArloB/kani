@@ -42,18 +42,9 @@ macro_rules! int_id {
     };
 }
 
-int_id!(
-    /// Primary key of a row in the `manga` table.
-    MangaId
-);
-int_id!(
-    /// Primary key of a row in the `chapters` table.
-    ChapterId
-);
-int_id!(
-    /// Primary key of a row in the `users` table.
-    UserId
-);
+int_id!(MangaId);
+int_id!(ChapterId);
+int_id!(UserId);
 
 /// A source/extension identifier. `String`-backed to match the WIT interface.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, sqlx::Type)]

@@ -1,12 +1,41 @@
 use super::super::*;
 use crate::ids::UserId;
+use std::sync::Arc;
 
-// Library CRUD: fetch, list, filter, delete and local-metadata updates.
+#[allow(clippy::too_many_arguments)]
+fn compute_filter_hash(
+    search: &Option<String>,
+    status_filter: Option<i64>,
+    tag_filter: Option<i64>,
+    author_filter: Option<i64>,
+    artist_filter: Option<i64>,
+    category_filter: Option<i64>,
+    reading_status_filter: Option<i64>,
+    hide_no_unread: bool,
+    hide_completed_status: bool,
+    source_id: Option<i64>,
+    sort_order: &str,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    search.hash(&mut h);
+    status_filter.hash(&mut h);
+    tag_filter.hash(&mut h);
+    author_filter.hash(&mut h);
+    artist_filter.hash(&mut h);
+    category_filter.hash(&mut h);
+    reading_status_filter.hash(&mut h);
+    hide_no_unread.hash(&mut h);
+    hide_completed_status.hash(&mut h);
+    source_id.hash(&mut h);
+    sort_order.hash(&mut h);
+    h.finish()
+}
 
 impl AppService {
     pub async fn get_manga_by_id(&self, id: MangaId) -> Result<crate::models::Manga> {
         sqlx::query_as!(crate::models::Manga, "SELECT * FROM manga WHERE id = ?", id)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Manga {id} not found")))
     }
@@ -18,7 +47,7 @@ impl AppService {
         // sqlx macro can't bind ORDER BY; use query_as with a runtime-built SQL.
         let sql = format!("SELECT * FROM manga ORDER BY {order_sql} LIMIT 20 OFFSET {offset}");
         sqlx::query_as::<_, crate::models::Manga>(&sql)
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await
             .map_err(Into::into)
     }
@@ -27,7 +56,7 @@ impl AppService {
     /// its cover file. Succeeds even if the files are already absent.
     pub async fn delete_manga(&self, id: MangaId, user_id: UserId) -> Result<()> {
         let row = sqlx::query!("SELECT name, local_cover_path FROM manga WHERE id = ?", id)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Manga {id} not found")))?;
 
@@ -61,6 +90,7 @@ impl AppService {
             .execute(&self.db)
             .await?;
 
+        self.invalidate_library();
         self.audit(Some(user_id), "manga.delete", Some(&row.name), None)
             .await;
         self.webhook_service
@@ -93,7 +123,31 @@ impl AppService {
     ) -> Result<(Vec<crate::models::LibraryManga>, bool, Option<u32>)> {
         use kani_shared::types::MangaSortOrder;
 
+        let filter_hash = compute_filter_hash(
+            &search,
+            status_filter,
+            tag_filter,
+            author_filter,
+            artist_filter,
+            category_filter,
+            reading_status_filter,
+            hide_no_unread,
+            hide_completed_status,
+            source_id,
+            sort_by.to_sql_order(),
+        );
+
+        if let Some(cached) = self
+            .cache
+            .get_library_listing(user_id.0, filter_hash, page, page_size)
+            .await
+        {
+            let (rows, has_next, total) = (*cached).clone();
+            return Ok((rows, has_next, total));
+        }
+
         let offset = (page - 1).max(0) * page_size;
+        let use_fts = search.is_some();
 
         let need_umt = sort_by.needs_tracking_join()
             || reading_status_filter.is_some()
@@ -114,6 +168,10 @@ impl AppService {
              FROM manga m JOIN sources s ON m.source_id = s.id",
         );
 
+        if use_fts {
+            qb.push(" JOIN manga_fts ON manga_fts.manga_id = m.id");
+        }
+
         if need_umt {
             qb.push(" LEFT JOIN user_manga_tracking umt ON umt.manga_id = m.id AND umt.user_id = ");
             qb.push_bind(user_id);
@@ -122,9 +180,9 @@ impl AppService {
         qb.push(" WHERE 1=1");
 
         if let Some(s) = search {
-            qb.push(" AND LOWER(COALESCE(m.local_name, m.name)) LIKE '%' || LOWER(");
-            qb.push_bind(s);
-            qb.push(") || '%'");
+            let fts_term = format!("\"{}\"*", s.replace('"', "\"\""));
+            qb.push(" AND manga_fts MATCH ");
+            qb.push_bind(fts_term);
         }
         if let Some(v) = status_filter {
             qb.push(" AND m.status = ");
@@ -180,8 +238,9 @@ impl AppService {
 
         let limit = page_size + 1;
 
-        // ORDER BY — LastReadDesc requires a correlated subquery with a bind parameter.
-        if matches!(sort_by, MangaSortOrder::LastReadDesc) {
+        if use_fts {
+            qb.push(" ORDER BY manga_fts.rank");
+        } else if matches!(sort_by, MangaSortOrder::LastReadDesc) {
             qb.push(
                 " ORDER BY (SELECT MAX(uct2.last_read_at) \
                    FROM user_chapter_tracking uct2 \
@@ -199,7 +258,7 @@ impl AppService {
 
         let mut records = qb
             .build_query_as::<crate::models::LibraryManga>()
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await?;
 
         let has_next_page = records.len() == limit as usize;
@@ -207,6 +266,17 @@ impl AppService {
         records.truncate(page_size as usize);
         let ps = page_size as i64;
         let total_pages = Some(((total_count + ps - 1) / ps).max(0) as u32);
+
+        self.cache
+            .insert_library_listing(
+                user_id.0,
+                filter_hash,
+                page,
+                page_size,
+                Arc::new((records.clone(), has_next_page, total_pages)),
+            )
+            .await;
+
         Ok((records, has_next_page, total_pages))
     }
 
@@ -219,7 +289,7 @@ impl AppService {
         use kani_shared::types::NamedItem;
 
         let manga = sqlx::query_as!(crate::models::Manga, "SELECT * FROM manga WHERE id = ?", id)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Manga {id} not found")))?;
 
@@ -234,7 +304,7 @@ impl AppService {
              WHERE s.id = ?",
             manga.source_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound("Source not found".into()))?;
 
@@ -260,7 +330,7 @@ impl AppService {
                FROM manga m WHERE m.id = ?"#,
             id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?
         .ok_or_else(|| ServiceError::NotFound(format!("Manga {id} not found")))?;
 
@@ -345,7 +415,7 @@ impl AppService {
             manga_id,
             source_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await
         .map_err(Into::into)
     }
@@ -369,7 +439,7 @@ impl AppService {
              ORDER BY DATE(c.discovered_at) DESC, c.chapter_number DESC LIMIT 51 OFFSET ?",
             offset
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let has_next_page = items.len() > 50;
@@ -380,7 +450,7 @@ impl AppService {
         let total_count = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM chapters c WHERE c.discovered_at IS NOT NULL"
         )
-        .fetch_one(&self.db)
+        .fetch_one(&self.db_read)
         .await?;
         let total_pages = Some(((total_count as i64 + 49) / 50).max(0) as u32);
 
@@ -453,8 +523,35 @@ impl AppService {
             }
         }
 
+        self.update_manga_fts(manga_id).await.unwrap_or_else(|e| {
+            tracing::warn!("FTS update failed for manga {manga_id}: {e}");
+        });
+        self.invalidate_library();
         self.audit(Some(user_id), "manga.local_metadata.update", None, None)
             .await;
+        Ok(())
+    }
+
+    pub async fn update_manga_fts(&self, manga_id: MangaId) -> Result<()> {
+        sqlx::query("DELETE FROM manga_fts WHERE manga_id = ?")
+            .bind(manga_id)
+            .execute(&self.db)
+            .await?;
+        sqlx::query(
+            "INSERT INTO manga_fts(manga_id, name, local_name, description, authors) \
+             SELECT m.id, m.name, m.local_name, m.description, \
+                    COALESCE((SELECT GROUP_CONCAT(n, ' ') FROM (\
+                        SELECT p.name AS n FROM manga_people mp \
+                        JOIN people p ON mp.person_id = p.id \
+                        WHERE mp.manga_id = m.id \
+                        UNION ALL \
+                        SELECT name AS n FROM manga_local_authors WHERE manga_id = m.id\
+                    )), '') \
+             FROM manga m WHERE m.id = ?",
+        )
+        .bind(manga_id)
+        .execute(&self.db)
+        .await?;
         Ok(())
     }
 }

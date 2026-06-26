@@ -117,7 +117,7 @@ impl AppService {
             "SELECT DISTINCT manga_id FROM tracker_manga_mappings WHERE user_id = ?",
             user_id,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         for manga_id in manga_ids {

@@ -54,7 +54,7 @@ async fn example_instance() -> (
     kani_core::wasm::KaniExtension,
 ) {
     let bytes = load_wasm("kani-example").expect("kani-example.wasm must exist for this helper");
-    let rt = WasmRuntime::new(1).unwrap();
+    let rt = WasmRuntime::new_on_demand().unwrap();
     let component = rt.compile_component(&bytes).unwrap();
     let mut store = rt.create_store();
     store.set_epoch_deadline(EPOCH_TICKS);
@@ -67,7 +67,7 @@ async fn example_instance() -> (
 #[tokio::test]
 async fn example_wasm_compiles_and_instantiates() {
     let bytes = skip_if_missing!("kani-example");
-    let rt = WasmRuntime::new(1).unwrap();
+    let rt = WasmRuntime::new_on_demand().unwrap();
     let component = rt.compile_component(&bytes).unwrap();
     let mut store = rt.create_store();
     store.set_epoch_deadline(EPOCH_TICKS);
@@ -303,7 +303,7 @@ async fn example_instantiate_pre_and_call() {
         return;
     }
     let bytes = load_wasm("kani-example").unwrap();
-    let rt = WasmRuntime::new(2).unwrap();
+    let rt = WasmRuntime::new_on_demand().unwrap();
     let component = rt.compile_component(&bytes).unwrap();
     let pre = rt.instantiate_pre(&component).unwrap();
 

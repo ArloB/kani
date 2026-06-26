@@ -21,7 +21,7 @@ impl AppService {
             target_source_id,
             target_source_manga_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
 
         if conflict.is_some() {
@@ -44,7 +44,7 @@ impl AppService {
             "SELECT id, chapter_number, download_status FROM chapters WHERE manga_id = ?",
             manga_db_id
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let existing_pairs: Vec<(i64, f64)> = existing_chapters
@@ -98,7 +98,7 @@ impl AppService {
         keep_orphaned_downloads: bool,
     ) -> Result<MigrationResult> {
         let old_manga = sqlx::query!("SELECT name FROM manga WHERE id = ?", manga_db_id)
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Manga {manga_db_id} not found")))?;
         let old_manga_name = old_manga.name;
@@ -142,7 +142,7 @@ impl AppService {
                     "SELECT name, chapter_number, volume FROM chapters WHERE id = ?",
                     orphan_id
                 )
-                .fetch_optional(&self.db)
+                .fetch_optional(&self.db_read)
                 .await?;
 
                 if let Some(ch) = ch {

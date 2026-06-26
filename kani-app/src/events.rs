@@ -103,6 +103,11 @@ pub enum AppEvent {
         source_id: i64,
         source_name: String,
     },
+    LibraryInvalidated,
+    CircuitOpen {
+        host: String,
+        failure_count: u32,
+    },
     #[serde(untagged)]
     Refresh(RefreshProgressEvent),
 }

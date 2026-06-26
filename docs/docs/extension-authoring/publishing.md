@@ -1,6 +1,8 @@
 # Publishing & Distribution
 
-This guide covers creating a signed extension repository and publishing extensions to it. Users add your repository to their Kani instance and install extensions from it with one click. See [Extension Repositories](../admin/extension-repositories.md) for the admin side of this process.
+This guide covers creating a signed extension repository and publishing extensions to it. Users add your
+repository to their Kani instance and install extensions from it with one click. See
+[Extension Repositories](../admin/extension-repositories.md) for the admin side of this process.
 
 !!! note "Requires kani-cli from this repository"
     The `kani-cli keygen`, `publish`, and `repo` subcommands described in this guide
@@ -17,11 +19,12 @@ Two types of keypairs are involved:
 | **Maintainer key** | You, the repository owner | The repository `index.json` as a whole |
 | **Author key** | Individual extension authors | The extension artifact itself |
 
-These can be the same keypair if you are the sole author of all extensions in your repository. Use separate author keys for multi-author repositories to allow per-author revocation.
+These can be the same keypair if you are the sole author of all extensions in your repository. Use separate
+author keys for multi-author repositories to allow per-author revocation.
 
 ### Trust chain
 
-```
+```text
 Repo maintainer key  →  signs index.json
   Author key         →  signs extension artifact
     SHA-256          →  listed in index.json; verified against downloaded bytes
@@ -71,14 +74,15 @@ This creates `index.json` and the `extensions/` directory:
 !!! note
     `index.json.sig` is created by `publish --repo-sign-key` (step 3). `repo init` creates the skeleton only.
 
-```
+```text
 my-repo/
 ├── index.json         ← signed catalog; this is the URL you give users
 ├── index.json.sig     ← maintainer signature over index.json
 └── extensions/        ← artifact storage
 ```
 
-**Share your public key fingerprint** alongside the repository URL whenever you announce the repo. Users need it to complete the TOFU confirmation. You can print it at any time:
+**Share your public key fingerprint** alongside the repository URL whenever you announce the repo. Users need it
+to complete the TOFU confirmation. You can print it at any time:
 
 ```bash
 kani-cli repo show-fingerprint --key ./keys/maintainer.pub
@@ -116,7 +120,8 @@ kani-cli publish \
 
 #### Updating an extension version
 
-Re-run `publish` with the same extension ID and a bumped version. The old version remains under `extensions/<id>/<old-version>/`; Kani uses the highest semver-valid version listed in the index as the latest.
+Re-run `publish` with the same extension ID and a bumped version. The old version remains under
+`extensions/<id>/<old-version>/`; Kani uses the highest semver-valid version listed in the index as the latest.
 
 ## Repository file format
 
@@ -148,7 +153,7 @@ Re-run `publish` with the same extension ID and a bumped version. The old versio
 
 ### Artifact layout
 
-```
+```text
 extensions/
 └── my-source/
     └── 1.2.0/
@@ -156,11 +161,13 @@ extensions/
         └── extension.yaml.sig   ← Ed25519 signature (author key; raw bytes, base64-encoded)
 ```
 
-The URL of an artifact is `<repo_base_url>/extensions/<id>/<version>/extension.<format>`. Kani constructs this URL from the `index.json` entry; you do not configure it separately.
+The URL of an artifact is `<repo_base_url>/extensions/<id>/<version>/extension.<format>`. Kani constructs
+this URL from the `index.json` entry; you do not configure it separately.
 
 ### `index.json.sig`
 
-A raw Ed25519 signature over the UTF-8 bytes of `index.json`, base64-encoded, written to a separate file at `<repo_base_url>/index.json.sig`. Kani fetches both files and verifies the signature before trusting any entry.
+A raw Ed25519 signature over the UTF-8 bytes of `index.json`, base64-encoded, written to a separate file at
+`<repo_base_url>/index.json.sig`. Kani fetches both files and verifies the signature before trusting any entry.
 
 ## Verifying repository integrity
 
@@ -170,7 +177,8 @@ Before publishing or in CI, verify that all signatures and digests in the reposi
 kani-cli repo verify --repo-key ./keys/maintainer.pub
 ```
 
-Exits 0 on success, non-zero if any signature fails or a digest does not match the artifact on disk. Run this as a CI step to catch accidental file corruption or a missed re-sign after an edit.
+Exits 0 on success, non-zero if any signature fails or a digest does not match the artifact on disk. Run this
+as a CI step to catch accidental file corruption or a missed re-sign after an edit.
 
 ## Hosting
 
@@ -178,9 +186,11 @@ A Kani repository is a directory of static files. Any static file host works:
 
 - **GitHub Pages** — push the repo directory to a `gh-pages` branch or a `docs/` folder; set the base URL accordingly.
 - **GitHub Releases + raw.githubusercontent.com** — simpler; no branch management.
-- **Any CDN or object store** — S3, Cloudflare R2, Bunny, etc. Ensure `Content-Type: application/json` is served for `.json` files.
+- **Any CDN or object store** — S3, Cloudflare R2, Bunny, etc. Ensure `Content-Type: application/json` is served
+  for `.json` files.
 
-Kani requires `https://` for all repository URLs. HTTP-only hosts are rejected by the server before the TOFU flow begins.
+Kani requires `https://` for all repository URLs. HTTP-only hosts are rejected by the server before the TOFU
+flow begins.
 
 ### Example: GitHub Pages workflow
 
@@ -218,7 +228,9 @@ Store `maintainer.key` as an encrypted GitHub Actions secret. Commit only `maint
 
 ## Revoking an extension
 
-Remove the entry from `index.json` and re-sign. Existing installs are not automatically uninstalled — users must remove the source manually. Consider leaving a `deprecated: true` marker and `description` note before removing the entry entirely.
+Remove the entry from `index.json` and re-sign. Existing installs are not automatically uninstalled — users
+must remove the source manually. Consider leaving a `deprecated: true` marker and `description` note before
+removing the entry entirely.
 
 ## Key rotation
 
@@ -232,8 +244,10 @@ If the **maintainer key** is compromised:
 
 1. Generate a new keypair.
 2. Re-sign the entire repository index with the new maintainer key.
-3. Notify your users — they will see a **409 Key Changed** warning in Kani and must manually re-confirm the new fingerprint after verifying it out-of-band.
+3. Notify your users — they will see a **409 Key Changed** warning in Kani and must manually re-confirm the
+   new fingerprint after verifying it out-of-band.
 
 ## Writing an extension
 
-See [YAML schema](./yaml-schema.md) for the declarative format (recommended for new sources) and [DSL grammar](./dsl-grammar.md) for the expression language used in field selectors.
+See [YAML schema](./yaml-schema.md) for the declarative format (recommended for new sources) and
+[DSL grammar](./dsl-grammar.md) for the expression language used in field selectors.

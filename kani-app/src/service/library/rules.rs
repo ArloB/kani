@@ -15,7 +15,7 @@ impl AppService {
              FROM chapters WHERE manga_id = ?",
         )
         .bind(manga_id)
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let total = rows.len();
@@ -73,7 +73,7 @@ impl AppService {
                  WHERE manga_id = ?",
             manga_id
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await
         .unwrap_or_default();
 
@@ -102,7 +102,7 @@ impl AppService {
                 }
                 qb.push(")");
                 qb.build_query_as::<ChapterFilterRow>()
-                    .fetch_all(&self.db)
+                    .fetch_all(&self.db_read)
                     .await
                     .unwrap_or_default()
                     .into_iter()
@@ -131,7 +131,7 @@ impl AppService {
             "SELECT scanlator, priority, blocked FROM scanlator_preferences WHERE manga_id = ?",
             manga_id
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -173,7 +173,7 @@ impl AppService {
             }
             qb.push(")");
             qb.build_query_as::<(i64, f64, Option<String>)>()
-                .fetch_all(&self.db)
+                .fetch_all(&self.db_read)
                 .await
                 .unwrap_or_default()
                 .into_iter()

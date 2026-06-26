@@ -58,7 +58,7 @@ async fn make_instance(
     wasmtime::Store<kani_core::wasm::HostState>,
     kani_core::wasm::KaniExtension,
 ) {
-    let rt = WasmRuntime::new(1).unwrap();
+    let rt = WasmRuntime::new_on_demand().unwrap();
     let component = rt.compile_component(bytes).unwrap();
     let mut store = rt.create_store();
     store.set_epoch_deadline(EPOCH_TICKS);

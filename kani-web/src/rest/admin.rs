@@ -26,6 +26,9 @@ pub fn router() -> Router<AppState> {
             patch(admin_update_role).delete(admin_delete_role),
         )
         .route("/admin/maintenance", post(run_maintenance))
+        .route("/admin/db/stats", get(db_stats))
+        .route("/admin/db/analyze", post(db_analyze))
+        .route("/admin/db/vacuum", post(db_vacuum))
         .route("/admin/cache/clear", post(clear_cache))
         .route("/admin/scan/stop", post(stop_scan))
         .route("/admin/email/test", post(admin_send_test_email))
@@ -59,6 +62,12 @@ pub fn router() -> Router<AppState> {
         .route(
             "/admin/sources/blocked-repos/{id}",
             delete(delete_blocked_repo_handler),
+        )
+        .route("/admin/proxy/stats", get(proxy_bandwidth_stats))
+        .route("/admin/sources/circuits", get(list_source_circuits))
+        .route(
+            "/admin/sources/circuits/{host}/reset",
+            post(reset_source_circuit),
         )
 }
 
@@ -499,7 +508,7 @@ pub(crate) async fn admin_delete_role(
 #[utoipa::path(
     post, path = "/rest/admin/maintenance",
     responses(
-        (status = 200, description = "Database VACUUM run; returns before/after byte sizes"),
+        (status = 200, description = "Enqueues analyze and vacuum jobs; returns job IDs"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Admin permission required"),
     ),
@@ -510,10 +519,93 @@ pub(crate) async fn run_maintenance(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    let (before_bytes, after_bytes) = state.run_maintenance().await?;
+    let analyze_id = state
+        .job_manager
+        .submit(kani_app::jobs::maintenance::AnalyzeJob::new())
+        .await?;
+    let vacuum_id = state
+        .job_manager
+        .submit(kani_app::jobs::maintenance::VacuumJob::new())
+        .await?;
     Ok(Json(
-        json!({ "before_bytes": before_bytes, "after_bytes": after_bytes }),
+        json!({ "analyze_job_id": analyze_id, "vacuum_job_id": vacuum_id }),
     ))
+}
+
+#[utoipa::path(
+    get, path = "/rest/admin/db/stats",
+    responses(
+        (status = 200, description = "SQLite page/WAL size statistics"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn db_stats(
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let (page_count,): (i64,) = sqlx::query_as("PRAGMA page_count")
+        .fetch_one(&state.db)
+        .await
+        .map_err(kani_app::error::ServiceError::Db)?;
+    let (page_size,): (i64,) = sqlx::query_as("PRAGMA page_size")
+        .fetch_one(&state.db)
+        .await
+        .map_err(kani_app::error::ServiceError::Db)?;
+    let db_size_bytes = page_count * page_size;
+    let wal_size_bytes = std::fs::metadata("kani.db-wal")
+        .map(|m| m.len() as i64)
+        .unwrap_or(0);
+    Ok(Json(json!({
+        "db_size_bytes": db_size_bytes,
+        "wal_size_bytes": wal_size_bytes,
+        "page_count": page_count,
+        "page_size": page_size,
+    })))
+}
+
+#[utoipa::path(
+    post, path = "/rest/admin/db/analyze",
+    responses(
+        (status = 200, description = "Enqueues WAL checkpoint + ANALYZE job; returns job_id"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn db_analyze(
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let job_id = state
+        .job_manager
+        .submit(kani_app::jobs::maintenance::AnalyzeJob::new())
+        .await?;
+    Ok(Json(json!({ "job_id": job_id })))
+}
+
+#[utoipa::path(
+    post, path = "/rest/admin/db/vacuum",
+    responses(
+        (status = 200, description = "Enqueues VACUUM job; returns job_id"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn db_vacuum(
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let job_id = state
+        .job_manager
+        .submit(kani_app::jobs::maintenance::VacuumJob::new())
+        .await?;
+    Ok(Json(json!({ "job_id": job_id })))
 }
 
 #[utoipa::path(
@@ -1130,5 +1222,43 @@ pub(crate) async fn delete_blocked_repo_handler(
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
     state.delete_blocked_repo(id, Some(user.id)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub(crate) async fn proxy_bandwidth_stats(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::ServerManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    use std::sync::atomic::Ordering;
+
+    let mut entries: Vec<(String, u64)> = state
+        .proxy_bandwidth
+        .iter()
+        .map(|e| (e.key().clone(), e.value().load(Ordering::Relaxed)))
+        .collect();
+    entries.sort_unstable_by_key(|e| std::cmp::Reverse(e.1));
+    entries.truncate(10);
+
+    let result: Vec<serde_json::Value> = entries
+        .into_iter()
+        .map(|(host, bytes)| serde_json::json!({ "host": host, "bytes": bytes }))
+        .collect();
+
+    Ok(Json(result))
+}
+
+pub(crate) async fn list_source_circuits(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::ServerManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(state.smart_client.list_circuits()))
+}
+
+pub(crate) async fn reset_source_circuit(
+    AuthGuard(..): AuthGuard<crate::permissions::guards::ServerManage>,
+    State(state): State<AppState>,
+    Path(host): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    state.smart_client.reset_circuit(&host);
     Ok(StatusCode::NO_CONTENT)
 }

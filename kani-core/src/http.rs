@@ -78,6 +78,66 @@ pub struct CachedCredentials {
     challenge_url: Option<String>,
 }
 
+#[derive(Clone)]
+pub struct CircuitOpenedEvent {
+    pub host: String,
+    pub failure_count: u32,
+}
+
+struct CachedHeaders {
+    etag: Option<String>,
+    last_modified: Option<String>,
+}
+
+pub struct ConditionalGetCache(dashmap::DashMap<String, CachedHeaders>);
+
+impl Default for ConditionalGetCache {
+    fn default() -> Self {
+        Self(dashmap::DashMap::new())
+    }
+}
+
+impl ConditionalGetCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn apply_to(&self, url: &str, mut builder: rquest::RequestBuilder) -> rquest::RequestBuilder {
+        if let Some(cached) = self.0.get(url) {
+            if let Some(ref etag) = cached.etag {
+                if let Ok(v) = rquest::header::HeaderValue::from_str(etag) {
+                    builder = builder.header(rquest::header::IF_NONE_MATCH, v);
+                }
+            } else if let Some(ref lm) = cached.last_modified
+                && let Ok(v) = rquest::header::HeaderValue::from_str(lm)
+            {
+                builder = builder.header(rquest::header::IF_MODIFIED_SINCE, v);
+            }
+        }
+        builder
+    }
+
+    fn record(&self, url: &str, headers: &rquest::header::HeaderMap) {
+        let etag = headers
+            .get(rquest::header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let last_modified = headers
+            .get(rquest::header::LAST_MODIFIED)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        if etag.is_some() || last_modified.is_some() {
+            self.0.insert(
+                url.to_string(),
+                CachedHeaders {
+                    etag,
+                    last_modified,
+                },
+            );
+        }
+    }
+}
+
 pub enum SmartResponse {
     Normal(rquest::Response),
     Buffered {
@@ -86,6 +146,10 @@ pub enum SmartResponse {
         headers: rquest::header::HeaderMap,
         body: bytes::Bytes,
     },
+    NotModified {
+        url: rquest::Url,
+        headers: rquest::header::HeaderMap,
+    },
 }
 
 impl SmartResponse {
@@ -93,6 +157,7 @@ impl SmartResponse {
         match self {
             SmartResponse::Normal(r) => r.status(),
             SmartResponse::Buffered { status, .. } => *status,
+            SmartResponse::NotModified { .. } => rquest::StatusCode::NOT_MODIFIED,
         }
     }
 
@@ -100,6 +165,7 @@ impl SmartResponse {
         match self {
             SmartResponse::Normal(r) => r.url(),
             SmartResponse::Buffered { url, .. } => url,
+            SmartResponse::NotModified { url, .. } => url,
         }
     }
 
@@ -107,6 +173,7 @@ impl SmartResponse {
         match self {
             SmartResponse::Normal(r) => r.headers(),
             SmartResponse::Buffered { headers, .. } => headers,
+            SmartResponse::NotModified { headers, .. } => headers,
         }
     }
 
@@ -114,6 +181,7 @@ impl SmartResponse {
         match self {
             SmartResponse::Normal(r) => Ok(r.bytes().await?),
             SmartResponse::Buffered { body, .. } => Ok(body),
+            SmartResponse::NotModified { .. } => Ok(bytes::Bytes::new()),
         }
     }
 
@@ -121,6 +189,7 @@ impl SmartResponse {
         match self {
             SmartResponse::Normal(r) => Ok(r.text().await?),
             SmartResponse::Buffered { body, .. } => Ok(String::from_utf8_lossy(&body).to_string()),
+            SmartResponse::NotModified { .. } => Ok(String::new()),
         }
     }
 
@@ -134,6 +203,7 @@ impl SmartResponse {
                     Ok(Some(std::mem::take(body)))
                 }
             }
+            SmartResponse::NotModified { .. } => Ok(None),
         }
     }
 
@@ -164,6 +234,8 @@ pub struct SmartClient {
     pub solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub host_circuits: Arc<dashmap::DashMap<String, Arc<HostCircuit>>>,
     pub rate_states: Arc<dashmap::DashMap<String, Arc<RateState>>>,
+    pub circuit_event_tx: tokio::sync::broadcast::Sender<CircuitOpenedEvent>,
+    pub cond_cache: Arc<ConditionalGetCache>,
 }
 
 impl SmartClient {
@@ -178,6 +250,7 @@ impl SmartClient {
             .timeout(std::time::Duration::from_secs(35))
             .build()?;
 
+        let (circuit_event_tx, _) = tokio::sync::broadcast::channel(32);
         Ok(Self {
             client,
             credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
@@ -185,6 +258,8 @@ impl SmartClient {
             solving: Arc::new(dashmap::DashMap::new()),
             host_circuits: Arc::new(dashmap::DashMap::new()),
             rate_states: Arc::new(dashmap::DashMap::new()),
+            circuit_event_tx,
+            cond_cache: Arc::new(ConditionalGetCache::new()),
         })
     }
 
@@ -193,6 +268,7 @@ impl SmartClient {
         credentials: Arc<ArcSwap<HashMap<String, CachedCredentials>>>,
         solving: Arc<dashmap::DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
         host_circuits: Arc<dashmap::DashMap<String, Arc<HostCircuit>>>,
+        circuit_event_tx: tokio::sync::broadcast::Sender<CircuitOpenedEvent>,
     ) -> Result<Self> {
         let resolver = ValidatingResolver::new()?;
         let client = rquest::Client::builder()
@@ -211,6 +287,8 @@ impl SmartClient {
             solving,
             host_circuits,
             rate_states: Arc::new(dashmap::DashMap::new()),
+            circuit_event_tx,
+            cond_cache: Arc::new(ConditionalGetCache::new()),
         })
     }
 
@@ -268,15 +346,24 @@ impl SmartClient {
             .consecutive_failures
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if prev + 1 >= CIRCUIT_OPEN_THRESHOLD {
-            let until =
-                std::time::Instant::now() + std::time::Duration::from_secs(CIRCUIT_COOLDOWN_SECS);
-            *circuit.open_until.lock().expect("circuit mutex poisoned") = Some(until);
+            let now = std::time::Instant::now();
+            let until = now + std::time::Duration::from_secs(CIRCUIT_COOLDOWN_SECS);
+            let mut guard = circuit.open_until.lock().expect("circuit mutex poisoned");
+            let was_open = guard.map(|t| now < t).unwrap_or(false);
+            *guard = Some(until);
+            drop(guard);
             tracing::warn!(
                 "Circuit opened for {} after {} consecutive failures (cooldown {}s)",
                 domain,
                 prev + 1,
                 CIRCUIT_COOLDOWN_SECS,
             );
+            if !was_open {
+                let _ = self.circuit_event_tx.send(CircuitOpenedEvent {
+                    host: domain.to_string(),
+                    failure_count: prev + 1,
+                });
+            }
         }
     }
 
@@ -483,6 +570,24 @@ impl SmartClient {
         initial_url: &str,
         headers: Option<rquest::header::HeaderMap>,
     ) -> Result<SmartResponse> {
+        self.safe_get_impl(initial_url, headers, None).await
+    }
+
+    pub async fn safe_get_conditional(
+        &self,
+        initial_url: &str,
+        headers: Option<rquest::header::HeaderMap>,
+    ) -> Result<SmartResponse> {
+        self.safe_get_impl(initial_url, headers, Some(&self.cond_cache.clone()))
+            .await
+    }
+
+    async fn safe_get_impl(
+        &self,
+        initial_url: &str,
+        headers: Option<rquest::header::HeaderMap>,
+        cond_cache: Option<&ConditionalGetCache>,
+    ) -> Result<SmartResponse> {
         const MAX_REDIRECTS: usize = 5;
 
         let mut current_url = initial_url.to_string();
@@ -534,10 +639,13 @@ impl SmartClient {
 
         loop {
             let mut req_builder = self.client.get(&current_url);
-            if current_url == initial_url
-                && let Some(ref h) = headers
-            {
-                req_builder = req_builder.headers(h.clone());
+            if current_url == initial_url {
+                if let Some(cache) = cond_cache {
+                    req_builder = cache.apply_to(initial_url, req_builder);
+                }
+                if let Some(ref h) = headers {
+                    req_builder = req_builder.headers(h.clone());
+                }
             }
             if !solver_headers.is_empty() {
                 req_builder = req_builder.headers(solver_headers.clone());
@@ -578,6 +686,16 @@ impl SmartClient {
                 retry_count += 1;
                 tokio::time::sleep(delay).await;
                 continue;
+            }
+
+            if resp.status() == rquest::StatusCode::NOT_MODIFIED && cond_cache.is_some() {
+                self.record_success(&circuit_domain);
+                let url = resp.url().clone();
+                let response_headers = resp.headers().clone();
+                return Ok(SmartResponse::NotModified {
+                    url,
+                    headers: response_headers,
+                });
             }
 
             if resp.status().is_redirection() {
@@ -650,8 +768,54 @@ impl SmartClient {
                 solved = true;
             } else {
                 self.record_success(&circuit_domain);
+                if let Some(cache) = cond_cache {
+                    cache.record(initial_url, resp.headers());
+                }
                 return Ok(SmartResponse::Normal(resp));
             }
+        }
+    }
+
+    pub fn subscribe_circuit_events(&self) -> tokio::sync::broadcast::Receiver<CircuitOpenedEvent> {
+        self.circuit_event_tx.subscribe()
+    }
+
+    pub fn list_circuits(&self) -> Vec<serde_json::Value> {
+        let now = std::time::Instant::now();
+        self.host_circuits
+            .iter()
+            .map(|entry| {
+                let host = entry.key().clone();
+                let circuit = entry.value();
+                let failures = circuit
+                    .consecutive_failures
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let guard = circuit.open_until.lock().expect("circuit mutex poisoned");
+                let is_open = guard.map(|t| now < t).unwrap_or(false);
+                let open_for_secs = guard.and_then(|t| {
+                    if now < t {
+                        Some(t.saturating_duration_since(now).as_secs())
+                    } else {
+                        None
+                    }
+                });
+                drop(guard);
+                serde_json::json!({
+                    "host": host,
+                    "is_open": is_open,
+                    "consecutive_failures": failures,
+                    "open_for_secs": open_for_secs,
+                })
+            })
+            .collect()
+    }
+
+    pub fn reset_circuit(&self, host: &str) {
+        if let Some(circuit) = self.host_circuits.get(host) {
+            circuit
+                .consecutive_failures
+                .store(0, std::sync::atomic::Ordering::Relaxed);
+            *circuit.open_until.lock().expect("circuit mutex poisoned") = None;
         }
     }
 
@@ -1012,6 +1176,7 @@ impl SmartClient {
             .emulation(rquest_util::Emulation::Chrome130)
             .redirect(rquest::redirect::Policy::none())
             .build()?;
+        let (circuit_event_tx, _) = tokio::sync::broadcast::channel(8);
         Ok(Self {
             client,
             credentials: Arc::new(ArcSwap::from_pointee(HashMap::new())),
@@ -1019,6 +1184,8 @@ impl SmartClient {
             solving: Arc::new(dashmap::DashMap::new()),
             host_circuits: Arc::new(dashmap::DashMap::new()),
             rate_states: Arc::new(dashmap::DashMap::new()),
+            circuit_event_tx,
+            cond_cache: Arc::new(ConditionalGetCache::new()),
         })
     }
 }
@@ -1598,6 +1765,189 @@ mod tests {
         }
         assert_eq!(passed, 3, "only burst={} requests pass immediately", 3);
         assert_eq!(blocked, 3, "remaining requests are rate-limited");
+    }
+
+    // ── ConditionalGetCache ──────────────────────────────────────────────────
+
+    #[test]
+    fn cond_cache_records_etag_and_applies_if_none_match() {
+        let cache = ConditionalGetCache::new();
+        let url = "https://example.com/feed";
+        let mut headers = rquest::header::HeaderMap::new();
+        headers.insert(
+            rquest::header::ETAG,
+            rquest::header::HeaderValue::from_static("\"abc123\""),
+        );
+        cache.record(url, &headers);
+
+        let client = rquest::Client::builder()
+            .emulation(rquest_util::Emulation::Chrome130)
+            .build()
+            .unwrap();
+        let builder = client.get(url);
+        let req = cache.apply_to(url, builder).build().unwrap();
+        let val = req.headers().get(rquest::header::IF_NONE_MATCH).unwrap();
+        assert_eq!(val, "\"abc123\"");
+    }
+
+    #[test]
+    fn cond_cache_falls_back_to_last_modified() {
+        let cache = ConditionalGetCache::new();
+        let url = "https://example.com/page";
+        let mut headers = rquest::header::HeaderMap::new();
+        headers.insert(
+            rquest::header::LAST_MODIFIED,
+            rquest::header::HeaderValue::from_static("Wed, 01 Jan 2025 00:00:00 GMT"),
+        );
+        cache.record(url, &headers);
+
+        let client = rquest::Client::builder()
+            .emulation(rquest_util::Emulation::Chrome130)
+            .build()
+            .unwrap();
+        let builder = client.get(url);
+        let req = cache.apply_to(url, builder).build().unwrap();
+        assert!(req.headers().get(rquest::header::IF_NONE_MATCH).is_none());
+        let val = req
+            .headers()
+            .get(rquest::header::IF_MODIFIED_SINCE)
+            .unwrap();
+        assert_eq!(val, "Wed, 01 Jan 2025 00:00:00 GMT");
+    }
+
+    #[tokio::test]
+    async fn safe_get_conditional_records_etag_on_200() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/feed"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("etag", "\"v1\"")
+                    .set_body_string("data"),
+            )
+            .mount(&server)
+            .await;
+
+        let client = SmartClient::new_for_test().unwrap();
+        let resp = client
+            .safe_get_conditional(&format!("{}/feed", server.uri()), None)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), rquest::StatusCode::OK);
+
+        assert!(
+            client
+                .cond_cache
+                .0
+                .contains_key(&format!("{}/feed", server.uri())),
+            "etag should be recorded after 200"
+        );
+    }
+
+    #[tokio::test]
+    async fn safe_get_conditional_returns_not_modified_on_304() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/resource"))
+            .and(header("if-none-match", "\"v1\""))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&server)
+            .await;
+
+        let client = SmartClient::new_for_test().unwrap();
+        let url = format!("{}/resource", server.uri());
+
+        let mut seed_headers = rquest::header::HeaderMap::new();
+        seed_headers.insert(
+            rquest::header::ETAG,
+            rquest::header::HeaderValue::from_static("\"v1\""),
+        );
+        client.cond_cache.record(&url, &seed_headers);
+
+        let resp = client.safe_get_conditional(&url, None).await.unwrap();
+        assert!(
+            matches!(resp, SmartResponse::NotModified { .. }),
+            "304 with cond_cache must return NotModified"
+        );
+    }
+
+    #[tokio::test]
+    async fn safe_get_plain_ignores_304_from_cache() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/resource"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&server)
+            .await;
+
+        let client = SmartClient::new_for_test().unwrap();
+        let url = format!("{}/resource", server.uri());
+        let resp = client.safe_get(&url, None).await.unwrap();
+        assert_eq!(resp.status(), rquest::StatusCode::OK);
+        assert!(
+            !client.cond_cache.0.contains_key(&url),
+            "safe_get (non-conditional) must not populate cond_cache"
+        );
+    }
+
+    // ── circuit_opens_emits_event ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn circuit_open_emits_event_on_first_open() {
+        let client = SmartClient::new(None).unwrap();
+        let mut rx = client.subscribe_circuit_events();
+
+        for _ in 0..CIRCUIT_OPEN_THRESHOLD {
+            client.record_failure("example.com");
+        }
+
+        let ev = rx
+            .try_recv()
+            .expect("CircuitOpenedEvent should have been sent");
+        assert_eq!(ev.host, "example.com");
+        assert_eq!(ev.failure_count, CIRCUIT_OPEN_THRESHOLD);
+    }
+
+    #[tokio::test]
+    async fn circuit_open_does_not_re_emit_while_still_open() {
+        let client = SmartClient::new(None).unwrap();
+        let mut rx = client.subscribe_circuit_events();
+
+        for _ in 0..CIRCUIT_OPEN_THRESHOLD + 3 {
+            client.record_failure("example.com");
+        }
+
+        let mut count = 0;
+        while rx.try_recv().is_ok() {
+            count += 1;
+        }
+        assert_eq!(count, 1, "exactly one event emitted for the open edge");
+    }
+
+    #[tokio::test]
+    async fn reset_circuit_clears_open_state() {
+        let client = SmartClient::new(None).unwrap();
+        for _ in 0..CIRCUIT_OPEN_THRESHOLD {
+            client.record_failure("example.com");
+        }
+        assert!(client.is_circuit_open("example.com"));
+        client.reset_circuit("example.com");
+        assert!(!client.is_circuit_open("example.com"));
+    }
+
+    #[tokio::test]
+    async fn list_circuits_reflects_state() {
+        let client = SmartClient::new(None).unwrap();
+        for _ in 0..CIRCUIT_OPEN_THRESHOLD {
+            client.record_failure("example.com");
+        }
+        let circuits = client.list_circuits();
+        let entry = circuits
+            .iter()
+            .find(|v| v["host"] == "example.com")
+            .expect("example.com should appear in list");
+        assert_eq!(entry["is_open"], serde_json::json!(true));
+        assert!(entry["consecutive_failures"].as_u64().unwrap() >= CIRCUIT_OPEN_THRESHOLD as u64);
     }
 
     #[tokio::test]

@@ -7,7 +7,7 @@ impl AppService {
             kani_shared::types::Category,
             "SELECT id, name, sort_order FROM categories ORDER BY sort_order ASC, name ASC"
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await
         .map_err(Into::into)
     }
@@ -73,7 +73,7 @@ impl AppService {
              WHERE mc.manga_id=? ORDER BY c.sort_order ASC, c.name ASC",
             manga_id
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await
         .map_err(Into::into)
     }
@@ -97,6 +97,7 @@ impl AppService {
             .await?;
         }
         tx.commit().await?;
+        self.invalidate_library();
         Ok(())
     }
 }

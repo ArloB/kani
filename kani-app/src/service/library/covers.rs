@@ -143,6 +143,7 @@ impl AppService {
         let cover_path = covers_dir.join(&filename);
         let relative = format!("covers/{}", filename);
 
+        self.clear_thumbnails(manga_row_id).await;
         tokio::fs::write(&cover_path, &final_bytes).await?;
 
         sqlx::query!(
@@ -153,6 +154,7 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
+        self.spawn_thumbnail_generation(manga_row_id);
         Ok(())
     }
 
@@ -172,7 +174,7 @@ impl AppService {
                  AND m.cover_url IS NOT NULL AND m.cover_overridden = FALSE"#,
             manga_id
         )
-        .fetch_optional(&self.db)
+        .fetch_optional(&self.db_read)
         .await?;
 
         if let Some(row) = row {
@@ -198,7 +200,7 @@ impl AppService {
                  AND m.cover_url IS NOT NULL
                  AND m.cover_overridden = FALSE"#
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await
         {
             Ok(r) => r,
@@ -281,6 +283,7 @@ impl AppService {
         let cover_path = covers_dir.join(&filename);
         let relative = format!("covers/{filename}");
 
+        self.clear_thumbnails(manga_id).await;
         tokio::fs::write(&cover_path, &final_bytes).await?;
 
         sqlx::query!(
@@ -291,6 +294,8 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
+        self.spawn_thumbnail_generation(manga_id);
+        self.invalidate_library();
         self.audit(Some(user_id), "manga.cover.upload", None, None)
             .await;
         Ok(())
@@ -308,7 +313,7 @@ impl AppService {
 
         let current_rel =
             sqlx::query_scalar!("SELECT local_cover_path FROM manga WHERE id = ?", manga_id)
-                .fetch_optional(&self.db)
+                .fetch_optional(&self.db_read)
                 .await?
                 .flatten();
 
@@ -330,6 +335,8 @@ impl AppService {
             Err(_) => None,
         };
 
+        self.clear_thumbnails(manga_id).await;
+
         sqlx::query!(
             "UPDATE manga SET local_cover_path = ?, cover_overridden = FALSE WHERE id = ?",
             restored_path,
@@ -338,6 +345,10 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
+        if restored_path.is_some() {
+            self.spawn_thumbnail_generation(manga_id);
+        }
+        self.invalidate_library();
         self.audit(Some(user_id), "manga.cover.override_cleared", None, None)
             .await;
         Ok(())

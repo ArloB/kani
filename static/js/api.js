@@ -80,6 +80,47 @@ async function _req(method, path, opts = {}) {
   return _parseBody(res);
 }
 
+// ── SWR cache ────────────────────────────────────────────────────────────────
+
+/** @type {Map<string, { data: any, ts: number, revalidating: boolean }>} */
+const _swrCache = new Map();
+
+/**
+ * Stale-while-revalidate fetch helper. Returns cached data immediately if fresh
+ * enough, revalidates in the background when stale, or fetches synchronously on
+ * a cold miss.
+ * @template T
+ * @param {string} key
+ * @param {() => Promise<T>} fetcher
+ * @param {{ ttlMs?: number }} [opts]
+ * @returns {Promise<T>}
+ */
+export async function fetchSWR(key, fetcher, opts = {}) {
+  const ttl = opts.ttlMs ?? 30_000;
+  const entry = _swrCache.get(key);
+  const now = Date.now();
+  if (entry) {
+    if (now - entry.ts <= ttl) return entry.data;
+    if (!entry.revalidating) {
+      entry.revalidating = true;
+      fetcher().then(data => {
+        _swrCache.set(key, { data, ts: Date.now(), revalidating: false });
+      }).catch(() => {
+        const e = _swrCache.get(key);
+        if (e) e.revalidating = false;
+      });
+    }
+    return entry.data;
+  }
+  const data = await fetcher();
+  _swrCache.set(key, { data, ts: Date.now(), revalidating: false });
+  return data;
+}
+
+export function clearSWRCache() {
+  _swrCache.clear();
+}
+
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -104,6 +145,7 @@ export async function login(username, password) {
 }
 
 export async function logout() {
+  clearSWRCache();
   return _req('POST', '/auth/logout');
 }
 
@@ -115,6 +157,7 @@ export async function changePassword(currentPassword, newPassword) {
 }
 
 export async function logoutEverywhere() {
+  clearSWRCache();
   return _req('POST', '/auth/logout_everywhere');
 }
 
@@ -449,7 +492,8 @@ export async function togglePreferenceSelect(sid, key, item, selected) {
  * @param {AbortSignal} [signal]
  */
 export async function getLibrary(params, signal) {
-  return _req('GET', '/library', { params, signal });
+  const key = 'library:' + JSON.stringify(params);
+  return fetchSWR(key, () => _req('GET', '/library', { params, signal }));
 }
 
 /** @param {number} page @param {AbortSignal} [signal] */
@@ -490,8 +534,13 @@ export async function deleteManga(id) {
  * @param {number} id
  * @returns {string}
  */
-export function getMangaCoverUrl(id) {
-  return `/rest/manga/${id}/cover`;
+export function getMangaCoverUrl(id, size, hash) {
+  let url = `/rest/manga/${id}/cover`;
+  const params = [];
+  if (size) params.push(`size=${encodeURIComponent(size)}`);
+  if (hash) params.push(`h=${encodeURIComponent(hash.slice(0, 16))}`);
+  if (params.length) url += '?' + params.join('&');
+  return url;
 }
 
 /** @param {number} id @param {AbortSignal} [signal] */

@@ -45,12 +45,12 @@ impl AppService {
                 "#,
                 user_id
             )
-            .fetch_one(&self.db),
+            .fetch_one(&self.db_read),
             sqlx::query_scalar!(
                 r#"SELECT COUNT(*) as "count: i64" FROM user_manga_tracking WHERE user_id = ? AND status = 4"#,
                 user_id
             )
-            .fetch_one(&self.db),
+            .fetch_one(&self.db_read),
             sqlx::query!(
                 r#"
                 SELECT
@@ -64,7 +64,7 @@ impl AppService {
                 user_id,
                 cutoff
             )
-            .fetch_all(&self.db),
+            .fetch_all(&self.db_read),
             sqlx::query!(
                 r#"
                 SELECT
@@ -81,7 +81,7 @@ impl AppService {
                 "#,
                 user_id
             )
-            .fetch_all(&self.db),
+            .fetch_all(&self.db_read),
             sqlx::query!(
                 r#"
                 SELECT
@@ -98,7 +98,7 @@ impl AppService {
                 "#,
                 user_id
             )
-            .fetch_all(&self.db),
+            .fetch_all(&self.db_read),
             sqlx::query!(
                 r#"
                 SELECT
@@ -114,7 +114,7 @@ impl AppService {
                 user_id,
                 cutoff
             )
-            .fetch_all(&self.db),
+            .fetch_all(&self.db_read),
         )?;
 
         let daily_activity: Vec<DailyActivity> = daily_rows
@@ -193,7 +193,7 @@ impl AppService {
             user_id,
             cutoff,
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         Ok(rows

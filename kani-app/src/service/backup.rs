@@ -237,7 +237,7 @@ impl AppService {
                 "SELECT id FROM sources WHERE name = ? AND deleted_at IS NULL",
                 name
             )
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .is_some();
             sources.push(BackupSourceSummary {
@@ -278,7 +278,7 @@ impl AppService {
              FROM manga m
              JOIN sources s ON s.id = m.source_id",
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?;
 
         let mut manga_out = Vec::with_capacity(rows.len());
@@ -290,7 +290,7 @@ impl AppService {
                  WHERE mc.manga_id = ?",
                 row.id
             )
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await?;
 
             let tracking = sqlx::query!(
@@ -299,7 +299,7 @@ impl AppService {
                 row.id,
                 user_id
             )
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?
             .map(|r| BackupMangaTracking {
                 status: r.status,
@@ -310,7 +310,7 @@ impl AppService {
                 "SELECT rule_type, value FROM download_rules WHERE manga_id = ?",
                 row.id
             )
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await?
             .into_iter()
             .map(|r| BackupDownloadRule {
@@ -328,7 +328,7 @@ impl AppService {
                     row.id,
                     user_id
                 )
-                .fetch_all(&self.db)
+                .fetch_all(&self.db_read)
                 .await?
                 .into_iter()
                 .map(|r| BackupChapterProgress {
@@ -358,7 +358,7 @@ impl AppService {
 
         let categories: Vec<BackupCategory> =
             sqlx::query!("SELECT name, sort_order FROM categories ORDER BY sort_order")
-                .fetch_all(&self.db)
+                .fetch_all(&self.db_read)
                 .await?
                 .into_iter()
                 .map(|r| BackupCategory {
@@ -379,7 +379,7 @@ impl AppService {
         let repos: Vec<BackupRepo> = sqlx::query!(
             "SELECT url, name, maintainer_key, trusted_level, index_cache FROM repo_trust ORDER BY url"
         )
-        .fetch_all(&self.db)
+        .fetch_all(&self.db_read)
         .await?
         .into_iter()
         .map(|r| BackupRepo {
@@ -393,7 +393,7 @@ impl AppService {
 
         let blocked_repos: Vec<BackupBlockedRepo> =
             sqlx::query!("SELECT url, reason FROM blocked_repos ORDER BY url")
-                .fetch_all(&self.db)
+                .fetch_all(&self.db_read)
                 .await?
                 .into_iter()
                 .map(|r| BackupBlockedRepo {
@@ -509,7 +509,7 @@ impl AppService {
                 "SELECT id FROM sources WHERE name = ? AND deleted_at IS NULL",
                 m.source_name
             )
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?;
 
             let source_id = match source_id {
@@ -538,7 +538,7 @@ impl AppService {
                 source_id,
                 m.source_manga_id
             )
-            .fetch_optional(&self.db)
+            .fetch_optional(&self.db_read)
             .await?;
 
             let manga_id = if let Some(id) = existing_id {
@@ -635,7 +635,7 @@ impl AppService {
                         manga_id,
                         cp.source_chapter_id
                     )
-                    .fetch_optional(&self.db)
+                    .fetch_optional(&self.db_read)
                     .await?;
 
                     if let Some(ch_id) = chapter_id {

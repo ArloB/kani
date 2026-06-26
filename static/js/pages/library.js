@@ -629,7 +629,7 @@ export async function init(container) {
         const cover = document.createElement('div');
         cover.className = 'w-full aspect-[2/3] rounded bg-surface-2 overflow-hidden'; /* justified: manga cover ratio */
         const coverSrc = item.local_cover_path
-          ? `/rest/manga/${item.manga_id}/cover`
+          ? `/rest/manga/${item.manga_id}/cover?size=sm`
           : item.cover_url ?? null;
         if (coverSrc) {
           const img = document.createElement('img');

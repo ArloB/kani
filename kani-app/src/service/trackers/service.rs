@@ -31,7 +31,7 @@ impl AppService {
     /// List all known trackers with per-user link status.
     pub async fn list_trackers_status(&self, user_id: UserId) -> Result<Vec<TrackerStatusItem>> {
         let rows = sqlx::query!("SELECT id, name FROM trackers ORDER BY name")
-            .fetch_all(&self.db)
+            .fetch_all(&self.db_read)
             .await?;
 
         let registry = self.tracker_registry.read().await;
@@ -47,7 +47,7 @@ impl AppService {
                 user_id,
                 tracker_id,
             )
-            .fetch_one(&self.db)
+            .fetch_one(&self.db_read)
             .await
             .unwrap_or(0)
                 > 0;
@@ -203,7 +203,7 @@ impl AppService {
         client_secret: Option<&str>,
     ) -> Result<()> {
         let exists = sqlx::query_scalar!("SELECT COUNT(*) FROM trackers WHERE id = ?", tracker_id)
-            .fetch_one(&self.db)
+            .fetch_one(&self.db_read)
             .await
             .unwrap_or(0)
             > 0;

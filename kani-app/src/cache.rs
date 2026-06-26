@@ -7,6 +7,9 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+type LibraryListingCache =
+    Cache<(i64, u64, i32, i32), Arc<(Vec<crate::models::LibraryManga>, bool, Option<u32>)>>;
+
 #[derive(Clone)]
 pub struct RequestCache {
     manga_details: Cache<(i64, String), String>,
@@ -17,10 +20,31 @@ pub struct RequestCache {
     pub preference_schema: DashMap<i64, Vec<kani_core::PreferenceSpec>>,
     /// Reading stats keyed by (user_id, period_days). 10-minute TTL.
     pub stats: Cache<(i64, i32), Arc<ReadingStats>>,
+    library_listing: Option<LibraryListingCache>,
 }
 
 impl RequestCache {
     pub fn new() -> Self {
+        let library_ttl: u64 = std::env::var("KANI_LIBRARY_CACHE_TTL_SECONDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+        Self::build_with_library_ttl(library_ttl)
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn new_with_library_ttl(ttl_secs: u64) -> Self {
+        Self::build_with_library_ttl(ttl_secs)
+    }
+
+    fn build_with_library_ttl(library_ttl: u64) -> Self {
+        let library_listing = (library_ttl > 0).then(|| {
+            Cache::builder()
+                .max_capacity(2000)
+                .time_to_live(Duration::from_secs(library_ttl))
+                .support_invalidation_closures()
+                .build()
+        });
         Self {
             manga_details: Cache::builder()
                 .max_capacity(500)
@@ -53,6 +77,7 @@ impl RequestCache {
                 .time_to_live(Duration::from_secs(10 * 60))
                 .support_invalidation_closures()
                 .build(),
+            library_listing,
         }
     }
 
@@ -179,6 +204,40 @@ impl RequestCache {
             .invalidate_entries_if(move |(id, _period), _| *id == raw);
     }
 
+    pub async fn get_library_listing(
+        &self,
+        user_id: i64,
+        filter_hash: u64,
+        page: i32,
+        page_size: i32,
+    ) -> Option<Arc<(Vec<crate::models::LibraryManga>, bool, Option<u32>)>> {
+        self.library_listing
+            .as_ref()?
+            .get(&(user_id, filter_hash, page, page_size))
+            .await
+    }
+
+    pub async fn insert_library_listing(
+        &self,
+        user_id: i64,
+        filter_hash: u64,
+        page: i32,
+        page_size: i32,
+        val: Arc<(Vec<crate::models::LibraryManga>, bool, Option<u32>)>,
+    ) {
+        if let Some(cache) = &self.library_listing {
+            cache
+                .insert((user_id, filter_hash, page, page_size), val)
+                .await;
+        }
+    }
+
+    pub fn invalidate_library(&self) {
+        if let Some(cache) = &self.library_listing {
+            cache.invalidate_all();
+        }
+    }
+
     pub fn clear_all(&self) {
         self.manga_details.invalidate_all();
         self.popular_manga.invalidate_all();
@@ -186,6 +245,7 @@ impl RequestCache {
         self.pages.invalidate_all();
         self.search_results.invalidate_all();
         self.stats.invalidate_all();
+        self.invalidate_library();
     }
 
     pub fn invalidate_source(&self, source_id: i64) {
