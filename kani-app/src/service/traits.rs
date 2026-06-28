@@ -404,13 +404,23 @@ pub trait LibraryDomain: Send + Sync {
     async fn scan_all_manga(&self) -> Result<usize>;
     async fn scan_manga_ids(&self, ids: Vec<MangaId>) -> Result<uuid::Uuid>;
     async fn get_library(&self, page: i32, order: i32) -> Result<Vec<Manga>>;
-    async fn export_backup(&self, user_id: UserId, include_progress: bool) -> Result<Vec<u8>>;
-    async fn preview_backup(&self, data: &[u8]) -> Result<BackupPreview>;
+    async fn export_backup(
+        &self,
+        user_id: UserId,
+        include_progress: bool,
+        passphrase: Option<String>,
+    ) -> Result<Vec<u8>>;
+    async fn preview_backup(
+        &self,
+        data: &[u8],
+        passphrase: Option<String>,
+    ) -> Result<BackupPreview>;
     async fn restore_backup(
         &self,
         user_id: UserId,
         data: &[u8],
         opts: RestoreOptions,
+        passphrase: Option<String>,
     ) -> Result<RestoreResult>;
     async fn preview_tachiyomi_backup(&self, data: &[u8]) -> Result<TachiyomiPreview>;
     async fn import_tachiyomi_backup(
@@ -449,12 +459,22 @@ impl LibraryDomain for AppService {
         self.get_library(page, order).await
     }
 
-    async fn export_backup(&self, user_id: UserId, include_progress: bool) -> Result<Vec<u8>> {
-        self.export_backup(user_id, include_progress).await
+    async fn export_backup(
+        &self,
+        user_id: UserId,
+        include_progress: bool,
+        passphrase: Option<String>,
+    ) -> Result<Vec<u8>> {
+        self.export_backup(user_id, include_progress, passphrase)
+            .await
     }
 
-    async fn preview_backup(&self, data: &[u8]) -> Result<BackupPreview> {
-        self.preview_backup(data).await
+    async fn preview_backup(
+        &self,
+        data: &[u8],
+        passphrase: Option<String>,
+    ) -> Result<BackupPreview> {
+        self.preview_backup(data, passphrase).await
     }
 
     async fn restore_backup(
@@ -462,8 +482,9 @@ impl LibraryDomain for AppService {
         user_id: UserId,
         data: &[u8],
         opts: RestoreOptions,
+        passphrase: Option<String>,
     ) -> Result<RestoreResult> {
-        self.restore_backup(user_id, data, opts).await
+        self.restore_backup(user_id, data, opts, passphrase).await
     }
 
     async fn preview_tachiyomi_backup(&self, data: &[u8]) -> Result<TachiyomiPreview> {
@@ -599,6 +620,10 @@ pub trait MangaDomain: Send + Sync {
         manga_id: MangaId,
         kinds: Vec<DownloadRuleKind>,
     ) -> Result<(usize, usize)>;
+    async fn trash_manga(&self, id: MangaId, user_id: UserId) -> Result<()>;
+    async fn untrash_manga(&self, id: MangaId, user_id: UserId) -> Result<()>;
+    async fn list_trash(&self) -> Result<Vec<Manga>>;
+    async fn purge_all_trash(&self) -> Result<u64>;
 }
 
 #[async_trait::async_trait]
@@ -790,6 +815,22 @@ impl MangaDomain for AppService {
         kinds: Vec<DownloadRuleKind>,
     ) -> Result<(usize, usize)> {
         self.preview_download_rules(manga_id, kinds).await
+    }
+
+    async fn trash_manga(&self, id: MangaId, user_id: UserId) -> Result<()> {
+        self.trash_manga(id, user_id).await
+    }
+
+    async fn untrash_manga(&self, id: MangaId, user_id: UserId) -> Result<()> {
+        self.untrash_manga(id, user_id).await
+    }
+
+    async fn list_trash(&self) -> Result<Vec<Manga>> {
+        self.list_trash().await
+    }
+
+    async fn purge_all_trash(&self) -> Result<u64> {
+        self.purge_all_trash().await
     }
 }
 
@@ -1425,10 +1466,15 @@ mod tests {
             &self,
             _user_id: UserId,
             _include_progress: bool,
+            _passphrase: Option<String>,
         ) -> Result<Vec<u8>> {
             unimplemented!()
         }
-        async fn preview_backup(&self, _data: &[u8]) -> Result<BackupPreview> {
+        async fn preview_backup(
+            &self,
+            _data: &[u8],
+            _passphrase: Option<String>,
+        ) -> Result<BackupPreview> {
             unimplemented!()
         }
         async fn restore_backup(
@@ -1436,6 +1482,7 @@ mod tests {
             _user_id: UserId,
             _data: &[u8],
             _opts: RestoreOptions,
+            _passphrase: Option<String>,
         ) -> Result<RestoreResult> {
             unimplemented!()
         }
@@ -1644,6 +1691,18 @@ mod tests {
             _manga_id: MangaId,
             _kinds: Vec<DownloadRuleKind>,
         ) -> Result<(usize, usize)> {
+            unimplemented!()
+        }
+        async fn trash_manga(&self, _id: MangaId, _user_id: UserId) -> Result<()> {
+            unimplemented!()
+        }
+        async fn untrash_manga(&self, _id: MangaId, _user_id: UserId) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_trash(&self) -> Result<Vec<Manga>> {
+            unimplemented!()
+        }
+        async fn purge_all_trash(&self) -> Result<u64> {
             unimplemented!()
         }
     }

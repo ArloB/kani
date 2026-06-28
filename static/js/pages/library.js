@@ -22,6 +22,7 @@ import { iconBookOpen, iconChevronDown, iconRefresh, iconSearch } from '../icons
 import { showToast, showApiError } from '../components/toast.js';
 import { ContextMenu } from '../components/menu.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -31,7 +32,8 @@ let _statusFilter = /** @type {string|null} */ (null);
 let _tagFilter    = /** @type {number|null} */ (null);
 let _authorFilter = /** @type {number|null} */ (null);
 let _artistFilter = /** @type {number|null} */ (null);
-let _catFilter    = /** @type {number|null} */ (null);
+let _catFilter        = /** @type {number|null} */ (null);
+let _collectionFilter = /** @type {number|null} */ (null);
 let _readingStatusFilter = /** @type {number|null} */ (null);
 let _hideNoUnread = false;
 let _hideCompletedStatus = false;
@@ -91,6 +93,8 @@ function _clearAllFilters() {
   _tagFilter = null;
   _authorFilter = null;
   _artistFilter = null;
+  _catFilter = null;
+  _collectionFilter = null;
   _page = 1;
   if (_container) {
     for (const el of _container.querySelectorAll('.js-search')) /** @type {HTMLInputElement} */ (el).value = '';
@@ -124,7 +128,8 @@ export async function init(container) {
   _tagFilter  = urlParams.get('tag_id')    ? Number(urlParams.get('tag_id'))    : null;
   _authorFilter = urlParams.get('author_id') ? Number(urlParams.get('author_id')) : null;
   _artistFilter = urlParams.get('artist_id') ? Number(urlParams.get('artist_id')) : null;
-  _catFilter  = urlParams.get('cat_id')    ? Number(urlParams.get('cat_id'))    : null;
+  _catFilter        = urlParams.get('cat_id')        ? Number(urlParams.get('cat_id'))        : null;
+  _collectionFilter = urlParams.get('collection_id') ? Number(urlParams.get('collection_id')) : null;
   _readingStatusFilter = urlParams.get('reading_status') ? Number(urlParams.get('reading_status')) : null;
   _hideNoUnread = urlParams.get('hide_no_unread') === '1';
   _hideCompletedStatus = urlParams.get('hide_completed') === '1';
@@ -273,6 +278,7 @@ export async function init(container) {
               <span class="kani-toggle__track"></span>
             </label>
           </label>
+          <div class="js-saved-searches flex items-center gap-2 ml-auto"></div>
         </div>
       </div>
 
@@ -388,17 +394,46 @@ export async function init(container) {
   _cancelInitSkeleton = deferredSkeleton(() => { if (_gridEl) _gridEl.innerHTML = skeletonGrid(_pageSize); });
 
   // ── Fetch filter options in parallel ──
-  const [tags, authors, artists, categories] = await Promise.allSettled([
+  const [tags, authors, artists, categories, collectionsRaw] = await Promise.allSettled([
     api.getTags(), api.getAuthors(), api.getArtists(), api.getCategories(),
+    api.listCollections(),
   ]).then(r => r.map(s => s.status === 'fulfilled' ? s.value : []));
 
-  // Category tabs: "All" + one per category
   const catList = Array.isArray(categories) ? categories : [];
-  const tabItems = [{ id: null, name: 'All' }, ...catList.map(c => ({ id: c.id, name: c.name }))];
+  const collectionList = Array.isArray(collectionsRaw) ? collectionsRaw : [];
+
+  // Tab IDs: positive = category_id, negative = -(collection_id), null = All
+  const tabItems = [
+    { id: null, name: 'All' },
+    ...catList.map(c => ({ id: c.id, name: c.name })),
+    ...collectionList.map(c => ({ id: -(c.id), name: `★ ${c.name}` })),
+  ];
+
+  function _activeTabId() {
+    if (_collectionFilter != null) return -(_collectionFilter);
+    return _catFilter;
+  }
+
+  function _onTabSelect(id) {
+    if (id === null) {
+      _catFilter = null;
+      _collectionFilter = null;
+    } else if (id < 0) {
+      _catFilter = null;
+      _collectionFilter = -(id);
+    } else {
+      _catFilter = id;
+      _collectionFilter = null;
+    }
+    _page = 1;
+    _updateUrl();
+    _fetchLibrary();
+  }
+
   const { destroy: destroyTabs } = renderCategoryTabs(tabsEl, {
     tabs: tabItems,
-    activeId: _catFilter,
-    onSelect: (id) => { _catFilter = id; _page = 1; _updateUrl(); _fetchLibrary(); },
+    activeId: _activeTabId(),
+    onSelect: _onTabSelect,
   });
   _destroyTabs = destroyTabs;
 
@@ -435,6 +470,10 @@ export async function init(container) {
   }
   _mountComboboxesFn = _mountComboboxes;
   _mountComboboxes();
+
+  // ── Saved searches ──
+  const savedSearchesEl = /** @type {HTMLElement|null} */ (container.querySelector('.js-saved-searches'));
+  if (savedSearchesEl) _mountSavedSearches(savedSearchesEl);
 
   // ── Wire events ──
   for (const searchEl of searchEls) {
@@ -671,6 +710,7 @@ function _updateUrl(replace = false) {
   if (_authorFilter)            params.set('author_id',       String(_authorFilter));
   if (_artistFilter)            params.set('artist_id',       String(_artistFilter));
   if (_catFilter)               params.set('cat_id',          String(_catFilter));
+  if (_collectionFilter)        params.set('collection_id',   String(_collectionFilter));
   if (_readingStatusFilter != null) params.set('reading_status', String(_readingStatusFilter));
   if (_hideNoUnread)            params.set('hide_no_unread',  '1');
   if (_hideCompletedStatus)     params.set('hide_completed',  '1');
@@ -717,6 +757,7 @@ function _fetchLibrary() {
     author_filter: _authorFilter ?? undefined,
     artist_filter: _artistFilter ?? undefined,
     category_filter: _catFilter ?? undefined,
+    collection_id: _collectionFilter ?? undefined,
     sort_by: _sortOrder,
   }, _abort.signal).then(result => {
     if (!_gridEl || !_paginEl) return;
@@ -1203,4 +1244,203 @@ export function destroy(container) {
   _selectMode = false;
   _selected.clear();
   container.innerHTML = '';
+}
+
+// ── Saved searches ────────────────────────────────────────────────────────────
+
+/** @param {HTMLElement} el */
+async function _mountSavedSearches(el) {
+  el.innerHTML = '';
+
+  let searches = [];
+  try { searches = await api.listSavedSearches(); } catch { return; }
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'btn-secondary btn-sm whitespace-nowrap';
+  saveBtn.textContent = t('saved_searches.save');
+  saveBtn.addEventListener('click', () => _showSaveSearchDialog(el));
+
+  el.appendChild(saveBtn);
+
+  if (searches.length > 0) {
+    const select = document.createElement('select');
+    select.className = 'input text-sm w-36';
+    select.innerHTML = `<option value="">Saved searches</option>` +
+      searches.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    select.addEventListener('change', () => {
+      const id = Number(select.value);
+      if (!id) return;
+      const search = searches.find(s => s.id === id);
+      if (!search) return;
+      _applySearchQuery(search.query_json);
+      select.value = '';
+    });
+    el.appendChild(select);
+
+    const manageBtn = document.createElement('button');
+    manageBtn.type = 'button';
+    manageBtn.className = 'btn-icon text-text-muted shrink-0';
+    manageBtn.setAttribute('aria-label', t('saved_searches.manage'));
+    manageBtn.setAttribute('data-tooltip', t('saved_searches.manage'));
+    manageBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+    manageBtn.addEventListener('click', () => _showManageSearchesDialog(el, searches));
+    el.appendChild(manageBtn);
+  }
+}
+
+/** @param {string} queryJson */
+function _applySearchQuery(queryJson) {
+  try {
+    const q = JSON.parse(queryJson);
+    _search           = q.search ?? '';
+    _statusFilter     = q.status_filter != null ? Object.keys({ ongoing: 0, completed: 1, hiatus: 2, cancelled: 3, unknown: 4 }).find(k => ({ ongoing: 0, completed: 1, hiatus: 2, cancelled: 3, unknown: 4 }[k] === q.status_filter) ?? null) ?? null : null;
+    _readingStatusFilter = q.reading_status_filter ?? null;
+    _hideNoUnread     = q.hide_no_unread ?? false;
+    _hideCompletedStatus = q.hide_completed_status ?? false;
+    _tagFilter        = q.tag_filter ?? null;
+    _authorFilter     = q.author_filter ?? null;
+    _artistFilter     = q.artist_filter ?? null;
+    _catFilter        = q.category_filter ?? null;
+    _collectionFilter = null;
+    _page = 1;
+    _mountComboboxesFn?.();
+    _updateFilterCountFn?.();
+    _updateUrl(true);
+    _fetchLibrary();
+  } catch { /* ignore invalid JSON */ }
+}
+
+/** @param {HTMLElement} parentEl */
+function _showSaveSearchDialog(parentEl) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-bg/70 backdrop-blur-sm p-4';
+
+  const card = document.createElement('div');
+  card.className = 'bg-surface rounded-2xl shadow-xl w-full max-w-xs flex flex-col overflow-hidden';
+  card.innerHTML = `
+    <div class="px-6 py-4 border-b border-border-subtle flex items-center justify-between gap-4">
+      <h2 class="text-base font-semibold text-text">${t('saved_searches.save')}</h2>
+      <button type="button" class="btn-icon js-close">✕</button>
+    </div>
+    <div class="px-6 py-4 flex flex-col gap-3">
+      <input type="text" class="input text-sm js-name" placeholder="${t('saved_searches.name.placeholder')}" />
+      <div class="flex justify-end gap-2">
+        <button type="button" class="btn-ghost btn-sm js-cancel">Cancel</button>
+        <button type="button" class="btn-primary btn-sm js-save">Save</button>
+      </div>
+    </div>
+  `;
+
+  const dismiss = () => overlay.remove();
+  card.querySelector('.js-close')?.addEventListener('click', dismiss);
+  card.querySelector('.js-cancel')?.addEventListener('click', dismiss);
+
+  const nameInput = /** @type {HTMLInputElement} */ (card.querySelector('.js-name'));
+  const saveBtn2 = /** @type {HTMLButtonElement} */ (card.querySelector('.js-save'));
+
+  saveBtn2?.addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+    const queryJson = JSON.stringify({
+      search: _search || undefined,
+      status_filter: _statusFilter ? ({ ongoing: 0, completed: 1, hiatus: 2, cancelled: 3, unknown: 4 }[_statusFilter]) : undefined,
+      reading_status_filter: _readingStatusFilter ?? undefined,
+      hide_no_unread: _hideNoUnread || undefined,
+      hide_completed_status: _hideCompletedStatus || undefined,
+      tag_filter: _tagFilter ?? undefined,
+      author_filter: _authorFilter ?? undefined,
+      artist_filter: _artistFilter ?? undefined,
+      category_filter: _catFilter ?? undefined,
+    });
+    saveBtn2.disabled = true;
+    try {
+      await api.createSavedSearch({ name, query_json: queryJson });
+      showToast(t('saved_searches.toast.saved'), { type: 'success' });
+      dismiss();
+      _mountSavedSearches(parentEl);
+    } catch (e) {
+      showApiError(e);
+      saveBtn2.disabled = false;
+    }
+  });
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  nameInput?.focus();
+}
+
+/**
+ * @param {HTMLElement} parentEl
+ * @param {any[]} searches
+ */
+function _showManageSearchesDialog(parentEl, searches) {
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-bg/70 backdrop-blur-sm p-4';
+
+  const card = document.createElement('div');
+  card.className = 'bg-surface rounded-2xl shadow-xl w-full max-w-xs flex flex-col overflow-hidden';
+
+  const header = document.createElement('div');
+  header.className = 'px-6 py-4 border-b border-border-subtle flex items-center justify-between gap-4';
+  const title = document.createElement('h2');
+  title.className = 'text-base font-semibold text-text';
+  title.textContent = t('saved_searches.manage.title');
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'btn-icon';
+  closeBtn.textContent = '✕';
+  header.append(title, closeBtn);
+
+  const list = document.createElement('div');
+  list.className = 'divide-y divide-border-subtle overflow-y-auto max-h-64';
+
+  const dismiss = () => overlay.remove();
+  closeBtn.addEventListener('click', dismiss);
+
+  function _rebuildList(items) {
+    list.innerHTML = '';
+    if (items.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'px-6 py-4 text-sm text-text-muted text-center';
+      empty.textContent = t('saved_searches.empty.title');
+      list.appendChild(empty);
+      return;
+    }
+    for (const s of items) {
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-3 px-6 py-3';
+      const name = document.createElement('span');
+      name.className = 'flex-1 text-sm text-text truncate';
+      name.textContent = s.name;
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn-icon text-danger shrink-0';
+      delBtn.setAttribute('aria-label', 'Delete');
+      delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+      delBtn.addEventListener('click', async () => {
+        const ok = await confirmDialog({ title: 'Delete', body: t('saved_searches.delete.confirm', { name: s.name }), confirmLabel: 'Delete' });
+        if (!ok) return;
+        delBtn.disabled = true;
+        try {
+          await api.deleteSavedSearch(s.id);
+          showToast(t('saved_searches.toast.deleted'), { type: 'success' });
+          row.remove();
+          _mountSavedSearches(parentEl);
+        } catch (e) {
+          showApiError(e);
+          delBtn.disabled = false;
+        }
+      });
+      row.append(name, delBtn);
+      list.appendChild(row);
+    }
+  }
+
+  _rebuildList(searches);
+  card.append(header, list);
+  overlay.appendChild(card);
+  overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
+  document.body.appendChild(overlay);
 }

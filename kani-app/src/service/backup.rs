@@ -1,5 +1,7 @@
 use std::io::{Cursor, Read as _, Write as _};
 
+use argon2::{Algorithm, Argon2, Params, Version};
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use serde::{Deserialize, Serialize};
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 
@@ -156,6 +158,74 @@ pub struct RestoreResult {
     pub warnings: Vec<String>,
 }
 
+// ── Encryption ───────────────────────────────────────────────────────────────
+
+const BACKUP_V2_MAGIC: &[u8] = b"KANI-BACKUP-V2\n";
+
+fn derive_key(passphrase: &str, salt: &[u8]) -> Result<[u8; 32]> {
+    let params = Params::new(65536, 3, 1, Some(32))
+        .map_err(|e| ServiceError::Internal(format!("Argon2 params: {e}")))?;
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = [0u8; 32];
+    argon2
+        .hash_password_into(passphrase.as_bytes(), salt, &mut key)
+        .map_err(|e| ServiceError::Internal(format!("Key derivation failed: {e}")))?;
+    Ok(key)
+}
+
+pub fn encrypt_backup(zip: &[u8], passphrase: &str) -> Result<Vec<u8>> {
+    let salt: [u8; 16] = rand::random();
+    let nonce_bytes: [u8; 12] = rand::random();
+    let key = derive_key(passphrase, &salt)?;
+    let cipher = ChaCha20Poly1305::new((&key).into());
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, zip)
+        .map_err(|e| ServiceError::Internal(format!("Encryption failed: {e}")))?;
+    let mut out = Vec::with_capacity(BACKUP_V2_MAGIC.len() + 16 + 12 + ciphertext.len());
+    out.extend_from_slice(BACKUP_V2_MAGIC);
+    out.extend_from_slice(&salt);
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ciphertext);
+    Ok(out)
+}
+
+pub fn decrypt_backup(data: &[u8], passphrase: &str) -> Result<Vec<u8>> {
+    if !data.starts_with(BACKUP_V2_MAGIC) {
+        return Err(ServiceError::Validation(
+            "Not an encrypted backup (missing magic header)".into(),
+        ));
+    }
+    let rest = &data[BACKUP_V2_MAGIC.len()..];
+    if rest.len() < 28 {
+        return Err(ServiceError::Validation(
+            "Encrypted backup is truncated".into(),
+        ));
+    }
+    let (salt, rest) = rest.split_at(16);
+    let (nonce_bytes, ciphertext) = rest.split_at(12);
+    let key = derive_key(passphrase, salt)?;
+    let cipher = ChaCha20Poly1305::new((&key).into());
+    let nonce = Nonce::from_slice(nonce_bytes);
+    cipher.decrypt(nonce, ciphertext).map_err(|_| {
+        ServiceError::Validation("Decryption failed — wrong passphrase or corrupted backup".into())
+    })
+}
+
+fn maybe_decrypt_backup<'a>(
+    data: &'a [u8],
+    passphrase: Option<&str>,
+) -> Result<std::borrow::Cow<'a, [u8]>> {
+    if data.starts_with(BACKUP_V2_MAGIC) {
+        let pp = passphrase.ok_or_else(|| {
+            ServiceError::Validation("Backup is encrypted but no passphrase was provided".into())
+        })?;
+        Ok(std::borrow::Cow::Owned(decrypt_backup(data, pp)?))
+    } else {
+        Ok(std::borrow::Cow::Borrowed(data))
+    }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn parse_zip_backup(data: &[u8]) -> Result<BackupData> {
@@ -211,9 +281,13 @@ fn build_zip(backup: &BackupData) -> Result<Vec<u8>> {
 // ── AppService methods ────────────────────────────────────────────────────────
 
 impl AppService {
-    /// Parse the backup ZIP and return metadata without writing to the DB.
-    pub async fn preview_backup(&self, data: &[u8]) -> Result<BackupPreview> {
-        let backup = parse_zip_backup(data)?;
+    pub async fn preview_backup(
+        &self,
+        data: &[u8],
+        passphrase: Option<String>,
+    ) -> Result<BackupPreview> {
+        let data = maybe_decrypt_backup(data, passphrase.as_deref())?;
+        let backup = parse_zip_backup(&data)?;
 
         let mut source_counts: indexmap::IndexMap<SourceId, u32> = Default::default();
         let mut download_rule_count: u32 = 0;
@@ -262,11 +336,11 @@ impl AppService {
         })
     }
 
-    /// Export the library to a ZIP archive of JSON.
     pub async fn export_backup(
         &self,
         user_id: UserId,
         include_chapter_progress: bool,
+        passphrase: Option<String>,
     ) -> Result<Vec<u8>> {
         let now = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
@@ -412,19 +486,24 @@ impl AppService {
             blocked_repos,
         };
 
-        let bytes = build_zip(&backup)?;
+        let zip = build_zip(&backup)?;
+        let bytes = match passphrase {
+            Some(pp) => encrypt_backup(&zip, &pp)?,
+            None => zip,
+        };
         self.audit(Some(user_id), "backup.export", None, None).await;
         Ok(bytes)
     }
 
-    /// Restore from a backup ZIP. Honours `opts` to select which sections to apply.
     pub async fn restore_backup(
         &self,
         user_id: UserId,
         data: &[u8],
         opts: RestoreOptions,
+        passphrase: Option<String>,
     ) -> Result<RestoreResult> {
-        let backup = parse_zip_backup(data)?;
+        let data = maybe_decrypt_backup(data, passphrase.as_deref())?;
+        let backup = parse_zip_backup(&data)?;
 
         let mut result = RestoreResult {
             imported_manga: 0,
@@ -787,5 +866,72 @@ impl AppService {
         .execute(&self.db)
         .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn dummy_zip() -> Vec<u8> {
+        let backup = BackupData {
+            version: 1,
+            exported_at: "2026-01-01T00:00:00Z".into(),
+            manga: vec![],
+            categories: vec![],
+            settings: None,
+            repos: vec![],
+            blocked_repos: vec![],
+        };
+        build_zip(&backup).unwrap()
+    }
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let zip = dummy_zip();
+        let encrypted = encrypt_backup(&zip, "hunter2").unwrap();
+        assert!(encrypted.starts_with(BACKUP_V2_MAGIC));
+        assert!(encrypted.len() > zip.len());
+        let decrypted = decrypt_backup(&encrypted, "hunter2").unwrap();
+        assert_eq!(decrypted, zip);
+    }
+
+    #[test]
+    fn wrong_passphrase_fails() {
+        let zip = dummy_zip();
+        let encrypted = encrypt_backup(&zip, "correct").unwrap();
+        assert!(decrypt_backup(&encrypted, "wrong").is_err());
+    }
+
+    #[test]
+    fn magic_header_detected() {
+        let zip = dummy_zip();
+        assert!(!zip.starts_with(BACKUP_V2_MAGIC));
+        let encrypted = encrypt_backup(&zip, "pass").unwrap();
+        assert!(encrypted.starts_with(BACKUP_V2_MAGIC));
+    }
+
+    #[test]
+    fn maybe_decrypt_plaintext_passthrough() {
+        let zip = dummy_zip();
+        let cow = maybe_decrypt_backup(&zip, None).unwrap();
+        assert_eq!(&*cow, &zip[..]);
+    }
+
+    #[test]
+    fn maybe_decrypt_encrypted_without_passphrase_errors() {
+        let zip = dummy_zip();
+        let encrypted = encrypt_backup(&zip, "pass").unwrap();
+        assert!(maybe_decrypt_backup(&encrypted, None).is_err());
+    }
+
+    #[test]
+    fn encrypted_backup_parse_roundtrip() {
+        let zip = dummy_zip();
+        let encrypted = encrypt_backup(&zip, "secret!").unwrap();
+        let decrypted = decrypt_backup(&encrypted, "secret!").unwrap();
+        let parsed = parse_zip_backup(&decrypted).unwrap();
+        assert_eq!(parsed.version, 1);
     }
 }

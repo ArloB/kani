@@ -4,25 +4,18 @@ mod common;
 use common::{insert_manga, insert_source, test_service};
 use kani_app::ids::UserId;
 use kani_app::models::LocalMetadataUpdate;
-use kani_shared::types::MangaSortOrder;
+use kani_app::service::library::LibraryFilter;
 
 async fn search(svc: &kani_app::service::AppService, query: &str) -> Vec<String> {
     let (rows, _, _) = svc
         .get_library_filtered(
             UserId(1),
-            1,
-            20,
-            Some(query.to_string()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            false,
-            None,
-            MangaSortOrder::UpdatedAsc,
+            &LibraryFilter {
+                page: 1,
+                page_size: 20,
+                search: Some(query.to_string()),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();

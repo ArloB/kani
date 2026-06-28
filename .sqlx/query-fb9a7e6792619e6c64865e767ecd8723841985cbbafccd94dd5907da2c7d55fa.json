@@ -107,6 +107,11 @@
         "name": "cover_hash",
         "ordinal": 20,
         "type_info": "Text"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 21,
+        "type_info": "Datetime"
       }
     ],
     "parameters": {
@@ -133,6 +138,7 @@
       true,
       false,
       false,
+      true,
       true
     ]
   },

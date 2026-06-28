@@ -1,7 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for Kani native backup (ZIP + JSON) export / restore round-trips.
-// Tachiyomi import (.tachibk gzip+protobuf) is exercised separately once
-// a proto fixture helper is available.
 
 mod common;
 use common::{insert_manga, insert_source, insert_user, test_service};
@@ -15,8 +12,8 @@ async fn preview_backup_shows_correct_manga_count() {
     insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
     insert_manga(&svc.db, src, "m2", "Naruto").await;
 
-    let zip = svc.export_backup(UserId(1), false).await.unwrap();
-    let preview = svc.preview_backup(&zip).await.unwrap();
+    let zip = svc.export_backup(UserId(1), false, None).await.unwrap();
+    let preview = svc.preview_backup(&zip, None).await.unwrap();
 
     assert_eq!(preview.manga_count, 2);
     assert_eq!(preview.version, 1);
@@ -31,11 +28,10 @@ async fn restore_backup_reimports_manga_after_wipe() {
     let src = insert_source(&svc.db, "src").await;
     insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
 
-    let zip = svc.export_backup(UserId(1), false).await.unwrap();
+    let zip = svc.export_backup(UserId(1), false, None).await.unwrap();
 
-    // merge=false → deletes all manga then re-imports from the ZIP.
     let result = svc
-        .restore_backup(UserId(1), &zip, RestoreOptions::default())
+        .restore_backup(UserId(1), &zip, RestoreOptions::default(), None)
         .await
         .unwrap();
 
@@ -52,16 +48,15 @@ async fn restore_backup_reimports_manga_after_wipe() {
 
 #[tokio::test]
 async fn restore_backup_unknown_source_adds_pending_import() {
-    // Export from svc1 (has source "src"), restore to svc2 (fresh, no sources).
     let svc1 = test_service().await;
     let src = insert_source(&svc1.db, "src").await;
     insert_manga(&svc1.db, src, "m1", "Dragon Ball").await;
-    let zip = svc1.export_backup(UserId(1), false).await.unwrap();
+    let zip = svc1.export_backup(UserId(1), false, None).await.unwrap();
 
     let svc2 = test_service().await;
     let user2 = insert_user(&svc2.db, "user").await;
     let result = svc2
-        .restore_backup(user2, &zip, RestoreOptions::default())
+        .restore_backup(user2, &zip, RestoreOptions::default(), None)
         .await
         .unwrap();
 
@@ -97,16 +92,15 @@ async fn restore_backup_preserves_category_assignment() {
         .await
         .unwrap();
 
-    let zip = svc.export_backup(UserId(1), false).await.unwrap();
+    let zip = svc.export_backup(UserId(1), false, None).await.unwrap();
 
     let result = svc
-        .restore_backup(UserId(1), &zip, RestoreOptions::default())
+        .restore_backup(UserId(1), &zip, RestoreOptions::default(), None)
         .await
         .unwrap();
     assert_eq!(result.imported_manga, 1);
     assert_eq!(result.imported_categories, 1);
 
-    // Find the restored manga's id (may differ from the original).
     let restored_manga_id: i64 =
         sqlx::query_scalar("SELECT id FROM manga WHERE source_manga_id = 'm1'")
             .fetch_one(&svc.db)
@@ -130,12 +124,10 @@ async fn restore_backup_merge_mode_keeps_existing_manga() {
     let src = insert_source(&svc.db, "src").await;
     insert_manga(&svc.db, src, "m1", "Dragon Ball").await;
 
-    let zip = svc.export_backup(UserId(1), false).await.unwrap();
+    let zip = svc.export_backup(UserId(1), false, None).await.unwrap();
 
-    // Add a second manga AFTER export (not in the ZIP).
     insert_manga(&svc.db, src, "m2", "Naruto").await;
 
-    // Restore with merge=true → should not delete existing manga.
     let opts = RestoreOptions {
         merge: true,
         import_manga: true,
@@ -146,7 +138,9 @@ async fn restore_backup_merge_mode_keeps_existing_manga() {
         import_settings: false,
         import_repos: true,
     };
-    svc.restore_backup(UserId(1), &zip, opts).await.unwrap();
+    svc.restore_backup(UserId(1), &zip, opts, None)
+        .await
+        .unwrap();
 
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM manga")
         .fetch_one(&svc.db)
@@ -155,5 +149,71 @@ async fn restore_backup_merge_mode_keeps_existing_manga() {
     assert_eq!(
         count, 2,
         "both original and post-export manga should remain"
+    );
+}
+
+#[tokio::test]
+async fn encrypted_backup_roundtrip() {
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "src").await;
+    insert_manga(&svc.db, src, "m1", "Bleach").await;
+
+    let passphrase = Some("correct-horse-battery".to_string());
+    let encrypted = svc
+        .export_backup(UserId(1), false, passphrase.clone())
+        .await
+        .unwrap();
+
+    assert!(
+        encrypted.starts_with(b"KANI-BACKUP-V2\n"),
+        "encrypted backup should start with magic"
+    );
+
+    let result = svc
+        .restore_backup(UserId(1), &encrypted, RestoreOptions::default(), passphrase)
+        .await
+        .unwrap();
+    assert_eq!(result.imported_manga, 1);
+}
+
+#[tokio::test]
+async fn encrypted_backup_wrong_passphrase_is_rejected() {
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "src").await;
+    insert_manga(&svc.db, src, "m1", "Bleach").await;
+
+    let encrypted = svc
+        .export_backup(UserId(1), false, Some("correct".to_string()))
+        .await
+        .unwrap();
+
+    let result = svc
+        .restore_backup(
+            UserId(1),
+            &encrypted,
+            RestoreOptions::default(),
+            Some("wrong".to_string()),
+        )
+        .await;
+    assert!(result.is_err(), "wrong passphrase should fail");
+}
+
+#[tokio::test]
+async fn encrypted_backup_without_passphrase_is_rejected() {
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "src").await;
+    insert_manga(&svc.db, src, "m1", "Bleach").await;
+
+    let encrypted = svc
+        .export_backup(UserId(1), false, Some("secret".to_string()))
+        .await
+        .unwrap();
+
+    let result = svc
+        .restore_backup(UserId(1), &encrypted, RestoreOptions::default(), None)
+        .await;
+    assert!(
+        result.is_err(),
+        "encrypted backup without passphrase should fail"
     );
 }

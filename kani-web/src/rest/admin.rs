@@ -69,6 +69,20 @@ pub fn router() -> Router<AppState> {
             "/admin/sources/circuits/{host}/reset",
             post(reset_source_circuit),
         )
+        .route(
+            "/admin/backup/schedule",
+            get(admin_get_backup_schedule).put(admin_put_backup_schedule),
+        )
+        .route("/admin/backup/run-now", post(admin_backup_run_now))
+        .route("/admin/storage/stats", get(admin_storage_stats))
+        .route(
+            "/admin/storage/stats/history",
+            get(admin_storage_stats_history),
+        )
+        .route(
+            "/admin/library/integrity-check",
+            post(admin_integrity_check),
+        )
 }
 
 #[utoipa::path(
@@ -1261,4 +1275,147 @@ pub(crate) async fn reset_source_circuit(
 ) -> Result<impl IntoResponse, AppError> {
     state.smart_client.reset_circuit(&host);
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get, path = "/rest/admin/backup/schedule",
+    responses(
+        (status = 200, description = "Current backup schedule configuration (passphrase redacted)"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_get_backup_schedule(
+    _: AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let mut config = state.service.get_backup_schedule().await?;
+    if config.passphrase.is_some() {
+        config.passphrase = Some("***".into());
+    }
+    Ok(Json(config))
+}
+
+#[utoipa::path(
+    put, path = "/rest/admin/backup/schedule",
+    request_body = inline(serde_json::Value),
+    responses(
+        (status = 200, description = "Backup schedule saved"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_put_backup_schedule(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+    Json(body): Json<kani_app::service::backup_scheduler::BackupScheduleConfig>,
+) -> Result<impl IntoResponse, AppError> {
+    if body.passphrase.as_deref() == Some("***") {
+        let existing = state.service.get_backup_schedule().await?;
+        let mut config = body;
+        config.passphrase = existing.passphrase;
+        state.service.set_backup_schedule(&config).await?;
+    } else {
+        state.service.set_backup_schedule(&body).await?;
+    }
+    state
+        .audit(Some(user.id), "admin.backup.schedule.update", None, None)
+        .await;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[utoipa::path(
+    post, path = "/rest/admin/backup/run-now",
+    responses(
+        (status = 200, description = "Backup job submitted; returns job_id"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Admin permission required"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
+pub(crate) async fn admin_backup_run_now(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let job_id = state
+        .job_manager
+        .submit(kani_app::jobs::backup::ScheduledBackupJob::new())
+        .await?;
+    state
+        .audit(Some(user.id), "admin.backup.run_now", None, None)
+        .await;
+    Ok(Json(json!({ "job_id": job_id })))
+}
+
+pub(crate) async fn admin_storage_stats(
+    _: AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let stats = state.service.get_storage_stats().await?;
+    Ok(Json(stats))
+}
+
+pub(crate) async fn admin_storage_stats_history(
+    _: AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let rows = sqlx::query!(
+        r#"SELECT
+            captured_at as "captured_at: String",
+            library_used_bytes, cover_used_bytes, chapter_used_bytes,
+            data_used_bytes, free_bytes, total_manga, total_chapters
+           FROM storage_history
+           ORDER BY captured_at DESC
+           LIMIT 90"#
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(kani_app::error::ServiceError::Db)?;
+
+    let data: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "captured_at": r.captured_at,
+                "library_used_bytes": r.library_used_bytes,
+                "cover_used_bytes": r.cover_used_bytes,
+                "chapter_used_bytes": r.chapter_used_bytes,
+                "data_used_bytes": r.data_used_bytes,
+                "free_bytes": r.free_bytes,
+                "total_manga": r.total_manga,
+                "total_chapters": r.total_chapters,
+            })
+        })
+        .collect();
+
+    Ok(Json(data))
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct IntegrityCheckQuery {
+    pub fix: Option<bool>,
+}
+
+pub(crate) async fn admin_integrity_check(
+    _: AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+    Query(q): Query<IntegrityCheckQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let fix = q.fix.unwrap_or(false);
+    if fix {
+        let result = state.service.cleanup_orphans(false).await?;
+        Ok(Json(serde_json::to_value(result).map_err(|e| {
+            AppError::InternalServerError(e.to_string())
+        })?))
+    } else {
+        let report = state.service.check_library().await?;
+        Ok(Json(serde_json::to_value(report).map_err(|e| {
+            AppError::InternalServerError(e.to_string())
+        })?))
+    }
 }

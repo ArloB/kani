@@ -115,6 +115,8 @@ pub struct LibraryQuery {
     #[garde(skip)]
     pub source_id: Option<i64>,
     #[garde(skip)]
+    pub collection_id: Option<i64>,
+    #[garde(skip)]
     #[serde(default)]
     #[schema(value_type = String)]
     pub sort_by: kani_shared::MangaSortOrder,

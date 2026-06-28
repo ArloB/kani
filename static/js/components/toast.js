@@ -19,9 +19,9 @@ function _getContainer() {
 /**
  * Show a toast notification.
  * @param {string} message
- * @param {{ type?: 'info' | 'success' | 'warn' | 'error', duration?: number }} [opts]
+ * @param {{ type?: 'info' | 'success' | 'warn' | 'error', duration?: number, action?: { label: string, href: string } }} [opts]
  */
-export function showToast(message, { type = 'info', duration = 3000 } = {}) {
+export function showToast(message, { type = 'info', duration = 3000, action = null } = {}) {
   const container = _getContainer();
 
   const typeClasses = {
@@ -40,6 +40,14 @@ export function showToast(message, { type = 'info', duration = 3000 } = {}) {
   toast.setAttribute('role', 'status');
   toast.setAttribute('aria-atomic', 'true');
   toast.textContent = message;
+
+  if (action) {
+    const link = document.createElement('a');
+    link.href = action.href;
+    link.textContent = ' · ' + action.label;
+    link.className = 'underline font-semibold';
+    toast.appendChild(link);
+  }
 
   container.appendChild(toast);
 

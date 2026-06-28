@@ -146,9 +146,14 @@ impl AppService {
     pub async fn delete_downloaded(&self, chapter_id: ChapterId) -> Result<()> {
         let info = self.chapter_cbz_path(chapter_id).await?;
 
-        if let Err(e) = tokio::fs::remove_file(&info.path).await {
-            tracing::error!("Failed to remove chapter file: {}", e);
-        }
+        let remove_ok = match tokio::fs::remove_file(&info.path).await {
+            Ok(_) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Err(e) => {
+                tracing::warn!("Failed to remove chapter file {:?}: {e}", info.path);
+                false
+            }
+        };
 
         let is_orphaned: bool =
             sqlx::query_scalar!("SELECT is_orphaned FROM chapters WHERE id = ?", chapter_id)
@@ -159,10 +164,17 @@ impl AppService {
             let _ = sqlx::query!("DELETE FROM chapters WHERE id = ?", chapter_id)
                 .execute(&self.db)
                 .await;
+        } else if remove_ok {
+            let _ = sqlx::query!(
+                "UPDATE chapters SET download_status = ?, delete_status = NULL WHERE id = ?",
+                DownloadStatus::Pending,
+                chapter_id
+            )
+            .execute(&self.db)
+            .await;
         } else {
             let _ = sqlx::query!(
-                "UPDATE chapters SET download_status = ? WHERE id = ?",
-                DownloadStatus::Pending,
+                "UPDATE chapters SET delete_status = 'pending_delete' WHERE id = ?",
                 chapter_id
             )
             .execute(&self.db)
@@ -473,5 +485,55 @@ impl AppService {
             })
             .collect();
         Ok(items)
+    }
+
+    pub async fn retry_pending_deletes(&self) -> Result<()> {
+        let pending = sqlx::query!(
+            "SELECT c.id, c.manga_id, m.name AS manga_name, c.name AS chapter_name, \
+             c.chapter_number, c.volume \
+             FROM chapters c JOIN manga m ON m.id = c.manga_id \
+             WHERE c.delete_status = 'pending_delete' AND m.deleted_at IS NULL",
+        )
+        .fetch_all(&self.db_read)
+        .await?;
+
+        let library_path = self.settings.read().await.library_path.clone();
+
+        for row in pending {
+            let safe_manga = format!(
+                "{} - {}",
+                kani_core::utilities::sanitize_filename(&row.manga_name),
+                row.manga_id
+            );
+            let chapter_title =
+                super::chapter_name(row.volume, row.chapter_number, row.chapter_name);
+            let cbz_path = library_path.join(&safe_manga).join(format!(
+                "{}.cbz",
+                kani_core::utilities::sanitize_filename(&chapter_title)
+            ));
+
+            match tokio::fs::remove_file(&cbz_path).await {
+                Ok(_) => {
+                    let _ = sqlx::query!(
+                        "UPDATE chapters SET delete_status = NULL, download_status = 0 WHERE id = ?",
+                        row.id
+                    )
+                    .execute(&self.db)
+                    .await;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let _ = sqlx::query!(
+                        "UPDATE chapters SET delete_status = NULL, download_status = 0 WHERE id = ?",
+                        row.id
+                    )
+                    .execute(&self.db)
+                    .await;
+                }
+                Err(e) => {
+                    tracing::warn!("retry_pending_deletes: {:?}: {e}", cbz_path);
+                }
+            }
+        }
+        Ok(())
     }
 }

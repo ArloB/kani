@@ -1473,3 +1473,183 @@ export async function retryChapterDownload(id) {
 export async function getMangaDownloadStatus(mangaId) {
   return _req('GET', `/manga/${mangaId}/download-status`);
 }
+
+// ── Trash ─────────────────────────────────────────────────────────────────────
+
+export async function listTrash() {
+  return _req('GET', '/trash');
+}
+
+/** @param {number} id */
+export async function untrashManga(id) {
+  return _req('POST', `/manga/${id}/untrash`);
+}
+
+export async function purgeTrashAll() {
+  return _req('DELETE', '/trash');
+}
+
+/** @param {number} id */
+export async function purgeTrashOne(id) {
+  return _req('DELETE', `/trash/${id}`);
+}
+
+// ── Volumes ───────────────────────────────────────────────────────────────────
+
+/** @param {number} mangaId */
+export async function listVolumes(mangaId) {
+  return _req('GET', `/manga/${mangaId}/volumes`);
+}
+
+/** @param {number} mangaId @param {{ name?: string, volume_num?: number }} body */
+export async function createVolume(mangaId, body) {
+  return _req('POST', `/manga/${mangaId}/volumes`, { body });
+}
+
+/** @param {number} mangaId @param {number} volumeId @param {{ name?: string, volume_num?: number }} body */
+export async function updateVolume(mangaId, volumeId, body) {
+  return _req('PUT', `/manga/${mangaId}/volumes/${volumeId}`, { body });
+}
+
+/** @param {number} mangaId @param {number} volumeId */
+export async function deleteVolume(mangaId, volumeId) {
+  return _req('DELETE', `/manga/${mangaId}/volumes/${volumeId}`);
+}
+
+/** @param {number} mangaId @param {number} chapterId @param {number|null} volumeId */
+export async function assignChapterVolume(mangaId, chapterId, volumeId) {
+  return _req('PUT', `/manga/${mangaId}/chapters/${chapterId}/volume`, { body: { volume_id: volumeId } });
+}
+
+// ── Smart collections ─────────────────────────────────────────────────────────
+
+export async function listCollections() {
+  return _req('GET', '/collections');
+}
+
+/** @param {{ name: string, rule: object, sort_order?: number }} body */
+export async function createCollection(body) {
+  return _req('POST', '/collections', { body });
+}
+
+/** @param {number} id @param {{ name?: string, rule?: object, sort_order?: number }} body */
+export async function updateCollection(id, body) {
+  return _req('PUT', `/collections/${id}`, { body });
+}
+
+/** @param {number} id */
+export async function deleteCollection(id) {
+  return _req('DELETE', `/collections/${id}`);
+}
+
+/** @param {number} id */
+export async function getCollectionManga(id) {
+  return _req('GET', `/collections/${id}/manga`);
+}
+
+// ── Saved searches ────────────────────────────────────────────────────────────
+
+export async function listSavedSearches() {
+  return _req('GET', '/saved-searches');
+}
+
+/** @param {{ name: string, query_json: string }} body */
+export async function createSavedSearch(body) {
+  return _req('POST', '/saved-searches', { body });
+}
+
+/** @param {number} id @param {{ name?: string, query_json?: string }} body */
+export async function updateSavedSearch(id, body) {
+  return _req('PUT', `/saved-searches/${id}`, { body });
+}
+
+/** @param {number} id */
+export async function deleteSavedSearch(id) {
+  return _req('DELETE', `/saved-searches/${id}`);
+}
+
+// ── Admin — storage stats ─────────────────────────────────────────────────────
+
+export async function getAdminStorageStats() {
+  return _req('GET', '/admin/storage/stats');
+}
+
+export async function getAdminStorageStatsHistory() {
+  return _req('GET', '/admin/storage/stats/history');
+}
+
+// ── Admin — integrity check ───────────────────────────────────────────────────
+
+/** @param {boolean} [fix] */
+export async function runIntegrityCheck(fix = false) {
+  return _req('POST', `/admin/library/integrity-check${fix ? '?fix=true' : ''}`);
+}
+
+// ── Admin — backup schedule ───────────────────────────────────────────────────
+
+export async function getBackupSchedule() {
+  return _req('GET', '/admin/backup/schedule');
+}
+
+/** @param {object} config */
+export async function setBackupSchedule(config) {
+  return _req('PUT', '/admin/backup/schedule', { body: config });
+}
+
+export async function runBackupNow() {
+  return _req('POST', '/admin/backup/run-now');
+}
+
+/**
+ * Download a backup, optionally encrypted.
+ * @param {boolean} includeChapterProgress
+ * @param {string} [passphrase]
+ */
+export function downloadBackupEncrypted(includeChapterProgress = false, passphrase = '') {
+  if (!passphrase) {
+    downloadBackup(includeChapterProgress);
+    return;
+  }
+  fetch(`/rest/library/backup${includeChapterProgress ? '?include_chapter_progress=true' : ''}`, {
+    method: 'GET',
+    credentials: 'include',
+    headers: passphrase ? { 'X-Backup-Passphrase': passphrase } : {},
+  }).then(async res => {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const disp = res.headers.get('Content-Disposition') ?? '';
+    const match = disp.match(/filename="?([^"]+)"?/);
+    a.download = match?.[1] ?? 'kani-backup.zip';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }).catch(e => { throw e; });
+}
+
+/** @param {File} file @param {string} [passphrase] */
+export async function previewBackupEncrypted(file, passphrase = '') {
+  const body = new FormData();
+  body.append('file', file);
+  if (passphrase) body.append('passphrase', passphrase);
+  const res = await fetch('/rest/library/backup/preview', { method: 'POST', credentials: 'include', body });
+  if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
+  return res.json();
+}
+
+/**
+ * @param {File} file
+ * @param {{ merge?: boolean, import_manga?: boolean, import_categories?: boolean,
+ *            import_download_rules?: boolean, import_tracking?: boolean,
+ *            import_chapter_progress?: boolean, import_settings?: boolean }} [opts]
+ * @param {string} [passphrase]
+ */
+export async function restoreBackupEncrypted(file, opts = {}, passphrase = '') {
+  const body = new FormData();
+  body.append('file', file);
+  for (const [k, v] of Object.entries(opts)) body.append(k, String(v));
+  if (passphrase) body.append('passphrase', passphrase);
+  const res = await fetch('/rest/library/restore', { method: 'POST', credentials: 'include', body });
+  if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
+  return res.json();
+}

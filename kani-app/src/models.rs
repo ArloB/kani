@@ -125,6 +125,7 @@ pub struct Manga {
     pub notes: Option<String>,
     pub is_orphaned: bool,
     pub cover_hash: Option<String>,
+    pub deleted_at: Option<time::OffsetDateTime>,
 }
 
 /// DB row fetched when listing chapters for a manga.

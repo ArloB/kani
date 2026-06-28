@@ -204,6 +204,156 @@ impl AppService {
             })
             .collect())
     }
+
+    pub async fn capture_storage_snapshot(&self) -> crate::error::Result<()> {
+        let library_path = self.settings.read().await.library_path.clone();
+
+        let library_used = dir_size_bytes(&library_path).await;
+        let data_path = library_path.parent().unwrap_or(&library_path).to_path_buf();
+        let data_used = dir_size_bytes(&data_path.join("kani.db")).await;
+        let cover_used = dir_size_bytes(&library_path.join("covers")).await;
+        let chapter_used = library_used.saturating_sub(cover_used);
+
+        let free_bytes = fs2::free_space(&library_path).unwrap_or(0);
+
+        let total_manga: i64 =
+            sqlx::query_scalar!("SELECT COUNT(*) FROM manga WHERE deleted_at IS NULL")
+                .fetch_one(&self.db_read)
+                .await?;
+
+        let total_chapters: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM chapters")
+            .fetch_one(&self.db_read)
+            .await?;
+
+        let library_used_i64 = library_used as i64;
+        let cover_used_i64 = cover_used as i64;
+        let chapter_used_i64 = chapter_used as i64;
+        let data_used_i64 = data_used as i64;
+        let free_bytes_i64 = free_bytes as i64;
+
+        sqlx::query!(
+            "INSERT INTO storage_history \
+             (library_used_bytes, cover_used_bytes, chapter_used_bytes, \
+              data_used_bytes, free_bytes, total_manga, total_chapters) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            library_used_i64,
+            cover_used_i64,
+            chapter_used_i64,
+            data_used_i64,
+            free_bytes_i64,
+            total_manga,
+            total_chapters
+        )
+        .execute(&self.db)
+        .await?;
+
+        let warn_threshold: f64 = std::env::var("KANI_DISK_WARN_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.10);
+
+        let total_bytes = (free_bytes as i64).saturating_add(library_used as i64);
+        if total_bytes > 0 {
+            let free_fraction = free_bytes as f64 / total_bytes as f64;
+            if free_fraction < warn_threshold {
+                tracing::warn!(
+                    "Low disk space on library path: {:.1}% free ({} bytes)",
+                    free_fraction * 100.0,
+                    free_bytes
+                );
+            }
+        }
+
+        sqlx::query!("DELETE FROM storage_history WHERE captured_at < datetime('now', '-90 days')")
+            .execute(&self.db)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_storage_stats(&self) -> crate::error::Result<StorageStats> {
+        let library_path = self.settings.read().await.library_path.clone();
+
+        let library_used = dir_size_bytes(&library_path).await;
+        let cover_used = dir_size_bytes(&library_path.join("covers")).await;
+        let chapter_used = library_used.saturating_sub(cover_used);
+        let free_bytes = fs2::free_space(&library_path).unwrap_or(0);
+
+        let data_path = library_path.parent().unwrap_or(&library_path).to_path_buf();
+        let data_used = dir_size_bytes(&data_path.join("kani.db")).await;
+
+        let total_manga: i64 =
+            sqlx::query_scalar!("SELECT COUNT(*) FROM manga WHERE deleted_at IS NULL")
+                .fetch_one(&self.db_read)
+                .await?;
+
+        let total_chapters: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM chapters")
+            .fetch_one(&self.db_read)
+            .await?;
+
+        let total_downloads: i64 =
+            sqlx::query_scalar!("SELECT COUNT(*) FROM chapters WHERE download_status = 2")
+                .fetch_one(&self.db_read)
+                .await?;
+
+        Ok(StorageStats {
+            library_used_bytes: library_used,
+            library_free_bytes: free_bytes,
+            cover_used_bytes: cover_used,
+            chapter_used_bytes: chapter_used,
+            data_used_bytes: data_used,
+            total_manga: total_manga as u64,
+            total_chapters: total_chapters as u64,
+            total_downloads: total_downloads as u64,
+        })
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct StorageStats {
+    pub library_used_bytes: u64,
+    pub library_free_bytes: u64,
+    pub cover_used_bytes: u64,
+    pub chapter_used_bytes: u64,
+    pub data_used_bytes: u64,
+    pub total_manga: u64,
+    pub total_chapters: u64,
+    pub total_downloads: u64,
+}
+
+async fn dir_size_bytes(path: &std::path::Path) -> u64 {
+    use tokio::fs;
+    let mut total = 0u64;
+    let Ok(mut rd) = fs::read_dir(path).await else {
+        return 0;
+    };
+    while let Ok(Some(entry)) = rd.next_entry().await {
+        let Ok(meta) = entry.metadata().await else {
+            continue;
+        };
+        if meta.is_file() {
+            total += meta.len();
+        } else if meta.is_dir() {
+            total += dir_size_bytes_sync(&entry.path());
+        }
+    }
+    total
+}
+
+fn dir_size_bytes_sync(path: &std::path::Path) -> u64 {
+    let Ok(rd) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    let mut total = 0u64;
+    for entry in rd.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_file() {
+            total += meta.len();
+        } else if meta.is_dir() {
+            total += dir_size_bytes_sync(&entry.path());
+        }
+    }
+    total
 }
 
 fn calculate_streaks(activity: &[DailyActivity]) -> (i64, i64) {

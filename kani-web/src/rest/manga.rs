@@ -5,6 +5,12 @@ use super::*;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/manga/{id}", get(get_manga).delete(delete_manga))
+        .route("/manga/{id}/untrash", post(untrash_manga_handler))
+        .route(
+            "/trash",
+            get(list_trash_handler).delete(purge_trash_all_handler),
+        )
+        .route("/trash/{id}", delete(purge_trash_one_handler))
         .route(
             "/manga/{id}/cover",
             post(upload_manga_cover_handler).delete(clear_manga_cover_handler),
@@ -79,9 +85,10 @@ pub(crate) async fn get_manga(
     delete, path = "/rest/manga/{id}",
     params(("id" = i64, Path, description = "Manga ID")),
     responses(
-        (status = 200, description = "Manga deleted from library"),
+        (status = 200, description = "Manga moved to trash; returns undo_token"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Manga not found"),
     ),
     security(("session" = [])),
     tag = "manga"
@@ -91,8 +98,41 @@ pub(crate) async fn delete_manga(
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
+    svc.trash_manga(id, user.id).await?;
+    Ok(Json(json!({ "undo_token": id.0 })))
+}
+
+pub(crate) async fn untrash_manga_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(id): Path<MangaId>,
+) -> Result<impl IntoResponse, AppError> {
+    svc.untrash_manga(id, user.id).await?;
+    Ok(Json(json!({})))
+}
+
+pub(crate) async fn list_trash_handler(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(svc.list_trash().await?))
+}
+
+pub(crate) async fn purge_trash_one_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Path(id): Path<MangaId>,
+) -> Result<impl IntoResponse, AppError> {
     svc.delete_manga(id, user.id).await?;
     Ok(Json(json!({})))
+}
+
+pub(crate) async fn purge_trash_all_handler(
+    _: AuthGuard<crate::permissions::guards::LibraryDelete>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+) -> Result<impl IntoResponse, AppError> {
+    let purged = svc.purge_all_trash().await?;
+    Ok(Json(json!({ "purged": purged })))
 }
 
 #[utoipa::path(
@@ -992,6 +1032,22 @@ mod tests {
             _manga_id: MangaId,
             _kinds: Vec<DownloadRuleKind>,
         ) -> kani_app::error::Result<(usize, usize)> {
+            unimplemented!()
+        }
+        async fn trash_manga(&self, _id: MangaId, _user_id: UserId) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn untrash_manga(
+            &self,
+            _id: MangaId,
+            _user_id: UserId,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn list_trash(&self) -> kani_app::error::Result<Vec<kani_app::models::Manga>> {
+            unimplemented!()
+        }
+        async fn purge_all_trash(&self) -> kani_app::error::Result<u64> {
             unimplemented!()
         }
     }

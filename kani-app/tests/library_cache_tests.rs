@@ -3,24 +3,18 @@
 mod common;
 use common::{insert_manga, insert_source, test_service};
 use kani_app::ids::UserId;
+use kani_app::service::library::LibraryFilter;
 use kani_shared::types::MangaSortOrder;
 
 async fn list_names(svc: &kani_app::service::AppService) -> Vec<String> {
     svc.get_library_filtered(
         UserId(1),
-        1,
-        20,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        false,
-        false,
-        None,
-        MangaSortOrder::NameAsc,
+        &LibraryFilter {
+            page: 1,
+            page_size: 20,
+            sort_by: MangaSortOrder::NameAsc,
+            ..Default::default()
+        },
     )
     .await
     .unwrap()

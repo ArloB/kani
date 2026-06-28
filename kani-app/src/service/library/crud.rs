@@ -1,34 +1,24 @@
 use super::super::*;
+use super::filter::LibraryFilter;
 use crate::ids::UserId;
 use std::sync::Arc;
 
-#[allow(clippy::too_many_arguments)]
-fn compute_filter_hash(
-    search: &Option<String>,
-    status_filter: Option<i64>,
-    tag_filter: Option<i64>,
-    author_filter: Option<i64>,
-    artist_filter: Option<i64>,
-    category_filter: Option<i64>,
-    reading_status_filter: Option<i64>,
-    hide_no_unread: bool,
-    hide_completed_status: bool,
-    source_id: Option<i64>,
-    sort_order: &str,
-) -> u64 {
+fn compute_filter_hash(f: &LibraryFilter) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    search.hash(&mut h);
-    status_filter.hash(&mut h);
-    tag_filter.hash(&mut h);
-    author_filter.hash(&mut h);
-    artist_filter.hash(&mut h);
-    category_filter.hash(&mut h);
-    reading_status_filter.hash(&mut h);
-    hide_no_unread.hash(&mut h);
-    hide_completed_status.hash(&mut h);
-    source_id.hash(&mut h);
-    sort_order.hash(&mut h);
+    f.search.hash(&mut h);
+    f.status_filter.hash(&mut h);
+    f.tag_filter.hash(&mut h);
+    f.author_filter.hash(&mut h);
+    f.artist_filter.hash(&mut h);
+    f.category_filter.hash(&mut h);
+    f.reading_status_filter.hash(&mut h);
+    f.hide_no_unread.hash(&mut h);
+    f.hide_completed_status.hash(&mut h);
+    f.source_id.hash(&mut h);
+    f.sort_by.to_sql_order().hash(&mut h);
+    f.include_trashed.hash(&mut h);
+    f.manga_id_filter.hash(&mut h);
     h.finish()
 }
 
@@ -103,55 +93,32 @@ impl AppService {
     }
 
     /// Filtered/paginated library query. Returns (rows, has_next_page, total_pages).
-    #[allow(clippy::too_many_arguments)]
     pub async fn get_library_filtered(
         &self,
         user_id: UserId,
-        page: i32,
-        page_size: i32,
-        search: Option<String>,
-        status_filter: Option<i64>,
-        tag_filter: Option<i64>,
-        author_filter: Option<i64>,
-        artist_filter: Option<i64>,
-        category_filter: Option<i64>,
-        reading_status_filter: Option<i64>,
-        hide_no_unread: bool,
-        hide_completed_status: bool,
-        source_id: Option<i64>,
-        sort_by: kani_shared::types::MangaSortOrder,
+        f: &LibraryFilter,
     ) -> Result<(Vec<crate::models::LibraryManga>, bool, Option<u32>)> {
         use kani_shared::types::MangaSortOrder;
 
-        let filter_hash = compute_filter_hash(
-            &search,
-            status_filter,
-            tag_filter,
-            author_filter,
-            artist_filter,
-            category_filter,
-            reading_status_filter,
-            hide_no_unread,
-            hide_completed_status,
-            source_id,
-            sort_by.to_sql_order(),
-        );
+        let filter_hash = compute_filter_hash(f);
 
         if let Some(cached) = self
             .cache
-            .get_library_listing(user_id.0, filter_hash, page, page_size)
+            .get_library_listing(user_id.0, filter_hash, f.page, f.page_size)
             .await
         {
             let (rows, has_next, total) = (*cached).clone();
             return Ok((rows, has_next, total));
         }
 
+        let page = f.page;
+        let page_size = f.page_size;
         let offset = (page - 1).max(0) * page_size;
-        let use_fts = search.is_some();
+        let use_fts = f.search.is_some();
 
-        let need_umt = sort_by.needs_tracking_join()
-            || reading_status_filter.is_some()
-            || hide_completed_status;
+        let need_umt = f.sort_by.needs_tracking_join()
+            || f.reading_status_filter.is_some()
+            || f.hide_completed_status;
 
         let mut qb = sqlx::QueryBuilder::new(
             "SELECT m.id, COALESCE(m.local_name, m.name) AS name, m.cover_url, m.local_cover_path, s.base_url, \
@@ -179,44 +146,59 @@ impl AppService {
 
         qb.push(" WHERE 1=1");
 
-        if let Some(s) = search {
+        if !f.include_trashed {
+            qb.push(" AND m.deleted_at IS NULL");
+        }
+
+        if let Some(ref s) = f.search {
             let fts_term = format!("\"{}\"*", s.replace('"', "\"\""));
             qb.push(" AND manga_fts MATCH ");
             qb.push_bind(fts_term);
         }
-        if let Some(v) = status_filter {
+        if let Some(v) = f.status_filter {
             qb.push(" AND m.status = ");
             qb.push_bind(v);
         }
-        if let Some(v) = tag_filter {
+        if let Some(v) = f.tag_filter {
             qb.push(" AND EXISTS (SELECT 1 FROM manga_tags mt WHERE mt.manga_id = m.id AND mt.tag_id = ");
             qb.push_bind(v);
             qb.push(")");
         }
-        if let Some(v) = author_filter {
+        if let Some(v) = f.author_filter {
             qb.push(" AND EXISTS (SELECT 1 FROM manga_people mp WHERE mp.manga_id = m.id AND mp.role = 'author' AND mp.person_id = ");
             qb.push_bind(v);
             qb.push(")");
         }
-        if let Some(v) = artist_filter {
+        if let Some(v) = f.artist_filter {
             qb.push(" AND EXISTS (SELECT 1 FROM manga_people mp WHERE mp.manga_id = m.id AND mp.role = 'artist' AND mp.person_id = ");
             qb.push_bind(v);
             qb.push(")");
         }
-        if let Some(v) = category_filter {
+        if let Some(v) = f.category_filter {
             qb.push(" AND EXISTS (SELECT 1 FROM manga_categories mc WHERE mc.manga_id = m.id AND mc.category_id = ");
             qb.push_bind(v);
             qb.push(")");
         }
-        if let Some(v) = reading_status_filter {
+        if let Some(ids) = &f.manga_id_filter {
+            if ids.is_empty() {
+                qb.push(" AND 1=0");
+            } else {
+                qb.push(" AND m.id IN (");
+                let mut sep = qb.separated(", ");
+                for id in ids {
+                    sep.push_bind(*id);
+                }
+                qb.push(")");
+            }
+        }
+        if let Some(v) = f.reading_status_filter {
             qb.push(" AND umt.status = ");
             qb.push_bind(v);
         }
-        if hide_completed_status {
+        if f.hide_completed_status {
             qb.push(" AND (umt.status IS NULL OR umt.status != 4)");
         }
-        if hide_no_unread {
-            // Keep manga that have at least one chapter number not read by this user.
+        if f.hide_no_unread {
             qb.push(
                 " AND EXISTS (\
                    SELECT 1 FROM chapters c WHERE c.manga_id = m.id \
@@ -231,7 +213,7 @@ impl AppService {
             qb.push(" AND uct.is_read = true))");
         }
 
-        if let Some(v) = source_id {
+        if let Some(v) = f.source_id {
             qb.push(" AND m.source_id = ");
             qb.push_bind(v);
         }
@@ -240,7 +222,7 @@ impl AppService {
 
         if use_fts {
             qb.push(" ORDER BY manga_fts.rank");
-        } else if matches!(sort_by, MangaSortOrder::LastReadDesc) {
+        } else if matches!(f.sort_by, MangaSortOrder::LastReadDesc) {
             qb.push(
                 " ORDER BY (SELECT MAX(uct2.last_read_at) \
                    FROM user_chapter_tracking uct2 \
@@ -250,7 +232,7 @@ impl AppService {
             qb.push_bind(user_id);
             qb.push(") DESC NULLS LAST, m.name ASC");
         } else {
-            qb.push(format!(" ORDER BY {}", sort_by.to_sql_order()));
+            qb.push(format!(" ORDER BY {}", f.sort_by.to_sql_order()));
         }
 
         qb.push(format!(" LIMIT {} OFFSET ", limit));
@@ -553,5 +535,152 @@ impl AppService {
         .execute(&self.db)
         .await?;
         Ok(())
+    }
+
+    pub async fn trash_manga(&self, id: MangaId, user_id: UserId) -> Result<()> {
+        let exists = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM manga WHERE id = ? AND deleted_at IS NULL",
+            id
+        )
+        .fetch_one(&self.db_read)
+        .await?;
+        if exists == 0 {
+            return Err(ServiceError::NotFound(format!("Manga {id} not found")));
+        }
+        let now = time::OffsetDateTime::now_utc();
+        sqlx::query!("UPDATE manga SET deleted_at = ? WHERE id = ?", now, id)
+            .execute(&self.db)
+            .await?;
+        self.invalidate_library();
+        self.audit(Some(user_id), "manga.trash", None, None).await;
+        Ok(())
+    }
+
+    pub async fn untrash_manga(&self, id: MangaId, user_id: UserId) -> Result<()> {
+        let exists = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM manga WHERE id = ? AND deleted_at IS NOT NULL",
+            id
+        )
+        .fetch_one(&self.db_read)
+        .await?;
+        if exists == 0 {
+            return Err(ServiceError::NotFound(format!(
+                "Manga {id} not found in trash"
+            )));
+        }
+        sqlx::query!("UPDATE manga SET deleted_at = NULL WHERE id = ?", id)
+            .execute(&self.db)
+            .await?;
+        self.invalidate_library();
+        self.audit(Some(user_id), "manga.untrash", None, None).await;
+        Ok(())
+    }
+
+    pub async fn list_trash(&self) -> Result<Vec<crate::models::Manga>> {
+        sqlx::query_as!(
+            crate::models::Manga,
+            "SELECT * FROM manga WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+        )
+        .fetch_all(&self.db_read)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn purge_all_trash(&self) -> Result<u64> {
+        let rows = sqlx::query!(
+            "SELECT id, name, local_cover_path FROM manga WHERE deleted_at IS NOT NULL"
+        )
+        .fetch_all(&self.db_read)
+        .await?;
+
+        let count = rows.len() as u64;
+        let library_path = self.settings.read().await.library_path.clone();
+
+        for row in rows {
+            let safe_name = format!(
+                "{} - {}",
+                kani_core::utilities::sanitize_filename(&row.name),
+                row.id
+            );
+            let dir = library_path.join(&safe_name);
+            match tokio::fs::remove_dir_all(&dir).await {
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => tracing::warn!("purge_all_trash: remove_dir_all {:?}: {e}", dir),
+            }
+            if let Some(cover_rel) = row.local_cover_path {
+                let cover_path = library_path.join(&cover_rel);
+                match tokio::fs::remove_file(&cover_path).await {
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => tracing::warn!("purge_all_trash: remove cover {:?}: {e}", cover_path),
+                }
+            }
+        }
+
+        sqlx::query!("DELETE FROM manga WHERE deleted_at IS NOT NULL")
+            .execute(&self.db)
+            .await?;
+
+        self.invalidate_library();
+        Ok(count)
+    }
+
+    pub async fn purge_expired_trash(&self, days: u32) -> crate::error::Result<u64> {
+        let days_i64 = days as i64;
+        let cutoff = time::OffsetDateTime::now_utc() - time::Duration::days(days_i64);
+        let count = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM manga WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+            cutoff
+        )
+        .fetch_one(&self.db_read)
+        .await?;
+
+        let expired = sqlx::query!(
+            "SELECT id, name, local_cover_path FROM manga \
+             WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+            cutoff
+        )
+        .fetch_all(&self.db_read)
+        .await?;
+
+        let library_path = self.settings.read().await.library_path.clone();
+
+        for row in expired {
+            let id = row.id;
+            let name = row.name;
+            let cover_path = row.local_cover_path;
+            let safe_name = format!(
+                "{} - {}",
+                kani_core::utilities::sanitize_filename(&name),
+                id
+            );
+            let dir = library_path.join(&safe_name);
+            match tokio::fs::remove_dir_all(&dir).await {
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => tracing::warn!("purge_expired_trash: remove_dir_all {:?}: {e}", dir),
+            }
+            if let Some(cover_rel) = cover_path {
+                let cover_path = library_path.join(&cover_rel);
+                match tokio::fs::remove_file(&cover_path).await {
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        tracing::warn!("purge_expired_trash: remove cover {:?}: {e}", cover_path)
+                    }
+                }
+            }
+        }
+
+        sqlx::query!(
+            "DELETE FROM manga WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+            cutoff
+        )
+        .execute(&self.db)
+        .await?;
+
+        self.invalidate_library();
+        Ok(count as u64)
     }
 }

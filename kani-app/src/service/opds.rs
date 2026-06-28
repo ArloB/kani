@@ -8,7 +8,7 @@ use time::OffsetDateTime;
 use super::AppService;
 use crate::error::Result;
 use crate::ids::MangaId;
-use kani_shared::types::{ChapterSortOrder, MangaSortOrder};
+use kani_shared::types::ChapterSortOrder;
 
 impl AppService {
     /// Root OPDS navigation feed — links to catalogue and search.
@@ -73,19 +73,12 @@ impl AppService {
         let (manga_list, has_next, _) = self
             .get_library_filtered(
                 crate::ids::UserId(0),
-                page,
-                page_size,
-                search.clone(),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-                false,
-                None,
-                MangaSortOrder::default(),
+                &crate::service::library::LibraryFilter {
+                    page,
+                    page_size,
+                    search: search.clone(),
+                    ..Default::default()
+                },
             )
             .await?;
 

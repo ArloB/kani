@@ -9,7 +9,8 @@ import { openConfirm } from '../../utils.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { iconPencil, iconX } from '../../icons.js';
 import { Modal, mountIntoModalRoot } from '../../components/modal.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
+import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow, mkNumberRow } from './_shared.js';
+import { t } from '../../i18n.js';
 import { mountSortableList } from '../../components/sortable-list.js';
 import { createEmptyState } from '../../components/empty-state.js';
 
@@ -263,7 +264,10 @@ function _mountImportExport(el) {
   let includeProgress = false;
 
   const exportCtrl = document.createElement('div');
-  exportCtrl.className = 'flex items-center gap-2';
+  exportCtrl.className = 'flex flex-col gap-2 items-end';
+
+  const exportTopRow = document.createElement('div');
+  exportTopRow.className = 'flex items-center gap-2';
 
   const progressLabel = document.createElement('label');
   progressLabel.className = 'flex items-center gap-1.5 text-xs text-text-muted cursor-pointer select-none';
@@ -274,19 +278,34 @@ function _mountImportExport(el) {
   progressLabel.appendChild(progressCheck);
   progressLabel.appendChild(document.createTextNode('Include chapter progress'));
 
+  const exportPassphrase = document.createElement('input');
+  exportPassphrase.type = 'password';
+  exportPassphrase.className = 'input text-sm w-44';
+  exportPassphrase.placeholder = t('backup.export.passphrase');
+  exportPassphrase.autocomplete = 'new-password';
+  exportPassphrase.title = t('backup.export.passphrase.desc');
+
   const exportBtn = document.createElement('button');
   exportBtn.type = 'button';
   exportBtn.className = 'btn-primary btn-sm';
   exportBtn.textContent = 'Export';
-  exportBtn.addEventListener('click', () => api.downloadBackup(includeProgress));
+  exportBtn.addEventListener('click', () => api.downloadBackupEncrypted(includeProgress, exportPassphrase.value));
 
-  exportCtrl.appendChild(progressLabel);
-  exportCtrl.appendChild(exportBtn);
+  exportTopRow.appendChild(progressLabel);
+  exportTopRow.appendChild(exportBtn);
+  exportCtrl.appendChild(exportTopRow);
+  exportCtrl.appendChild(exportPassphrase);
   card.appendChild(mkSettingsRow({ label: 'Export backup', description: 'Download a .zip backup of your library.', control: exportCtrl }));
 
   // ── Restore ───────────────────────────────────────────────────────────────
   const restoreCtrl = document.createElement('div');
   restoreCtrl.className = 'flex flex-col gap-2 items-end';
+
+  const restorePassphrase = document.createElement('input');
+  restorePassphrase.type = 'password';
+  restorePassphrase.className = 'input text-sm w-44';
+  restorePassphrase.placeholder = t('backup.restore.passphrase');
+  restorePassphrase.autocomplete = 'current-password';
 
   const restoreBtn = document.createElement('button');
   restoreBtn.type = 'button';
@@ -302,8 +321,8 @@ function _mountImportExport(el) {
     if (!file) return;
     restoreInput.value = '';
     try {
-      const preview = await api.previewBackup(file);
-      _showRestoreDialog(file, preview);
+      const preview = await api.previewBackupEncrypted(file, restorePassphrase.value);
+      _showRestoreDialog(file, preview, restorePassphrase.value);
     } catch (e) {
       showToast(`Preview failed: ${e.message}`, 'error');
     }
@@ -311,6 +330,7 @@ function _mountImportExport(el) {
 
   restoreBtn.addEventListener('click', () => restoreInput.click());
   restoreCtrl.appendChild(restoreInput);
+  restoreCtrl.appendChild(restorePassphrase);
   restoreCtrl.appendChild(restoreBtn);
   card.appendChild(mkSettingsRow({ label: 'Restore backup', description: 'Restore from a Kani backup file.', control: restoreCtrl }));
 
@@ -341,10 +361,155 @@ function _mountImportExport(el) {
   tachiCtrl.appendChild(tachiInput);
   tachiCtrl.appendChild(tachiBtn);
   card.appendChild(mkSettingsRow({ label: 'Import from Tachiyomi / Mihon', description: 'Import a .tachibk backup file.', control: tachiCtrl }));
+
+  _mountScheduledBackup(el);
 }
 
-/** @param {{ file: File, preview: any, onClose: () => void }} props */
-function RestoreModal({ file, preview, onClose }) {
+/** @param {HTMLElement} el */
+async function _mountScheduledBackup(el) {
+  const group = mkSettingsGroup(t('backup.group.schedule'));
+  const card  = mkSettingsGroupCard(group);
+  el.appendChild(group);
+
+  let cfg = {
+    enabled: false,
+    frequency: { type: 'daily', hour: 2 },
+    retain_n: 7,
+    destination: { type: 'local', path: '/backups' },
+    passphrase: null,
+  };
+
+  try {
+    const loaded = await api.getBackupSchedule();
+    if (loaded) cfg = loaded;
+  } catch { /* admin may not be available; silently skip */ }
+
+  let dirty = false;
+
+  const enabledRow = mkToggleRow({
+    label: t('backup.schedule.enabled'),
+    checked: !!cfg.enabled,
+    onChange: v => { cfg = { ...cfg, enabled: v }; dirty = true; _updateDisabled(); },
+  });
+  card.appendChild(enabledRow);
+
+  const freqCtrl = document.createElement('select');
+  freqCtrl.className = 'input text-sm w-28';
+  freqCtrl.innerHTML = `<option value="daily">${t('backup.schedule.daily')}</option><option value="weekly">${t('backup.schedule.weekly')}</option>`;
+  freqCtrl.value = cfg.frequency?.type ?? 'daily';
+  freqCtrl.addEventListener('change', () => {
+    const freq = { ...cfg.frequency, type: freqCtrl.value };
+    if (freqCtrl.value === 'weekly' && freq.weekday == null) {
+      freq.weekday = Number(weekdayCtrl.value);
+    }
+    cfg = { ...cfg, frequency: freq };
+    dirty = true;
+    _updateWeekdayRow();
+  });
+  const freqRow = mkSettingsRow({ label: t('backup.schedule.frequency'), control: freqCtrl });
+  card.appendChild(freqRow);
+
+  const hourRow = mkNumberRow({
+    label: t('backup.schedule.hour'), id: 'backup-hour',
+    value: cfg.frequency?.hour ?? 2, min: 0, max: 23,
+    onChange: v => { cfg = { ...cfg, frequency: { ...cfg.frequency, hour: v } }; dirty = true; },
+  });
+  card.appendChild(hourRow);
+
+  const weekdayCtrl = document.createElement('select');
+  weekdayCtrl.className = 'input text-sm';
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  weekdayCtrl.innerHTML = days.map((d, i) => `<option value="${i}">${d}</option>`).join('');
+  weekdayCtrl.value = String(cfg.frequency?.weekday ?? 0);
+  weekdayCtrl.addEventListener('change', () => { cfg = { ...cfg, frequency: { ...cfg.frequency, weekday: Number(weekdayCtrl.value) } }; dirty = true; });
+  const weekdayRow = mkSettingsRow({ label: t('backup.schedule.weekday'), control: weekdayCtrl });
+  card.appendChild(weekdayRow);
+
+  const retainRow = mkNumberRow({
+    label: t('backup.schedule.retain'), id: 'backup-retain',
+    value: cfg.retain_n ?? 7, min: 1, max: 365,
+    onChange: v => { cfg = { ...cfg, retain_n: v }; dirty = true; },
+  });
+  card.appendChild(retainRow);
+
+  const pathCtrl = document.createElement('input');
+  pathCtrl.type = 'text';
+  pathCtrl.className = 'input text-sm w-48';
+  pathCtrl.value = cfg.destination?.path ?? '/backups';
+  pathCtrl.addEventListener('change', () => { cfg = { ...cfg, destination: { type: 'local', path: pathCtrl.value } }; dirty = true; });
+  card.appendChild(mkSettingsRow({ label: t('backup.schedule.path'), control: pathCtrl }));
+
+  const passphraseCtrl = document.createElement('input');
+  passphraseCtrl.type = 'password';
+  passphraseCtrl.className = 'input text-sm w-44';
+  passphraseCtrl.placeholder = cfg.passphrase === '***' ? '••••••••' : '';
+  passphraseCtrl.autocomplete = 'new-password';
+  passphraseCtrl.addEventListener('change', () => { cfg = { ...cfg, passphrase: passphraseCtrl.value || null }; dirty = true; });
+  card.appendChild(mkSettingsRow({ label: t('backup.schedule.passphrase'), description: t('backup.schedule.passphrase.desc'), control: passphraseCtrl }));
+
+  const footerRow = document.createElement('div');
+  footerRow.className = 'flex items-center gap-2 px-4 py-3 border-t border-border-subtle';
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'btn-primary btn-sm';
+  saveBtn.textContent = t('backup.schedule.save');
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    saveBtn.textContent = t('backup.schedule.saving');
+    try {
+      await api.setBackupSchedule(cfg);
+      showToast(t('backup.schedule.saved'), { type: 'success' });
+      dirty = false;
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = t('backup.schedule.save');
+    }
+  });
+
+  const runNowBtn = document.createElement('button');
+  runNowBtn.type = 'button';
+  runNowBtn.className = 'btn-secondary btn-sm';
+  runNowBtn.textContent = t('backup.schedule.run_now');
+  runNowBtn.setAttribute('data-tooltip', t('backup.schedule.run_now.desc'));
+  runNowBtn.addEventListener('click', async () => {
+    runNowBtn.disabled = true;
+    try {
+      await api.runBackupNow();
+      showToast(t('backup.schedule.job_submitted'), { type: 'success', action: { label: t('backup.schedule.job_view'), href: '/admin/jobs' } });
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      runNowBtn.disabled = false;
+    }
+  });
+
+  footerRow.appendChild(saveBtn);
+  footerRow.appendChild(runNowBtn);
+  card.appendChild(footerRow);
+
+  function _updateDisabled() {
+    const disabled = !cfg.enabled;
+    for (const el of [freqRow, hourRow, weekdayRow, retainRow]) {
+      el.style.opacity = disabled ? '0.5' : '';
+      for (const input of el.querySelectorAll('input, select')) {
+        /** @type {HTMLInputElement} */ (input).disabled = disabled;
+      }
+    }
+  }
+
+  function _updateWeekdayRow() {
+    weekdayRow.style.display = cfg.frequency?.type === 'weekly' ? '' : 'none';
+  }
+
+  _updateDisabled();
+  _updateWeekdayRow();
+}
+
+/** @param {{ file: File, preview: any, passphrase?: string, onClose: () => void }} props */
+function RestoreModal({ file, preview, passphrase = '', onClose }) {
   const [opts, setOpts] = useState({
     merge: false,
     import_manga: true,
@@ -389,7 +554,7 @@ function RestoreModal({ file, preview, onClose }) {
     setLoading(true);
     setProgress(null);
     try {
-      const r = await api.restoreBackup(file, opts);
+      const r = await api.restoreBackupEncrypted(file, opts, passphrase);
       showToast(`Backup restored: ${r.imported_manga} manga imported.`, { type: 'success' });
       onClose();
     } catch (e) {
@@ -551,10 +716,10 @@ function TachiyomiImportModal({ file, preview, onClose }) {
   `;
 }
 
-/** @param {File} file @param {any} preview */
-function _showRestoreDialog(file, preview) {
+/** @param {File} file @param {any} preview @param {string} [passphrase] */
+function _showRestoreDialog(file, preview, passphrase = '') {
   let cleanup = () => {};
-  cleanup = mountIntoModalRoot(html`<${RestoreModal} file=${file} preview=${preview} onClose=${() => cleanup()} />`);
+  cleanup = mountIntoModalRoot(html`<${RestoreModal} file=${file} preview=${preview} passphrase=${passphrase} onClose=${() => cleanup()} />`);
 }
 
 /** @param {File} file @param {any} preview */

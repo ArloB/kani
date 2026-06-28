@@ -3,6 +3,7 @@
 mod common;
 use common::{insert_manga, insert_source, test_service};
 use kani_app::ids::{MangaId, UserId};
+use kani_app::service::library::LibraryFilter;
 use kani_shared::types::MangaSortOrder;
 
 #[tokio::test]
@@ -48,19 +49,12 @@ async fn get_library_filtered_empty_db_returns_empty() {
     let (rows, has_next, _total) = svc
         .get_library_filtered(
             UserId(1),
-            1,
-            20,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            false,
-            None,
-            MangaSortOrder::UpdatedAsc,
+            &LibraryFilter {
+                page: 1,
+                page_size: 20,
+                sort_by: MangaSortOrder::UpdatedAsc,
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -78,19 +72,13 @@ async fn get_library_filtered_returns_matching_manga() {
     let (rows, _, _) = svc
         .get_library_filtered(
             UserId(1),
-            1,
-            20,
-            Some("Dragon".to_string()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            false,
-            None,
-            MangaSortOrder::UpdatedAsc,
+            &LibraryFilter {
+                page: 1,
+                page_size: 20,
+                search: Some("Dragon".to_string()),
+                sort_by: MangaSortOrder::UpdatedAsc,
+                ..Default::default()
+            },
         )
         .await
         .unwrap();

@@ -26,6 +26,7 @@ use trackers::TrackerRegistry;
 
 mod audit;
 pub mod backup;
+pub mod backup_scheduler;
 mod categories;
 mod chapters;
 mod cover;
@@ -40,7 +41,8 @@ pub mod export;
 mod filters;
 pub mod fs_browse;
 pub mod import;
-mod library;
+pub mod integrity;
+pub mod library;
 pub mod metadata_provider;
 mod migration;
 pub mod opds;
@@ -51,9 +53,11 @@ pub mod pending_imports;
 mod preferences;
 pub(crate) mod progress;
 pub mod repos;
+pub mod saved_searches;
 mod scanlators;
 pub mod sessions;
 mod settings;
+pub mod smart_collections;
 mod sources;
 mod stats;
 pub mod streaming;
@@ -61,6 +65,7 @@ pub mod thumbnails;
 pub mod totp;
 pub mod trackers;
 pub mod traits;
+pub mod volumes;
 pub mod webhooks;
 
 #[derive(Clone)]
@@ -550,6 +555,10 @@ impl AppService {
         job_registry.register::<crate::jobs::download::LibraryScanJob>();
         job_registry.register::<crate::jobs::maintenance::AnalyzeJob>();
         job_registry.register::<crate::jobs::maintenance::VacuumJob>();
+        job_registry.register::<crate::jobs::scan::AutoScanJob>();
+        job_registry.register::<crate::jobs::backup::ScheduledBackupJob>();
+        job_registry.register::<crate::jobs::storage::StorageMonitorJob>();
+        job_registry.register::<crate::jobs::integrity::IntegrityCheckJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),
@@ -704,6 +713,10 @@ impl AppService {
         registry.register::<crate::jobs::download::LibraryScanJob>();
         registry.register::<crate::jobs::maintenance::AnalyzeJob>();
         registry.register::<crate::jobs::maintenance::VacuumJob>();
+        registry.register::<crate::jobs::scan::AutoScanJob>();
+        registry.register::<crate::jobs::backup::ScheduledBackupJob>();
+        registry.register::<crate::jobs::storage::StorageMonitorJob>();
+        registry.register::<crate::jobs::integrity::IntegrityCheckJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),
@@ -948,162 +961,131 @@ impl AppService {
         });
     }
 
-    /// Spawns the background auto-scan loop. Call once from main after construction.
-    ///
-    /// Cancellation audit: every `select!` in the background loops pairs
-    /// `shutdown_token.cancelled()` against a `sleep`/`interval.tick()` only —
-    /// both are cancel-safe and hold no DB transaction across the await, so a
-    /// shutdown can never abort an in-flight write mid-transaction.
-    pub fn spawn_auto_scan(&self) {
-        let state = self.clone();
-        let token = self.shutdown_token.clone();
-        tokio::spawn(async move {
-            loop {
-                let interval_mins = state.settings.read().await.scan_interval_minutes;
-                tokio::select! {
-                    _ = token.cancelled() => {
-                        tracing::info!("Scan task shutting down");
-                        break;
-                    }
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(interval_mins as u64 * 60)) => {}
-                }
+    pub async fn run_auto_scan_once(&self) {
+        let settings_snap = self.settings.read().await.clone();
+        if !settings_snap.auto_scan {
+            return;
+        }
+        let exclude_completed = settings_snap.scan_exclude_completed;
+        let category_ids: Vec<i64> =
+            serde_json::from_str(&settings_snap.auto_download_category_ids).unwrap_or_default();
+        drop(settings_snap);
 
-                let settings_snap = state.settings.read().await.clone();
-                if !settings_snap.auto_scan {
-                    continue;
-                }
-                let exclude_completed = settings_snap.scan_exclude_completed;
-                let category_ids: Vec<i64> =
-                    serde_json::from_str(&settings_snap.auto_download_category_ids)
-                        .unwrap_or_default();
-                drop(settings_snap);
+        let category_manga_ids: std::collections::HashSet<i64> = if category_ids.is_empty() {
+            std::collections::HashSet::new()
+        } else {
+            let placeholders = category_ids
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 1))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT DISTINCT manga_id FROM manga_categories WHERE category_id IN ({})",
+                placeholders
+            );
+            let mut q = sqlx::query_scalar::<_, i64>(&sql);
+            for id in &category_ids {
+                q = q.bind(*id);
+            }
+            q.fetch_all(&self.db)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .collect()
+        };
 
-                let category_manga_ids: std::collections::HashSet<i64> = if category_ids.is_empty()
-                {
-                    std::collections::HashSet::new()
-                } else {
-                    let placeholders = category_ids
-                        .iter()
-                        .enumerate()
-                        .map(|(i, _)| format!("?{}", i + 1))
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    let sql = format!(
-                        "SELECT DISTINCT manga_id FROM manga_categories WHERE category_id IN ({})",
-                        placeholders
+        let manga_to_scan: Vec<(i64, bool)> = {
+            let base = "SELECT m.id, m.auto_download FROM manga m WHERE m.auto_scan = true";
+            let completed_clause = if exclude_completed {
+                " AND m.status != 1"
+            } else {
+                ""
+            };
+            let sql = format!("{base}{completed_clause}");
+            sqlx::query_as::<_, (i64, bool)>(&sql)
+                .fetch_all(&self.db)
+                .await
+                .unwrap_or_default()
+        };
+
+        for (manga_db_id, auto_download) in manga_to_scan {
+            let effective_auto_download =
+                auto_download || category_manga_ids.contains(&manga_db_id);
+            match self
+                .scan_for_new_chapters(crate::ids::MangaId(manga_db_id))
+                .await
+            {
+                Ok(new_ids) if !new_ids.is_empty() => {
+                    tracing::info!(
+                        "Found {} new chapters for manga {}",
+                        new_ids.len(),
+                        manga_db_id
                     );
-                    let mut q = sqlx::query_scalar::<_, i64>(&sql);
-                    for id in &category_ids {
-                        q = q.bind(*id);
-                    }
-                    q.fetch_all(&state.db)
-                        .await
-                        .unwrap_or_default()
-                        .into_iter()
-                        .collect()
-                };
+                    if effective_auto_download {
+                        let filtered_ids = self
+                            .filter_chapters_by_rules(
+                                crate::ids::MangaId(manga_db_id),
+                                new_ids.iter().copied().map(crate::ids::ChapterId).collect(),
+                            )
+                            .await;
 
-                let manga_to_scan: Vec<(i64, bool)> = {
-                    let base = "SELECT m.id, m.auto_download FROM manga m \
-                                WHERE m.auto_scan = true";
-                    let completed_clause = if exclude_completed {
-                        " AND m.status != 1"
-                    } else {
-                        ""
-                    };
-                    let sql = format!("{base}{completed_clause}");
-                    sqlx::query_as::<_, (i64, bool)>(&sql)
-                        .fetch_all(&state.db)
-                        .await
-                        .unwrap_or_default()
-                };
-
-                for (manga_db_id, auto_download) in manga_to_scan {
-                    // A manga auto-downloads if manually flagged OR in a nominated category.
-                    let effective_auto_download =
-                        auto_download || category_manga_ids.contains(&manga_db_id);
-                    match state
-                        .scan_for_new_chapters(crate::ids::MangaId(manga_db_id))
-                        .await
-                    {
-                        Ok(new_ids) if !new_ids.is_empty() => {
+                        if filtered_ids.is_empty() {
                             tracing::info!(
-                                "Found {} new chapters for manga {}",
-                                new_ids.len(),
+                                "All new chapters for manga {} filtered out by download rules",
                                 manga_db_id
                             );
-                            if effective_auto_download {
-                                let filtered_ids = state
-                                    .filter_chapters_by_rules(
-                                        crate::ids::MangaId(manga_db_id),
-                                        new_ids
-                                            .iter()
-                                            .copied()
-                                            .map(crate::ids::ChapterId)
-                                            .collect(),
-                                    )
-                                    .await;
-
-                                if filtered_ids.is_empty() {
-                                    tracing::info!(
-                                        "All new chapters for manga {} filtered out by download rules",
-                                        manga_db_id
-                                    );
-                                } else {
-                                    tracing::info!(
-                                        "{} new chapters passed download rules for manga {}",
-                                        filtered_ids.len(),
-                                        manga_db_id
-                                    );
-
-                                    let mut join_set = tokio::task::JoinSet::new();
-                                    for new_id in filtered_ids {
-                                        let s = state.clone();
-                                        join_set.spawn(async move {
-                                            match s.enqueue_claimed_chapter(new_id).await {
-                                                Ok(_) => tracing::info!(
-                                                    "Chapter {} enqueued for download",
-                                                    new_id
-                                                ),
-                                                Err(e) => tracing::error!(
-                                                    "Failed to enqueue chapter {}: {}",
-                                                    new_id,
-                                                    e
-                                                ),
-                                            }
-                                        });
+                        } else {
+                            tracing::info!(
+                                "{} new chapters passed download rules for manga {}",
+                                filtered_ids.len(),
+                                manga_db_id
+                            );
+                            let mut join_set = tokio::task::JoinSet::new();
+                            for new_id in filtered_ids {
+                                let s = self.clone();
+                                join_set.spawn(async move {
+                                    match s.enqueue_claimed_chapter(new_id).await {
+                                        Ok(_) => tracing::info!(
+                                            "Chapter {} enqueued for download",
+                                            new_id
+                                        ),
+                                        Err(e) => tracing::error!(
+                                            "Failed to enqueue chapter {}: {}",
+                                            new_id,
+                                            e
+                                        ),
                                     }
-                                    while let Some(result) = join_set.join_next().await {
-                                        if let Err(e) = result {
-                                            tracing::error!("Chapter enqueue task panicked: {e}");
-                                        }
-                                    }
+                                });
+                            }
+                            while let Some(result) = join_set.join_next().await {
+                                if let Err(e) = result {
+                                    tracing::error!("Chapter enqueue task panicked: {e}");
                                 }
                             }
                         }
-                        Ok(_) => {}
-                        Err(ServiceError::NotFound(_)) => {
-                            tracing::debug!(
-                                "Manga {} deleted or source gone during scan, skipping",
-                                manga_db_id
-                            );
-                        }
-                        Err(e) => tracing::error!("Scan failed for manga {}: {}", manga_db_id, e),
                     }
                 }
-
-                if let Err(e) = sqlx::query!(
-                    "DELETE FROM chapters WHERE is_orphaned = true AND download_status != 2"
-                )
-                .execute(&state.db)
-                .await
-                {
-                    tracing::warn!("Orphan chapter cleanup failed: {}", e);
+                Ok(_) => {}
+                Err(ServiceError::NotFound(_)) => {
+                    tracing::debug!(
+                        "Manga {} deleted or source gone during scan, skipping",
+                        manga_db_id
+                    );
                 }
-
-                state.retry_missing_covers().await;
+                Err(e) => tracing::error!("Scan failed for manga {}: {}", manga_db_id, e),
             }
-        });
+        }
+
+        if let Err(e) =
+            sqlx::query!("DELETE FROM chapters WHERE is_orphaned = true AND download_status != 2")
+                .execute(&self.db)
+                .await
+        {
+            tracing::warn!("Orphan chapter cleanup failed: {}", e);
+        }
+
+        self.retry_missing_covers().await;
     }
 
     /// Schedules a cover download retry for the given manga ID.
@@ -1142,35 +1124,6 @@ impl AppService {
                             tracing::debug!("Cover retry failed for manga {manga_id}: {e}");
                             state.cover_retry_queue.lock().await.insert(manga_id);
                         }
-                    }
-                }
-            }
-        });
-    }
-
-    pub fn spawn_db_maintenance(&self) {
-        let svc = self.clone();
-        let token = self.shutdown_token.clone();
-        tokio::spawn(async move {
-            let mut daily = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
-            daily.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            daily.tick().await;
-            let mut weekly_ticks: u8 = 0;
-            loop {
-                tokio::select! {
-                    _ = token.cancelled() => break,
-                    _ = daily.tick() => {}
-                }
-                let analyze = crate::jobs::maintenance::AnalyzeJob::new();
-                if let Err(e) = svc.job_manager.submit(analyze).await {
-                    tracing::warn!("Failed to schedule AnalyzeJob: {e}");
-                }
-                weekly_ticks += 1;
-                if weekly_ticks >= 7 {
-                    weekly_ticks = 0;
-                    let vacuum = crate::jobs::maintenance::VacuumJob::new();
-                    if let Err(e) = svc.job_manager.submit(vacuum).await {
-                        tracing::warn!("Failed to schedule VacuumJob: {e}");
                     }
                 }
             }

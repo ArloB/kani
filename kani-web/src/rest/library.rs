@@ -70,24 +70,35 @@ pub(crate) async fn get_library_filtered(
     State(state): State<AppState>,
     ValidatedQuery(q): ValidatedQuery<LibraryQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let (records, has_next_page, total_pages) = state
-        .get_library_filtered(
-            user.id,
-            q.page,
-            q.page_size,
-            q.search,
-            q.status_filter,
-            q.tag_filter,
-            q.author_filter,
-            q.artist_filter,
-            q.category_filter,
-            q.reading_status_filter,
-            q.hide_no_unread,
-            q.hide_completed_status,
-            q.source_id,
-            q.sort_by,
-        )
-        .await?;
+    let manga_id_filter = if let Some(cid) = q.collection_id {
+        let col = state.service.get_collection(cid).await?;
+        let rule: kani_app::service::smart_collections::SmartCollectionRule =
+            serde_json::from_str(&col.rule_json)
+                .map_err(|e| AppError::InternalServerError(format!("Invalid rule JSON: {e}")))?;
+        let ids = state.service.evaluate_collection(&rule, user.id).await?;
+        Some(ids.into_iter().map(|id| id.0).collect::<Vec<_>>())
+    } else {
+        None
+    };
+    let filter = kani_app::service::library::LibraryFilter {
+        page: q.page,
+        page_size: q.page_size,
+        search: q.search,
+        status_filter: q.status_filter,
+        tag_filter: q.tag_filter,
+        author_filter: q.author_filter,
+        artist_filter: q.artist_filter,
+        category_filter: q.category_filter,
+        reading_status_filter: q.reading_status_filter,
+        hide_no_unread: q.hide_no_unread,
+        hide_completed_status: q.hide_completed_status,
+        source_id: q.source_id,
+        sort_by: q.sort_by,
+        include_trashed: false,
+        manga_id_filter,
+    };
+    let (records, has_next_page, total_pages) =
+        state.get_library_filtered(user.id, &filter).await?;
 
     let items = records
         .into_iter()
@@ -227,7 +238,7 @@ pub(crate) async fn get_library(
     get, path = "/rest/library/backup",
     params(("include_chapter_progress" = Option<bool>, Query, description = "Include chapter read progress in backup")),
     responses(
-        (status = 200, description = "Backup ZIP download"),
+        (status = 200, description = "Backup ZIP or encrypted backup download"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Insufficient permissions"),
     ),
@@ -237,10 +248,18 @@ pub(crate) async fn get_library(
 pub(crate) async fn library_backup(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
     State(svc): State<Arc<dyn LibraryDomain>>,
+    headers: axum::http::HeaderMap,
     Query(q): Query<LibraryBackupQuery>,
 ) -> Result<impl IntoResponse, AppError> {
+    let passphrase = headers
+        .get("x-backup-passphrase")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let include_progress = q.include_chapter_progress.unwrap_or(false);
-    let bytes = svc.export_backup(user.id, include_progress).await?;
+    let bytes = svc
+        .export_backup(user.id, include_progress, passphrase)
+        .await?;
 
     let now = time::OffsetDateTime::now_utc();
     let filename = format!(
@@ -275,8 +294,35 @@ pub(crate) async fn library_backup_preview(
     State(svc): State<Arc<dyn LibraryDomain>>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, AppError> {
-    let bytes = collect_file_field(&mut multipart, MAX_BACKUP_BYTES).await?;
-    let preview = svc.preview_backup(&bytes).await?;
+    let mut file_bytes: Option<bytes::Bytes> = None;
+    let mut passphrase: Option<String> = None;
+
+    while let Some(field) = multipart.next_field().await? {
+        match field.name() {
+            Some("file") => {
+                let content_length = field
+                    .headers()
+                    .get(rquest::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<usize>().ok());
+                file_bytes = Some(
+                    kani_core::http::collect_bytes_limited(
+                        Box::pin(field.map_err(|e| kani_core::error::Error::Other(e.to_string()))),
+                        content_length,
+                        MAX_BACKUP_BYTES,
+                    )
+                    .await?,
+                );
+            }
+            Some("passphrase") => {
+                passphrase = field.text().await.ok().filter(|s| !s.is_empty());
+            }
+            _ => {}
+        }
+    }
+
+    let bytes = file_bytes.ok_or_else(|| AppError::ValidationError("No file uploaded".into()))?;
+    let preview = svc.preview_backup(&bytes, passphrase).await?;
     Ok(Json(preview))
 }
 
@@ -298,6 +344,7 @@ pub(crate) async fn library_restore(
 ) -> Result<impl IntoResponse, AppError> {
     let mut file_bytes: Option<bytes::Bytes> = None;
     let mut opts = kani_app::RestoreOptions::default();
+    let mut passphrase: Option<String> = None;
 
     while let Some(field) = multipart.next_field().await? {
         match field.name() {
@@ -315,6 +362,9 @@ pub(crate) async fn library_restore(
                     )
                     .await?,
                 );
+            }
+            Some("passphrase") => {
+                passphrase = field.text().await.ok().filter(|s| !s.is_empty());
             }
             Some("merge") => {
                 opts.merge = field
@@ -377,7 +427,7 @@ pub(crate) async fn library_restore(
     }
 
     let data = file_bytes.ok_or_else(|| AppError::ValidationError("No file uploaded".into()))?;
-    let result = svc.restore_backup(user.id, &data, opts).await?;
+    let result = svc.restore_backup(user.id, &data, opts, passphrase).await?;
     Ok(Json(result))
 }
 
@@ -764,10 +814,19 @@ mod tests {
         async fn get_library(&self, _: i32, _: i32) -> kani_app::error::Result<Vec<Manga>> {
             unimplemented!()
         }
-        async fn export_backup(&self, _: UserId, _: bool) -> kani_app::error::Result<Vec<u8>> {
+        async fn export_backup(
+            &self,
+            _: UserId,
+            _: bool,
+            _: Option<String>,
+        ) -> kani_app::error::Result<Vec<u8>> {
             unimplemented!()
         }
-        async fn preview_backup(&self, _: &[u8]) -> kani_app::error::Result<BackupPreview> {
+        async fn preview_backup(
+            &self,
+            _: &[u8],
+            _: Option<String>,
+        ) -> kani_app::error::Result<BackupPreview> {
             unimplemented!()
         }
         async fn restore_backup(
@@ -775,6 +834,7 @@ mod tests {
             _: UserId,
             _: &[u8],
             _: RestoreOptions,
+            _: Option<String>,
         ) -> kani_app::error::Result<RestoreResult> {
             unimplemented!()
         }

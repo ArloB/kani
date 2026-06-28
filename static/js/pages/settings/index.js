@@ -24,6 +24,9 @@ import * as server            from './server.js';
 import * as email             from './email.js';
 import * as webhooks          from './webhooks.js';
 import * as security          from './security.js';
+import * as collections       from './collections.js';
+import * as trash             from './trash.js';
+import * as storage           from './storage.js';
 
 /** @type {Array<() => void>} */
 let _panelDestroys = [];
@@ -69,7 +72,9 @@ export async function init(container) {
   const allSections = [
     { id: 'general',          label: 'General',          description: 'Display preferences, reading behaviour, and notifications.',            perm: null,                     mount: el => general.mount(el) },
     { id: 'library',          label: 'Library',          description: 'Manage categories and import/export your manga collection.',             perm: 'library:manage',          mount: el => library.mount(el, catList) },
+    { id: 'collections',      label: 'Collections',      description: 'Create and manage smart collections that group manga by rules.',         perm: 'library:manage',          mount: el => collections.mount(el) },
     { id: 'manga-management', label: 'Manga Management', description: 'Pending imports, duplicate detection, and orphaned manga.',              perm: 'library:manage',          mount: el => mangaManagement.mount(el) },
+    { id: 'trash',            label: 'Trash',            description: 'Trashed manga waiting to be restored or permanently deleted.',           perm: 'library:view',            mount: el => trash.mount(el) },
     { id: 'downloads',        label: 'Downloads',        description: 'Control download concurrency, queue size, and reading-ahead behaviour.', perm: 'settings:edit_download',  mount: el => downloads.mount(el, settings) },
     { id: 'offline',          label: 'Offline',          description: 'Configure offline reading, page cache, and the OPDS catalog server.',      perm: null,                      mount: el => offline.mount(el) },
     { id: 'scan',      label: 'Scan',       description: 'Configure automatic scanning for new chapters.',                         perm: 'settings:edit_scan',      mount: el => scan.mount(el, settings) },
@@ -77,6 +82,7 @@ export async function init(container) {
     { id: 'email',           label: 'Email / SMTP',    description: 'Configure outbound email for password reset and notifications.', perm: 'settings:edit_advanced', group: 'Server',  mount: el => email.mount(el, settings) },
     { id: 'webhooks',        label: 'Webhooks',        description: 'Send HTTP POST notifications to external services when events occur.', perm: 'settings:edit_advanced', group: 'Server',  mount: el => webhooks.mount(el) },
     { id: 'advanced',        label: 'Advanced',        description: 'FlareSolverr, library path, and other low-level options.',  perm: 'settings:edit_advanced', group: 'Server',  mount: el => advanced.mount(el, settings, bootId) },
+    { id: 'storage',         label: 'Storage',         description: 'Disk usage and library integrity check.',                     perm: 'admin:manage',           group: 'Server',  mount: el => storage.mount(el) },
     { id: 'server',          label: 'Lifecycle',       description: 'Stop or restart the server process.',                         perm: 'server:manage',          group: 'Server',  mount: el => server.mount(el) },
     { id: 'account',         label: 'My Account',      description: 'Change your password and manage active sessions.',            perm: null,                     group: 'Account', mount: el => account.mount(el) },
     { id: 'security',        label: 'Security',        description: 'Two-factor authentication, session management, and security status.', perm: null,                group: 'Account', mount: el => security.mount(el) },

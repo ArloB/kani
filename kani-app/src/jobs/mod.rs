@@ -1,9 +1,14 @@
+pub mod backup;
 pub mod circuit_breaker;
 pub mod download;
 pub mod error;
 pub mod framework;
+pub mod integrity;
 pub mod maintenance;
 pub mod manager;
+pub mod recurring;
+pub mod scan;
+pub mod storage;
 
 pub use error::{DownloadErrorKind, JobError, RetryPolicy};
 pub use framework::{

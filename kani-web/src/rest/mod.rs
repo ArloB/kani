@@ -52,12 +52,14 @@ pub(crate) mod admin;
 pub(crate) mod auth;
 pub(crate) mod categories;
 pub(crate) mod chapters;
+pub(crate) mod collections;
 pub(crate) mod downloads;
 pub(crate) mod export;
 pub(crate) mod filters;
 pub(crate) mod jobs;
 pub(crate) mod library;
 pub(crate) mod manga;
+pub(crate) mod saved_searches;
 pub(crate) mod scanlators;
 pub(crate) mod settings;
 pub(crate) mod sources;
@@ -65,6 +67,7 @@ pub(crate) mod sse;
 pub(crate) mod stats;
 pub(crate) mod system;
 pub(crate) mod trackers;
+pub(crate) mod volumes;
 pub(crate) mod webhooks;
 
 fn sign_image_url(url: &str, referer: &str, state: &AppState, transform: Option<&str>) -> String {
@@ -187,6 +190,9 @@ pub fn routes(state: AppState) -> Router {
         .merge(trackers::router())
         .merge(filters::router())
         .merge(settings::router())
+        .merge(volumes::router())
+        .merge(collections::router())
+        .merge(saved_searches::router())
         .merge(admin::router())
         .merge(stats::router())
         .merge(export::router())

@@ -522,6 +522,16 @@ async function _renderManageTab(contentEl) {
     contentEl.appendChild(section);
   }
 
+  // ── 1a. Volumes ────────────────────────────────────────────────────────────
+
+  if (hasPermission('library:manage') && _isLocal) {
+    const volumesSection = document.createElement('div');
+    volumesSection.className = 'flex flex-col gap-3';
+    volumesSection.appendChild(mkSectionHeader('Volumes', 'Group chapters into volumes.'));
+    contentEl.appendChild(volumesSection);
+    _mountVolumesPanel(volumesSection, _dbId);
+  }
+
   // ── 1b–1c. Tracking ────────────────────────────────────────────────────────
 
   {
@@ -1366,4 +1376,200 @@ export function destroy(container) {
   _contentSection = null;
   clearPageHeader();
   container.innerHTML = '';
+}
+
+// ── Volumes panel ─────────────────────────────────────────────────────────────
+
+/** @param {HTMLElement} section @param {number} mangaId */
+async function _mountVolumesPanel(section, mangaId) {
+  const card = mkCard();
+  section.appendChild(card);
+
+  const head = document.createElement('div');
+  head.className = 'detail-card-head';
+  head.innerHTML = '<span>Loading…</span>';
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'btn-primary btn-sm';
+  addBtn.textContent = '+ Add volume';
+  head.appendChild(addBtn);
+  card.appendChild(head);
+
+  const list = document.createElement('div');
+  list.className = 'divide-y divide-border-subtle';
+  card.appendChild(list);
+
+  async function _load() {
+    list.innerHTML = '<p class="px-4 py-3 text-sm text-text-muted">Loading…</p>';
+    try {
+      const volumes = await api.listVolumes(mangaId);
+      head.querySelector('span').textContent = `${volumes.length} volume${volumes.length === 1 ? '' : 's'}`;
+      list.innerHTML = '';
+      if (volumes.length === 0) {
+        list.innerHTML = '<p class="px-4 py-3 text-sm text-text-muted">No volumes. Add one to start grouping chapters.</p>';
+      } else {
+        for (const v of volumes) list.appendChild(_mkVolumeRow(v, mangaId, _load));
+      }
+    } catch (e) {
+      list.innerHTML = `<p class="px-4 py-3 text-sm text-danger">${e.message ?? 'Failed to load.'}</p>`;
+    }
+  }
+
+  const addForm = document.createElement('div');
+  addForm.className = 'hidden items-center gap-2 px-4 py-2 border-b border-border-subtle';
+  addForm.innerHTML = `
+    <input type="text" placeholder="Name (optional)" class="input text-sm flex-1" />
+    <input type="number" placeholder="Vol. #" class="input text-sm w-20" min="0" step="1" />
+    <button type="button" class="btn-primary btn-sm">Add</button>
+    <button type="button" class="btn-ghost btn-sm">Cancel</button>
+  `;
+  card.appendChild(addForm);
+
+  const addNameInput = /** @type {HTMLInputElement} */ (addForm.querySelector('input[type="text"]'));
+  const addNumInput  = /** @type {HTMLInputElement} */ (addForm.querySelector('input[type="number"]'));
+  const addSubmitBtn = /** @type {HTMLButtonElement} */ (addForm.querySelector('.btn-primary'));
+  const addCancelBtn = /** @type {HTMLButtonElement} */ (addForm.querySelector('.btn-ghost'));
+
+  addBtn.addEventListener('click', () => {
+    addBtn.classList.add('hidden');
+    addForm.classList.remove('hidden');
+    addForm.classList.add('flex');
+    addNameInput.focus();
+  });
+
+  addCancelBtn.addEventListener('click', () => {
+    addForm.classList.add('hidden');
+    addForm.classList.remove('flex');
+    addBtn.classList.remove('hidden');
+    addNameInput.value = '';
+    addNumInput.value = '';
+  });
+
+  addSubmitBtn.addEventListener('click', async () => {
+    addSubmitBtn.disabled = true;
+    try {
+      const volume_num = addNumInput.value ? Number(addNumInput.value) : undefined;
+      await api.createVolume(mangaId, { name: addNameInput.value.trim() || undefined, volume_num });
+      addForm.classList.add('hidden');
+      addForm.classList.remove('flex');
+      addBtn.classList.remove('hidden');
+      addNameInput.value = '';
+      addNumInput.value = '';
+      await _load();
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      addSubmitBtn.disabled = false;
+    }
+  });
+
+  await _load();
+}
+
+/**
+ * @param {any} volume
+ * @param {number} mangaId
+ * @param {() => Promise<void>} reload
+ */
+function _mkVolumeRow(volume, mangaId, reload) {
+  const row = document.createElement('div');
+  row.className = 'px-4';
+
+  const viewRow = document.createElement('div');
+  viewRow.className = 'flex items-center gap-3 py-2.5';
+
+  const label = document.createElement('span');
+  label.className = 'flex-1 text-sm text-text truncate';
+  label.textContent = volume.name
+    ? (volume.volume_num != null ? `Vol. ${volume.volume_num} — ${volume.name}` : volume.name)
+    : (volume.volume_num != null ? `Volume ${volume.volume_num}` : `Volume #${volume.id}`);
+
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'btn-icon text-text-muted shrink-0';
+  editBtn.setAttribute('aria-label', 'Rename volume');
+  editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'btn-icon text-danger shrink-0';
+  delBtn.setAttribute('aria-label', 'Delete volume');
+  delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+  delBtn.addEventListener('click', async () => {
+    const ok = await confirmDialog({ title: 'Delete volume', body: 'Remove this volume? Chapters will be unassigned but not deleted.', confirmLabel: 'Delete' });
+    if (!ok) return;
+    delBtn.disabled = true;
+    try {
+      await api.deleteVolume(mangaId, volume.id);
+      await reload();
+    } catch (e) {
+      showApiError(e);
+      delBtn.disabled = false;
+    }
+  });
+
+  viewRow.append(label, editBtn, delBtn);
+  row.appendChild(viewRow);
+
+  const editForm = document.createElement('div');
+  editForm.className = 'hidden items-center gap-2 py-2';
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'input text-sm flex-1';
+  nameInput.value = volume.name ?? '';
+  nameInput.placeholder = 'Volume name (optional)';
+
+  const numInput = document.createElement('input');
+  numInput.type = 'number';
+  numInput.className = 'input text-sm w-20';
+  numInput.value = volume.volume_num != null ? String(volume.volume_num) : '';
+  numInput.placeholder = 'Vol. #';
+  numInput.min = '0';
+  numInput.step = '1';
+
+  const saveEditBtn = document.createElement('button');
+  saveEditBtn.type = 'button';
+  saveEditBtn.className = 'btn-primary btn-sm shrink-0';
+  saveEditBtn.textContent = 'Save';
+
+  const cancelEditBtn = document.createElement('button');
+  cancelEditBtn.type = 'button';
+  cancelEditBtn.className = 'btn-ghost btn-sm shrink-0';
+  cancelEditBtn.textContent = 'Cancel';
+
+  editForm.append(nameInput, numInput, saveEditBtn, cancelEditBtn);
+  row.appendChild(editForm);
+
+  const _showEdit = () => {
+    editForm.classList.remove('hidden');
+    editForm.classList.add('flex');
+    editBtn.classList.add('hidden');
+    nameInput.focus();
+  };
+
+  const _hideEdit = () => {
+    editForm.classList.add('hidden');
+    editForm.classList.remove('flex');
+    editBtn.classList.remove('hidden');
+  };
+
+  editBtn.addEventListener('click', _showEdit);
+  cancelEditBtn.addEventListener('click', _hideEdit);
+
+  saveEditBtn.addEventListener('click', async () => {
+    saveEditBtn.disabled = true;
+    try {
+      const name = nameInput.value.trim() || undefined;
+      const volume_num = numInput.value ? Number(numInput.value) : undefined;
+      await api.updateVolume(mangaId, volume.id, { name, volume_num });
+      await reload();
+    } catch (e) {
+      showApiError(e);
+      saveEditBtn.disabled = false;
+    }
+  });
+
+  return row;
 }

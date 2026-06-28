@@ -147,13 +147,17 @@ async fn main() {
         }
     }
 
-    state.spawn_auto_scan();
     state.spawn_cover_retry();
     state.spawn_credential_refresh();
     state.spawn_webhook_listener();
     state.spawn_login_attempt_prune();
     state.spawn_cache_prune();
     state.spawn_progress_flush();
+
+    if let Err(e) = kani_app::jobs::recurring::ensure_recurring_rows(&state.db).await {
+        tracing::warn!("Failed to initialise recurring job rows: {e}");
+    }
+    kani_app::jobs::recurring::spawn_recurring_scheduler(&state);
 
     // Rate limiter settings.
     // API: enough for normal UI use while protecting against abuse.

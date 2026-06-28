@@ -94,4 +94,46 @@ impl AppService {
 
         Ok((rows, has_next, total_pages))
     }
+
+    pub async fn prune_audit_log(&self) -> Result<u64> {
+        let retention_days = std::env::var("KANI_AUDIT_RETENTION_DAYS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(365);
+
+        let security_retention_days: Option<i64> =
+            std::env::var("KANI_AUDIT_SECURITY_RETENTION_DAYS")
+                .ok()
+                .and_then(|v| v.parse().ok());
+
+        let security_actions = ["login_failed", "permission_denied", "user_created"];
+
+        let op_interval = format!("-{retention_days} days");
+        let result = sqlx::query(
+            "DELETE FROM audit_log \
+             WHERE action NOT IN ('login_failed', 'permission_denied', 'user_created') \
+             AND created_at < datetime('now', ?)",
+        )
+        .bind(&op_interval)
+        .execute(&self.db)
+        .await?;
+
+        let mut deleted = result.rows_affected();
+
+        if let Some(sec_days) = security_retention_days {
+            let sec_interval = format!("-{sec_days} days");
+            for action in &security_actions {
+                let r = sqlx::query(
+                    "DELETE FROM audit_log WHERE action = ? AND created_at < datetime('now', ?)",
+                )
+                .bind(action)
+                .bind(&sec_interval)
+                .execute(&self.db)
+                .await?;
+                deleted += r.rows_affected();
+            }
+        }
+
+        Ok(deleted)
+    }
 }
