@@ -1,3 +1,4 @@
+pub mod audit_tokens;
 pub mod build;
 pub mod css;
 pub mod dsl_cmd;
@@ -139,6 +140,18 @@ pub enum Command {
     /// REPL: inspect, explain, test, replay, or record a YAML extension
     #[command(subcommand)]
     Repl(ReplCommand),
+    /// Scan static/js for hard-coded colour literals and report violations
+    AuditTokens {
+        /// Directory to scan (default: static/js)
+        #[arg(long, value_name = "PATH", default_value = "static/js")]
+        dir: std::path::PathBuf,
+        /// Exit non-zero if violations exceed the baseline (for CI use)
+        #[arg(long)]
+        check: bool,
+        /// With --check, tolerate up to N existing violations; fail only when exceeded
+        #[arg(long, default_value_t = 0)]
+        max: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -325,6 +338,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 repo::run_verify(&repo_dir, repo_key.as_deref())
             }
         },
+        Command::AuditTokens { dir, check, max } => audit_tokens::run(&dir, check, max),
         Command::Repl(repl_cmd) => match repl_cmd {
             ReplCommand::Inspect { file } => crate::repl::inspect::run(&file),
             ReplCommand::Explain { expression } => crate::repl::explain::run(&expression),

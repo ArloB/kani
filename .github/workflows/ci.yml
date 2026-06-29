@@ -176,6 +176,36 @@ jobs:
       - name: Check JS syntax
         run: find static/js -name '*.js' -not -path '*/dist/*' -not -path '*/vendor/*' -print0 | xargs -0 node --check
 
+      - name: Restore kani-cli binary
+        uses: actions/cache/restore@v5
+        id: kani-cli-cache
+        with:
+          path: target/release/kani-cli
+          key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
+
+      - name: Install mold linker
+        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
+        run: sudo apt-get install -y mold
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
+        with:
+          shared-key: "ci"
+          cache-on-failure: true
+
+      - name: Build kani-cli
+        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
+        run: cargo build --release -p kani-cli
+
+      # Baseline ratchet: blocks NEW hard-coded colour literals without requiring
+      # the 49 existing/legitimate ones (reader black, toast white, etc.) to be
+      # migrated first. Lower --max as the semantic-colour migration cleans them up.
+      - name: Audit hard-coded colour tokens
+        run: ./target/release/kani-cli audit-tokens --check --max 49
+
   docs:
     name: Docs & i18n
     needs: changes

@@ -6,6 +6,7 @@ use common::{
     authed_delete, authed_get, authed_post, body_json, build_test_app, create_admin,
     create_regular_user, delete_req, get_req, post_json, test_state,
 };
+use common::{insert_manga, insert_source};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -202,4 +203,123 @@ async fn purge_trash_one_returns_404_for_regular_user_missing_id() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+// ── DELETE /rest/manga/:id returns undo_token ─────────────────────────────────
+
+#[tokio::test]
+async fn delete_manga_returns_undo_token() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let source_id = insert_source(&state.service.db, "test-src").await;
+    let manga_id = insert_manga(&state.service.db, source_id, "m1", "Test Manga").await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_delete(
+            &format!("/rest/manga/{}", manga_id.0),
+            &cookie,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    let token = body["undo_token"]
+        .as_str()
+        .expect("undo_token must be a string");
+    assert!(
+        uuid::Uuid::parse_str(token).is_ok(),
+        "undo_token must be a UUID"
+    );
+}
+
+// ── POST /rest/manga/untrash (token-based) ────────────────────────────────────
+
+#[tokio::test]
+async fn untrash_by_token_returns_401_without_auth() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+
+    let res = app
+        .oneshot(post_json(
+            "/rest/manga/untrash",
+            json!({ "token": "00000000-0000-0000-0000-000000000001" }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn untrash_by_token_returns_422_for_missing_token_field() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post("/rest/manga/untrash", &cookie, json!({})))
+        .await
+        .unwrap();
+
+    assert!(
+        res.status().is_client_error(),
+        "expected 4xx for missing token, got {}",
+        res.status()
+    );
+}
+
+#[tokio::test]
+async fn untrash_by_token_returns_404_for_unknown_token() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/manga/untrash",
+            &cookie,
+            json!({ "token": "00000000-0000-0000-0000-000000000001" }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn untrash_by_token_returns_200_for_valid_token() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let source_id = insert_source(&state.service.db, "test-src").await;
+    let manga_id = insert_manga(&state.service.db, source_id, "m2", "Undo Test").await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, username, password).await;
+
+    let del_res = app
+        .clone()
+        .oneshot(authed_delete(
+            &format!("/rest/manga/{}", manga_id.0),
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(del_res.status(), StatusCode::OK);
+    let del_body = body_json(del_res).await;
+    let token = del_body["undo_token"].as_str().unwrap().to_string();
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/manga/untrash",
+            &cookie,
+            json!({ "token": token }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
 }

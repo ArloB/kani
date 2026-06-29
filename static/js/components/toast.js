@@ -19,7 +19,7 @@ function _getContainer() {
 /**
  * Show a toast notification.
  * @param {string} message
- * @param {{ type?: 'info' | 'success' | 'warn' | 'error', duration?: number, action?: { label: string, href: string } }} [opts]
+ * @param {{ type?: 'info' | 'success' | 'warn' | 'error', duration?: number, action?: { label: string, href?: string, onClick?: () => void } }} [opts]
  */
 export function showToast(message, { type = 'info', duration = 3000, action = null } = {}) {
   const container = _getContainer();
@@ -41,28 +41,31 @@ export function showToast(message, { type = 'info', duration = 3000, action = nu
   toast.setAttribute('aria-atomic', 'true');
   toast.textContent = message;
 
-  if (action) {
-    const link = document.createElement('a');
-    link.href = action.href;
-    link.textContent = ' · ' + action.label;
-    link.className = 'underline font-semibold';
-    toast.appendChild(link);
-  }
-
   container.appendChild(toast);
 
-  // Fade out then remove
-  const timer = setTimeout(() => {
+  let timer = setTimeout(() => {
     toast.style.opacity = '0';
     setTimeout(() => toast.remove(), 300);
   }, duration);
 
-  // Click to dismiss early
-  toast.addEventListener('click', () => {
-    clearTimeout(timer);
-    toast.style.opacity = '0';
-    setTimeout(() => toast.remove(), 300);
-  });
+  const _dismiss = () => { clearTimeout(timer); toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); };
+
+  if (action) {
+    const el = action.onClick
+      ? document.createElement('button')
+      : document.createElement('a');
+    if (action.onClick) {
+      /** @type {HTMLButtonElement} */ (el).type = 'button';
+      el.addEventListener('click', (e) => { e.stopPropagation(); _dismiss(); action.onClick(); });
+    } else {
+      /** @type {HTMLAnchorElement} */ (el).href = action.href ?? '#';
+    }
+    el.textContent = ' · ' + action.label;
+    el.className = 'underline font-semibold';
+    toast.appendChild(el);
+  }
+
+  toast.addEventListener('click', _dismiss);
 }
 
 /**

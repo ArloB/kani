@@ -678,17 +678,14 @@ impl AppService {
 
     /// Queues a background scan for every manga in the library.
     /// Returns immediately with the count of manga queued.
-    pub async fn scan_all_manga(&self) -> Result<usize> {
-        let rows: Vec<(MangaId, String)> = sqlx::query!("SELECT id, name FROM manga ORDER BY id")
+    pub async fn scan_all_manga(&self) -> Result<uuid::Uuid> {
+        let ids: Vec<MangaId> = sqlx::query!("SELECT id FROM manga ORDER BY id")
             .fetch_all(&self.db_read)
             .await?
             .into_iter()
-            .map(|r| (r.id.into(), r.name))
+            .map(|r| r.id.into())
             .collect();
-        let ids: Vec<MangaId> = rows.iter().map(|(id, _)| *id).collect();
-        let count = ids.len();
-        self.scan_manga_ids(ids).await?;
-        Ok(count)
+        self.scan_manga_ids(ids).await
     }
 
     /// Scans a specific list of manga IDs for new chapters, emitting SSE progress

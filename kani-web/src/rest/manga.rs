@@ -6,6 +6,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/manga/{id}", get(get_manga).delete(delete_manga))
         .route("/manga/{id}/untrash", post(untrash_manga_handler))
+        .route("/manga/untrash", post(untrash_manga_by_token_handler))
         .route(
             "/trash",
             get(list_trash_handler).delete(purge_trash_all_handler),
@@ -98,8 +99,8 @@ pub(crate) async fn delete_manga(
     State(svc): State<Arc<dyn MangaDomain>>,
     Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
-    svc.trash_manga(id, user.id).await?;
-    Ok(Json(json!({ "undo_token": id.0 })))
+    let undo_token = svc.trash_manga(id, user.id).await?;
+    Ok(Json(json!({ "undo_token": undo_token })))
 }
 
 pub(crate) async fn untrash_manga_handler(
@@ -108,6 +109,20 @@ pub(crate) async fn untrash_manga_handler(
     Path(id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
     svc.untrash_manga(id, user.id).await?;
+    Ok(Json(json!({})))
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct UndoTokenBody {
+    token: uuid::Uuid,
+}
+
+pub(crate) async fn untrash_manga_by_token_handler(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
+    State(svc): State<Arc<dyn MangaDomain>>,
+    Json(body): Json<UndoTokenBody>,
+) -> Result<impl IntoResponse, AppError> {
+    svc.untrash_by_token(body.token, user.id).await?;
     Ok(Json(json!({})))
 }
 
@@ -406,8 +421,8 @@ pub(crate) async fn refresh_manga(
 ) -> Result<impl IntoResponse, AppError> {
     let req = body.map(|Json(b)| b).unwrap_or_default();
     let opts = map_refresh_request(req)?;
-    svc.refresh_manga_with_options(id, opts).await?;
-    Ok(Json(json!({})))
+    let job_id = svc.queue_manga_refresh(id, opts).await?;
+    Ok(Json(json!({ "job_id": job_id })))
 }
 
 #[utoipa::path(
@@ -1034,7 +1049,11 @@ mod tests {
         ) -> kani_app::error::Result<(usize, usize)> {
             unimplemented!()
         }
-        async fn trash_manga(&self, _id: MangaId, _user_id: UserId) -> kani_app::error::Result<()> {
+        async fn trash_manga(
+            &self,
+            _id: MangaId,
+            _user_id: UserId,
+        ) -> kani_app::error::Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn untrash_manga(
@@ -1042,6 +1061,20 @@ mod tests {
             _id: MangaId,
             _user_id: UserId,
         ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn untrash_by_token(
+            &self,
+            _token: uuid::Uuid,
+            _user_id: UserId,
+        ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn queue_manga_refresh(
+            &self,
+            _manga_id: MangaId,
+            _opts: kani_app::models::RefreshOptions,
+        ) -> kani_app::error::Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn list_trash(&self) -> kani_app::error::Result<Vec<kani_app::models::Manga>> {

@@ -191,7 +191,7 @@ pub struct LocalMetadataUpdate {
     pub tags: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RefreshFields {
     pub cover: bool,
     pub title: bool,
@@ -214,7 +214,7 @@ impl Default for RefreshFields {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RefreshOptions {
     pub fields: RefreshFields,
     pub fetch_chapters: bool,

@@ -2,15 +2,17 @@
 // Downloads page — active queue and history, split into tabs.
 
 import { h, render } from 'preact';
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useCallback } from 'preact/hooks';
 import htm from 'htm';
 import { getState, subscribe } from '../state.js';
-import { cancelDownload, getDownloadHistory } from '../api.js';
+import { cancelDownload, getDownloadHistory, retryChapterDownload } from '../api.js';
 import { navigate } from '../router.js';
 import { iconX, iconCheck, iconWarning } from '../icons.js';
 import { formatChapterTitle, formatRelativeTime, getLocalInt, setLocal } from '../utils.js';
 import { Icon } from '../components/icon.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
+import { showApiError } from '../components/toast.js';
+import { useBulkSelect } from '../hooks/use-bulk-select.js';
 const html = htm.bind(h);
 
 /** @typedef {import('../state.js').ChapterProgress} ChapterProgress */
@@ -18,8 +20,8 @@ const html = htm.bind(h);
 const HISTORY_SIZES = [5, 10, 25, 50, 100];
 const HISTORY_KEY = 'kani_download_history_size';
 
-/** @param {{ entry: ChapterProgress }} props */
-function ActiveRow({ entry }) {
+/** @param {{ entry: ChapterProgress, selected: boolean, onToggle: () => void }} props */
+function ActiveRow({ entry, selected, onToggle }) {
   const pct = entry.totalPages > 0
     ? Math.round((entry.completedPages / entry.totalPages) * 100)
     : 0;
@@ -29,8 +31,15 @@ function ActiveRow({ entry }) {
   }
 
   return html`
-    <div class="flex flex-col gap-2 px-4 py-3 border-b border-border-subtle last:border-b-0">
+    <div class=${'flex flex-col gap-2 px-4 py-3 border-b border-border-subtle last:border-b-0' + (selected ? ' bg-accent-dim' : '')}>
       <div class="flex items-center gap-3">
+        <input
+          type="checkbox"
+          class="shrink-0 accent-accent cursor-pointer"
+          checked=${selected}
+          onChange=${onToggle}
+          aria-label=${'Select ' + (entry.name || 'download')}
+        />
         <div class="shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-accent">
           <svg class="w-4 h-4 dl-ring-spin" viewBox="0 0 32 32" aria-hidden="true">
             <circle cx="16" cy="16" r="12" fill="none" stroke="currentColor" stroke-width="2.5" opacity="0.25" />
@@ -49,8 +58,8 @@ function ActiveRow({ entry }) {
         </div>
         <button class="btn-ghost btn-sm shrink-0 text-danger" onClick=${handleCancel} aria-label="Cancel">Cancel</button>
       </div>
-      <div class="h-1 rounded-full bg-surface-2 overflow-hidden ml-10">
-        <div class="h-full rounded-full bg-accent transition-[width] duration-300" style=${{ width: pct + '%' }}></div>{/* justified: animates only width */}
+      <div class="h-1 rounded-full bg-surface-2 overflow-hidden ml-16">
+        <div class="h-full rounded-full bg-accent transition-[width] duration-300" style=${{ width: pct + '%' }}></div>
       </div>
     </div>
   `;
@@ -103,8 +112,26 @@ function DownloadsPage() {
   const [activeTab, setActiveTab] = useState(/** @type {'active'|'history'} */ ('active'));
   const [historySize, setHistorySize] = useState(() => getLocalInt(HISTORY_KEY, 10));
   const [active, setActive] = useState(/** @type {ChapterProgress[]} */ ([]));
-  // History: seeded from API (persistent), merged with real-time SSE completions
   const [history, setHistory] = useState(/** @type {ChapterProgress[]} */ ([]));
+
+  const activeIds = active.map(e => e.id);
+  const failedIds = history.filter(e => e.status === 'failed').map(e => e.id);
+  const bulkActive = useBulkSelect(activeIds);
+  const bulkFailed = useBulkSelect(failedIds);
+
+  async function cancelSelected() {
+    const ids = [...bulkActive.selected];
+    bulkActive.clear();
+    await Promise.all(ids.map(id => cancelDownload(id).catch(() => {})));
+  }
+
+  const retrySelected = useCallback(async () => {
+    const ids = [...bulkFailed.selected];
+    bulkFailed.clear();
+    const results = await Promise.allSettled(ids.map(id => retryChapterDownload(id)));
+    const failed = results.filter(r => r.status === 'rejected');
+    if (failed.length > 0) showApiError(/** @type {any} */ (failed[0]).reason);
+  }, [bulkFailed]);
 
   // Sync active downloads from chaptersProgress state
   useEffect(() => {
@@ -204,20 +231,67 @@ function DownloadsPage() {
 
       <!-- Active tab -->
       ${activeTab === 'active' && html`
-        <div class="bg-surface border border-border rounded-xl overflow-hidden">
-          ${active.length === 0
-            ? html`<div class="flex flex-col items-center gap-2 py-12 text-center">
-                <p class="text-base font-medium text-text">No active downloads</p>
-                <p class="text-sm text-text-muted">Downloads started from manga details will appear here.</p>
-              </div>`
-            : active.map(e => html`<${ActiveRow} key=${e.id} entry=${e} />`)
-          }
+        <div class="flex flex-col gap-2">
+          ${active.length > 0 && html`
+            <div class="flex items-center gap-3 px-4 py-2 bg-surface-2 rounded-lg border border-border">
+              <input
+                type="checkbox"
+                class="accent-accent cursor-pointer"
+                checked=${bulkActive.headerState === 'checked'}
+                ref=${(el) => { if (el) el.indeterminate = bulkActive.headerState === 'indeterminate'; }}
+                onChange=${bulkActive.toggleAll}
+                aria-label="Select all downloads"
+              />
+              <span class="text-sm text-text-muted flex-1">
+                ${bulkActive.count > 0 ? `${bulkActive.count} selected` : `${active.length} download${active.length !== 1 ? 's' : ''}`}
+              </span>
+              ${bulkActive.count > 0 && html`
+                <button class="btn-danger btn-sm" onClick=${cancelSelected}>
+                  Cancel ${bulkActive.count}
+                </button>
+              `}
+            </div>
+          `}
+          <div class="bg-surface border border-border rounded-xl overflow-hidden">
+            ${active.length === 0
+              ? html`<div class="flex flex-col items-center gap-2 py-12 text-center">
+                  <p class="text-base font-medium text-text">No active downloads</p>
+                  <p class="text-sm text-text-muted">Downloads started from manga details will appear here.</p>
+                </div>`
+              : active.map(e => html`<${ActiveRow}
+                  key=${e.id}
+                  entry=${e}
+                  selected=${bulkActive.isSelected(e.id)}
+                  onToggle=${() => bulkActive.toggle(e.id)}
+                />`)
+            }
+          </div>
         </div>
       `}
 
       <!-- History tab -->
       ${activeTab === 'history' && html`
         <div class="flex flex-col gap-3">
+          ${failedIds.length > 0 && html`
+            <div class="flex items-center gap-3 px-4 py-2 bg-surface-2 rounded-lg border border-border">
+              <input
+                type="checkbox"
+                class="accent-accent cursor-pointer"
+                checked=${bulkFailed.headerState === 'checked'}
+                ref=${(el) => { if (el) el.indeterminate = bulkFailed.headerState === 'indeterminate'; }}
+                onChange=${bulkFailed.toggleAll}
+                aria-label="Select all failed downloads"
+              />
+              <span class="text-sm text-text-muted flex-1">
+                ${bulkFailed.count > 0 ? `${bulkFailed.count} selected` : `${failedIds.length} failed`}
+              </span>
+              ${bulkFailed.count > 0 && html`
+                <button class="btn-primary btn-sm" onClick=${retrySelected}>
+                  Retry ${bulkFailed.count}
+                </button>
+              `}
+            </div>
+          `}
           <div class="bg-surface border border-border rounded-xl overflow-hidden">
             ${history.length === 0
               ? html`<div class="flex flex-col items-center gap-2 py-12 text-center">

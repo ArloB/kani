@@ -98,6 +98,8 @@ export function getShortcuts(scope) {
   return all;
 }
 
+export function showCheatsheet() { _showCheatsheet(); }
+
 function _showCheatsheet() {
   if (document.getElementById('shortcut-cheatsheet')) return;
 

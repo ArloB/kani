@@ -13,6 +13,7 @@ let _source = null;
 let _retryCount = 0;
 /** @type {ReturnType<typeof setTimeout> | null} */
 let _retryTimer = null;
+let _everConnected = false;
 
 /** Accumulates per-manga new chapter counts during a scan run. Reset on each 'started' event. */
 let _scanNewChapters = /** @type {Map<number, number>} */ (new Map());
@@ -56,6 +57,8 @@ function _connect() {
 
   _source.addEventListener('open', () => {
     _retryCount = 0;
+    _everConnected = true;
+    window.dispatchEvent(new CustomEvent('kani:sse-connected'));
   });
 
   _source.addEventListener('message', (event) => {
@@ -90,6 +93,7 @@ function _disconnect() {
 
 function _scheduleReconnect() {
   if (_retryTimer) return;
+  if (_everConnected) window.dispatchEvent(new CustomEvent('kani:sse-disconnected'));
   const delay = Math.min(1000 * Math.pow(2, _retryCount), MAX_DELAY_MS);
   _retryCount++;
   _retryTimer = setTimeout(() => {

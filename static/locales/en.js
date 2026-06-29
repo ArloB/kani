@@ -41,6 +41,10 @@ export default {
   'jobs.denied.title': 'Access denied',
   'jobs.denied.desc': 'You do not have permission to view background jobs.',
 
+  'manga.removed': 'Removed from library',
+  'manga.restored': 'Restored to library',
+  'common.undo': 'Undo',
+
   'manga.download_all.queued': 'Download all started',
   'manga.download_all.progress': '{current} / {total} chapters',
   'manga.download_all.cancelled': 'Downloads cancelled',
@@ -192,4 +196,35 @@ export default {
 
   'backup.schedule.job_submitted': 'Backup job submitted.',
   'backup.schedule.job_view': 'View progress',
+
+  'settings.display.group': 'Display',
+  'settings.display.theme': 'Theme',
+  'settings.display.theme.desc': 'Colour scheme for the interface.',
+  'settings.display.theme.light': 'Light',
+  'settings.display.theme.dark': 'Dark',
+  'settings.display.theme.black': 'Black',
+  'settings.display.theme.system': 'System',
+  'settings.display.density': 'Density',
+  'settings.display.density.desc': 'Interface spacing.',
+  'settings.display.density.comfortable': 'Comfortable',
+  'settings.display.density.compact': 'Compact',
+  'settings.display.accent': 'Accent colour',
+  'settings.display.accent.desc': 'Colour used for buttons and highlights.',
+  'settings.display.accent.custom': 'Custom colour',
+
+  'settings.display.reset_confirms': 'Reset confirmations',
+  'settings.display.reset_confirms.desc': 'Restore all "Don\'t ask again" dialogs.',
+  'settings.display.reset_confirms.action': 'Reset',
+  'settings.display.confirms_reset': 'Confirmations reset',
+
+  'confirm.dont_ask_again': "Don't ask again",
+
+  'palette.placeholder': 'Search commands and manga…',
+  'palette.no_results': 'No results',
+  'palette.shortcut': 'Command palette',
+  'palette.category.nav': 'Navigation',
+  'palette.category.settings': 'Settings',
+  'palette.category.library': 'Library',
+
+  'sse.disconnected': 'Live updates paused — reconnecting…',
 };

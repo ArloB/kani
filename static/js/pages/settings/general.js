@@ -1,13 +1,163 @@
 // @ts-check
 // Settings — General section (display, reading, notifications).
 
-import { getLocal, setLocal } from '../../utils.js';
+import { getLocal, setLocal, resetAllConfirmDialogs } from '../../utils.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
+import { ACCENT_SWATCHES, getCurrentTheme, saveAndApplyTheme } from '../../theme.js';
+import { t } from '../../i18n.js';
+import { showToast } from '../../components/toast.js';
+
+/**
+ * @param {HTMLElement} container
+ * @param {string} activeHex
+ */
+function _updateSwatchRings(container, activeHex) {
+  for (const btn of container.querySelectorAll('button[data-swatch]')) {
+    const hex = /** @type {HTMLButtonElement} */ (btn).dataset.swatch ?? '';
+    btn.style.boxShadow = hex === activeHex
+      ? '0 0 0 2.5px var(--color-bg), 0 0 0 4.5px var(--color-accent)'
+      : '';
+  }
+  const custom = /** @type {HTMLElement | null} */ (container.querySelector('[data-swatch-custom]'));
+  if (custom) {
+    const isCustom = !ACCENT_SWATCHES.some(s => s.color === activeHex);
+    custom.style.boxShadow = isCustom
+      ? '0 0 0 2.5px var(--color-bg), 0 0 0 4.5px var(--color-accent)'
+      : '';
+  }
+}
 
 /** @param {HTMLElement} el */
 export function mount(el) {
   function _render() {
     el.innerHTML = '';
+
+    // ── Display group ────────────────────────────────────────────────────────
+    const { theme: curTheme, density: curDensity, accent: curAccent } = getCurrentTheme();
+
+    const displayGroup = mkSettingsGroup(t('settings.display.group'));
+    const displayCard  = mkSettingsGroupCard(displayGroup);
+
+    // Theme chips
+    const themeChips = document.createElement('div');
+    themeChips.className = 'flex gap-1.5 shrink-0 flex-wrap';
+    for (const [val, label] of /** @type {[string,string][]} */ ([
+      ['light',  t('settings.display.theme.light')],
+      ['dark',   t('settings.display.theme.dark')],
+      ['black',  t('settings.display.theme.black')],
+      ['system', t('settings.display.theme.system')],
+    ])) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = curTheme === val ? 'chip chip-active' : 'chip';
+      btn.textContent = label;
+      btn.setAttribute('aria-pressed', String(curTheme === val));
+      btn.addEventListener('click', () => {
+        saveAndApplyTheme(val, curDensity, curAccent);
+        _render();
+      });
+      themeChips.appendChild(btn);
+    }
+    displayCard.appendChild(mkSettingsRow({
+      label: t('settings.display.theme'),
+      description: t('settings.display.theme.desc'),
+      control: themeChips,
+    }));
+
+    // Density chips
+    const densityChips = document.createElement('div');
+    densityChips.className = 'flex gap-1.5 shrink-0';
+    for (const [val, label] of /** @type {[string,string][]} */ ([
+      ['comfortable', t('settings.display.density.comfortable')],
+      ['compact',     t('settings.display.density.compact')],
+    ])) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = curDensity === val ? 'chip chip-active' : 'chip';
+      btn.textContent = label;
+      btn.setAttribute('aria-pressed', String(curDensity === val));
+      btn.addEventListener('click', () => {
+        saveAndApplyTheme(curTheme, val, curAccent);
+        _render();
+      });
+      densityChips.appendChild(btn);
+    }
+    displayCard.appendChild(mkSettingsRow({
+      label: t('settings.display.density'),
+      description: t('settings.display.density.desc'),
+      control: densityChips,
+    }));
+
+    // Accent swatches
+    const accentWrap = document.createElement('div');
+    accentWrap.className = 'flex items-center gap-2 flex-wrap shrink-0';
+
+    for (const { color, label } of ACCENT_SWATCHES) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.swatch = color;
+      btn.className = 'w-6 h-6 rounded-full shrink-0 transition-[box-shadow]';
+      btn.style.background = color;
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
+      btn.setAttribute('aria-pressed', String(color === curAccent));
+      btn.addEventListener('click', () => {
+        saveAndApplyTheme(curTheme, curDensity, color);
+        _updateSwatchRings(accentWrap, color);
+        accentWrap.querySelectorAll('button[data-swatch]').forEach(b => {
+          b.setAttribute('aria-pressed', String(/** @type {HTMLButtonElement} */(b).dataset.swatch === color));
+        });
+        const inp = /** @type {HTMLInputElement | null} */ (accentWrap.querySelector('input[type="color"]'));
+        if (inp) inp.value = color;
+      });
+      accentWrap.appendChild(btn);
+    }
+
+    // Custom colour input
+    const customLabel = document.createElement('label');
+    customLabel.dataset.swatchCustom = '';
+    customLabel.className = 'w-6 h-6 rounded-full border-2 border-dashed border-border cursor-pointer flex items-center justify-center transition-[box-shadow] shrink-0 overflow-hidden';
+    customLabel.title = t('settings.display.accent.custom');
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.className = 'opacity-0 w-0 h-0 absolute';
+    const isCustom = !ACCENT_SWATCHES.some(s => s.color === curAccent);
+    colorInput.value = isCustom ? curAccent : '#e8545a';
+    colorInput.addEventListener('input', () => {
+      const hex = colorInput.value;
+      customLabel.style.background = hex;
+      saveAndApplyTheme(curTheme, curDensity, hex);
+      _updateSwatchRings(accentWrap, hex);
+    });
+    customLabel.appendChild(colorInput);
+    if (isCustom) customLabel.style.background = curAccent;
+    accentWrap.appendChild(customLabel);
+
+    _updateSwatchRings(accentWrap, curAccent);
+
+    displayCard.appendChild(mkSettingsRow({
+      label: t('settings.display.accent'),
+      description: t('settings.display.accent.desc'),
+      control: accentWrap,
+    }));
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'btn-ghost btn-sm';
+    resetBtn.textContent = t('settings.display.reset_confirms.action');
+    resetBtn.addEventListener('click', () => {
+      resetAllConfirmDialogs();
+      showToast(t('settings.display.confirms_reset'), { type: 'success' });
+    });
+    displayCard.appendChild(mkSettingsRow({
+      label: t('settings.display.reset_confirms'),
+      description: t('settings.display.reset_confirms.desc'),
+      control: resetBtn,
+    }));
+
+    el.appendChild(displayGroup);
+
+    // ────────────────────────────────────────────────────────────────────────
 
     const paginationPrefs = [
       { label: 'Chapter list',  key: 'kani_chapter_pagination',  desc: 'How chapters are loaded in the chapter list.' },

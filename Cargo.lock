@@ -3054,6 +3054,7 @@ dependencies = [
  "insta",
  "kani-shared",
  "kani-yaml",
+ "regex",
  "reqwest",
  "resvg",
  "rhai",

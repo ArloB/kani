@@ -6,6 +6,7 @@ import { useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import { iconX } from '../icons.js';
 import { Icon } from './icon.js';
+import { confirmDialog } from '../utils.js';
 const html = htm.bind(h);
 
 /**
@@ -111,28 +112,16 @@ export function mountIntoModalRoot(vnode) {
 // ── Imperative helpers ────────────────────────────────────────────────────────
 
 /**
- * @param {{
- *   message: string,
- *   title?: string,
- *   confirmLabel?: string,
- *   cancelLabel?: string,
- *   onResolve: (value: boolean) => void,
- * }} props
+ * Shows a confirm dialog. Returns a Promise resolving to true (confirmed) or
+ * false (cancelled / Escape). Delegates to `confirmDialog` in utils.js so both
+ * call paths share one implementation with full feature parity (danger,
+ * rememberKey, cancelLabel, Tab-trap, Escape).
+ * @param {string} message
+ * @param {{ title?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, rememberKey?: string }} [opts]
+ * @returns {Promise<boolean>}
  */
-function ConfirmModal({ message, title = 'Confirm', confirmLabel = 'Confirm', cancelLabel = 'Cancel', onResolve }) {
-  return html`
-    <${Modal}
-      open=${true}
-      title=${title}
-      onClose=${() => onResolve(false)}
-      footer=${html`
-        <button type="button" class="btn-ghost btn-sm" onClick=${() => onResolve(false)}>${cancelLabel}</button>
-        <button type="button" class="btn-primary btn-sm" onClick=${() => onResolve(true)}>${confirmLabel}</button>
-      `}
-    >
-      <p class="text-sm text-text">${message}</p>
-    </${Modal}>
-  `;
+export function showConfirm(message, opts = {}) {
+  return confirmDialog({ message, ...opts });
 }
 
 /**
@@ -151,28 +140,6 @@ function AlertModal({ message, title = 'Notice', closeLabel = 'OK', onClose }) {
       <p class="text-sm text-text">${message}</p>
     </${Modal}>
   `;
-}
-
-/**
- * Shows a confirm dialog using the app modal. Returns a Promise that resolves
- * to true (confirm) or false (cancel / Escape).
- * @param {string} message
- * @param {{ title?: string, confirmLabel?: string, cancelLabel?: string }} [opts]
- * @returns {Promise<boolean>}
- */
-export function showConfirm(message, opts = {}) {
-  return new Promise((resolve) => {
-    let cleanup = () => {};
-    cleanup = mountIntoModalRoot(html`
-      <${ConfirmModal}
-        message=${message}
-        title=${opts.title ?? 'Confirm'}
-        confirmLabel=${opts.confirmLabel ?? 'Confirm'}
-        cancelLabel=${opts.cancelLabel ?? 'Cancel'}
-        onResolve=${(v) => { cleanup(); resolve(v); }}
-      />
-    `);
-  });
 }
 
 /**

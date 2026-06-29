@@ -1,5 +1,7 @@
 // @ts-check
-// Pure utility functions — no dependencies, no side effects.
+
+import { getState, setState } from './state.js';
+import { showApiError } from './components/toast.js';
 
 /**
  * Returns a debounced version of `fn` that delays invocation by `ms`.
@@ -111,44 +113,93 @@ export function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const _CONFIRM_SKIP_PREFIX = 'kani-confirm-skip-';
+
+/** @param {string} key */
+export function resetConfirmDialog(key) {
+  localStorage.removeItem(_CONFIRM_SKIP_PREFIX + key);
+}
+
+export function resetAllConfirmDialogs() {
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const k = localStorage.key(i);
+    if (k?.startsWith(_CONFIRM_SKIP_PREFIX)) localStorage.removeItem(k);
+  }
+}
+
 /**
  * Shows a confirmation modal dialog and resolves with true (confirmed) or false (cancelled).
- * @param {{ title?: string, message: string, confirmLabel?: string, danger?: boolean }} opts
+ * Pass `rememberKey` to enable a "Don't ask again" checkbox backed by localStorage.
+ * @param {{ title?: string, message: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, rememberKey?: string }} opts
  * @returns {Promise<boolean>}
  */
-export function confirmDialog({ title = 'Are you sure?', message, confirmLabel = 'Confirm', danger = false }) {
+export function confirmDialog({ title = 'Are you sure?', message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false, rememberKey }) {
+  if (rememberKey && localStorage.getItem(_CONFIRM_SKIP_PREFIX + rememberKey) === '1') {
+    return Promise.resolve(true);
+  }
+
   return new Promise(resolve => {
+    const titleId = 'confirm-dialog-title-' + Math.random().toString(36).slice(2);
     const overlay = document.createElement('div');
     overlay.className = 'fixed inset-0 bg-scrim z-top flex items-center justify-center p-4';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', titleId);
+
+    const rememberHtml = rememberKey
+      ? `<label class="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none">
+           <input type="checkbox" class="js-remember accent-accent" />
+           Don't ask again
+         </label>`
+      : '';
 
     const dialog = document.createElement('div');
     dialog.className = 'bg-surface rounded-xl shadow-xl w-full max-w-sm flex flex-col overflow-hidden';
     dialog.innerHTML = `
       <div class="px-6 pt-5 pb-4 flex flex-col gap-2">
-        <h2 class="text-base font-semibold text-text">${escapeHtml(title)}</h2>
+        <h2 id="${titleId}" class="text-base font-semibold text-text">${escapeHtml(title)}</h2>
         <p class="text-sm text-text-muted">${escapeHtml(message)}</p>
       </div>
-      <div class="flex items-center justify-end gap-2 px-6 py-4 border-t border-border-subtle">
-        <button type="button" class="btn-ghost js-cancel">Cancel</button>
-        <button type="button" class="${danger ? 'btn-danger' : 'btn-primary'} js-confirm">${escapeHtml(confirmLabel)}</button>
+      <div class="flex items-center justify-between gap-2 px-6 py-4 border-t border-border-subtle">
+        <div>${rememberHtml}</div>
+        <div class="flex items-center gap-2">
+          <button type="button" class="btn-ghost js-cancel">${escapeHtml(cancelLabel)}</button>
+          <button type="button" class="${danger ? 'btn-danger' : 'btn-primary'} js-confirm">${escapeHtml(confirmLabel)}</button>
+        </div>
       </div>
     `;
 
     overlay.appendChild(dialog);
 
+    const _trigger = /** @type {HTMLElement|null} */ (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     const close = (/** @type {boolean} */ result) => {
+      if (result && rememberKey) {
+        const cb = /** @type {HTMLInputElement|null} */ (dialog.querySelector('.js-remember'));
+        if (cb?.checked) localStorage.setItem(_CONFIRM_SKIP_PREFIX + rememberKey, '1');
+      }
       overlay.remove();
+      if (_trigger) _trigger.focus();
       resolve(result);
     };
 
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close(false); return; }
+      if (e.key === 'Tab') {
+        const focusable = /** @type {HTMLElement[]} */ ([...dialog.querySelectorAll('button, input')]);
+        if (focusable.length < 2) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey ? document.activeElement === first : document.activeElement === last) {
+          e.preventDefault();
+          (e.shiftKey ? last : first).focus();
+        }
+      }
+    });
     dialog.querySelector('.js-cancel')?.addEventListener('click', () => close(false));
     dialog.querySelector('.js-confirm')?.addEventListener('click', () => close(true));
 
     document.body.appendChild(overlay);
-    // Focus the confirm button
     setTimeout(() => /** @type {HTMLElement|null} */ (dialog.querySelector('.js-confirm'))?.focus(), 10);
   });
 }
@@ -268,4 +319,145 @@ export function deferredSkeleton(mountFn, delayMs = 150) {
 export function errorCountAriaLabel(count) {
   if (count >= 3) return `${count} errors — unhealthy`;
   return `${count} ${count === 1 ? 'error' : 'errors'}`;
+}
+
+/**
+ * Attaches a horizontal swipe handler to `el`.
+ * Does not interfere with vertical scrolling. Safe to use alongside the
+ * reader's own pinch/zoom touch handler (different element).
+ * @param {HTMLElement} el
+ * @param {{ onLeft?: () => void, onRight?: () => void, threshold?: number }} opts
+ * @returns {() => void} cleanup
+ */
+export function addSwipeHandler(el, { onLeft, onRight, threshold = 50 } = {}) {
+  let startX = 0;
+  let startY = 0;
+
+  function onTouchStart(/** @type {TouchEvent} */ e) {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }
+
+  function onTouchEnd(/** @type {TouchEvent} */ e) {
+    if (e.changedTouches.length !== 1) return;
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    if (Math.abs(dx) < threshold || Math.abs(dx) <= Math.abs(dy)) return;
+    if (dx < 0) onLeft?.();
+    else onRight?.();
+  }
+
+  el.addEventListener('touchstart', onTouchStart, { passive: true });
+  el.addEventListener('touchend', onTouchEnd, { passive: true });
+  return () => {
+    el.removeEventListener('touchstart', onTouchStart);
+    el.removeEventListener('touchend', onTouchEnd);
+  };
+}
+
+/**
+ * Attaches a pull-to-refresh handler to `el`.
+ * Fires `onRefresh` when the user pulls down past `threshold` px while at the
+ * top of the scroll container. Respects `prefers-reduced-motion`.
+ * @param {HTMLElement} el
+ * @param {() => Promise<void> | void} onRefresh
+ * @param {{ threshold?: number }} opts
+ * @returns {() => void} cleanup
+ */
+export function addPullToRefresh(el, onRefresh, { threshold = 60 } = {}) {
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let startY = 0;
+  let pulling = false;
+
+  /** @type {HTMLElement | null} */
+  let indicator = null;
+
+  function _ensureIndicator() {
+    if (indicator) return indicator;
+    indicator = document.createElement('div');
+    indicator.className = 'flex items-center justify-center h-10 text-text-muted text-sm opacity-0 transition-opacity duration-200';
+    indicator.setAttribute('aria-hidden', 'true');
+    indicator.textContent = '↓ Release to refresh';
+    el.insertAdjacentElement('beforebegin', indicator);
+    return indicator;
+  }
+
+  function _removeIndicator() {
+    indicator?.remove();
+    indicator = null;
+  }
+
+  function onTouchStart(/** @type {TouchEvent} */ e) {
+    if (el.scrollTop > 0) return;
+    if (e.touches.length !== 1) return;
+    startY = e.touches[0].clientY;
+    pulling = false;
+  }
+
+  function onTouchMove(/** @type {TouchEvent} */ e) {
+    if (el.scrollTop > 0) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0) return;
+    pulling = dy >= threshold;
+    if (!reduced) {
+      const ind = _ensureIndicator();
+      ind.style.opacity = pulling ? '1' : String(dy / threshold);
+    }
+  }
+
+  async function onTouchEnd() {
+    if (!pulling) { _removeIndicator(); return; }
+    pulling = false;
+    _removeIndicator();
+    await onRefresh();
+  }
+
+  el.addEventListener('touchstart', onTouchStart, { passive: true });
+  el.addEventListener('touchmove', onTouchMove, { passive: true });
+  el.addEventListener('touchend', onTouchEnd, { passive: true });
+  return () => {
+    el.removeEventListener('touchstart', onTouchStart);
+    el.removeEventListener('touchmove', onTouchMove);
+    el.removeEventListener('touchend', onTouchEnd);
+    _removeIndicator();
+  };
+}
+
+/** @type {HTMLElement | null} */
+let _liveRegion = null;
+
+/**
+ * Writes `message` to a singleton `aria-live="polite"` region so screen readers
+ * announce it without moving focus. Call for results that have no visible toast.
+ * @param {string} message
+ */
+export function announce(message) {
+  if (!_liveRegion) {
+    _liveRegion = document.createElement('div');
+    _liveRegion.setAttribute('aria-live', 'polite');
+    _liveRegion.setAttribute('aria-atomic', 'true');
+    _liveRegion.className = 'sr-only';
+    document.body.appendChild(_liveRegion);
+  }
+  _liveRegion.textContent = '';
+  requestAnimationFrame(() => { if (_liveRegion) _liveRegion.textContent = message; });
+}
+
+/**
+ * Applies an optimistic state update, runs `apiFn`, and rolls back + shows an
+ * error toast on failure.
+ * @param {string} stateKey
+ * @param {any} optimisticValue
+ * @param {() => Promise<any>} apiFn
+ */
+export async function optimisticUpdate(stateKey, optimisticValue, apiFn) {
+  const prev = getState(stateKey);
+  setState(stateKey, optimisticValue);
+  try {
+    await apiFn();
+  } catch (e) {
+    setState(stateKey, prev);
+    showApiError(e);
+  }
 }

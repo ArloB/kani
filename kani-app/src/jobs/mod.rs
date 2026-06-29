@@ -7,6 +7,7 @@ pub mod integrity;
 pub mod maintenance;
 pub mod manager;
 pub mod recurring;
+pub mod refresh;
 pub mod scan;
 pub mod storage;
 

@@ -6,7 +6,7 @@ import { hasPermission } from '../state.js';
 import { renderPagination } from '../components/pagination.js';
 import { getParam, replaceState as urlReplaceState } from '../url-params.js';
 import { getMangaCoverUrl } from '../api.js';
-import { formatChapterTitle, hasNextPage, formatDate, escapeHtml, deferredSkeleton } from '../utils.js';
+import { formatChapterTitle, hasNextPage, formatDate, escapeHtml, deferredSkeleton, addPullToRefresh } from '../utils.js';
 import { skeletonUpdateList } from '../components/skeletons.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
@@ -42,6 +42,8 @@ let _abort = null;
 let _destroyPagination = null;
 /** @type {(() => void) | null} */
 let _unsubProgress = null;
+/** @type {(() => void) | null} */
+let _removePullToRefresh = null;
 /** @type {HTMLElement | null} */
 let _listEl = null;
 
@@ -70,6 +72,8 @@ export async function init(container) {
   _unsubProgress = subscribe('chaptersProgress', _onProgressUpdate);
 
   await _fetch(_listEl, paginEl);
+
+  _removePullToRefresh = addPullToRefresh(document.documentElement, () => _fetch(_listEl, paginEl));
 }
 
 // ── URL state ─────────────────────────────────────────────────────────────────
@@ -303,6 +307,8 @@ export function destroy(container) {
   clearPageHeader();
   _abort?.abort();
   _abort = null;
+  _removePullToRefresh?.();
+  _removePullToRefresh = null;
   _destroyPagination?.();
   _destroyPagination = null;
   _unsubProgress?.();

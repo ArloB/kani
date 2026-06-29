@@ -401,7 +401,7 @@ impl ChapterDomain for AppService {
 
 #[async_trait::async_trait]
 pub trait LibraryDomain: Send + Sync {
-    async fn scan_all_manga(&self) -> Result<usize>;
+    async fn scan_all_manga(&self) -> Result<uuid::Uuid>;
     async fn scan_manga_ids(&self, ids: Vec<MangaId>) -> Result<uuid::Uuid>;
     async fn get_library(&self, page: i32, order: i32) -> Result<Vec<Manga>>;
     async fn export_backup(
@@ -447,7 +447,7 @@ pub trait LibraryDomain: Send + Sync {
 
 #[async_trait::async_trait]
 impl LibraryDomain for AppService {
-    async fn scan_all_manga(&self) -> Result<usize> {
+    async fn scan_all_manga(&self) -> Result<uuid::Uuid> {
         self.scan_all_manga().await
     }
 
@@ -620,8 +620,14 @@ pub trait MangaDomain: Send + Sync {
         manga_id: MangaId,
         kinds: Vec<DownloadRuleKind>,
     ) -> Result<(usize, usize)>;
-    async fn trash_manga(&self, id: MangaId, user_id: UserId) -> Result<()>;
+    async fn trash_manga(&self, id: MangaId, user_id: UserId) -> Result<uuid::Uuid>;
     async fn untrash_manga(&self, id: MangaId, user_id: UserId) -> Result<()>;
+    async fn untrash_by_token(&self, token: uuid::Uuid, user_id: UserId) -> Result<()>;
+    async fn queue_manga_refresh(
+        &self,
+        manga_id: MangaId,
+        opts: crate::models::RefreshOptions,
+    ) -> Result<uuid::Uuid>;
     async fn list_trash(&self) -> Result<Vec<Manga>>;
     async fn purge_all_trash(&self) -> Result<u64>;
 }
@@ -817,12 +823,47 @@ impl MangaDomain for AppService {
         self.preview_download_rules(manga_id, kinds).await
     }
 
-    async fn trash_manga(&self, id: MangaId, user_id: UserId) -> Result<()> {
-        self.trash_manga(id, user_id).await
+    async fn trash_manga(&self, id: MangaId, user_id: UserId) -> Result<uuid::Uuid> {
+        self.trash_manga(id, user_id).await?;
+        let token = uuid::Uuid::new_v4();
+        self.undo_tokens
+            .insert(token, (id, std::time::Instant::now()));
+        Ok(token)
     }
 
     async fn untrash_manga(&self, id: MangaId, user_id: UserId) -> Result<()> {
         self.untrash_manga(id, user_id).await
+    }
+
+    async fn untrash_by_token(&self, token: uuid::Uuid, user_id: UserId) -> Result<()> {
+        let entry = self.undo_tokens.remove(&token).ok_or_else(|| {
+            crate::error::ServiceError::NotFound("Undo token not found or expired".into())
+        })?;
+        let (manga_id, issued_at) = entry.1;
+        if issued_at.elapsed() > std::time::Duration::from_secs(10) {
+            return Err(crate::error::ServiceError::NotFound(
+                "Undo token expired".into(),
+            ));
+        }
+        self.untrash_manga(manga_id, user_id).await
+    }
+
+    async fn queue_manga_refresh(
+        &self,
+        manga_id: MangaId,
+        opts: crate::models::RefreshOptions,
+    ) -> Result<uuid::Uuid> {
+        let row = sqlx::query!("SELECT name FROM manga WHERE id = ?", manga_id)
+            .fetch_optional(&self.db_read)
+            .await?
+            .ok_or_else(|| {
+                crate::error::ServiceError::NotFound(format!("Manga {manga_id} not found"))
+            })?;
+        let job = crate::jobs::refresh::RefreshMangaJob::new(manga_id.0, row.name, opts);
+        self.job_manager
+            .submit(job)
+            .await
+            .map_err(|e| crate::error::ServiceError::Internal(e.to_string()))
     }
 
     async fn list_trash(&self) -> Result<Vec<Manga>> {
@@ -1453,7 +1494,7 @@ mod tests {
                 source_name: "deleted-source".into(),
             }])
         }
-        async fn scan_all_manga(&self) -> Result<usize> {
+        async fn scan_all_manga(&self) -> Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn scan_manga_ids(&self, _ids: Vec<MangaId>) -> Result<uuid::Uuid> {
@@ -1693,10 +1734,20 @@ mod tests {
         ) -> Result<(usize, usize)> {
             unimplemented!()
         }
-        async fn trash_manga(&self, _id: MangaId, _user_id: UserId) -> Result<()> {
+        async fn trash_manga(&self, _id: MangaId, _user_id: UserId) -> Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn untrash_manga(&self, _id: MangaId, _user_id: UserId) -> Result<()> {
+            unimplemented!()
+        }
+        async fn untrash_by_token(&self, _token: uuid::Uuid, _user_id: UserId) -> Result<()> {
+            unimplemented!()
+        }
+        async fn queue_manga_refresh(
+            &self,
+            _manga_id: MangaId,
+            _opts: crate::models::RefreshOptions,
+        ) -> Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn list_trash(&self) -> Result<Vec<Manga>> {

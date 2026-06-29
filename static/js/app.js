@@ -2,6 +2,7 @@
 // App entry point. Bootstraps permissions, SSE, nav, and the SPA router.
 
 import { initPermissions, getState, setState, subscribe, hasPermission } from './state.js';
+import { initTheme } from './theme.js';
 import { connectSSE } from './sse.js';
 import { initRouter, navigate, onNavigate } from './router.js';
 import { getBootId, logout, getFeatures, getSystemInfo } from './api.js';
@@ -12,10 +13,15 @@ import { initTooltip } from './components/tooltip.js';
 import { showAlert } from './components/modal.js';
 import { getLocal, setLocal } from './utils.js';
 import { t } from './i18n.js';
+import { listenForStateChanges } from './sync.js';
+import { registerShortcuts, showCheatsheet } from './shortcuts.js';
+import { openCommandPalette } from './components/command-palette.js';
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
 (async () => {
+  initTheme();
+
   if (location.pathname === '/login' || location.pathname === '/register') {
     const appEl = document.getElementById('app');
     if (appEl) initRouter(appEl);
@@ -26,6 +32,9 @@ import { t } from './i18n.js';
   await initPermissions();
   initTooltip();
   connectSSE();
+  _mountConnectionBanner();
+  listenForStateChanges((key, value) => setState(key, value, { broadcast: false }));
+  _registerGlobalShortcuts();
 
   try {
     const { boot_id } = await getBootId();
@@ -172,6 +181,7 @@ function _buildNavLinks() {
     { href: '/accounts',  label: 'Accounts',  icon: iconAccounts,  perm: 'user:manage' },
     { href: '/admin/logs', label: 'Logs',     icon: iconLogs,      perm: 'admin:view_logs', matchPrefix: '/admin' },
     { href: '/jobs',       label: t('nav.jobs'), icon: iconRefresh,   perm: 'admin:jobs',      matchPrefix: '/jobs',  section: 'Admin' },
+    { href: '/admin/ui-showcase', label: 'UI Showcase', icon: iconCube, perm: 'admin:manage', matchPrefix: '/admin/ui-showcase' },
   ];
   const visible = defs.filter(d => !d.perm || hasPermission(d.perm));
   let html = '';
@@ -319,6 +329,33 @@ function _handleServerRestart() {
   });
 }
 
+// ── SSE connection banner ─────────────────────────────────────────────────────
+
+function _mountConnectionBanner() {
+  /** @type {HTMLElement | null} */
+  let _banner = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _graceTimer = null;
+  const GRACE_MS = 3000;
+
+  window.addEventListener('kani:sse-disconnected', () => {
+    if (_graceTimer || _banner) return;
+    _graceTimer = setTimeout(() => {
+      _graceTimer = null;
+      _banner = document.createElement('div');
+      _banner.id = 'sse-disconnect-banner';
+      _banner.className = 'fixed top-0 right-0 left-0 md:left-sidebar z-20 flex items-center gap-3 px-6 py-2.5 bg-surface-3 border-b border-border text-sm text-text-muted';
+      _banner.innerHTML = `<span class="flex-1">${t('sse.disconnected')}</span>`;
+      document.body.prepend(_banner);
+    }, GRACE_MS);
+  });
+
+  window.addEventListener('kani:sse-connected', () => {
+    if (_graceTimer) { clearTimeout(_graceTimer); _graceTimer = null; }
+    if (_banner) { _banner.remove(); _banner = null; }
+  });
+}
+
 // ── Service worker ────────────────────────────────────────────────────────────
 
 function _registerServiceWorker() {
@@ -371,6 +408,55 @@ async function _maybeShowSecurityBanner(appEl) {
 }
 
 /** @param {ServiceWorker} incoming */
+function _registerGlobalShortcuts() {
+  registerShortcuts('global', [
+    {
+      key: '/',
+      description: 'Focus search',
+      handler: () => {
+        const search = /** @type {HTMLInputElement|null} */ (document.querySelector('.js-search'));
+        if (search) { search.focus(); search.select(); }
+        else navigate('/search');
+      },
+    },
+    {
+      key: ['h', 'H'],
+      description: 'Go to Library',
+      handler: () => navigate('/'),
+    },
+    {
+      key: ['u', 'U'],
+      description: 'Go to Updates',
+      handler: () => navigate('/updates'),
+    },
+    {
+      key: ['s', 'S'],
+      description: 'Go to Sources',
+      handler: () => navigate('/sources'),
+    },
+    {
+      key: '?',
+      description: 'Show keyboard shortcuts',
+      handler: () => showCheatsheet(),
+    },
+    {
+      key: '⌘K',
+      description: 'Command palette',
+      handler: () => {},
+    },
+  ]);
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      const tag = /** @type {HTMLElement} */ (e.target)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (/** @type {HTMLElement} */ (e.target)?.isContentEditable) return;
+      e.preventDefault();
+      openCommandPalette();
+    }
+  });
+}
+
 function _showSwUpdateBanner(incoming) {
   if (document.getElementById('sw-update-banner')) return;
 

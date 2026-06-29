@@ -1,8 +1,8 @@
 // @ts-check
 // Observable global state store. Module-scoped atoms with subscribe/unsubscribe.
-// No external dependencies.
 
 import { getPermissions } from './api.js';
+import { broadcastStateChange } from './sync.js';
 
 /**
  * @typedef {{ id: number, name: string, mangaId: number, mangaTitle: string,
@@ -72,14 +72,20 @@ export function getState(key) {
   return _state[key];
 }
 
+const _BROADCAST_KEYS = new Set(['chaptersProgress', 'libraryInvalidation', 'sourcesInvalidation']);
+
 /**
  * Replaces a state atom and notifies subscribers.
+ * Pass `{ broadcast: false }` when applying a value received from another tab
+ * to prevent rebroadcast loops.
  * @param {string} key
  * @param {any} value
+ * @param {{ broadcast?: boolean }} [opts]
  */
-export function setState(key, value) {
+export function setState(key, value, { broadcast = true } = {}) {
   _state[key] = value;
   _notify(key);
+  if (broadcast && _BROADCAST_KEYS.has(key)) broadcastStateChange(key, value);
 }
 
 /**

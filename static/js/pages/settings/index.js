@@ -98,6 +98,16 @@ export async function init(container) {
         aria-label="Settings sections"
       >
         <div class="p-2 flex flex-col gap-0.5 pt-4">
+          <div class="px-2 pb-1">
+            <input
+              id="settings-search"
+              type="search"
+              placeholder="Filter…"
+              autocomplete="off"
+              class="w-full text-xs bg-surface-2 border border-border-subtle rounded-lg px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-accent/50 placeholder:text-text-faint text-text"
+              aria-label="Filter settings sections"
+            />
+          </div>
           <div class="nav-section">Settings</div>
           <div id="settings-nav-items"></div>
         </div>
@@ -105,6 +115,16 @@ export async function init(container) {
       <div class="flex-1 min-w-0 flex flex-col">
         <div id="settings-restart-tray" class="px-4 md:px-8 pt-4"></div>
         <div class="js-mobile-list lg:hidden flex flex-col gap-0 px-0 py-2">
+          <div class="px-4 pt-2 pb-1 lg:hidden">
+            <input
+              id="settings-search-mobile"
+              type="search"
+              placeholder="Filter sections…"
+              autocomplete="off"
+              class="w-full text-sm bg-surface-2 border border-border-subtle rounded-lg px-3 py-2 outline-none focus:ring-1 focus:ring-accent/50 placeholder:text-text-faint text-text"
+              aria-label="Filter settings sections"
+            />
+          </div>
           <div class="flex flex-col divide-y divide-border-subtle border-t border-border-subtle" id="mobile-nav-items"></div>
         </div>
         <button type="button" class="js-mobile-back lg:hidden hidden items-center gap-2 px-4 py-3 text-sm text-accent hover:text-accent/80 transition-colors">
@@ -130,12 +150,25 @@ export async function init(container) {
   const mobileBackBtn  = /** @type {HTMLButtonElement} */ (container.querySelector('.js-mobile-back'));
   const desktopNavEl   = /** @type {HTMLElement} */ (container.querySelector('#settings-nav-items'));
   const mobileNavEl    = /** @type {HTMLElement} */ (container.querySelector('#mobile-nav-items'));
+  const searchEl       = /** @type {HTMLInputElement|null} */ (container.querySelector('#settings-search'));
+  const searchMobileEl = /** @type {HTMLInputElement|null} */ (container.querySelector('#settings-search-mobile'));
+
+  let _filteredSections = sections;
+
+  function _applySearch(/** @type {string} */ query) {
+    const q = query.trim().toLowerCase();
+    _filteredSections = q
+      ? sections.filter(s => (s.label + ' ' + s.description).toLowerCase().includes(q))
+      : sections;
+    _buildDesktopNav();
+    _buildMobileNav();
+  }
 
   // Build desktop nav items
   function _buildDesktopNav() {
     desktopNavEl.innerHTML = '';
     let lastGroup = '';
-    for (const s of sections) {
+    for (const s of _filteredSections) {
       if (s.group && s.group !== lastGroup) {
         const sep = document.createElement('div');
         sep.className = 'nav-section';
@@ -151,12 +184,18 @@ export async function init(container) {
       btn.addEventListener('click', () => _showSection(s.id, true));
       desktopNavEl.appendChild(btn);
     }
+    if (_filteredSections.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'px-2 py-2 text-xs text-text-faint';
+      empty.textContent = 'No sections found';
+      desktopNavEl.appendChild(empty);
+    }
   }
 
   // Build mobile nav items
   function _buildMobileNav() {
     mobileNavEl.innerHTML = '';
-    for (const s of sections) {
+    for (const s of _filteredSections) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.dataset.section = s.id;
@@ -166,6 +205,9 @@ export async function init(container) {
       mobileNavEl.appendChild(btn);
     }
   }
+
+  searchEl?.addEventListener('input', (e) => _applySearch(/** @type {HTMLInputElement} */ (e.target).value));
+  searchMobileEl?.addEventListener('input', (e) => _applySearch(/** @type {HTMLInputElement} */ (e.target).value));
 
   _buildDesktopNav();
   _buildMobileNav();

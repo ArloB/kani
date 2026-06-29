@@ -12,6 +12,7 @@ import { iconPencil, iconRefresh, iconX } from '../../icons.js';
 import { mkCard, mkRow, mkItem } from './_shared.js';
 import { hasPermission } from '../../state.js';
 import { getLocal, setLocal } from '../../utils.js';
+import { subscribeJob } from '../../sse.js';
 
 const html = htm.bind(h);
 
@@ -266,18 +267,30 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     flash(setRefreshStatus, 'refreshing');
     const fields = redownloadCover ? undefined : ['title', 'description', 'status', 'people', 'tags'];
     try {
-      await api.refreshManga(dbId, { fields, fetch_chapters: false });
-      const fresh = await api.getMangaDetails(dbId);
-      onFieldSaved(fresh);
-      if (!hasLocalPeople) {
-        setAuthors(toNames(fresh.source_authors?.length ? fresh.source_authors : fresh.authors));
-        setArtists(toNames(fresh.source_artists?.length ? fresh.source_artists : fresh.artists));
+      const { job_id } = await api.refreshManga(dbId, { fields, fetch_chapters: false });
+      if (job_id) {
+        subscribeJob(job_id, {
+          onComplete: async () => {
+            const fresh = await api.getMangaDetails(dbId);
+            onFieldSaved(fresh);
+            if (!hasLocalPeople) {
+              setAuthors(toNames(fresh.source_authors?.length ? fresh.source_authors : fresh.authors));
+              setArtists(toNames(fresh.source_artists?.length ? fresh.source_artists : fresh.artists));
+            }
+            if (!hasLocalTags) {
+              setTags(toNames(fresh.source_tags?.length ? fresh.source_tags : fresh.tags));
+            }
+            setCoverTs(Date.now());
+            flash(setRefreshStatus, 'saved');
+          },
+          onFailed: (data) => {
+            flash(setRefreshStatus, 'error');
+            showApiError({ message: data?.message ?? 'Refresh failed' });
+          },
+        });
+      } else {
+        flash(setRefreshStatus, 'error');
       }
-      if (!hasLocalTags) {
-        setTags(toNames(fresh.source_tags?.length ? fresh.source_tags : fresh.tags));
-      }
-      setCoverTs(Date.now());
-      flash(setRefreshStatus, 'saved');
     } catch (e) {
       flash(setRefreshStatus, 'error');
       showApiError(e);
@@ -288,31 +301,43 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
   async function handlePullField(fieldName) {
     setPulling(fieldName);
     try {
-      await api.refreshManga(dbId, { fields: [fieldName], fetch_chapters: false, clear_overrides: true });
-      const fresh = await api.getMangaDetails(dbId);
-      onFieldSaved(fresh);
-      if (fieldName === 'title') {
-        setLocalName('');
-        savedName.current = '';
-      } else if (fieldName === 'description') {
-        if (descTimer.current) clearTimeout(descTimer.current);
-        setLocalDesc('');
-      } else if (fieldName === 'status') {
-        setLocalStatus('');
-      } else if (fieldName === 'people') {
-        setAuthors(toNames(fresh.source_authors?.length ? fresh.source_authors : fresh.authors));
-        setArtists(toNames(fresh.source_artists?.length ? fresh.source_artists : fresh.artists));
-        setHasLocalPeople(false);
-      } else if (fieldName === 'tags') {
-        setTags(toNames(fresh.source_tags?.length ? fresh.source_tags : fresh.tags));
-        setHasLocalTags(false);
-      } else if (fieldName === 'cover') {
-        setCoverOverridden(false);
-        setCoverTs(Date.now());
+      const { job_id } = await api.refreshManga(dbId, { fields: [fieldName], fetch_chapters: false, clear_overrides: true });
+      if (job_id) {
+        subscribeJob(job_id, {
+          onComplete: async () => {
+            const fresh = await api.getMangaDetails(dbId);
+            onFieldSaved(fresh);
+            if (fieldName === 'title') {
+              setLocalName('');
+              savedName.current = '';
+            } else if (fieldName === 'description') {
+              if (descTimer.current) clearTimeout(descTimer.current);
+              setLocalDesc('');
+            } else if (fieldName === 'status') {
+              setLocalStatus('');
+            } else if (fieldName === 'people') {
+              setAuthors(toNames(fresh.source_authors?.length ? fresh.source_authors : fresh.authors));
+              setArtists(toNames(fresh.source_artists?.length ? fresh.source_artists : fresh.artists));
+              setHasLocalPeople(false);
+            } else if (fieldName === 'tags') {
+              setTags(toNames(fresh.source_tags?.length ? fresh.source_tags : fresh.tags));
+              setHasLocalTags(false);
+            } else if (fieldName === 'cover') {
+              setCoverOverridden(false);
+              setCoverTs(Date.now());
+            }
+            setPulling(null);
+          },
+          onFailed: (data) => {
+            showApiError({ message: data?.message ?? 'Refresh failed' });
+            setPulling(null);
+          },
+        });
+      } else {
+        setPulling(null);
       }
     } catch (e) {
       showApiError(e);
-    } finally {
       setPulling(null);
     }
   }

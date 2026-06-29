@@ -169,7 +169,7 @@ export async function init(container) {
         src.enabled ? 'text-text' : 'text-text-muted opacity-60',
       ].join(' ');
       const circuitDot = src.circuit_state && src.circuit_state !== 'closed'
-        ? `<span class="shrink-0 w-2 h-2 rounded-full ${src.circuit_state === 'open' ? 'bg-error' : 'bg-warning'}" title="${src.circuit_state === 'open' ? t('source.circuit.open') : t('source.circuit.half_open')}"></span>`
+        ? `<span class="shrink-0 w-2 h-2 rounded-full ${src.circuit_state === 'open' ? 'bg-danger' : 'bg-warn'}" role="img" aria-label="Status: ${src.circuit_state === 'open' ? t('source.circuit.open') : t('source.circuit.half_open')}"></span>`
         : '';
       a.innerHTML = `
         <span class="flex-1 font-medium truncate">${escapeHtml(src.name)}</span>

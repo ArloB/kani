@@ -10,6 +10,7 @@ use common::{
     get_req, login, test_state,
 };
 use tower::ServiceExt;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn get_library_returns_empty_list_for_fresh_db() {
@@ -97,8 +98,12 @@ async fn scan_all_library_returns_200_for_authed_user() {
         .await
         .unwrap();
 
-    // With no sources configured, scan-all still returns 200 (nothing to do).
     assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    let job_id = body["job_id"]
+        .as_str()
+        .expect("scan-all must return job_id");
+    assert!(Uuid::parse_str(job_id).is_ok(), "job_id must be a UUID");
 }
 
 #[tokio::test]
@@ -159,6 +164,11 @@ async fn scan_manga_all_returns_200_for_authed_user() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    let job_id = body["job_id"]
+        .as_str()
+        .expect("scan with ids=all must return job_id");
+    assert!(Uuid::parse_str(job_id).is_ok(), "job_id must be a UUID");
 }
 
 #[tokio::test]

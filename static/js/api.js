@@ -1485,6 +1485,11 @@ export async function untrashManga(id) {
   return _req('POST', `/manga/${id}/untrash`);
 }
 
+/** @param {string} token */
+export async function untrashMangaByToken(token) {
+  return _req('POST', '/manga/untrash', { body: { token } });
+}
+
 export async function purgeTrashAll() {
   return _req('DELETE', '/trash');
 }

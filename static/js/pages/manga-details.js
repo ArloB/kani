@@ -678,13 +678,33 @@ async function _renderManageTab(contentEl) {
       removeBtn.addEventListener('click', async () => {
         const confirmed = await confirmDialog({
           title: 'Remove from Library?',
-          message: 'This will permanently remove this manga and all downloaded chapters. This cannot be undone.',
+          message: 'This will remove this manga and all downloaded chapters.',
           confirmLabel: 'Remove',
           danger: true,
         });
         if (!confirmed) return;
         removeBtn.disabled = true;
-        try { await api.deleteManga(_dbId); navigate('/'); }
+        try {
+          const dbId = _dbId;
+          const result = await api.deleteManga(dbId);
+          navigate('/');
+          const token = result?.undo_token;
+          if (token) {
+            showToast(t('manga.removed'), {
+              duration: 10000,
+              action: {
+                label: t('common.undo'),
+                onClick: async () => {
+                  try {
+                    await api.untrashMangaByToken(token);
+                    navigate(`/manga/${dbId}`);
+                    showToast(t('manga.restored'), { type: 'success' });
+                  } catch (e) { showApiError(e); }
+                },
+              },
+            });
+          }
+        }
         catch { removeBtn.disabled = false; }
       });
       card.appendChild(mkItem(mkRow('Remove from Library', 'Permanently deletes all chapter data for this manga', removeBtn)));
@@ -1264,7 +1284,7 @@ function _renderChapterList() {
         _chapters = _chapters.map(ch => idSet.has(ch.id) ? { ...ch, read: isRead } : ch);
         showToast(`${ids.length} chapter${ids.length !== 1 ? 's' : ''} marked as ${isRead ? 'read' : 'unread'}`);
         _selected.clear(); _selectMode = false; _allSelected = false; _renderChapterList();
-      } catch (err) { console.error('bulk read failed:', err); }
+      } catch (err) { showApiError(err); }
     }}
     onBulkDownload=${async () => {
       const ids = [..._selected].filter(id => { const ch = _chapters.find(c => c.id === id); return ch && !ch.downloaded; });

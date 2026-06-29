@@ -6,7 +6,8 @@ import htm from 'htm';
 import * as api from '../api.js';
 import { hasPermission, getState, setState, updateState, subscribe } from '../state.js';
 import { navigate } from '../router.js';
-import { debounce, getLocal, getLocalInt, setLocal, hasNextPage, confirmDialog, formatChapterTitle, deferredSkeleton } from '../utils.js';
+import { debounce, getLocal, getLocalInt, setLocal, hasNextPage, confirmDialog, formatChapterTitle, deferredSkeleton, addPullToRefresh } from '../utils.js';
+import { getParam, pushState, replaceState } from '../url-params.js';
 
 /** @type {Record<string, number>} */
 const STATUS_VALUES = { ongoing: 0, completed: 1, hiatus: 2, cancelled: 3, unknown: 4 };
@@ -42,6 +43,7 @@ let _page = 1;
 let _pageSize = 0;
 
 /** @type {AbortController|null} */ let _abort = null;
+/** @type {(() => void)|null} */   let _removePullToRefresh = null;
 /** @type {(() => void)|null} */   let _unsubRefresh = null;
 /** @type {(() => void)|null} */   let _unsubInvalidation = null;
 /** @type {(() => void)|null} */   let _unsubScanning = null;
@@ -121,19 +123,18 @@ export async function init(container) {
   _pageSize = getLocalInt('kani_library_page_size', 24);
 
   // Restore filter state from URL params
-  const urlParams = new URLSearchParams(location.search);
-  _page       = parseInt(urlParams.get('page') ?? '1', 10) || 1;
-  _search     = urlParams.get('search') ?? '';
-  _statusFilter = urlParams.get('status') || null;
-  _tagFilter  = urlParams.get('tag_id')    ? Number(urlParams.get('tag_id'))    : null;
-  _authorFilter = urlParams.get('author_id') ? Number(urlParams.get('author_id')) : null;
-  _artistFilter = urlParams.get('artist_id') ? Number(urlParams.get('artist_id')) : null;
-  _catFilter        = urlParams.get('cat_id')        ? Number(urlParams.get('cat_id'))        : null;
-  _collectionFilter = urlParams.get('collection_id') ? Number(urlParams.get('collection_id')) : null;
-  _readingStatusFilter = urlParams.get('reading_status') ? Number(urlParams.get('reading_status')) : null;
-  _hideNoUnread = urlParams.get('hide_no_unread') === '1';
-  _hideCompletedStatus = urlParams.get('hide_completed') === '1';
-  _sortOrder  = urlParams.get('sort') ?? 'updated_desc';
+  _page       = parseInt(getParam('page') ?? '1', 10) || 1;
+  _search     = getParam('search') ?? '';
+  _statusFilter = getParam('status') || null;
+  _tagFilter  = getParam('tag_id')    ? Number(getParam('tag_id'))    : null;
+  _authorFilter = getParam('author_id') ? Number(getParam('author_id')) : null;
+  _artistFilter = getParam('artist_id') ? Number(getParam('artist_id')) : null;
+  _catFilter        = getParam('cat_id')        ? Number(getParam('cat_id'))        : null;
+  _collectionFilter = getParam('collection_id') ? Number(getParam('collection_id')) : null;
+  _readingStatusFilter = getParam('reading_status') ? Number(getParam('reading_status')) : null;
+  _hideNoUnread = getParam('hide_no_unread') === '1';
+  _hideCompletedStatus = getParam('hide_completed') === '1';
+  _sortOrder  = getParam('sort') ?? 'updated_desc';
 
   // Build refresh button for the global header
   let refreshBtn = /** @type {HTMLButtonElement|null} */ (null);
@@ -538,9 +539,13 @@ export async function init(container) {
   }
 
   refreshBtn?.addEventListener('click', async () => {
+    if (refreshBtn) refreshBtn.disabled = true;
     try {
       await api.startRefreshAll();
-    } catch { /* ignore — SSE will update state */ }
+    } catch (e) {
+      if (refreshBtn) refreshBtn.disabled = false;
+      showApiError(e);
+    }
   });
 
   // ── Refresh state subscription ──
@@ -697,28 +702,29 @@ export async function init(container) {
 
   // Initial fetch
   _fetchLibrary();
+
+  _removePullToRefresh = addPullToRefresh(document.documentElement, _fetchLibrary);
 }
 
 // ── URL sync ──────────────────────────────────────────────────────────────────
 
 function _updateUrl(replace = false) {
-  const params = new URLSearchParams();
-  if (_page > 1)                params.set('page',            String(_page));
-  if (_search)                  params.set('search',          _search);
-  if (_statusFilter)            params.set('status',          _statusFilter);
-  if (_tagFilter)               params.set('tag_id',          String(_tagFilter));
-  if (_authorFilter)            params.set('author_id',       String(_authorFilter));
-  if (_artistFilter)            params.set('artist_id',       String(_artistFilter));
-  if (_catFilter)               params.set('cat_id',          String(_catFilter));
-  if (_collectionFilter)        params.set('collection_id',   String(_collectionFilter));
-  if (_readingStatusFilter != null) params.set('reading_status', String(_readingStatusFilter));
-  if (_hideNoUnread)            params.set('hide_no_unread',  '1');
-  if (_hideCompletedStatus)     params.set('hide_completed',  '1');
-  if (_sortOrder && _sortOrder !== 'updated_desc') params.set('sort', _sortOrder);
-  const qs = params.toString();
-  const url = qs ? '?' + qs : location.pathname;
-  if (replace) history.replaceState(null, '', url);
-  else history.pushState(null, '', url);
+  const params = {
+    page:            _page > 1                    ? _page          : null,
+    search:          _search                      || null,
+    status:          _statusFilter                || null,
+    tag_id:          _tagFilter                   ?? null,
+    author_id:       _authorFilter                ?? null,
+    artist_id:       _artistFilter                ?? null,
+    cat_id:          _catFilter                   ?? null,
+    collection_id:   _collectionFilter            ?? null,
+    reading_status:  _readingStatusFilter != null ? _readingStatusFilter : null,
+    hide_no_unread:  _hideNoUnread                ? '1' : null,
+    hide_completed:  _hideCompletedStatus         ? '1' : null,
+    sort:            _sortOrder && _sortOrder !== 'updated_desc' ? _sortOrder : null,
+  };
+  if (replace) replaceState(params);
+  else pushState(params);
 }
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -1209,6 +1215,8 @@ export function destroy(container) {
   clearPageHeader();
   _abort?.abort();
   _abort = null;
+  _removePullToRefresh?.();
+  _removePullToRefresh = null;
   _unsubRefresh?.();
   _unsubRefresh = null;
   _unsubInvalidation?.();

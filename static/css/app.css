@@ -94,11 +94,12 @@
   --btn-h-lg: 2.75rem;
 
   /* Shadows (overrides Tailwind defaults) */
-  --shadow-sm:       0 1px 3px rgba(0, 0, 0, 0.4);
-  --shadow-md:       0 4px 12px rgba(0, 0, 0, 0.5);
-  --shadow-lg:       0 8px 32px rgba(0, 0, 0, 0.6);
-  --shadow-card:     0 2px 8px rgba(0, 0, 0, 0.45);
-  --shadow-popover:  0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-sm:         0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md:         0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg:         0 8px 32px rgba(0, 0, 0, 0.6);
+  --shadow-card:       0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-popover:    0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
 
   /* Motion */
   --motion-fast:    100ms;
@@ -135,6 +136,57 @@
   --breakpoint-lg: 1024px;
   --breakpoint-xl: 1400px;
 }
+
+/* ── 4b. Runtime theme overrides ─────────────────────────────────────────── */
+
+[data-theme="light"] {
+  --color-bg:              #f4f5f9;
+  --color-surface:         #ffffff;
+  --color-surface-2:       #eceef3;
+  --color-surface-3:       #e2e4ec;
+  --color-surface-alt:     #eceef3;
+  --color-border:          #d8dbe6;
+  --color-border-subtle:   #e6e8f0;
+  --color-accent:          #c03a3f;
+  --color-accent-hover:    #a13135;
+  --color-accent-dim:      rgba(192, 58, 63, 0.12);
+  --color-text:            #1a1a26;
+  --color-text-muted:      #56566e;
+  --color-text-faint:      #8a8aa0;
+  --color-success:         #1a7a49;
+  --color-warn:            #8c5900;
+  --color-danger:          #c43636;
+  --shadow-sm:             0 1px 3px rgba(20,20,45,0.10);
+  --shadow-md:             0 4px 12px rgba(20,20,45,0.12);
+  --shadow-lg:             0 8px 32px rgba(20,20,45,0.16);
+  --shadow-card:           0 2px 8px rgba(20,20,45,0.10);
+  --shadow-popover:        0 8px 24px rgba(20,20,45,0.14);
+  --color-reader-seg-loaded:   rgba(0,0,0,0.25);
+  --color-reader-seg-unloaded: rgba(0,0,0,0.10);
+  --chart-1: #d43040;
+  --chart-2: #28865a;
+  --chart-3: #b07010;
+  --chart-4: #3a72a8;
+  --chart-5: #7c54a8;
+}
+
+[data-theme="black"] {
+  --color-bg:            #000000;
+  --color-surface:       #0a0a0f;
+  --color-surface-2:     #101018;
+  --color-surface-3:     #18181f;
+  --color-border:        #1e1e28;
+  --color-border-subtle: #141420;
+}
+
+[data-reader-theme="sepia"] .reader-container {
+  --color-bg:         #f4ecd8;
+  --color-surface:    #efe6cf;
+  --color-text:       #5b4636;
+  --color-text-muted: #7d6a52;
+}
+
+[data-density="compact"] { --spacing: 0.2rem; }
 
 /* ── 5. Base styles ──────────────────────────────────────────────────────── */
 @layer base {
@@ -215,7 +267,7 @@
 
     &:focus-visible {
       outline: none;
-      box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+      box-shadow: var(--shadow-focus-ring);
     }
 
     &:active:not(:disabled):not([aria-disabled="true"]) {
@@ -364,7 +416,7 @@
 
     &:focus-visible {
       outline: none;
-      box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+      box-shadow: var(--shadow-focus-ring);
     }
   }
 
@@ -589,7 +641,7 @@
     }
     &:focus-visible {
       outline: none;
-      box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+      box-shadow: var(--shadow-focus-ring);
     }
   }
   .category-tab-active {
@@ -633,7 +685,7 @@
   /* Visible focus ring on the track when the hidden input receives keyboard focus */
   .kani-toggle__input:focus-visible ~ .kani-toggle__track {
     outline: none;
-    box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+    box-shadow: var(--shadow-focus-ring);
   }
 
   /* ── Star / favourite checkbox ── */
@@ -657,7 +709,7 @@
   /* Visible focus ring on the icon span when the hidden input gets keyboard focus */
   .star-checkbox__input:focus-visible ~ .star-checkbox__icon {
     outline: none;
-    box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+    box-shadow: var(--shadow-focus-ring);
     border-radius: var(--radius-sm);
   }
 
@@ -672,7 +724,7 @@
     flex-shrink: 0;
     &:focus-visible {
       outline: none;
-      box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+      box-shadow: var(--shadow-focus-ring);
     }
     &:active { transform: scale(0.95); }
   }
@@ -1185,3 +1237,11 @@
 .no-spinners::-webkit-inner-spin-button,
 .no-spinners::-webkit-outer-spin-button { display: none; }
 .no-spinners { -moz-appearance: textfield; appearance: textfield; }
+
+/* ── View-transition crossfade (theme / accent switches) ─────────────────── */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: var(--motion-slow);
+  }
+}

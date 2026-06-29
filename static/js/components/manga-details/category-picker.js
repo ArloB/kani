@@ -3,6 +3,7 @@
 
 import * as api from '../../api.js';
 import { createEmptyState } from '../empty-state.js';
+import { showApiError } from '../toast.js';
 
 /**
  * @param {HTMLElement} bodyEl  Card body element (already mounted by caller)
@@ -31,9 +32,16 @@ export function mountCategoryPicker(bodyEl, allCats, mangaCats, dbId) {
       btn.textContent = cat.name;
       btn.setAttribute('aria-pressed', String(memberIds.has(cat.id)));
       btn.addEventListener('click', async () => {
-        if (memberIds.has(cat.id)) memberIds.delete(cat.id); else memberIds.add(cat.id);
-        try { await api.setMangaCategories(dbId, [...memberIds]); } catch { /* revert */ }
+        const wasIn = memberIds.has(cat.id);
+        if (wasIn) memberIds.delete(cat.id); else memberIds.add(cat.id);
         rerender();
+        try {
+          await api.setMangaCategories(dbId, [...memberIds]);
+        } catch (err) {
+          if (wasIn) memberIds.add(cat.id); else memberIds.delete(cat.id);
+          rerender();
+          showApiError(err);
+        }
       });
       chips.appendChild(btn);
     }

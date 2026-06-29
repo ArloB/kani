@@ -2,6 +2,8 @@
 // History API (pushState) SPA router.
 // Pages are lazy-imported modules that export init(container, params) and destroy(container).
 
+import { announce } from './utils.js';
+
 /**
  * @typedef {{ init: (container: HTMLElement, params: Record<string, string>) => void,
  *             destroy?: (container: HTMLElement) => void }} PageModule
@@ -26,6 +28,7 @@ const _routes = [
   { path: '/updates',                   load: () => import('./pages/recent-updates.js') },
   { path: '/stats',                     load: () => import('./pages/stats.js') },
   { path: '/admin/logs',                load: () => import('./pages/admin/logs.js') },
+  { path: '/admin/ui-showcase',         load: () => import('./pages/admin/ui-showcase.js') },
   { path: '/jobs',                      load: () => import('./pages/admin/jobs.js') },
   { path: '/onboarding',               load: () => import('./pages/onboarding.js') },
   { path: '/',                          load: () => import('./pages/library.js') },
@@ -41,6 +44,7 @@ const _navCallbacks = new Set();
 let _currentParams = {};
 /** @type {(() => Promise<boolean>) | null} — resolve false to cancel navigation */
 let _beforeNavigate = null;
+let _isInitialRoute = true;
 
 /**
  * Registers a guard called before every programmatic navigation.
@@ -154,6 +158,9 @@ async function _route(path, fromPopstate = false) {
   } else {
     window.scrollTo(0, 0);
   }
+
+  if (!_isInitialRoute) announce(document.title);
+  _isInitialRoute = false;
 
   // Notify nav and other listeners
   for (const cb of _navCallbacks) {

@@ -11,6 +11,7 @@ import { SidebarNav } from './sidebar-nav.js';
 import { iconStarFilled, iconStarOutline } from '../icons.js';
 import { navigate } from '../router.js';
 import { t } from '../i18n.js';
+import { StatusDot } from './status-dot.js';
 const html = htm.bind(h);
 
 // ── Pending source cleanup ─────────────────────────────────────────────────
@@ -273,8 +274,8 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
                             <span>v${(src.version ?? '').replace('+debug', '')}${src.language ? ` · ${src.language}` : ''}</span>
                             ${src.version?.includes('+debug') && html`<span class="text-2xs px-1 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none">DEBUG</span>`}
                             ${!src.enabled && html`<span class="text-2xs px-1 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none">Off</span>`}
-                            ${src.circuit_state === 'open' && html`<span class="w-2 h-2 rounded-full bg-error shrink-0" title=${t('source.circuit.open')}></span>`}
-                            ${src.circuit_state === 'half_open' && html`<span class="w-2 h-2 rounded-full bg-warning shrink-0" title=${t('source.circuit.half_open')}></span>`}
+                            ${src.circuit_state === 'open' && html`<${StatusDot} state="open" label=${t('source.circuit.open')} />`}
+                            ${src.circuit_state === 'half_open' && html`<${StatusDot} state="half_open" label=${t('source.circuit.half_open')} />`}
                         </span>
                     </span>
                     <button

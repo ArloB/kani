@@ -138,8 +138,8 @@ pub(crate) async fn scan_all_library(
     _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
     State(svc): State<Arc<dyn LibraryDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let queued = svc.scan_all_manga().await?;
-    Ok(Json(json!({ "queued": queued })))
+    let job_id = svc.scan_all_manga().await?;
+    Ok(Json(json!({ "job_id": job_id })))
 }
 
 /// Unified scan endpoint: scan all library manga or a specific list of IDs.
@@ -164,8 +164,8 @@ pub(crate) async fn scan_manga_multiple(
 ) -> Result<impl IntoResponse, AppError> {
     match body {
         ScanMangaRequest::All { .. } => {
-            svc.scan_all_manga().await?;
-            Ok(Json(json!({})))
+            let job_id = svc.scan_all_manga().await?;
+            Ok(Json(json!({ "job_id": job_id })))
         }
         ScanMangaRequest::Ids { ids } => {
             let job_id = svc.scan_manga_ids(ids).await?;
@@ -805,7 +805,7 @@ mod tests {
                 source_name: "removed-ext".into(),
             }])
         }
-        async fn scan_all_manga(&self) -> kani_app::error::Result<usize> {
+        async fn scan_all_manga(&self) -> kani_app::error::Result<uuid::Uuid> {
             unimplemented!()
         }
         async fn scan_manga_ids(&self, _: Vec<MangaId>) -> kani_app::error::Result<uuid::Uuid> {

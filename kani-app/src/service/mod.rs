@@ -101,6 +101,7 @@ pub struct AppService {
     pub(crate) progress_buffer: progress::ReadProgressBuffer,
     pub thumbnail_inflight: thumbnails::ThumbnailInflight,
     pub(crate) thumbnail_formats: Vec<String>,
+    pub(crate) undo_tokens: Arc<DashMap<uuid::Uuid, (crate::ids::MangaId, std::time::Instant)>>,
     #[cfg(any(test, feature = "test-util"))]
     pub mock_sources: Arc<DashMap<i64, Arc<dyn kani_core::downloader::PageListFetcher>>>,
 }
@@ -553,6 +554,7 @@ impl AppService {
         job_registry.register::<crate::jobs::download::MangaDownloadAllJob>();
         job_registry.register::<crate::jobs::download::SourceScanJob>();
         job_registry.register::<crate::jobs::download::LibraryScanJob>();
+        job_registry.register::<crate::jobs::refresh::RefreshMangaJob>();
         job_registry.register::<crate::jobs::maintenance::AnalyzeJob>();
         job_registry.register::<crate::jobs::maintenance::VacuumJob>();
         job_registry.register::<crate::jobs::scan::AutoScanJob>();
@@ -618,6 +620,7 @@ impl AppService {
             progress_buffer: progress::ReadProgressBuffer::default(),
             thumbnail_inflight: thumbnails::ThumbnailInflight::default(),
             thumbnail_formats: crate::images::thumbnail_formats_from_env(),
+            undo_tokens: Arc::new(DashMap::new()),
             #[cfg(any(test, feature = "test-util"))]
             mock_sources: Arc::new(DashMap::new()),
         };
@@ -711,6 +714,7 @@ impl AppService {
         registry.register::<crate::jobs::download::MangaDownloadAllJob>();
         registry.register::<crate::jobs::download::SourceScanJob>();
         registry.register::<crate::jobs::download::LibraryScanJob>();
+        registry.register::<crate::jobs::refresh::RefreshMangaJob>();
         registry.register::<crate::jobs::maintenance::AnalyzeJob>();
         registry.register::<crate::jobs::maintenance::VacuumJob>();
         registry.register::<crate::jobs::scan::AutoScanJob>();
@@ -766,6 +770,7 @@ impl AppService {
             progress_buffer: progress::ReadProgressBuffer::default(),
             thumbnail_inflight: thumbnails::ThumbnailInflight::default(),
             thumbnail_formats: crate::images::thumbnail_formats_from_env(),
+            undo_tokens: Arc::new(DashMap::new()),
             mock_sources: Arc::new(DashMap::new()),
         };
         *svc_cell.lock().expect("svc_cell lock") = Some(svc.clone());
