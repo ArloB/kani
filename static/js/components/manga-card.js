@@ -51,7 +51,7 @@ export function createMangaCard({ manga, href, badge = null, extraClass = '', ea
 
   if (manga.new_chapter_count && manga.new_chapter_count > 0) {
     const newBadge = document.createElement('span');
-    newBadge.className = 'absolute top-1 left-1 bg-accent text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none z-10';
+    newBadge.className = 'absolute top-1 left-1 bg-accent text-on-accent text-xs font-bold px-1.5 py-0.5 rounded-full leading-none z-10';
     newBadge.textContent = manga.new_chapter_count > 99 ? '99+' : String(manga.new_chapter_count);
     newBadge.setAttribute('aria-label', `${manga.new_chapter_count} new chapter${manga.new_chapter_count !== 1 ? 's' : ''}`);
     coverWrap.appendChild(newBadge);
@@ -110,9 +110,9 @@ export function setMangaCardScanning(mangaId, isScanning, root = document) {
   const existing = coverWrap.querySelector('.js-scan-spinner');
   if (isScanning && !existing) {
     const overlay = document.createElement('div');
-    overlay.className = 'js-scan-spinner absolute inset-0 flex items-center justify-center bg-black/40 rounded-md z-10';
+    overlay.className = 'js-scan-spinner absolute inset-0 flex items-center justify-center bg-black/40 rounded-md z-10'; // audit-ignore: scrim over cover image, theme-independent
     const spinner = document.createElement('div');
-    spinner.className = 'w-10 h-10 border-[3px] border-white/30 border-t-white rounded-full animate-spin';
+    spinner.className = 'w-10 h-10 border-[3px] border-white/30 border-t-white rounded-full animate-spin'; // audit-ignore: spinner on dark scrim, theme-independent
     overlay.appendChild(spinner);
     coverWrap.appendChild(overlay);
   } else if (!isScanning && existing) {
@@ -139,7 +139,7 @@ export function setNewChapterCount(mangaId, count, root = document) {
   }
   if (!badge) {
     badge = document.createElement('div');
-    badge.className = 'js-new-ch-badge absolute top-1 left-1 z-10 min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-full text-[10px] font-bold bg-accent text-white leading-none';
+    badge.className = 'js-new-ch-badge absolute top-1 left-1 z-10 min-w-[1.25rem] h-5 px-1 flex items-center justify-center rounded-full text-[10px] font-bold bg-accent text-on-accent leading-none';
     coverWrap.appendChild(badge);
   }
   badge.textContent = count > 99 ? '99+' : String(count);
@@ -164,7 +164,7 @@ export function setMangaCardDownloadProgress(mangaId, pct, root = document) {
   }
   if (!bar) {
     bar = document.createElement('div');
-    bar.className = 'js-dl-bar absolute bottom-0 left-0 right-0 h-1 bg-black/30 z-10';
+    bar.className = 'js-dl-bar absolute bottom-0 left-0 right-0 h-1 bg-black/30 z-10'; // audit-ignore: track scrim over cover image
     const fill = document.createElement('div');
     fill.className = 'js-dl-bar-fill h-full bg-accent transition-[width] duration-300';
     bar.appendChild(fill);

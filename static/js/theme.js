@@ -1,4 +1,7 @@
 // @ts-check
+// audit-ignore-file: this module is the colour-palette source (accent swatches,
+// default accent, accent-derivation math, meta theme-colours) — its literals
+// ARE the token source values, not hard-coded UI styling.
 
 /** @type {ReadonlyArray<{color: string, label: string}>} */
 export const ACCENT_SWATCHES = [

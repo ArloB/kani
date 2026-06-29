@@ -122,7 +122,7 @@ export function mount(el) {
     colorInput.type = 'color';
     colorInput.className = 'opacity-0 w-0 h-0 absolute';
     const isCustom = !ACCENT_SWATCHES.some(s => s.color === curAccent);
-    colorInput.value = isCustom ? curAccent : '#e8545a';
+    colorInput.value = isCustom ? curAccent : '#e8545a'; // audit-ignore: default accent source value
     colorInput.addEventListener('input', () => {
       const hex = colorInput.value;
       customLabel.style.background = hex;

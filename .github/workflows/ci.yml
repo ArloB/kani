@@ -200,11 +200,12 @@ jobs:
         if: steps.kani-cli-cache.outputs.cache-hit != 'true'
         run: cargo build --release -p kani-cli
 
-      # Baseline ratchet: blocks NEW hard-coded colour literals without requiring
-      # the 49 existing/legitimate ones (reader black, toast white, etc.) to be
-      # migrated first. Lower --max as the semantic-colour migration cleans them up.
+      # Zero-tolerance: the semantic-colour migration is complete, so any new
+      # hard-coded colour literal fails CI. Intentional literals (the pure-black
+      # reader, scrims, contrast text) carry a `// audit-ignore` directive, and
+      # the colour-palette module uses `audit-ignore-file`.
       - name: Audit hard-coded colour tokens
-        run: ./target/release/kani-cli audit-tokens --check --max 49
+        run: ./target/release/kani-cli audit-tokens --check --max 0
 
   docs:
     name: Docs & i18n

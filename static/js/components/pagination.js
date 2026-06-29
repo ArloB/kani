@@ -102,7 +102,7 @@ function _mkNumberTile(label, onClick) {
 /** Current-page tile — accent fill, not interactive. */
 function _mkActiveTile(label) {
   const span = document.createElement('span');
-  span.className = `${TILE_BASE} border-accent bg-accent text-white font-medium`;
+  span.className = `${TILE_BASE} border-accent bg-accent text-on-accent font-medium`;
   span.textContent = label;
   return span;
 }

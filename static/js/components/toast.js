@@ -26,9 +26,9 @@ export function showToast(message, { type = 'info', duration = 3000, action = nu
 
   const typeClasses = {
     info:    'bg-surface-3 text-text border border-border',
-    success: 'bg-success text-white',
-    warn:    'bg-warn text-black',
-    error:   'bg-danger text-white',
+    success: 'bg-success text-white', // audit-ignore: contrast text on semantic fill (no on-success token)
+    warn:    'bg-warn text-black', // audit-ignore: contrast text on semantic fill (no on-warn token)
+    error:   'bg-danger text-white', // audit-ignore: contrast text on semantic fill (no on-danger token)
   };
 
   const toast = document.createElement('div');

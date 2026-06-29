@@ -74,3 +74,49 @@ fn scan_skips_dist_directories() {
     let violations = audit_tokens::scan(tmp.path()).unwrap();
     assert!(violations.is_empty(), "should skip files inside dist/");
 }
+
+#[test]
+fn scan_respects_audit_ignore_directive() {
+    let tmp = tempfile::tempdir().unwrap();
+    let f = tmp.path().join("intentional.js");
+    std::fs::write(
+        &f,
+        "const black = '#000'; // audit-ignore\nconst red = '#ff0000';\n",
+    )
+    .unwrap();
+
+    let violations = audit_tokens::scan(tmp.path()).unwrap();
+    let literals: Vec<&str> = violations.iter().map(|v| v.literal.as_str()).collect();
+    assert!(
+        !literals.contains(&"#000"),
+        "the audit-ignore line should be skipped"
+    );
+    assert!(
+        literals.contains(&"#ff0000"),
+        "non-ignored literals should still be flagged"
+    );
+    assert_eq!(violations.len(), 1, "only the non-ignored line counts");
+}
+
+#[test]
+fn scan_respects_audit_ignore_file_directive() {
+    let tmp = tempfile::tempdir().unwrap();
+    let palette = tmp.path().join("palette.js");
+    std::fs::write(
+        &palette,
+        "// audit-ignore-file: this module defines the colour palette\nconst a = '#123456';\nconst b = 'rgb(1,2,3)';\n",
+    )
+    .unwrap();
+    let normal = tmp.path().join("normal.js");
+    std::fs::write(&normal, "const c = '#abcdef';").unwrap();
+
+    let violations = audit_tokens::scan(tmp.path()).unwrap();
+    assert!(
+        violations.iter().all(|v| !v.file.ends_with("palette.js")),
+        "the audit-ignore-file module should be skipped entirely"
+    );
+    assert!(
+        violations.iter().any(|v| v.file.ends_with("normal.js")),
+        "other files are still scanned"
+    );
+}

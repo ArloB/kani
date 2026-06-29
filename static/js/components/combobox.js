@@ -365,7 +365,7 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
                 onMouseEnter=${() => setHighlighted(idx)}
               >
                 <span class=${'shrink-0 w-4 h-4 rounded border flex items-center justify-center text-2xs leading-none '
-                  + (isSelected ? 'bg-accent border-accent text-white' : 'border-border bg-surface')}>
+                  + (isSelected ? 'bg-accent border-accent text-on-accent' : 'border-border bg-surface')}>
                   ${isSelected ? '✓' : ''}
                 </span>
                 ${opt.name}

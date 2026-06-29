@@ -891,7 +891,7 @@ function _openEnrichMetadataModal() {
 
 function _openChapterNotesModal() {
   const overlay = document.createElement('div');
-  overlay.className = 'fixed inset-0 z-modal flex items-center justify-center p-4 bg-black/50';
+  overlay.className = 'fixed inset-0 z-modal flex items-center justify-center p-4 bg-scrim';
 
   const card = document.createElement('div');
   card.className = 'bg-surface rounded-xl shadow-lg w-full max-w-md max-h-[70vh] flex flex-col overflow-hidden';

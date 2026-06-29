@@ -105,7 +105,7 @@ function NotificationsPanel() {
       >
         <${Icon} svg=${iconBell} />
         ${badgeCount > 0 && html`
-          <span class="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center text-2xs font-bold bg-accent text-white rounded-full">
+          <span class="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center text-2xs font-bold bg-accent text-on-accent rounded-full">
             ${badgeCount}
           </span>
         `}

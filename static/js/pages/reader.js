@@ -29,7 +29,7 @@ export async function init(container, { id }) {
   document.body.classList.add('overflow-hidden');
 
   container.innerHTML = `
-    <div id="reader-root" class="fixed inset-0 z-40 flex flex-col select-none overflow-hidden" style="background-color:#000">
+    <div id="reader-root" class="fixed inset-0 z-40 flex flex-col select-none overflow-hidden" style="background-color:#000"><!-- audit-ignore: reader bg is its own black/white/sepia system -->
 
       <!-- Mobile-only top bar (hidden on md+). Slides in from top when bars visible.
            min-h-14 + safe-area padding lets the bar absorb the iOS notch / Dynamic Island. -->
@@ -66,7 +66,7 @@ export async function init(container, { id }) {
 
       <!-- Page-number overlay badge: shown when pageOverlay pref is enabled. -->
       <div id="reader-page-num" class="absolute bottom-20 right-3 pointer-events-none select-none" style="z-index:2;display:none">
-        <span class="text-xs tabular-nums rounded px-1.5 py-0.5 bg-black/50 text-white/80"></span>
+        <span class="text-xs tabular-nums rounded px-1.5 py-0.5 bg-black/50 text-white/80"></span><!-- audit-ignore: page-number badge over arbitrary page content -->
       </div>
 
       <!-- Mini progress strip — always visible, 4px, z-20, pointer-events-none.
@@ -99,7 +99,7 @@ export async function init(container, { id }) {
 
       <!-- Side panel backdrop -->
       <div id="reader-side-backdrop"
-        class="hidden absolute inset-0 bg-black/50 z-30">
+        class="hidden absolute inset-0 bg-scrim z-30">
       </div>
 
       <!-- Side panel — left on desktop (md+), right on mobile.
@@ -294,8 +294,8 @@ export async function init(container, { id }) {
       ? [`brightness(${br}%)`, `contrast(${co}%)`, `saturate(${sa}%)`,
          gs ? 'grayscale(1)' : '', inv ? 'invert(1)' : ''].filter(Boolean).join(' ')
       : '';
-    const bgMap = /** @type {Record<string,string>} */ ({ black: '#000', white: '#fff', sepia: '#f5e6c8' });
-    const bgColor = bgMap[bg] ?? '#000';
+    const bgMap = /** @type {Record<string,string>} */ ({ black: '#000', white: '#fff', sepia: '#f5e6c8' }); // audit-ignore: reader background palette
+    const bgColor = bgMap[bg] ?? '#000'; // audit-ignore: reader background fallback
     readerRoot.style.backgroundColor = bgColor;
     // canvasEl also needs the bg color so blend modes on pagesEl (inside the isolation
     // context) have the colored backdrop to blend against. Without this, bgTintPage's
@@ -317,7 +317,7 @@ export async function init(container, { id }) {
     const g = parseInt(col.slice(3, 5), 16);
     const b = parseInt(col.slice(5, 7), 16);
     tintOverlay.style.display          = '';
-    tintOverlay.style.backgroundColor  = `rgba(${r},${g},${b},${op / 100})`;
+    tintOverlay.style.backgroundColor  = `rgba(${r},${g},${b},${op / 100})`; // audit-ignore: built from user-chosen tint colour
     tintOverlay.style.mixBlendMode     = blend;
   }
 

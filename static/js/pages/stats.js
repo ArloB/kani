@@ -14,11 +14,11 @@ import { createErrorState } from '../components/error-state.js';
 
 /** @param {string} varName e.g. '--color-text-muted' */
 function cssVar(varName) {
-  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || '#888';
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || '#888'; // audit-ignore: last-resort fallback when a token is unresolved
 }
 
 /**
- * Resolves a CSS hex color token and returns it as an rgba() string.
+ * Resolves a CSS hex color token and returns it as an RGBA string.
  * @param {string} varName
  * @param {number} alpha
  */
@@ -27,7 +27,7 @@ function chartColor(varName, alpha = 1) {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
+  return `rgba(${r},${g},${b},${alpha})`; // audit-ignore: built from a resolved token, not a literal colour
 }
 
 // ── Widget registry ───────────────────────────────────────────────────────────
@@ -427,7 +427,7 @@ function genreBreakdownWidget() {
       const PALETTE = [
         cssVar('--chart-1'), cssVar('--chart-2'), cssVar('--chart-3'),
         cssVar('--chart-4'), cssVar('--chart-5'), cssVar('--color-accent-hover'),
-        '#ec4899', '#14b8a6', '#f97316', '#84cc16', '#06b6d4', '#a855f7',
+        '#ec4899', '#14b8a6', '#f97316', '#84cc16', '#06b6d4', '#a855f7', // audit-ignore: extended categorical chart palette beyond --chart-1..5
       ];
 
       _loadChartJs().then(Chart => {

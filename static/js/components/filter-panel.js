@@ -56,7 +56,7 @@ export function mountFilterModal(triggerBtn, modalRoot, { filterDefs, activeFilt
     if (count > 0) {
       if (!badge) {
         badge = document.createElement('span');
-        badge.className = 'js-filter-badge inline-flex items-center justify-center w-4 h-4 text-2xs font-bold rounded-full bg-accent text-white ml-1.5';
+        badge.className = 'js-filter-badge inline-flex items-center justify-center w-4 h-4 text-2xs font-bold rounded-full bg-accent text-on-accent ml-1.5';
         triggerBtn.appendChild(badge);
       }
       badge.textContent = String(count);

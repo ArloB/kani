@@ -211,7 +211,7 @@ export async function init(container) {
         >
           <span class="flex items-center gap-2">
             Filters
-            <span class="js-filter-count hidden items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-accent text-white text-xs font-medium"></span>
+            <span class="js-filter-count hidden items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-accent text-on-accent text-xs font-medium"></span>
           </span>
           <span class="icon-sm transition-transform js-filter-chevron">${iconChevronDown}</span>
         </button>
@@ -950,7 +950,7 @@ function _toggleMangaSelected(id, cardEl) {
     cardEl.classList.add('ring-2', 'ring-accent', 'rounded-sm');
     if (!cardEl.querySelector('.js-select-overlay')) {
       const overlay = document.createElement('div');
-      overlay.className = 'js-select-overlay absolute top-1 right-1 w-5 h-5 bg-accent rounded-full flex items-center justify-center text-white text-xs font-bold pointer-events-none z-10';
+      overlay.className = 'js-select-overlay absolute top-1 right-1 w-5 h-5 bg-accent rounded-full flex items-center justify-center text-on-accent text-xs font-bold pointer-events-none z-10';
       overlay.textContent = '✓';
       overlay.style.fontSize = '10px';
       const coverWrap = cardEl.querySelector('.relative');

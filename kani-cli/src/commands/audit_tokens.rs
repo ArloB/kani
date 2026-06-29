@@ -1,7 +1,6 @@
 use crate::error::CliError;
 use regex::Regex;
 use std::fs;
-use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 
 pub struct Violation {
@@ -109,15 +108,24 @@ fn scan_js_file(
     patterns: &Patterns,
     out: &mut Vec<Violation>,
 ) -> Result<(), CliError> {
-    let file = fs::File::open(path)
-        .map_err(|e| CliError::Other(format!("cannot open {}: {e}", path.display())))?;
-    let reader = io::BufReader::new(file);
+    let content = fs::read_to_string(path)
+        .map_err(|e| CliError::Other(format!("cannot read {}: {e}", path.display())))?;
 
-    for (idx, line) in reader.lines().enumerate() {
-        let line =
-            line.map_err(|e| CliError::Other(format!("read error in {}: {e}", path.display())))?;
+    // A file-level `audit-ignore-file` directive skips the whole file — for
+    // modules that are definitionally colour sources (e.g. the theme palette).
+    if content.contains("audit-ignore-file") {
+        return Ok(());
+    }
+
+    for (idx, line) in content.lines().enumerate() {
         let line_num = idx + 1;
-        for literal in patterns.matches(&line) {
+        // A line-level `audit-ignore` directive opts that line out — for
+        // intentional literals (the pure-black reader, scrims, contrast text)
+        // that have no semantic-token equivalent.
+        if line.contains("audit-ignore") {
+            continue;
+        }
+        for literal in patterns.matches(line) {
             out.push(Violation {
                 file: path.to_owned(),
                 line: line_num,

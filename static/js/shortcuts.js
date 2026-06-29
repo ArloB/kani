@@ -105,7 +105,7 @@ function _showCheatsheet() {
 
   const backdrop = document.createElement('div');
   backdrop.id = 'shortcut-cheatsheet';
-  backdrop.className = 'fixed inset-0 z-top flex items-center justify-center bg-black/60 backdrop-blur-sm p-4';
+  backdrop.className = 'fixed inset-0 z-top flex items-center justify-center bg-scrim backdrop-blur-sm p-4';
 
   const modal = document.createElement('div');
   modal.className = 'bg-surface border border-border rounded-xl shadow-lg max-w-sm w-full p-5 flex flex-col gap-4';

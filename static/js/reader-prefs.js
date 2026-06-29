@@ -80,7 +80,7 @@ const DEFAULTS = /** @type {ReaderPrefs} */ ({
   tapLeft:     'prev',
   tapCenter:   'menu',
   tapRight:    'next',
-  tintColor:          '#ff9966',
+  tintColor:          '#ff9966', // audit-ignore: default tint colour value
   tintOpacity:        0,
   tintBlend:          'multiply',
   slideshowInterval:  5,
