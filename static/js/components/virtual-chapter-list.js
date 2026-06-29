@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import { getState, subscribe, hasPermission } from '../state.js';
 import { formatDate, isChapterDownloaded } from '../utils.js';
+import { useBusy } from '../hooks/use-busy.js';
 import { navigate } from '../router.js';
 import { downloadChapter, deleteChapter, cancelDownload, setChapterReadStatus, markChaptersUpTo, retryChapterDownload } from '../api.js';
 import { iconCheck, iconDownload, iconCloud, iconCloudCheck } from '../icons.js';
@@ -393,6 +394,8 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
   const [menuSignal, setMenuSignal] = useState({ id: /** @type {number|null} */ (null), tick: 0 });
   const sentinelRef = useRef(/** @type {HTMLDivElement | null} */(null));
   const scrollRef = useRef(/** @type {HTMLDivElement | null} */(null));
+  // Disable all bulk actions while any one is in flight (prevents double-submit).
+  const { busy: bulkBusy, run: runBulk } = useBusy();
 
   // IntersectionObserver for the non-windowed sentinel
   useEffect(() => {
@@ -522,13 +525,13 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
         `}
       </div>
       <div class="flex items-center gap-1.5 flex-wrap">
-        <button class="btn-primary btn-sm" disabled=${selectedCount === 0} onClick=${() => onBulkRead && onBulkRead(true)}>Mark read</button>
-        <button class="btn-ghost btn-sm" disabled=${selectedCount === 0} onClick=${() => onBulkRead && onBulkRead(false)}>Mark unread</button>
+        <button class="btn-primary btn-sm" disabled=${selectedCount === 0 || bulkBusy} onClick=${() => onBulkRead && runBulk(() => onBulkRead(true))}>Mark read</button>
+        <button class="btn-ghost btn-sm" disabled=${selectedCount === 0 || bulkBusy} onClick=${() => onBulkRead && runBulk(() => onBulkRead(false))}>Mark unread</button>
         ${canDownload && onBulkDownload && html`
-          <button class="btn-ghost btn-sm" disabled=${selectedUndownloadedCount === 0} onClick=${() => onBulkDownload()}>Download</button>
+          <button class="btn-ghost btn-sm" disabled=${selectedUndownloadedCount === 0 || bulkBusy} onClick=${() => runBulk(() => onBulkDownload())}>Download</button>
         `}
         ${canDelete && onBulkDelete && html`
-          <button class="btn-ghost btn-sm" disabled=${selectedDownloadedCount === 0} onClick=${() => onBulkDelete()}>Delete</button>
+          <button class="btn-ghost btn-sm" disabled=${selectedDownloadedCount === 0 || bulkBusy} onClick=${() => runBulk(() => onBulkDelete())}>Delete</button>
         `}
         <button class="btn-ghost btn-sm" onClick=${() => onExitSelect && onExitSelect()}>Cancel</button>
       </div>

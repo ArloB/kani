@@ -13,6 +13,7 @@ import { skeletonGrid } from '../components/skeletons.js';
 import { renderPagination } from '../components/pagination.js';
 import { createMangaCard } from '../components/manga-card.js';
 import { Modal, mountIntoModalRoot } from '../components/modal.js';
+import { showApiError } from '../components/toast.js';
 import { SourcesSidebar, AddSourceModal, consumePendingSourceId } from '../components/sources-sidebar.js';
 import { PreferenceRow, PreferenceDetailView } from '../components/preference-row.js';
 import { Icon } from '../components/icon.js';
@@ -167,7 +168,7 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
                 setLiveValues({});
             }
         })
-        .catch(e => console.error('Failed to load prefs:', e))
+        .catch(showApiError)
         .finally(() => setPrefsLoading(false));
   }, [sid]);
 
@@ -228,7 +229,7 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
       await api.deleteSource(sid);
       onDeleted();
     } catch (e) {
-      console.error('Delete failed:', e);
+      showApiError(e);
     }
   }
 

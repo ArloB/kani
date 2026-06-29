@@ -75,7 +75,7 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
       await api.deleteSource(sid);
       onDeleted(sid);
     } catch (e) {
-      console.error('Delete failed:', e);
+      showApiError(e);
     }
   }
 
