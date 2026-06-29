@@ -5,6 +5,9 @@ jobs = 8
 linker = "rust-lld"
 rustflags = ["-C", "link-arg=/DEBUG:FASTLINK"]
 
+# Linux: use a wrapper that auto-selects the fastest available linker
+# (mold → lld → system default) so the workspace builds with or without
+# mold/lld installed — neither is required. The path is relative to the
+# workspace root (the parent of this .cargo/ directory).
 [target.x86_64-unknown-linux-gnu]
-linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+linker = "scripts/fast-linker.sh"
