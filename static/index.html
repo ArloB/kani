@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kani</title>
   <script>
+    // FOUC-free theme application, before the stylesheet/modules load. The accent
+    // math below is an intentional inline mirror of `accentFromHex` in
+    // static/js/theme.js (the source of truth) — this script runs pre-module and
+    // cannot import. Keep the two in sync; do not add a third copy elsewhere.
     (function () {
       var h = document.documentElement;
       var theme   = localStorage.getItem('kani-theme')   || 'system';

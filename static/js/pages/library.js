@@ -6,7 +6,7 @@ import htm from 'htm';
 import * as api from '../api.js';
 import { hasPermission, getState, setState, updateState, subscribe } from '../state.js';
 import { navigate } from '../router.js';
-import { debounce, getLocal, getLocalInt, setLocal, hasNextPage, confirmDialog, formatChapterTitle, deferredSkeleton, addPullToRefresh } from '../utils.js';
+import { debounce, getLocal, getLocalInt, setLocal, hasNextPage, confirmDialog, formatChapterTitle, deferredSkeleton, addPullToRefresh, withBusy } from '../utils.js';
 import { getParam, pushState, replaceState } from '../url-params.js';
 
 /** @type {Record<string, number>} */
@@ -1022,11 +1022,10 @@ function _renderBulkBar() {
   // Scan selected for new chapters
   bar.querySelector('.js-bulk-scan')?.addEventListener('click', async () => {
     const ids = [..._selected].map(Number);
-    // Disable all actions during scan
-    for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (bar.querySelectorAll('.js-bulk-action'))) btn.disabled = true;
     _scanInProgress = true;
     try {
-      await api.scanMangaMultiple(ids);
+      // withBusy disables all bulk actions for the duration and restores them after.
+      await withBusy(bar.querySelectorAll('.js-bulk-action'), () => api.scanMangaMultiple(ids));
       // Card spinners and completion toast driven by SSE events.
       // Exit select mode so the user can see scan progress on cards.
       _exitSelectMode();
@@ -1034,7 +1033,6 @@ function _renderBulkBar() {
       showApiError(e);
       _scanInProgress = false;
       setState('scanningMangaIds', new Set());
-      for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (bar.querySelectorAll('.js-bulk-action'))) btn.disabled = false;
     }
   });
 

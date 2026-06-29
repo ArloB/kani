@@ -2,7 +2,7 @@
 // Settings — General section (display, reading, notifications).
 
 import { getLocal, setLocal, resetAllConfirmDialogs } from '../../utils.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
+import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow, mkSelectRow } from './_shared.js';
 import { ACCENT_SWATCHES, getCurrentTheme, saveAndApplyTheme } from '../../theme.js';
 import { t } from '../../i18n.js';
 import { showToast } from '../../components/toast.js';
@@ -38,54 +38,30 @@ export function mount(el) {
     const displayGroup = mkSettingsGroup(t('settings.display.group'));
     const displayCard  = mkSettingsGroupCard(displayGroup);
 
-    // Theme chips
-    const themeChips = document.createElement('div');
-    themeChips.className = 'flex gap-1.5 shrink-0 flex-wrap';
-    for (const [val, label] of /** @type {[string,string][]} */ ([
-      ['light',  t('settings.display.theme.light')],
-      ['dark',   t('settings.display.theme.dark')],
-      ['black',  t('settings.display.theme.black')],
-      ['system', t('settings.display.theme.system')],
-    ])) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = curTheme === val ? 'chip chip-active' : 'chip';
-      btn.textContent = label;
-      btn.setAttribute('aria-pressed', String(curTheme === val));
-      btn.addEventListener('click', () => {
-        saveAndApplyTheme(val, curDensity, curAccent);
-        _render();
-      });
-      themeChips.appendChild(btn);
-    }
-    displayCard.appendChild(mkSettingsRow({
+    // Theme selector
+    displayCard.appendChild(mkSelectRow({
       label: t('settings.display.theme'),
       description: t('settings.display.theme.desc'),
-      control: themeChips,
+      value: curTheme,
+      options: [
+        { value: 'light',  label: t('settings.display.theme.light') },
+        { value: 'dark',   label: t('settings.display.theme.dark') },
+        { value: 'black',  label: t('settings.display.theme.black') },
+        { value: 'system', label: t('settings.display.theme.system') },
+      ],
+      onChange: (val) => { saveAndApplyTheme(val, curDensity, curAccent); _render(); },
     }));
 
-    // Density chips
-    const densityChips = document.createElement('div');
-    densityChips.className = 'flex gap-1.5 shrink-0';
-    for (const [val, label] of /** @type {[string,string][]} */ ([
-      ['comfortable', t('settings.display.density.comfortable')],
-      ['compact',     t('settings.display.density.compact')],
-    ])) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = curDensity === val ? 'chip chip-active' : 'chip';
-      btn.textContent = label;
-      btn.setAttribute('aria-pressed', String(curDensity === val));
-      btn.addEventListener('click', () => {
-        saveAndApplyTheme(curTheme, val, curAccent);
-        _render();
-      });
-      densityChips.appendChild(btn);
-    }
-    displayCard.appendChild(mkSettingsRow({
+    // Density selector
+    displayCard.appendChild(mkSelectRow({
       label: t('settings.display.density'),
       description: t('settings.display.density.desc'),
-      control: densityChips,
+      value: curDensity,
+      options: [
+        { value: 'comfortable', label: t('settings.display.density.comfortable') },
+        { value: 'compact',     label: t('settings.display.density.compact') },
+      ],
+      onChange: (val) => { saveAndApplyTheme(curTheme, val, curAccent); _render(); },
     }));
 
     // Accent swatches

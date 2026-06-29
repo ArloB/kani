@@ -208,6 +208,36 @@ export function confirmDialog({ title = 'Are you sure?', message, confirmLabel =
 export const openConfirm = confirmDialog;
 
 /**
+ * Disables the given control(s) for the duration of an async operation and
+ * restores their prior state in a `finally` block — the "disable before await,
+ * re-enable after" contract from CLAUDE.md, in one place. Accepts a single
+ * element or an iterable (NodeList/array). Returns the awaited result of `fn`;
+ * errors propagate after state is restored.
+ * @template T
+ * @param {Element | Iterable<Element>} target
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withBusy(target, fn) {
+  const els = /** @type {HTMLElement[]} */ (
+    target instanceof Element ? [target] : [...target]
+  );
+  const prev = els.map(el => /** @type {any} */ (el).disabled === true);
+  for (const el of els) {
+    /** @type {any} */ (el).disabled = true;
+    el.setAttribute('aria-busy', 'true');
+  }
+  try {
+    return await fn();
+  } finally {
+    els.forEach((el, i) => {
+      /** @type {any} */ (el).disabled = prev[i];
+      el.removeAttribute('aria-busy');
+    });
+  }
+}
+
+/**
  * @param {number} val
  * @param {number} min
  * @param {number} max

@@ -83,6 +83,69 @@ export function mkToggleRow({ label, description, tooltip, checked, onChange }) 
 }
 
 /**
+ * Creates a single-select row rendered as an accessible segmented control
+ * (`role="radiogroup"` with roving tabindex, arrow-key navigation, and
+ * selection-follows-focus). Visually matches the `chip`/`chip-active` styling.
+ * @param {{ label: string, description?: string, tooltip?: string, options: { value: string, label: string }[], value: string, onChange: (v: string) => void }} opts
+ * @returns {HTMLElement}
+ */
+export function mkSelectRow({ label, description, tooltip, options, value, onChange }) {
+  const group = document.createElement('div');
+  group.className = 'flex gap-1.5 shrink-0 flex-wrap';
+  group.setAttribute('role', 'radiogroup');
+  group.setAttribute('aria-label', label);
+
+  /** @type {HTMLButtonElement[]} */
+  const buttons = [];
+  let current = value;
+
+  const select = (/** @type {string} */ val, /** @type {boolean} */ focus) => {
+    current = val;
+    for (const b of buttons) {
+      const on = b.dataset.value === val;
+      b.className = on ? 'chip chip-active' : 'chip';
+      b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
+      if (on && focus) b.focus();
+    }
+  };
+
+  options.forEach((opt, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.value = opt.value;
+    btn.setAttribute('role', 'radio');
+    const on = opt.value === value;
+    btn.className = on ? 'chip chip-active' : 'chip';
+    btn.setAttribute('aria-checked', String(on));
+    btn.tabIndex = on ? 0 : -1;
+    btn.textContent = opt.label;
+    btn.addEventListener('click', () => {
+      if (btn.dataset.value === current) return;
+      select(opt.value, false);
+      onChange(opt.value);
+    });
+    btn.addEventListener('keydown', (e) => {
+      let idx = -1;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') idx = (i + 1) % options.length;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') idx = (i - 1 + options.length) % options.length;
+      else if (e.key === 'Home') idx = 0;
+      else if (e.key === 'End') idx = options.length - 1;
+      else return;
+      e.preventDefault();
+      const next = options[idx].value;
+      if (next === current) return;
+      select(next, true);
+      onChange(next);
+    });
+    buttons.push(btn);
+    group.appendChild(btn);
+  });
+
+  return mkSettingsRow({ label, description, tooltip, control: group });
+}
+
+/**
  * Creates a number input row.
  * @param {{ label: string, description?: string, badge?: string, tooltip?: string, id: string, value: any, min?: number, max?: number, onChange: (v: number) => void }} opts
  * @returns {HTMLElement}
