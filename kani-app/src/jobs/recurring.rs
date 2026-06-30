@@ -209,14 +209,19 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
 
     match result {
         Ok(()) => {
-            let interval_override = if kind == RecurringJobKind::AutoScan {
-                let mins = svc.settings.read().await.scan_interval_minutes;
-                Some(mins * 60)
-            } else if kind == RecurringJobKind::TrackerSync {
-                let hours = svc.settings.read().await.tracker_sync_interval_hours;
-                Some(hours * 60 * 60)
-            } else {
-                None
+            let interval_override = {
+                let s = svc.settings.read().await;
+                match kind {
+                    RecurringJobKind::AutoScan => Some(s.scan_interval_minutes * 60),
+                    RecurringJobKind::TrackerSync => Some(s.tracker_sync_interval_hours * 60 * 60),
+                    RecurringJobKind::DbMaintenance => {
+                        Some(s.db_maintenance_interval_hours * 60 * 60)
+                    }
+                    RecurringJobKind::DbVacuum => Some(s.db_vacuum_interval_hours * 60 * 60),
+                    RecurringJobKind::AuditPrune => Some(s.audit_prune_interval_hours * 60 * 60),
+                    RecurringJobKind::TrashPurge => Some(s.trash_purge_interval_hours * 60 * 60),
+                    _ => None,
+                }
             };
             if let Err(e) = record_run(&svc.db, kind, interval_override).await {
                 tracing::warn!("Failed to record recurring job run for {:?}: {e}", kind);

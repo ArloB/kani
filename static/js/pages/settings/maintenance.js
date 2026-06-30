@@ -170,6 +170,91 @@ export function mount(el, settings) {
     }
   });
 
+  // ── Performance & schedules group ──────────────────────────────────────────
+  /** @type {Record<string, number>} */
+  const perf = {
+    max_concurrent_jobs: Number(settings?.max_concurrent_jobs ?? 10),
+    db_maintenance_interval_hours: Number(settings?.db_maintenance_interval_hours ?? 24),
+    db_vacuum_interval_hours: Number(settings?.db_vacuum_interval_hours ?? 168),
+    audit_prune_interval_hours: Number(settings?.audit_prune_interval_hours ?? 168),
+    trash_purge_interval_hours: Number(settings?.trash_purge_interval_hours ?? 168),
+  };
+
+  const perfGroup = mkSettingsGroup(t('settings.performance.group'));
+  const perfCard = mkSettingsGroupCard(perfGroup);
+
+  perfCard.appendChild(mkNumberRow({
+    label: t('settings.performance.max_concurrent_jobs'),
+    description: t('settings.performance.max_concurrent_jobs.desc'),
+    badge: t('settings.security.restart_badge'),
+    id: 'perf_max_concurrent_jobs',
+    value: perf.max_concurrent_jobs,
+    min: 1,
+    onChange: (v) => { perf.max_concurrent_jobs = v; },
+  }));
+  perfCard.appendChild(mkNumberRow({
+    label: t('settings.performance.db_maintenance_interval'),
+    description: t('settings.performance.db_maintenance_interval.desc'),
+    id: 'perf_db_maintenance_interval',
+    value: perf.db_maintenance_interval_hours,
+    min: 1,
+    onChange: (v) => { perf.db_maintenance_interval_hours = v; },
+  }));
+  perfCard.appendChild(mkNumberRow({
+    label: t('settings.performance.db_vacuum_interval'),
+    description: t('settings.performance.db_vacuum_interval.desc'),
+    id: 'perf_db_vacuum_interval',
+    value: perf.db_vacuum_interval_hours,
+    min: 1,
+    onChange: (v) => { perf.db_vacuum_interval_hours = v; },
+  }));
+  perfCard.appendChild(mkNumberRow({
+    label: t('settings.performance.audit_prune_interval'),
+    description: t('settings.performance.audit_prune_interval.desc'),
+    id: 'perf_audit_prune_interval',
+    value: perf.audit_prune_interval_hours,
+    min: 1,
+    onChange: (v) => { perf.audit_prune_interval_hours = v; },
+  }));
+  perfCard.appendChild(mkNumberRow({
+    label: t('settings.performance.trash_purge_interval'),
+    description: t('settings.performance.trash_purge_interval.desc'),
+    id: 'perf_trash_purge_interval',
+    value: perf.trash_purge_interval_hours,
+    min: 1,
+    onChange: (v) => { perf.trash_purge_interval_hours = v; },
+  }));
+
+  const perfSaveRow = document.createElement('div');
+  perfSaveRow.className = 'flex items-center gap-3 px-4 py-3';
+  const perfSaveBtn = document.createElement('button');
+  perfSaveBtn.type = 'button';
+  perfSaveBtn.className = 'btn-primary btn-sm';
+  perfSaveBtn.textContent = t('settings.performance.save');
+  perfSaveRow.appendChild(perfSaveBtn);
+  perfCard.appendChild(perfSaveRow);
+  el.appendChild(perfGroup);
+
+  perfSaveBtn.addEventListener('click', async () => {
+    perfSaveBtn.disabled = true;
+    try {
+      await api.updateSettings({
+        Performance: {
+          max_concurrent_jobs: Number(perf.max_concurrent_jobs),
+          db_maintenance_interval_hours: Number(perf.db_maintenance_interval_hours),
+          db_vacuum_interval_hours: Number(perf.db_vacuum_interval_hours),
+          audit_prune_interval_hours: Number(perf.audit_prune_interval_hours),
+          trash_purge_interval_hours: Number(perf.trash_purge_interval_hours),
+        },
+      });
+      showToast(t('settings.performance.saved'), { type: 'success' });
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      perfSaveBtn.disabled = false;
+    }
+  });
+
   return {
     destroy() { el.innerHTML = ''; },
   };

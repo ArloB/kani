@@ -47,6 +47,11 @@ impl AppService {
             session_timeout_secs: s.session_timeout_secs,
             tracker_auto_sync_enabled: s.tracker_auto_sync_enabled,
             tracker_sync_interval_hours: s.tracker_sync_interval_hours,
+            max_concurrent_jobs: s.max_concurrent_jobs,
+            db_maintenance_interval_hours: s.db_maintenance_interval_hours,
+            db_vacuum_interval_hours: s.db_vacuum_interval_hours,
+            audit_prune_interval_hours: s.audit_prune_interval_hours,
+            trash_purge_interval_hours: s.trash_purge_interval_hours,
         }
     }
 
@@ -320,6 +325,44 @@ impl AppService {
                     settings.session_timeout_secs = s.session_timeout_secs;
                 }
                 self.audit(Some(user_id), "settings.update.security", None, None)
+                    .await;
+            }
+            SettingsUpdate::Performance(s) => {
+                if s.max_concurrent_jobs < 1 {
+                    return Err(ServiceError::Validation(
+                        "max_concurrent_jobs must be >= 1".into(),
+                    ));
+                }
+                if s.db_maintenance_interval_hours < 1
+                    || s.db_vacuum_interval_hours < 1
+                    || s.audit_prune_interval_hours < 1
+                    || s.trash_purge_interval_hours < 1
+                {
+                    return Err(ServiceError::Validation(
+                        "interval hours must be >= 1".into(),
+                    ));
+                }
+                sqlx::query!(
+                    "UPDATE settings SET max_concurrent_jobs=?, db_maintenance_interval_hours=?, \
+                     db_vacuum_interval_hours=?, audit_prune_interval_hours=?, \
+                     trash_purge_interval_hours=? WHERE id='singleton'",
+                    s.max_concurrent_jobs,
+                    s.db_maintenance_interval_hours,
+                    s.db_vacuum_interval_hours,
+                    s.audit_prune_interval_hours,
+                    s.trash_purge_interval_hours,
+                )
+                .execute(&self.db)
+                .await?;
+                {
+                    let mut settings = self.settings.write().await;
+                    settings.max_concurrent_jobs = s.max_concurrent_jobs;
+                    settings.db_maintenance_interval_hours = s.db_maintenance_interval_hours;
+                    settings.db_vacuum_interval_hours = s.db_vacuum_interval_hours;
+                    settings.audit_prune_interval_hours = s.audit_prune_interval_hours;
+                    settings.trash_purge_interval_hours = s.trash_purge_interval_hours;
+                }
+                self.audit(Some(user_id), "settings.update.performance", None, None)
                     .await;
             }
         }

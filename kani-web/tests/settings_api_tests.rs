@@ -292,3 +292,71 @@ async fn patch_settings_security_invalid_attempts_returns_4xx() {
         res.status()
     );
 }
+
+#[tokio::test]
+async fn patch_settings_performance_updates() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .clone()
+        .oneshot(authed_patch(
+            "/rest/settings",
+            &cookie,
+            serde_json::json!({
+                "Performance": {
+                    "max_concurrent_jobs": 16,
+                    "db_maintenance_interval_hours": 12,
+                    "db_vacuum_interval_hours": 72,
+                    "audit_prune_interval_hours": 240,
+                    "trash_purge_interval_hours": 96
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let get_res = app
+        .oneshot(authed_get("/rest/settings", &cookie))
+        .await
+        .unwrap();
+    let body = body_json(get_res).await;
+    assert_eq!(body["max_concurrent_jobs"], serde_json::json!(16));
+    assert_eq!(body["db_maintenance_interval_hours"], serde_json::json!(12));
+    assert_eq!(body["db_vacuum_interval_hours"], serde_json::json!(72));
+    assert_eq!(body["audit_prune_interval_hours"], serde_json::json!(240));
+    assert_eq!(body["trash_purge_interval_hours"], serde_json::json!(96));
+}
+
+#[tokio::test]
+async fn patch_settings_performance_invalid_returns_4xx() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_patch(
+            "/rest/settings",
+            &cookie,
+            serde_json::json!({
+                "Performance": {
+                    "max_concurrent_jobs": 0,
+                    "db_maintenance_interval_hours": 24,
+                    "db_vacuum_interval_hours": 168,
+                    "audit_prune_interval_hours": 168,
+                    "trash_purge_interval_hours": 168
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        res.status().is_client_error(),
+        "max_concurrent_jobs=0 should return 4xx, got {}",
+        res.status()
+    );
+}

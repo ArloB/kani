@@ -58,6 +58,11 @@ pub struct Settings {
     pub session_timeout_secs: i64,
     pub tracker_auto_sync_enabled: bool,
     pub tracker_sync_interval_hours: i64,
+    pub max_concurrent_jobs: i64,
+    pub db_maintenance_interval_hours: i64,
+    pub db_vacuum_interval_hours: i64,
+    pub audit_prune_interval_hours: i64,
+    pub trash_purge_interval_hours: i64,
 }
 
 #[derive(sqlx::FromRow)]

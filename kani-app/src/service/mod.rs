@@ -246,7 +246,7 @@ impl AppService {
 
         let enc = load_or_provision_credential_cipher(data_dir);
 
-        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours FROM settings")
+        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
@@ -655,7 +655,10 @@ impl AppService {
             refresh_tx.clone(),
             shutdown_token.clone(),
             crate::jobs::JobManagerConfig {
-                global_max_concurrent: crate::tuning::DEFAULT_MAX_CONCURRENT_JOBS,
+                global_max_concurrent: settings
+                    .max_concurrent_jobs
+                    .try_into()
+                    .unwrap_or(crate::tuning::DEFAULT_MAX_CONCURRENT_JOBS),
                 job_shutdown_timeout: std::time::Duration::from_secs(
                     settings
                         .job_shutdown_timeout_secs
@@ -776,6 +779,11 @@ impl AppService {
             session_timeout_secs: 2592000,
             tracker_auto_sync_enabled: false,
             tracker_sync_interval_hours: 24,
+            max_concurrent_jobs: crate::tuning::DEFAULT_MAX_CONCURRENT_JOBS as i64,
+            db_maintenance_interval_hours: 24,
+            db_vacuum_interval_hours: 168,
+            audit_prune_interval_hours: 168,
+            trash_purge_interval_hours: 168,
         };
 
         let smart_client =
@@ -824,7 +832,10 @@ impl AppService {
             refresh_tx.clone(),
             shutdown_token.clone(),
             crate::jobs::JobManagerConfig {
-                global_max_concurrent: crate::tuning::DEFAULT_MAX_CONCURRENT_JOBS,
+                global_max_concurrent: settings
+                    .max_concurrent_jobs
+                    .try_into()
+                    .unwrap_or(crate::tuning::DEFAULT_MAX_CONCURRENT_JOBS),
                 job_shutdown_timeout: std::time::Duration::from_secs(5),
                 type_configs: std::collections::HashMap::new(),
                 registry,

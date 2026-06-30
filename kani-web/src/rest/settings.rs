@@ -70,6 +70,9 @@ pub(crate) async fn update_settings(
         SettingsUpdate::Security(_) => {
             crate::permissions::Permission::Settings(crate::permissions::Settings::EditAdvanced)
         }
+        SettingsUpdate::Performance(_) => {
+            crate::permissions::Permission::Settings(crate::permissions::Settings::EditAdvanced)
+        }
     };
     if !auth
         .backend
