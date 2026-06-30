@@ -1913,6 +1913,8 @@ mod tests {
         }));
         json_rt(&SettingsUpdate::Tracking(TrackingSettings {
             default_tracking_enabled: true,
+            tracker_auto_sync_enabled: false,
+            tracker_sync_interval_hours: 24,
         }));
         json_rt(&SettingsUpdate::Email(EmailSettings {
             email_enabled: false,

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs FROM settings",
+  "query": "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours FROM settings",
   "describe": {
     "columns": [
       {
@@ -157,6 +157,16 @@
         "name": "job_shutdown_timeout_secs",
         "ordinal": 30,
         "type_info": "Integer"
+      },
+      {
+        "name": "tracker_auto_sync_enabled",
+        "ordinal": 31,
+        "type_info": "Bool"
+      },
+      {
+        "name": "tracker_sync_interval_hours",
+        "ordinal": 32,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -193,8 +203,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "c083a92153031cba3a79b6932a56212ba3c9b01086c023e1ff82556eb33ed846"
+  "hash": "a47769ac4dd2dc5275e5d1bcd691071fc5357a9cce9b5f2d4df5ced8b2885375"
 }

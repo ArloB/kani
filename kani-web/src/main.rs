@@ -268,8 +268,7 @@ async fn main() {
                                     info.name,
                                 );
                                 listener_state
-                                    .webhook_service
-                                    .fire(
+                                    .fire_webhooks(
                                         kani_app::service::webhooks::WebhookPayload::ChapterDownloaded {
                                             chapter_id: kani_app::ids::ChapterId(chapter_id),
                                             manga_id: kani_app::ids::MangaId(info.manga_id),

@@ -684,6 +684,8 @@ impl AppService {
                 as i64,
             job_max_history: crate::tuning::DEFAULT_JOB_MAX_HISTORY as i64,
             job_shutdown_timeout_secs: crate::tuning::DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS as i64,
+            tracker_auto_sync_enabled: false,
+            tracker_sync_interval_hours: 24,
         };
 
         let smart_client =

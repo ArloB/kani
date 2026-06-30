@@ -157,25 +157,34 @@ async fn clear_thumbnails_removes_files_and_db_rows() {
 }
 
 #[tokio::test]
-async fn inflight_coalescing_prevents_double_spawn() {
+async fn thumbnail_submit_dedups_against_active_job() {
     let svc = test_service().await;
     let src = insert_source(&svc.db, "src").await;
     let manga_id = insert_manga(&svc.db, src, "m1", "Manga").await;
 
-    let claimed_first = svc.thumbnail_inflight.try_claim(manga_id.0);
-    let claimed_second = svc.thumbnail_inflight.try_claim(manga_id.0);
+    // Simulate a thumbnail job already in flight for this manga. A 'running' row
+    // is never picked up by the executor, so it stays active for the duration.
+    sqlx::query(
+        "INSERT INTO jobs (id, job_type, status, params_json) \
+         VALUES ('thumb-dedup-test', 'thumbnail_generation', 'running', ?)",
+    )
+    .bind(format!("{{\"manga_id\":{}}}", manga_id.0))
+    .execute(&svc.db)
+    .await
+    .unwrap();
 
-    assert!(claimed_first, "first claim should succeed");
-    assert!(
-        !claimed_second,
-        "second claim should be rejected (already in-flight)"
+    // A second submit must be deduplicated against the active job (no new row).
+    svc.spawn_thumbnail_generation(manga_id).await;
+
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE job_type = 'thumbnail_generation'")
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert_eq!(
+        count, 1,
+        "second submit should be deduplicated against the active thumbnail job"
     );
-
-    svc.thumbnail_inflight.release(manga_id.0);
-
-    let claimed_third = svc.thumbnail_inflight.try_claim(manga_id.0);
-    assert!(claimed_third, "claim after release should succeed");
-    svc.thumbnail_inflight.release(manga_id.0);
 }
 
 #[tokio::test]
