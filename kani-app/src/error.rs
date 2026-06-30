@@ -22,6 +22,9 @@ pub enum ServiceError {
     #[error("Validation error: {0}")]
     Validation(String),
 
+    #[error("Rate limited")]
+    RateLimited { retry_after_secs: Option<u64> },
+
     #[error("Possible duplicate")]
     PossibleDuplicate(Vec<crate::service::dedup::SimilarMangaHit>),
 

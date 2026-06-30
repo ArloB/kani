@@ -15,6 +15,7 @@ pub enum RecurringJobKind {
     StorageMonitor,
     PendingDeleteRetry,
     ScheduledBackup,
+    TrackerSync,
 }
 
 impl RecurringJobKind {
@@ -28,6 +29,7 @@ impl RecurringJobKind {
             Self::StorageMonitor => "storage_monitor",
             Self::PendingDeleteRetry => "pending_delete_retry",
             Self::ScheduledBackup => "scheduled_backup",
+            Self::TrackerSync => "tracker_sync",
         }
     }
 
@@ -41,6 +43,7 @@ impl RecurringJobKind {
             Self::StorageMonitor => 24 * 60 * 60,
             Self::PendingDeleteRetry => 60 * 60,
             Self::ScheduledBackup => 60 * 60,
+            Self::TrackerSync => 60 * 60,
         }
     }
 
@@ -54,6 +57,7 @@ impl RecurringJobKind {
             Self::StorageMonitor,
             Self::PendingDeleteRetry,
             Self::ScheduledBackup,
+            Self::TrackerSync,
         ]
     }
 }
@@ -130,6 +134,16 @@ async fn scheduled_backup_job_active(pool: &sqlx::SqlitePool) -> bool {
     .unwrap_or(false)
 }
 
+async fn tracker_sync_job_active(pool: &sqlx::SqlitePool) -> bool {
+    sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'tracker_sync' AND status IN ('pending', 'running')"
+    )
+    .fetch_one(pool)
+    .await
+    .map(|c| c > 0)
+    .unwrap_or(false)
+}
+
 async fn scheduled_backup_time_matches(svc: &AppService) -> bool {
     let Ok(config) = svc.get_backup_schedule().await else {
         return false;
@@ -168,6 +182,25 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
         }
     }
 
+    if kind == RecurringJobKind::TrackerSync {
+        let (enabled, interval_hours) = {
+            let s = svc.settings.read().await;
+            (s.tracker_auto_sync_enabled, s.tracker_sync_interval_hours)
+        };
+        if !enabled {
+            if let Err(e) = record_run(&svc.db, kind, Some(interval_hours * 60 * 60)).await {
+                tracing::warn!(
+                    "Failed to record recurring job reschedule for {:?}: {e}",
+                    kind
+                );
+            }
+            return;
+        }
+        if tracker_sync_job_active(&svc.db).await {
+            return;
+        }
+    }
+
     let result = match kind {
         RecurringJobKind::DbMaintenance => {
             let job = crate::jobs::maintenance::AnalyzeJob::new();
@@ -181,21 +214,32 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
             let job = crate::jobs::scan::AutoScanJob::new();
             svc.job_manager.submit(job).await.map(|_| ())
         }
-        RecurringJobKind::AuditPrune => svc.prune_audit_log().await.map(|_| ()),
+        RecurringJobKind::AuditPrune => {
+            let job = crate::jobs::audit_prune::AuditPruneJob::new();
+            svc.job_manager.submit(job).await.map(|_| ())
+        }
         RecurringJobKind::TrashPurge => {
             let days = std::env::var("KANI_TRASH_RETENTION_DAYS")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(30u32);
-            svc.purge_expired_trash(days).await.map(|_| ())
+            let job = crate::jobs::trash_purge::TrashPurgeJob::new(days);
+            svc.job_manager.submit(job).await.map(|_| ())
         }
         RecurringJobKind::StorageMonitor => {
             let job = crate::jobs::storage::StorageMonitorJob::new();
             svc.job_manager.submit(job).await.map(|_| ())
         }
-        RecurringJobKind::PendingDeleteRetry => svc.retry_pending_deletes().await,
+        RecurringJobKind::PendingDeleteRetry => {
+            let job = crate::jobs::pending_delete_retry::PendingDeleteRetryJob::new();
+            svc.job_manager.submit(job).await.map(|_| ())
+        }
         RecurringJobKind::ScheduledBackup => {
             let job = crate::jobs::backup::ScheduledBackupJob::new();
+            svc.job_manager.submit(job).await.map(|_| ())
+        }
+        RecurringJobKind::TrackerSync => {
+            let job = crate::jobs::tracker_sync::TrackerSyncJob::new();
             svc.job_manager.submit(job).await.map(|_| ())
         }
     };
@@ -205,6 +249,9 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
             let interval_override = if kind == RecurringJobKind::AutoScan {
                 let mins = svc.settings.read().await.scan_interval_minutes;
                 Some(mins * 60)
+            } else if kind == RecurringJobKind::TrackerSync {
+                let hours = svc.settings.read().await.tracker_sync_interval_hours;
+                Some(hours * 60 * 60)
             } else {
                 None
             };

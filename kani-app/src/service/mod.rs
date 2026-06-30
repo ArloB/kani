@@ -99,7 +99,6 @@ pub struct AppService {
     /// `sources.name`) cannot race two writers into duplicate rows + backends.
     pub install_locks: Arc<DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub(crate) progress_buffer: progress::ReadProgressBuffer,
-    pub thumbnail_inflight: thumbnails::ThumbnailInflight,
     pub(crate) thumbnail_formats: Vec<String>,
     pub(crate) undo_tokens: Arc<DashMap<uuid::Uuid, (crate::ids::MangaId, std::time::Instant)>>,
     #[cfg(any(test, feature = "test-util"))]
@@ -248,7 +247,7 @@ impl AppService {
 
         let enc = load_or_provision_credential_cipher(data_dir);
 
-        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs FROM settings")
+        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
@@ -561,6 +560,13 @@ impl AppService {
         job_registry.register::<crate::jobs::backup::ScheduledBackupJob>();
         job_registry.register::<crate::jobs::storage::StorageMonitorJob>();
         job_registry.register::<crate::jobs::integrity::IntegrityCheckJob>();
+        job_registry.register::<crate::jobs::audit_prune::AuditPruneJob>();
+        job_registry.register::<crate::jobs::trash_purge::TrashPurgeJob>();
+        job_registry.register::<crate::jobs::pending_delete_retry::PendingDeleteRetryJob>();
+        job_registry.register::<crate::jobs::thumbnail::ThumbnailGenerationJob>();
+        job_registry.register::<crate::jobs::import_dedup::ImportDedupJob>();
+        job_registry.register::<crate::jobs::webhook_delivery::WebhookDeliveryJob>();
+        job_registry.register::<crate::jobs::tracker_sync::TrackerSyncJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),
@@ -618,7 +624,6 @@ impl AppService {
             job_manager,
             install_locks: Arc::new(DashMap::new()),
             progress_buffer: progress::ReadProgressBuffer::default(),
-            thumbnail_inflight: thumbnails::ThumbnailInflight::default(),
             thumbnail_formats: crate::images::thumbnail_formats_from_env(),
             undo_tokens: Arc::new(DashMap::new()),
             #[cfg(any(test, feature = "test-util"))]
@@ -768,7 +773,6 @@ impl AppService {
             job_manager,
             install_locks: Arc::new(DashMap::new()),
             progress_buffer: progress::ReadProgressBuffer::default(),
-            thumbnail_inflight: thumbnails::ThumbnailInflight::default(),
             thumbnail_formats: crate::images::thumbnail_formats_from_env(),
             undo_tokens: Arc::new(DashMap::new()),
             mock_sources: Arc::new(DashMap::new()),
@@ -921,7 +925,7 @@ impl AppService {
     /// Subscribes to the broadcast channel and dispatches webhook events. Call once from main.
     pub fn spawn_webhook_listener(&self) {
         let mut rx = self.refresh_tx.subscribe();
-        let wh = self.webhook_service.clone();
+        let svc = self.clone();
         let token = self.shutdown_token.clone();
         tokio::spawn(async move {
             loop {
@@ -937,7 +941,7 @@ impl AppService {
                                     chapter_ids,
                                     chapter_names,
                                 } => {
-                                    wh.fire(webhooks::WebhookPayload::ChapterNew {
+                                    svc.fire_webhooks(webhooks::WebhookPayload::ChapterNew {
                                         manga_id,
                                         manga_name,
                                         chapter_count: count,
@@ -947,7 +951,7 @@ impl AppService {
                                     .await;
                                 }
                                 AppEvent::Refresh(RefreshProgressEvent::Completed { total, failed }) => {
-                                    wh.fire(webhooks::WebhookPayload::ScanCompleted {
+                                    svc.fire_webhooks(webhooks::WebhookPayload::ScanCompleted {
                                         total_scanned: total,
                                         failed_count: failed,
                                     })

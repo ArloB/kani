@@ -227,4 +227,12 @@ export default {
   'palette.category.library': 'Library',
 
   'sse.disconnected': 'Live updates paused — reconnecting…',
+
+  'settings.trackers.behaviour': 'Behaviour',
+  'settings.trackers.default_enabled': 'Enable tracking by default',
+  'settings.trackers.default_enabled_desc': 'New manga added to the library will have sync enabled.',
+  'settings.trackers.auto_sync': 'Periodic background sync',
+  'settings.trackers.auto_sync_desc': 'Automatically sync progress with linked trackers in the background. Rate-limited per account.',
+  'settings.trackers.sync_interval': 'Sync interval (hours)',
+  'settings.trackers.sync_interval_desc': 'How often each tracked manga is re-synced when background sync is enabled.',
 };

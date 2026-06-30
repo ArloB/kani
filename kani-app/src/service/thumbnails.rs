@@ -1,33 +1,30 @@
 use super::*;
 use crate::ids::MangaId;
 
-#[derive(Clone, Default)]
-pub struct ThumbnailInflight(std::sync::Arc<std::sync::Mutex<std::collections::HashSet<i64>>>);
-
-impl ThumbnailInflight {
-    pub fn try_claim(&self, manga_id: i64) -> bool {
-        let mut set = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        set.insert(manga_id)
-    }
-
-    pub fn release(&self, manga_id: i64) {
-        let mut set = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        set.remove(&manga_id);
-    }
-}
-
 impl AppService {
-    pub fn spawn_thumbnail_generation(&self, manga_id: MangaId) {
-        if !self.thumbnail_inflight.try_claim(manga_id.0) {
+    /// Submit a background job to generate cover thumbnails, deduplicating against any
+    /// pending/running thumbnail job already queued for the same manga.
+    pub async fn spawn_thumbnail_generation(&self, manga_id: MangaId) {
+        if self.thumbnail_job_active(manga_id.0).await {
             return;
         }
-        let svc = self.clone();
-        tokio::spawn(async move {
-            if let Err(e) = svc.generate_and_store_thumbnails(manga_id).await {
-                tracing::warn!("thumbnail generation failed for manga {manga_id}: {e}");
-            }
-            svc.thumbnail_inflight.release(manga_id.0);
-        });
+        let job = crate::jobs::thumbnail::ThumbnailGenerationJob::new(manga_id.0);
+        if let Err(e) = self.job_manager.submit(job).await {
+            tracing::warn!("Failed to submit thumbnail job for manga {manga_id}: {e}");
+        }
+    }
+
+    async fn thumbnail_job_active(&self, manga_id: i64) -> bool {
+        sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM jobs WHERE job_type = 'thumbnail_generation' \
+             AND status IN ('pending', 'running') \
+             AND json_extract(params_json, '$.manga_id') = ?",
+            manga_id
+        )
+        .fetch_one(&self.db_read)
+        .await
+        .map(|c| c > 0)
+        .unwrap_or(false)
     }
 
     pub async fn generate_and_store_thumbnails(&self, manga_id: MangaId) -> Result<()> {

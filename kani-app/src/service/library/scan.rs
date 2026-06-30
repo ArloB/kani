@@ -127,13 +127,12 @@ impl AppService {
                 }
             });
 
-            self.webhook_service
-                .fire(crate::service::webhooks::WebhookPayload::MangaAdded {
-                    manga_id: manga_row_id,
-                    manga_name: manga.title.clone(),
-                    source_id,
-                })
-                .await;
+            self.fire_webhooks(crate::service::webhooks::WebhookPayload::MangaAdded {
+                manga_id: manga_row_id,
+                manga_name: manga.title.clone(),
+                source_id,
+            })
+            .await;
         }
 
         Ok(manga_row_id)

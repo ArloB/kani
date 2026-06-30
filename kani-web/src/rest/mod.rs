@@ -870,7 +870,7 @@ async fn serve_manga_cover(
             );
         }
 
-        state.spawn_thumbnail_generation(id);
+        state.spawn_thumbnail_generation(id).await;
     }
 
     let full_path = state.get_manga_cover_path(id).await?;

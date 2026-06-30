@@ -1170,6 +1170,8 @@ pub struct AppSettings {
     pub first_run_complete: bool,
     pub scan_concurrency: i64,
     pub per_source_download_concurrency: i64,
+    pub tracker_auto_sync_enabled: bool,
+    pub tracker_sync_interval_hours: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1290,6 +1292,8 @@ pub struct AdvancedSettings {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct TrackingSettings {
     pub default_tracking_enabled: bool,
+    pub tracker_auto_sync_enabled: bool,
+    pub tracker_sync_interval_hours: i64,
 }
 
 #[cfg(feature = "host")]

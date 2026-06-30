@@ -5,9 +5,10 @@ import * as api from '../../api.js';
 import { escapeHtml, openConfirm } from '../../utils.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { hasPermission } from '../../state.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
+import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow, mkNumberRow } from './_shared.js';
 import { skeletonSettingsCards } from '../../components/skeletons.js';
 import { createErrorState } from '../../components/error-state.js';
+import { t } from '../../i18n.js';
 
 /**
  * @param {HTMLElement} el
@@ -30,19 +31,64 @@ export function mount(el, settings) {
 
     el.innerHTML = '';
 
-    const defaultGroup = mkSettingsGroup('Behaviour');
+    const saveTracking = async () => {
+      await api.updateSettings({
+        Tracking: {
+          default_tracking_enabled: settings.default_tracking_enabled ?? true,
+          tracker_auto_sync_enabled: settings.tracker_auto_sync_enabled ?? false,
+          tracker_sync_interval_hours: settings.tracker_sync_interval_hours ?? 24,
+        },
+      });
+    };
+
+    const defaultGroup = mkSettingsGroup(t('settings.trackers.behaviour'));
     const defaultCard  = mkSettingsGroupCard(defaultGroup);
     const trackingEnabled = settings?.default_tracking_enabled ?? true;
     defaultCard.appendChild(mkToggleRow({
-      label: 'Enable tracking by default',
-      description: 'New manga added to the library will have sync enabled.',
+      label: t('settings.trackers.default_enabled'),
+      description: t('settings.trackers.default_enabled_desc'),
       checked: trackingEnabled,
       onChange: async (checked) => {
+        const prev = settings.default_tracking_enabled;
+        settings.default_tracking_enabled = checked;
         try {
-          await api.updateSettings({ Tracking: { default_tracking_enabled: checked } });
-          settings.default_tracking_enabled = checked;
+          await saveTracking();
         } catch (e) {
-          showToast(e?.message ?? 'Failed to save.', { type: 'error' });
+          settings.default_tracking_enabled = prev;
+          showApiError(e);
+        }
+      },
+    }));
+    defaultCard.appendChild(mkToggleRow({
+      label: t('settings.trackers.auto_sync'),
+      description: t('settings.trackers.auto_sync_desc'),
+      checked: settings?.tracker_auto_sync_enabled ?? false,
+      onChange: async (checked) => {
+        const prev = settings.tracker_auto_sync_enabled;
+        settings.tracker_auto_sync_enabled = checked;
+        try {
+          await saveTracking();
+        } catch (e) {
+          settings.tracker_auto_sync_enabled = prev;
+          showApiError(e);
+        }
+      },
+    }));
+    defaultCard.appendChild(mkNumberRow({
+      label: t('settings.trackers.sync_interval'),
+      description: t('settings.trackers.sync_interval_desc'),
+      id: 'tracker-sync-interval',
+      value: settings?.tracker_sync_interval_hours ?? 24,
+      min: 1,
+      max: 168,
+      onChange: async (val) => {
+        const prev = settings.tracker_sync_interval_hours;
+        settings.tracker_sync_interval_hours = val;
+        try {
+          await saveTracking();
+        } catch (e) {
+          settings.tracker_sync_interval_hours = prev;
+          showApiError(e);
         }
       },
     }));

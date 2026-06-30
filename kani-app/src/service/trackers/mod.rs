@@ -13,6 +13,23 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 
+/// If the response is an HTTP 429, returns a `ServiceError::RateLimited` carrying the
+/// parsed `Retry-After` (seconds) header when present. Callers should propagate this so
+/// the periodic sync job can back off per access token.
+pub(crate) fn rate_limited_error(resp: &rquest::Response) -> Option<ServiceError> {
+    if resp.status().as_u16() != 429 {
+        return None;
+    }
+    let retry_after = resp
+        .headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok());
+    Some(ServiceError::RateLimited {
+        retry_after_secs: retry_after,
+    })
+}
+
 /// Token response from an OAuth exchange or refresh.
 #[derive(Debug, Clone)]
 pub struct TokenResponse {

@@ -47,6 +47,8 @@ pub struct Settings {
     pub per_source_download_concurrency: i64,
     pub job_max_history: i64,
     pub job_shutdown_timeout_secs: i64,
+    pub tracker_auto_sync_enabled: bool,
+    pub tracker_sync_interval_hours: i64,
 }
 
 #[derive(sqlx::FromRow)]
