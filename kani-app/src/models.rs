@@ -56,6 +56,8 @@ pub struct Settings {
     pub max_ip_attempts: i64,
     pub login_lockout_seconds: i64,
     pub session_timeout_secs: i64,
+    pub tracker_auto_sync_enabled: bool,
+    pub tracker_sync_interval_hours: i64,
 }
 
 #[derive(sqlx::FromRow)]

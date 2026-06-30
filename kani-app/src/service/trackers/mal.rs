@@ -235,6 +235,9 @@ impl ExternalTracker for MalTracker {
             .await
             .map_err(|e| ServiceError::Internal(format!("MAL update failed: {e}")))?;
 
+        if let Some(e) = super::rate_limited_error(&resp) {
+            return Err(e);
+        }
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(ServiceError::Internal(format!("MAL update failed: {text}")));
@@ -248,14 +251,18 @@ impl ExternalTracker for MalTracker {
         access_token: &str,
         tracker_manga_id: &str,
     ) -> Result<TrackerMangaStatus> {
-        let resp: MalMangaDetail = self
+        let resp = self
             .http
             .get(format!("{}/manga/{}", API_URL, tracker_manga_id))
             .bearer_auth(access_token)
             .query(&[("fields", "my_list_status")])
             .send()
             .await
-            .map_err(|e| ServiceError::Internal(format!("MAL get_status failed: {e}")))?
+            .map_err(|e| ServiceError::Internal(format!("MAL get_status failed: {e}")))?;
+        if let Some(e) = super::rate_limited_error(&resp) {
+            return Err(e);
+        }
+        let resp: MalMangaDetail = resp
             .json()
             .await
             .map_err(|e| ServiceError::Internal(format!("MAL get_status parse failed: {e}")))?;

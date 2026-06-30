@@ -258,7 +258,7 @@ impl ExternalTracker for AnilistTracker {
             variables["score"] = serde_json::json!(s);
         }
 
-        let resp: GraphqlResponse<serde_json::Value> = self
+        let resp = self
             .http
             .post(GRAPHQL_URL)
             .bearer_auth(access_token)
@@ -268,7 +268,11 @@ impl ExternalTracker for AnilistTracker {
             }))
             .send()
             .await
-            .map_err(|e| ServiceError::Internal(format!("AniList update failed: {e}")))?
+            .map_err(|e| ServiceError::Internal(format!("AniList update failed: {e}")))?;
+        if let Some(e) = super::rate_limited_error(&resp) {
+            return Err(e);
+        }
+        let resp: GraphqlResponse<serde_json::Value> = resp
             .json()
             .await
             .map_err(|e| ServiceError::Internal(format!("AniList update parse failed: {e}")))?;
@@ -304,7 +308,7 @@ impl ExternalTracker for AnilistTracker {
             }
         "#;
 
-        let resp: GraphqlResponse<MediaListData> = self
+        let resp = self
             .http
             .post(GRAPHQL_URL)
             .bearer_auth(access_token)
@@ -314,7 +318,11 @@ impl ExternalTracker for AnilistTracker {
             }))
             .send()
             .await
-            .map_err(|e| ServiceError::Internal(format!("AniList get_status failed: {e}")))?
+            .map_err(|e| ServiceError::Internal(format!("AniList get_status failed: {e}")))?;
+        if let Some(e) = super::rate_limited_error(&resp) {
+            return Err(e);
+        }
+        let resp: GraphqlResponse<MediaListData> = resp
             .json()
             .await
             .map_err(|e| ServiceError::Internal(format!("AniList get_status parse failed: {e}")))?;

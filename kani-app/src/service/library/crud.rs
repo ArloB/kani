@@ -83,12 +83,11 @@ impl AppService {
         self.invalidate_library();
         self.audit(Some(user_id), "manga.delete", Some(&row.name), None)
             .await;
-        self.webhook_service
-            .fire(crate::service::webhooks::WebhookPayload::MangaDeleted {
-                manga_id: id,
-                manga_name: row.name.clone(),
-            })
-            .await;
+        self.fire_webhooks(crate::service::webhooks::WebhookPayload::MangaDeleted {
+            manga_id: id,
+            manga_name: row.name.clone(),
+        })
+        .await;
         Ok(())
     }
 

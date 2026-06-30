@@ -304,6 +304,7 @@ impl From<kani_app::ServiceError> for AppError {
             kani_app::ServiceError::Forbidden(s) => Self::Forbidden(s),
             kani_app::ServiceError::Internal(s) => Self::InternalServerError(s),
             kani_app::ServiceError::Validation(s) => Self::ValidationError(s),
+            kani_app::ServiceError::RateLimited { .. } => Self::RateLimitExceeded,
             kani_app::ServiceError::Core(e) => Self::CoreError(e),
             kani_app::ServiceError::Db(e) => Self::SqlxError(e),
             kani_app::ServiceError::Migration(e) => Self::MigrationError(e),

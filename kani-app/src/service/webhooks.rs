@@ -141,78 +141,81 @@ pub struct UpdateWebhookBody {
 // ── Core firing logic ─────────────────────────────────────────────────────────
 
 impl WebhookService {
-    /// Fire a webhook event. Spawns one background task per applicable webhook.
-    /// Never blocks or fails the caller — errors are logged and recorded in webhook_deliveries.
-    pub async fn fire(&self, payload: WebhookPayload) {
+    /// Build the delivery envelope and resolve the webhooks that should receive it.
+    /// Returns `(event_type, serialized_body, applicable_webhooks)`.
+    pub async fn applicable_deliveries(
+        &self,
+        payload: &WebhookPayload,
+    ) -> Result<(String, String, Vec<WebhookRow>)> {
         let event_type = payload.event_type();
         let manga_id = payload.manga_id();
 
         let envelope = Envelope {
             event: event_type,
             timestamp: now_rfc3339(),
-            data: &payload,
+            data: payload,
         };
-        let body = match serde_json::to_string(&envelope) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::error!("Webhook: failed to serialize payload: {e}");
-                return;
-            }
-        };
+        let body =
+            serde_json::to_string(&envelope).map_err(|e| ServiceError::Internal(e.to_string()))?;
 
-        let webhooks = match self.list_applicable(event_type, manga_id).await {
-            Ok(wh) => wh,
-            Err(e) => {
-                tracing::error!("Webhook: failed to query applicable webhooks: {e}");
-                return;
-            }
-        };
+        let webhooks = self.list_applicable(event_type, manga_id).await?;
+        Ok((event_type.to_owned(), body, webhooks))
+    }
 
-        for wh in webhooks {
-            let client = self.http.clone();
-            let db = self.db.clone();
-            let body = body.clone();
-            let event_str = event_type.to_owned();
+    /// Sign and POST a webhook body. Returns `(http_status, error)`; never fails the caller.
+    pub async fn send_signed(
+        &self,
+        url: &str,
+        secret: Option<&str>,
+        body: &str,
+    ) -> (Option<i64>, Option<String>) {
+        let sig = secret.map(|s| {
+            let mut mac =
+                Hmac::<Sha256>::new_from_slice(s.as_bytes()).expect("HMAC accepts any key size");
+            mac.update(body.as_bytes());
+            format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+        });
 
-            tokio::spawn(async move {
-                let sig = wh.secret.as_deref().map(|s| {
-                    let mut mac = Hmac::<Sha256>::new_from_slice(s.as_bytes())
-                        .expect("HMAC accepts any key size");
-                    mac.update(body.as_bytes());
-                    format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
-                });
-
-                let mut builder = client
-                    .post(&wh.url)
-                    .header("Content-Type", "application/json")
-                    .header("User-Agent", "Kani-Webhook/1.0")
-                    .body(body.clone());
-                if let Some(ref sig) = sig {
-                    builder = builder.header("X-Kani-Signature", sig.as_str());
-                }
-
-                let (http_status, error) = match builder.send().await {
-                    Ok(r) => (Some(r.status().as_u16() as i64), None),
-                    Err(e) => {
-                        tracing::warn!("Webhook delivery to {} failed: {e}", wh.url);
-                        (None, Some(e.to_string()))
-                    }
-                };
-
-                let _ = sqlx::query!(
-                    "INSERT INTO webhook_deliveries \
-                     (webhook_id, event_type, payload, http_status, error) \
-                     VALUES (?, ?, ?, ?, ?)",
-                    wh.id,
-                    event_str,
-                    body,
-                    http_status,
-                    error,
-                )
-                .execute(&db)
-                .await;
-            });
+        let mut builder = self
+            .http
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "Kani-Webhook/1.0")
+            .body(body.to_owned());
+        if let Some(ref sig) = sig {
+            builder = builder.header("X-Kani-Signature", sig.as_str());
         }
+
+        match builder.send().await {
+            Ok(r) => (Some(r.status().as_u16() as i64), None),
+            Err(e) => {
+                tracing::warn!("Webhook delivery to {url} failed: {e}");
+                (None, Some(e.to_string()))
+            }
+        }
+    }
+
+    /// Record a delivery attempt in `webhook_deliveries`.
+    pub async fn record_delivery(
+        &self,
+        webhook_id: i64,
+        event_type: &str,
+        body: &str,
+        http_status: Option<i64>,
+        error: Option<String>,
+    ) {
+        let _ = sqlx::query!(
+            "INSERT INTO webhook_deliveries \
+             (webhook_id, event_type, payload, http_status, error) \
+             VALUES (?, ?, ?, ?, ?)",
+            webhook_id,
+            event_type,
+            body,
+            http_status,
+            error,
+        )
+        .execute(&self.db)
+        .await;
     }
 
     /// Send a synchronous test event to a single webhook and return success/error.
@@ -226,31 +229,17 @@ impl WebhookService {
         }))
         .map_err(|e| ServiceError::Internal(e.to_string()))?;
 
-        let sig = wh.secret.as_deref().map(|s| {
-            let mut mac =
-                Hmac::<Sha256>::new_from_slice(s.as_bytes()).expect("HMAC accepts any key size");
-            mac.update(body.as_bytes());
-            format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
-        });
+        let (http_status, error) = self.send_signed(&wh.url, wh.secret.as_deref(), &body).await;
 
-        let mut builder = self
-            .http
-            .post(&wh.url)
-            .header("Content-Type", "application/json")
-            .header("User-Agent", "Kani-Webhook/1.0")
-            .body(body.clone());
-        if let Some(ref sig) = sig {
-            builder = builder.header("X-Kani-Signature", sig.as_str());
+        if let Some(e) = error {
+            return Err(ServiceError::Internal(format!(
+                "Webhook delivery failed: {e}"
+            )));
         }
-
-        let resp = builder.send().await?;
-        if resp.status().is_success() {
-            Ok(())
-        } else {
-            Err(ServiceError::Internal(format!(
-                "Webhook returned HTTP {}",
-                resp.status()
-            )))
+        match http_status {
+            Some(s) if (200..300).contains(&s) => Ok(()),
+            Some(s) => Err(ServiceError::Internal(format!("Webhook returned HTTP {s}"))),
+            None => Err(ServiceError::Internal("Webhook delivery failed".into())),
         }
     }
 
@@ -441,6 +430,34 @@ impl WebhookService {
             .await?;
         }
         Ok(())
+    }
+}
+
+// ── Job-based fan-out ─────────────────────────────────────────────────────────
+
+impl crate::service::AppService {
+    /// Resolve applicable webhooks for an event and submit one delivery job per webhook.
+    /// Never blocks or fails the caller — errors are logged.
+    pub async fn fire_webhooks(&self, payload: WebhookPayload) {
+        let (event_type, body, webhooks) =
+            match self.webhook_service.applicable_deliveries(&payload).await {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::error!("Webhook: failed to resolve deliveries: {e}");
+                    return;
+                }
+            };
+
+        for wh in webhooks {
+            let job = crate::jobs::webhook_delivery::WebhookDeliveryJob::new(
+                wh.id,
+                event_type.clone(),
+                body.clone(),
+            );
+            if let Err(e) = self.job_manager.submit(job).await {
+                tracing::warn!("Webhook: failed to submit delivery job for {}: {e}", wh.id);
+            }
+        }
     }
 }
 

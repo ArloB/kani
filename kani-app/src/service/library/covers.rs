@@ -154,7 +154,7 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
-        self.spawn_thumbnail_generation(manga_row_id);
+        self.spawn_thumbnail_generation(manga_row_id).await;
         Ok(())
     }
 
@@ -294,7 +294,7 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
-        self.spawn_thumbnail_generation(manga_id);
+        self.spawn_thumbnail_generation(manga_id).await;
         self.invalidate_library();
         self.audit(Some(user_id), "manga.cover.upload", None, None)
             .await;
@@ -346,7 +346,7 @@ impl AppService {
         .await?;
 
         if restored_path.is_some() {
-            self.spawn_thumbnail_generation(manga_id);
+            self.spawn_thumbnail_generation(manga_id).await;
         }
         self.invalidate_library();
         self.audit(Some(user_id), "manga.cover.override_cleared", None, None)

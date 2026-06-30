@@ -1,5 +1,5 @@
 use super::{get_access_token, get_mapping};
-use crate::error::Result;
+use crate::error::{Result, ServiceError};
 use crate::ids::{MangaId, UserId};
 use crate::service::AppService;
 
@@ -54,6 +54,7 @@ impl AppService {
 
                 let remote = match tracker.get_status(&token, &tracker_manga_id).await {
                     Ok(s) => s,
+                    Err(e @ ServiceError::RateLimited { .. }) => return Err(e),
                     Err(e) => {
                         tracing::warn!(
                             "Failed to get status from {} for manga {}: {e}",
@@ -75,12 +76,15 @@ impl AppService {
             // Push merged state to the remote tracker (lock-free — we dropped the read lock).
             if let Some(s) = status {
                 let registry = self.tracker_registry.read().await;
-                if let Some(tracker) = registry.get(tracker_id)
-                    && let Err(e) = tracker
+                if let Some(tracker) = registry.get(tracker_id) {
+                    match tracker
                         .update_status(&access_token, &tracker_manga_id, s, score, chapters_read)
                         .await
-                {
-                    tracing::warn!("Failed to push to {}: {e}", tracker.name());
+                    {
+                        Ok(()) => {}
+                        Err(e @ ServiceError::RateLimited { .. }) => return Err(e),
+                        Err(e) => tracing::warn!("Failed to push to {}: {e}", tracker.name()),
+                    }
                 }
             }
 
@@ -128,4 +132,88 @@ impl AppService {
 
         Ok(())
     }
+
+    /// Sync only stale tracker mappings (never-synced, or last synced longer than
+    /// `interval_hours` ago), throttled per access token and honouring HTTP 429
+    /// `Retry-After`. Respects `cancel` for graceful shutdown and caps work at `cap`.
+    pub async fn sync_stale_trackers(
+        &self,
+        interval_hours: i64,
+        cap: usize,
+        min_spacing: std::time::Duration,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<TrackerSyncOutcome> {
+        use std::time::Instant;
+
+        let now = time::OffsetDateTime::now_utc();
+        let cutoff = now - time::Duration::hours(interval_hours.max(0));
+        let cap_i64 = cap as i64;
+
+        let rows = sqlx::query!(
+            "SELECT DISTINCT user_id, manga_id FROM tracker_manga_mappings \
+             WHERE last_synced_at IS NULL OR last_synced_at < ? \
+             ORDER BY manga_id LIMIT ?",
+            cutoff,
+            cap_i64,
+        )
+        .fetch_all(&self.db_read)
+        .await?;
+
+        let mut throttle = crate::jobs::tracker_sync::TokenThrottle::default();
+        let mut outcome = TrackerSyncOutcome::default();
+
+        for row in rows {
+            if cancel.is_cancelled() {
+                break;
+            }
+
+            let key = row.user_id;
+            let wait = throttle.delay_before(key, Instant::now(), min_spacing);
+            if !wait.is_zero() {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = tokio::time::sleep(wait) => {}
+                }
+            }
+            throttle.record_call(key, Instant::now());
+
+            match self
+                .sync_manga_trackers(UserId(row.user_id), MangaId(row.manga_id))
+                .await
+            {
+                Ok(()) => {
+                    let synced_at = time::OffsetDateTime::now_utc();
+                    sqlx::query!(
+                        "UPDATE tracker_manga_mappings SET last_synced_at = ? \
+                         WHERE user_id = ? AND manga_id = ?",
+                        synced_at,
+                        row.user_id,
+                        row.manga_id,
+                    )
+                    .execute(&self.db)
+                    .await?;
+                    outcome.synced += 1;
+                }
+                Err(ServiceError::RateLimited { retry_after_secs }) => {
+                    let backoff = std::time::Duration::from_secs(retry_after_secs.unwrap_or(60));
+                    throttle.record_rate_limited(key, Instant::now(), backoff);
+                    outcome.rate_limited += 1;
+                }
+                Err(e) => {
+                    tracing::warn!("Tracker sync failed for manga {}: {e}", row.manga_id);
+                    outcome.failed += 1;
+                }
+            }
+        }
+
+        Ok(outcome)
+    }
+}
+
+/// Summary of a stale-tracker sync run.
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct TrackerSyncOutcome {
+    pub synced: usize,
+    pub rate_limited: usize,
+    pub failed: usize,
 }

@@ -562,16 +562,10 @@ impl AppService {
         }
 
         if !new_manga_ids.is_empty() {
-            let pool = self.db.clone();
-            tokio::spawn(async move {
-                for id in new_manga_ids {
-                    if let Err(e) =
-                        crate::service::dedup::record_duplicates_for_manga(&pool, MangaId(id)).await
-                    {
-                        tracing::warn!("Duplicate recording failed for manga {id}: {e}");
-                    }
-                }
-            });
+            let job = crate::jobs::import_dedup::ImportDedupJob::new(new_manga_ids);
+            if let Err(e) = self.job_manager.submit(job).await {
+                tracing::warn!("Failed to submit import dedup job: {e}");
+            }
         }
 
         self.cache.invalidate_stats(user_id);

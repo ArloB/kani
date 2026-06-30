@@ -45,6 +45,8 @@ impl AppService {
             max_ip_attempts: s.max_ip_attempts,
             login_lockout_seconds: s.login_lockout_seconds,
             session_timeout_secs: s.session_timeout_secs,
+            tracker_auto_sync_enabled: s.tracker_auto_sync_enabled,
+            tracker_sync_interval_hours: s.tracker_sync_interval_hours,
         }
     }
 
@@ -142,13 +144,26 @@ impl AppService {
                     .await;
             }
             SettingsUpdate::Tracking(s) => {
+                if s.tracker_sync_interval_hours < 1 {
+                    return Err(ServiceError::Validation(
+                        "tracker_sync_interval_hours must be >= 1".into(),
+                    ));
+                }
                 sqlx::query!(
-                    "UPDATE settings SET default_tracking_enabled=? WHERE id='singleton'",
-                    s.default_tracking_enabled
+                    "UPDATE settings SET default_tracking_enabled=?, tracker_auto_sync_enabled=?, \
+                     tracker_sync_interval_hours=? WHERE id='singleton'",
+                    s.default_tracking_enabled,
+                    s.tracker_auto_sync_enabled,
+                    s.tracker_sync_interval_hours
                 )
                 .execute(&self.db)
                 .await?;
-                self.settings.write().await.default_tracking_enabled = s.default_tracking_enabled;
+                {
+                    let mut settings = self.settings.write().await;
+                    settings.default_tracking_enabled = s.default_tracking_enabled;
+                    settings.tracker_auto_sync_enabled = s.tracker_auto_sync_enabled;
+                    settings.tracker_sync_interval_hours = s.tracker_sync_interval_hours;
+                }
                 self.audit(Some(user_id), "settings.update.tracking", None, None)
                     .await;
             }

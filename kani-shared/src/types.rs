@@ -1179,6 +1179,8 @@ pub struct AppSettings {
     pub max_ip_attempts: i64,
     pub login_lockout_seconds: i64,
     pub session_timeout_secs: i64,
+    pub tracker_auto_sync_enabled: bool,
+    pub tracker_sync_interval_hours: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1299,6 +1301,8 @@ pub struct AdvancedSettings {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct TrackingSettings {
     pub default_tracking_enabled: bool,
+    pub tracker_auto_sync_enabled: bool,
+    pub tracker_sync_interval_hours: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1939,6 +1943,8 @@ mod tests {
         }));
         json_rt(&SettingsUpdate::Tracking(TrackingSettings {
             default_tracking_enabled: true,
+            tracker_auto_sync_enabled: false,
+            tracker_sync_interval_hours: 24,
         }));
         json_rt(&SettingsUpdate::Email(EmailSettings {
             email_enabled: false,
