@@ -151,3 +151,56 @@ async fn run_maintenance_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn trigger_recurring_returns_200_with_job_id_for_admin() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/admin/recurring/db_maintenance/run",
+            &cookie,
+            json!({}),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    assert!(body["job_id"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn trigger_recurring_unknown_kind_returns_404() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/admin/recurring/not_a_real_kind/run",
+            &cookie,
+            json!({}),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn trigger_recurring_returns_401_without_auth() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+
+    let res = app
+        .oneshot(post_req("/rest/admin/recurring/db_maintenance/run"))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}

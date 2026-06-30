@@ -29,6 +29,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/db/stats", get(db_stats))
         .route("/admin/db/analyze", post(db_analyze))
         .route("/admin/db/vacuum", post(db_vacuum))
+        .route("/admin/recurring/{kind}/run", post(trigger_recurring))
         .route("/admin/cache/clear", post(clear_cache))
         .route("/admin/scan/stop", post(stop_scan))
         .route("/admin/email/test", post(admin_send_test_email))
@@ -533,17 +534,37 @@ pub(crate) async fn run_maintenance(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    let analyze_id = state
-        .job_manager
-        .submit(kani_app::jobs::maintenance::AnalyzeJob::new())
-        .await?;
-    let vacuum_id = state
-        .job_manager
-        .submit(kani_app::jobs::maintenance::VacuumJob::new())
-        .await?;
+    use kani_app::jobs::recurring::{RecurringJobKind, trigger_now};
+    let analyze_id = trigger_now(&state, RecurringJobKind::DbMaintenance).await?;
+    let vacuum_id = trigger_now(&state, RecurringJobKind::DbVacuum).await?;
     Ok(Json(
         json!({ "analyze_job_id": analyze_id, "vacuum_job_id": vacuum_id }),
     ))
+}
+
+/// Generic manual trigger for any recurring-job kind. Submits the kind's job
+/// immediately without disturbing its schedule; returns the job id (or a
+/// conflict if a singleton kind is already running, or 404 for an unknown kind).
+pub(crate) async fn trigger_recurring(
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
+    State(state): State<AppState>,
+    Path(kind): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    let Some(k) = kani_app::jobs::recurring::RecurringJobKind::parse(&kind) else {
+        return Ok((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "unknown_recurring_kind" })),
+        )
+            .into_response());
+    };
+    match kani_app::jobs::recurring::trigger_now(&state, k).await? {
+        Some(job_id) => Ok(Json(json!({ "job_id": job_id })).into_response()),
+        None => Ok((
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "already_running" })),
+        )
+            .into_response()),
+    }
 }
 
 #[utoipa::path(
@@ -594,10 +615,11 @@ pub(crate) async fn db_analyze(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    let job_id = state
-        .job_manager
-        .submit(kani_app::jobs::maintenance::AnalyzeJob::new())
-        .await?;
+    let job_id = kani_app::jobs::recurring::trigger_now(
+        &state,
+        kani_app::jobs::recurring::RecurringJobKind::DbMaintenance,
+    )
+    .await?;
     Ok(Json(json!({ "job_id": job_id })))
 }
 
@@ -615,10 +637,11 @@ pub(crate) async fn db_vacuum(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    let job_id = state
-        .job_manager
-        .submit(kani_app::jobs::maintenance::VacuumJob::new())
-        .await?;
+    let job_id = kani_app::jobs::recurring::trigger_now(
+        &state,
+        kani_app::jobs::recurring::RecurringJobKind::DbVacuum,
+    )
+    .await?;
     Ok(Json(json!({ "job_id": job_id })))
 }
 
@@ -1342,10 +1365,11 @@ pub(crate) async fn admin_backup_run_now(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    let job_id = state
-        .job_manager
-        .submit(kani_app::jobs::backup::ScheduledBackupJob::new())
-        .await?;
+    let job_id = kani_app::jobs::recurring::trigger_now(
+        &state,
+        kani_app::jobs::recurring::RecurringJobKind::ScheduledBackup,
+    )
+    .await?;
     state
         .audit(Some(user.id), "admin.backup.run_now", None, None)
         .await;

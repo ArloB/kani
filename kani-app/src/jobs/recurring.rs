@@ -60,6 +60,10 @@ impl RecurringJobKind {
             Self::TrackerSync,
         ]
     }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::all().iter().copied().find(|k| k.as_str() == s)
+    }
 }
 
 pub async fn ensure_recurring_rows(pool: &sqlx::SqlitePool) -> Result<()> {
@@ -201,45 +205,7 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
         }
     }
 
-    let result = match kind {
-        RecurringJobKind::DbMaintenance => {
-            let job = crate::jobs::maintenance::AnalyzeJob::new();
-            svc.job_manager.submit(job).await.map(|_| ())
-        }
-        RecurringJobKind::DbVacuum => {
-            let job = crate::jobs::maintenance::VacuumJob::new();
-            svc.job_manager.submit(job).await.map(|_| ())
-        }
-        RecurringJobKind::AutoScan => {
-            let job = crate::jobs::scan::AutoScanJob::new();
-            svc.job_manager.submit(job).await.map(|_| ())
-        }
-        RecurringJobKind::AuditPrune => {
-            let job = crate::jobs::audit_prune::AuditPruneJob::new();
-            svc.job_manager.submit(job).await.map(|_| ())
-        }
-        RecurringJobKind::TrashPurge => {
-            let days = svc.settings.read().await.trash_retention_days.max(0) as u32;
-            let job = crate::jobs::trash_purge::TrashPurgeJob::new(days);
-            svc.job_manager.submit(job).await.map(|_| ())
-        }
-        RecurringJobKind::StorageMonitor => {
-            let job = crate::jobs::storage::StorageMonitorJob::new();
-            svc.job_manager.submit(job).await.map(|_| ())
-        }
-        RecurringJobKind::PendingDeleteRetry => {
-            let job = crate::jobs::pending_delete_retry::PendingDeleteRetryJob::new();
-            svc.job_manager.submit(job).await.map(|_| ())
-        }
-        RecurringJobKind::ScheduledBackup => {
-            let job = crate::jobs::backup::ScheduledBackupJob::new();
-            svc.job_manager.submit(job).await.map(|_| ())
-        }
-        RecurringJobKind::TrackerSync => {
-            let job = crate::jobs::tracker_sync::TrackerSyncJob::new();
-            svc.job_manager.submit(job).await.map(|_| ())
-        }
-    };
+    let result = submit_kind_job(svc, kind).await.map(|_| ());
 
     match result {
         Ok(()) => {
@@ -258,6 +224,82 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
         }
         Err(e) => tracing::warn!("Recurring job {:?} failed: {e}", kind),
     }
+}
+
+/// Submits the background job that backs a recurring kind, returning its id.
+/// Shared by the scheduler and the manual trigger path.
+async fn submit_kind_job(
+    svc: &AppService,
+    kind: RecurringJobKind,
+) -> Result<crate::jobs::JobId> {
+    match kind {
+        RecurringJobKind::DbMaintenance => {
+            svc.job_manager
+                .submit(crate::jobs::maintenance::AnalyzeJob::new())
+                .await
+        }
+        RecurringJobKind::DbVacuum => {
+            svc.job_manager
+                .submit(crate::jobs::maintenance::VacuumJob::new())
+                .await
+        }
+        RecurringJobKind::AutoScan => {
+            svc.job_manager
+                .submit(crate::jobs::scan::AutoScanJob::new())
+                .await
+        }
+        RecurringJobKind::AuditPrune => {
+            svc.job_manager
+                .submit(crate::jobs::audit_prune::AuditPruneJob::new())
+                .await
+        }
+        RecurringJobKind::TrashPurge => {
+            let days = svc.settings.read().await.trash_retention_days.max(0) as u32;
+            svc.job_manager
+                .submit(crate::jobs::trash_purge::TrashPurgeJob::new(days))
+                .await
+        }
+        RecurringJobKind::StorageMonitor => {
+            svc.job_manager
+                .submit(crate::jobs::storage::StorageMonitorJob::new())
+                .await
+        }
+        RecurringJobKind::PendingDeleteRetry => {
+            svc.job_manager
+                .submit(crate::jobs::pending_delete_retry::PendingDeleteRetryJob::new())
+                .await
+        }
+        RecurringJobKind::ScheduledBackup => {
+            svc.job_manager
+                .submit(crate::jobs::backup::ScheduledBackupJob::new())
+                .await
+        }
+        RecurringJobKind::TrackerSync => {
+            svc.job_manager
+                .submit(crate::jobs::tracker_sync::TrackerSyncJob::new())
+                .await
+        }
+    }
+}
+
+/// Manually triggers a recurring kind's job immediately, bypassing the schedule
+/// (does not touch `next_due_at`). Skips with `Ok(None)` if an instance of a
+/// singleton kind is already pending/running. Used by the admin trigger endpoint.
+pub async fn trigger_now(
+    svc: &AppService,
+    kind: RecurringJobKind,
+) -> Result<Option<crate::jobs::JobId>> {
+    let already_active = match kind {
+        RecurringJobKind::AutoScan => auto_scan_job_active(&svc.db).await,
+        RecurringJobKind::ScheduledBackup => scheduled_backup_job_active(&svc.db).await,
+        RecurringJobKind::TrackerSync => tracker_sync_job_active(&svc.db).await,
+        _ => false,
+    };
+    if already_active {
+        return Ok(None);
+    }
+    let id = submit_kind_job(svc, kind).await?;
+    Ok(Some(id))
 }
 
 pub fn spawn_recurring_scheduler(svc: &AppService) {
