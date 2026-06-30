@@ -3,8 +3,15 @@
 mod common;
 use common::{insert_chapter, insert_manga, insert_source, start_mock_page_server, test_service};
 use kani_app::jobs::BackgroundJob;
+use kani_app::jobs::JobId;
+use kani_app::jobs::audit_prune::AuditPruneJob;
 use kani_app::jobs::download::MangaDownloadAllJob;
+use kani_app::jobs::import_dedup::ImportDedupJob;
+use kani_app::jobs::pending_delete_retry::PendingDeleteRetryJob;
 use kani_app::jobs::test_jobs::{FailingDownloadJob, SlowTestJob, TestJob};
+use kani_app::jobs::trash_purge::TrashPurgeJob;
+use kani_app::jobs::webhook_delivery::WebhookDeliveryJob;
+use kani_app::service::AppService;
 use kani_core::downloader::MockPageListFetcher;
 use std::time::Duration;
 
@@ -410,4 +417,82 @@ async fn chapter_download_full_pipeline_with_mock() {
         dl_status, 2,
         "chapter should be marked Complete (download_status = 2)"
     );
+}
+
+// ── Wrapper-job submit→terminal coverage ─────────────────────────────────────
+
+/// Polls a submitted job until it reaches a terminal state, returning that state.
+async fn await_terminal(svc: &AppService, job_id: JobId) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let status = svc.job_manager.status(job_id).await.unwrap();
+        if matches!(status.status.as_str(), "completed" | "failed" | "cancelled") {
+            return status.status;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!("timed out; last status: {}", status.status);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn audit_prune_job_runs_to_completion() {
+    let svc = test_service().await;
+    let job_id = svc.job_manager.submit(AuditPruneJob::new()).await.unwrap();
+    assert_eq!(await_terminal(&svc, job_id).await, "completed");
+}
+
+#[tokio::test]
+async fn trash_purge_job_runs_to_completion() {
+    let svc = test_service().await;
+    let job_id = svc.job_manager.submit(TrashPurgeJob::new(30)).await.unwrap();
+    assert_eq!(await_terminal(&svc, job_id).await, "completed");
+}
+
+#[tokio::test]
+async fn pending_delete_retry_job_runs_to_completion() {
+    let svc = test_service().await;
+    let job_id = svc
+        .job_manager
+        .submit(PendingDeleteRetryJob::new())
+        .await
+        .unwrap();
+    assert_eq!(await_terminal(&svc, job_id).await, "completed");
+}
+
+#[tokio::test]
+async fn import_dedup_job_runs_to_completion() {
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "src").await;
+    let manga = insert_manga(&svc.db, src, "m1", "Manga").await;
+    let job_id = svc
+        .job_manager
+        .submit(ImportDedupJob::new(vec![manga.0]))
+        .await
+        .unwrap();
+    assert_eq!(await_terminal(&svc, job_id).await, "completed");
+}
+
+#[tokio::test]
+async fn webhook_delivery_job_completes_on_2xx() {
+    let svc = test_service().await;
+    let port = start_mock_page_server().await;
+    let url = format!("http://127.0.0.1:{port}/");
+    let webhook_id: i64 =
+        sqlx::query_scalar("INSERT INTO webhooks (url, enabled) VALUES (?, 1) RETURNING id")
+            .bind(&url)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    let job_id = svc
+        .job_manager
+        .submit(WebhookDeliveryJob::new(
+            webhook_id,
+            "chapter.new".to_string(),
+            "{}".to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(await_terminal(&svc, job_id).await, "completed");
 }
