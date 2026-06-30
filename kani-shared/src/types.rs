@@ -1170,6 +1170,15 @@ pub struct AppSettings {
     pub first_run_complete: bool,
     pub scan_concurrency: i64,
     pub per_source_download_concurrency: i64,
+    pub trash_retention_days: i64,
+    pub audit_retention_days: i64,
+    pub audit_security_retention_days: i64,
+    pub disk_warn_threshold: f64,
+    pub thumbnail_formats: String,
+    pub max_login_attempts: i64,
+    pub max_ip_attempts: i64,
+    pub login_lockout_seconds: i64,
+    pub session_timeout_secs: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1308,12 +1317,33 @@ pub struct EmailSettings {
 
 #[cfg(feature = "host")]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct MaintenanceSettings {
+    pub trash_retention_days: i64,
+    pub audit_retention_days: i64,
+    pub audit_security_retention_days: i64,
+    pub disk_warn_threshold: f64,
+    pub thumbnail_formats: String,
+}
+
+#[cfg(feature = "host")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct SecuritySettings {
+    pub max_login_attempts: i64,
+    pub max_ip_attempts: i64,
+    pub login_lockout_seconds: i64,
+    pub session_timeout_secs: i64,
+}
+
+#[cfg(feature = "host")]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum SettingsUpdate {
     Download(DownloadSettings),
     Scan(ScanSettings),
     Advanced(AdvancedSettings),
     Tracking(TrackingSettings),
     Email(EmailSettings),
+    Maintenance(MaintenanceSettings),
+    Security(SecuritySettings),
 }
 
 #[cfg(feature = "host")]

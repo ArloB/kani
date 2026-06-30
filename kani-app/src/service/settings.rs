@@ -36,6 +36,15 @@ impl AppService {
             first_run_complete: s.first_run_complete,
             scan_concurrency: s.scan_concurrency,
             per_source_download_concurrency: s.per_source_download_concurrency,
+            trash_retention_days: s.trash_retention_days,
+            audit_retention_days: s.audit_retention_days,
+            audit_security_retention_days: s.audit_security_retention_days,
+            disk_warn_threshold: s.disk_warn_threshold,
+            thumbnail_formats: s.thumbnail_formats.clone(),
+            max_login_attempts: s.max_login_attempts,
+            max_ip_attempts: s.max_ip_attempts,
+            login_lockout_seconds: s.login_lockout_seconds,
+            session_timeout_secs: s.session_timeout_secs,
         }
     }
 
@@ -223,6 +232,79 @@ impl AppService {
 
                 self.rebuild_email_service().await;
                 self.audit(Some(user_id), "settings.update.email", None, None)
+                    .await;
+            }
+            SettingsUpdate::Maintenance(s) => {
+                if s.trash_retention_days < 0
+                    || s.audit_retention_days < 0
+                    || s.audit_security_retention_days < 0
+                {
+                    return Err(ServiceError::Validation(
+                        "retention days must be >= 0".into(),
+                    ));
+                }
+                if !(0.0..=1.0).contains(&s.disk_warn_threshold) {
+                    return Err(ServiceError::Validation(
+                        "disk_warn_threshold must be between 0.0 and 1.0".into(),
+                    ));
+                }
+                sqlx::query!(
+                    "UPDATE settings SET trash_retention_days=?, audit_retention_days=?, \
+                     audit_security_retention_days=?, disk_warn_threshold=?, thumbnail_formats=? \
+                     WHERE id='singleton'",
+                    s.trash_retention_days,
+                    s.audit_retention_days,
+                    s.audit_security_retention_days,
+                    s.disk_warn_threshold,
+                    s.thumbnail_formats,
+                )
+                .execute(&self.db)
+                .await?;
+                {
+                    let mut settings = self.settings.write().await;
+                    settings.trash_retention_days = s.trash_retention_days;
+                    settings.audit_retention_days = s.audit_retention_days;
+                    settings.audit_security_retention_days = s.audit_security_retention_days;
+                    settings.disk_warn_threshold = s.disk_warn_threshold;
+                    settings.thumbnail_formats = s.thumbnail_formats;
+                }
+                self.audit(Some(user_id), "settings.update.maintenance", None, None)
+                    .await;
+            }
+            SettingsUpdate::Security(s) => {
+                if s.max_login_attempts < 1 || s.max_ip_attempts < 1 {
+                    return Err(ServiceError::Validation(
+                        "login attempt limits must be >= 1".into(),
+                    ));
+                }
+                if s.login_lockout_seconds < 1 {
+                    return Err(ServiceError::Validation(
+                        "login_lockout_seconds must be >= 1".into(),
+                    ));
+                }
+                if s.session_timeout_secs < 60 {
+                    return Err(ServiceError::Validation(
+                        "session_timeout_secs must be >= 60".into(),
+                    ));
+                }
+                sqlx::query!(
+                    "UPDATE settings SET max_login_attempts=?, max_ip_attempts=?, \
+                     login_lockout_seconds=?, session_timeout_secs=? WHERE id='singleton'",
+                    s.max_login_attempts,
+                    s.max_ip_attempts,
+                    s.login_lockout_seconds,
+                    s.session_timeout_secs,
+                )
+                .execute(&self.db)
+                .await?;
+                {
+                    let mut settings = self.settings.write().await;
+                    settings.max_login_attempts = s.max_login_attempts;
+                    settings.max_ip_attempts = s.max_ip_attempts;
+                    settings.login_lockout_seconds = s.login_lockout_seconds;
+                    settings.session_timeout_secs = s.session_timeout_secs;
+                }
+                self.audit(Some(user_id), "settings.update.security", None, None)
                     .await;
             }
         }

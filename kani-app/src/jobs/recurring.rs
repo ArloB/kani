@@ -183,10 +183,7 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
         }
         RecurringJobKind::AuditPrune => svc.prune_audit_log().await.map(|_| ()),
         RecurringJobKind::TrashPurge => {
-            let days = std::env::var("KANI_TRASH_RETENTION_DAYS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(30u32);
+            let days = svc.settings.read().await.trash_retention_days.max(0) as u32;
             svc.purge_expired_trash(days).await.map(|_| ())
         }
         RecurringJobKind::StorageMonitor => {

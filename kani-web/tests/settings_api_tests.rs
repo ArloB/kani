@@ -114,3 +114,181 @@ async fn patch_settings_invalid_body_returns_4xx() {
         res.status()
     );
 }
+
+#[tokio::test]
+async fn get_settings_shows_env_setting_defaults() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_get("/rest/settings", &cookie))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    assert_eq!(body["trash_retention_days"], serde_json::json!(30));
+    assert_eq!(body["audit_retention_days"], serde_json::json!(365));
+    assert_eq!(body["audit_security_retention_days"], serde_json::json!(0));
+    assert_eq!(body["max_login_attempts"], serde_json::json!(5));
+    assert_eq!(body["max_ip_attempts"], serde_json::json!(20));
+    assert_eq!(body["login_lockout_seconds"], serde_json::json!(900));
+    assert_eq!(body["session_timeout_secs"], serde_json::json!(2592000));
+    assert_eq!(body["thumbnail_formats"], serde_json::json!("jpeg"));
+}
+
+#[tokio::test]
+async fn patch_settings_maintenance_updates() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .clone()
+        .oneshot(authed_patch(
+            "/rest/settings",
+            &cookie,
+            serde_json::json!({
+                "Maintenance": {
+                    "trash_retention_days": 14,
+                    "audit_retention_days": 180,
+                    "audit_security_retention_days": 90,
+                    "disk_warn_threshold": 0.25,
+                    "thumbnail_formats": "jpeg"
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let get_res = app
+        .oneshot(authed_get("/rest/settings", &cookie))
+        .await
+        .unwrap();
+    let body = body_json(get_res).await;
+    assert_eq!(body["trash_retention_days"], serde_json::json!(14));
+    assert_eq!(body["audit_retention_days"], serde_json::json!(180));
+    assert_eq!(body["audit_security_retention_days"], serde_json::json!(90));
+    assert_eq!(body["disk_warn_threshold"], serde_json::json!(0.25));
+}
+
+#[tokio::test]
+async fn patch_settings_security_updates() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .clone()
+        .oneshot(authed_patch(
+            "/rest/settings",
+            &cookie,
+            serde_json::json!({
+                "Security": {
+                    "max_login_attempts": 8,
+                    "max_ip_attempts": 40,
+                    "login_lockout_seconds": 600,
+                    "session_timeout_secs": 86400
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let get_res = app
+        .oneshot(authed_get("/rest/settings", &cookie))
+        .await
+        .unwrap();
+    let body = body_json(get_res).await;
+    assert_eq!(body["max_login_attempts"], serde_json::json!(8));
+    assert_eq!(body["max_ip_attempts"], serde_json::json!(40));
+    assert_eq!(body["login_lockout_seconds"], serde_json::json!(600));
+    assert_eq!(body["session_timeout_secs"], serde_json::json!(86400));
+}
+
+#[tokio::test]
+async fn patch_settings_security_unauthed_returns_401() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+
+    let res = app
+        .oneshot(authed_patch(
+            "/rest/settings",
+            "",
+            serde_json::json!({
+                "Security": {
+                    "max_login_attempts": 8,
+                    "max_ip_attempts": 40,
+                    "login_lockout_seconds": 600,
+                    "session_timeout_secs": 86400
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn patch_settings_maintenance_invalid_threshold_returns_4xx() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_patch(
+            "/rest/settings",
+            &cookie,
+            serde_json::json!({
+                "Maintenance": {
+                    "trash_retention_days": 14,
+                    "audit_retention_days": 180,
+                    "audit_security_retention_days": 90,
+                    "disk_warn_threshold": 1.5,
+                    "thumbnail_formats": "jpeg"
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        res.status().is_client_error(),
+        "out-of-range disk_warn_threshold should return 4xx, got {}",
+        res.status()
+    );
+}
+
+#[tokio::test]
+async fn patch_settings_security_invalid_attempts_returns_4xx() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_patch(
+            "/rest/settings",
+            &cookie,
+            serde_json::json!({
+                "Security": {
+                    "max_login_attempts": 0,
+                    "max_ip_attempts": 40,
+                    "login_lockout_seconds": 600,
+                    "session_timeout_secs": 86400
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        res.status().is_client_error(),
+        "max_login_attempts=0 should return 4xx, got {}",
+        res.status()
+    );
+}

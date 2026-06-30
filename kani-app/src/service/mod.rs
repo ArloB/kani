@@ -100,7 +100,6 @@ pub struct AppService {
     pub install_locks: Arc<DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub(crate) progress_buffer: progress::ReadProgressBuffer,
     pub thumbnail_inflight: thumbnails::ThumbnailInflight,
-    pub(crate) thumbnail_formats: Vec<String>,
     pub(crate) undo_tokens: Arc<DashMap<uuid::Uuid, (crate::ids::MangaId, std::time::Instant)>>,
     #[cfg(any(test, feature = "test-util"))]
     pub mock_sources: Arc<DashMap<i64, Arc<dyn kani_core::downloader::PageListFetcher>>>,
@@ -248,7 +247,7 @@ impl AppService {
 
         let enc = load_or_provision_credential_cipher(data_dir);
 
-        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs FROM settings")
+        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
@@ -304,6 +303,89 @@ impl AppService {
                     "UPDATE settings SET scan_concurrency = ?, per_source_download_concurrency = ? WHERE id = 'singleton'",
                     settings.scan_concurrency,
                     settings.per_source_download_concurrency,
+                )
+                .execute(&pool)
+                .await?;
+            }
+
+            let mut env_settings_changed = false;
+            if let Ok(val) = std::env::var("KANI_TRASH_RETENTION_DAYS")
+                && let Ok(n) = val.trim().parse::<i64>()
+                && n >= 0
+            {
+                settings.trash_retention_days = n;
+                env_settings_changed = true;
+            }
+            if let Ok(val) = std::env::var("KANI_AUDIT_RETENTION_DAYS")
+                && let Ok(n) = val.trim().parse::<i64>()
+                && n >= 0
+            {
+                settings.audit_retention_days = n;
+                env_settings_changed = true;
+            }
+            if let Ok(val) = std::env::var("KANI_AUDIT_SECURITY_RETENTION_DAYS")
+                && let Ok(n) = val.trim().parse::<i64>()
+                && n >= 0
+            {
+                settings.audit_security_retention_days = n;
+                env_settings_changed = true;
+            }
+            if let Ok(val) = std::env::var("KANI_DISK_WARN_THRESHOLD")
+                && let Ok(n) = val.trim().parse::<f64>()
+                && (0.0..=1.0).contains(&n)
+            {
+                settings.disk_warn_threshold = n;
+                env_settings_changed = true;
+            }
+            if let Ok(val) = std::env::var("KANI_THUMBNAIL_FORMATS")
+                && !val.trim().is_empty()
+            {
+                settings.thumbnail_formats = val.trim().to_string();
+                env_settings_changed = true;
+            }
+            if let Ok(val) = std::env::var("KANI_MAX_LOGIN_ATTEMPTS")
+                && let Ok(n) = val.trim().parse::<i64>()
+                && n >= 1
+            {
+                settings.max_login_attempts = n;
+                env_settings_changed = true;
+            }
+            if let Ok(val) = std::env::var("KANI_MAX_IP_ATTEMPTS")
+                && let Ok(n) = val.trim().parse::<i64>()
+                && n >= 1
+            {
+                settings.max_ip_attempts = n;
+                env_settings_changed = true;
+            }
+            if let Ok(val) = std::env::var("KANI_LOGIN_LOCKOUT_SECONDS")
+                && let Ok(n) = val.trim().parse::<i64>()
+                && n >= 1
+            {
+                settings.login_lockout_seconds = n;
+                env_settings_changed = true;
+            }
+            if let Ok(val) = std::env::var("KANI_SESSION_TIMEOUT_SECONDS")
+                && let Ok(n) = val.trim().parse::<i64>()
+                && n >= 60
+            {
+                settings.session_timeout_secs = n;
+                env_settings_changed = true;
+            }
+            if env_settings_changed {
+                sqlx::query!(
+                    "UPDATE settings SET trash_retention_days = ?, audit_retention_days = ?, \
+                     audit_security_retention_days = ?, disk_warn_threshold = ?, thumbnail_formats = ?, \
+                     max_login_attempts = ?, max_ip_attempts = ?, login_lockout_seconds = ?, \
+                     session_timeout_secs = ? WHERE id = 'singleton'",
+                    settings.trash_retention_days,
+                    settings.audit_retention_days,
+                    settings.audit_security_retention_days,
+                    settings.disk_warn_threshold,
+                    settings.thumbnail_formats,
+                    settings.max_login_attempts,
+                    settings.max_ip_attempts,
+                    settings.login_lockout_seconds,
+                    settings.session_timeout_secs,
                 )
                 .execute(&pool)
                 .await?;
@@ -619,7 +701,6 @@ impl AppService {
             install_locks: Arc::new(DashMap::new()),
             progress_buffer: progress::ReadProgressBuffer::default(),
             thumbnail_inflight: thumbnails::ThumbnailInflight::default(),
-            thumbnail_formats: crate::images::thumbnail_formats_from_env(),
             undo_tokens: Arc::new(DashMap::new()),
             #[cfg(any(test, feature = "test-util"))]
             mock_sources: Arc::new(DashMap::new()),
@@ -679,6 +760,15 @@ impl AppService {
                 as i64,
             job_max_history: crate::tuning::DEFAULT_JOB_MAX_HISTORY as i64,
             job_shutdown_timeout_secs: crate::tuning::DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS as i64,
+            trash_retention_days: 30,
+            audit_retention_days: 365,
+            audit_security_retention_days: 0,
+            disk_warn_threshold: 0.10,
+            thumbnail_formats: "jpeg".to_string(),
+            max_login_attempts: 5,
+            max_ip_attempts: 20,
+            login_lockout_seconds: 900,
+            session_timeout_secs: 2592000,
         };
 
         let smart_client =
@@ -769,7 +859,6 @@ impl AppService {
             install_locks: Arc::new(DashMap::new()),
             progress_buffer: progress::ReadProgressBuffer::default(),
             thumbnail_inflight: thumbnails::ThumbnailInflight::default(),
-            thumbnail_formats: crate::images::thumbnail_formats_from_env(),
             undo_tokens: Arc::new(DashMap::new()),
             mock_sources: Arc::new(DashMap::new()),
         };

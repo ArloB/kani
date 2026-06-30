@@ -27,6 +27,7 @@ import * as security          from './security.js';
 import * as collections       from './collections.js';
 import * as trash             from './trash.js';
 import * as storage           from './storage.js';
+import * as maintenance       from './maintenance.js';
 
 /** @type {Array<() => void>} */
 let _panelDestroys = [];
@@ -83,6 +84,7 @@ export async function init(container) {
     { id: 'webhooks',        label: 'Webhooks',        description: 'Send HTTP POST notifications to external services when events occur.', perm: 'settings:edit_advanced', group: 'Server',  mount: el => webhooks.mount(el) },
     { id: 'advanced',        label: 'Advanced',        description: 'FlareSolverr, library path, and other low-level options.',  perm: 'settings:edit_advanced', group: 'Server',  mount: el => advanced.mount(el, settings, bootId) },
     { id: 'storage',         label: 'Storage',         description: 'Disk usage and library integrity check.',                     perm: 'admin:manage',           group: 'Server',  mount: el => storage.mount(el) },
+    { id: 'maintenance',     label: 'Maintenance',     description: 'Data retention, disk warnings, login rate limits, and session timeout.', perm: 'settings:edit_advanced', group: 'Server',  mount: el => maintenance.mount(el, settings) },
     { id: 'server',          label: 'Lifecycle',       description: 'Stop or restart the server process.',                         perm: 'server:manage',          group: 'Server',  mount: el => server.mount(el) },
     { id: 'account',         label: 'My Account',      description: 'Change your password and manage active sessions.',            perm: null,                     group: 'Account', mount: el => account.mount(el) },
     { id: 'security',        label: 'Security',        description: 'Two-factor authentication, session management, and security status.', perm: null,                group: 'Account', mount: el => security.mount(el) },

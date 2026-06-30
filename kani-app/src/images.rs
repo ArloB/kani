@@ -2,10 +2,8 @@ use sha2::{Digest, Sha256};
 
 pub const THUMBNAIL_SIZES: &[(&str, u32)] = &[("xs", 80), ("sm", 160), ("md", 320), ("lg", 640)];
 
-pub fn thumbnail_formats_from_env() -> Vec<String> {
-    std::env::var("KANI_THUMBNAIL_FORMATS")
-        .unwrap_or_else(|_| "jpeg".to_string())
-        .split(',')
+pub fn parse_thumbnail_formats(csv: &str) -> Vec<String> {
+    csv.split(',')
         .map(|s| s.trim().to_lowercase())
         .filter(|s| s == "jpeg")
         .collect()

@@ -33,7 +33,7 @@ pub async fn test_state() -> AppState {
     let service = Arc::new(AppService::new_for_test(pool.clone()).await);
     let (_, log_handle) = RingBufferLayer::new(100);
     AppState {
-        rate_limiter: Arc::new(AuthRateLimiter::new(pool)),
+        rate_limiter: Arc::new(AuthRateLimiter::new(pool, service.settings.clone())),
         csrf_secret: Arc::new([0u8; 32]),
         public_instance: false,
         service,

@@ -9,9 +9,12 @@
 //!
 //! Identity is stored as SHA-256 hex — the plaintext username/email is never persisted.
 
+use kani_app::models::Settings;
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
+use std::sync::Arc;
 use time::OffsetDateTime;
+use tokio::sync::RwLock;
 
 /// Result of a rate-limit check.
 #[derive(Debug, PartialEq)]
@@ -21,37 +24,35 @@ pub enum RateLimitResult {
     LockedOutByIp { retry_after_secs: i64 },
 }
 
-/// Tracks login attempts and enforces per-identity and per-IP lockouts.
-#[derive(Clone)]
-pub struct AuthRateLimiter {
-    db: SqlitePool,
-    /// Maximum failed attempts per identity before lockout.
+/// Snapshot of the rate-limit tunables, read live from settings per check.
+struct Limits {
     max_attempts_identity: i64,
-    /// Maximum failed attempts per IP before lockout.
     max_attempts_ip: i64,
-    /// Lockout window in seconds.
     lockout_seconds: i64,
 }
 
+/// Tracks login attempts and enforces per-identity and per-IP lockouts.
+///
+/// The limits (`max_login_attempts`, `max_ip_attempts`, `login_lockout_seconds`)
+/// are read from the live `Settings` snapshot on every check, so changes made via
+/// the settings API apply without a restart.
+#[derive(Clone)]
+pub struct AuthRateLimiter {
+    db: SqlitePool,
+    settings: Arc<RwLock<Settings>>,
+}
+
 impl AuthRateLimiter {
-    pub fn new(db: SqlitePool) -> Self {
-        let max_attempts_identity = std::env::var("KANI_MAX_LOGIN_ATTEMPTS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(5i64);
-        let max_attempts_ip = std::env::var("KANI_MAX_IP_ATTEMPTS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(20i64);
-        let lockout_seconds = std::env::var("KANI_LOGIN_LOCKOUT_SECONDS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(900i64);
-        Self {
-            db,
-            max_attempts_identity,
-            max_attempts_ip,
-            lockout_seconds,
+    pub fn new(db: SqlitePool, settings: Arc<RwLock<Settings>>) -> Self {
+        Self { db, settings }
+    }
+
+    async fn limits(&self) -> Limits {
+        let s = self.settings.read().await;
+        Limits {
+            max_attempts_identity: s.max_login_attempts,
+            max_attempts_ip: s.max_ip_attempts,
+            lockout_seconds: s.login_lockout_seconds,
         }
     }
 
@@ -67,8 +68,9 @@ impl AuthRateLimiter {
     /// is already within a lockout window from prior failures.
     pub async fn check_lockout(&self, identity: &str, ip_addr: &str) -> RateLimitResult {
         let identity_hash = Self::hash_identity(identity);
-        let window_start = OffsetDateTime::now_utc().unix_timestamp() - self.lockout_seconds;
-        self.lockout_state(&identity_hash, ip_addr, window_start)
+        let limits = self.limits().await;
+        let window_start = OffsetDateTime::now_utc().unix_timestamp() - limits.lockout_seconds;
+        self.lockout_state(&identity_hash, ip_addr, window_start, &limits)
             .await
     }
 
@@ -86,7 +88,8 @@ impl AuthRateLimiter {
     ) -> RateLimitResult {
         let identity_hash = Self::hash_identity(identity);
         let now = OffsetDateTime::now_utc().unix_timestamp();
-        let window_start = now - self.lockout_seconds;
+        let limits = self.limits().await;
+        let window_start = now - limits.lockout_seconds;
 
         let succeeded_int = succeeded as i64;
         let _ = sqlx::query(
@@ -104,7 +107,7 @@ impl AuthRateLimiter {
             return RateLimitResult::Allowed;
         }
 
-        self.lockout_state(&identity_hash, ip_addr, window_start)
+        self.lockout_state(&identity_hash, ip_addr, window_start, &limits)
             .await
     }
 
@@ -114,6 +117,7 @@ impl AuthRateLimiter {
         identity_hash: &str,
         ip_addr: &str,
         window_start: i64,
+        limits: &Limits,
     ) -> RateLimitResult {
         let now = OffsetDateTime::now_utc().unix_timestamp();
 
@@ -128,7 +132,7 @@ impl AuthRateLimiter {
         .await
         .unwrap_or(0);
 
-        if identity_failures >= self.max_attempts_identity {
+        if identity_failures >= limits.max_attempts_identity {
             let oldest: i64 = sqlx::query_scalar(
                 "SELECT MIN(attempted_at) FROM login_attempts \
                  WHERE identity_hash = ? AND succeeded = 0 AND attempted_at >= ?",
@@ -139,7 +143,7 @@ impl AuthRateLimiter {
             .await
             .unwrap_or(window_start);
 
-            let retry_after_secs = (oldest + self.lockout_seconds - now).max(1);
+            let retry_after_secs = (oldest + limits.lockout_seconds - now).max(1);
             return RateLimitResult::LockedOutByIdentity { retry_after_secs };
         }
 
@@ -154,7 +158,7 @@ impl AuthRateLimiter {
         .await
         .unwrap_or(0);
 
-        if ip_failures >= self.max_attempts_ip {
+        if ip_failures >= limits.max_attempts_ip {
             let oldest: i64 = sqlx::query_scalar(
                 "SELECT MIN(attempted_at) FROM login_attempts \
                  WHERE ip_addr = ? AND succeeded = 0 AND attempted_at >= ?",
@@ -165,7 +169,7 @@ impl AuthRateLimiter {
             .await
             .unwrap_or(window_start);
 
-            let retry_after_secs = (oldest + self.lockout_seconds - now).max(1);
+            let retry_after_secs = (oldest + limits.lockout_seconds - now).max(1);
             return RateLimitResult::LockedOutByIp { retry_after_secs };
         }
 
@@ -174,7 +178,8 @@ impl AuthRateLimiter {
 
     /// Prune attempts older than the lockout window. Called by the daily background job.
     pub async fn prune_old_attempts(&self) {
-        let cutoff = OffsetDateTime::now_utc().unix_timestamp() - self.lockout_seconds;
+        let lockout_seconds = self.settings.read().await.login_lockout_seconds;
+        let cutoff = OffsetDateTime::now_utc().unix_timestamp() - lockout_seconds;
         let _ = sqlx::query("DELETE FROM login_attempts WHERE attempted_at < ?")
             .bind(cutoff)
             .execute(&self.db)

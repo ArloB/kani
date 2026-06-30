@@ -95,11 +95,10 @@ async fn main() {
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
 
-    // Session lifetime — defaults to 30 days of inactivity. Override with KANI_SESSION_TIMEOUT_SECONDS.
-    let session_timeout_secs: i64 = std::env::var("KANI_SESSION_TIMEOUT_SECONDS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(30 * 24 * 60 * 60);
+    // Session lifetime — defaults to 30 days of inactivity. Read from the
+    // `session_timeout_secs` setting (seeded from KANI_SESSION_TIMEOUT_SECONDS on
+    // first boot); changes apply on restart.
+    let session_timeout_secs: i64 = state.settings.read().await.session_timeout_secs;
 
     let session_layer = SessionManagerLayer::new(session_store)
         .with_secure(secure_cookies)

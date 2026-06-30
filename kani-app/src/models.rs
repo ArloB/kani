@@ -47,6 +47,15 @@ pub struct Settings {
     pub per_source_download_concurrency: i64,
     pub job_max_history: i64,
     pub job_shutdown_timeout_secs: i64,
+    pub trash_retention_days: i64,
+    pub audit_retention_days: i64,
+    pub audit_security_retention_days: i64,
+    pub disk_warn_threshold: f64,
+    pub thumbnail_formats: String,
+    pub max_login_attempts: i64,
+    pub max_ip_attempts: i64,
+    pub login_lockout_seconds: i64,
+    pub session_timeout_secs: i64,
 }
 
 #[derive(sqlx::FromRow)]

@@ -75,7 +75,10 @@ impl AppState {
                 .to_string(),
             restart_requested: Arc::new(AtomicBool::new(false)),
             log_handle,
-            rate_limiter: Arc::new(AuthRateLimiter::new(service.db.clone())),
+            rate_limiter: Arc::new(AuthRateLimiter::new(
+                service.db.clone(),
+                service.settings.clone(),
+            )),
             csrf_secret: Arc::new(random_secret()),
             public_instance,
             service,
@@ -173,8 +176,9 @@ impl AppState {
     pub async fn new_for_test(pool: sqlx::SqlitePool) -> Self {
         let service = Arc::new(AppService::new_for_test(pool.clone()).await);
         let (_, log_handle) = crate::logging::RingBufferLayer::new(100);
+        let rate_limiter = Arc::new(AuthRateLimiter::new(pool, service.settings.clone()));
         Self {
-            rate_limiter: Arc::new(AuthRateLimiter::new(pool)),
+            rate_limiter,
             csrf_secret: Arc::new([0u8; 32]),
             public_instance: false,
             service,

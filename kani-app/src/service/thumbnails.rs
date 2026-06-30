@@ -51,7 +51,8 @@ impl AppService {
             .await
             .map_err(|e| ServiceError::Internal(format!("Read cover failed: {e}")))?;
 
-        let formats = self.thumbnail_formats.clone();
+        let formats =
+            crate::images::parse_thumbnail_formats(&self.settings.read().await.thumbnail_formats);
         let lib = library_path.clone();
         let mid = manga_id.0;
 

@@ -247,10 +247,7 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
-        let warn_threshold: f64 = std::env::var("KANI_DISK_WARN_THRESHOLD")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0.10);
+        let warn_threshold: f64 = self.settings.read().await.disk_warn_threshold;
 
         let total_bytes = (free_bytes as i64).saturating_add(library_used as i64);
         if total_bytes > 0 {

@@ -96,15 +96,15 @@ impl AppService {
     }
 
     pub async fn prune_audit_log(&self) -> Result<u64> {
-        let retention_days = std::env::var("KANI_AUDIT_RETENTION_DAYS")
-            .ok()
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(365);
-
-        let security_retention_days: Option<i64> =
-            std::env::var("KANI_AUDIT_SECURITY_RETENTION_DAYS")
-                .ok()
-                .and_then(|v| v.parse().ok());
+        let (retention_days, security_retention_days) = {
+            let s = self.settings.read().await;
+            let sec = if s.audit_security_retention_days > 0 {
+                Some(s.audit_security_retention_days)
+            } else {
+                None
+            };
+            (s.audit_retention_days, sec)
+        };
 
         let security_actions = ["login_failed", "permission_denied", "user_created"];
 
