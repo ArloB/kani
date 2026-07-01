@@ -1,11 +1,16 @@
 // @ts-check
 // Settings — General section (display, reading, notifications).
 
+import { h, render } from 'preact';
+import htm from 'htm';
 import { getLocal, setLocal, resetAllConfirmDialogs } from '../../utils.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow, mkSelectRow } from './_shared.js';
-import { ACCENT_SWATCHES, getCurrentTheme, saveAndApplyTheme } from '../../theme.js';
+import { ACCENT_SWATCHES, getCurrentTheme, saveAndApplyTheme, getCustomThemes, deleteCustomTheme, applyCustomTheme } from '../../theme.js';
 import { t } from '../../i18n.js';
 import { showToast } from '../../components/toast.js';
+import { ThemeEditor, ThemePreviewSwatch } from '../../components/theme-editor.js';
+
+const html = htm.bind(h);
 
 /**
  * @param {HTMLElement} container
@@ -220,10 +225,91 @@ export function mount(el) {
 
     el.appendChild(notifGroup);
 
+    // ── Custom themes group ──────────────────────────────────────────────────
+    const customThemes = getCustomThemes();
+    const activeTheme = getCurrentTheme().theme;
+
+    const customGroup = mkSettingsGroup(t('theme.custom.group'));
+    const customCard  = mkSettingsGroupCard(customGroup);
+
+    for (const ct of customThemes) {
+      const isActive = activeTheme === `custom:${ct.id}`;
+      const row = document.createElement('div');
+      row.className = `flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-surface-3 transition-colors${isActive ? ' bg-surface-3' : ''}`;
+      if (isActive) {
+        row.setAttribute('aria-current', 'true');
+      }
+
+      const swatchWrap = document.createElement('div');
+      render(html`<${ThemePreviewSwatch} tokens=${ct.tokens} />`, swatchWrap);
+      row.appendChild(swatchWrap);
+
+      const nameEl = document.createElement('span');
+      nameEl.className = `text-sm flex-1 min-w-0 truncate${isActive ? ' font-semibold text-accent' : ' text-text'}`;
+      nameEl.textContent = ct.name;
+      row.appendChild(nameEl);
+
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn-ghost btn-sm shrink-0';
+      editBtn.textContent = t('theme.custom.edit_action');
+      editBtn.addEventListener('click', (e) => { e.stopPropagation(); openEditor(ct.id); });
+      row.appendChild(editBtn);
+
+      row.addEventListener('click', () => {
+        applyCustomTheme(ct.id);
+        _render();
+      });
+
+      customCard.appendChild(row);
+    }
+
+    const newRow = document.createElement('div');
+    newRow.className = 'flex items-center px-4 py-3';
+    const newBtn = document.createElement('button');
+    newBtn.type = 'button';
+    newBtn.className = 'btn-ghost btn-sm';
+    newBtn.textContent = `+ ${t('theme.custom.new')}`;
+    newBtn.addEventListener('click', () => openEditor(null));
+    newRow.appendChild(newBtn);
+    customCard.appendChild(newRow);
+
+    el.appendChild(customGroup);
+
     const note = document.createElement('p');
     note.className = 'text-xs text-text-muted';
     note.textContent = 'These preferences are saved to this device only.';
     el.appendChild(note);
+  }
+
+  /** @param {string | null} themeId */
+  function openEditor(themeId) {
+    const root = document.getElementById('modal-root');
+    if (!root) return;
+
+    /** @param {string | null} savedId */
+    function handleSave(savedId) {
+      render(null, root);
+      if (savedId !== null) {
+        applyCustomTheme(savedId);
+      } else {
+        // Theme was deleted — if it was active, fall back to 'dark'
+        const prev = getCurrentTheme();
+        if (themeId && prev.theme === `custom:${themeId}`) {
+          saveAndApplyTheme('dark', prev.density, prev.accent);
+        }
+      }
+      _render();
+    }
+
+    render(
+      html`<${ThemeEditor}
+        themeId=${themeId}
+        onClose=${() => render(null, root)}
+        onSave=${handleSave}
+      />`,
+      root,
+    );
   }
 
   _render();

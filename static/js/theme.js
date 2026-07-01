@@ -15,6 +15,86 @@ export const ACCENT_SWATCHES = [
 
 const _DEFAULT_ACCENT = '#e8545a';
 
+/**
+ * The 13 manually-editable colour tokens that define a custom theme.
+ * accent-hover and accent-dim are auto-derived from accent and not listed here.
+ * @type {ReadonlyArray<string>}
+ */
+export const CORE_TOKENS = [
+  '--color-bg',
+  '--color-surface',
+  '--color-surface-2',
+  '--color-surface-3',
+  '--color-border',
+  '--color-border-subtle',
+  '--color-accent',
+  '--color-text',
+  '--color-text-muted',
+  '--color-text-faint',
+  '--color-success',
+  '--color-warn',
+  '--color-danger',
+];
+
+/**
+ * All 15 stored tokens (CORE_TOKENS + the 2 derived accent tokens).
+ * Used when clearing a custom theme from the document.
+ * @type {ReadonlyArray<string>}
+ */
+const _ALL_THEME_TOKENS = [...CORE_TOKENS, '--color-accent-hover', '--color-accent-dim'];
+
+/** @typedef {{ id: string, name: string, tokens: Record<string, string> }} CustomTheme */
+
+/** @returns {CustomTheme[]} */
+export function getCustomThemes() {
+  try {
+    const raw = localStorage.getItem('kani-custom-themes');
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+/** @param {CustomTheme[]} themes */
+function _saveCustomThemeList(themes) {
+  localStorage.setItem('kani-custom-themes', JSON.stringify(themes));
+}
+
+/** @param {CustomTheme} theme */
+export function saveCustomTheme(theme) {
+  const all = getCustomThemes();
+  const idx = all.findIndex(t => t.id === theme.id);
+  if (idx >= 0) all[idx] = theme;
+  else all.push(theme);
+  _saveCustomThemeList(all);
+}
+
+/** @param {string} id */
+export function deleteCustomTheme(id) {
+  _saveCustomThemeList(getCustomThemes().filter(t => t.id !== id));
+  if (localStorage.getItem('kani-theme') === `custom:${id}`) {
+    localStorage.removeItem('kani-theme');
+  }
+}
+
+/** @returns {string} */
+export function generateThemeId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+/**
+ * Reads the current computed token values from <html> to seed a new custom theme.
+ * Returns all 13 CORE_TOKENS as hex strings.
+ * @returns {Record<string, string>}
+ */
+export function snapshotCurrentTokens() {
+  const style = getComputedStyle(document.documentElement);
+  /** @type {Record<string, string>} */
+  const tokens = {};
+  for (const k of CORE_TOKENS) {
+    tokens[k] = style.getPropertyValue(k).trim();
+  }
+  return tokens;
+}
+
 /** @returns {{ theme: string, density: string, accent: string }} */
 export function getCurrentTheme() {
   return {
@@ -41,6 +121,33 @@ export function accentFromHex(hex) {
 function _applyRaw(theme, density, accent) {
   const h = document.documentElement;
 
+  // Clear any inline token overrides from a previously-applied custom theme
+  // (or from a previous accent override — the accent branch below re-sets as needed)
+  for (const t of _ALL_THEME_TOKENS) h.style.removeProperty(t);
+
+  // ── Custom named theme ─────────────────────────────────────────────────────
+  if (theme && theme.startsWith('custom:')) {
+    const id = theme.slice(7);
+    const custom = getCustomThemes().find(c => c.id === id);
+    if (custom) {
+      h.removeAttribute('data-theme');
+      if (density === 'compact') h.setAttribute('data-density', 'compact');
+      else h.removeAttribute('data-density');
+      for (const [k, v] of Object.entries(custom.tokens)) {
+        h.style.setProperty(k, v);
+      }
+      const bg = custom.tokens['--color-bg'];
+      if (bg) {
+        for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+          meta.setAttribute('content', bg);
+        }
+      }
+      return;
+    }
+    // Custom theme not found — fall through to dark default
+  }
+
+  // ── Preset themes ──────────────────────────────────────────────────────────
   if (theme === 'system') {
     const light = window.matchMedia('(prefers-color-scheme: light)').matches;
     if (light) h.setAttribute('data-theme', 'light');
@@ -59,10 +166,6 @@ function _applyRaw(theme, density, accent) {
     h.style.setProperty('--color-accent', color);
     h.style.setProperty('--color-accent-hover', hover);
     h.style.setProperty('--color-accent-dim', dim);
-  } else {
-    h.style.removeProperty('--color-accent');
-    h.style.removeProperty('--color-accent-hover');
-    h.style.removeProperty('--color-accent-dim');
   }
 
   const effectiveTheme = theme === 'system'
@@ -94,6 +197,16 @@ export function saveAndApplyTheme(theme, density, accent) {
   localStorage.setItem('kani-density', density);
   localStorage.setItem('kani-accent', accent);
   applyTheme(theme, density, accent);
+}
+
+/**
+ * Persist and apply a custom theme by id without touching density or accent prefs.
+ * @param {string} id
+ */
+export function applyCustomTheme(id) {
+  const { density, accent } = getCurrentTheme();
+  localStorage.setItem('kani-theme', `custom:${id}`);
+  applyTheme(`custom:${id}`, density, accent);
 }
 
 /** @type {MediaQueryList | null} */
