@@ -119,7 +119,7 @@ function _clearAllFilters() {
 /** @param {HTMLElement} container */
 export async function init(container) {
   _container = container;
-  document.title = 'Library - Kani';
+  document.title = t('library.title');
   _pageSize = getLocalInt('kani_library_page_size', 24);
 
   // Restore filter state from URL params
@@ -143,7 +143,7 @@ export async function init(container) {
     refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
     refreshBtn.className = 'btn-primary btn-sm flex items-center gap-2';
-    refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>Refresh All</span>`;
+    refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>${t('library.refresh_all')}</span>`;
   }
 
   let scanAllBtn = /** @type {HTMLButtonElement|null} */ (null);
@@ -151,7 +151,7 @@ export async function init(container) {
     scanAllBtn = document.createElement('button');
     scanAllBtn.type = 'button';
     scanAllBtn.className = 'btn-ghost btn-sm';
-    scanAllBtn.textContent = 'Scan all';
+    scanAllBtn.textContent = t('library.scan_all');
     scanAllBtn.addEventListener('click', async () => {
       if (!scanAllBtn || scanAllBtn.disabled) return;
       scanAllBtn.disabled = true;
@@ -163,7 +163,7 @@ export async function init(container) {
         setTimeout(() => {
           if (scanAllBtn && scanAllBtn.disabled) {
             scanAllBtn.disabled = false;
-            scanAllBtn.textContent = 'Scan all';
+            scanAllBtn.textContent = t('library.scan_all');
             _scanInProgress = false;
             setState('scanningMangaIds', new Set());
           }
@@ -171,7 +171,7 @@ export async function init(container) {
       } catch (e) {
         showApiError(e);
         scanAllBtn.disabled = false;
-        scanAllBtn.textContent = 'Scan all';
+        scanAllBtn.textContent = t('library.scan_all');
         _scanInProgress = false;
         setState('scanningMangaIds', new Set());
       }
@@ -181,7 +181,7 @@ export async function init(container) {
   const _hdrActions = /** @type {HTMLElement[]} */ ([]);
   if (scanAllBtn) _hdrActions.push(scanAllBtn);
   if (refreshBtn) _hdrActions.push(refreshBtn);
-  setPageHeader({ crumbs: [{ label: 'Library' }], actions: _hdrActions.length ? _hdrActions : null });
+  setPageHeader({ crumbs: [{ label: t('library.nav.title') }], actions: _hdrActions.length ? _hdrActions : null });
 
   container.innerHTML = `
     <div class="max-w-page mx-auto w-full px-3 sm:px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4">
@@ -195,9 +195,9 @@ export async function init(container) {
         <input
           type="search"
           class="input js-search w-full pl-9"
-          placeholder="Search library…"
+          placeholder="${t('library.search.placeholder')}"
           value="${_search.replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
-          aria-label="Search library"
+          aria-label="${t('library.search.aria')}"
         />
       </div>
 
@@ -210,12 +210,12 @@ export async function init(container) {
           aria-controls="library-filters"
         >
           <span class="flex items-center gap-2">
-            Filters
+            ${t('library.filters')}
             <span class="js-filter-count hidden items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-accent text-on-accent text-xs font-medium"></span>
           </span>
           <span class="icon-sm transition-transform js-filter-chevron">${iconChevronDown}</span>
         </button>
-        <select class="input js-page-size w-20 shrink-0" aria-label="Items per page">
+        <select class="input js-page-size w-20 shrink-0" aria-label="${t('library.items_per_page')}">
           ${[12, 24, 48, 96].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
         </select>
       </div>
@@ -229,36 +229,36 @@ export async function init(container) {
             <input
               type="search"
               class="input js-search pl-9 w-full"
-              placeholder="Search library…"
+              placeholder="${t('library.search.placeholder')}"
               value="${_search.replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
-              aria-label="Search library"
+              aria-label="${t('library.search.aria')}"
             />
           </div>
-          <select class="input js-sort w-full lg:w-auto" aria-label="Sort order">
+          <select class="input js-sort w-full lg:w-auto" aria-label="${t('library.sort.aria')}">
             ${[
-              ['updated_desc','Updated ↓'],['updated_asc','Updated ↑'],
-              ['name_asc','Title A–Z'],['name_desc','Title Z–A'],
-              ['added_desc','Added ↓'],['added_asc','Added ↑'],
-              ['score_desc','Score ↓'],['score_asc','Score ↑'],
-              ['last_read_desc','Last Read'],
+              ['updated_desc', t('library.sort.updated_desc')],['updated_asc', t('library.sort.updated_asc')],
+              ['name_asc', t('library.sort.name_asc')],['name_desc', t('library.sort.name_desc')],
+              ['added_desc', t('library.sort.added_desc')],['added_asc', t('library.sort.added_asc')],
+              ['score_desc', t('library.sort.score_desc')],['score_asc', t('library.sort.score_asc')],
+              ['last_read_desc', t('library.sort.last_read_desc')],
             ].map(([v,l]) =>
               `<option value="${v}"${v === _sortOrder ? ' selected' : ''}>${l}</option>`
             ).join('')}
           </select>
-          <select class="input js-page-size w-full lg:w-20 hidden lg:block" aria-label="Items per page">
+          <select class="input js-page-size w-full lg:w-20 hidden lg:block" aria-label="${t('library.items_per_page')}">
             ${[12, 24, 48, 96].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
           </select>
         </div>
         <!-- Row 2: Filter dropdowns + toggles -->
         <div class="flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-2">
-          <select class="input js-status w-full lg:w-auto lg:min-w-36" aria-label="Status filter">
+          <select class="input js-status w-full lg:w-auto lg:min-w-36" aria-label="${t('library.status.aria')}">
             ${['', 'ongoing', 'completed', 'hiatus', 'cancelled', 'unknown'].map(v =>
-              `<option value="${v}"${v === (_statusFilter ?? '') ? ' selected' : ''}>${v || 'All statuses'}</option>`
+              `<option value="${v}"${v === (_statusFilter ?? '') ? ' selected' : ''}>${v || t('library.status.all')}</option>`
             ).join('')}
           </select>
-          <select class="input js-reading-status w-full lg:w-auto lg:min-w-40" aria-label="Reading status filter">
-            <option value="">All reading states</option>
-            ${[['0','Reading'],['1','On Hold'],['2','Dropped'],['3','Plan to Read'],['4','Completed'],['5','Rereading']].map(([v,l]) =>
+          <select class="input js-reading-status w-full lg:w-auto lg:min-w-40" aria-label="${t('library.reading_status.aria')}">
+            <option value="">${t('library.reading_status.all')}</option>
+            ${[['0', t('library.reading_status.reading')],['1', t('library.reading_status.on_hold')],['2', t('library.reading_status.dropped')],['3', t('library.reading_status.plan_to_read')],['4', t('library.reading_status.completed')],['5', t('library.reading_status.rereading')]].map(([v,l]) =>
               `<option value="${v}"${String(_readingStatusFilter) === v ? ' selected' : ''}>${l}</option>`
             ).join('')}
           </select>
@@ -266,14 +266,14 @@ export async function init(container) {
           <div class="js-author-combobox w-full lg:w-auto lg:max-w-44"></div>
           <div class="js-artist-combobox w-full lg:w-auto lg:max-w-44"></div>
           <label class="flex items-center gap-3 text-sm text-text cursor-pointer whitespace-nowrap select-none">
-            <span>Hide read</span>
+            <span>${t('library.hide_read')}</span>
             <label class="kani-toggle">
               <input type="checkbox" class="kani-toggle__input js-hide-no-unread" ${_hideNoUnread ? 'checked' : ''} />
               <span class="kani-toggle__track"></span>
             </label>
           </label>
           <label class="flex items-center gap-3 text-sm text-text cursor-pointer whitespace-nowrap select-none">
-            <span>Hide completed</span>
+            <span>${t('library.hide_completed')}</span>
             <label class="kani-toggle">
               <input type="checkbox" class="kani-toggle__input js-hide-completed" ${_hideCompletedStatus ? 'checked' : ''} />
               <span class="kani-toggle__track"></span>
@@ -285,7 +285,7 @@ export async function init(container) {
 
       <!-- Continue Reading shelf -->
       <div class="js-shelf hidden flex flex-col gap-2">
-        <h2 class="text-sm font-semibold text-text-muted uppercase tracking-wide">Continue Reading</h2>
+        <h2 class="text-sm font-semibold text-text-muted uppercase tracking-wide">${t('library.continue_reading')}</h2>
         <div class="js-shelf-row flex gap-3 overflow-x-auto [scrollbar-width:none] [-webkit-overflow-scrolling:touch] pb-1"></div>
       </div>
 
@@ -449,7 +449,7 @@ export async function init(container) {
         options=${tagOptions}
         value=${_tagFilter}
         onChange=${(id) => { _tagFilter = id; _page = 1; _mountComboboxes(); _updateFilterCount(); _updateUrl(); _fetchLibrary(); }}
-        placeholder="All tags"
+        placeholder=${t('library.filter.all_tags')}
       />`, _tagsContainer);
     }
     if (_authorContainer) {
@@ -457,7 +457,7 @@ export async function init(container) {
         options=${authorOptions}
         value=${_authorFilter}
         onChange=${(id) => { _authorFilter = id; _page = 1; _mountComboboxes(); _updateFilterCount(); _updateUrl(); _fetchLibrary(); }}
-        placeholder="Author"
+        placeholder=${t('library.filter.author')}
       />`, _authorContainer);
     }
     if (_artistContainer) {
@@ -465,7 +465,7 @@ export async function init(container) {
         options=${artistOptions}
         value=${_artistFilter}
         onChange=${(id) => { _artistFilter = id; _page = 1; _mountComboboxes(); _updateFilterCount(); _updateUrl(); _fetchLibrary(); }}
-        placeholder="Artist"
+        placeholder=${t('library.filter.artist')}
       />`, _artistContainer);
     }
   }
@@ -558,7 +558,7 @@ export async function init(container) {
       // A scan is running — progress indicator belongs in Scan All, not Refresh All.
       if (scanAllBtn) {
         if (isRunning) {
-          const label = pct > 0 ? `${pct}%` : 'Scanning…';
+          const label = pct > 0 ? `${pct}%` : t('library.scanning');
           scanAllBtn.innerHTML = `<span class="icon-sm shrink-0 animate-spin">${iconRefresh}</span><span>${label}</span>`;
           // disabled was already set by the click handler; keep it set.
         }
@@ -567,18 +567,18 @@ export async function init(container) {
       // Keep Refresh All in its normal enabled state during a scan.
       if (refreshBtn) {
         refreshBtn.disabled = false;
-        refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>Refresh All</span>`;
+        refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>${t('library.refresh_all')}</span>`;
       }
     } else {
       // A refresh is running (or idle) — progress indicator belongs in Refresh All.
       if (!refreshBtn) return;
       if (isRunning) {
         refreshBtn.disabled = true;
-        const label = pct > 0 ? `${pct}%` : 'Refreshing…';
+        const label = pct > 0 ? `${pct}%` : t('library.refreshing');
         refreshBtn.innerHTML = `<span class="icon-sm shrink-0 animate-spin">${iconRefresh}</span><span>${label}</span>`;
       } else {
         refreshBtn.disabled = false;
-        refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>Refresh All</span>`;
+        refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>${t('library.refresh_all')}</span>`;
       }
     }
   }
@@ -640,14 +640,14 @@ export async function init(container) {
     _scanInProgress = false;
     if (scanAllBtn) {
       scanAllBtn.disabled = false;
-      scanAllBtn.textContent = 'Scan all';
+      scanAllBtn.textContent = t('library.scan_all');
     }
 
     // Show completion toast
-    const parts = [`Scanned ${result.total} manga`];
-    if (result.newChapters > 0) parts.push(`${result.newChapters} new chapter${result.newChapters !== 1 ? 's' : ''} found`);
-    else parts.push('no new chapters');
-    if (result.failed > 0) parts.push(`${result.failed} failed`);
+    const parts = [t('library.scan.result', { count: result.total })];
+    if (result.newChapters > 0) parts.push(t('library.scan.new_chapters', { count: result.newChapters }));
+    else parts.push(t('library.scan.no_new_chapters'));
+    if (result.failed > 0) parts.push(t('library.scan.failed', { count: result.failed }));
     showToast(parts.join(' — '), { type: result.failed > 0 ? 'warn' : 'success' });
 
     // Apply new-chapter badges to visible cards
@@ -785,11 +785,11 @@ function _fetchLibrary() {
       const hasCategoryOnly = !hasFilters && _catFilter != null;
       let emptyOpts;
       if (hasCategoryOnly) {
-        emptyOpts = { icon: iconBookOpen, title: 'This category is empty.' };
+        emptyOpts = { icon: iconBookOpen, title: t('library.empty.category') };
       } else if (hasFilters || _catFilter != null) {
-        emptyOpts = { icon: iconBookOpen, title: 'No results found.', subtitle: 'Try adjusting your filters.', action: { label: 'Clear Filters', onClick: _clearAllFilters } };
+        emptyOpts = { icon: iconBookOpen, title: t('library.empty.filters'), subtitle: t('library.empty.filters.subtitle'), action: { label: t('library.empty.filters.action'), onClick: _clearAllFilters } };
       } else {
-        emptyOpts = { icon: iconBookOpen, title: 'Your library is empty.', subtitle: 'Add manga from Sources to get started.', action: { label: 'Browse Sources', href: '/sources' } };
+        emptyOpts = { icon: iconBookOpen, title: t('library.empty.title'), subtitle: t('library.empty.subtitle'), action: { label: t('library.empty.action'), href: '/sources' } };
       }
       _gridEl.appendChild(createEmptyState(emptyOpts));
     } else if (items.length > 0) {
@@ -840,7 +840,7 @@ function _fetchLibrary() {
       _gridEl.classList.remove('opacity-50', 'pointer-events-none');
       _gridEl.innerHTML = '';
       _gridEl.appendChild(createErrorState({
-        message: 'Failed to load library.',
+        message: t('library.error.load'),
         onRetry: () => _fetchLibrary(),
       }));
     }
@@ -963,7 +963,7 @@ function _toggleMangaSelected(id, cardEl) {
 function _updateBulkBar() {
   if (!_bulkBarEl) return;
   const countEl = _bulkBarEl.querySelector('.js-select-count');
-  if (countEl) countEl.textContent = `${_selected.size} selected`;
+  if (countEl) countEl.textContent = t('library.bulk.selected', { count: _selected.size });
 
   const hasSelection = _selected.size > 0;
   for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (_bulkBarEl.querySelectorAll('.js-bulk-action'))) {
@@ -983,15 +983,15 @@ function _renderBulkBar() {
   ].join(' ');
 
   bar.innerHTML = `
-    <span class="text-sm font-medium text-text-muted js-select-count flex-1">0 selected</span>
-    <button type="button" class="btn-icon js-select-all" title="Select all visible">All</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-download" disabled title="Download all selected">Download</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-scan" disabled title="Scan for new chapters">Scan</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-mark-read" disabled>Mark read</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-mark-unread" disabled>Mark unread</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-categories" disabled>Categories</button>
-    <button type="button" class="btn-danger btn-sm js-bulk-action js-bulk-delete" disabled>Delete</button>
-    <button type="button" class="btn-ghost btn-sm js-bulk-cancel">Cancel</button>
+    <span class="text-sm font-medium text-text-muted js-select-count flex-1">${t('library.bulk.selected', { count: 0 })}</span>
+    <button type="button" class="btn-icon js-select-all" title="${t('library.bulk.select_all')}">${t('library.bulk.all')}</button>
+    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-download" disabled title="${t('library.bulk.download.title')}">${t('library.bulk.download')}</button>
+    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-scan" disabled title="${t('library.bulk.scan.title')}">${t('library.bulk.scan')}</button>
+    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-mark-read" disabled>${t('library.bulk.mark_read')}</button>
+    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-mark-unread" disabled>${t('library.bulk.mark_unread')}</button>
+    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-categories" disabled>${t('library.bulk.categories')}</button>
+    <button type="button" class="btn-danger btn-sm js-bulk-action js-bulk-delete" disabled>${t('library.bulk.delete')}</button>
+    <button type="button" class="btn-ghost btn-sm js-bulk-cancel">${t('common.cancel')}</button>
   `;
   _bulkBarEl = bar;
   document.body.appendChild(bar);
@@ -1015,7 +1015,7 @@ function _renderBulkBar() {
       try { await api.downloadAll(id); } catch { /* ignore */ }
       done++;
     }
-    showToast(`Download queued for ${done} manga.`);
+    showToast(t('library.bulk.toast.downloaded', { count: done }));
     _exitSelectMode();
   });
 
@@ -1043,7 +1043,7 @@ function _renderBulkBar() {
     for (const id of ids) {
       try { await api.markChaptersUpTo(id, 99999, true); done++; } catch { /* ignore */ }
     }
-    showToast(`Marked ${done} manga as read.`);
+    showToast(t('library.bulk.toast.read', { count: done }));
     _exitSelectMode();
   });
 
@@ -1054,7 +1054,7 @@ function _renderBulkBar() {
     for (const id of ids) {
       try { await api.markChaptersUpTo(id, 99999, false); done++; } catch { /* ignore */ }
     }
-    showToast(`Marked ${done} manga as unread.`);
+    showToast(t('library.bulk.toast.unread', { count: done }));
     _exitSelectMode();
   });
 
@@ -1066,7 +1066,7 @@ function _renderBulkBar() {
   // Delete selected
   bar.querySelector('.js-bulk-delete')?.addEventListener('click', async () => {
     const count = _selected.size;
-    const ok = await confirmDialog({ title: 'Remove from Library?', message: `Remove ${count} manga from your library? Downloaded chapters will be deleted.`, confirmLabel: 'Remove', danger: true });
+    const ok = await confirmDialog({ title: t('library.remove.title'), message: t('library.remove.message.bulk', { count }), confirmLabel: t('library.remove.confirm'), danger: true });
     if (!ok) return;
     const ids = [..._selected];
     _exitSelectMode();
@@ -1074,7 +1074,7 @@ function _renderBulkBar() {
     for (const id of ids) {
       try { await api.deleteManga(id); done++; } catch { /* ignore */ }
     }
-    showToast(`Deleted ${done} manga.`);
+    showToast(t('library.bulk.toast.deleted', { count: done }));
     _page = 1;
     _fetchLibrary();
   });
@@ -1091,34 +1091,34 @@ function _showMangaContextMenu(manga, x, y, cardEl) {
 
   /** @type {import('../components/menu.js').MenuItem[]} */
   const items = [
-    { label: 'Select', action: () => {
+    { label: t('library.menu.select'), action: () => {
       if (!_selectMode) _enterSelectMode();
       if (!_selected.has(manga.id)) _toggleMangaSelected(manga.id, cardEl);
     }},
     { divider: true },
-    ...(hasPermission('chapter:download') ? [{ label: 'Download All', action: async () => {
-      try { await api.downloadAll(manga.id); showToast('Download queued.'); }
-      catch { showToast('Failed to queue download.'); }
+    ...(hasPermission('chapter:download') ? [{ label: t('library.menu.download_all'), action: async () => {
+      try { await api.downloadAll(manga.id); showToast(t('library.toast.download_queued')); }
+      catch { showToast(t('library.toast.download_failed')); }
     }}] : []),
-    { label: 'Mark All Read', action: async () => {
-      try { await api.markChaptersUpTo(manga.id, 99999, true); showToast('Marked as read.'); }
-      catch { showToast('Failed.'); }
+    { label: t('library.menu.mark_all_read'), action: async () => {
+      try { await api.markChaptersUpTo(manga.id, 99999, true); showToast(t('library.toast.marked_read')); }
+      catch { showToast(t('common.error.failed')); }
     }},
-    { label: 'Mark All Unread', action: async () => {
-      try { await api.markChaptersUpTo(manga.id, 99999, false); showToast('Marked as unread.'); }
-      catch { showToast('Failed.'); }
+    { label: t('library.menu.mark_all_unread'), action: async () => {
+      try { await api.markChaptersUpTo(manga.id, 99999, false); showToast(t('library.toast.marked_unread')); }
+      catch { showToast(t('common.error.failed')); }
     }},
-    { label: 'Set Categories', action: () => _showBulkCategoryModal([manga.id]) },
+    { label: t('library.menu.set_categories'), action: () => _showBulkCategoryModal([manga.id]) },
     { divider: true },
-    { label: 'Remove from Library', danger: true, action: async () => {
-      const ok = await confirmDialog({ title: 'Remove from Library?', message: `Remove "${manga.title}" from your library? Downloaded chapters will be deleted.`, confirmLabel: 'Remove', danger: true });
+    { label: t('library.menu.remove'), danger: true, action: async () => {
+      const ok = await confirmDialog({ title: t('library.remove.title'), message: t('library.remove.message', { title: manga.title }), confirmLabel: t('library.remove.confirm'), danger: true });
       if (!ok) return;
       try {
         await api.deleteManga(manga.id);
-        showToast('Removed from library.');
+        showToast(t('library.toast.removed'));
         _page = 1;
         _fetchLibrary();
-      } catch { showToast('Failed to remove manga.'); }
+      } catch { showToast(t('library.toast.remove_failed')); }
     }},
   ];
 
@@ -1147,16 +1147,16 @@ async function _showBulkCategoryModal(mangaIds) {
   const dialog = document.createElement('div');
   dialog.className = 'bg-surface rounded-2xl shadow-xl w-full max-w-sm flex flex-col overflow-hidden';
   dialog.setAttribute('role', 'dialog');
-  dialog.setAttribute('aria-label', 'Set categories');
+  dialog.setAttribute('aria-label', t('library.categories.title'));
 
   if (allCats.length === 0) {
     dialog.innerHTML = `
       <div class="px-6 py-4 border-b border-border-subtle flex items-center justify-between gap-4">
-        <h2 class="text-base font-semibold text-text">Set categories</h2>
-        <button type="button" class="btn-icon js-close" aria-label="Close">✕</button>
+        <h2 class="text-base font-semibold text-text">${t('library.categories.title')}</h2>
+        <button type="button" class="btn-icon js-close" aria-label="${t('common.close')}">✕</button>
       </div>
       <div class="px-6 py-5">
-        <p class="text-sm text-text-muted">No categories yet. Create some in Settings → Library.</p>
+        <p class="text-sm text-text-muted">${t('library.categories.empty')}</p>
       </div>
     `;
   } else {
@@ -1169,16 +1169,16 @@ async function _showBulkCategoryModal(mangaIds) {
 
     dialog.innerHTML = `
       <div class="px-6 py-4 border-b border-border-subtle flex items-center justify-between gap-4">
-        <h2 class="text-base font-semibold text-text">Set categories</h2>
-        <button type="button" class="btn-icon js-close" aria-label="Close">✕</button>
+        <h2 class="text-base font-semibold text-text">${t('library.categories.title')}</h2>
+        <button type="button" class="btn-icon js-close" aria-label="${t('common.close')}">✕</button>
       </div>
       <div class="px-6 py-5 flex flex-col gap-2">
-        <p class="text-xs text-text-muted mb-2">Selected categories will be applied to all ${mangaIds.length} manga.</p>
+        <p class="text-xs text-text-muted mb-2">${t('library.categories.applies_to', { count: mangaIds.length })}</p>
         ${checkboxes}
       </div>
       <div class="px-6 py-4 border-t border-border-subtle flex items-center justify-end gap-3">
-        <button type="button" class="btn-secondary btn-sm js-cancel">Cancel</button>
-        <button type="button" class="btn-primary btn-sm js-apply">Apply</button>
+        <button type="button" class="btn-secondary btn-sm js-cancel">${t('common.cancel')}</button>
+        <button type="button" class="btn-primary btn-sm js-apply">${t('library.categories.apply')}</button>
       </div>
     `;
   }
@@ -1199,7 +1199,7 @@ async function _showBulkCategoryModal(mangaIds) {
     for (const id of mangaIds) {
       try { await api.setMangaCategories(id, selectedCatIds); done++; } catch { /* ignore */ }
     }
-    showToast(`Categories updated for ${done} manga.`);
+    showToast(t('library.categories.toast', { count: done }));
     _exitSelectMode();
     _page = 1;
     _fetchLibrary();
@@ -1272,7 +1272,7 @@ async function _mountSavedSearches(el) {
   if (searches.length > 0) {
     const select = document.createElement('select');
     select.className = 'input text-sm w-36';
-    select.innerHTML = `<option value="">Saved searches</option>` +
+    select.innerHTML = `<option value="">${t('saved_searches.label')}</option>` +
       searches.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
     select.addEventListener('change', () => {
       const id = Number(select.value);
@@ -1332,8 +1332,8 @@ function _showSaveSearchDialog(parentEl) {
     <div class="px-6 py-4 flex flex-col gap-3">
       <input type="text" class="input text-sm js-name" placeholder="${t('saved_searches.name.placeholder')}" />
       <div class="flex justify-end gap-2">
-        <button type="button" class="btn-ghost btn-sm js-cancel">Cancel</button>
-        <button type="button" class="btn-primary btn-sm js-save">Save</button>
+        <button type="button" class="btn-ghost btn-sm js-cancel">${t('common.cancel')}</button>
+        <button type="button" class="btn-primary btn-sm js-save">${t('common.save')}</button>
       </div>
     </div>
   `;
@@ -1423,10 +1423,10 @@ function _showManageSearchesDialog(parentEl, searches) {
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
       delBtn.className = 'btn-icon text-danger shrink-0';
-      delBtn.setAttribute('aria-label', 'Delete');
+      delBtn.setAttribute('aria-label', t('common.delete'));
       delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
       delBtn.addEventListener('click', async () => {
-        const ok = await confirmDialog({ title: 'Delete', body: t('saved_searches.delete.confirm', { name: s.name }), confirmLabel: 'Delete' });
+        const ok = await confirmDialog({ title: t('common.delete'), body: t('saved_searches.delete.confirm', { name: s.name }), confirmLabel: t('common.delete') });
         if (!ok) return;
         delBtn.disabled = true;
         try {

@@ -219,9 +219,9 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
 
   async function handleDelete() {
     const confirmed = await confirmDialog({
-      title: 'Delete source?',
-      message: 'This will permanently delete this source extension. This cannot be undone.',
-      confirmLabel: 'Delete',
+      title: t('source.delete.title'),
+      message: t('source.delete.message'),
+      confirmLabel: t('common.delete'),
       danger: true,
     });
     if (!confirmed) return;
@@ -340,17 +340,17 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
 
       <!-- 1. General -->
       <div class="flex flex-col gap-3">
-        ${mkSectionHdr('General', 'Configure basic source behaviour and status.')}
+        ${mkSectionHdr(t('source.settings.general'), t('source.settings.general.desc'))}
         <div class=${'bg-surface border rounded-xl px-4 md:px-6 py-1 ' + (source.unrestricted_http ? 'border-warn/50' : 'border-border')}>
 
           <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
             <div class="flex items-center justify-between gap-4">
               <div>
-                <p class="text-sm font-medium text-text">Runtime status</p>
-                <p class="text-xs text-text-muted mt-0.5">Whether the extension is currently loaded in memory</p>
+                <p class="text-sm font-medium text-text">${t('source.settings.runtime_status')}</p>
+                <p class="text-xs text-text-muted mt-0.5">${t('source.settings.runtime_status.desc')}</p>
               </div>
               <span class=${'shrink-0 inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ' + (isActive ? 'bg-success/20 text-success' : 'bg-surface-2 text-text-muted')}>
-                ${isActive ? 'Loaded' : 'Unloaded'}
+                ${isActive ? t('source.settings.loaded') : t('source.settings.unloaded')}
               </span>
             </div>
           </div>
@@ -358,15 +358,15 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
           <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
             <div class="flex items-center justify-between gap-4">
               <div>
-                <p class="text-sm font-medium text-text">Enabled</p>
-                <p class="text-xs text-text-muted mt-0.5">Allow this source to be used for browsing and searching</p>
+                <p class="text-sm font-medium text-text">${t('source.settings.enabled')}</p>
+                <p class="text-xs text-text-muted mt-0.5">${t('source.settings.enabled.desc')}</p>
               </div>
               <label class="kani-toggle shrink-0 cursor-pointer">
                 <input
                   type="checkbox"
                   class="kani-toggle__input"
                   checked=${enabled}
-                  aria-label=${enabled ? 'Disable source' : 'Enable source'}
+                  aria-label=${enabled ? t('source.settings.disable') : t('source.settings.enable')}
                   onChange=${(e) => toggleEnabled(/** @type {HTMLInputElement} */ (e.target).checked)}
                 />
                 <span class="kani-toggle__track"></span>
@@ -376,11 +376,11 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
               <div class="mt-3 rounded-lg bg-warn/10 border border-warn/30 p-3 flex flex-col gap-2">
                 <p class="text-sm text-warn flex items-center gap-1.5">
                   <${Icon} svg=${iconWarning} />
-                  This extension uses unrestricted HTTP. Only enable it if you trust the source.
+                  ${t('source.settings.unrestricted_warning')}
                 </p>
                 <div class="flex items-center gap-2 justify-end">
-                  <button class="btn-ghost btn-sm" onClick=${() => setConfirming(false)}>Cancel</button>
-                  <button class="btn-danger btn-sm" onClick=${() => toggleEnabled(true)}>Enable Anyway</button>
+                  <button class="btn-ghost btn-sm" onClick=${() => setConfirming(false)}>${t('common.cancel')}</button>
+                  <button class="btn-danger btn-sm" onClick=${() => toggleEnabled(true)}>${t('source.settings.enable_anyway')}</button>
                 </div>
               </div>
             `}
@@ -390,15 +390,15 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
             <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
               <div class="flex items-center gap-1.5 text-warn icon-sm">
                 <${Icon} svg=${iconWarning} />
-                <p class="text-sm font-medium">Unrestricted HTTP</p>
+                <p class="text-sm font-medium">${t('source.settings.unrestricted_http')}</p>
               </div>
-              <p class="text-xs text-text-muted mt-0.5">This extension can make arbitrary network requests. Only use it if you trust the source.</p>
+              <p class="text-xs text-text-muted mt-0.5">${t('source.settings.unrestricted_http.desc')}</p>
             </div>
           `}
 
           <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
             <div class="flex items-center justify-between gap-4">
-              <p class="text-sm font-medium text-text">Version</p>
+              <p class="text-sm font-medium text-text">${t('source.settings.version')}</p>
               <span class="flex items-center gap-2 shrink-0">
                 ${source.version?.includes('+debug') && html`
                   <span class="text-2xs px-1.5 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none" title="Built with debug info — readable WASM backtraces, larger binary">DEBUG</span>
@@ -411,9 +411,9 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
           ${capabilities?.streaming_chapters && html`
             <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
               <div class="flex items-center gap-1.5 text-accent icon-sm">
-                <p class="text-sm font-medium">Streaming Chapters</p>
+                <p class="text-sm font-medium">${t('source.settings.streaming')}</p>
               </div>
-              <p class="text-xs text-text-muted mt-0.5">This source supports progressive chapter list delivery via streaming.</p>
+              <p class="text-xs text-text-muted mt-0.5">${t('source.settings.streaming.desc')}</p>
             </div>
           `}
 
@@ -421,14 +421,14 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
             <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
               <div class="flex items-center justify-between gap-4">
                 <div>
-                  <p class="text-sm font-medium text-text">Reload extension</p>
-                  <p class="text-xs text-text-muted mt-0.5">Re-reads the WASM from disk and swaps the running instance</p>
+                  <p class="text-sm font-medium text-text">${t('source.settings.reload')}</p>
+                  <p class="text-xs text-text-muted mt-0.5">${t('source.settings.reload.desc')}</p>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
-                  ${reloadMsg === 'ok' && html`<span class="text-xs text-success">Reloaded</span>`}
-                  ${reloadMsg === 'err' && html`<span class="text-xs text-danger">Failed</span>`}
+                  ${reloadMsg === 'ok' && html`<span class="text-xs text-success">${t('source.settings.reloaded')}</span>`}
+                  ${reloadMsg === 'err' && html`<span class="text-xs text-danger">${t('common.error.failed')}</span>`}
                   <button class="btn-ghost btn-sm" disabled=${reloading} onClick=${handleReload}>
-                    ${reloading ? 'Reloading…' : 'Reload'}
+                    ${reloading ? t('source.settings.reloading') : t('source.settings.reload.action')}
                   </button>
                 </div>
               </div>
@@ -466,7 +466,7 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
 
       <!-- 2. Preferences -->
     <div class="flex flex-col gap-3">
-        ${mkSectionHdr('Preferences', 'Extension-specific settings and configuration options.')}
+        ${mkSectionHdr(t('source.settings.preferences'), t('source.settings.preferences.desc'))}
 
         <!-- Desktop: inline in card -->
         <div class="hidden md:block bg-surface border border-border rounded-xl px-4 md:px-6 py-1">
@@ -479,12 +479,12 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
                 <div class="py-4 first:pt-3 last:pb-3">
                     <div class="flex items-start justify-between gap-4 flex-wrap">
                         <div>
-                            <p class="text-sm font-medium text-text">Configure Extension Preferences</p>
-                            <p class="text-xs text-text-muted mt-0.5">Configure the internal preferences exposed by the extension.</p>
+                            <p class="text-sm font-medium text-text">${t('source.settings.prefs.configure')}</p>
+                            <p class="text-xs text-text-muted mt-0.5">${t('source.settings.prefs.configure.desc')}</p>
                         </div>
-                        <button class="btn-ghost" onClick=${() => setModalOpen(true)}>Configure preferences</button>
+                        <button class="btn-ghost" onClick=${() => setModalOpen(true)}>${t('source.settings.prefs.configure.action')}</button>
                     </div>
-                    <${Modal} open=${modalOpen} onClose=${() => setModalOpen(false)} title="Extension Preferences">
+                    <${Modal} open=${modalOpen} onClose=${() => setModalOpen(false)} title=${t('source.settings.prefs.modal_title')}>
                         <div class="flex flex-col divide-y divide-border-subtle">
                             ${prefContent}
                         </div>
@@ -497,33 +497,33 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
 
       <!-- 3. Health -->
       <div class="flex flex-col gap-3">
-        ${mkSectionHdr('Health', 'Extension response times and error history.')}
+        ${mkSectionHdr(t('source.settings.health'), t('source.settings.health.desc'))}
         <div class="bg-surface border border-border rounded-xl px-4 md:px-6 py-1">
           ${healthLoading
-            ? html`<p class="text-sm text-text-muted py-3">Loading…</p>`
+            ? html`<p class="text-sm text-text-muted py-3">${t('common.loading')}</p>`
             : health == null
-              ? html`<p class="text-sm text-text-muted py-3">No health data yet.</p>`
+              ? html`<p class="text-sm text-text-muted py-3">${t('source.settings.health.empty')}</p>`
               : html`
                 <div class="flex flex-col divide-y divide-border-subtle">
                   <div class="flex items-center justify-between gap-4 py-3">
-                    <p class="text-sm text-text">Last success</p>
+                    <p class="text-sm text-text">${t('source.health.last_success')}</p>
                     <span class="text-sm text-text-muted">${health.last_success_at ? fmtCompactDate(health.last_success_at) : '—'}</span>
                   </div>
                   <div class="flex items-center justify-between gap-4 py-3">
-                    <p class="text-sm text-text">Last error</p>
+                    <p class="text-sm text-text">${t('source.health.last_error')}</p>
                     <span class="text-sm text-text-muted">${health.last_error_at ? fmtCompactDate(health.last_error_at) : '—'}</span>
                   </div>
                   <div class="flex items-center justify-between gap-4 py-3">
-                    <p class="text-sm text-text">Consecutive errors</p>
+                    <p class="text-sm text-text">${t('source.health.consecutive_errors')}</p>
                     ${(health.consecutive_error_count ?? 0) >= 3
                       ? html`<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-danger/20 text-danger" aria-label=${errorCountAriaLabel(health.consecutive_error_count ?? 0)}>${health.consecutive_error_count}</span>`
                       : (health.consecutive_error_count ?? 0) > 0
                         ? html`<span class="text-xs font-semibold px-1.5 py-0.5 rounded bg-warn/20 text-warn" aria-label=${errorCountAriaLabel(health.consecutive_error_count ?? 0)}>${health.consecutive_error_count}</span>`
-                        : html`<span class="text-sm text-success" aria-label="0 errors">0</span>`
+                        : html`<span class="text-sm text-success" aria-label="${t('source.health.zero_errors')}">0</span>`
                     }
                   </div>
                   <div class="flex items-center justify-between gap-4 py-3">
-                    <p class="text-sm text-text">Avg response</p>
+                    <p class="text-sm text-text">${t('source.health.avg_response')}</p>
                     <span class="text-sm text-text-muted">${health.avg_response_ms != null ? Math.round(health.avg_response_ms) + ' ms' : '—'}</span>
                   </div>
                 </div>
@@ -534,15 +534,15 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
 
       <!-- 4. Danger Zone -->
       <div class="flex flex-col gap-3">
-        ${mkSectionHdr('Danger Zone', 'These actions are difficult or impossible to reverse. Proceed with care.')}
+        ${mkSectionHdr(t('source.settings.danger'), t('source.settings.danger.desc'))}
         <div class="bg-surface border border-border rounded-xl px-4 md:px-6 py-1">
           <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
             <div class="flex items-center justify-between gap-4">
               <div>
-                <p class="text-sm font-medium text-text">Delete source</p>
-                <p class="text-xs text-text-muted mt-0.5">Permanently removes this source extension</p>
+                <p class="text-sm font-medium text-text">${t('source.delete.action')}</p>
+                <p class="text-xs text-text-muted mt-0.5">${t('source.delete.desc')}</p>
               </div>
-              <button class="btn-danger btn-sm shrink-0" onClick=${handleDelete}>Delete</button>
+              <button class="btn-danger btn-sm shrink-0" onClick=${handleDelete}>${t('common.delete')}</button>
             </div>
           </div>
         </div>
@@ -571,12 +571,12 @@ function _updateUrl() {
 // ── Breadcrumb ────────────────────────────────────────────────────────────────
 
 function _updateBreadcrumb() {
-  const crumbs = [{ label: 'Sources', href: '/sources' }];
+  const crumbs = [{ label: t('source.nav.sources'), href: '/sources' }];
   if (_query) {
-    crumbs.push({ label: _sourceName || 'Source', href: `/source/${_sourceId}` });
-    crumbs.push({ label: `Search: ${_query}` });
+    crumbs.push({ label: _sourceName || t('source.nav.source'), href: `/source/${_sourceId}` });
+    crumbs.push({ label: t('source.nav.search', { query: _query }) });
   } else {
-    crumbs.push({ label: _sourceName || 'Source' });
+    crumbs.push({ label: _sourceName || t('source.nav.source') });
   }
   setPageHeader({ crumbs, actions: _addSourceBtn ?? null });
 }
@@ -633,7 +633,7 @@ export async function init(container, { id }) {
 
   if (!hasPermission('source:browse')) {
     container.innerHTML = '';
-    container.appendChild(createErrorState({ message: 'You do not have permission to browse sources.' }));
+    container.appendChild(createErrorState({ message: t('source.error.no_permission') }));
     return;
   }
 
@@ -642,7 +642,7 @@ export async function init(container, { id }) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn-primary btn-sm';
-    btn.textContent = 'Add source';
+    btn.textContent = t('source.add');
     _addSourceBtn = btn;
   } else {
     _addSourceBtn = null;
@@ -655,7 +655,7 @@ export async function init(container, { id }) {
       <aside
         class="hidden lg:flex flex-col w-72 shrink-0 border-r border-border-subtle sticky overflow-y-auto"
         style="top:var(--header-h);height:calc(100vh - var(--header-h));"
-        aria-label="Sources"
+        aria-label="${t('source.nav.sources')}"
       ></aside>
 
       <!-- Main panel -->
@@ -669,7 +669,7 @@ export async function init(container, { id }) {
           <div class="js-panel" data-panel="popular">
             <div class="flex flex-col gap-4">
               <div class="flex items-end justify-end gap-2">
-                <select class="input w-20 js-popular-page-size" aria-label="Page size">
+                <select class="input w-20 js-popular-page-size" aria-label="${t('common.page_size')}">
                   ${[18, 27, 36].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
                 </select>
               </div>
@@ -687,14 +687,14 @@ export async function init(container, { id }) {
                   <input
                     type="search"
                     class="input w-full pl-9 js-search"
-                    placeholder="Search manga…"
-                    aria-label="Search manga in this source"
+                    placeholder="${t('source.search.placeholder')}"
+                    aria-label="${t('source.search.aria')}"
                   />
                 </div>
-                <select class="input w-20 js-page-size" aria-label="Page size">
+                <select class="input w-20 js-page-size" aria-label="${t('common.page_size')}">
                   ${[18, 27, 36].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
                 </select>
-                <button type="button" class="js-filter-btn btn-ghost btn-sm flex items-center gap-1.5" aria-label="Open filters" style="display:none">Filters</button>
+                <button type="button" class="js-filter-btn btn-ghost btn-sm flex items-center gap-1.5" aria-label="${t('source.filters.open')}" style="display:none">${t('library.filters')}</button>
               </div>
               <div class="js-search-grid" aria-live="polite" aria-busy="false"></div>
               <div class="js-search-pagination"></div>
@@ -764,8 +764,8 @@ export async function init(container, { id }) {
       <div class="flex flex-col items-center justify-center py-20 gap-4 text-center">
         <span class="icon-xl text-warn">${iconWarning}</span>
         <div>
-          <p class="text-sm font-medium text-text">This extension is disabled</p>
-          <p class="text-xs text-text-muted mt-1">Enable it in the Settings tab to browse manga.</p>
+          <p class="text-sm font-medium text-text">${t('source.disabled.title')}</p>
+          <p class="text-xs text-text-muted mt-1">${t('source.disabled.hint')}</p>
         </div>
       </div>
     `;
@@ -801,9 +801,9 @@ export async function init(container, { id }) {
   const tabsEl = /** @type {HTMLElement} */ (container.querySelector('.js-tabs'));
   const { update: tabsUpdate } = renderTabs(tabsEl, {
     tabs: [
-      { id: 'popular', name: 'Popular' },
-      { id: 'search', name: 'Search' },
-      { id: 'library', name: 'Library' },
+      { id: 'popular', name: t('source.tab.popular') },
+      { id: 'search', name: t('source.tab.search') },
+      { id: 'library', name: t('source.tab.library') },
       { id: 'settings', name: 'Settings' },
     ],
     activeId: _activeTab,
@@ -881,11 +881,11 @@ export async function init(container, { id }) {
   }).catch(() => {});
 
   // ── Source name + title ──
-  document.title = 'Source - Kani';
+  document.title = t('source.title');
   api.getSource(_sourceId).then(src => {
     if (src?.name) {
       _sourceName = src.name;
-      document.title = src.name + ' - Kani';
+      document.title = t('source.title.named', { name: src.name });
       _updateBreadcrumb();
     }
     if (src && src.enabled === false) {
@@ -967,7 +967,7 @@ async function _mountSettings() {
     : []);
 
   if (!source) {
-    _settingsMountEl.appendChild(createErrorState({ message: 'Failed to load source settings.' }));
+    _settingsMountEl.appendChild(createErrorState({ message: t('source.error.settings') }));
     return;
   }
 
@@ -1000,8 +1000,8 @@ async function _mountSettings() {
                 <div class="flex flex-col items-center justify-center py-20 gap-4 text-center">
                   <span class="icon-xl text-warn">${iconWarning}</span>
                   <div>
-                    <p class="text-sm font-medium text-text">This extension is disabled</p>
-                    <p class="text-xs text-text-muted mt-1">Enable it in the Settings tab to browse manga.</p>
+                    <p class="text-sm font-medium text-text">${t('source.disabled.title')}</p>
+                    <p class="text-xs text-text-muted mt-1">${t('source.disabled.hint')}</p>
                   </div>
                 </div>
               `;
@@ -1018,8 +1018,8 @@ async function _mountSettings() {
                 <div class="flex flex-col items-center justify-center py-20 gap-4 text-center">
                   <span class="icon-xl text-warn">${iconWarning}</span>
                   <div>
-                    <p class="text-sm font-medium text-text">This extension is disabled</p>
-                    <p class="text-xs text-text-muted mt-1">Enable it in the Settings tab to browse manga.</p>
+                    <p class="text-sm font-medium text-text">${t('source.disabled.title')}</p>
+                    <p class="text-xs text-text-muted mt-1">${t('source.disabled.hint')}</p>
                   </div>
                 </div>
               `;
@@ -1062,7 +1062,7 @@ async function _fetchLibrary(gridEl, paginEl) {
     gridEl.innerHTML = '';
     gridEl.setAttribute('aria-busy', 'false');
     finishLoading();
-    gridEl.appendChild(createErrorState({ message: 'Failed to load library.' }));
+    gridEl.appendChild(createErrorState({ message: t('library.error.load') }));
     return;
   }
 
@@ -1078,7 +1078,7 @@ async function _fetchLibrary(gridEl, paginEl) {
   if (items.length === 0) {
     gridEl.appendChild(createEmptyState({
       icon: iconSearch,
-      title: 'No library manga from this source.',
+      title: t('source.library.empty'),
     }));
     return;
   }
@@ -1164,9 +1164,9 @@ async function _fetch(gridEl, paginEl, isSearch) {
       if (/** @type {any} */ (e)?.code === 'source_disabled') {
         const panel = /** @type {HTMLElement | null} */ (gridEl.closest('[data-panel]'));
         if (panel) _showDisabledPanel(panel);
-        else gridEl.appendChild(createErrorState({ message: 'Extension is disabled.' }));
+        else gridEl.appendChild(createErrorState({ message: t('source.disabled.title') }));
       } else {
-        gridEl.appendChild(createErrorState({ message: 'Failed to load manga.' }));
+        gridEl.appendChild(createErrorState({ message: t('source.error.load_manga') }));
       }
     }
     return;
