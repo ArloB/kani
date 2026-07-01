@@ -227,6 +227,8 @@ export default {
   'theme.custom.edit_action': 'Edit',
   'theme.custom.delete': 'Delete',
   'theme.custom.delete.confirm': 'Delete this custom theme? This cannot be undone.',
+  'theme.custom.empty': 'No custom themes yet. Create one to personalise your interface.',
+  'theme.custom.live_preview': 'The interface updates as you pick — the modal itself is the preview.',
   'theme.custom.contrast_warning': 'Custom themes are not checked for contrast and may reduce readability.',
   'theme.custom.group.bg': 'Backgrounds',
   'theme.custom.group.borders': 'Borders',

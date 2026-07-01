@@ -264,12 +264,22 @@ export function mount(el) {
       customCard.appendChild(row);
     }
 
+    if (customThemes.length === 0) {
+      const emptyRow = document.createElement('div');
+      emptyRow.className = 'px-4 py-3';
+      const emptyText = document.createElement('p');
+      emptyText.className = 'text-sm text-text-muted';
+      emptyText.textContent = t('theme.custom.empty');
+      emptyRow.appendChild(emptyText);
+      customCard.appendChild(emptyRow);
+    }
+
     const newRow = document.createElement('div');
     newRow.className = 'flex items-center px-4 py-3';
     const newBtn = document.createElement('button');
     newBtn.type = 'button';
     newBtn.className = 'btn-ghost btn-sm';
-    newBtn.textContent = `+ ${t('theme.custom.new')}`;
+    newBtn.textContent = t('theme.custom.new');
     newBtn.addEventListener('click', () => openEditor(null));
     newRow.appendChild(newBtn);
     customCard.appendChild(newRow);

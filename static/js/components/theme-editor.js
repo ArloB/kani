@@ -115,6 +115,7 @@ function ColorRow({ tokenKey, label, value, onChange }) {
       <input
         type="text"
         value=${text}
+        placeholder="#rrggbb"
         class="input w-28 text-xs font-mono py-1 h-8 shrink-0"
         maxLength="7"
         onInput=${(/** @type {Event} */ e) => setText(/** @type {HTMLInputElement} */ (e.target).value)}
@@ -137,7 +138,7 @@ export function ThemePreviewSwatch({ tokens }) {
     tokens['--color-text']    || '#ddddf0',
   ];
   return html`
-    <div class="flex rounded overflow-hidden h-5 w-20 shrink-0 border border-border-subtle" aria-hidden="true">
+    <div class="flex rounded-md overflow-hidden h-7 w-24 shrink-0 border border-border-subtle" aria-hidden="true">
       ${colors.map((c, i) => html`<div key=${i} class="flex-1" style=${{ background: c }}></div>`)}
     </div>
   `;
@@ -272,6 +273,7 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
             maxLength="40"
             onInput=${(/** @type {Event} */ e) => setName(/** @type {HTMLInputElement} */ (e.target).value)}
           />
+          <p class="text-xs text-text-faint">${t('theme.custom.live_preview')}</p>
         </div>
 
         ${TOKEN_GROUPS.map(group => html`
@@ -279,17 +281,33 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
             <p class="text-xs font-semibold uppercase tracking-wide text-text-muted mb-1.5 px-0.5">
               ${group.label}
             </p>
-            <div class="bg-surface-2 rounded-xl divide-y divide-border-subtle overflow-hidden">
-              ${group.tokens.map(tok => html`
-                <${ColorRow}
-                  key=${tok.key}
-                  tokenKey=${tok.key}
-                  label=${tok.label}
-                  value=${tokens[tok.key] || '#000000'}
-                  onChange=${handleTokenChange}
-                />
-              `)}
-            </div>
+            ${group.tokens.length === 1
+              ? html`
+                <div class="bg-surface-2 rounded-xl overflow-hidden">
+                  <${ColorRow}
+                    key=${group.tokens[0].key}
+                    tokenKey=${group.tokens[0].key}
+                    label=${group.tokens[0].label}
+                    value=${tokens[group.tokens[0].key] || '#000000'}
+                    onChange=${handleTokenChange}
+                  />
+                  <p class="text-xs text-text-faint px-4 pb-2.5">Hover and focus-ring colours are auto-derived.</p>
+                </div>
+              `
+              : html`
+                <div class="bg-surface-2 rounded-xl divide-y divide-border-subtle overflow-hidden">
+                  ${group.tokens.map(tok => html`
+                    <${ColorRow}
+                      key=${tok.key}
+                      tokenKey=${tok.key}
+                      label=${tok.label}
+                      value=${tokens[tok.key] || '#000000'}
+                      onChange=${handleTokenChange}
+                    />
+                  `)}
+                </div>
+              `
+            }
           </div>
         `)}
 
