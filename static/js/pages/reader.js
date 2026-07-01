@@ -5,6 +5,7 @@ import * as api from '../api.js';
 import { iconChevronLeft, iconChevronRight, iconX, iconMenu, iconSettings } from '../icons.js';
 import { navigate } from '../router.js';
 import { getLocal, getLocalJson, setLocalJson, debounce, formatChapterTitle } from '../utils.js';
+import { t } from '../i18n.js';
 import { getState, subscribe } from '../state.js';
 import { registerShortcuts, getShortcuts, setF1Override } from '../shortcuts.js';
 import { createEmptyState } from '../components/empty-state.js';
@@ -21,7 +22,7 @@ let _pendingBarsVisible = false;
 /** @param {HTMLElement} container @param {{ id?: string }} params */
 export async function init(container, { id }) {
   const chapterId = Number(id);
-  document.title = 'Reader - Kani';
+  document.title = t('reader.title');
 
   /** @type {Array<() => void>} */
   const _cleanup = [];
@@ -38,11 +39,11 @@ export async function init(container, { id }) {
         style="transform: translateY(-100%); padding-top: env(safe-area-inset-top, 0px)">
         <button id="reader-back-mobile"
           class="btn-icon shrink-0"
-          aria-label="Back">${iconChevronLeft}</button>
+          aria-label="${t('reader.aria.back')}">${iconChevronLeft}</button>
         <span id="reader-title-mobile" class="flex-1 text-sm font-medium text-text truncate"></span>
         <button id="reader-menu-btn"
           class="btn-icon shrink-0"
-          aria-label="Open menu">${iconMenu}</button>
+          aria-label="${t('reader.aria.open_menu')}">${iconMenu}</button>
       </div>
 
       <!-- Page canvas: flex-col so pagesEl can use flex-1; isolation:isolate so
@@ -52,9 +53,9 @@ export async function init(container, { id }) {
         <div id="reader-pages"
           class="flex-1 overflow-y-auto overflow-x-hidden flex flex-col items-center"
           style="overscroll-behavior: none"
-          tabindex="0" aria-label="Chapter pages" aria-live="polite">
+          tabindex="0" aria-label="${t('reader.aria.chapter_pages')}" aria-live="polite">
           <div class="flex items-center justify-center min-h-full w-full">
-            <p class="text-muted text-sm">Loading…</p>
+            <p class="text-muted text-sm">${t('common.loading')}</p>
           </div>
         </div>
 
@@ -113,14 +114,14 @@ export async function init(container, { id }) {
           <!-- Desktop back-to-manga button (hidden on mobile) -->
           <button id="reader-side-back"
             class="hidden md:flex btn-icon shrink-0"
-            aria-label="Back to manga">${iconChevronLeft}</button>
+            aria-label="${t('reader.aria.back_to_manga')}">${iconChevronLeft}</button>
           <span id="reader-side-title" class="flex-1 text-sm font-medium text-muted truncate">—</span>
           <button id="reader-settings-btn"
             class="btn-icon shrink-0"
-            aria-label="Reader settings">${iconSettings}</button>
+            aria-label="${t('reader.aria.settings')}">${iconSettings}</button>
           <button id="reader-side-close"
             class="btn-icon shrink-0"
-            aria-label="Close menu">${iconX}</button>
+            aria-label="${t('reader.aria.close_menu')}">${iconX}</button>
         </div>
 
         <div id="reader-side-scroll" class="flex flex-col flex-1 overflow-y-auto">
@@ -129,7 +130,7 @@ export async function init(container, { id }) {
           <div class="md:hidden px-3 py-3 border-b border-border shrink-0">
             <button id="reader-side-back-mobile"
               class="btn-ghost w-full flex items-center justify-center gap-1">
-              ${iconChevronLeft} Back to manga
+              ${iconChevronLeft} ${t('reader.back_to_manga')}
             </button>
           </div>
 
@@ -472,7 +473,7 @@ export async function init(container, { id }) {
     /** @param {{ totalPages: number, completedPages: number } | null} p */
     function _renderDlOverlay(p) {
       const progressText = p && p.totalPages > 0
-        ? `${p.completedPages} / ${p.totalPages} pages`
+        ? t('reader.dl.progress', { completed: p.completedPages, total: p.totalPages })
         : '';
       pagesEl.innerHTML = `
         <div class="flex flex-col items-center justify-center gap-4 min-h-full text-center px-6">
@@ -480,9 +481,9 @@ export async function init(container, { id }) {
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
           </svg>
-          <p class="text-sm text-text">Downloading chapter…</p>
+          <p class="text-sm text-text">${t('reader.dl.loading')}</p>
           ${progressText ? `<p class="text-xs text-text-muted js-dl-progress">${progressText}</p>` : '<p class="text-xs text-text-muted js-dl-progress"></p>'}
-          <button class="btn-ghost btn-sm js-dl-cancel">Cancel</button>
+          <button class="btn-ghost btn-sm js-dl-cancel">${t('common.cancel')}</button>
         </div>
       `;
       pagesEl.querySelector('.js-dl-cancel')?.addEventListener('click', () => {
@@ -511,9 +512,9 @@ export async function init(container, { id }) {
         unsub();
         pagesEl.innerHTML = `
           <div class="flex flex-col items-center justify-center gap-4 min-h-full text-center px-6">
-            <p class="text-sm text-danger">Download ${p.status}.</p>
-            <button class="btn-ghost btn-sm js-dl-retry">Retry</button>
-            <button class="btn-ghost btn-sm js-dl-back">Cancel</button>
+            <p class="text-sm text-danger">${t('reader.dl.status', { status: p.status })}</p>
+            <button class="btn-ghost btn-sm js-dl-retry">${t('common.retry')}</button>
+            <button class="btn-ghost btn-sm js-dl-back">${t('common.cancel')}</button>
           </div>
         `;
         pagesEl.querySelector('.js-dl-retry')?.addEventListener('click', () => _navigateChapter(chId), { once: true });
@@ -524,7 +525,7 @@ export async function init(container, { id }) {
       // Update progress text in-place (avoid full re-render to prevent losing the cancel listener).
       const progressEl = pagesEl.querySelector('.js-dl-progress');
       if (progressEl && p.totalPages > 0) {
-        progressEl.textContent = `${p.completedPages} / ${p.totalPages} pages`;
+        progressEl.textContent = t('reader.dl.progress', { completed: p.completedPages, total: p.totalPages });
       }
     });
 
@@ -659,7 +660,7 @@ export async function init(container, { id }) {
 
   segLeft.style.cursor        = 'pointer';
   segLeft.style.pointerEvents = 'auto';
-  segLeft.title               = 'Jump to page';
+  segLeft.title               = t('reader.jump_to_page');
   segLeft.addEventListener('click', (e) => {
     e.stopPropagation();
     if (_pages.length === 0) return;
@@ -1153,7 +1154,7 @@ export async function init(container, { id }) {
       pagesEl.className = 'flex-1 overflow-y-auto overflow-x-hidden flex flex-col items-center';
       const emptyWrap = document.createElement('div');
       emptyWrap.className = 'flex items-center justify-center min-h-full';
-      emptyWrap.appendChild(createEmptyState({ title: 'No pages found', subtitle: 'This chapter appears to have no pages.' }));
+      emptyWrap.appendChild(createEmptyState({ title: t('reader.empty.title'), subtitle: t('reader.empty.subtitle') }));
       pagesEl.appendChild(emptyWrap);
       _renderSegments();
       return;
@@ -1242,9 +1243,9 @@ export async function init(container, { id }) {
         card.className = 'flex flex-col items-center justify-center py-16 gap-4 w-full shrink-0';
         if (_chapterInfo.next_chapter_id) {
           card.innerHTML = `
-            <p class="text-muted text-sm">End of chapter</p>
+            <p class="text-muted text-sm">${t('reader.end.chapter')}</p>
             <button class="btn-ghost flex items-center gap-1">
-              Next chapter ${iconChevronRight}
+              ${t('reader.end.next_chapter')} ${iconChevronRight}
             </button>
           `;
           card.querySelector('button')?.addEventListener('click', () => {
@@ -1252,9 +1253,9 @@ export async function init(container, { id }) {
           });
         } else {
           card.innerHTML = `
-            <p class="text-muted text-sm">End of chapter</p>
+            <p class="text-muted text-sm">${t('reader.end.chapter')}</p>
             <button class="btn-ghost flex items-center gap-1">
-              ${iconChevronLeft} Back to manga
+              ${iconChevronLeft} ${t('reader.back_to_manga')}
             </button>
           `;
           card.querySelector('button')?.addEventListener('click', () => {
@@ -1327,7 +1328,7 @@ export async function init(container, { id }) {
           _failed.add(pageIdx); _loaded.delete(pageIdx); _renderSegments();
           const err = document.createElement('div');
           err.className = 'absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none';
-          err.innerHTML = `<p class="text-muted text-sm">Failed to load page ${pageIdx + 1}</p>`;
+          err.innerHTML = `<p class="text-muted text-sm">${t('reader.error.page', { page: pageIdx + 1 })}</p>`;
           pagesEl.appendChild(err);
         });
         if (img.complete) {
@@ -1479,7 +1480,7 @@ export async function init(container, { id }) {
           canvas.remove();
           const err = document.createElement('div');
           err.className = 'absolute inset-0 flex flex-col items-center justify-center gap-3';
-          err.innerHTML = `<p class="text-muted text-sm">Failed to load spread pages</p><button class="btn-ghost">Retry</button>`;
+          err.innerHTML = `<p class="text-muted text-sm">${t('reader.error.spread')}</p><button class="btn-ghost">${t('common.retry')}</button>`;
           err.querySelector('button')?.addEventListener('click', () => { _failed.delete(leftIdx); _failed.delete(rightIdx); _renderPages(); });
           pagesEl.appendChild(err);
         };
@@ -1498,8 +1499,8 @@ export async function init(container, { id }) {
           const err = document.createElement('div');
           err.className = 'absolute inset-0 flex flex-col items-center justify-center gap-3';
           err.innerHTML = `
-            <p class="text-muted text-sm">Failed to load page ${failedPage + 1}</p>
-            <button class="btn-ghost">Retry</button>
+            <p class="text-muted text-sm">${t('reader.error.page', { page: failedPage + 1 })}</p>
+            <button class="btn-ghost">${t('common.retry')}</button>
           `;
           err.querySelector('button')?.addEventListener('click', () => {
             _failed.delete(failedPage);
@@ -1750,7 +1751,7 @@ export async function init(container, { id }) {
   function _slideshowStop() {
     _slideshowActive = false;
     if (_slideshowTimer) { clearTimeout(_slideshowTimer); _slideshowTimer = null; }
-    if (_ssPlayBtn) _ssPlayBtn.textContent = 'Start slideshow';
+    if (_ssPlayBtn) _ssPlayBtn.textContent = t('reader.slideshow.start');
   }
 
   function _slideshowAdvance() {
@@ -1791,7 +1792,7 @@ export async function init(container, { id }) {
     _slideshowActive = true;
     _slideshowStartedAt = Date.now();
     _slideshowSchedule();
-    if (_ssPlayBtn) _ssPlayBtn.textContent = 'Stop slideshow';
+    if (_ssPlayBtn) _ssPlayBtn.textContent = t('reader.slideshow.stop');
   }
 
   function _slideshowPauseOnInput() {
@@ -1939,12 +1940,12 @@ export async function init(container, { id }) {
   _cleanup.push(() => _landscapeMQ.removeEventListener('change', _onLandscapeChange));
 
   const { row: preloadRow, input: preloadInput } = mkSliderRow({
-    label: 'Preload pages', min: 1, max: 10, value: _prefs?.preloadCount ?? 2,
+    label: t('reader.settings.preload'), min: 1, max: 10, value: _prefs?.preloadCount ?? 2,
     onChange: (v) => { if (_prefs) setReaderPref(_prefs, 'preloadCount', v); },
   });
 
   const saveBtn = mkActionBtn({
-    label: 'Save page',
+    label: t('reader.settings.save_page'),
     onClick: async () => {
       const canvas = /** @type {HTMLCanvasElement|null} */ (pagesEl.querySelector('canvas'));
       if (canvas) {
@@ -1980,9 +1981,9 @@ export async function init(container, { id }) {
   const _modalSections = /** @type {Record<string, HTMLElement>} */ ({});
   _modalSections.navigation = mkReaderSection('', saveBtn, preloadRow);
 
-  const fsBtn = mkActionBtn({ label: 'Enter fullscreen', onClick: () => _toggleFullscreen() });
+  const fsBtn = mkActionBtn({ label: t('reader.settings.fullscreen'), onClick: () => _toggleFullscreen() });
   const _onFsChange = () => {
-    fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen';
+    fsBtn.textContent = document.fullscreenElement ? t('reader.settings.exit_fullscreen') : t('reader.settings.fullscreen');
   };
   document.addEventListener('fullscreenchange', _onFsChange);
   _cleanup.push(() => document.removeEventListener('fullscreenchange', _onFsChange));
@@ -1993,7 +1994,7 @@ export async function init(container, { id }) {
   if ('wakeLock' in navigator) {
     let _wakeLock = /** @type {WakeLockSentinel|null} */ (null);
     const { row: wakeRow, input: wakeInput } = mkToggleRow({
-      label: 'Keep screen on',
+      label: t('reader.settings.wake_lock'),
       checked: false,
       onChange: async (on) => {
         if (on) {
@@ -2028,11 +2029,11 @@ export async function init(container, { id }) {
   // mobile fullscreen and always rejects on desktop browsers.
   if ('lock' in (screen.orientation ?? {}) && !_isFinePointer()) {
     const { row: orientRow } = mkSegmentedRow({
-      label: 'Screen orientation',
+      label: t('reader.settings.orientation'),
       options: [
-        { value: 'auto',      label: 'Auto' },
-        { value: 'portrait',  label: 'Portrait' },
-        { value: 'landscape', label: 'Landscape' },
+        { value: 'auto',      label: t('reader.orient.auto') },
+        { value: 'portrait',  label: t('reader.orient.portrait') },
+        { value: 'landscape', label: t('reader.orient.landscape') },
       ],
       selected: 'auto',
       onSelect: async (v) => {
@@ -2047,7 +2048,7 @@ export async function init(container, { id }) {
     displayChildren.push(orientRow);
   }
 
-  const _displayAccordion = mkAccordionSection('Display', {}, ...displayChildren);
+  const _displayAccordion = mkAccordionSection(t('reader.panel.display'), {}, ...displayChildren);
 
   // ── Load chapter ──────────────────────────────────────────────────────────
 
@@ -2095,7 +2096,7 @@ export async function init(container, { id }) {
     {
       const spreadOffsetMount = container.querySelector('#reader-spread-offset-mount');
       const { row: spreadOffsetRow } = mkToggleRow({
-        label: 'Pair from first page',
+        label: t('reader.settings.spread_offset'),
         checked: _prefs.spreadOffset ?? false,
         onChange: (v) => {
           if (_prefs) { setReaderPref(_prefs, 'spreadOffset', v); _renderPages(); }
@@ -2111,11 +2112,11 @@ export async function init(container, { id }) {
     // ── Fit / Dir / Mode segmented controls ───────────────────────────────────
 
     const { row: fitRow, update: _updateFit } = mkSegmentedRow({
-      label: 'Image fit',
+      label: t('reader.settings.fit'),
       options: [
-        { value: 'both',   label: 'Both'   },
-        { value: 'width',  label: 'Width'  },
-        { value: 'height', label: 'Height' },
+        { value: 'both',   label: t('reader.fit.both')   },
+        { value: 'width',  label: t('reader.fit.width')  },
+        { value: 'height', label: t('reader.fit.height') },
       ],
       selected: _fit,
       onSelect: (v) => {
@@ -2127,10 +2128,10 @@ export async function init(container, { id }) {
     fitMountEl.appendChild(fitRow);
 
     const { row: dirRow_ } = mkSegmentedRow({
-      label: 'Reading direction',
+      label: t('reader.settings.direction'),
       options: [
-        { value: 'rtl', label: 'RTL' },
-        { value: 'ltr', label: 'LTR' },
+        { value: 'rtl', label: t('reader.dir.rtl') },
+        { value: 'ltr', label: t('reader.dir.ltr') },
       ],
       selected: _direction,
       onSelect: (v) => {
@@ -2144,10 +2145,10 @@ export async function init(container, { id }) {
 
     const { row: modeRow } = mkSegmentedRow({
       options: [
-        { value: 'scroll',           label: 'Scroll'   },
-        { value: 'paged',            label: 'Paged'    },
-        { value: 'webtoon',          label: 'Webtoon'  },
-        { value: 'continuous-paged', label: 'Cont.'    },
+        { value: 'scroll',           label: t('reader.mode.scroll')    },
+        { value: 'paged',            label: t('reader.mode.paged')     },
+        { value: 'webtoon',          label: t('reader.mode.webtoon')   },
+        { value: 'continuous-paged', label: t('reader.mode.continuous') },
       ],
       selected: _mode,
       onSelect: (v) => {
@@ -2169,11 +2170,11 @@ export async function init(container, { id }) {
       const p = _prefs;
 
       const { row: bgRow } = mkSegmentedRow({
-        label: 'Background',
+        label: t('reader.settings.bg'),
         options: [
-          { value: 'black', label: 'Black' },
-          { value: 'white', label: 'White' },
-          { value: 'sepia', label: 'Sepia' },
+          { value: 'black', label: t('reader.bg.black') },
+          { value: 'white', label: t('reader.bg.white') },
+          { value: 'sepia', label: t('reader.bg.sepia') },
         ],
         selected: p.bg,
         onSelect: (v) => {
@@ -2181,32 +2182,32 @@ export async function init(container, { id }) {
         },
       });
 
-      const { row: brRow } = mkSliderRow({ label: 'Brightness', min: 50, max: 200, value: p.brightness, unit: '%',
+      const { row: brRow } = mkSliderRow({ label: t('reader.settings.brightness'), min: 50, max: 200, value: p.brightness, unit: '%',
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'brightness', v); _applyPresentation(); } } });
-      const { row: coRow } = mkSliderRow({ label: 'Contrast',   min: 50, max: 200, value: p.contrast,   unit: '%',
+      const { row: coRow } = mkSliderRow({ label: t('reader.settings.contrast'),   min: 50, max: 200, value: p.contrast,   unit: '%',
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'contrast',   v); _applyPresentation(); } } });
-      const { row: saRow } = mkSliderRow({ label: 'Saturation', min: 0,  max: 200, value: p.saturation, unit: '%',
+      const { row: saRow } = mkSliderRow({ label: t('reader.settings.saturation'), min: 0,  max: 200, value: p.saturation, unit: '%',
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'saturation', v); _applyPresentation(); } } });
 
-      const { row: gsRow } = mkToggleRow({ label: 'Grayscale', checked: p.grayscale,
+      const { row: gsRow } = mkToggleRow({ label: t('reader.settings.grayscale'), checked: p.grayscale,
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'grayscale', v); _applyPresentation(); } } });
-      const { row: invRow } = mkToggleRow({ label: 'Invert',   checked: p.invert,
+      const { row: invRow } = mkToggleRow({ label: t('reader.settings.invert'),   checked: p.invert,
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'invert',    v); _applyPresentation(); } } });
 
-      const { row: ctRow } = mkSliderRow({ label: 'Crop top',    min: 0, max: 50, value: p.cropTop,    unit: '%',
+      const { row: ctRow } = mkSliderRow({ label: t('reader.settings.crop_top'),    min: 0, max: 50, value: p.cropTop,    unit: '%',
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'cropTop',    v); _applyCropToAllImages(); } } });
-      const { row: cbRow } = mkSliderRow({ label: 'Crop bottom', min: 0, max: 50, value: p.cropBottom, unit: '%',
+      const { row: cbRow } = mkSliderRow({ label: t('reader.settings.crop_bottom'), min: 0, max: 50, value: p.cropBottom, unit: '%',
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'cropBottom', v); _applyCropToAllImages(); } } });
-      const { row: clRow } = mkSliderRow({ label: 'Crop left',   min: 0, max: 50, value: p.cropLeft,   unit: '%',
+      const { row: clRow } = mkSliderRow({ label: t('reader.settings.crop_left'),   min: 0, max: 50, value: p.cropLeft,   unit: '%',
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'cropLeft',   v); _applyCropToAllImages(); } } });
-      const { row: crRow } = mkSliderRow({ label: 'Crop right',  min: 0, max: 50, value: p.cropRight,  unit: '%',
+      const { row: crRow } = mkSliderRow({ label: t('reader.settings.crop_right'),  min: 0, max: 50, value: p.cropRight,  unit: '%',
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'cropRight',  v); _applyCropToAllImages(); } } });
 
       const tintColorRow = document.createElement('div');
       tintColorRow.className = 'flex items-center justify-between gap-3';
       const tintColorLbl = document.createElement('span');
       tintColorLbl.className = 'text-sm text-text';
-      tintColorLbl.textContent = 'Tint colour';
+      tintColorLbl.textContent = t('reader.settings.tint_color');
       const tintColorInput = document.createElement('input');
       tintColorInput.type = 'color';
       tintColorInput.value = p.tintColor;
@@ -2217,22 +2218,22 @@ export async function init(container, { id }) {
       tintColorRow.appendChild(tintColorLbl);
       tintColorRow.appendChild(tintColorInput);
 
-      const { row: tintOpRow } = mkSliderRow({ label: 'Tint opacity', min: 0, max: 100, value: p.tintOpacity, unit: '%',
+      const { row: tintOpRow } = mkSliderRow({ label: t('reader.settings.tint_opacity'), min: 0, max: 100, value: p.tintOpacity, unit: '%',
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'tintOpacity', v); _applyTint(); } } });
 
       const { row: tintBlendRow } = mkSegmentedRow({
-        label: 'Blend mode',
+        label: t('reader.settings.blend_mode'),
         options: [
-          { value: 'multiply', label: 'Multiply' },
-          { value: 'screen',   label: 'Screen'   },
-          { value: 'overlay',  label: 'Overlay'  },
-          { value: 'color',    label: 'Colour'   },
+          { value: 'multiply', label: t('reader.blend.multiply') },
+          { value: 'screen',   label: t('reader.blend.screen')   },
+          { value: 'overlay',  label: t('reader.blend.overlay')  },
+          { value: 'color',    label: t('reader.blend.color')    },
         ],
         selected: p.tintBlend,
         onSelect: (v) => { if (_prefs) { setReaderPref(_prefs, 'tintBlend', v); _applyTint(); } },
       });
 
-      const { row: bgTintRow } = mkToggleRow({ label: 'Tint page background', checked: p.bgTintPage,
+      const { row: bgTintRow } = mkToggleRow({ label: t('reader.settings.tint_bg'), checked: p.bgTintPage,
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'bgTintPage', v); _applyPresentation(); } } });
 
       _modalSections.image = mkReaderSection('', bgRow, bgTintRow, brRow, coRow, saRow, gsRow, invRow, ctRow, cbRow, clRow, crRow);
@@ -2242,15 +2243,15 @@ export async function init(container, { id }) {
     // ── Tap zones ─────────────────────────────────────────────────────────
     {
       const zoneOptions = [
-        { value: 'prev', label: 'Prev' },
-        { value: 'next', label: 'Next' },
-        { value: 'menu', label: 'Menu' },
-        { value: 'none', label: 'None' },
+        { value: 'prev', label: t('reader.zone.prev') },
+        { value: 'next', label: t('reader.zone.next') },
+        { value: 'menu', label: t('reader.zone.menu') },
+        { value: 'none', label: t('reader.zone.none') },
       ];
 
       const tzHint = document.createElement('p');
       tzHint.className = 'text-xs text-danger hidden';
-      tzHint.textContent = 'At least one zone must open the menu.';
+      tzHint.textContent = t('reader.tap_zone.guard');
 
       /** Ensure at least one zone stays set to 'menu'; shows hint if blocked. */
       function _guardZone(key, val, fallbackKey) {
@@ -2273,14 +2274,14 @@ export async function init(container, { id }) {
         setReaderPref(_prefs, key, val);
       }
 
-      const { row: tzlRow, update: tzlUpdate } = mkSegmentedRow({ label: 'Left zone',   options: zoneOptions, selected: _prefs.tapLeft,
+      const { row: tzlRow, update: tzlUpdate } = mkSegmentedRow({ label: t('reader.settings.zone_left'),   options: zoneOptions, selected: _prefs.tapLeft,
         onSelect: (v) => _guardZone('tapLeft',   v, 'tapCenter') });
-      const { row: tzcRow, update: tzcUpdate } = mkSegmentedRow({ label: 'Center zone', options: zoneOptions, selected: _prefs.tapCenter,
+      const { row: tzcRow, update: tzcUpdate } = mkSegmentedRow({ label: t('reader.settings.zone_center'), options: zoneOptions, selected: _prefs.tapCenter,
         onSelect: (v) => _guardZone('tapCenter', v, 'tapLeft')  });
-      const { row: tzrRow, update: tzrUpdate } = mkSegmentedRow({ label: 'Right zone',  options: zoneOptions, selected: _prefs.tapRight,
+      const { row: tzrRow, update: tzrUpdate } = mkSegmentedRow({ label: t('reader.settings.zone_right'),  options: zoneOptions, selected: _prefs.tapRight,
         onSelect: (v) => _guardZone('tapRight',  v, 'tapCenter') });
 
-      _modalSections.controls = mkReaderSection('Tap Zones', tzlRow, tzcRow, tzrRow, tzHint);
+      _modalSections.controls = mkReaderSection(t('reader.panel.tap_zones'), tzlRow, tzcRow, tzrRow, tzHint);
     }
 
     // ── Dual-scanlator comparison ─────────────────────────────────────────
@@ -2306,7 +2307,7 @@ export async function init(container, { id }) {
        * @returns {string}
        */
       function _scanlatorLabel(entry) {
-        const base = entry.scanlator ?? 'Unknown';
+        const base = entry.scanlator ?? t('reader.scanlator.unknown');
         const sameBase = _allEntries.filter(e => e.scanlator === entry.scanlator);
         if (sameBase.length === 1) return base;
         const sameVol = sameBase.filter(e => e.volume === entry.volume);
@@ -2320,7 +2321,7 @@ export async function init(container, { id }) {
       const { row: selectRow, select: scanlatorSelect } = mkSelectRow({
         options: _allEntries.map(entry => ({
           value: String(entry.chId),
-          label: _scanlatorLabel(entry) + (entry.chId === _primaryChId ? ' (current)' : ''),
+          label: _scanlatorLabel(entry) + (entry.chId === _primaryChId ? ` (${t('reader.scanlator.current')})` : ''),
         })),
         selected: String(_primaryChId),
         onChange: async (val) => {
@@ -2343,7 +2344,7 @@ export async function init(container, { id }) {
         },
       });
 
-      panelScroll.appendChild(mkAccordionSection('Scanlators', {}, selectRow));
+      panelScroll.appendChild(mkAccordionSection(t('reader.panel.scanlators'), {}, selectRow));
     }
 
     // ── Bookmarks ─────────────────────────────────────────────────────────
@@ -2351,7 +2352,7 @@ export async function init(container, { id }) {
       /** @type {Set<number>} */
       let _bookmarks = new Set();
 
-      const bookmarkStar = mkActionBtn({ label: '☆  Bookmark this page', onClick: async () => {
+      const bookmarkStar = mkActionBtn({ label: t('reader.bookmark.add'), onClick: async () => {
         try {
           const res = await api.toggleBookmark(chapterId, _currentPage);
           if (res.bookmarked) _bookmarks.add(_currentPage);
@@ -2365,12 +2366,12 @@ export async function init(container, { id }) {
 
       function _refreshBookmarkUI() {
         bookmarkStar.textContent = _bookmarks.has(_currentPage)
-          ? '★  Remove bookmark' : '☆  Bookmark this page';
+          ? t('reader.bookmark.remove') : t('reader.bookmark.add');
         bookmarkList.innerHTML = '';
         if (_bookmarks.size === 0) {
           const empty = document.createElement('p');
           empty.className = 'text-xs text-muted';
-          empty.textContent = 'No bookmarks yet.';
+          empty.textContent = t('reader.bookmarks.empty');
           bookmarkList.appendChild(empty);
         } else {
           const sorted = [..._bookmarks].sort((a, b) => a - b);
@@ -2393,7 +2394,7 @@ export async function init(container, { id }) {
 
       _panelOpenCallbacks.push(_refreshBookmarkUI);
 
-      panelScroll.appendChild(mkAccordionSection('Bookmarks', {}, bookmarkStar, bookmarkList));
+      panelScroll.appendChild(mkAccordionSection(t('reader.panel.bookmarks'), {}, bookmarkStar, bookmarkList));
     }
 
     // ── Per-chapter note ──────────────────────────────────────────────────
@@ -2401,7 +2402,7 @@ export async function init(container, { id }) {
       const noteArea = document.createElement('textarea');
       noteArea.className = 'w-full text-sm bg-surface-2 border border-border rounded-md px-2 py-1.5 resize-none outline-none focus:border-accent';
       noteArea.rows = 3;
-      noteArea.placeholder = 'Add a note for this chapter…';
+      noteArea.placeholder = t('reader.note.placeholder');
 
       const _saveNote = debounce(
         () => api.setChapterNote(chapterId, noteArea.value).catch(() => {}),
@@ -2418,13 +2419,13 @@ export async function init(container, { id }) {
         if (res?.note) noteArea.value = res.note;
       }).catch(() => {});
 
-      panelScroll.appendChild(mkAccordionSection('Chapter Note', {}, noteArea));
+      panelScroll.appendChild(mkAccordionSection(t('reader.panel.note'), {}, noteArea));
     }
 
     panelScroll.appendChild(_displayAccordion);
 
     const { row: overlayRow } = mkToggleRow({
-      label: 'Page number overlay',
+      label: t('reader.settings.page_overlay'),
       checked: _prefs.pageOverlay,
       onChange: (v) => {
         if (_prefs) { setReaderPref(_prefs, 'pageOverlay', v); _updatePageOverlay(); }
@@ -2432,11 +2433,11 @@ export async function init(container, { id }) {
     });
 
     const { row: ssSpeedRow } = mkSliderRow({
-      label: 'Slideshow speed', min: 3, max: 30, value: _prefs.slideshowInterval, unit: 's',
+      label: t('reader.settings.slideshow_speed'), min: 3, max: 30, value: _prefs.slideshowInterval, unit: 's',
       onChange: (v) => { if (_prefs) setReaderPref(_prefs, 'slideshowInterval', v); },
     });
     const ssBtn = mkActionBtn({
-      label: _slideshowActive ? 'Stop slideshow' : 'Start slideshow',
+      label: _slideshowActive ? t('reader.slideshow.stop') : t('reader.slideshow.start'),
       onClick: () => {
         if (_slideshowActive) {
           _slideshowStop();
@@ -2450,7 +2451,7 @@ export async function init(container, { id }) {
     _ssPlayBtn = ssBtn;
 
     const { row: sleepRow } = mkSliderRow({
-      label: 'Sleep after (0 = off)', min: 0, max: 60, value: _prefs.inactivityTimeout, unit: 'min',
+      label: t('reader.settings.sleep'), min: 0, max: 60, value: _prefs.inactivityTimeout, unit: 'min',
       onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'inactivityTimeout', v); _resetInactivity(); } },
     });
 
@@ -2460,7 +2461,7 @@ export async function init(container, { id }) {
     etaLine.className = 'flex items-center justify-between';
     const etaLbl = document.createElement('span');
     etaLbl.className = 'text-xs text-muted';
-    etaLbl.textContent = 'ETA';
+    etaLbl.textContent = t('reader.stats.eta');
     const etaVal = document.createElement('span');
     etaVal.className = 'text-xs text-text tabular-nums';
     etaVal.textContent = '—';
@@ -2470,7 +2471,7 @@ export async function init(container, { id }) {
     paceLine.className = 'flex items-center justify-between';
     const paceLbl = document.createElement('span');
     paceLbl.className = 'text-xs text-muted';
-    paceLbl.textContent = 'Pace';
+    paceLbl.textContent = t('reader.stats.pace');
     const paceVal = document.createElement('span');
     paceVal.className = 'text-xs text-text tabular-nums';
     paceVal.textContent = '—';
@@ -2519,10 +2520,10 @@ export async function init(container, { id }) {
       header.className = 'flex items-center justify-between px-5 py-4 border-b border-border shrink-0';
       const htitle = document.createElement('h2');
       htitle.className = 'text-base font-semibold text-text';
-      htitle.textContent = 'Reader Settings';
+      htitle.textContent = t('reader.settings.title');
       const hclose = document.createElement('button');
       hclose.className = 'btn-icon';
-      hclose.setAttribute('aria-label', 'Close settings');
+      hclose.setAttribute('aria-label', t('reader.aria.close_settings'));
       hclose.innerHTML = iconX;
       hclose.addEventListener('click', _closeSettingsModal);
       header.appendChild(htitle);
@@ -2545,7 +2546,7 @@ export async function init(container, { id }) {
       layoutSection.className = 'flex flex-col gap-3';
 
       const { row: smRow } = mkToggleRow({
-        label: 'Smooth scroll',
+        label: t('reader.settings.smooth_scroll'),
         checked: _prefs.smoothScroll,
         onChange: (v) => {
           _smoothScroll = v; smoothInput.checked = v;
@@ -2555,7 +2556,7 @@ export async function init(container, { id }) {
       });
 
       const { row: dpRow } = mkToggleRow({
-        label: 'Double page',
+        label: t('reader.settings.double_page'),
         checked: _prefs.doublePage,
         onChange: (v) => {
           _doublePage = v; doubleInput.checked = v;
@@ -2565,7 +2566,7 @@ export async function init(container, { id }) {
       });
 
       const { row: asRow } = mkToggleRow({
-        label: 'Auto-combine spreads',
+        label: t('reader.settings.auto_spread'),
         checked: _prefs.autoSpread,
         onChange: (v) => {
           _autoSpread = v; spreadInput.checked = v;
@@ -2575,7 +2576,7 @@ export async function init(container, { id }) {
       });
 
       const { row: soRow } = mkToggleRow({
-        label: 'Pair from first page',
+        label: t('reader.settings.spread_offset'),
         checked: _prefs.spreadOffset ?? false,
         onChange: (v) => { if (_prefs) { setReaderPref(_prefs, 'spreadOffset', v); _renderPages(); } },
       });
@@ -2589,7 +2590,7 @@ export async function init(container, { id }) {
       shortcutsEl.className = 'flex flex-col gap-1 border-t border-border pt-3 mt-1';
       const scTitle = document.createElement('p');
       scTitle.className = 'text-xs font-medium text-muted uppercase tracking-wide mb-1';
-      scTitle.textContent = 'Keyboard Shortcuts  (F1 = this modal)';
+      scTitle.textContent = t('reader.shortcuts.title');
       shortcutsEl.appendChild(scTitle);
       for (const entry of getShortcuts('reader')) {
         const scRow = document.createElement('div');
@@ -2607,13 +2608,13 @@ export async function init(container, { id }) {
       _modalSections.controls?.appendChild(shortcutsEl);
 
       const TABS = [
-        { id: 'layout',     name: 'Layout',     section: layoutSection },
-        { id: 'image',      name: 'Image',       section: _modalSections.image },
-        { id: 'tint',       name: 'Page Tint',   section: _modalSections.tint },
-        { id: 'navigation', name: 'Navigation',  section: _modalSections.navigation },
-        { id: 'controls',   name: 'Controls',    section: _modalSections.controls },
-        { id: 'reading',    name: 'Reading',      section: _modalSections.reading },
-      ].filter(t => t.section);
+        { id: 'layout',     name: t('reader.tab.layout'),     section: layoutSection },
+        { id: 'image',      name: t('reader.tab.image'),      section: _modalSections.image },
+        { id: 'tint',       name: t('reader.tab.tint'),       section: _modalSections.tint },
+        { id: 'navigation', name: t('reader.tab.navigation'), section: _modalSections.navigation },
+        { id: 'controls',   name: t('reader.tab.controls'),   section: _modalSections.controls },
+        { id: 'reading',    name: t('reader.tab.reading'),    section: _modalSections.reading },
+      ].filter(tab => tab.section);
 
       for (const tab of TABS) {
         tab.section.style.display = 'none';
@@ -2701,7 +2702,7 @@ export async function init(container, { id }) {
       sideNext.addEventListener('click', () => _navigateChapter(data.next_chapter_id));
     }
   } catch {
-    pagesEl.innerHTML = '<div class="flex items-center justify-center min-h-full"><p class="text-danger text-sm">Failed to load chapter pages.</p></div>';
+    pagesEl.innerHTML = `<div class="flex items-center justify-center min-h-full"><p class="text-danger text-sm">${t('reader.error.chapter')}</p></div>`;
   }
 
   _applyDoublePageVisibility();
