@@ -13,6 +13,7 @@ import { createEmptyState } from '../components/empty-state.js';
 import { createMangaCard } from '../components/manga-card.js';
 import { iconSearch, iconChevronLeft, iconChevronRight } from '../icons.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
+import { t } from '../i18n.js';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 
@@ -41,11 +42,11 @@ export async function init(container) {
     const ids = scopeParam.slice(8).split(',').map(Number).filter(Boolean);
     if (ids.length) _scope = { Sources: ids };
   }
-  setPageHeader({ crumbs: [{ label: 'Search' }] });
+  setPageHeader({ crumbs: [{ label: t('global_search.crumb') }] });
 
   if (!hasPermission('source:browse')) {
     container.innerHTML = '';
-    container.appendChild(createErrorState({ message: 'You do not have permission to search sources.' }));
+    container.appendChild(createErrorState({ message: t('global_search.no_permission') }));
     return;
   }
 
@@ -59,13 +60,13 @@ export async function init(container) {
             type="search"
             class="input w-full pl-11 h-12 text-base"
             id="search-input"
-            placeholder="Search manga across sources…"
-            aria-label="Search manga"
+            placeholder="${t('global_search.placeholder')}"
+            aria-label="${t('global_search.input.label')}"
             autofocus
           />
         </div>
         <!-- Scope chips -->
-        <div class="flex flex-wrap justify-center gap-2" id="scope-chips" role="group" aria-label="Search scope"></div>
+        <div class="flex flex-wrap justify-center gap-2" id="scope-chips" role="group" aria-label="${t('global_search.scope.label')}"></div>
       </div>
 
       <!-- Results -->
@@ -127,14 +128,14 @@ export async function init(container) {
       el.appendChild(btn);
     };
 
-    mkChip('Favourites', isFav, () => {
+    mkChip(t('global_search.scope.favourites'), isFav, () => {
       _scope = 'FavouritedOnly';
       _updateUrl();
       _renderChips(el, results);
       if (_query) _fetchSearch(results);
     });
 
-    mkChip('All enabled', isAll, () => {
+    mkChip(t('global_search.scope.all_enabled'), isAll, () => {
       _scope = 'AllEnabled';
       _updateUrl();
       _renderChips(el, results);
@@ -184,7 +185,7 @@ async function _fetchSearch(resultsEl) {
     resultsEl.innerHTML = '';
     resultsEl.setAttribute('aria-busy', 'false');
     finishLoading();
-    resultsEl.appendChild(createErrorState({ message: 'Search failed. Try again.' }));
+    resultsEl.appendChild(createErrorState({ message: t('global_search.error') }));
     return;
   }
 
@@ -199,8 +200,8 @@ async function _fetchSearch(resultsEl) {
   if (sourceResults.length === 0) {
     resultsEl.appendChild(createEmptyState({
       icon: iconSearch,
-      title: 'No results found.',
-      subtitle: 'Try a different search term or scope.',
+      title: t('global_search.empty.title'),
+      subtitle: t('global_search.empty.subtitle'),
     }));
     return;
   }
@@ -226,14 +227,14 @@ async function _fetchSearch(resultsEl) {
     header.className = 'flex items-center justify-between gap-3';
     header.innerHTML = `
       <h2 class="text-sm font-semibold text-text">${escapeHtml(sourceResult.source_name ?? String(sid))}</h2>
-      <a href="/source/${encodeURIComponent(sid)}?q=${encodeURIComponent(_query)}" class="text-xs text-accent hover:underline focus-visible:outline-none focus-visible:underline">See all →</a>
+      <a href="/source/${encodeURIComponent(sid)}?q=${encodeURIComponent(_query)}" class="text-xs text-accent hover:underline focus-visible:outline-none focus-visible:underline">${t('global_search.see_all')}</a>
     `;
     section.appendChild(header);
 
     if (!sourceResult.manga?.length) {
       const empty = document.createElement('p');
       empty.className = 'text-sm text-text-muted';
-      empty.textContent = 'No results from this source.';
+      empty.textContent = t('global_search.source.empty');
       section.appendChild(empty);
     } else {
       const wrapper = document.createElement('div');
@@ -243,7 +244,7 @@ async function _fetchSearch(resultsEl) {
       navLeft.type = 'button';
       navLeft.className = 'manga-row-nav';
       navLeft.setAttribute('data-dir', 'left');
-      navLeft.setAttribute('aria-label', 'Previous page');
+      navLeft.setAttribute('aria-label', t('global_search.nav.prev'));
       navLeft.style.display = 'none';
       navLeft.innerHTML = iconChevronLeft;
 
@@ -251,7 +252,7 @@ async function _fetchSearch(resultsEl) {
       navRight.type = 'button';
       navRight.className = 'manga-row-nav';
       navRight.setAttribute('data-dir', 'right');
-      navRight.setAttribute('aria-label', 'Next page');
+      navRight.setAttribute('aria-label', t('global_search.nav.next'));
       navRight.style.display = 'none';
       navRight.innerHTML = iconChevronRight;
 

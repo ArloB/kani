@@ -1,6 +1,8 @@
 // @ts-check
 // Toast notification — self-dismissing message overlay.
 
+import { t } from '../i18n.js';
+
 /** @type {HTMLElement | null} */
 let _container = null;
 
@@ -73,5 +75,5 @@ export function showToast(message, { type = 'info', duration = 3000, action = nu
  * @param {any} err
  */
 export function showApiError(err) {
-  showToast(err?.hint ?? err?.message ?? 'An error occurred', { type: 'error' });
+  showToast(err?.hint ?? err?.message ?? t('common.error_occurred'), { type: 'error' });
 }

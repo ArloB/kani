@@ -3,6 +3,7 @@
 
 import * as api from '../api.js';
 import { hasPermission } from '../state.js';
+import { t } from '../i18n.js';
 import { renderPagination } from '../components/pagination.js';
 import { getParam, replaceState as urlReplaceState } from '../url-params.js';
 import { getMangaCoverUrl } from '../api.js';
@@ -25,10 +26,10 @@ import { setPageHeader, clearPageHeader } from '../components/app-header.js';
  */
 function _renderDownloadControl(ch, canDownload) {
   if (ch.is_downloaded) {
-    return `<a href="/reader/${ch.id}" class="icon-xs text-success shrink-0 dl-btn" aria-label="Read ${escapeHtml(ch.title)}" title="Read">${iconCheck}</a>`;
+    return `<a href="/reader/${ch.id}" class="icon-xs text-success shrink-0 dl-btn" aria-label="${t('updates.action.read', { title: escapeHtml(ch.title) })}" title="${t('updates.action.read_title')}">${iconCheck}</a>`;
   }
   if (canDownload) {
-    return `<button class="dl-btn shrink-0" aria-label="Download ${escapeHtml(ch.title)}" data-chapter-id="${ch.id}" title="Download">${iconDownload}</button>`;
+    return `<button class="dl-btn shrink-0" aria-label="${t('updates.action.download', { title: escapeHtml(ch.title) })}" data-chapter-id="${ch.id}" data-chapter-title="${escapeHtml(ch.title)}" title="${t('updates.action.download_title')}">${iconDownload}</button>`;
   }
   return '';
 }
@@ -56,7 +57,7 @@ export async function init(container) {
   _listEl = null;
   _unsubProgress?.();
   _unsubProgress = null;
-  setPageHeader({ crumbs: [{ label: 'Updates' }] });
+  setPageHeader({ crumbs: [{ label: t('updates.crumb') }] });
 
   container.innerHTML = `
     <div class="max-w-page mx-auto w-full overflow-x-hidden px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6">
@@ -107,7 +108,7 @@ async function _fetch(listEl, paginEl) {
     listEl.setAttribute('aria-busy', 'false');
     finishLoading();
     listEl.appendChild(createErrorState({
-      message: 'Failed to load recent updates.',
+      message: t('updates.error.load_failed'),
       onRetry: () => _fetch(listEl, paginEl),
     }));
     return;
@@ -126,8 +127,8 @@ async function _fetch(listEl, paginEl) {
   if (updates.length === 0) {
     listEl.appendChild(createEmptyState({
       icon: iconBookOpen,
-      title: 'No recent updates',
-      subtitle: 'Scan your library to find new chapters.',
+      title: t('updates.empty.title'),
+      subtitle: t('updates.empty.subtitle'),
     }));
     return;
   }
@@ -270,7 +271,7 @@ function _onProgressUpdate(progress) {
     if (!p) continue;
     const ctrl = /** @type {HTMLElement | null} */ (btn.closest('.js-dl-ctrl'));
     if (p.status === 'completed' || p.status === 'completed_hidden') {
-      const title = btn.getAttribute('aria-label')?.replace('Download ', '') ?? '';
+      const title = btn.dataset.chapterTitle ?? '';
       const ch = { id, title, is_downloaded: true };
       if (ctrl) ctrl.innerHTML = _renderDownloadControl(ch, true);
     } else if (p.status === 'in_progress') {
@@ -292,8 +293,8 @@ function _relativeDate(dateStr) {
     const d = new Date(dateStr);
     const now = new Date();
     const diffDays = Math.floor((now.getTime() - d.getTime()) / 86_400_000);
-    if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Yesterday';
+    if (diffDays === 0) return t('updates.date.today');
+    if (diffDays === 1) return t('updates.date.yesterday');
     return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   } catch {
     return formatDate(dateStr);

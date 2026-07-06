@@ -27,7 +27,7 @@ export async function init(container) {
   document.title = 'Sources - Kani';
 
   if (!hasPermission('source:browse')) {
-    setPageHeader({ crumbs: [{ label: 'Sources' }] });
+    setPageHeader({ crumbs: [{ label: t('sources.crumb') }] });
     container.innerHTML = '';
     container.appendChild(createErrorState({ message: 'You do not have permission to browse sources.' }));
     return;
@@ -41,7 +41,7 @@ export async function init(container) {
   const _sourcesTabBtn = document.createElement('button');
   _sourcesTabBtn.type = 'button';
   _sourcesTabBtn.className = 'btn-ghost btn-sm';
-  _sourcesTabBtn.textContent = 'Extensions';
+  _sourcesTabBtn.textContent = t('sources.tab.extensions');
 
   const _reposTabBtn = document.createElement('button');
   _reposTabBtn.type = 'button';
@@ -56,7 +56,7 @@ export async function init(container) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn-primary btn-sm';
-    btn.textContent = 'Add source';
+    btn.textContent = t('source.add.title');
     return btn;
   })();
 
@@ -65,7 +65,7 @@ export async function init(container) {
   _actionsEl.appendChild(_tabsEl);
   if (_addSourceBtn) _actionsEl.appendChild(_addSourceBtn);
 
-  setPageHeader({ crumbs: [{ label: 'Sources' }], actions: _actionsEl });
+  setPageHeader({ crumbs: [{ label: t('sources.crumb') }], actions: _actionsEl });
 
   container.innerHTML = `
     <!-- Sources view -->
@@ -75,7 +75,7 @@ export async function init(container) {
       <aside
         class="hidden lg:flex flex-col w-72 shrink-0 border-r border-border-subtle sticky overflow-y-auto"
         style="top:var(--header-h);height:calc(100vh - var(--header-h));"
-        aria-label="Sources"
+        aria-label="${t('sources.crumb')}"
       ></aside>
 
       <!-- Content -->

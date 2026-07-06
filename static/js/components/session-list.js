@@ -6,16 +6,17 @@ import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
 import { openConfirm } from '../utils.js';
+import { t } from '../i18n.js';
 
 const html = htm.bind(h);
 
 /** Relative time formatter */
 function relativeTime(unixTs) {
   const diff = Math.floor(Date.now() / 1000) - unixTs;
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 60) return t('session.time.just_now');
+  if (diff < 3600) return t('session.time.minutes_ago', { n: Math.floor(diff / 60) });
+  if (diff < 86400) return t('session.time.hours_ago', { n: Math.floor(diff / 3600) });
+  return t('session.time.days_ago', { n: Math.floor(diff / 86400) });
 }
 
 /** Parse a rough browser/OS label from a user-agent string */
@@ -38,28 +39,28 @@ export function SessionList() {
   useEffect(() => {
     api.getSessions()
       .then(data => { setSessions(data.sessions ?? []); setLoading(false); })
-      .catch(e => { setError(String(e?.message ?? 'Failed to load sessions')); setLoading(false); });
+      .catch(e => { setError(String(e?.message ?? t('session.error.load_failed'))); setLoading(false); });
   }, []);
 
   async function handleRevoke(id) {
-    const ok = await openConfirm('Revoke this session? The device using it will be signed out.');
+    const ok = await openConfirm(t('session.confirm.revoke'));
     if (!ok) return;
     try {
       await api.revokeSession(id);
       setSessions(prev => prev.filter(s => s.id !== id));
     } catch (e) {
-      alert('Failed to revoke session: ' + (e?.message ?? 'unknown'));
+      alert(t('session.error.revoke_failed', { msg: e?.message ?? '' }));
     }
   }
 
   async function handleRevokeAll() {
-    const ok = await openConfirm('Sign out all other sessions? Only this session remains active.');
+    const ok = await openConfirm(t('session.confirm.revoke_all'));
     if (!ok) return;
     try {
       await api.revokeOtherSessions();
       setSessions(prev => prev.filter(s => s.is_current));
     } catch (e) {
-      alert('Failed to revoke sessions: ' + (e?.message ?? 'unknown'));
+      alert(t('session.error.revoke_all_failed', { msg: e?.message ?? '' }));
     }
   }
 
@@ -79,13 +80,13 @@ export function SessionList() {
   if (error) {
     return html`
       <div class="px-3 py-4 text-sm text-danger">${error}
-        <button class="ml-2 text-accent underline" onClick=${() => { setLoading(true); setError(null); api.getSessions().then(d => { setSessions(d.sessions ?? []); setLoading(false); }).catch(e => { setError(String(e?.message)); setLoading(false); }); }}>Retry</button>
+        <button class="ml-2 text-accent underline" onClick=${() => { setLoading(true); setError(null); api.getSessions().then(d => { setSessions(d.sessions ?? []); setLoading(false); }).catch(e => { setError(String(e?.message)); setLoading(false); }); }}>${t('common.retry')}</button>
       </div>
     `;
   }
 
   if (sessions.length === 0) {
-    return html`<div class="px-3 py-4 text-sm text-text-muted">No active sessions found.</div>`;
+    return html`<div class="px-3 py-4 text-sm text-text-muted">${t('session.empty')}</div>`;
   }
 
   const otherCount = sessions.filter(s => !s.is_current).length;
@@ -98,16 +99,16 @@ export function SessionList() {
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="text-sm font-medium text-text truncate">${parseUA(s.user_agent)}</span>
-                ${s.is_current && html`<span class="shrink-0 text-xs font-medium px-1.5 py-0.5 rounded bg-accent/15 text-accent">Current</span>`}
+                ${s.is_current && html`<span class="shrink-0 text-xs font-medium px-1.5 py-0.5 rounded bg-accent/15 text-accent">${t('session.current')}</span>`}
               </div>
               <div class="text-xs text-text-muted mt-0.5 truncate">
-                ${s.ip_addr ? html`${s.ip_addr} · ` : ''}Last active ${relativeTime(s.last_seen_at)}
+                ${s.ip_addr ? html`${s.ip_addr} · ` : ''}${t('session.last_active', { time: relativeTime(s.last_seen_at) })}
               </div>
             </div>
             ${!s.is_current && html`
               <button type="button" class="shrink-0 btn-ghost btn-sm text-danger"
                 onClick=${() => handleRevoke(s.id)}>
-                Revoke
+                ${t('session.action.revoke')}
               </button>
             `}
           </div>
@@ -117,7 +118,7 @@ export function SessionList() {
         <div class="px-3 py-2 border-t border-border-subtle">
           <button type="button" class="btn-danger btn-sm w-full"
             onClick=${handleRevokeAll}>
-            Sign out all other devices (${otherCount})
+            ${t('session.action.revoke_all', { count: otherCount })}
           </button>
         </div>
       `}

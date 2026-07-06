@@ -4,6 +4,7 @@
 import { createCoverImage } from './cover-image.js';
 import { getMangaCoverUrl } from '../api.js';
 import { iconEllipsisVertical } from '../icons.js';
+import { t } from '../i18n.js';
 
 /**
  * @typedef {{ id: number, title: string, source_id?: number | null, cover_image_url?: string | null, new_chapter_count?: number, is_orphaned?: boolean }} MangaCardData
@@ -53,15 +54,15 @@ export function createMangaCard({ manga, href, badge = null, extraClass = '', ea
     const newBadge = document.createElement('span');
     newBadge.className = 'absolute top-1 left-1 bg-accent text-on-accent text-xs font-bold px-1.5 py-0.5 rounded-full leading-none z-10';
     newBadge.textContent = manga.new_chapter_count > 99 ? '99+' : String(manga.new_chapter_count);
-    newBadge.setAttribute('aria-label', `${manga.new_chapter_count} new chapter${manga.new_chapter_count !== 1 ? 's' : ''}`);
+    newBadge.setAttribute('aria-label', t('manga.badge.new_chapters', { count: manga.new_chapter_count, s: manga.new_chapter_count !== 1 ? 's' : '' }));
     coverWrap.appendChild(newBadge);
   }
 
   if (manga.is_orphaned) {
     const orphanBadge = document.createElement('span');
     orphanBadge.className = 'absolute top-1 right-1 bg-warn/20 text-warn text-xs font-semibold px-1.5 py-0.5 rounded leading-none z-10';
-    orphanBadge.textContent = 'Orphaned';
-    orphanBadge.setAttribute('aria-label', 'Source deleted — manga is orphaned');
+    orphanBadge.textContent = t('manga.badge.orphaned');
+    orphanBadge.setAttribute('aria-label', t('manga.badge.orphaned.aria'));
     coverWrap.appendChild(orphanBadge);
   }
 
@@ -76,7 +77,7 @@ export function createMangaCard({ manga, href, badge = null, extraClass = '', ea
     const menuBtn = document.createElement('button');
     menuBtn.type = 'button';
     menuBtn.className = 'manga-card__menu-btn';
-    menuBtn.setAttribute('aria-label', 'More options');
+    menuBtn.setAttribute('aria-label', t('common.more_options'));
     menuBtn.innerHTML = iconEllipsisVertical;
     menuBtn.addEventListener('click', (e) => {
       e.preventDefault();

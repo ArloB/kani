@@ -8,6 +8,7 @@ import htm from 'htm';
 import { iconX, iconChevronDown } from '../icons.js';
 import { Icon } from './icon.js';
 import { Pill } from './pill.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 const ITEM_H = 36;
@@ -260,7 +261,7 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
           onKeyDown=${_onKeyDown}
         />
         ${(value != null || inputText.trim() !== '')
-          ? html`<button type="button" class="absolute right-1 top-1/2 -translate-y-1/2 btn-icon w-8 h-8 border-0" aria-label="Clear" onClick=${_clear}><${Icon} svg=${iconX} /></button>`
+          ? html`<button type="button" class="absolute right-1 top-1/2 -translate-y-1/2 btn-icon w-8 h-8 border-0" aria-label=${t('common.clear')} onClick=${_clear}><${Icon} svg=${iconX} /></button>`
           : html`<span class="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none icon-sm" aria-hidden="true"><${Icon} svg=${iconChevronDown} /></span>`
         }
       </div>

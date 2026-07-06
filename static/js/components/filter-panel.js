@@ -6,6 +6,7 @@ import { h, render } from 'preact';
 import htm from 'htm';
 import { Combobox } from './combobox.js';
 import { escapeHtml } from '../utils.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /**
@@ -77,15 +78,21 @@ export function mountFilterModal(triggerBtn, modalRoot, { filterDefs, activeFilt
     dialog.className = 'bg-surface rounded-t-2xl sm:rounded-xl w-full sm:max-w-lg max-h-sheet flex flex-col shadow-xl overflow-hidden';
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
-    dialog.setAttribute('aria-label', 'Filters');
+    dialog.setAttribute('aria-label', t('filter.panel.label'));
 
     // Header
     const header = document.createElement('div');
     header.className = 'flex items-center justify-between px-4 py-3 border-b border-border-subtle shrink-0';
-    header.innerHTML = `
-      <h2 class="text-sm font-semibold text-text">Filters</h2>
-      <button type="button" class="js-close btn-ghost btn-sm px-2! text-text-muted" aria-label="Close">✕</button>
-    `;
+    const h2 = document.createElement('h2');
+    h2.className = 'text-sm font-semibold text-text';
+    h2.textContent = t('filter.panel.title');
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'js-close btn-ghost btn-sm px-2! text-text-muted';
+    closeBtn.setAttribute('aria-label', t('common.close'));
+    closeBtn.textContent = '✕';
+    header.appendChild(h2);
+    header.appendChild(closeBtn);
     dialog.appendChild(header);
 
     // Body — scrollable filter controls

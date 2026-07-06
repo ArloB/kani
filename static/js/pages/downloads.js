@@ -13,6 +13,7 @@ import { Icon } from '../components/icon.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { showApiError } from '../components/toast.js';
 import { useBulkSelect } from '../hooks/use-bulk-select.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /** @typedef {import('../state.js').ChapterProgress} ChapterProgress */
@@ -38,7 +39,7 @@ function ActiveRow({ entry, selected, onToggle }) {
           class="shrink-0 accent-accent cursor-pointer"
           checked=${selected}
           onChange=${onToggle}
-          aria-label=${'Select ' + (entry.name || 'download')}
+          aria-label=${t('downloads.row.select', { name: entry.name || t('downloads.item') })}
         />
         <div class="shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-accent">
           <svg class="w-4 h-4 dl-ring-spin" viewBox="0 0 32 32" aria-hidden="true">
@@ -56,7 +57,7 @@ function ActiveRow({ entry, selected, onToggle }) {
             <p class="text-xs text-text-muted mt-0.5">${entry.completedPages} / ${entry.totalPages} pages</p>
           `}
         </div>
-        <button class="btn-ghost btn-sm shrink-0 text-danger" onClick=${handleCancel} aria-label="Cancel">Cancel</button>
+        <button class="btn-ghost btn-sm shrink-0 text-danger" onClick=${handleCancel} aria-label=${t('common.cancel')}>${t('common.cancel')}</button>
       </div>
       <div class="h-1 rounded-full bg-surface-2 overflow-hidden ml-16">
         <div class="h-full rounded-full bg-accent transition-[width] duration-300" style=${{ width: pct + '%' }}></div>
@@ -212,14 +213,14 @@ function DownloadsPage() {
 
       <!-- Tab bar with inline "Show last" control when on History tab -->
       <div class="flex items-center gap-1 border-b border-border -mb-3 min-h-9" role="tablist">
-        <${TabBtn} id="active" label="Active" count=${active.length} />
-        <${TabBtn} id="history" label="History" count=${0} />
+        <${TabBtn} id="active" label=${t('downloads.tab.active')} count=${active.length} />
+        <${TabBtn} id="history" label=${t('downloads.tab.history')} count=${0} />
         ${activeTab === 'history' && html`
           <div class="ml-auto flex items-center gap-2 pb-1">
-            <span class="text-xs text-text-muted">Show last</span>
+            <span class="text-xs text-text-muted">${t('downloads.history.show_last')}</span>
             <select
               class="input input-sm w-20"
-              aria-label="History size"
+              aria-label=${t('downloads.history.size.label')}
               value=${historySize}
               onChange=${(/** @type {any} */ e) => changeHistorySize(Number(e.target.value))}
             >
@@ -240,14 +241,14 @@ function DownloadsPage() {
                 checked=${bulkActive.headerState === 'checked'}
                 ref=${(el) => { if (el) el.indeterminate = bulkActive.headerState === 'indeterminate'; }}
                 onChange=${bulkActive.toggleAll}
-                aria-label="Select all downloads"
+                aria-label=${t('downloads.bulk.select_all')}
               />
               <span class="text-sm text-text-muted flex-1">
-                ${bulkActive.count > 0 ? `${bulkActive.count} selected` : `${active.length} download${active.length !== 1 ? 's' : ''}`}
+                ${bulkActive.count > 0 ? t('chapter.bulk.selected', { count: bulkActive.count }) : t('downloads.active.queue', { count: active.length, s: active.length !== 1 ? 's' : '' })}
               </span>
               ${bulkActive.count > 0 && html`
                 <button class="btn-danger btn-sm" onClick=${cancelSelected}>
-                  Cancel ${bulkActive.count}
+                  ${t('downloads.bulk.cancel', { count: bulkActive.count })}
                 </button>
               `}
             </div>
@@ -255,8 +256,8 @@ function DownloadsPage() {
           <div class="bg-surface border border-border rounded-xl overflow-hidden">
             ${active.length === 0
               ? html`<div class="flex flex-col items-center gap-2 py-12 text-center">
-                  <p class="text-base font-medium text-text">No active downloads</p>
-                  <p class="text-sm text-text-muted">Downloads started from manga details will appear here.</p>
+                  <p class="text-base font-medium text-text">${t('downloads.empty.title')}</p>
+                  <p class="text-sm text-text-muted">${t('downloads.empty.desc')}</p>
                 </div>`
               : active.map(e => html`<${ActiveRow}
                   key=${e.id}
@@ -280,14 +281,14 @@ function DownloadsPage() {
                 checked=${bulkFailed.headerState === 'checked'}
                 ref=${(el) => { if (el) el.indeterminate = bulkFailed.headerState === 'indeterminate'; }}
                 onChange=${bulkFailed.toggleAll}
-                aria-label="Select all failed downloads"
+                aria-label=${t('downloads.bulk.select_all_failed')}
               />
               <span class="text-sm text-text-muted flex-1">
-                ${bulkFailed.count > 0 ? `${bulkFailed.count} selected` : `${failedIds.length} failed`}
+                ${bulkFailed.count > 0 ? t('chapter.bulk.selected', { count: bulkFailed.count }) : t('downloads.failed.queue', { count: failedIds.length })}
               </span>
               ${bulkFailed.count > 0 && html`
                 <button class="btn-primary btn-sm" onClick=${retrySelected}>
-                  Retry ${bulkFailed.count}
+                  ${t('downloads.bulk.retry', { count: bulkFailed.count })}
                 </button>
               `}
             </div>
@@ -295,8 +296,8 @@ function DownloadsPage() {
           <div class="bg-surface border border-border rounded-xl overflow-hidden">
             ${history.length === 0
               ? html`<div class="flex flex-col items-center gap-2 py-12 text-center">
-                  <p class="text-base font-medium text-text">No download history</p>
-                  <p class="text-sm text-text-muted">Completed and failed downloads will appear here.</p>
+                  <p class="text-base font-medium text-text">${t('downloads.history.empty.title')}</p>
+                  <p class="text-sm text-text-muted">${t('downloads.history.empty.desc')}</p>
                 </div>`
               : history.map(e => html`<${HistoryRow} key=${e.id} entry=${e} />`)
             }
@@ -310,7 +311,7 @@ function DownloadsPage() {
 /** @param {HTMLElement} container */
 export async function init(container) {
   document.title = 'Downloads - Kani';
-  setPageHeader({ crumbs: [{ label: 'Downloads' }] });
+  setPageHeader({ crumbs: [{ label: t('downloads.crumb') }] });
   render(html`<${DownloadsPage} />`, container);
 }
 

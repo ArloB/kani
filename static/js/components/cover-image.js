@@ -1,6 +1,8 @@
 // @ts-check
 // Cover image component — manga cover with no-cover fallback.
 
+import { t } from '../i18n.js';
+
 const MAX_RETRIES = 3;
 
 /**
@@ -30,7 +32,7 @@ export function createCoverImage({ url, alt = '', loading = 'lazy', fetchpriorit
         img.remove();
         const fallback = document.createElement('div');
         fallback.className = 'absolute inset-0 flex items-center justify-center text-xs text-text-muted';
-        fallback.textContent = 'No Cover';
+        fallback.textContent = t('common.no_cover');
         wrap.appendChild(fallback);
       }
     });
@@ -40,7 +42,7 @@ export function createCoverImage({ url, alt = '', loading = 'lazy', fetchpriorit
   } else {
     const fallback = document.createElement('div');
     fallback.className = 'absolute inset-0 flex items-center justify-center text-xs text-text-muted';
-    fallback.textContent = 'No Cover';
+    fallback.textContent = t('common.no_cover');
     wrap.appendChild(fallback);
   }
 

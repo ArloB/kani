@@ -8,6 +8,7 @@ import { escapeHtml } from '../utils.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
+import { t } from '../i18n.js';
 
 // ── CSS variable resolver ─────────────────────────────────────────────────────
 // Chart.js renders on <canvas> and cannot read CSS custom properties.
@@ -60,7 +61,7 @@ export async function init(container) {
   // Period picker action
   const picker = document.createElement('select');
   picker.className = 'input input-sm w-28';
-  for (const [v, l] of [[30, '30 days'], [90, '90 days'], [180, '180 days'], [365, '1 year']]) {
+  for (const [v, l] of [[30, t('stats.period.30d')], [90, t('stats.period.90d')], [180, t('stats.period.180d')], [365, t('stats.period.1y')]]) {
     const opt = document.createElement('option');
     opt.value = String(v);
     opt.textContent = l;
@@ -72,7 +73,7 @@ export async function init(container) {
     _load();
   });
 
-  setPageHeader({ crumbs: [{ label: 'Statistics' }], actions: picker });
+  setPageHeader({ crumbs: [{ label: t('stats.crumb') }], actions: picker });
 
   container.innerHTML = `
     <div class="max-w-page mx-auto w-full px-4 md:px-6 py-4 md:py-6">
@@ -163,10 +164,10 @@ function summaryWidget() {
     /** @param {HTMLElement} container @param {any} data */
     render(container, data) {
       const cards = [
-        { label: 'Chapters Read',    value: data.total_chapters_read ?? 0 },
-        { label: 'Manga Read',       value: data.total_manga_read    ?? 0 },
-        { label: 'Completed Manga',  value: data.completed_manga     ?? 0 },
-        { label: 'Current Streak',   value: `${data.current_streak ?? 0}d` },
+        { label: t('stats.card.chapters_read'), value: data.total_chapters_read ?? 0 },
+        { label: t('stats.card.manga_read'),    value: data.total_manga_read    ?? 0 },
+        { label: t('stats.card.completed'),     value: data.completed_manga     ?? 0 },
+        { label: t('stats.card.streak'),        value: `${data.current_streak ?? 0}d` },
       ];
 
       container.innerHTML = `
@@ -178,7 +179,7 @@ function summaryWidget() {
             </div>
           `).join('')}
         </div>
-        ${data.longest_streak ? `<p class="text-sm text-text-muted mt-2">Longest streak: <span class="font-medium text-text">${data.longest_streak}d</span></p>` : ''}
+        ${data.longest_streak ? `<p class="text-sm text-text-muted mt-2">${escapeHtml(t('stats.summary.longest_streak'))}: <span class="font-medium text-text">${data.longest_streak}d</span></p>` : ''}
       `;
       return { destroy() { container.innerHTML = ''; } };
     },
@@ -196,13 +197,13 @@ function readingPaceWidget() {
     render(container, data) {
       const rows = data.reading_pace ?? [];
       if (!rows.length) {
-        container.innerHTML = `<div class="card p-4 text-text-muted text-sm">No reading activity in selected period.</div>`;
+        container.innerHTML = `<div class="card p-4 text-text-muted text-sm">${escapeHtml(t('stats.empty.no_activity'))}</div>`;
         return { destroy() { container.innerHTML = ''; } };
       }
 
       container.innerHTML = `
         <div class="card p-4">
-          <h2 class="text-base font-semibold mb-4">Pages per Day</h2>
+          <h2 class="text-base font-semibold mb-4">${escapeHtml(t('stats.chart.pages_per_day'))}</h2>
           <div class="relative h-48">
             <canvas id="chart-pace" class="w-full h-full"></canvas>
           </div>
@@ -218,7 +219,7 @@ function readingPaceWidget() {
           data: {
             labels: rows.map((r) => r.date),
             datasets: [{
-              label: 'Pages',
+              label: t('stats.chart.dataset.pages'),
               data: rows.map((r) => r.pages),
               backgroundColor: chartColor('--chart-2', 0.15),
               borderColor: chartColor('--chart-2', 0.9),
@@ -264,13 +265,13 @@ function dailyActivityWidget() {
     render(container, data) {
       const rows = data.daily_activity ?? [];
       if (!rows.length) {
-        container.innerHTML = `<div class="card p-4 text-text-muted text-sm">No reading activity in selected period.</div>`;
+        container.innerHTML = `<div class="card p-4 text-text-muted text-sm">${escapeHtml(t('stats.empty.no_activity'))}</div>`;
         return { destroy() { container.innerHTML = ''; } };
       }
 
       container.innerHTML = `
         <div class="card p-4">
-          <h2 class="text-base font-semibold mb-4">Daily Activity</h2>
+          <h2 class="text-base font-semibold mb-4">${escapeHtml(t('stats.chart.daily_activity'))}</h2>
           <div class="relative h-48">
             <canvas id="chart-daily" class="w-full h-full"></canvas>
           </div>
@@ -287,7 +288,7 @@ function dailyActivityWidget() {
           data: {
             labels: rows.map((r) => r.date),
             datasets: [{
-              label: 'Chapters',
+              label: t('stats.chart.dataset.chapters'),
               data: rows.map((r) => r.chapters_read),
               backgroundColor: chartColor('--chart-1', 0.6),
               borderRadius: 3,
@@ -336,7 +337,7 @@ function topMangaWidget() {
 
       container.innerHTML = `
         <div class="card p-4">
-          <h2 class="text-base font-semibold mb-4">Most Read Manga</h2>
+          <h2 class="text-base font-semibold mb-4">${escapeHtml(t('stats.chart.most_read'))}</h2>
           <div class="relative h-64">
             <canvas id="chart-top-manga" class="w-full h-full"></canvas>
           </div>
@@ -352,7 +353,7 @@ function topMangaWidget() {
           data: {
             labels: rows.map((r) => r.manga_name),
             datasets: [{
-              label: 'Chapters',
+              label: t('stats.chart.dataset.chapters'),
               data: rows.map((r) => r.chapters_read),
               backgroundColor: chartColor('--chart-2', 0.65),
               borderRadius: 3,
@@ -377,10 +378,9 @@ function topMangaWidget() {
           },
         });
       }).catch(() => {
-        // Fallback: plain list
         container.innerHTML = `
           <div class="card p-4">
-            <h2 class="text-base font-semibold mb-3">Most Read Manga</h2>
+            <h2 class="text-base font-semibold mb-3">${escapeHtml(t('stats.chart.most_read'))}</h2>
             <ol class="flex flex-col gap-1 text-sm">
               ${rows.map((r, i) => `<li class="flex gap-2"><span class="text-text-muted w-4">${i + 1}.</span><a href="/manga/${r.manga_id}" class="link flex-1 truncate">${escapeHtml(r.manga_name)}</a><span class="text-text-muted">${r.chapters_read}ch</span></li>`).join('')}
             </ol>
@@ -415,7 +415,7 @@ function genreBreakdownWidget() {
 
       container.innerHTML = `
         <div class="card p-4">
-          <h2 class="text-base font-semibold mb-4">Genre Breakdown</h2>
+          <h2 class="text-base font-semibold mb-4">${escapeHtml(t('stats.chart.genre_breakdown'))}</h2>
           <div class="relative h-64">
             <canvas id="chart-genre" class="w-full h-full"></canvas>
           </div>
@@ -453,7 +453,7 @@ function genreBreakdownWidget() {
       }).catch(() => {
         container.innerHTML = `
           <div class="card p-4">
-            <h2 class="text-base font-semibold mb-3">Genre Breakdown</h2>
+            <h2 class="text-base font-semibold mb-3">${escapeHtml(t('stats.chart.genre_breakdown'))}</h2>
             <ul class="flex flex-col gap-1 text-sm">
               ${rows.map(r => `<li class="flex gap-2 justify-between"><span>${escapeHtml(r.genre)}</span><span class="text-text-muted">${r.chapters_read}</span></li>`).join('')}
             </ul>

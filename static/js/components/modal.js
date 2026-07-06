@@ -7,6 +7,7 @@ import htm from 'htm';
 import { iconX } from '../icons.js';
 import { Icon } from './icon.js';
 import { confirmDialog } from '../utils.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /**
@@ -86,7 +87,7 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
         ${title && html`
           <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle shrink-0">
             <h2 id=${titleId} class="text-lg font-semibold text-text">${title}</h2>
-            <button class="btn-icon" aria-label="Close" onClick=${onClose}><${Icon} svg=${iconX} /></button>
+            <button class="btn-icon" aria-label=${t('common.close')} onClick=${onClose}><${Icon} svg=${iconX} /></button>
           </div>
         `}
         <div class="flex-1 overflow-y-auto p-5">${children}</div>

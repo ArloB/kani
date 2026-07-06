@@ -3,6 +3,7 @@
 
 import { h, render } from 'preact';
 import htm from 'htm';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /**
@@ -19,7 +20,7 @@ export function SectionHeader({ title, description, actions, dirty }) {
       <div>
         <h2 class="flex items-center gap-2">
           ${title}
-          ${dirty ? html`<span class="dirty-dot" aria-label="Unsaved changes"></span>` : null}
+          ${dirty ? html`<span class="dirty-dot" aria-label=${t('settings.unsaved.title')}></span>` : null}
         </h2>
         ${description ? html`<p>${description}</p>` : null}
       </div>

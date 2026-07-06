@@ -241,11 +241,11 @@ export async function init(container, params) {
   let crumbs;
   if (!_fromSourceId && _isLocal) {
     // Direct navigation from the library
-    crumbs = [{ label: 'Library', href: '/library' }, { label: _mangaTitle }];
+    crumbs = [{ label: t('library.crumb'), href: '/library' }, { label: _mangaTitle }];
   } else if (source) {
     // Navigated from a source (browsing or via source link on a library entry)
     crumbs = [
-      { label: 'Sources', href: '/sources' },
+      { label: t('sources.crumb'), href: '/sources' },
       { label: source.name, href: `/source/${source.id}` },
       { label: _mangaTitle },
     ];
