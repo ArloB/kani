@@ -25,7 +25,7 @@ export function mount(el, settings) {
       trackers = await api.getTrackers();
     } catch (e) {
       el.innerHTML = '';
-      el.appendChild(createErrorState({ message: 'Failed to load trackers.', onRetry: _render }));
+      el.appendChild(createErrorState({ message: t('trackers.error.load_failed'), onRetry: _render }));
       return;
     }
 
@@ -102,25 +102,25 @@ export function mount(el, settings) {
         const linkBtn = document.createElement('button');
         linkBtn.type = 'button';
         linkBtn.className = tracker.linked ? 'btn-danger btn-sm' : 'btn-primary btn-sm';
-        linkBtn.textContent = tracker.linked ? 'Unlink' : 'Link Account';
+        linkBtn.textContent = tracker.linked ? t('trackers.unlink') : t('trackers.link');
         trackerCard.appendChild(mkSettingsRow({
-          label: tracker.linked ? 'Account linked' : 'Not linked',
+          label: tracker.linked ? t('trackers.linked_label') : t('trackers.not_linked_label'),
           description: tracker.linked
-            ? `Your ${tracker.name} account is connected.`
-            : `Connect your ${tracker.name} account to sync progress.`,
+            ? t('trackers.linked_desc', { name: tracker.name })
+            : t('trackers.not_linked_desc', { name: tracker.name }),
           control: linkBtn,
         }));
 
         linkBtn.addEventListener('click', async () => {
           if (tracker.linked) {
-            if (!(await openConfirm({ title: 'Unlink tracker', message: `Unlink your ${tracker.name} account?`, danger: true }))) return;
+            if (!(await openConfirm({ title: t('trackers.confirm.unlink.title'), message: t('trackers.confirm.unlink.msg', { name: tracker.name }), danger: true }))) return;
             linkBtn.disabled = true;
             try {
               await api.unlinkTracker(tracker.id);
               tracker.linked = false;
               await _render();
             } catch (e) {
-              showToast(e?.message ?? 'Failed to unlink.', { type: 'error' });
+              showToast(e?.message ?? t('trackers.error.unlink_failed'), { type: 'error' });
               linkBtn.disabled = false;
             }
           } else {
@@ -134,10 +134,10 @@ export function mount(el, settings) {
         const notConfiguredEl = document.createElement('span');
         notConfiguredEl.className = 'text-xs text-text-muted';
         trackerCard.appendChild(mkSettingsRow({
-          label: 'Not configured',
+          label: t('trackers.not_configured'),
           description: isAdmin
-            ? 'Add credentials below to enable this tracker.'
-            : 'Contact your server admin to configure this tracker.',
+            ? t('trackers.not_configured.admin_desc')
+            : t('trackers.not_configured.user_desc'),
           control: notConfiguredEl,
         }));
       }
@@ -149,7 +149,7 @@ export function mount(el, settings) {
         const isAniList = tracker.name === 'AniList';
         const isMAL = tracker.name === 'MyAnimeList';
 
-        const setupGroup = mkSettingsGroup('Setup');
+        const setupGroup = mkSettingsGroup(t('trackers.setup.group'));
         const setupCard  = mkSettingsGroupCard(setupGroup);
 
         const instructions = isAniList ? `
@@ -168,22 +168,22 @@ export function mount(el, settings) {
           <div class="px-4 py-4 flex flex-col gap-3">
             ${instructions}
             <div class="flex flex-col gap-1">
-              <label class="text-xs font-medium text-text" for="tracker-${tracker.id}-client-id">Client ID</label>
+              <label class="text-xs font-medium text-text" for="tracker-${tracker.id}-client-id">${escapeHtml(t('trackers.setup.client_id'))}</label>
               <input type="text" id="tracker-${tracker.id}-client-id" class="input text-sm js-client-id font-mono"
-                value="${escapeHtml(config?.client_id ?? '')}" placeholder="Paste your client ID here"
+                value="${escapeHtml(config?.client_id ?? '')}" placeholder="${escapeHtml(t('trackers.setup.client_id.placeholder'))}"
                 autocomplete="off" spellcheck="false">
             </div>
             ${isAniList ? `
             <div class="flex flex-col gap-1">
-              <label class="text-xs font-medium text-text" for="tracker-${tracker.id}-secret">Client Secret</label>
+              <label class="text-xs font-medium text-text" for="tracker-${tracker.id}-secret">${escapeHtml(t('trackers.setup.client_secret'))}</label>
               <input type="password" id="tracker-${tracker.id}-secret" class="input text-sm js-client-secret font-mono"
-                placeholder="${config?.secret_configured ? 'Already set — leave blank to keep current value' : 'Paste your client secret here'}"
+                placeholder="${escapeHtml(config?.secret_configured ? t('trackers.setup.client_secret.already_set') : t('trackers.setup.client_secret.placeholder'))}"
                 autocomplete="off">
-              <p class="text-xs text-text-muted">Stored on the server only, never exposed to users.</p>
+              <p class="text-xs text-text-muted">${escapeHtml(t('trackers.setup.client_secret.note'))}</p>
             </div>` : ''}
             <div class="flex items-center gap-2 flex-wrap">
-              <button type="button" class="btn-primary btn-sm js-config-save">Save credentials</button>
-              ${config?.client_id ? `<button type="button" class="btn-danger btn-sm js-config-delete">Remove credentials</button>` : ''}
+              <button type="button" class="btn-primary btn-sm js-config-save">${escapeHtml(t('trackers.setup.save'))}</button>
+              ${config?.client_id ? `<button type="button" class="btn-danger btn-sm js-config-delete">${escapeHtml(t('trackers.setup.remove'))}</button>` : ''}
             </div>
           </div>
         `;
@@ -195,13 +195,13 @@ export function mount(el, settings) {
 
         saveBtn.addEventListener('click', async () => {
           const clientId = clientIdEl.value.trim();
-          if (!clientId) { showToast('Client ID is required.', { type: 'error' }); return; }
+          if (!clientId) { showToast(t('trackers.setup.client_id.required'), { type: 'error' }); return; }
           saveBtn.disabled = true;
           try {
             const body = { client_id: clientId };
             if (secretEl?.value) body.client_secret = secretEl.value;
             await api.setTrackerConfig(tracker.id, body);
-            showToast('Saved.', { type: 'success' });
+            showToast(t('common.saved'), { type: 'success' });
             await _render();
           } catch (e) {
             showApiError(e);
@@ -211,13 +211,13 @@ export function mount(el, settings) {
         });
 
         deleteBtn?.addEventListener('click', async () => {
-          if (!(await openConfirm({ title: 'Remove credentials', message: `Remove all ${tracker.name} credentials? This will unlink all users.`, danger: true }))) return;
+          if (!(await openConfirm({ title: t('trackers.confirm.remove_creds.title'), message: t('trackers.confirm.remove_creds.msg', { name: tracker.name }), danger: true }))) return;
           deleteBtn.disabled = true;
           try {
             await api.deleteTrackerConfig(tracker.id);
             _render();
           } catch (e) {
-            showToast(e?.message ?? 'Failed to remove.', { type: 'error' });
+            showToast(e?.message ?? t('trackers.error.remove_failed'), { type: 'error' });
             deleteBtn.disabled = false;
           }
         });
@@ -246,7 +246,7 @@ function _openTrackerPopup(trackerId, trackerName, onLinked) {
     if (!popup) {
       // Import showToast lazily to avoid circular imports
       import('../../components/toast.js').then(({ showToast }) => {
-        showToast('Popup was blocked. Please allow popups for this site.', { type: 'error' });
+        showToast(t('trackers.error.popup_blocked'), { type: 'error' });
       });
       return;
     }
@@ -272,7 +272,7 @@ function _openTrackerPopup(trackerId, trackerName, onLinked) {
     }, 500);
   }).catch(e => {
     import('../../components/toast.js').then(({ showToast }) => {
-      showToast(e?.message ?? `Failed to get ${trackerName} auth URL.`, { type: 'error' });
+      showToast(e?.message ?? t('trackers.error.auth_url_failed', { name: trackerName }), { type: 'error' });
     });
   });
 }

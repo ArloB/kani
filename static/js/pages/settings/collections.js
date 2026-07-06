@@ -18,10 +18,10 @@ function _describeRule(ruleJson) {
       case 'has_unread': return t('collections.rule.has_unread');
       case 'status': return `${t('collections.rule.status')}: ${_STATUS_LABELS[r.value] ?? r.value}`;
       case 'tag': return `${t('collections.rule.tag')}: ${r.name}`;
-      case 'chapter_count_gt': return `> ${r.value} chapters`;
-      case 'chapter_count_lt': return `< ${r.value} chapters`;
-      case 'and': return `All of ${r.rules?.length ?? 0} conditions`;
-      case 'or': return `Any of ${r.rules?.length ?? 0} conditions`;
+      case 'chapter_count_gt': return t('collections.rule.chapter_count_gt_label', { count: r.value });
+      case 'chapter_count_lt': return t('collections.rule.chapter_count_lt_label', { count: r.value });
+      case 'and': return t('collections.rule.and', { count: r.rules?.length ?? 0 });
+      case 'or':  return t('collections.rule.or',  { count: r.rules?.length ?? 0 });
       default: return r.op ?? '—';
     }
   } catch { return '—'; }
@@ -77,7 +77,7 @@ function _mkRuleBuilder(initial) {
       const inp = document.createElement('input');
       inp.type = 'text';
       inp.className = 'input text-sm w-36';
-      inp.placeholder = 'Tag name';
+      inp.placeholder = t('collections.tag.placeholder');
       if (initial?.op === 'tag') inp.value = initial.name ?? '';
       valueWrap.appendChild(inp);
     } else if (type === 'chapter_count_gt' || type === 'chapter_count_lt') {
@@ -127,13 +127,13 @@ export function mount(el) {
 
 /** @param {HTMLElement} el */
 async function _load(el) {
-  el.innerHTML = '<div class="text-sm text-text-muted px-1 py-4">Loading…</div>';
+  el.innerHTML = `<div class="text-sm text-text-muted px-1 py-4">${t('common.loading')}</div>`;
   try {
     const cols = await api.listCollections();
     _render(el, Array.isArray(cols) ? cols : []);
   } catch (e) {
     el.innerHTML = '';
-    el.appendChild(createErrorState({ message: e.message ?? 'Failed to load collections.' }));
+    el.appendChild(createErrorState({ message: e.message ?? t('collections.error.load') }));
   }
 }
 
@@ -183,13 +183,13 @@ function _mkRow(col, containerEl) {
   const editBtn = document.createElement('button');
   editBtn.type = 'button';
   editBtn.className = 'btn-icon text-text-muted shrink-0' + (simple ? '' : ' hidden');
-  editBtn.setAttribute('aria-label', 'Edit');
+  editBtn.setAttribute('aria-label', t('common.edit'));
   editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
 
   const delBtn = document.createElement('button');
   delBtn.type = 'button';
   delBtn.className = 'btn-icon text-danger shrink-0';
-  delBtn.setAttribute('aria-label', 'Delete');
+  delBtn.setAttribute('aria-label', t('common.delete'));
   delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
 
   viewRow.append(nameEl, descEl, editBtn, delBtn);
@@ -211,12 +211,12 @@ function _mkRow(col, containerEl) {
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'btn-ghost btn-sm';
-  cancelBtn.textContent = 'Cancel';
+  cancelBtn.textContent = t('common.cancel');
 
   const saveBtn = document.createElement('button');
   saveBtn.type = 'button';
   saveBtn.className = 'btn-primary btn-sm';
-  saveBtn.textContent = 'Save';
+  saveBtn.textContent = t('common.save');
 
   editActions.append(cancelBtn, saveBtn);
   editForm.append(nameInput, builderEl, editActions);
@@ -256,7 +256,7 @@ function _mkRow(col, containerEl) {
   });
 
   delBtn.addEventListener('click', async () => {
-    if (!(await showConfirm(t('collections.delete.confirm', { name: col.name }), { confirmLabel: 'Delete' }))) return;
+    if (!(await showConfirm(t('collections.delete.confirm', { name: col.name }), { confirmLabel: t('common.delete') }))) return;
     delBtn.disabled = true;
     try {
       await api.deleteCollection(col.id);
@@ -309,7 +309,7 @@ function _mkAddForm(containerEl) {
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'btn-ghost btn-sm';
-  cancelBtn.textContent = 'Cancel';
+  cancelBtn.textContent = t('common.cancel');
 
   const submitBtn = document.createElement('button');
   submitBtn.type = 'button';

@@ -141,18 +141,18 @@ export function mount(el) {
     // ────────────────────────────────────────────────────────────────────────
 
     const paginationPrefs = [
-      { label: 'Chapter list',  key: 'kani_chapter_pagination',  desc: 'How chapters are loaded in the chapter list.' },
-      { label: 'Library',       key: 'kani_library_pagination',  desc: 'How manga are loaded in the library grid.' },
-      { label: 'Source browse', key: 'kani_source_pagination',   desc: 'How manga are loaded when browsing a source.' },
+      { label: t('settings.general.pagination.chapters'),  key: 'kani_chapter_pagination',  desc: t('settings.general.pagination.chapters.desc') },
+      { label: t('settings.general.pagination.library'),   key: 'kani_library_pagination',  desc: t('settings.general.pagination.library.desc') },
+      { label: t('settings.general.pagination.source'),    key: 'kani_source_pagination',   desc: t('settings.general.pagination.source.desc') },
     ];
 
-    const paginGroup = mkSettingsGroup('Pagination');
+    const paginGroup = mkSettingsGroup(t('settings.general.pagination.group'));
     const paginCard  = mkSettingsGroupCard(paginGroup);
     for (const { label, key, desc } of paginationPrefs) {
       const current = getLocal(key) || 'paginated';
       const chips = document.createElement('div');
       chips.className = 'flex gap-2 shrink-0';
-      for (const [val, chipLabel] of [['paginated', 'Paginated'], ['infinite', 'Infinite scroll']]) {
+      for (const [val, chipLabel] of [['paginated', t('settings.general.pagination.paginated')], ['infinite', t('settings.general.pagination.infinite')]]) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = current === val ? 'chip chip-active' : 'chip';
@@ -165,39 +165,38 @@ export function mount(el) {
     }
     el.appendChild(paginGroup);
 
-    const readGroup = mkSettingsGroup('Reading');
+    const readGroup = mkSettingsGroup(t('settings.general.reading.group'));
     const readCard  = mkSettingsGroupCard(readGroup);
     readCard.appendChild(mkToggleRow({
-      label: 'Sync read status across scanlators',
-      description: 'Marking a chapter read also marks all other versions of it as read.',
+      label: t('settings.general.reading.coalesce'),
+      description: t('settings.general.reading.coalesce.desc'),
       checked: getLocal('kani_coalesce_read') === 'true',
       onChange: v => setLocal('kani_coalesce_read', v ? 'true' : 'false'),
     }));
     readCard.appendChild(mkToggleRow({
-      label: 'Warn before opening external links',
-      description: 'Show a confirmation dialog when clicking links in manga descriptions.',
+      label: t('settings.general.reading.external_warn'),
+      description: t('settings.general.reading.external_warn.desc'),
       checked: getLocal('kani_skip_external_warning') !== 'true',
       onChange: v => setLocal('kani_skip_external_warning', v ? 'false' : 'true'),
     }));
     el.appendChild(readGroup);
 
-    const notifGroup = mkSettingsGroup('Notifications');
+    const notifGroup = mkSettingsGroup(t('settings.general.notifications.group'));
     const notifCard  = mkSettingsGroupCard(notifGroup);
     notifCard.appendChild(mkToggleRow({
-      label: 'Show in-app chapter badges',
-      description: 'Show a notification badge when new chapters are found during a scan.',
+      label: t('settings.general.notifications.in_app'),
+      description: t('settings.general.notifications.in_app.desc'),
       checked: getLocal('kani_disable_notifications') !== 'true',
       onChange: v => setLocal('kani_disable_notifications', v ? 'false' : 'true'),
     }));
 
-    // Browser push notifications (only show if the API is available)
     if ('Notification' in window) {
       const browserEnabled = getLocal('kani_browser_notifications') === 'true';
       const browserRow = mkSettingsRow({
-        label: 'Browser notifications',
+        label: t('settings.general.notifications.browser'),
         description: Notification.permission === 'denied'
-          ? 'Notifications are blocked by your browser. Update your browser settings to allow them.'
-          : 'Show a browser notification when new chapters are found during a scan.',
+          ? t('settings.general.notifications.browser.blocked')
+          : t('settings.general.notifications.browser.desc'),
         control: (() => {
           const label = document.createElement('label');
           label.className = 'kani-toggle';
@@ -288,7 +287,7 @@ export function mount(el) {
 
     const note = document.createElement('p');
     note.className = 'text-xs text-text-muted';
-    note.textContent = 'These preferences are saved to this device only.';
+    note.textContent = t('settings.general.local_prefs_note');
     el.appendChild(note);
   }
 

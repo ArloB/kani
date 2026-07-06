@@ -29,18 +29,18 @@ export function mount(el, initialCategories) {
   function _render() {
     el.innerHTML = '';
 
-    const group = mkSettingsGroup('Categories');
+    const group = mkSettingsGroup(t('library.categories.group'));
     const card  = mkSettingsGroupCard(group);
     el.appendChild(group);
 
     // Card header with Add button
     const cardHead = document.createElement('div');
     cardHead.className = 'detail-card-head';
-    cardHead.innerHTML = `<span>${cats.length} categor${cats.length === 1 ? 'y' : 'ies'}</span>`;
+    cardHead.innerHTML = `<span>${t('library.categories.count', { count: cats.length, s: cats.length !== 1 ? 'ies' : 'y' })}</span>`;
     const addBtn = document.createElement('button');
     addBtn.type = 'button';
     addBtn.className = 'btn-primary btn-sm';
-    addBtn.textContent = '+ Add category';
+    addBtn.textContent = t('library.categories.add');
     cardHead.appendChild(addBtn);
     card.appendChild(cardHead);
 
@@ -51,8 +51,8 @@ export function mount(el, initialCategories) {
 
     if (cats.length === 0) {
       listContainer.appendChild(createEmptyState({
-        title: 'No categories yet',
-        subtitle: 'Create a category to organise your library.',
+        title: t('library.categories.empty.title'),
+        subtitle: t('library.categories.empty.subtitle'),
       }));
     } else {
       sortable = mountSortableList(listContainer, {
@@ -64,7 +64,7 @@ export function mount(el, initialCategories) {
           try {
             await api.reorderCategories(ids);
           } catch (e) {
-            showToast(/** @type {any} */(e)?.message ?? 'Failed to reorder.', { type: 'error' });
+            showToast(/** @type {any} */(e)?.message ?? t('library.categories.error.reorder'), { type: 'error' });
           }
           _refreshHead(cardHead, cats.length);
         },
@@ -90,18 +90,18 @@ export function mount(el, initialCategories) {
     editInput.type = 'text';
     editInput.className = 'input flex-1 text-sm js-cat-edit hidden';
     editInput.value = cat.name;
-    editInput.setAttribute('aria-label', `Rename ${cat.name}`);
+    editInput.setAttribute('aria-label', t('library.categories.rename', { name: cat.name }));
 
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.className = 'btn-icon shrink-0';
-    editBtn.setAttribute('aria-label', `Rename ${cat.name}`);
+    editBtn.setAttribute('aria-label', t('library.categories.rename', { name: cat.name }));
     editBtn.innerHTML = iconPencil;
 
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'btn-icon text-danger shrink-0';
-    delBtn.setAttribute('aria-label', `Delete ${cat.name}`);
+    delBtn.setAttribute('aria-label', t('library.categories.delete', { name: cat.name }));
     delBtn.innerHTML = iconX;
 
     wrap.appendChild(nameSpan);
@@ -128,7 +128,7 @@ export function mount(el, initialCategories) {
         cat.name = newName;
         nameSpan.textContent = newName;
       } catch (e) {
-        showToast(/** @type {any} */(e)?.message ?? 'Failed to rename.', { type: 'error' });
+        showToast(/** @type {any} */(e)?.message ?? t('library.categories.error.rename'), { type: 'error' });
       }
       editInput.classList.add('hidden');
       nameSpan.classList.remove('hidden');
@@ -145,7 +145,7 @@ export function mount(el, initialCategories) {
     });
 
     delBtn.addEventListener('click', async () => {
-      if (!(await openConfirm({ title: 'Delete category', message: `Delete category "${cat.name}"? This cannot be undone.`, danger: true }))) return;
+      if (!(await openConfirm({ title: t('library.categories.confirm.delete.title'), message: t('library.categories.confirm.delete.msg', { name: cat.name }), danger: true }))) return;
       delBtn.disabled = true;
       try {
         await api.deleteCategory(cat.id);
@@ -153,7 +153,7 @@ export function mount(el, initialCategories) {
         if (sortable) sortable.update(cats);
         if (cats.length === 0) _render();
       } catch (e) {
-        showToast(/** @type {any} */(e)?.message ?? 'Failed to delete.', { type: 'error' });
+        showToast(/** @type {any} */(e)?.message ?? t('library.categories.error.delete'), { type: 'error' });
         delBtn.disabled = false;
       }
     });
@@ -184,8 +184,8 @@ export function mount(el, initialCategories) {
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'input flex-1 text-sm';
-    input.placeholder = 'Category name';
-    input.setAttribute('aria-label', 'New category name');
+    input.placeholder = t('library.categories.name.placeholder');
+    input.setAttribute('aria-label', t('library.categories.name.label'));
     pendingRow.appendChild(input);
 
     const editBtn = document.createElement('button');
@@ -219,7 +219,7 @@ export function mount(el, initialCategories) {
         cats = Array.isArray(updated) ? updated : cats;
         _render();
       } catch (e) {
-        showToast(/** @type {any} */(e)?.message ?? 'Failed to add category.', { type: 'error' });
+        showToast(/** @type {any} */(e)?.message ?? t('library.categories.error.add'), { type: 'error' });
         _discard();
         _committed = false;
       }
@@ -249,14 +249,14 @@ export function mount(el, initialCategories) {
  */
 function _refreshHead(headEl, count) {
   const span = headEl.querySelector('span');
-  if (span) span.textContent = `${count} categor${count === 1 ? 'y' : 'ies'}`;
+  if (span) span.textContent = t('library.categories.count', { count, s: count !== 1 ? 'ies' : 'y' });
 }
 
 // ── Import & Export ───────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} el */
 function _mountImportExport(el) {
-  const group = mkSettingsGroup('Import & Export');
+  const group = mkSettingsGroup(t('library.import_export.group'));
   const card  = mkSettingsGroupCard(group);
   el.appendChild(group);
 
@@ -276,7 +276,7 @@ function _mountImportExport(el) {
   progressCheck.className = 'rounded';
   progressCheck.addEventListener('change', () => { includeProgress = progressCheck.checked; });
   progressLabel.appendChild(progressCheck);
-  progressLabel.appendChild(document.createTextNode('Include chapter progress'));
+  progressLabel.appendChild(document.createTextNode(t('library.export.include_progress')));
 
   const exportPassphrase = document.createElement('input');
   exportPassphrase.type = 'password';
@@ -288,14 +288,14 @@ function _mountImportExport(el) {
   const exportBtn = document.createElement('button');
   exportBtn.type = 'button';
   exportBtn.className = 'btn-primary btn-sm';
-  exportBtn.textContent = 'Export';
+  exportBtn.textContent = t('library.export.btn');
   exportBtn.addEventListener('click', () => api.downloadBackupEncrypted(includeProgress, exportPassphrase.value));
 
   exportTopRow.appendChild(progressLabel);
   exportTopRow.appendChild(exportBtn);
   exportCtrl.appendChild(exportTopRow);
   exportCtrl.appendChild(exportPassphrase);
-  card.appendChild(mkSettingsRow({ label: 'Export backup', description: 'Download a .zip backup of your library.', control: exportCtrl }));
+  card.appendChild(mkSettingsRow({ label: t('library.export.label'), description: t('library.export.desc'), control: exportCtrl }));
 
   // ── Restore ───────────────────────────────────────────────────────────────
   const restoreCtrl = document.createElement('div');
@@ -310,7 +310,7 @@ function _mountImportExport(el) {
   const restoreBtn = document.createElement('button');
   restoreBtn.type = 'button';
   restoreBtn.className = 'btn-secondary btn-sm';
-  restoreBtn.textContent = 'Choose file (.zip)';
+  restoreBtn.textContent = t('library.restore.choose_file');
 
   const restoreInput = document.createElement('input');
   restoreInput.type = 'file';
@@ -324,7 +324,7 @@ function _mountImportExport(el) {
       const preview = await api.previewBackupEncrypted(file, restorePassphrase.value);
       _showRestoreDialog(file, preview, restorePassphrase.value);
     } catch (e) {
-      showToast(`Preview failed: ${e.message}`, 'error');
+      showToast(t('library.restore.preview_failed', { msg: e.message }), 'error');
     }
   });
 
@@ -332,14 +332,14 @@ function _mountImportExport(el) {
   restoreCtrl.appendChild(restoreInput);
   restoreCtrl.appendChild(restorePassphrase);
   restoreCtrl.appendChild(restoreBtn);
-  card.appendChild(mkSettingsRow({ label: 'Restore backup', description: 'Restore from a Kani backup file.', control: restoreCtrl }));
+  card.appendChild(mkSettingsRow({ label: t('library.restore.label'), description: t('library.restore.desc'), control: restoreCtrl }));
 
   // ── Tachiyomi ─────────────────────────────────────────────────────────────
   const tachiCtrl = document.createElement('div');
   const tachiBtn = document.createElement('button');
   tachiBtn.type = 'button';
   tachiBtn.className = 'btn-secondary btn-sm';
-  tachiBtn.textContent = 'Choose file (.tachibk)';
+  tachiBtn.textContent = t('library.tachiyomi.choose_file');
 
   const tachiInput = document.createElement('input');
   tachiInput.type = 'file';
@@ -353,14 +353,14 @@ function _mountImportExport(el) {
       const preview = await api.previewTachiyomiImport(file);
       _showTachiyomiDialog(file, preview);
     } catch (e) {
-      showToast(`Preview failed: ${e.message}`, 'error');
+      showToast(t('library.tachiyomi.preview_failed', { msg: e.message }), 'error');
     }
   });
 
   tachiBtn.addEventListener('click', () => tachiInput.click());
   tachiCtrl.appendChild(tachiInput);
   tachiCtrl.appendChild(tachiBtn);
-  card.appendChild(mkSettingsRow({ label: 'Import from Tachiyomi / Mihon', description: 'Import a .tachibk backup file.', control: tachiCtrl }));
+  card.appendChild(mkSettingsRow({ label: t('library.tachiyomi.label'), description: t('library.tachiyomi.desc'), control: tachiCtrl }));
 
   _mountScheduledBackup(el);
 }
@@ -541,13 +541,13 @@ function RestoreModal({ file, preview, passphrase = '', onClose }) {
 
   /** @type {Array<[string, string, boolean]>} */
   const checkDefs = [
-    [`Import manga (${preview.manga_count})`, 'import_manga', true],
-    ['Import categories', 'import_categories', !!preview.category_count],
-    ['Import download rules', 'import_download_rules', !!preview.download_rule_count],
-    ['Import reading status', 'import_tracking', !!preview.has_tracking],
-    ['Import chapter progress', 'import_chapter_progress', !!preview.has_chapter_progress],
-    ['Import settings', 'import_settings', !!preview.has_settings],
-    [`Import repositories (${preview.repo_count || 0})`, 'import_repos', !!preview.repo_count],
+    [t('library.restore.import_manga', { count: preview.manga_count }), 'import_manga', true],
+    [t('library.restore.import_categories'), 'import_categories', !!preview.category_count],
+    [t('library.restore.import_download_rules'), 'import_download_rules', !!preview.download_rule_count],
+    [t('library.restore.import_tracking'), 'import_tracking', !!preview.has_tracking],
+    [t('library.restore.import_chapter_progress'), 'import_chapter_progress', !!preview.has_chapter_progress],
+    [t('library.restore.import_settings'), 'import_settings', !!preview.has_settings],
+    [t('library.restore.import_repos', { count: preview.repo_count || 0 }), 'import_repos', !!preview.repo_count],
   ];
 
   async function doImport() {
@@ -555,7 +555,7 @@ function RestoreModal({ file, preview, passphrase = '', onClose }) {
     setProgress(null);
     try {
       const r = await api.restoreBackupEncrypted(file, opts, passphrase);
-      showToast(`Backup restored: ${r.imported_manga} manga imported.`, { type: 'success' });
+      showToast(t('library.restore.success', { count: r.imported_manga }), { type: 'success' });
       onClose();
     } catch (e) {
       showApiError(e);
@@ -565,22 +565,22 @@ function RestoreModal({ file, preview, passphrase = '', onClose }) {
   }
 
   return html`
-    <${Modal} open=${true} title="Restore Backup" onClose=${onClose} footer=${html`
-      <button type="button" class="btn-ghost btn-sm" onClick=${onClose}>Cancel</button>
+    <${Modal} open=${true} title=${t('library.restore.modal.title')} onClose=${onClose} footer=${html`
+      <button type="button" class="btn-ghost btn-sm" onClick=${onClose}>${t('common.cancel')}</button>
       <button type="button" class="btn-primary btn-sm" disabled=${loading} onClick=${doImport}>
-        ${loading ? 'Importing…' : 'Import'}
+        ${loading ? t('library.restore.importing') : t('library.restore.import_btn')}
       </button>
     `}>
       <div class="flex flex-col gap-4">
         <p class="text-sm text-text-muted">
-          Kani Backup · ${preview.exported_at?.slice(0, 10) ?? 'unknown date'} · ${preview.manga_count} manga, ${preview.category_count} categories
+          ${t('library.restore.meta', { date: preview.exported_at?.slice(0, 10) ?? t('common.unknown'), manga: preview.manga_count, categories: preview.category_count })}
         </p>
         ${preview.sources?.length ? html`
           <div class="text-xs flex flex-col gap-1 bg-surface-3 rounded p-2">
             ${preview.sources.map(s => html`
               <div class="flex items-center justify-between" key=${s.source_name}>
                 <span>${s.source_name} (${s.manga_count})</span>
-                <span class=${s.found ? 'text-success' : 'text-danger'}>${s.found ? '✓ available' : '✗ not installed'}</span>
+                <span class=${s.found ? 'text-success' : 'text-danger'}>${s.found ? t('library.restore.source_available') : t('library.restore.source_missing')}</span>
               </div>
             `)}
           </div>
@@ -596,7 +596,7 @@ function RestoreModal({ file, preview, passphrase = '', onClose }) {
           <label class="flex items-center gap-2 cursor-pointer mt-1">
             <input type="checkbox" checked=${opts.merge}
               onChange=${e => setOpts(o => ({ ...o, merge: e.target.checked }))} />
-            Merge (keep existing data, add new)
+            ${t('library.restore.merge_option')}
           </label>
         </div>
         ${loading && progress ? html`
@@ -645,10 +645,10 @@ function TachiyomiImportModal({ file, preview, onClose }) {
 
   /** @type {Array<[string, string, boolean]>} */
   const checkDefs = [
-    ['Import manga', 'import_manga', true],
-    ['Import categories', 'import_categories', !!preview.category_count],
-    ['Import reading status', 'import_tracking', !!preview.has_tracking],
-    ['Import chapter progress', 'import_chapter_progress', !!preview.has_chapter_progress],
+    [t('library.tachiyomi.import_manga'), 'import_manga', true],
+    [t('library.restore.import_categories'), 'import_categories', !!preview.category_count],
+    [t('library.restore.import_tracking'), 'import_tracking', !!preview.has_tracking],
+    [t('library.restore.import_chapter_progress'), 'import_chapter_progress', !!preview.has_chapter_progress],
   ];
 
   async function doImport() {
@@ -656,7 +656,7 @@ function TachiyomiImportModal({ file, preview, onClose }) {
     setProgress(null);
     try {
       const r = await api.importTachiyomiBackup(file, opts);
-      showToast(`Import complete: ${r.imported_manga} manga added.`, { type: 'success' });
+      showToast(t('library.tachiyomi.success', { count: r.imported_manga }), { type: 'success' });
       onClose();
     } catch (e) {
       showApiError(e);
@@ -666,26 +666,26 @@ function TachiyomiImportModal({ file, preview, onClose }) {
   }
 
   const pendingNote = preview.pending_import_estimate > 0
-    ? ` · ~${preview.pending_import_estimate} will go to Pending Imports`
+    ? ` · ${t('library.tachiyomi.pending_note', { count: preview.pending_import_estimate })}`
     : '';
 
   return html`
-    <${Modal} open=${true} title="Import from Tachiyomi / Mihon" onClose=${onClose} footer=${html`
-      <button type="button" class="btn-ghost btn-sm" onClick=${onClose}>Cancel</button>
+    <${Modal} open=${true} title=${t('library.tachiyomi.modal.title')} onClose=${onClose} footer=${html`
+      <button type="button" class="btn-ghost btn-sm" onClick=${onClose}>${t('common.cancel')}</button>
       <button type="button" class="btn-primary btn-sm" disabled=${loading} onClick=${doImport}>
-        ${loading ? 'Importing…' : 'Import'}
+        ${loading ? t('library.restore.importing') : t('library.restore.import_btn')}
       </button>
     `}>
       <div class="flex flex-col gap-4">
         <p class="text-sm text-text-muted">
-          ${preview.total_manga} manga · ${preview.category_count} categories${pendingNote}
+          ${t('library.tachiyomi.meta', { manga: preview.total_manga, categories: preview.category_count })}${pendingNote}
         </p>
         ${preview.sources?.length ? html`
           <div class="text-xs flex flex-col gap-1 bg-surface-3 rounded p-2">
             ${preview.sources.map(s => html`
               <div class="flex items-center justify-between" key=${s.source_id}>
                 <span>${s.source_name} (${s.manga_count})</span>
-                <span class=${s.found ? 'text-success' : 'text-danger'}>${s.found ? '✓ matched' : '✗ unmatched'}</span>
+                <span class=${s.found ? 'text-success' : 'text-danger'}>${s.found ? t('library.tachiyomi.source_matched') : t('library.tachiyomi.source_unmatched')}</span>
               </div>
             `)}
           </div>

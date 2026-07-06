@@ -32,7 +32,7 @@ async function _mountUsage(el) {
 
   const placeholder = document.createElement('div');
   placeholder.className = 'px-4 py-3 text-sm text-text-muted';
-  placeholder.textContent = 'Loading…';
+  placeholder.textContent = t('common.loading');
   card.appendChild(placeholder);
 
   try {
@@ -58,7 +58,7 @@ async function _mountUsage(el) {
       card.appendChild(mkSettingsRow({ label, control: valueEl }));
     }
   } catch (e) {
-    placeholder.textContent = e.message ?? 'Failed to load storage stats.';
+    placeholder.textContent = e.message ?? t('storage.error.load_failed');
     placeholder.className = 'px-4 py-3 text-sm text-danger';
   }
 }
@@ -163,7 +163,7 @@ async function _mountHistory(el) {
 
   const placeholder = document.createElement('p');
   placeholder.className = 'px-4 py-3 text-sm text-text-muted';
-  placeholder.textContent = 'Loading…';
+  placeholder.textContent = t('common.loading');
   card.appendChild(placeholder);
 
   try {
@@ -211,7 +211,7 @@ async function _mountHistory(el) {
     wrap.appendChild(table);
     card.appendChild(wrap);
   } catch (e) {
-    placeholder.textContent = e.message ?? 'Failed to load history.';
+    placeholder.textContent = e.message ?? t('storage.error.history_failed');
     placeholder.className = 'px-4 py-3 text-sm text-danger';
   }
 }
