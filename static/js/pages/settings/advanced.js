@@ -10,6 +10,7 @@ import { showToast, showApiError } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
 import { FolderPicker } from '../../components/folder-picker.js';
 import { PathMigrationDialog } from '../../components/path-migration-dialog.js';
+import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
 
@@ -79,7 +80,7 @@ export function mount(el, settings, bootId) {
   // Initial render (both closed)
   renderDialogs();
 
-  const advGroup = mkSettingsGroup('Server');
+  const advGroup = mkSettingsGroup(t('settings.advanced.server.group'));
   const advCard  = mkSettingsGroupCard(advGroup);
 
   const flareInput = document.createElement('input');
@@ -89,13 +90,13 @@ export function mount(el, settings, bootId) {
   flareInput.dataset.key = 'flaresolverr_url';
   flareInput.placeholder = 'http://localhost:8191';
   flareInput.value = settings?.flaresolverr_url ?? '';
-  advCard.appendChild(mkSettingsRow({ label: 'FlareSolverr URL', description: 'Optional. Used by sources that require Cloudflare bypass.', control: flareInput }));
+  advCard.appendChild(mkSettingsRow({ label: t('settings.advanced.flaresolverr.label'), description: t('settings.advanced.flaresolverr.desc'), control: flareInput }));
 
   // ── Library path control ──────────────────────────────────────────────────
   const { el: libEl, hidden: libHidden, setPath: setLibPath } = makePathControl('library_path', settings?.library_path ?? '');
   advCard.appendChild(mkSettingsRow({
-    label: 'Library path',
-    description: 'Filesystem path where downloaded chapters and covers are stored.',
+    label: t('settings.advanced.library_path.label'),
+    description: t('settings.advanced.library_path.desc'),
     control: libEl,
   }));
 
@@ -106,8 +107,8 @@ export function mount(el, settings, bootId) {
   // ── WASM storage path control ─────────────────────────────────────────────
   const { el: wasmPathEl, hidden: wasmPathHidden, setPath: setWasmPath } = makePathControl('wasm_storage_path', settings?.wasm_storage_path ?? '');
   advCard.appendChild(mkSettingsRow({
-    label: 'WASM storage path',
-    description: 'Directory where extension .wasm files are loaded from.',
+    label: t('settings.advanced.wasm_path.label'),
+    description: t('settings.advanced.wasm_path.desc'),
     control: wasmPathEl,
   }));
 
@@ -123,7 +124,7 @@ export function mount(el, settings, bootId) {
   wasmInput.dataset.key = 'max_wasm_instances';
   wasmInput.min = '1';
   wasmInput.value = String(settings?.max_wasm_instances ?? '');
-  advCard.appendChild(mkSettingsRow({ label: 'Max WASM instances', description: 'Sandbox limit for source extensions.', badge: 'Restart required', control: wasmInput }));
+  advCard.appendChild(mkSettingsRow({ label: t('settings.advanced.wasm_instances.label'), description: t('settings.advanced.wasm_instances.desc'), badge: t('settings.badge.restart_required'), control: wasmInput }));
 
   const coverDimInput = document.createElement('input');
   coverDimInput.type = 'number';
@@ -134,50 +135,50 @@ export function mount(el, settings, bootId) {
   coverDimInput.max = '2000';
   coverDimInput.placeholder = '800';
   coverDimInput.value = settings?.cover_max_dimension != null ? String(settings.cover_max_dimension) : '';
-  advCard.appendChild(mkSettingsRow({ label: 'Cover max dimension', description: 'Maximum width/height in pixels when downloading covers (default 800). Lower values save disk space.', control: coverDimInput }));
+  advCard.appendChild(mkSettingsRow({ label: t('settings.advanced.cover_dim.label'), description: t('settings.advanced.cover_dim.desc'), control: coverDimInput }));
 
   let httpLogging = settings?.http_request_logging ?? false;
   advCard.appendChild(mkToggleRow({
-    label: 'HTTP request logging',
-    description: 'Log incoming HTTP requests to the server console.',
+    label: t('settings.advanced.http_logging.label'),
+    description: t('settings.advanced.http_logging.desc'),
     checked: httpLogging,
     onChange: (v) => { httpLogging = v; },
   }));
 
   let browserDebugLogging = settings?.browser_debug_logging ?? false;
   advCard.appendChild(mkToggleRow({
-    label: 'Browser token capture logging',
-    description: 'Log all URLs seen by the headless browser when capturing auth tokens. Useful for debugging sources that time out during page loading.',
+    label: t('settings.advanced.browser_logging.label'),
+    description: t('settings.advanced.browser_logging.desc'),
     checked: browserDebugLogging,
     onChange: (v) => { browserDebugLogging = v; },
   }));
 
   let registrationEnabled = settings?.registration_enabled ?? false;
   advCard.appendChild(mkToggleRow({
-    label: 'Public registration',
-    description: 'Allow anyone to create an account via the /register page.',
+    label: t('settings.advanced.registration.label'),
+    description: t('settings.advanced.registration.desc'),
     checked: registrationEnabled,
     onChange: (v) => { registrationEnabled = v; },
   }));
 
   const saveRow = document.createElement('div');
   saveRow.className = 'flex items-center gap-3 px-4 py-3';
-  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-adv-save">Save</button>`;
+  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-adv-save">${t('common.save')}</button>`;
   advCard.appendChild(saveRow);
   el.appendChild(advGroup);
 
   // ── Credential Encryption ──────────────────────────────────────────────────
-  const encGroup = mkSettingsGroup('Credential Encryption');
+  const encGroup = mkSettingsGroup(t('settings.advanced.encryption.group'));
   const encCard  = mkSettingsGroupCard(encGroup);
 
   const encStatusEl = document.createElement('p');
   encStatusEl.className = 'text-sm text-text-muted px-1';
-  encStatusEl.textContent = 'Loading…';
+  encStatusEl.textContent = t('common.loading');
 
   const encMigrateBtn = document.createElement('button');
   encMigrateBtn.type = 'button';
   encMigrateBtn.className = 'btn-primary btn-sm hidden';
-  encMigrateBtn.textContent = 'Encrypt stored credentials';
+  encMigrateBtn.textContent = t('settings.advanced.encryption.btn');
 
   const encResultEl = document.createElement('span');
   encResultEl.className = 'text-xs hidden';
@@ -193,9 +194,9 @@ export function mount(el, settings, bootId) {
   encCtrl.appendChild(encBtnRow);
 
   encCard.appendChild(mkSettingsRow({
-    label: 'Encryption at rest',
-    description: 'Encrypts SMTP password and OAuth tokens using ChaCha20-Poly1305 (KANI_SECRET_KEY).',
-    tooltip: 'Set KANI_SECRET_KEY to a random 32-byte hex string in your environment and restart Kani to enable encryption at rest.',
+    label: t('settings.advanced.encryption.label'),
+    description: t('settings.advanced.encryption.desc'),
+    tooltip: t('settings.advanced.encryption.tooltip'),
     control: encCtrl,
   }));
   el.appendChild(encGroup);
@@ -204,17 +205,17 @@ export function mount(el, settings, bootId) {
     try {
       const s = await api.getCredentialEncryptionStatus();
       if (!s.encryption_enabled) {
-        encStatusEl.textContent = 'Encryption is disabled. Set KANI_SECRET_KEY in your environment and restart to enable.';
+        encStatusEl.textContent = t('settings.advanced.encryption.disabled');
         encMigrateBtn.classList.add('hidden');
       } else if (s.plaintext_count > 0) {
-        encStatusEl.textContent = `Encryption is enabled. ${s.plaintext_count} credential${s.plaintext_count === 1 ? '' : 's'} stored in plaintext.`;
+        encStatusEl.textContent = t('settings.advanced.encryption.partial', { count: s.plaintext_count, s: s.plaintext_count === 1 ? '' : 's' });
         encMigrateBtn.classList.remove('hidden');
       } else {
-        encStatusEl.textContent = 'All credentials are encrypted.';
+        encStatusEl.textContent = t('settings.advanced.encryption.all_done');
         encMigrateBtn.classList.add('hidden');
       }
     } catch {
-      encStatusEl.textContent = 'Unable to load encryption status.';
+      encStatusEl.textContent = t('settings.advanced.encryption.load_failed');
     }
   }
 
@@ -222,11 +223,11 @@ export function mount(el, settings, bootId) {
 
   encMigrateBtn.addEventListener('click', async () => {
     encMigrateBtn.disabled = true;
-    encMigrateBtn.textContent = 'Encrypting…';
+    encMigrateBtn.textContent = t('settings.advanced.encryption.encrypting');
     encResultEl.className = 'text-xs hidden';
     try {
       await api.migrateCredentialsToEncrypted();
-      encResultEl.textContent = 'Done.';
+      encResultEl.textContent = t('settings.advanced.encryption.result_done');
       encResultEl.className = 'text-xs text-success';
       await refreshEncStatus();
     } catch (/** @type {any} */ e) {
@@ -234,7 +235,7 @@ export function mount(el, settings, bootId) {
       encResultEl.className = 'text-xs text-error';
     } finally {
       encMigrateBtn.disabled = false;
-      encMigrateBtn.textContent = 'Encrypt stored credentials';
+      encMigrateBtn.textContent = t('settings.advanced.encryption.btn');
     }
   });
 
@@ -324,7 +325,7 @@ export function mount(el, settings, bootId) {
       const freshPayload = buildAdvPayload();
       await api.updateSettings({ Advanced: freshPayload });
       lastSaved = { ...freshPayload };
-      showToast('Saved.', { type: 'success' });
+      showToast(t('common.saved'), { type: 'success' });
       if ((freshPayload.max_wasm_instances ?? null) !== (settings?.max_wasm_instances ?? null)) {
         setLocal('kani_restart_boot_id', bootId);
         addPendingFields(['max_wasm_instances']);
@@ -339,7 +340,7 @@ export function mount(el, settings, bootId) {
 
   // ── Maintenance ────────────────────────────────────────────────────────────
 
-  const maintGroup = mkSettingsGroup('Maintenance');
+  const maintGroup = mkSettingsGroup(t('settings.advanced.maintenance.group'));
   const maintCard  = mkSettingsGroupCard(maintGroup);
 
   const maintRow = document.createElement('div');
@@ -347,29 +348,29 @@ export function mount(el, settings, bootId) {
   const maintBtn = document.createElement('button');
   maintBtn.type = 'button';
   maintBtn.className = 'btn-ghost btn-sm';
-  maintBtn.textContent = 'Run maintenance';
+  maintBtn.textContent = t('settings.advanced.maintenance.btn');
   maintRow.appendChild(maintBtn);
   maintCard.appendChild(mkSettingsRow({
-    label: 'Database maintenance',
-    description: 'Run WAL checkpoint and VACUUM to compact the database and reclaim disk space.',
+    label: t('settings.advanced.maintenance.label'),
+    description: t('settings.advanced.maintenance.desc'),
     control: maintRow,
   }));
   el.appendChild(maintGroup);
 
   maintBtn.addEventListener('click', async () => {
     maintBtn.disabled = true;
-    maintBtn.textContent = 'Running…';
+    maintBtn.textContent = t('settings.advanced.maintenance.running');
     try {
       const res = await api.runMaintenance();
       const freed = (res?.before_bytes ?? 0) - (res?.after_bytes ?? 0);
       const mb = (freed / 1024 / 1024).toFixed(1);
-      const msg = freed > 0 ? `Freed ${mb} MB` : 'No space freed';
+      const msg = freed > 0 ? t('settings.advanced.maintenance.freed', { mb }) : t('settings.advanced.maintenance.no_freed');
       showToast(msg, { type: 'success' });
     } catch (e) {
       showApiError(e);
     } finally {
       maintBtn.disabled = false;
-      maintBtn.textContent = 'Run maintenance';
+      maintBtn.textContent = t('settings.advanced.maintenance.btn');
     }
   });
 
@@ -380,26 +381,26 @@ export function mount(el, settings, bootId) {
   const dupRescanBtn = document.createElement('button');
   dupRescanBtn.type = 'button';
   dupRescanBtn.className = 'btn-ghost btn-sm';
-  dupRescanBtn.textContent = 'Rescan for duplicates';
+  dupRescanBtn.textContent = t('settings.advanced.dedup.btn');
   dupRescanRow.appendChild(dupRescanBtn);
   maintCard.appendChild(mkSettingsRow({
-    label: 'Duplicate detection',
-    description: 'Re-run the full-library duplicate scan. New pairs are saved to the Duplicates tab. Dismissed pairs are not re-flagged. May be slow for large libraries.',
+    label: t('settings.advanced.dedup.label'),
+    description: t('settings.advanced.dedup.desc'),
     control: dupRescanRow,
   }));
 
   dupRescanBtn.addEventListener('click', async () => {
     dupRescanBtn.disabled = true;
-    dupRescanBtn.textContent = 'Scanning…';
+    dupRescanBtn.textContent = t('settings.advanced.dedup.scanning');
     try {
       const res = await api.rescanDuplicates();
       const n = res?.new_pairs ?? 0;
-      showToast(n === 0 ? 'No new duplicates found.' : `Found ${n} new duplicate pair${n === 1 ? '' : 's'}.`, { type: 'success' });
+      showToast(n === 0 ? t('settings.advanced.dedup.no_pairs') : t('settings.advanced.dedup.pairs', { count: n, s: n === 1 ? '' : 's' }), { type: 'success' });
     } catch (e) {
       showApiError(e);
     } finally {
       dupRescanBtn.disabled = false;
-      dupRescanBtn.textContent = 'Rescan for duplicates';
+      dupRescanBtn.textContent = t('settings.advanced.dedup.btn');
     }
   });
 
@@ -426,7 +427,7 @@ function makePathControl(field, initial) {
   const display = document.createElement('span');
   display.className = 'text-sm font-mono text-text truncate max-w-xs';
   display.title = initial;
-  display.textContent = initial || '(not set)';
+  display.textContent = initial || t('settings.advanced.path.not_set');
 
   const hidden = document.createElement('input');
   hidden.type = 'hidden';
@@ -437,7 +438,7 @@ function makePathControl(field, initial) {
   const browseBtn = document.createElement('button');
   browseBtn.type = 'button';
   browseBtn.className = 'btn-ghost btn-sm';
-  browseBtn.textContent = 'Browse…';
+  browseBtn.textContent = t('settings.advanced.path.browse');
 
   container.appendChild(display);
   container.appendChild(hidden);

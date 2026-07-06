@@ -6,26 +6,27 @@ import { mkSettingsGroup, mkSettingsGroupCard } from './_shared.js';
 import { fmtCompactDate, errorCountAriaLabel } from '../../utils.js';
 import { createEmptyState } from '../../components/empty-state.js';
 import { createErrorState } from '../../components/error-state.js';
+import { t } from '../../i18n.js';
 
 /**
  * @param {HTMLElement} el
  */
 export function mount(el) {
-  const group = mkSettingsGroup('Extension health');
+  const group = mkSettingsGroup(t('settings.health.group'));
   const card  = mkSettingsGroupCard(group);
   el.appendChild(group);
 
   api.getSourcesHealth().then((rows) => {
     if (!Array.isArray(rows) || rows.length === 0) {
       card.appendChild(createEmptyState({
-        title: 'No sources installed',
-        subtitle: 'Install extensions from the Sources page to see health data.',
+        title: t('settings.health.empty.title'),
+        subtitle: t('settings.health.empty.desc'),
       }));
       return;
     }
     _renderTable(card, rows);
   }).catch(() => {
-    card.appendChild(createErrorState({ message: 'Failed to load extension health data.' }));
+    card.appendChild(createErrorState({ message: t('settings.health.error') }));
   });
 
   return {
@@ -44,11 +45,11 @@ function _renderTable(card, rows) {
   const thead = document.createElement('thead');
   thead.innerHTML = `
     <tr class="border-b border-border-subtle">
-      <th class="text-left text-xs font-medium text-text-muted px-4 py-2">Source</th>
-      <th class="text-left text-xs font-medium text-text-muted px-4 py-2">Last success</th>
-      <th class="text-left text-xs font-medium text-text-muted px-4 py-2">Last error</th>
-      <th class="text-right text-xs font-medium text-text-muted px-4 py-2">Errors</th>
-      <th class="text-right text-xs font-medium text-text-muted px-4 py-2">Avg ms</th>
+      <th class="text-left text-xs font-medium text-text-muted px-4 py-2">${t('settings.health.col.source')}</th>
+      <th class="text-left text-xs font-medium text-text-muted px-4 py-2">${t('settings.health.col.last_success')}</th>
+      <th class="text-left text-xs font-medium text-text-muted px-4 py-2">${t('settings.health.col.last_error')}</th>
+      <th class="text-right text-xs font-medium text-text-muted px-4 py-2">${t('settings.health.col.errors')}</th>
+      <th class="text-right text-xs font-medium text-text-muted px-4 py-2">${t('settings.health.col.avg_ms')}</th>
     </tr>
   `;
   table.appendChild(thead);

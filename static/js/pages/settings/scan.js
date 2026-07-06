@@ -4,6 +4,7 @@
 import * as api from '../../api.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
+import { t } from '../../i18n.js';
 
 /**
  * @param {HTMLElement} el
@@ -13,7 +14,7 @@ export function mount(el, settings) {
   let autoScan = !!settings?.auto_scan;
   let interval = settings?.scan_interval_minutes ?? 60;
 
-  const scanGroup = mkSettingsGroup('Automatic scanning');
+  const scanGroup = mkSettingsGroup(t('settings.scan.group'));
   const scanCard  = mkSettingsGroupCard(scanGroup);
 
   const autoToggleLabel = document.createElement('label');
@@ -27,7 +28,7 @@ export function mount(el, settings) {
   autoTrack.className = 'kani-toggle__track';
   autoToggleLabel.appendChild(autoEl);
   autoToggleLabel.appendChild(autoTrack);
-  scanCard.appendChild(mkSettingsRow({ label: 'Auto scan', description: 'Automatically scan for new chapters on an interval.', control: autoToggleLabel }));
+  scanCard.appendChild(mkSettingsRow({ label: t('settings.scan.auto.label'), description: t('settings.scan.auto.desc'), control: autoToggleLabel }));
 
   const intervalInput = document.createElement('input');
   intervalInput.type = 'number';
@@ -35,7 +36,7 @@ export function mount(el, settings) {
   intervalInput.className = 'input w-24 text-sm';
   intervalInput.min = '1';
   intervalInput.value = String(interval);
-  const intervalRow = mkSettingsRow({ label: 'Interval (minutes)', description: 'How often to scan for new chapters.', control: intervalInput });
+  const intervalRow = mkSettingsRow({ label: t('settings.scan.interval.label'), description: t('settings.scan.interval.desc'), control: intervalInput });
   intervalRow.style.display = autoScan ? '' : 'none';
   scanCard.appendChild(intervalRow);
 
@@ -50,11 +51,11 @@ export function mount(el, settings) {
   excludeTrack.className = 'kani-toggle__track';
   excludeToggleLabel.appendChild(excludeEl);
   excludeToggleLabel.appendChild(excludeTrack);
-  scanCard.appendChild(mkSettingsRow({ label: 'Exclude completed', description: 'Skip manga marked as Completed during automatic scans.', control: excludeToggleLabel }));
+  scanCard.appendChild(mkSettingsRow({ label: t('settings.scan.exclude.label'), description: t('settings.scan.exclude.desc'), control: excludeToggleLabel }));
 
   const saveRow = document.createElement('div');
   saveRow.className = 'flex items-center gap-3 px-4 py-3';
-  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-scan-save">Save</button>`;
+  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-scan-save">${t('common.save')}</button>`;
   scanCard.appendChild(saveRow);
   el.appendChild(scanGroup);
 
@@ -89,7 +90,7 @@ export function mount(el, settings) {
     try {
       await api.updateSettings({ Scan: payload });
       lastSaved = { ...payload };
-      showToast('Saved.', { type: 'success' });
+      showToast(t('common.saved'), { type: 'success' });
     } catch (e) {
       showApiError(e);
     } finally {

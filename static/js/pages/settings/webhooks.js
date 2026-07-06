@@ -5,16 +5,17 @@ import * as api from '../../api.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
 import { escapeHtml, confirmDialog } from '../../utils.js';
+import { t } from '../../i18n.js';
 import { createErrorState } from '../../components/error-state.js';
 import { createEmptyState } from '../../components/empty-state.js';
 import { skeletonSettingsCards } from '../../components/skeletons.js';
 
 const ALL_EVENTS = [
-  { value: 'chapter.new',         label: 'New chapters',        description: 'New chapters found during a scan' },
-  { value: 'manga.added',         label: 'Manga added',         description: 'Manga saved to the library' },
-  { value: 'manga.deleted',       label: 'Manga deleted',       description: 'Manga removed from the library' },
-  { value: 'chapter.downloaded',  label: 'Chapter downloaded',  description: 'A chapter download completes' },
-  { value: 'scan.completed',      label: 'Scan completed',      description: 'Full library refresh finishes' },
+  { value: 'chapter.new',         get label() { return t('settings.webhooks.event.chapter_new.label'); },         get description() { return t('settings.webhooks.event.chapter_new.desc'); } },
+  { value: 'manga.added',         get label() { return t('settings.webhooks.event.manga_added.label'); },         get description() { return t('settings.webhooks.event.manga_added.desc'); } },
+  { value: 'manga.deleted',       get label() { return t('settings.webhooks.event.manga_deleted.label'); },       get description() { return t('settings.webhooks.event.manga_deleted.desc'); } },
+  { value: 'chapter.downloaded',  get label() { return t('settings.webhooks.event.chapter_downloaded.label'); },  get description() { return t('settings.webhooks.event.chapter_downloaded.desc'); } },
+  { value: 'scan.completed',      get label() { return t('settings.webhooks.event.scan_completed.label'); },      get description() { return t('settings.webhooks.event.scan_completed.desc'); } },
 ];
 
 /**
@@ -44,7 +45,7 @@ export async function mount(el) {
   el.innerHTML = '';
 
   // ── Webhook list group ────────────────────────────────────────────────────
-  const listGroup = mkSettingsGroup('Webhooks');
+  const listGroup = mkSettingsGroup(t('settings.webhooks.group'));
   const listCard  = mkSettingsGroupCard(listGroup);
 
   const listEl = document.createElement('div');
@@ -55,17 +56,17 @@ export async function mount(el) {
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'btn-ghost btn-sm';
-  addBtn.textContent = '+ Add webhook';
+  addBtn.textContent = t('settings.webhooks.add_btn');
   listCard.appendChild(mkSettingsRow({
-    label: 'Add',
-    description: 'Configure a new HTTP webhook endpoint.',
+    label: t('settings.webhooks.add.label'),
+    description: t('settings.webhooks.add.desc'),
     control: addBtn,
   }));
 
   el.appendChild(listGroup);
 
   // ── Payload format reference ──────────────────────────────────────────────
-  const refGroup = mkSettingsGroup('Payload format');
+  const refGroup = mkSettingsGroup(t('settings.webhooks.payload.group'));
   const refCard  = mkSettingsGroupCard(refGroup);
 
   const _examplePayload = escapeHtml(JSON.stringify({
@@ -93,9 +94,9 @@ export async function mount(el) {
   const details = document.createElement('details');
   details.className = 'px-4 py-3';
   details.innerHTML = `
-    <summary class="text-sm font-medium text-text cursor-pointer select-none">Show example payload &amp; HMAC verification</summary>
+    <summary class="text-sm font-medium text-text cursor-pointer select-none">${t('settings.webhooks.payload.show')}</summary>
     <pre class="mt-3 text-xs bg-surface rounded-lg p-3 overflow-x-auto text-text-muted leading-relaxed">${_examplePayload}</pre>
-    <p class="mt-3 text-xs text-text-muted">HMAC-SHA256 signature is in the <code class="bg-surface px-1 rounded">X-Kani-Signature: sha256=&lt;hex&gt;</code> header.</p>
+    <p class="mt-3 text-xs text-text-muted">${t('settings.webhooks.payload.hmac_prefix')} <code class="bg-surface px-1 rounded">X-Kani-Signature: sha256=&lt;hex&gt;</code> ${t('settings.webhooks.payload.hmac_suffix')}</p>
     <pre class="mt-2 text-xs bg-surface rounded-lg p-3 overflow-x-auto text-text-muted leading-relaxed">${_hmacSnippet}</pre>
   `;
   refCard.appendChild(details);
@@ -109,14 +110,14 @@ export async function mount(el) {
       webhooks = await api.listWebhooks();
     } catch (e) {
       listEl.innerHTML = '';
-      listEl.appendChild(createErrorState({ message: 'Failed to load webhooks.', onRetry: _reload }));
+      listEl.appendChild(createErrorState({ message: t('settings.webhooks.load_failed'), onRetry: _reload }));
       return;
     }
 
     if (webhooks.length === 0) {
       listEl.appendChild(createEmptyState({
-        title: 'No webhooks configured',
-        subtitle: 'Add a webhook to receive HTTP notifications for library events.',
+        title: t('settings.webhooks.empty.title'),
+        subtitle: t('settings.webhooks.empty.desc'),
       }));
       return;
     }
@@ -175,7 +176,7 @@ function _mkWebhookRow(wh, reload) {
   const badgesEl = document.createElement('div');
   badgesEl.className = 'flex flex-wrap gap-1 mt-0.5';
   const eventLabels = eventState.all
-    ? [{ label: 'All events', value: '*' }]
+    ? [{ label: t('settings.webhooks.event.all'), value: '*' }]
     : ALL_EVENTS.filter(e => eventState.selected.has(e.value));
   for (const ev of eventLabels) {
     const badge = document.createElement('span');
@@ -214,18 +215,18 @@ function _mkWebhookRow(wh, reload) {
   const testBtn = document.createElement('button');
   testBtn.type = 'button';
   testBtn.className = 'btn-ghost btn-sm text-xs';
-  testBtn.textContent = 'Test';
+  testBtn.textContent = t('settings.webhooks.row.test');
   testBtn.addEventListener('click', async () => {
     testBtn.disabled = true;
     testBtn.textContent = '…';
     try {
       const r = await api.testWebhook(wh.id);
-      showToast(r?.ok ? '✓ Webhook delivered' : `✗ ${r?.error ?? 'Delivery failed'}`, { type: r?.ok ? 'success' : 'error' });
+      showToast(r?.ok ? t('settings.webhooks.row.test.success') : t('settings.webhooks.row.test.failed', { error: r?.error ?? t('settings.webhooks.row.test.default_error') }), { type: r?.ok ? 'success' : 'error' });
     } catch (e) {
       showApiError(e);
     } finally {
       testBtn.disabled = false;
-      testBtn.textContent = 'Test';
+      testBtn.textContent = t('settings.webhooks.row.test');
     }
   });
   controls.appendChild(testBtn);
@@ -234,16 +235,16 @@ function _mkWebhookRow(wh, reload) {
   const editBtn = document.createElement('button');
   editBtn.type = 'button';
   editBtn.className = 'btn-ghost btn-sm text-xs';
-  editBtn.textContent = 'Edit';
+  editBtn.textContent = t('common.edit');
   controls.appendChild(editBtn);
 
   // Delete button
   const delBtn = document.createElement('button');
   delBtn.type = 'button';
   delBtn.className = 'btn-ghost btn-sm text-xs text-danger';
-  delBtn.textContent = 'Delete';
+  delBtn.textContent = t('common.delete');
   delBtn.addEventListener('click', async () => {
-    const ok = await confirmDialog({ title: 'Delete webhook?', message: `Delete webhook ${wh.url}?`, confirmLabel: 'Delete', danger: true });
+    const ok = await confirmDialog({ title: t('settings.webhooks.row.delete.title'), message: t('settings.webhooks.row.delete.message', { url: wh.url }), confirmLabel: t('common.delete'), danger: true });
     if (!ok) return;
     delBtn.disabled = true;
     try {
@@ -263,7 +264,7 @@ function _mkWebhookRow(wh, reload) {
   const logsToggle = document.createElement('button');
   logsToggle.type = 'button';
   logsToggle.className = 'text-xs text-text-muted hover:text-accent transition-colors self-start';
-  logsToggle.textContent = 'Show recent deliveries ›';
+  logsToggle.textContent = t('settings.webhooks.deliveries.show');
 
   const logsEl = document.createElement('div');
   logsEl.className = 'hidden';
@@ -271,7 +272,7 @@ function _mkWebhookRow(wh, reload) {
   let logsLoaded = false;
   logsToggle.addEventListener('click', async () => {
     const open = logsEl.classList.toggle('hidden');
-    logsToggle.textContent = open ? 'Show recent deliveries ›' : 'Hide deliveries ‹';
+    logsToggle.textContent = open ? t('settings.webhooks.deliveries.show') : t('settings.webhooks.deliveries.hide');
     if (!open && !logsLoaded) {
       logsLoaded = true;
       logsEl.innerHTML = skeletonSettingsCards(3);
@@ -281,7 +282,7 @@ function _mkWebhookRow(wh, reload) {
         logsEl.appendChild(_mkDeliveryLog(deliveries));
       } catch {
         logsEl.innerHTML = '';
-        logsEl.appendChild(createErrorState({ message: 'Failed to load delivery log.' }));
+        logsEl.appendChild(createErrorState({ message: t('settings.webhooks.deliveries.load_failed') }));
       }
     }
   });
@@ -293,14 +294,14 @@ function _mkWebhookRow(wh, reload) {
   /** @type {HTMLElement|null} */
   let _editForm = null;
   editBtn.addEventListener('click', () => {
-    if (_editForm) { _editForm.remove(); _editForm = null; editBtn.textContent = 'Edit'; return; }
-    editBtn.textContent = 'Cancel';
+    if (_editForm) { _editForm.remove(); _editForm = null; editBtn.textContent = t('common.edit'); return; }
+    editBtn.textContent = t('common.cancel');
     _editForm = _mkForm(wh, async (data) => {
       await api.updateWebhook(wh.id, data);
       _editForm?.remove(); _editForm = null;
-      editBtn.textContent = 'Edit';
+      editBtn.textContent = t('common.edit');
       await reload();
-    }, () => { _editForm?.remove(); _editForm = null; editBtn.textContent = 'Edit'; });
+    }, () => { _editForm?.remove(); _editForm = null; editBtn.textContent = t('common.edit'); });
     row.appendChild(_editForm);
   });
 
@@ -314,7 +315,7 @@ function _mkDeliveryLog(deliveries) {
   if (deliveries.length === 0) {
     const p = document.createElement('p');
     p.className = 'text-xs text-text-muted';
-    p.textContent = 'No deliveries yet.';
+    p.textContent = t('settings.webhooks.deliveries.empty');
     return p;
   }
 
@@ -323,9 +324,9 @@ function _mkDeliveryLog(deliveries) {
   table.innerHTML = `
     <thead>
       <tr class="text-text-muted">
-        <th class="text-left py-1 pr-3 font-medium">Event</th>
-        <th class="text-left py-1 pr-3 font-medium">Status</th>
-        <th class="text-left py-1 font-medium">Time</th>
+        <th class="text-left py-1 pr-3 font-medium">${t('settings.webhooks.deliveries.col.event')}</th>
+        <th class="text-left py-1 pr-3 font-medium">${t('settings.webhooks.deliveries.col.status')}</th>
+        <th class="text-left py-1 font-medium">${t('settings.webhooks.deliveries.col.time')}</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -357,13 +358,13 @@ function _mkForm(existing, onSave, onCancel) {
 
   const title = document.createElement('p');
   title.className = 'text-sm font-semibold text-text';
-  title.textContent = existing ? 'Edit webhook' : 'Add webhook';
+  title.textContent = existing ? t('settings.webhooks.form.edit') : t('settings.webhooks.form.add');
   form.appendChild(title);
 
   // URL
   const urlLabel = document.createElement('label');
   urlLabel.className = 'flex flex-col gap-1';
-  urlLabel.innerHTML = '<span class="text-xs text-text-muted font-medium">URL <span class="text-danger">*</span></span>';
+  urlLabel.innerHTML = `<span class="text-xs text-text-muted font-medium">${t('settings.webhooks.form.url')} <span class="text-danger">*</span></span>`;
   const urlInput = document.createElement('input');
   urlInput.type = 'url';
   urlInput.className = 'input text-sm';
@@ -376,19 +377,19 @@ function _mkForm(existing, onSave, onCancel) {
   // Secret
   const secretLabel = document.createElement('label');
   secretLabel.className = 'flex flex-col gap-1';
-  secretLabel.innerHTML = '<span class="text-xs text-text-muted font-medium">Secret (optional)</span>';
+  secretLabel.innerHTML = `<span class="text-xs text-text-muted font-medium">${t('settings.webhooks.form.secret')}</span>`;
   const secretInput = document.createElement('input');
   secretInput.type = 'password';
   secretInput.className = 'input text-sm';
   secretInput.autocomplete = 'new-password';
-  secretInput.placeholder = existing ? '(unchanged)' : 'HMAC signing secret';
+  secretInput.placeholder = existing ? t('settings.webhooks.form.secret.unchanged') : t('settings.webhooks.form.secret.placeholder');
   secretLabel.appendChild(secretInput);
   form.appendChild(secretLabel);
 
   // Events
   const eventsLabel = document.createElement('div');
   eventsLabel.className = 'flex flex-col gap-1.5';
-  eventsLabel.innerHTML = '<span class="text-xs text-text-muted font-medium">Events</span>';
+  eventsLabel.innerHTML = `<span class="text-xs text-text-muted font-medium">${t('settings.webhooks.form.events')}</span>`;
 
   const existingState = parseEvents(existing?.events ?? '["*"]');
 
@@ -400,7 +401,7 @@ function _mkForm(existing, onSave, onCancel) {
   allCheck.className = 'rounded';
   allCheck.checked = existingState.all;
   allRow.appendChild(allCheck);
-  allRow.append('All events');
+  allRow.append(t('settings.webhooks.event.all'));
   eventsLabel.appendChild(allRow);
 
   // Individual event checkboxes
@@ -443,12 +444,12 @@ function _mkForm(existing, onSave, onCancel) {
   const saveBtn = document.createElement('button');
   saveBtn.type = 'button';
   saveBtn.className = 'btn-primary btn-sm';
-  saveBtn.textContent = existing ? 'Save changes' : 'Add webhook';
+  saveBtn.textContent = existing ? t('settings.webhooks.form.save_changes') : t('settings.webhooks.form.add');
 
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'btn-ghost btn-sm';
-  cancelBtn.textContent = 'Cancel';
+  cancelBtn.textContent = t('common.cancel');
 
   btnRow.appendChild(saveBtn);
   btnRow.appendChild(cancelBtn);
@@ -459,7 +460,7 @@ function _mkForm(existing, onSave, onCancel) {
   saveBtn.addEventListener('click', async () => {
     const url = urlInput.value.trim();
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      showToast('URL must start with http:// or https://', { type: 'error' });
+      showToast(t('settings.webhooks.form.url_error'), { type: 'error' });
       return;
     }
 

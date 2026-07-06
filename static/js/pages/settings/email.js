@@ -4,6 +4,7 @@
 import * as api from '../../api.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
+import { t } from '../../i18n.js';
 
 /**
  * @param {HTMLElement} el
@@ -18,13 +19,13 @@ export function mount(el, settings) {
   const _mark = () => { _dirty = true; };
 
   // ── General group ─────────────────────────────────────────────────────────
-  const generalGroup = mkSettingsGroup('General');
+  const generalGroup = mkSettingsGroup(t('settings.email.general.group'));
   const generalCard  = mkSettingsGroupCard(generalGroup);
 
   let _emailEnabled = settings?.email_enabled ?? false;
   generalCard.appendChild(mkToggleRow({
-    label: 'Enable email',
-    description: 'Required for password reset and email verification.',
+    label: t('settings.email.general.enable.label'),
+    description: t('settings.email.general.enable.desc'),
     checked: _emailEnabled,
     onChange: v => { _emailEnabled = v; _mark(); },
   }));
@@ -35,7 +36,7 @@ export function mount(el, settings) {
   fromInput.placeholder = 'noreply@example.com';
   fromInput.value = settings?.email_from_address ?? '';
   fromInput.addEventListener('input', _mark);
-  generalCard.appendChild(mkSettingsRow({ label: 'From address', description: 'Address emails are sent from.', control: fromInput }));
+  generalCard.appendChild(mkSettingsRow({ label: t('settings.email.general.from.label'), description: t('settings.email.general.from.desc'), control: fromInput }));
 
   const appUrlInput = document.createElement('input');
   appUrlInput.type = 'url';
@@ -43,26 +44,26 @@ export function mount(el, settings) {
   appUrlInput.placeholder = 'https://kani.example.com';
   appUrlInput.value = settings?.app_url ?? '';
   appUrlInput.addEventListener('input', _mark);
-  generalCard.appendChild(mkSettingsRow({ label: 'App URL', description: 'Used to build links in emails (e.g. reset link).', control: appUrlInput }));
+  generalCard.appendChild(mkSettingsRow({ label: t('settings.email.general.app_url.label'), description: t('settings.email.general.app_url.desc'), control: appUrlInput }));
 
   el.appendChild(generalGroup);
 
   // ── Feature toggles group ─────────────────────────────────────────────────
-  const featGroup = mkSettingsGroup('Features');
+  const featGroup = mkSettingsGroup(t('settings.email.features.group'));
   const featCard  = mkSettingsGroupCard(featGroup);
 
   let _resetEnabled = settings?.password_reset_enabled ?? true;
   featCard.appendChild(mkToggleRow({
-    label: 'Password reset',
-    description: 'Allow users to reset their password via email.',
+    label: t('settings.email.features.reset.label'),
+    description: t('settings.email.features.reset.desc'),
     checked: _resetEnabled,
     onChange: v => { _resetEnabled = v; _mark(); },
   }));
 
   let _verifyRequired = settings?.email_verification_required ?? false;
   featCard.appendChild(mkToggleRow({
-    label: 'Require email verification',
-    description: 'New accounts must verify their email before signing in.',
+    label: t('settings.email.features.verify.label'),
+    description: t('settings.email.features.verify.desc'),
     checked: _verifyRequired,
     onChange: v => { _verifyRequired = v; _mark(); },
   }));
@@ -70,12 +71,12 @@ export function mount(el, settings) {
   el.appendChild(featGroup);
 
   // ── SMTP provider group ───────────────────────────────────────────────────
-  const smtpGroup = mkSettingsGroup('SMTP');
+  const smtpGroup = mkSettingsGroup(t('settings.email.smtp.group'));
   const smtpCard  = mkSettingsGroupCard(smtpGroup);
 
   const disclaimer = document.createElement('p');
   disclaimer.className = 'text-xs text-text-muted px-1';
-  disclaimer.textContent = 'SMTP credentials are stored in the database without encryption. Ensure the server and database file are adequately protected at the OS level.';
+  disclaimer.textContent = t('settings.email.smtp.disclaimer');
   smtpGroup.insertBefore(disclaimer, smtpCard);
 
   /** @param {string} key @param {string} def */
@@ -87,7 +88,7 @@ export function mount(el, settings) {
   hostInput.placeholder = 'smtp.example.com';
   hostInput.value = _cfg('host');
   hostInput.addEventListener('input', _mark);
-  smtpCard.appendChild(mkSettingsRow({ label: 'Host', description: 'SMTP server hostname.', control: hostInput }));
+  smtpCard.appendChild(mkSettingsRow({ label: t('settings.email.smtp.host.label'), description: t('settings.email.smtp.host.desc'), control: hostInput }));
 
   const portInput = document.createElement('input');
   portInput.type = 'number';
@@ -96,7 +97,7 @@ export function mount(el, settings) {
   portInput.max = '65535';
   portInput.value = String(_cfg('port', '587'));
   portInput.addEventListener('input', _mark);
-  smtpCard.appendChild(mkSettingsRow({ label: 'Port', control: portInput }));
+  smtpCard.appendChild(mkSettingsRow({ label: t('settings.email.smtp.port.label'), control: portInput }));
 
   const tlsSelect = document.createElement('select');
   tlsSelect.className = 'input w-32 text-sm';
@@ -108,7 +109,7 @@ export function mount(el, settings) {
     tlsSelect.appendChild(opt);
   }
   tlsSelect.addEventListener('change', _mark);
-  smtpCard.appendChild(mkSettingsRow({ label: 'TLS mode', control: tlsSelect }));
+  smtpCard.appendChild(mkSettingsRow({ label: t('settings.email.smtp.tls.label'), control: tlsSelect }));
 
   const userInput = document.createElement('input');
   userInput.type = 'text';
@@ -117,7 +118,7 @@ export function mount(el, settings) {
   userInput.placeholder = 'username (optional)';
   userInput.value = _cfg('username');
   userInput.addEventListener('input', _mark);
-  smtpCard.appendChild(mkSettingsRow({ label: 'Username', control: userInput }));
+  smtpCard.appendChild(mkSettingsRow({ label: t('settings.email.smtp.username.label'), control: userInput }));
 
   const pwInput = document.createElement('input');
   pwInput.type = 'password';
@@ -126,7 +127,7 @@ export function mount(el, settings) {
   pwInput.placeholder = 'password (optional)';
   pwInput.value = _cfg('password');
   pwInput.addEventListener('input', _mark);
-  smtpCard.appendChild(mkSettingsRow({ label: 'Password', control: pwInput }));
+  smtpCard.appendChild(mkSettingsRow({ label: t('settings.email.smtp.password.label'), control: pwInput }));
 
   el.appendChild(smtpGroup);
 
@@ -137,13 +138,13 @@ export function mount(el, settings) {
   const saveBtn = document.createElement('button');
   saveBtn.type = 'button';
   saveBtn.className = 'btn-primary btn-sm';
-  saveBtn.textContent = 'Save';
+  saveBtn.textContent = t('common.save');
 
   const saveWrap = document.createElement('div');
   saveWrap.className = 'flex items-center gap-3';
   saveWrap.appendChild(saveBtn);
 
-  actionsCard.appendChild(mkSettingsRow({ label: 'Email settings', description: 'Save all email configuration above.', control: saveWrap }));
+  actionsCard.appendChild(mkSettingsRow({ label: t('settings.email.save.label'), description: t('settings.email.save.desc'), control: saveWrap }));
 
   // Test email row
   const testInput = document.createElement('input');
@@ -154,14 +155,14 @@ export function mount(el, settings) {
   const testBtn = document.createElement('button');
   testBtn.type = 'button';
   testBtn.className = 'btn-ghost btn-sm';
-  testBtn.textContent = 'Send test';
+  testBtn.textContent = t('settings.email.test.btn');
 
   const testWrap = document.createElement('div');
   testWrap.className = 'flex items-center gap-2';
   testWrap.appendChild(testInput);
   testWrap.appendChild(testBtn);
 
-  actionsCard.appendChild(mkSettingsRow({ label: 'Test email', description: 'Send a test message to verify your configuration.', control: testWrap }));
+  actionsCard.appendChild(mkSettingsRow({ label: t('settings.email.test.label'), description: t('settings.email.test.desc'), control: testWrap }));
 
   el.appendChild(actionsGroup);
 
@@ -189,7 +190,7 @@ export function mount(el, settings) {
         },
       });
       _dirty = false;
-      showToast('Saved.', { type: 'success' });
+      showToast(t('common.saved'), { type: 'success' });
     } catch (e) {
       showApiError(e);
     } finally {
@@ -199,17 +200,17 @@ export function mount(el, settings) {
 
   testBtn.addEventListener('click', async () => {
     const to = testInput.value.trim();
-    if (!to) { showToast('Enter a recipient', { type: 'error' }); return; }
+    if (!to) { showToast(t('settings.email.test.no_recipient'), { type: 'error' }); return; }
     testBtn.disabled = true;
-    testBtn.textContent = 'Sending…';
+    testBtn.textContent = t('common.sending');
     try {
       await api.sendTestEmail(to);
-      showToast('Test email sent!', { type: 'success' });
+      showToast(t('settings.email.test.success'), { type: 'success' });
     } catch (e) {
       showApiError(e);
     } finally {
       testBtn.disabled = false;
-      testBtn.textContent = 'Send test';
+      testBtn.textContent = t('settings.email.test.btn');
     }
   });
 

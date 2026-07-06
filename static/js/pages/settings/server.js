@@ -5,13 +5,14 @@ import * as api from '../../api.js';
 import { openConfirm } from '../../utils.js';
 import { showToast } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
+import { t } from '../../i18n.js';
 
 /** @param {HTMLElement} el */
 export function mount(el) {
   // ── Server info ───────────────────────────────────────────────────────────
   // Show the OPDS catalog URL so users can point e-reader apps at it.
 
-  const infoGroup = mkSettingsGroup('Integrations');
+  const infoGroup = mkSettingsGroup(t('settings.server.integrations.group'));
   const infoCard  = mkSettingsGroupCard(infoGroup);
 
   const opdsBase = `${window.location.origin}/opds`;
@@ -20,18 +21,18 @@ export function mount(el) {
   opdsInput.readOnly = true;
   opdsInput.value = opdsBase;
   opdsInput.className = 'input input-sm font-mono text-xs w-56 select-all cursor-pointer';
-  opdsInput.title = 'Click to select';
+  opdsInput.title = t('settings.server.opds.click_select');
   opdsInput.addEventListener('click', () => opdsInput.select());
 
   const copyBtn = document.createElement('button');
   copyBtn.type = 'button';
   copyBtn.className = 'btn-ghost btn-sm';
-  copyBtn.textContent = 'Copy';
+  copyBtn.textContent = t('common.copy');
   copyBtn.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(opdsBase);
-      copyBtn.textContent = 'Copied!';
-      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+      copyBtn.textContent = t('common.copied');
+      setTimeout(() => { copyBtn.textContent = t('common.copy'); }, 2000);
     } catch { /* clipboard not available */ }
   });
 
@@ -41,8 +42,8 @@ export function mount(el) {
   opdsControl.appendChild(copyBtn);
 
   infoCard.appendChild(mkSettingsRow({
-    label: 'OPDS catalog',
-    description: 'Point an e-reader app (Panels, Chunky, Moon+, KOReader…) at this URL for OPDS access to your library. Supports HTTP Basic auth.',
+    label: t('settings.server.opds.label'),
+    description: t('settings.server.opds.desc'),
     control: opdsControl,
   }));
 
@@ -50,7 +51,7 @@ export function mount(el) {
 
   // ── Admin actions ─────────────────────────────────────────────────────────
 
-  const adminGroup = mkSettingsGroup('Admin actions');
+  const adminGroup = mkSettingsGroup(t('settings.server.admin.group'));
   const adminCard  = mkSettingsGroupCard(adminGroup);
 
   /** @param {string} label @param {string} btnLabel @param {string} btnClass @param {() => Promise<void>} onClick */
@@ -68,37 +69,37 @@ export function mount(el) {
   }
 
   _mkActionRow(
-    'Cancel all downloads',
-    'Stop all in-progress and queued chapter downloads.',
-    'Cancel downloads',
+    t('settings.server.admin.cancel_downloads.label'),
+    t('settings.server.admin.cancel_downloads.desc'),
+    t('settings.server.admin.cancel_downloads.btn'),
     'btn-ghost',
     async () => {
-      if (!(await openConfirm({ title: 'Cancel all downloads', message: 'Cancel all in-progress and queued downloads?', confirmLabel: 'Cancel downloads', danger: true }))) return;
+      if (!(await openConfirm({ title: t('settings.server.admin.cancel_downloads.label'), message: t('settings.server.admin.cancel_downloads.confirm'), confirmLabel: t('settings.server.admin.cancel_downloads.btn'), danger: true }))) return;
       await api.cancelAllGlobalDownloads();
-      showToast('All downloads cancelled.', { type: 'info' });
+      showToast(t('settings.server.admin.cancel_downloads.done'), { type: 'info' });
     },
   );
 
   _mkActionRow(
-    'Stop current scan',
-    'Abort the in-progress library refresh scan.',
-    'Stop scan',
+    t('settings.server.admin.stop_scan.label'),
+    t('settings.server.admin.stop_scan.desc'),
+    t('settings.server.admin.stop_scan.btn'),
     'btn-ghost',
     async () => {
-      if (!(await openConfirm({ title: 'Stop scan', message: 'Abort the currently running library scan?', confirmLabel: 'Stop scan', danger: true }))) return;
+      if (!(await openConfirm({ title: t('settings.server.admin.stop_scan.btn'), message: t('settings.server.admin.stop_scan.confirm'), confirmLabel: t('settings.server.admin.stop_scan.btn'), danger: true }))) return;
       await api.stopScan();
-      showToast('Scan aborted.', { type: 'info' });
+      showToast(t('settings.server.admin.stop_scan.done'), { type: 'info' });
     },
   );
 
   _mkActionRow(
-    'Clear request cache',
-    'Flush the in-memory cache for source manga details, chapter lists, and search results.',
-    'Clear cache',
+    t('settings.server.admin.clear_cache.label'),
+    t('settings.server.admin.clear_cache.desc'),
+    t('settings.server.admin.clear_cache.btn'),
     'btn-ghost',
     async () => {
       await api.clearCache();
-      showToast('Cache cleared.', { type: 'success' });
+      showToast(t('settings.server.admin.clear_cache.done'), { type: 'success' });
     },
   );
 
@@ -106,47 +107,47 @@ export function mount(el) {
 
   // ── Danger zone ───────────────────────────────────────────────────────────
 
-  const dangerGroup = mkSettingsGroup('Danger zone');
+  const dangerGroup = mkSettingsGroup(t('settings.server.danger.group'));
   const dangerCard  = mkSettingsGroupCard(dangerGroup);
   dangerCard.classList.add('border', 'border-danger/20');
 
   const restartBtn = document.createElement('button');
   restartBtn.type = 'button';
   restartBtn.className = 'btn-primary btn-sm';
-  restartBtn.textContent = 'Restart';
-  dangerCard.appendChild(mkSettingsRow({ label: 'Restart server', description: 'Restart the server process. The page will reload automatically.', control: restartBtn }));
+  restartBtn.textContent = t('settings.server.danger.restart.btn');
+  dangerCard.appendChild(mkSettingsRow({ label: t('settings.server.danger.restart.label'), description: t('settings.server.danger.restart.desc'), control: restartBtn }));
 
   const stopBtn = document.createElement('button');
   stopBtn.type = 'button';
   stopBtn.className = 'btn-danger btn-sm';
-  stopBtn.textContent = 'Stop';
-  dangerCard.appendChild(mkSettingsRow({ label: 'Stop server', description: 'Shut down the server. Only auto-restarts if managed by Docker or systemd.', control: stopBtn }));
+  stopBtn.textContent = t('settings.server.danger.stop.btn');
+  dangerCard.appendChild(mkSettingsRow({ label: t('settings.server.danger.stop.label'), description: t('settings.server.danger.stop.desc'), control: stopBtn }));
 
   el.appendChild(dangerGroup);
 
   restartBtn.addEventListener('click', async () => {
-    if (!(await openConfirm({ title: 'Restart server', message: 'Restart the server? The page will reload automatically when the server comes back online.', confirmLabel: 'Restart', danger: true }))) return;
+    if (!(await openConfirm({ title: t('settings.server.danger.restart.label'), message: t('settings.server.danger.restart.confirm'), confirmLabel: t('settings.server.danger.restart.btn'), danger: true }))) return;
     restartBtn.disabled = true;
     stopBtn.disabled    = true;
     try {
       await api.serverRestart();
       _showRestartOverlay();
     } catch (e) {
-      showToast(e?.hint ?? e?.message ?? 'Failed to restart server.', { type: 'error' });
+      showToast(e?.hint ?? e?.message ?? t('settings.server.danger.restart.failed'), { type: 'error' });
       restartBtn.disabled = false;
       stopBtn.disabled    = false;
     }
   });
 
   stopBtn.addEventListener('click', async () => {
-    if (!(await openConfirm({ title: 'Stop server', message: 'Stop the server? It will only restart automatically if managed by Docker or systemd.', confirmLabel: 'Stop', danger: true }))) return;
+    if (!(await openConfirm({ title: t('settings.server.danger.stop.label'), message: t('settings.server.danger.stop.confirm'), confirmLabel: t('settings.server.danger.stop.btn'), danger: true }))) return;
     restartBtn.disabled = true;
     stopBtn.disabled    = true;
     try {
       await api.serverStop();
-      showToast('Server is stopping…', { type: 'info', duration: 8000 });
+      showToast(t('settings.server.danger.stop.stopping'), { type: 'info', duration: 8000 });
     } catch (e) {
-      showToast(e?.hint ?? e?.message ?? 'Failed to stop server.', { type: 'error' });
+      showToast(e?.hint ?? e?.message ?? t('settings.server.danger.stop.failed'), { type: 'error' });
       restartBtn.disabled = false;
       stopBtn.disabled    = false;
     }
@@ -164,8 +165,8 @@ function _showRestartOverlay() {
   ].join(' ');
   overlay.innerHTML = `
     <div class="w-10 h-10 border-4 border-accent border-t-transparent rounded-full animate-spin"></div>
-    <p class="text-lg font-semibold text-text">Server is restarting…</p>
-    <p class="text-sm text-text-muted">The page will reload automatically.</p>
+    <p class="text-lg font-semibold text-text">${t('settings.server.restart_overlay.title')}</p>
+    <p class="text-sm text-text-muted">${t('settings.server.restart_overlay.desc')}</p>
   `;
   document.body.appendChild(overlay);
 

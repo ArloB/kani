@@ -3,12 +3,13 @@
 
 import * as api from '../../api.js';
 import { escapeHtml } from '../../utils.js';
-import { showToast } from '../../components/toast.js';
+import { showToast, showApiError } from '../../components/toast.js';
 import { showConfirm } from '../../components/modal.js';
 import { navigate } from '../../router.js';
 import { skeletonSettingsCards } from '../../components/skeletons.js';
 import { createEmptyState } from '../../components/empty-state.js';
 import { createErrorState } from '../../components/error-state.js';
+import { t } from '../../i18n.js';
 
 /** @param {HTMLElement} el */
 export function mount(el) {
@@ -16,9 +17,9 @@ export function mount(el) {
 
   // ── Tab bar ───────────────────────────────────────────────────────────────
   const tabs = [
-    { id: 'pending',  label: 'Pending Imports' },
-    { id: 'dupes',    label: 'Duplicates' },
-    { id: 'orphaned', label: 'Orphaned Manga' },
+    { id: 'pending',  label: t('settings.manga_mgmt.tab.pending') },
+    { id: 'dupes',    label: t('settings.manga_mgmt.tab.dupes') },
+    { id: 'orphaned', label: t('settings.manga_mgmt.tab.orphaned') },
   ];
 
   const tabBar = document.createElement('div');
@@ -28,19 +29,19 @@ export function mount(el) {
   /** @type {string} */
   let activeTab = 'pending';
 
-  tabs.forEach(t => {
+  tabs.forEach(tab => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.dataset.tab = t.id;
+    btn.dataset.tab = tab.id;
     btn.className = 'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors';
-    btn.textContent = t.label;
-    btn.addEventListener('click', () => _switchTab(t.id));
+    btn.textContent = tab.label;
+    btn.addEventListener('click', () => _switchTab(tab.id));
     tabBar.appendChild(btn);
 
     const panel = document.createElement('div');
-    panel.id = `tab-${t.id}`;
+    panel.id = `tab-${tab.id}`;
     panel.className = 'hidden';
-    panels[t.id] = panel;
+    panels[tab.id] = panel;
     el.appendChild(panel);
   });
 
@@ -80,7 +81,7 @@ async function _loadPendingImports(el) {
     _renderPendingImports(el, items);
   } catch (e) {
     el.innerHTML = '';
-    el.appendChild(createErrorState({ message: `Failed to load: ${e?.message ?? 'Unknown error'}`, onRetry: () => _loadPendingImports(el) }));
+    el.appendChild(createErrorState({ message: t('settings.manga_mgmt.load_failed', { msg: e?.message ?? '' }), onRetry: () => _loadPendingImports(el) }));
   }
 }
 
@@ -88,8 +89,8 @@ function _renderPendingImports(el, items) {
   el.innerHTML = '';
   if (!items.length) {
     el.appendChild(createEmptyState({
-      title: 'No pending imports',
-      subtitle: 'Files dropped into the library folder will appear here for review.',
+      title: t('settings.manga_mgmt.pending.empty.title'),
+      subtitle: t('settings.manga_mgmt.pending.empty.desc'),
     }));
     return;
   }
@@ -120,7 +121,7 @@ function _renderPendingImports(el, items) {
     if (item.possible_duplicate_of) {
       const dup = document.createElement('p');
       dup.className = 'text-xs text-warn';
-      dup.innerHTML = `Possible duplicate of <a href="/manga/${item.possible_duplicate_of}" class="underline text-accent" data-dupid="${item.possible_duplicate_of}">${escapeHtml(item.possible_duplicate_title ?? '#' + item.possible_duplicate_of)}</a>${item.duplicate_similarity ? ` (${Math.round(item.duplicate_similarity * 100)}% match)` : ''}`;
+      dup.innerHTML = `${t('settings.manga_mgmt.pending.dup.prefix')} <a href="/manga/${item.possible_duplicate_of}" class="underline text-accent" data-dupid="${item.possible_duplicate_of}">${escapeHtml(item.possible_duplicate_title ?? '#' + item.possible_duplicate_of)}</a>${item.duplicate_similarity ? ' ' + t('settings.manga_mgmt.pending.dup.match', { pct: Math.round(item.duplicate_similarity * 100) }) : ''}`;
       dup.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/manga/${item.possible_duplicate_of}`); });
       left.appendChild(dup);
     }
@@ -133,14 +134,14 @@ function _renderPendingImports(el, items) {
     const findBtn = document.createElement('a');
     findBtn.href = `/sources?search=${encodeURIComponent(item.title)}`;
     findBtn.className = 'btn-primary btn-sm';
-    findBtn.textContent = 'Find & Import';
+    findBtn.textContent = t('settings.manga_mgmt.pending.find_btn');
     findBtn.addEventListener('click', e => { e.preventDefault(); navigate(`/sources?search=${encodeURIComponent(item.title)}`); });
     actions.appendChild(findBtn);
 
     const dismissBtn = document.createElement('button');
     dismissBtn.type = 'button';
     dismissBtn.className = 'btn-secondary btn-sm';
-    dismissBtn.textContent = 'Dismiss';
+    dismissBtn.textContent = t('settings.manga_mgmt.pending.dismiss_btn');
     dismissBtn.addEventListener('click', async () => {
       dismissBtn.disabled = true;
       try {
@@ -150,7 +151,7 @@ function _renderPendingImports(el, items) {
           _renderPendingImports(el, []);
         }
       } catch (e) {
-        showToast(`Error: ${e.message}`, 'error');
+        showApiError(e);
         dismissBtn.disabled = false;
       }
     });
@@ -174,7 +175,7 @@ async function _mountDuplicatesTab(el) {
     _renderDuplicates(el, pairs);
   } catch (e) {
     el.innerHTML = '';
-    el.appendChild(createErrorState({ message: `Failed to load: ${e?.message ?? 'Unknown error'}`, onRetry: () => _mountDuplicatesTab(el) }));
+    el.appendChild(createErrorState({ message: t('settings.manga_mgmt.load_failed', { msg: e?.message ?? '' }), onRetry: () => _mountDuplicatesTab(el) }));
   }
 }
 
@@ -182,8 +183,8 @@ function _renderDuplicates(el, pairs) {
   el.innerHTML = '';
   if (!pairs.length) {
     el.appendChild(createEmptyState({
-      title: 'No duplicates detected',
-      subtitle: 'New duplicates will appear here automatically when manga are added.',
+      title: t('settings.manga_mgmt.dupes.empty.title'),
+      subtitle: t('settings.manga_mgmt.dupes.empty.desc'),
     }));
     return;
   }
@@ -229,28 +230,28 @@ function _renderDuplicates(el, pairs) {
       btn.className = 'btn-primary btn-sm';
       btn.textContent = label;
       btn.addEventListener('click', async () => {
-        if (!await showConfirm(`Keep "${keep.name}" and permanently delete "${discard.name}"?`, { title: 'Merge manga', confirmLabel: 'Merge' })) return;
+        if (!await showConfirm(t('settings.manga_mgmt.dupes.merge.confirm', { keep: keep.name, discard: discard.name }), { title: t('settings.manga_mgmt.dupes.merge.title'), confirmLabel: t('settings.manga_mgmt.dupes.merge.btn') })) return;
         btn.disabled = true;
         try {
           await api.mergeDuplicate(keep.id, discard.id);
           card.remove();
           if (!list.children.length) _renderDuplicates(el, []);
-          showToast(`Merged: kept "${keep.name}".`, 'success');
+          showToast(t('settings.manga_mgmt.dupes.merge.success', { name: keep.name }), { type: 'success' });
         } catch (e) {
-          showToast(`Error: ${e.message}`, 'error');
+          showApiError(e);
           btn.disabled = false;
         }
       });
       return btn;
     };
 
-    actions.appendChild(mkMergeBtn(pair.manga_a, pair.manga_b, `Keep "${pair.manga_a.name}"`));
-    actions.appendChild(mkMergeBtn(pair.manga_b, pair.manga_a, `Keep "${pair.manga_b.name}"`));
+    actions.appendChild(mkMergeBtn(pair.manga_a, pair.manga_b, t('settings.manga_mgmt.dupes.keep_btn', { name: pair.manga_a.name })));
+    actions.appendChild(mkMergeBtn(pair.manga_b, pair.manga_a, t('settings.manga_mgmt.dupes.keep_btn', { name: pair.manga_b.name })));
 
     const notDupBtn = document.createElement('button');
     notDupBtn.type = 'button';
     notDupBtn.className = 'btn-secondary btn-sm';
-    notDupBtn.textContent = 'Not a duplicate';
+    notDupBtn.textContent = t('settings.manga_mgmt.dupes.not_dup');
     notDupBtn.addEventListener('click', async () => {
       notDupBtn.disabled = true;
       try {
@@ -258,7 +259,7 @@ function _renderDuplicates(el, pairs) {
         card.remove();
         if (!list.children.length) _renderDuplicates(el, []);
       } catch (e) {
-        showToast(`Error: ${e.message}`, 'error');
+        showApiError(e);
         notDupBtn.disabled = false;
       }
     });
@@ -290,8 +291,8 @@ function _renderOrphanedManga(el, items) {
   el.innerHTML = '';
   if (!items.length) {
     el.appendChild(createEmptyState({
-      title: 'No orphaned manga',
-      subtitle: 'Manga whose source extension has been deleted will appear here.',
+      title: t('settings.manga_mgmt.orphaned.empty.title'),
+      subtitle: t('settings.manga_mgmt.orphaned.empty.desc'),
     }));
     return;
   }
@@ -309,7 +310,7 @@ function _renderOrphanedManga(el, items) {
     nameEl.textContent = item.name;
     const srcEl = document.createElement('p');
     srcEl.className = 'text-xs text-text-muted';
-    srcEl.textContent = `Orphaned from: ${item.source_name}`;
+    srcEl.textContent = t('settings.manga_mgmt.orphaned.from', { source: item.source_name });
     left.appendChild(nameEl);
     left.appendChild(srcEl);
 
@@ -319,16 +320,16 @@ function _renderOrphanedManga(el, items) {
     const migrateBtn = document.createElement('a');
     migrateBtn.href = `/manga/${item.id}`;
     migrateBtn.className = 'btn-primary btn-sm';
-    migrateBtn.textContent = 'Migrate';
+    migrateBtn.textContent = t('settings.manga_mgmt.orphaned.migrate');
     migrateBtn.addEventListener('click', e => { e.preventDefault(); navigate(`/manga/${item.id}`); });
     actions.appendChild(migrateBtn);
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.className = 'btn-danger btn-sm';
-    deleteBtn.textContent = 'Delete';
+    deleteBtn.textContent = t('common.delete');
     deleteBtn.addEventListener('click', async () => {
-      if (!await showConfirm(`Permanently delete "${item.name}"?`, { title: 'Delete manga', confirmLabel: 'Delete' })) return;
+      if (!await showConfirm(t('settings.manga_mgmt.orphaned.delete.confirm', { name: item.name }), { title: t('settings.manga_mgmt.orphaned.delete.title'), confirmLabel: t('common.delete') })) return;
       deleteBtn.disabled = true;
       try {
         await api.deleteManga(item.id);
@@ -337,7 +338,7 @@ function _renderOrphanedManga(el, items) {
           _renderOrphanedManga(el, []);
         }
       } catch (e) {
-        showToast(`Error: ${e.message}`, 'error');
+        showApiError(e);
         deleteBtn.disabled = false;
       }
     });

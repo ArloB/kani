@@ -3,6 +3,7 @@
 
 import { getLocal, setLocal } from '../../utils.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
+import { t } from '../../i18n.js';
 
 /** @param {HTMLElement} el */
 export function mount(el) {
@@ -16,12 +17,12 @@ export function mount(el) {
     const maxMb = getLocal('kani_offline_max_mb') || '';
 
     // ── Mode ────────────────────────────────────────────────────────────────
-    const offlineGroup = mkSettingsGroup('Offline Reading');
+    const offlineGroup = mkSettingsGroup(t('settings.offline.group'));
     const offlineCard = mkSettingsGroupCard(offlineGroup);
 
     const modeChips = document.createElement('div');
     modeChips.className = 'flex gap-2 shrink-0';
-    for (const [val, label] of [['off', 'Off'], ['auto', 'Auto'], ['manual', 'Manual']]) {
+    for (const [val, label] of [['off', t('settings.offline.mode.off')], ['auto', t('settings.offline.mode.auto')], ['manual', t('settings.offline.mode.manual')]]) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = mode === val ? 'chip chip-active' : 'chip';
@@ -31,15 +32,15 @@ export function mount(el) {
       modeChips.appendChild(btn);
     }
     offlineCard.appendChild(mkSettingsRow({
-      label: 'Auto-cache mode',
-      description: 'Off: manual only. Auto: cache chapters as they download. Manual: cache via the chapter list.',
+      label: t('settings.offline.mode.label'),
+      description: t('settings.offline.mode.desc'),
       control: modeChips,
     }));
 
     if (mode === 'auto') {
       const scopeChips = document.createElement('div');
       scopeChips.className = 'flex gap-2 shrink-0';
-      for (const [val, label] of [['mine', 'Mine only'], ['all', 'All users']]) {
+      for (const [val, label] of [['mine', t('settings.offline.scope.mine')], ['all', t('settings.offline.scope.all')]]) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = scope === val ? 'chip chip-active' : 'chip';
@@ -49,14 +50,14 @@ export function mount(el) {
         scopeChips.appendChild(btn);
       }
       offlineCard.appendChild(mkSettingsRow({
-        label: 'Scope',
-        description: 'Which downloads trigger auto-caching.',
+        label: t('settings.offline.scope.label'),
+        description: t('settings.offline.scope.desc'),
         control: scopeChips,
       }));
 
       const filterChips = document.createElement('div');
       filterChips.className = 'flex gap-2 shrink-0';
-      for (const [val, label] of [['all', 'All'], ['unread', 'Unread'], ['next', 'Next N']]) {
+      for (const [val, label] of [['all', t('settings.offline.filter.all')], ['unread', t('settings.offline.filter.unread')], ['next', t('settings.offline.filter.next')]]) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = filter === val ? 'chip chip-active' : 'chip';
@@ -66,8 +67,8 @@ export function mount(el) {
         filterChips.appendChild(btn);
       }
       offlineCard.appendChild(mkSettingsRow({
-        label: 'Which chapters to cache',
-        description: 'Filter applied when deciding whether to cache a newly downloaded chapter.',
+        label: t('settings.offline.filter.label'),
+        description: t('settings.offline.filter.desc'),
         control: filterChips,
       }));
 
@@ -84,8 +85,8 @@ export function mount(el) {
           nextInput.value = String(v);
         });
         offlineCard.appendChild(mkSettingsRow({
-          label: 'Chapters ahead',
-          description: 'Cache this many unread chapters ahead of your last read position.',
+          label: t('settings.offline.ahead.label'),
+          description: t('settings.offline.ahead.desc'),
           control: nextInput,
         }));
       }
@@ -107,52 +108,52 @@ export function mount(el) {
       }
     });
     offlineCard.appendChild(mkSettingsRow({
-      label: 'Max cache size (MB)',
-      description: 'Limit the page image cache. Leave empty for unlimited.',
+      label: t('settings.offline.max_mb.label'),
+      description: t('settings.offline.max_mb.desc'),
       control: maxInput,
     }));
 
     el.appendChild(offlineGroup);
 
     // ── Cache stats ──────────────────────────────────────────────────────────
-    const statsGroup = mkSettingsGroup('Cache');
+    const statsGroup = mkSettingsGroup(t('settings.offline.cache.group'));
     const statsCard = mkSettingsGroupCard(statsGroup);
 
     const usageRow = (() => {
       const usageEl = document.createElement('span');
       usageEl.className = 'text-sm text-text-muted shrink-0';
-      usageEl.textContent = 'Calculating…';
+      usageEl.textContent = t('settings.offline.cache.calculating');
       _estimateCacheSize().then(mb => {
-        usageEl.textContent = mb !== null ? `~${mb} MB used` : 'Unknown';
+        usageEl.textContent = mb !== null ? t('settings.offline.cache.size', { mb }) : t('settings.offline.cache.unknown');
       });
-      return mkSettingsRow({ label: 'Page cache size', description: 'Approximate storage used by offline chapter pages.', control: usageEl });
+      return mkSettingsRow({ label: t('settings.offline.cache.size_row.label'), description: t('settings.offline.cache.size_row.desc'), control: usageEl });
     })();
     statsCard.appendChild(usageRow);
 
     const clearBtn = document.createElement('button');
     clearBtn.type = 'button';
     clearBtn.className = 'btn-danger btn-sm';
-    clearBtn.textContent = 'Clear page cache';
+    clearBtn.textContent = t('settings.offline.cache.clear_btn');
     clearBtn.addEventListener('click', async () => {
       clearBtn.disabled = true;
-      clearBtn.textContent = 'Clearing…';
+      clearBtn.textContent = t('settings.offline.cache.clearing');
       try {
         if ('caches' in window) await caches.delete('kani-pages-v1');
         const usageEl = /** @type {HTMLElement|null} */ (usageRow.querySelector('.shrink-0'));
-        if (usageEl) usageEl.textContent = '0 MB used';
-        clearBtn.textContent = 'Cleared';
-        setTimeout(() => { clearBtn.disabled = false; clearBtn.textContent = 'Clear page cache'; }, 2000);
+        if (usageEl) usageEl.textContent = t('settings.offline.cache.size', { mb: 0 });
+        clearBtn.textContent = t('settings.offline.cache.cleared');
+        setTimeout(() => { clearBtn.disabled = false; clearBtn.textContent = t('settings.offline.cache.clear_btn'); }, 2000);
       } catch {
         clearBtn.disabled = false;
-        clearBtn.textContent = 'Clear page cache';
+        clearBtn.textContent = t('settings.offline.cache.clear_btn');
       }
     });
-    statsCard.appendChild(mkSettingsRow({ label: 'Clear page cache', description: 'Remove all downloaded chapter pages from this browser.', control: clearBtn }));
+    statsCard.appendChild(mkSettingsRow({ label: t('settings.offline.cache.clear_row.label'), description: t('settings.offline.cache.clear_row.desc'), control: clearBtn }));
 
     el.appendChild(statsGroup);
 
     // ── OPDS ─────────────────────────────────────────────────────────────────
-    const opdsGroup = mkSettingsGroup('OPDS Catalog');
+    const opdsGroup = mkSettingsGroup(t('settings.offline.opds.group'));
     const opdsCard = mkSettingsGroupCard(opdsGroup);
 
     const feedUrl = `${window.location.origin}/opds`;
@@ -164,20 +165,20 @@ export function mount(el) {
     const copyBtn = document.createElement('button');
     copyBtn.type = 'button';
     copyBtn.className = 'btn-ghost btn-sm text-xs';
-    copyBtn.textContent = 'Copy';
+    copyBtn.textContent = t('common.copy');
     copyBtn.addEventListener('click', async () => {
       await navigator.clipboard.writeText(feedUrl).catch(() => {});
-      copyBtn.textContent = 'Copied!';
-      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+      copyBtn.textContent = t('common.copied');
+      setTimeout(() => { copyBtn.textContent = t('common.copy'); }, 1500);
     });
     urlWrap.appendChild(urlCode);
     urlWrap.appendChild(copyBtn);
-    opdsCard.appendChild(mkSettingsRow({ label: 'Feed URL', description: 'Add this to any OPDS-compatible reader app.', control: urlWrap }));
+    opdsCard.appendChild(mkSettingsRow({ label: t('settings.offline.opds.feed.label'), description: t('settings.offline.opds.feed.desc'), control: urlWrap }));
 
     const authNote = document.createElement('span');
     authNote.className = 'text-sm text-text-muted shrink-0';
-    authNote.textContent = 'Your Kani credentials';
-    opdsCard.appendChild(mkSettingsRow({ label: 'Authentication', description: 'OPDS clients use your username and password (HTTP Basic auth).', control: authNote }));
+    authNote.textContent = t('settings.offline.opds.auth_note');
+    opdsCard.appendChild(mkSettingsRow({ label: t('settings.offline.opds.auth.label'), description: t('settings.offline.opds.auth.desc'), control: authNote }));
 
     const appsRow = (() => {
       const wrap = document.createElement('div');
@@ -195,7 +196,7 @@ export function mount(el) {
         a.textContent = name;
         wrap.appendChild(a);
       }
-      return mkSettingsRow({ label: 'Compatible apps', description: '', control: wrap });
+      return mkSettingsRow({ label: t('settings.offline.opds.apps.label'), description: '', control: wrap });
     })();
     opdsCard.appendChild(appsRow);
 
@@ -203,7 +204,7 @@ export function mount(el) {
 
     const note = document.createElement('p');
     note.className = 'text-xs text-text-muted';
-    note.textContent = 'Offline and cache settings are stored on this device only.';
+    note.textContent = t('settings.offline.footer');
     el.appendChild(note);
   }
 

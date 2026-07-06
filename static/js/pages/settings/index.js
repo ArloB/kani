@@ -6,6 +6,7 @@ import * as api from '../../api.js';
 import { hasPermission } from '../../state.js';
 import { escapeHtml, deferredSkeleton } from '../../utils.js';
 import { iconLock } from '../../icons.js';
+import { t } from '../../i18n.js';
 import { skeletonSettingsCards } from '../../components/skeletons.js';
 import { mountRestartTray } from '../../components/restart-tray.js';
 import { setPageHeader, clearPageHeader } from '../../components/app-header.js';
@@ -38,13 +39,13 @@ let _activeIsDirty = null;
 
 /** @param {HTMLElement} container */
 export async function init(container) {
-  document.title = 'Settings - Kani';
+  document.title = t('settings.page_title');
   _panelDestroys = [];
   _activeSection = null;
-  setPageHeader({ crumbs: [{ label: 'Settings' }] });
+  setPageHeader({ crumbs: [{ label: t('settings.crumb') }] });
 
   setBeforeNavigate(async () => {
-    if (_activeIsDirty?.() && !(await showConfirm('You have unsaved changes. Leave this page anyway?', { title: 'Unsaved changes', confirmLabel: 'Leave', cancelLabel: 'Stay' }))) return false;
+    if (_activeIsDirty?.() && !(await showConfirm(t('settings.unsaved.page.message'), { title: t('settings.unsaved.title'), confirmLabel: t('settings.unsaved.leave'), cancelLabel: t('settings.unsaved.stay') }))) return false;
     return true;
   });
 
@@ -71,23 +72,23 @@ export async function init(container) {
 
   /** @type {Array<{ id: string, label: string, description: string, perm: string|null, group?: string, mount: (el: HTMLElement) => { destroy: () => void } }>} */
   const allSections = [
-    { id: 'general',          label: 'General',          description: 'Display preferences, reading behaviour, and notifications.',            perm: null,                     mount: el => general.mount(el) },
-    { id: 'library',          label: 'Library',          description: 'Manage categories and import/export your manga collection.',             perm: 'library:manage',          mount: el => library.mount(el, catList) },
-    { id: 'collections',      label: 'Collections',      description: 'Create and manage smart collections that group manga by rules.',         perm: 'library:manage',          mount: el => collections.mount(el) },
-    { id: 'manga-management', label: 'Manga Management', description: 'Pending imports, duplicate detection, and orphaned manga.',              perm: 'library:manage',          mount: el => mangaManagement.mount(el) },
-    { id: 'trash',            label: 'Trash',            description: 'Trashed manga waiting to be restored or permanently deleted.',           perm: 'library:view',            mount: el => trash.mount(el) },
-    { id: 'downloads',        label: 'Downloads',        description: 'Control download concurrency, queue size, and reading-ahead behaviour.', perm: 'settings:edit_download',  mount: el => downloads.mount(el, settings) },
-    { id: 'offline',          label: 'Offline',          description: 'Configure offline reading, page cache, and the OPDS catalog server.',      perm: null,                      mount: el => offline.mount(el) },
-    { id: 'scan',      label: 'Scan',       description: 'Configure automatic scanning for new chapters.',                         perm: 'settings:edit_scan',      mount: el => scan.mount(el, settings) },
-    { id: 'trackers',  label: 'Trackers',   description: 'Link external tracking services like AniList and MyAnimeList.',          perm: null,                      mount: el => trackers.mount(el, settings) },
-    { id: 'email',           label: 'Email / SMTP',    description: 'Configure outbound email for password reset and notifications.', perm: 'settings:edit_advanced', group: 'Server',  mount: el => email.mount(el, settings) },
-    { id: 'webhooks',        label: 'Webhooks',        description: 'Send HTTP POST notifications to external services when events occur.', perm: 'settings:edit_advanced', group: 'Server',  mount: el => webhooks.mount(el) },
-    { id: 'advanced',        label: 'Advanced',        description: 'FlareSolverr, library path, and other low-level options.',  perm: 'settings:edit_advanced', group: 'Server',  mount: el => advanced.mount(el, settings, bootId) },
-    { id: 'storage',         label: 'Storage',         description: 'Disk usage and library integrity check.',                     perm: 'admin:manage',           group: 'Server',  mount: el => storage.mount(el) },
-    { id: 'maintenance',     label: 'Maintenance',     description: 'Data retention, disk warnings, login rate limits, and session timeout.', perm: 'settings:edit_advanced', group: 'Server',  mount: el => maintenance.mount(el, settings) },
-    { id: 'server',          label: 'Lifecycle',       description: 'Stop or restart the server process.',                         perm: 'server:manage',          group: 'Server',  mount: el => server.mount(el) },
-    { id: 'account',         label: 'My Account',      description: 'Change your password and manage active sessions.',            perm: null,                     group: 'Account', mount: el => account.mount(el) },
-    { id: 'security',        label: 'Security',        description: 'Two-factor authentication, session management, and security status.', perm: null,                group: 'Account', mount: el => security.mount(el) },
+    { id: 'general',          label: t('settings.section.general.label'),          description: t('settings.section.general.desc'),          perm: null,                     mount: el => general.mount(el) },
+    { id: 'library',          label: t('settings.section.library.label'),          description: t('settings.section.library.desc'),          perm: 'library:manage',          mount: el => library.mount(el, catList) },
+    { id: 'collections',      label: t('settings.section.collections.label'),      description: t('settings.section.collections.desc'),      perm: 'library:manage',          mount: el => collections.mount(el) },
+    { id: 'manga-management', label: t('settings.section.manga_management.label'), description: t('settings.section.manga_management.desc'), perm: 'library:manage',          mount: el => mangaManagement.mount(el) },
+    { id: 'trash',            label: t('settings.section.trash.label'),            description: t('settings.section.trash.desc'),            perm: 'library:view',            mount: el => trash.mount(el) },
+    { id: 'downloads',        label: t('settings.section.downloads.label'),        description: t('settings.section.downloads.desc'),        perm: 'settings:edit_download',  mount: el => downloads.mount(el, settings) },
+    { id: 'offline',          label: t('settings.section.offline.label'),          description: t('settings.section.offline.desc'),          perm: null,                      mount: el => offline.mount(el) },
+    { id: 'scan',             label: t('settings.section.scan.label'),             description: t('settings.section.scan.desc'),             perm: 'settings:edit_scan',      mount: el => scan.mount(el, settings) },
+    { id: 'trackers',         label: t('settings.section.trackers.label'),         description: t('settings.section.trackers.desc'),         perm: null,                      mount: el => trackers.mount(el, settings) },
+    { id: 'email',            label: t('settings.section.email.label'),            description: t('settings.section.email.desc'),            perm: 'settings:edit_advanced', group: t('settings.group.server'),  mount: el => email.mount(el, settings) },
+    { id: 'webhooks',         label: t('settings.section.webhooks.label'),         description: t('settings.section.webhooks.desc'),         perm: 'settings:edit_advanced', group: t('settings.group.server'),  mount: el => webhooks.mount(el) },
+    { id: 'advanced',         label: t('settings.section.advanced.label'),         description: t('settings.section.advanced.desc'),         perm: 'settings:edit_advanced', group: t('settings.group.server'),  mount: el => advanced.mount(el, settings, bootId) },
+    { id: 'storage',          label: t('settings.section.storage.label'),          description: t('settings.section.storage.desc'),          perm: 'admin:manage',           group: t('settings.group.server'),  mount: el => storage.mount(el) },
+    { id: 'maintenance',      label: t('settings.section.maintenance.label'),      description: t('settings.section.maintenance.desc'),      perm: 'settings:edit_advanced', group: t('settings.group.server'),  mount: el => maintenance.mount(el, settings) },
+    { id: 'server',           label: t('settings.section.server.label'),           description: t('settings.section.server.desc'),           perm: 'server:manage',          group: t('settings.group.server'),  mount: el => server.mount(el) },
+    { id: 'account',          label: t('settings.section.account.label'),          description: t('settings.section.account.desc'),          perm: null,                     group: t('settings.group.account'), mount: el => account.mount(el) },
+    { id: 'security',         label: t('settings.section.security.label'),         description: t('settings.section.security.desc'),         perm: null,                     group: t('settings.group.account'), mount: el => security.mount(el) },
   ];
 
   const sections = allSections.filter(s => !s.perm || hasPermission(s.perm));
@@ -104,13 +105,13 @@ export async function init(container) {
             <input
               id="settings-search"
               type="search"
-              placeholder="Filter…"
+              placeholder="${t('settings.search.placeholder')}"
               autocomplete="off"
               class="w-full text-xs bg-surface-2 border border-border-subtle rounded-lg px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-accent/50 placeholder:text-text-faint text-text"
-              aria-label="Filter settings sections"
+              aria-label="${t('settings.search.placeholder')}"
             />
           </div>
-          <div class="nav-section">Settings</div>
+          <div class="nav-section">${t('settings.crumb')}</div>
           <div id="settings-nav-items"></div>
         </div>
       </aside>
@@ -121,16 +122,16 @@ export async function init(container) {
             <input
               id="settings-search-mobile"
               type="search"
-              placeholder="Filter sections…"
+              placeholder="${t('settings.search.placeholder_mobile')}"
               autocomplete="off"
               class="w-full text-sm bg-surface-2 border border-border-subtle rounded-lg px-3 py-2 outline-none focus:ring-1 focus:ring-accent/50 placeholder:text-text-faint text-text"
-              aria-label="Filter settings sections"
+              aria-label="${t('settings.search.placeholder_mobile')}"
             />
           </div>
           <div class="flex flex-col divide-y divide-border-subtle border-t border-border-subtle" id="mobile-nav-items"></div>
         </div>
         <button type="button" class="js-mobile-back lg:hidden hidden items-center gap-2 px-4 py-3 text-sm text-accent hover:text-accent/80 transition-colors">
-          <span aria-hidden="true">‹</span> Back
+          <span aria-hidden="true">‹</span> ${t('settings.mobile_back')}
         </button>
         <div class="js-content max-w-4xl w-full px-4 md:px-8 py-4 md:py-6 flex flex-col gap-6"></div>
       </div>
@@ -189,7 +190,7 @@ export async function init(container) {
     if (_filteredSections.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'px-2 py-2 text-xs text-text-faint';
-      empty.textContent = 'No sections found';
+      empty.textContent = t('settings.search.empty');
       desktopNavEl.appendChild(empty);
     }
   }
@@ -219,7 +220,7 @@ export async function init(container) {
    * @param {boolean} [pushState] - true when triggered by user action; false on init/restore
    */
   async function _showSection(sectionId, pushState = false) {
-    if (_activeIsDirty?.() && !(await showConfirm('You have unsaved changes. Leave this section anyway?', { title: 'Unsaved changes', confirmLabel: 'Leave', cancelLabel: 'Stay' }))) return;
+    if (_activeIsDirty?.() && !(await showConfirm(t('settings.unsaved.section.message'), { title: t('settings.unsaved.title'), confirmLabel: t('settings.unsaved.leave'), cancelLabel: t('settings.unsaved.stay') }))) return;
 
     _activeSection = sectionId;
     const section = sections.find(s => s.id === sectionId);
@@ -228,7 +229,7 @@ export async function init(container) {
     if (pushState) {
       history.pushState(null, '', '/settings?section=' + encodeURIComponent(sectionId));
     }
-    setPageHeader({ crumbs: [{ label: 'Settings', href: '/settings' }, { label: section.label }] });
+    setPageHeader({ crumbs: [{ label: t('settings.crumb'), href: '/settings' }, { label: section.label }] });
 
     // Update desktop active state
     for (const btn of desktopNavEl.querySelectorAll('[data-section]')) {
@@ -266,12 +267,12 @@ export async function init(container) {
   }
 
   async function _showMobileList(pushState = false) {
-    if (_activeIsDirty?.() && !(await showConfirm('You have unsaved changes. Leave this section anyway?', { title: 'Unsaved changes', confirmLabel: 'Leave', cancelLabel: 'Stay' }))) return;
+    if (_activeIsDirty?.() && !(await showConfirm(t('settings.unsaved.section.message'), { title: t('settings.unsaved.title'), confirmLabel: t('settings.unsaved.leave'), cancelLabel: t('settings.unsaved.stay') }))) return;
 
     _activeSection = null;
     _activeIsDirty = null;
     if (pushState) history.pushState(null, '', '/settings');
-    setPageHeader({ crumbs: [{ label: 'Settings' }] });
+    setPageHeader({ crumbs: [{ label: t('settings.crumb') }] });
     mobileListEl.classList.remove('hidden');
     mobileBackBtn.classList.add('hidden');
     mobileBackBtn.classList.remove('flex');
@@ -312,8 +313,8 @@ function _createAccessDenied() {
   el.className = 'flex flex-col items-center justify-center gap-3 py-20 text-text-muted';
   el.innerHTML = `
     <span class="icon-xl opacity-40" aria-hidden="true">${iconLock}</span>
-    <p class="text-base font-medium text-text">Access denied</p>
-    <p class="text-sm">You do not have permission to view settings.</p>
+    <p class="text-base font-medium text-text">${t('settings.access_denied.title')}</p>
+    <p class="text-sm">${t('settings.access_denied.desc')}</p>
   `;
   return el;
 }
