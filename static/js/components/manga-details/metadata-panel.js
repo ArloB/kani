@@ -13,18 +13,19 @@ import { mkCard, mkRow, mkItem } from './_shared.js';
 import { hasPermission } from '../../state.js';
 import { getLocal, setLocal } from '../../utils.js';
 import { subscribeJob } from '../../sse.js';
+import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const STATUS_OPTIONS = [
-  { value: '', label: '(use source)' },
-  { value: 0, label: 'Unknown' },
-  { value: 1, label: 'Ongoing' },
-  { value: 2, label: 'Completed' },
-  { value: 3, label: 'Hiatus' },
-  { value: 4, label: 'Cancelled' },
+const STATUS_OPTIONS = () => [
+  { value: '', label: t('manga.status.use_source') },
+  { value: 0, label: t('manga.status.unknown') },
+  { value: 1, label: t('manga.status.ongoing') },
+  { value: 2, label: t('manga.status.completed') },
+  { value: 3, label: t('manga.status.hiatus') },
+  { value: 4, label: t('manga.status.cancelled') },
 ];
 
 // ── SaveStatus ────────────────────────────────────────────────────────────────
@@ -32,14 +33,14 @@ const STATUS_OPTIONS = [
 /** @param {{ status: string|null }} props */
 function SaveStatus({ status }) {
   if (!status) return null;
-  if (status === 'error') return html`<span class="text-xs text-danger">Error saving</span>`;
-  if (status === 'saving') return html`<span class="text-xs text-text-muted">Saving…</span>`;
-  return html`<span class="text-xs text-accent">Saved</span>`;
+  if (status === 'error') return html`<span class="text-xs text-danger">${t('manga.meta.save.error')}</span>`;
+  if (status === 'saving') return html`<span class="text-xs text-text-muted">${t('manga.meta.save.saving')}</span>`;
+  return html`<span class="text-xs text-accent">${t('manga.meta.save.saved')}</span>`;
 }
 
 /** Small dot shown next to a field heading when an override is active. */
 function OverrideDot() {
-  return html`<span class="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-accent align-middle" title="Override active"></span>`;
+  return html`<span class="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-accent align-middle" title=${t('manga.meta.override_active')}></span>`;
 }
 
 // ── MetadataEditModal ─────────────────────────────────────────────────────────
@@ -285,7 +286,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
           },
           onFailed: (data) => {
             flash(setRefreshStatus, 'error');
-            showApiError({ message: data?.message ?? 'Refresh failed' });
+            showApiError({ message: data?.message ?? t('manga.meta.refresh_failed') });
           },
         });
       } else {
@@ -329,7 +330,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
             setPulling(null);
           },
           onFailed: (data) => {
-            showApiError({ message: data?.message ?? 'Refresh failed' });
+            showApiError({ message: data?.message ?? t('manga.meta.refresh_failed') });
             setPulling(null);
           },
         });
@@ -349,22 +350,22 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
   const statusOverridden = localStatus !== '';
   const isRefreshing = refreshStatus === 'refreshing';
 
-  const srcStatusLabel = STATUS_OPTIONS.find(o => String(o.value) === String(d.source_status))?.label;
+  const srcStatusLabel = STATUS_OPTIONS().find(o => String(o.value) === String(d.source_status))?.label;
 
   const descPlaceholder = d.source_description
     ? d.source_description.slice(0, 120) + (d.source_description.length > 120 ? '…' : '')
-    : 'Override description…';
+    : t('manga.meta.desc.placeholder');
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return html`
-    <${Modal} open=${true} onClose=${onClose} title="Edit Metadata" wide=${true}
-      footer=${html`<button type="button" class="btn-primary btn-sm" onClick=${onClose}>Close</button>`}
+    <${Modal} open=${true} onClose=${onClose} title=${t('manga.meta.title')} wide=${true}
+      footer=${html`<button type="button" class="btn-primary btn-sm" onClick=${onClose}>${t('common.close')}</button>`}
     >
       ${canRefresh && html`
         <div class="border-b border-border pb-4 mb-2">
           <div class="flex items-center justify-between gap-3">
-            <span class="text-sm font-semibold text-text">Refresh from source</span>
+            <span class="text-sm font-semibold text-text">${t('manga.meta.refresh_source')}</span>
             <div class="flex items-center gap-3">
               <${SaveStatus} status=${isRefreshing ? null : refreshStatus} />
               <label class="flex items-center gap-1.5 cursor-pointer select-none text-xs text-text-muted">
@@ -374,16 +375,16 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
                     setRedownloadCover(v);
                     setLocal('kani.refreshOpts.cover', String(v));
                   }} />
-                Re-download cover
+                ${t('manga.meta.redownload_cover')}
               </label>
               <button type="button"
                 class="btn-ghost btn-sm flex items-center gap-1"
                 disabled=${!!pulling || isRefreshing}
-                title="Your edits below are kept. Use 'Pull' on a field to adopt the latest source value."
+                title=${t('manga.meta.refresh_tip')}
                 onClick=${handleRefreshAll}>
                 <span class=${'icon-xs' + (isRefreshing ? ' icon-spin' : '')}
                   dangerouslySetInnerHTML=${{ __html: iconRefresh }}></span>
-                ${isRefreshing ? 'Refreshing…' : 'Refresh'}
+                ${isRefreshing ? t('manga.meta.refreshing') : t('manga.meta.refresh')}
               </button>
             </div>
           </div>
@@ -396,7 +397,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-semibold text-text">
-              Cover
+              ${t('manga.meta.cover')}
               ${coverOverridden && html`<${OverrideDot} />`}
             </span>
             <div class="flex items-center gap-2">
@@ -405,8 +406,8 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
                 <button type="button"
                   class="btn-ghost btn-sm text-xs text-text-muted"
                   disabled=${!!pulling} onClick=${() => handlePullField('cover')}
-                  title="Fetch latest cover from source">
-                  ${pulling === 'cover' ? '…' : 'Pull'}
+                  title=${t('manga.meta.pull.cover')}>
+                  ${pulling === 'cover' ? '…' : t('manga.meta.pull')}
                 </button>
               `}
             </div>
@@ -414,19 +415,19 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
           <div class="flex items-start gap-4">
             <img
               src=${`/rest/manga/${dbId}/cover?v=${coverTs}`}
-              alt="Cover"
+              alt=${t('manga.meta.cover')}
               class="w-16 h-24 object-cover rounded-lg border border-border flex-shrink-0 bg-surface-2"
               onError=${(/** @type {Event} */e) => { /** @type {HTMLImageElement} */(e.target).style.display = 'none'; }}
             />
             <div class="flex flex-col gap-2">
               <label class="btn-ghost btn-sm cursor-pointer">
-                Choose image…
+                ${t('manga.meta.choose_image')}
                 <input type="file" accept="image/*" class="sr-only"
                   ref=${fileInputRef} onChange=${handleCoverFile} />
               </label>
               ${coverOverridden && html`
                 <button type="button" class="btn-ghost btn-sm text-danger text-xs"
-                  onClick=${handleRemoveCover}>Remove custom cover</button>
+                  onClick=${handleRemoveCover}>${t('manga.meta.remove_cover')}</button>
               `}
             </div>
           </div>
@@ -436,7 +437,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
         <div class="flex flex-col gap-1.5">
           <div class="flex items-center justify-between gap-2">
             <label class="text-sm font-semibold text-text">
-              Title
+              ${t('manga.meta.field.title')}
               ${titleOverridden && html`<${OverrideDot} />`}
             </label>
             <div class="flex items-center gap-2">
@@ -446,15 +447,15 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
                   class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
                   onClick=${resetTitle}>
                   <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
-                  Restore
+                  ${t('manga.meta.restore')}
                 </button>
               ` : null}
               ${canRefresh && titleOverridden && html`
                 <button type="button"
                   class="btn-ghost btn-sm text-xs text-text-muted"
                   disabled=${!!pulling} onClick=${() => handlePullField('title')}
-                  title="Fetch latest title from source">
-                  ${pulling === 'title' ? '…' : 'Pull'}
+                  title=${t('manga.meta.pull.title')}>
+                  ${pulling === 'title' ? '…' : t('manga.meta.pull')}
                 </button>
               `}
             </div>
@@ -476,7 +477,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
         <div class="flex flex-col gap-1.5">
           <div class="flex items-center justify-between gap-2">
             <label class="text-sm font-semibold text-text">
-              Description
+              ${t('manga.meta.field.description')}
               ${descOverridden && html`<${OverrideDot} />`}
             </label>
             <div class="flex items-center gap-2">
@@ -486,15 +487,15 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
                   class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
                   onClick=${resetDesc}>
                   <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
-                  Restore
+                  ${t('manga.meta.restore')}
                 </button>
               ` : null}
               ${canRefresh && descOverridden && html`
                 <button type="button"
                   class="btn-ghost btn-sm text-xs text-text-muted"
                   disabled=${!!pulling} onClick=${() => handlePullField('description')}
-                  title="Fetch latest description from source">
-                  ${pulling === 'description' ? '…' : 'Pull'}
+                  title=${t('manga.meta.pull.description')}>
+                  ${pulling === 'description' ? '…' : t('manga.meta.pull')}
                 </button>
               `}
             </div>
@@ -516,7 +517,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
         <div class="flex flex-col gap-1.5">
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-semibold text-text">
-              Publication status
+              ${t('manga.meta.field.status')}
               ${statusOverridden && html`<${OverrideDot} />`}
             </span>
             <div class="flex items-center gap-2 shrink-0">
@@ -526,15 +527,15 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
                   class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
                   onClick=${resetStatus}>
                   <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
-                  Restore
+                  ${t('manga.meta.restore')}
                 </button>
               ` : null}
               ${canRefresh && statusOverridden && html`
                 <button type="button"
                   class="btn-ghost btn-sm text-xs text-text-muted"
                   disabled=${!!pulling} onClick=${() => handlePullField('status')}
-                  title="Fetch latest status from source">
-                  ${pulling === 'status' ? '…' : 'Pull'}
+                  title=${t('manga.meta.pull.status')}>
+                  ${pulling === 'status' ? '…' : t('manga.meta.pull')}
                 </button>
               `}
             </div>
@@ -542,7 +543,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
           <select class="input w-full text-sm" value=${localStatus}
             disabled=${pulling === 'status'}
             onChange=${handleStatusChange}>
-            ${STATUS_OPTIONS.map(opt => html`
+            ${STATUS_OPTIONS().map(opt => html`
               <option key=${opt.value} value=${String(opt.value)}>${opt.label}</option>
             `)}
           </select>
@@ -555,7 +556,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
         <div class="flex flex-col gap-4">
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-semibold text-text">
-              Authors & Artists
+              ${t('manga.meta.field.people')}
               ${hasLocalPeople && html`<${OverrideDot} />`}
             </span>
             <div class="flex items-center gap-2">
@@ -565,36 +566,36 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
                   class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
                   onClick=${resetPeople}>
                   <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
-                  Restore
+                  ${t('manga.meta.restore')}
                 </button>
               `}
               ${canRefresh && hasLocalPeople && html`
                 <button type="button"
                   class="btn-ghost btn-sm text-xs text-text-muted"
                   disabled=${!!pulling} onClick=${() => handlePullField('people')}
-                  title="Fetch latest authors & artists from source">
-                  ${pulling === 'people' ? '…' : 'Pull'}
+                  title=${t('manga.meta.pull.people')}>
+                  ${pulling === 'people' ? '…' : t('manga.meta.pull')}
                 </button>
               `}
             </div>
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-text-muted">Authors</label>
+            <label class="text-xs text-text-muted">${t('manga.meta.field.authors')}</label>
             <${Combobox}
               options=${authorOptions}
               value=${authors}
               onChange=${(items) => savePeople(items, artists)}
-              placeholder="Add author…"
+              placeholder=${t('manga.meta.add_author')}
               creatable=${true}
             />
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="text-xs text-text-muted">Artists</label>
+            <label class="text-xs text-text-muted">${t('manga.meta.field.artists')}</label>
             <${Combobox}
               options=${artistOptions}
               value=${artists}
               onChange=${(items) => savePeople(authors, items)}
-              placeholder="Add artist…"
+              placeholder=${t('manga.meta.add_artist')}
               creatable=${true}
             />
           </div>
@@ -604,7 +605,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between gap-2">
             <span class="text-sm font-semibold text-text">
-              Tags
+              ${t('manga.meta.field.tags')}
               ${hasLocalTags && html`<${OverrideDot} />`}
             </span>
             <div class="flex items-center gap-2">
@@ -614,15 +615,15 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
                   class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
                   onClick=${resetTags}>
                   <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
-                  Restore
+                  ${t('manga.meta.restore')}
                 </button>
               `}
               ${canRefresh && hasLocalTags && html`
                 <button type="button"
                   class="btn-ghost btn-sm text-xs text-text-muted"
                   disabled=${!!pulling} onClick=${() => handlePullField('tags')}
-                  title="Fetch latest tags from source">
-                  ${pulling === 'tags' ? '…' : 'Pull'}
+                  title=${t('manga.meta.pull.tags')}>
+                  ${pulling === 'tags' ? '…' : t('manga.meta.pull')}
                 </button>
               `}
             </div>
@@ -631,7 +632,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
             options=${tagOptions}
             value=${tags}
             onChange=${saveTags}
-            placeholder="Add tag…"
+            placeholder=${t('manga.meta.add_tag')}
             creatable=${true}
           />
         </div>
@@ -661,7 +662,7 @@ export function mountMetadataPanel(containerEl, { dbId, mangaData }) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'btn-ghost btn-sm flex items-center gap-2';
-  btn.innerHTML = `<span class="icon-sm" style="display:inline-flex">${iconPencil}</span> Edit metadata`;
+  btn.innerHTML = `<span class="icon-sm" style="display:inline-flex">${iconPencil}</span> ${t('manga.meta.edit')}`;
 
   btn.addEventListener('click', () => {
     let cleanup = /** @type {() => void} */(() => {});
@@ -676,8 +677,8 @@ export function mountMetadataPanel(containerEl, { dbId, mangaData }) {
   });
 
   card.appendChild(mkItem(mkRow(
-    'Metadata',
-    'Override title, description, status, authors, and cover',
+    t('manga.meta.row_label'),
+    t('manga.meta.row_desc'),
     btn,
   )));
 

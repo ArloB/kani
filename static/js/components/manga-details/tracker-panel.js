@@ -2,6 +2,7 @@
 // Manage tab — Tracking + External Trackers sections.
 
 import * as api from '../../api.js';
+import { t } from '../../i18n.js';
 import { getState, setState } from '../../state.js';
 import { showAlert } from '../modal.js';
 import { mkCard, mkTitledCard, mkRow, mkItem } from './_shared.js';
@@ -15,16 +16,16 @@ export function mountTrackerPanel(containerEl, ctx) {
 
   // ── Internal tracking ──────────────────────────────────────────────────────
 
-  const trackCard = mkTitledCard('Status & Score', 'Track your progress');
+  const trackCard = mkTitledCard(t('manga.tracker.card.title'), t('manga.tracker.card.desc'));
 
   const statusOptions = [
-    { value: '', label: 'Not tracked' },
-    { value: 'reading', label: 'Reading' },
-    { value: 'on_hold', label: 'On Hold' },
-    { value: 'dropped', label: 'Dropped' },
-    { value: 'plan_to_read', label: 'Plan to Read' },
-    { value: 'completed', label: 'Completed' },
-    { value: 'rereading', label: 'Rereading' },
+    { value: '', label: t('manga.tracker.status.untracked') },
+    { value: 'reading', label: t('manga.tracker.status.reading') },
+    { value: 'on_hold', label: t('manga.tracker.status.on_hold') },
+    { value: 'dropped', label: t('manga.tracker.status.dropped') },
+    { value: 'plan_to_read', label: t('manga.tracker.status.plan_to_read') },
+    { value: 'completed', label: t('manga.tracker.status.completed') },
+    { value: 'rereading', label: t('manga.tracker.status.rereading') },
   ];
 
   const statusSelect = document.createElement('select');
@@ -58,10 +59,10 @@ export function mountTrackerPanel(containerEl, ctx) {
   `;
   const trackingToggle = /** @type {HTMLInputElement} */ (toggleLabel.querySelector('.js-tracking-enabled'));
 
-  trackCard.appendChild(mkItem(mkRow('Sync enabled', 'Sync this manga with external trackers', toggleLabel)));
-  trackCard.appendChild(mkItem(mkRow('Status', 'Your reading status', statusSelect)));
-  trackCard.appendChild(mkItem(mkRow('Score', 'Rate 0–10', scoreInput)));
-  trackCard.appendChild(mkItem(mkRow('Progress', 'Chapters read / total', progressText)));
+  trackCard.appendChild(mkItem(mkRow(t('manga.tracker.sync_enabled'), t('manga.tracker.sync_enabled.desc'), toggleLabel)));
+  trackCard.appendChild(mkItem(mkRow(t('manga.tracker.status'), t('manga.tracker.status.desc'), statusSelect)));
+  trackCard.appendChild(mkItem(mkRow(t('manga.tracker.score'), t('manga.tracker.score.desc'), scoreInput)));
+  trackCard.appendChild(mkItem(mkRow(t('manga.tracker.progress'), t('manga.tracker.progress.desc'), progressText)));
   containerEl.appendChild(trackCard);
 
   const notifyId = `notify-new-chapters-${dbId}`;
@@ -73,7 +74,7 @@ export function mountTrackerPanel(containerEl, ctx) {
     <span class="kani-toggle__track"></span>
   `;
   const notifyToggle = /** @type {HTMLInputElement} */ (notifyLabel.querySelector('.js-notify-chapters'));
-  trackCard.appendChild(mkItem(mkRow('Notify new chapters', 'Show a browser notification when new chapters are found', notifyLabel)));
+  trackCard.appendChild(mkItem(mkRow(t('manga.tracker.notify'), t('manga.tracker.notify.desc'), notifyLabel)));
 
   api.getMangaTracking(dbId).then(tracking => {
     trackingToggle.checked = tracking.tracking_enabled ?? true;
@@ -96,7 +97,7 @@ export function mountTrackerPanel(containerEl, ctx) {
     if (val && 'Notification' in window) {
       if (Notification.permission === 'denied') {
         notifyToggle.checked = false;
-        await showAlert('Browser notifications are blocked. Update your browser settings to allow them from this site.', { title: 'Notifications blocked' });
+        await showAlert(t('manga.tracker.notify.blocked'), { title: t('manga.tracker.notify.blocked.title') });
         return;
       }
       if (Notification.permission !== 'granted') {
@@ -135,7 +136,7 @@ export function mountTrackerPanel(containerEl, ctx) {
   const extCard = mkCard();
   const extBody = document.createElement('div');
   extBody.className = 'py-3 text-sm text-text-muted';
-  extBody.textContent = 'Loading trackers...';
+  extBody.textContent = t('manga.tracker.loading');
   extCard.appendChild(extBody);
   containerEl.appendChild(extCard);
 
@@ -144,7 +145,7 @@ export function mountTrackerPanel(containerEl, ctx) {
       extBody.textContent = '';
       const configuredTrackers = trackers.filter(t => t.configured);
       if (!configuredTrackers.length) {
-        extBody.textContent = 'No trackers configured. Add OAuth app credentials in Settings → Trackers.';
+        extBody.textContent = t('manga.tracker.none_configured');
         return;
       }
 
@@ -162,11 +163,11 @@ export function mountTrackerPanel(containerEl, ctx) {
         const statusEl = document.createElement('p');
         statusEl.className = 'text-xs text-text-muted mt-0.5';
         if (!t.linked) {
-          statusEl.textContent = 'Not linked — link in Settings';
+          statusEl.textContent = t('manga.tracker.not_linked');
         } else if (mapping?.tracker_manga_id) {
-          statusEl.textContent = `Mapped to ID: ${mapping.tracker_manga_id}`;
+          statusEl.textContent = t('manga.tracker.mapped', { id: mapping.tracker_manga_id });
         } else {
-          statusEl.textContent = 'Linked but not mapped to this manga';
+          statusEl.textContent = t('manga.tracker.linked_not_mapped');
         }
         info.appendChild(statusEl);
         row.appendChild(info);
@@ -178,24 +179,24 @@ export function mountTrackerPanel(containerEl, ctx) {
           const searchBtn = document.createElement('button');
           searchBtn.type = 'button';
           searchBtn.className = 'btn-ghost btn-sm';
-          searchBtn.textContent = 'Search & Link';
+          searchBtn.textContent = t('manga.tracker.search_link');
           searchBtn.addEventListener('click', async () => {
-            const query = prompt(`Search ${t.name} for manga title:`);
+            const query = prompt(t('manga.tracker.search_prompt', { name: t.name }));
             if (!query) return;
             try {
               const results = await api.searchTrackerManga(t.id, query);
-              if (!results.length) { await showAlert('No results found.', { title: 'Search' }); return; }
+              if (!results.length) { await showAlert(t('manga.tracker.no_results'), { title: t('manga.tracker.search.title') }); return; }
               const choice = prompt(
                 results.map((r, i) => `${i + 1}. ${r.title} (${r.tracker_manga_id})`).join('\n') +
-                '\n\nEnter number to link:'
+                '\n\n' + t('manga.tracker.enter_number')
               );
               const idx = parseInt(choice ?? '', 10) - 1;
               if (idx >= 0 && idx < results.length) {
                 await api.setTrackerMapping(dbId, t.id, results[idx].tracker_manga_id);
-                statusEl.textContent = `Mapped to ID: ${results[idx].tracker_manga_id}`;
+                statusEl.textContent = t('manga.tracker.mapped', { id: results[idx].tracker_manga_id });
               }
             } catch (err) {
-              await showAlert('Search failed: ' + (/** @type {any} */(err)?.message ?? err), { title: 'Error' });
+              await showAlert(t('manga.tracker.search_failed', { message: /** @type {any} */(err)?.message ?? String(err) }), { title: t('manga.tracker.error.title') });
             }
           });
           btnGroup.appendChild(searchBtn);
@@ -205,17 +206,17 @@ export function mountTrackerPanel(containerEl, ctx) {
           const syncBtn = document.createElement('button');
           syncBtn.type = 'button';
           syncBtn.className = 'btn-ghost btn-sm';
-          syncBtn.textContent = 'Sync';
+          syncBtn.textContent = t('manga.tracker.sync');
           syncBtn.addEventListener('click', async () => {
             syncBtn.disabled = true;
-            syncBtn.textContent = 'Syncing...';
+            syncBtn.textContent = t('manga.tracker.syncing');
             try {
               await api.syncMangaTrackers(dbId);
-              syncBtn.textContent = 'Done';
-              setTimeout(() => { syncBtn.textContent = 'Sync'; }, 2000);
+              syncBtn.textContent = t('manga.tracker.sync_done');
+              setTimeout(() => { syncBtn.textContent = t('manga.tracker.sync'); }, 2000);
             } catch {
-              syncBtn.textContent = 'Failed';
-              setTimeout(() => { syncBtn.textContent = 'Sync'; }, 2000);
+              syncBtn.textContent = t('manga.tracker.sync_failed_btn');
+              setTimeout(() => { syncBtn.textContent = t('manga.tracker.sync'); }, 2000);
             } finally { syncBtn.disabled = false; }
           });
           btnGroup.appendChild(syncBtn);
@@ -223,10 +224,10 @@ export function mountTrackerPanel(containerEl, ctx) {
           const unlinkBtn = document.createElement('button');
           unlinkBtn.type = 'button';
           unlinkBtn.className = 'btn-ghost btn-sm text-danger';
-          unlinkBtn.textContent = 'Unmap';
+          unlinkBtn.textContent = t('manga.tracker.unmap');
           unlinkBtn.addEventListener('click', async () => {
             await api.deleteTrackerMapping(dbId, t.id);
-            statusEl.textContent = 'Linked but not mapped to this manga';
+            statusEl.textContent = t('manga.tracker.linked_not_mapped');
           });
           btnGroup.appendChild(unlinkBtn);
         }
@@ -236,7 +237,7 @@ export function mountTrackerPanel(containerEl, ctx) {
       }
     })
     .catch(() => {
-      extBody.textContent = 'Failed to load tracker info.';
+      extBody.textContent = t('manga.tracker.load_failed');
     });
 }
 

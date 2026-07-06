@@ -2,6 +2,7 @@
 // Manage tab — Download filter rules: add, edit, delete, reorder, live preview.
 
 import * as api from '../../api.js';
+import { t } from '../../i18n.js';
 import { debounce, escapeHtml } from '../../utils.js';
 import { showToast } from '../toast.js';
 import { createEmptyState } from '../empty-state.js';
@@ -81,7 +82,7 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
       options=${opts}
       value=${opts.find(o => o.name === curVal)?.id ?? null}
       onChange=${(/** @type {any} */ id) => { setValue(opts.find(o => o.id === id)?.name ?? ''); }}
-      placeholder="Select language…"
+      placeholder=${t('manga.rules.lang_placeholder')}
     />`, mount);
   };
 
@@ -97,11 +98,11 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
   previewEl.className = 'text-sm text-text-muted';
 
   const _refreshPreview = debounce(async () => {
-    if (rules.length === 0) { previewEl.textContent = 'All chapters will be downloaded.'; return; }
-    previewEl.textContent = 'Calculating…';
+    if (rules.length === 0) { previewEl.textContent = t('manga.rules.preview.all'); return; }
+    previewEl.textContent = t('manga.rules.preview.calculating');
     try {
       const res = await api.previewDownloadRules(dbId, rules.map(r => r.kind));
-      previewEl.textContent = `${res.matching} of ${res.total} chapters would be downloaded with these rules.`;
+      previewEl.textContent = t('manga.rules.preview.result', { matching: res.matching, total: res.total });
     } catch { previewEl.textContent = ''; }
   }, 400);
 
@@ -118,26 +119,26 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
     formEl.className = 'flex flex-wrap items-center gap-2 mt-2';
     formEl.innerHTML = `
       <select class="input w-auto text-sm js-rule-type">
-        <optgroup label="Language">
-          <option value="LanguageInclude">Language include</option>
-          <option value="LanguageExclude">Language exclude</option>
+        <optgroup label="${t('manga.rules.group.language')}">
+          <option value="LanguageInclude">${t('manga.rules.type.lang_include')}</option>
+          <option value="LanguageExclude">${t('manga.rules.type.lang_exclude')}</option>
         </optgroup>
-        <optgroup label="Title">
-          <option value="TitleContains">Title contains</option>
-          <option value="TitleExcludes">Title excludes</option>
+        <optgroup label="${t('manga.rules.group.title')}">
+          <option value="TitleContains">${t('manga.rules.type.title_contains')}</option>
+          <option value="TitleExcludes">${t('manga.rules.type.title_excludes')}</option>
         </optgroup>
-        <optgroup label="Chapter number">
-          <option value="ChapterNumberMin">Chapter ≥ (min)</option>
-          <option value="ChapterNumberMax">Chapter ≤ (max)</option>
+        <optgroup label="${t('manga.rules.group.chapter_number')}">
+          <option value="ChapterNumberMin">${t('manga.rules.type.chapter_min')}</option>
+          <option value="ChapterNumberMax">${t('manga.rules.type.chapter_max')}</option>
         </optgroup>
-        <optgroup label="Other">
-          <option value="ExcludeFractional">Exclude fractional chapters</option>
-          <option value="MaxAgeDays">Max age (days)</option>
-          <option value="PublishedAfter">Published after</option>
+        <optgroup label="${t('manga.rules.group.other')}">
+          <option value="ExcludeFractional">${t('manga.rules.type.exclude_fractional')}</option>
+          <option value="MaxAgeDays">${t('manga.rules.type.max_age')}</option>
+          <option value="PublishedAfter">${t('manga.rules.type.published_after')}</option>
         </optgroup>
       </select>
       <div class="js-rule-cmb-wrap flex-1 min-w-36" style="display:none"></div>
-      <input type="text" class="input flex-1 min-w-24 text-sm js-rule-val" placeholder="Value…" />
+      <input type="text" class="input flex-1 min-w-24 text-sm js-rule-val" placeholder="${t('manga.rules.value_placeholder')}" />
     `;
     const typeEl = /** @type {HTMLSelectElement} */ (formEl.querySelector('.js-rule-type'));
     const valEl  = /** @type {HTMLInputElement} */  (formEl.querySelector('.js-rule-val'));
@@ -154,7 +155,7 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
       const isLang = type === 'LanguageInclude' || type === 'LanguageExclude';
       valEl.style.display = (type === 'ExcludeFractional' || isLang) ? 'none' : '';
       if (type === 'PublishedAfter') valEl.type = 'date';
-      else { valEl.type = 'text'; if (!['ChapterNumberMin','ChapterNumberMax','MaxAgeDays'].includes(type)) valEl.placeholder = 'Value…'; else valEl.placeholder = 'Number…'; }
+      else { valEl.type = 'text'; if (!['ChapterNumberMin','ChapterNumberMax','MaxAgeDays'].includes(type)) valEl.placeholder = t('manga.rules.value_placeholder'); else valEl.placeholder = t('manga.rules.number_placeholder'); }
       cmbWrap.style.display = isLang ? '' : 'none';
     };
     typeEl.addEventListener('change', _syncVisibility);
@@ -205,11 +206,11 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
           const confirmBtn = document.createElement('button');
           confirmBtn.type = 'button';
           confirmBtn.className = 'btn-ghost btn-sm flex items-center gap-1';
-          confirmBtn.innerHTML = `<span class="icon-xs">${iconCheck}</span> Save`;
+          confirmBtn.innerHTML = `<span class="icon-xs">${iconCheck}</span> ${t('common.save')}`;
           const cancelBtn = document.createElement('button');
           cancelBtn.type = 'button';
           cancelBtn.className = 'btn-ghost btn-sm text-text-muted';
-          cancelBtn.textContent = 'Cancel';
+          cancelBtn.textContent = t('common.cancel');
           btnRow.appendChild(formEl);
           btnRow.appendChild(confirmBtn);
           btnRow.appendChild(cancelBtn);
@@ -227,7 +228,7 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
               rerender();
               _refreshPreview();
             } catch (e) {
-              showToast(/** @type {any} */(e)?.hint ?? 'Failed to update rule', { type: 'error' });
+              showToast(/** @type {any} */(e)?.hint ?? t('manga.rules.update_failed'), { type: 'error' });
             }
           });
           cancelBtn.addEventListener('click', () => rerender());
@@ -236,10 +237,10 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
           const row = document.createElement('div');
           row.className = 'flex items-center justify-between gap-2';
           row.innerHTML = `
-            <span class="cursor-grab text-text-faint select-none shrink-0 js-drag-handle" title="Drag to reorder">⠿</span>
+            <span class="cursor-grab text-text-faint select-none shrink-0 js-drag-handle" title="${t('manga.rules.drag_reorder')}">⠿</span>
             <span class="text-sm text-text flex-1">${escapeHtml(_ruleLabel(rule.kind))}</span>
-            <button class="btn-icon js-edit" data-id="${rule.id}" aria-label="Edit rule">${iconPencil}</button>
-            <button class="btn-icon text-danger js-rm" data-id="${rule.id}" aria-label="Remove rule">${iconX}</button>
+            <button class="btn-icon js-edit" data-id="${rule.id}" aria-label="${t('manga.rules.edit_rule')}">${iconPencil}</button>
+            <button class="btn-icon text-danger js-rm" data-id="${rule.id}" aria-label="${t('manga.rules.remove_rule')}">${iconX}</button>
           `;
           li.appendChild(row);
 
@@ -284,7 +285,7 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
       }
       wrap.appendChild(ul);
     } else {
-      wrap.appendChild(createEmptyState({ title: 'No download filters.' }));
+      wrap.appendChild(createEmptyState({ title: t('manga.rules.empty') }));
     }
 
     // ── Add rule form ──────────────────────────────────────────────────────
@@ -298,7 +299,7 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
     const addBtn = document.createElement('button');
     addBtn.type = 'button';
     addBtn.className = 'btn-ghost btn-sm';
-    addBtn.textContent = 'Add';
+    addBtn.textContent = t('common.add');
 
     const addRow = document.createElement('div');
     addRow.className = 'flex flex-wrap items-center gap-2 mt-2';
@@ -320,7 +321,7 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
         rerender();
         _refreshPreview();
       } catch (e) {
-        showToast(/** @type {any} */(e)?.hint ?? /** @type {any} */(e)?.message ?? 'Failed to add rule', { type: 'error' });
+        showToast(/** @type {any} */(e)?.hint ?? /** @type {any} */(e)?.message ?? t('manga.rules.add_failed'), { type: 'error' });
       }
     });
 

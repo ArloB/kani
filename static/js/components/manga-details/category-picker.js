@@ -4,6 +4,7 @@
 import * as api from '../../api.js';
 import { createEmptyState } from '../empty-state.js';
 import { showApiError } from '../toast.js';
+import { t } from '../../i18n.js';
 
 /**
  * @param {HTMLElement} bodyEl  Card body element (already mounted by caller)
@@ -16,7 +17,7 @@ export function mountCategoryPicker(bodyEl, allCats, mangaCats, dbId) {
   const all = Array.isArray(allCats) ? allCats : [];
 
   if (all.length === 0) {
-    bodyEl.appendChild(createEmptyState({ title: 'No categories. Create some in Settings.' }));
+    bodyEl.appendChild(createEmptyState({ title: t('manga.categories.empty') }));
     return;
   }
 

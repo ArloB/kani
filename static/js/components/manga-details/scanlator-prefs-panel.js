@@ -4,6 +4,7 @@
 import { h, render } from 'preact';
 import htm from 'htm';
 import * as api from '../../api.js';
+import { t } from '../../i18n.js';
 import { showToast } from '../toast.js';
 import { createEmptyState } from '../empty-state.js';
 import { Combobox } from '../combobox.js';
@@ -39,7 +40,7 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
       options=${opts}
       value=${opts.find(o => o.name === scCmbVal)?.id ?? null}
       onChange=${(/** @type {any} */ id) => { scCmbVal = opts.find(o => o.id === id)?.name ?? ''; }}
-      placeholder="Select scanlator…"
+      placeholder=${t('manga.scanlator.select_placeholder')}
     />`, scCmbMount);
   };
 
@@ -59,15 +60,15 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
     const modeRow = document.createElement('div');
     modeRow.className = 'flex items-center gap-2';
     modeRow.innerHTML = `
-      <span class="text-sm font-medium text-text">Mode:</span>
-      <button type="button" class="btn-sm js-mode-priority ${mode === 'priority' ? 'btn-primary' : 'btn-ghost'}">Priority</button>
-      <button type="button" class="btn-sm js-mode-whitelist ${mode === 'whitelist' ? 'btn-primary' : 'btn-ghost'}">Whitelist</button>
+      <span class="text-sm font-medium text-text">${t('manga.scanlator.mode')}</span>
+      <button type="button" class="btn-sm js-mode-priority ${mode === 'priority' ? 'btn-primary' : 'btn-ghost'}">${t('manga.scanlator.mode.priority')}</button>
+      <button type="button" class="btn-sm js-mode-whitelist ${mode === 'whitelist' ? 'btn-primary' : 'btn-ghost'}">${t('manga.scanlator.mode.whitelist')}</button>
     `;
     const modeDesc = document.createElement('p');
     modeDesc.className = 'text-xs text-text-muted';
     modeDesc.textContent = mode === 'priority'
-      ? 'All scanlators accepted. Use priority to prefer, and block to exclude.'
-      : 'Only listed scanlators are accepted.';
+      ? t('manga.scanlator.mode.priority.desc')
+      : t('manga.scanlator.mode.whitelist.desc');
     modeRow.querySelector('.js-mode-priority')?.addEventListener('click', async () => {
       try { await api.setScanlatorMode(dbId, 'priority'); mode = 'priority'; rerender(); } catch { /* ignore */ }
     });
@@ -93,7 +94,7 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
           const blockedClass = pref.blocked ? 'text-danger line-through' : 'text-text';
           const nameSpan = document.createElement('span');
           nameSpan.className = `flex-1 text-sm ${blockedClass}`;
-          nameSpan.textContent = pref.scanlator || '* (Any scanlator)';
+          nameSpan.textContent = pref.scanlator || t('manga.scanlator.any');
           content.appendChild(nameSpan);
 
           const btns = document.createElement('div');
@@ -103,8 +104,8 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
             const blockBtn = document.createElement('button');
             blockBtn.type = 'button';
             blockBtn.className = `btn-sm ${pref.blocked ? 'btn-danger' : 'btn-ghost'}`;
-            blockBtn.title = pref.blocked ? 'Unblock' : 'Block';
-            blockBtn.textContent = pref.blocked ? 'Blocked' : 'Block';
+            blockBtn.title = pref.blocked ? t('manga.scanlator.unblock') : t('manga.scanlator.block');
+            blockBtn.textContent = pref.blocked ? t('manga.scanlator.blocked') : t('manga.scanlator.block');
             blockBtn.addEventListener('click', async () => {
               const newBlocked = !pref.blocked;
               try {
@@ -119,7 +120,7 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
           const rmBtn = document.createElement('button');
           rmBtn.type = 'button';
           rmBtn.className = 'btn-icon text-danger';
-          rmBtn.setAttribute('aria-label', `Remove ${pref.scanlator || '* (Any scanlator)'}`);
+          rmBtn.setAttribute('aria-label', t('manga.scanlator.remove', { name: pref.scanlator || t('manga.scanlator.any') }));
           rmBtn.innerHTML = iconX;
           rmBtn.addEventListener('click', async () => {
             try {
@@ -158,7 +159,7 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
           <span class="shrink-0 icon-sm text-transparent" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="12" r="1.5"/></svg>
           </span>
-          <span class="flex-1 text-sm text-text-muted italic">All scanlators (fallback)</span>
+          <span class="flex-1 text-sm text-text-muted italic">${t('manga.scanlator.fallback')}</span>
         `;
         listContainer.appendChild(fallbackRow);
       }
@@ -166,7 +167,7 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
     } else {
       const emptyWrap = document.createElement('div');
       emptyWrap.className = 'flex flex-col gap-0';
-      emptyWrap.appendChild(createEmptyState({ title: mode === 'priority' ? 'No preferences set — all scanlators accepted equally.' : 'No whitelisted scanlators.' }));
+      emptyWrap.appendChild(createEmptyState({ title: mode === 'priority' ? t('manga.scanlator.empty.priority') : t('manga.scanlator.empty.whitelist') }));
       if (mode === 'priority') {
         const fallbackLi = document.createElement('div');
         fallbackLi.className = 'flex items-center gap-3 py-2 opacity-50';
@@ -175,7 +176,7 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
           <span class="shrink-0 icon-sm text-transparent" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="12" r="1.5"/></svg>
           </span>
-          <span class="flex-1 text-sm text-text-muted italic">All scanlators (fallback)</span>
+          <span class="flex-1 text-sm text-text-muted italic">${t('manga.scanlator.fallback')}</span>
         `;
         emptyWrap.appendChild(fallbackLi);
       }
@@ -186,7 +187,7 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
     form.className = 'flex flex-wrap items-center gap-2 mt-2';
     form.innerHTML = `
       <div class="js-sc-cmb-wrap flex-1 min-w-48"></div>
-      <button type="button" class="btn-ghost btn-sm js-sc-add">Add</button>
+      <button type="button" class="btn-ghost btn-sm js-sc-add">${t('common.add')}</button>
     `;
     scCmbMount = /** @type {HTMLDivElement} */ (form.querySelector('.js-sc-cmb-wrap'));
 
@@ -203,7 +204,7 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
         scCmbVal = '';
         rerender();
       } catch (e) {
-        showToast(/** @type {any} */(e)?.hint ?? /** @type {any} */(e)?.message ?? 'Failed to add preference', { type: 'error' });
+        showToast(/** @type {any} */(e)?.hint ?? /** @type {any} */(e)?.message ?? t('manga.scanlator.add_failed'), { type: 'error' });
       }
     });
 

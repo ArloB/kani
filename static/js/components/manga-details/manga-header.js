@@ -3,6 +3,7 @@
 // Handles responsive layout swap between mobile and desktop.
 
 import * as api from '../../api.js';
+import { t } from '../../i18n.js';
 import { hasPermission, getState, subscribe } from '../../state.js';
 import { navigate } from '../../router.js';
 import { getLocal, setLocal, escapeHtml } from '../../utils.js';
@@ -47,17 +48,17 @@ function _showExternalLinkDialog(url) {
   dialog.className = 'bg-surface rounded-xl p-6 max-w-sm w-full shadow-xl flex flex-col gap-4';
   dialog.innerHTML = `
     <div class="flex flex-col gap-1">
-      <h3 class="text-base font-semibold text-text">External Link</h3>
-      <p class="text-sm text-text-muted">This link will open outside the app:</p>
+      <h3 class="text-base font-semibold text-text">${t('manga.header.external_link.title')}</h3>
+      <p class="text-sm text-text-muted">${t('manga.header.external_link.body')}</p>
       <p class="text-sm text-accent break-all">${escapeHtml(url)}</p>
     </div>
     <label class="flex items-center gap-2 text-sm text-text-muted cursor-pointer select-none">
       <input type="checkbox" class="js-dont-ask accent-accent" />
-      Don't ask again
+      ${t('manga.header.external_link.dont_ask')}
     </label>
     <div class="flex gap-2 justify-end">
-      <button type="button" class="btn-ghost btn-sm js-cancel">Cancel</button>
-      <button type="button" class="btn-primary btn-sm js-continue">Open link</button>
+      <button type="button" class="btn-ghost btn-sm js-cancel">${t('common.cancel')}</button>
+      <button type="button" class="btn-primary btn-sm js-continue">${t('manga.header.external_link.open')}</button>
     </div>
   `;
   overlay.appendChild(dialog);
@@ -169,7 +170,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     p.className = 'text-base md:text-sm flex items-center gap-2';
     const sname = escapeHtml(source?.name || info?.source_name || 'Source');
     const srcId = source?.id || info?.source_id || sid;
-    p.innerHTML = `<span class="font-semibold text-text">Source:</span> <a href="/source/${srcId}" class="text-accent hover:underline focus-visible:outline-none focus-visible:underline">${sname}</a>`;
+    p.innerHTML = `<span class="font-semibold text-text">${t('manga.header.source')}</span> <a href="/source/${srcId}" class="text-accent hover:underline focus-visible:outline-none focus-visible:underline">${sname}</a>`;
     p.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/source/${srcId}`); });
     meta.appendChild(p);
   }
@@ -179,7 +180,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     statusEl.className = 'text-base md:text-sm';
     const statusVal = info.status.toLowerCase();
     const statusDisplay = info.status.charAt(0).toUpperCase() + info.status.slice(1);
-    statusEl.innerHTML = `<span class="font-semibold text-text">Status:</span> <a href="/?status=${statusVal}" class="text-accent hover:underline focus-visible:outline-none focus-visible:underline">${escapeHtml(statusDisplay)}</a>`;
+    statusEl.innerHTML = `<span class="font-semibold text-text">${t('manga.header.status')}</span> <a href="/?status=${statusVal}" class="text-accent hover:underline focus-visible:outline-none focus-visible:underline">${escapeHtml(statusDisplay)}</a>`;
     statusEl.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/?status=${statusVal}`); });
     meta.appendChild(statusEl);
   }
@@ -188,7 +189,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     const p = document.createElement('p');
     p.className = 'text-base md:text-sm';
     if (isLocal) {
-      p.innerHTML = '<span class="font-semibold text-text">Authors:</span> ' + info.authors.map((a, i) =>
+      p.innerHTML = `<span class="font-semibold text-text">${t('manga.header.authors')}</span> ` + info.authors.map((a, i) =>
         `<a class="text-accent hover:underline focus-visible:outline-none focus-visible:underline" href="/?author_id=${a.id}" data-idx="${i}">${escapeHtml(a.name)}</a>`
       ).join(', ');
       p.querySelectorAll('a').forEach(el => {
@@ -196,7 +197,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
         el.addEventListener('click', e => { e.preventDefault(); navigate(`/?author_id=${id}`); });
       });
     } else {
-      p.innerHTML = '<span class="font-semibold text-text">Authors:</span> ' + info.authors.map((a, i) =>
+      p.innerHTML = `<span class="font-semibold text-text">${t('manga.header.authors')}</span> ` + info.authors.map((a, i) =>
         `<a class="text-accent hover:underline focus-visible:outline-none focus-visible:underline" href="/source/${sid}?q=${encodeURIComponent(a.name)}" data-idx="${i}">${escapeHtml(a.name)}</a>`
       ).join(', ');
       p.querySelectorAll('a').forEach(el => {
@@ -211,7 +212,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     const p = document.createElement('p');
     p.className = 'text-base md:text-sm';
     if (isLocal) {
-      p.innerHTML = '<span class="font-semibold text-text">Artists:</span> ' + info.artists.map((a, i) =>
+      p.innerHTML = `<span class="font-semibold text-text">${t('manga.header.artists')}</span> ` + info.artists.map((a, i) =>
         `<a class="text-accent hover:underline focus-visible:outline-none focus-visible:underline" href="/?artist_id=${a.id}" data-idx="${i}">${escapeHtml(a.name)}</a>`
       ).join(', ');
       p.querySelectorAll('a').forEach(el => {
@@ -219,7 +220,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
         el.addEventListener('click', e => { e.preventDefault(); navigate(`/?artist_id=${id}`); });
       });
     } else {
-      p.innerHTML = '<span class="font-semibold text-text">Artists:</span> ' + info.artists.map((a, i) =>
+      p.innerHTML = `<span class="font-semibold text-text">${t('manga.header.artists')}</span> ` + info.artists.map((a, i) =>
         `<a class="text-accent hover:underline focus-visible:outline-none focus-visible:underline" href="/source/${sid}?q=${encodeURIComponent(a.name)}" data-idx="${i}">${escapeHtml(a.name)}</a>`
       ).join(', ');
       p.querySelectorAll('a').forEach(el => {
@@ -262,7 +263,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'text-xs text-accent hover:underline text-left mt-1 self-start';
-    toggle.textContent = 'Show more';
+    toggle.textContent = t('manga.header.show_more');
     toggle.style.display = 'none';
     descWrap.appendChild(toggle);
 
@@ -274,7 +275,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
     toggle.addEventListener('click', () => {
       expanded = !expanded;
-      toggle.textContent = expanded ? 'Show less' : 'Show more';
+      toggle.textContent = expanded ? t('manga.header.show_less') : t('manga.header.show_more');
       if (!desc) return;
 
       if (isDesktop()) {
@@ -433,7 +434,7 @@ function _renderBtnGroup(btnGroupEl, info, source, ctx) {
     const readBtn = document.createElement('button');
     readBtn.type = 'button';
     readBtn.className = 'btn-primary w-full';
-    readBtn.textContent = 'Read';
+    readBtn.textContent = t('manga.header.read');
     readBtn.addEventListener('click', async () => {
       if (readBtn.disabled) return;
       readBtn.disabled = true;
@@ -448,12 +449,12 @@ function _renderBtnGroup(btnGroupEl, info, source, ctx) {
         if (!nextUnread) {
           readBtn.disabled = false;
           const hasAnyUnread = ctx.getChapters().some(ch => !ch.read);
-          if (hasAnyUnread) showToast('No chapters match your scanlator preferences. Adjust them in the Manage tab.', { type: 'warning' });
-          else showToast('All chapters are read.');
+          if (hasAnyUnread) showToast(t('manga.header.no_pref_chapters'), { type: 'warning' });
+          else showToast(t('manga.header.all_read'));
           return;
         }
         const originalText = readBtn.textContent;
-        readBtn.innerHTML = `<span class="inline-block animate-spin icon-sm">${iconSpinner}</span> Downloading…`;
+        readBtn.innerHTML = `<span class="inline-block animate-spin icon-sm">${iconSpinner}</span> ${t('manga.header.downloading')}`;
         try {
           await api.downloadChapter(nextUnread.id);
           await new Promise((resolve, reject) => {
@@ -468,15 +469,15 @@ function _renderBtnGroup(btnGroupEl, info, source, ctx) {
           });
           navigate(`/reader/${nextUnread.id}`);
         } catch {
-          showToast('Download failed. Try downloading the chapter manually.');
+          showToast(t('manga.header.download_failed'));
           readBtn.textContent = originalText;
           readBtn.disabled = false;
         }
       } catch { readBtn.disabled = false; }
     });
     api.getMangaTracking(dbId).then(t => {
-      if (t && t.chapters_read > 0) readBtn.textContent = 'Continue Reading';
-      else readBtn.textContent = 'Start Reading';
+      if (t && t.chapters_read > 0) readBtn.textContent = t('manga.header.continue_reading');
+      else readBtn.textContent = t('manga.header.start_reading');
     }).catch(() => {});
     btnGroupEl.appendChild(readBtn);
 
@@ -487,12 +488,12 @@ function _renderBtnGroup(btnGroupEl, info, source, ctx) {
       const dlBtn = document.createElement('button');
       dlBtn.type = 'button';
       dlBtn.className = 'btn-ghost btn-sm flex-1';
-      dlBtn.textContent = 'Download All';
+      dlBtn.textContent = t('manga.header.download_all');
 
       const cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
       cancelBtn.className = 'btn-ghost btn-sm flex-1';
-      cancelBtn.textContent = 'Cancel All';
+      cancelBtn.textContent = t('manga.header.cancel_all');
       cancelBtn.style.display = 'none';
 
       const _dlBtnOriginalText = dlBtn.textContent;
@@ -546,14 +547,14 @@ function _renderBtnGroup(btnGroupEl, info, source, ctx) {
       const scanBtn = document.createElement('button');
       scanBtn.type = 'button';
       scanBtn.className = 'btn-ghost btn-sm flex-1';
-      scanBtn.textContent = 'Scan';
+      scanBtn.textContent = t('manga.header.scan');
       scanBtn.addEventListener('click', async () => {
         scanBtn.disabled = true;
         try {
           const res = await onScan();
           const count = res?.new_chapters ?? 0;
           showToast(
-            count > 0 ? `${count} new chapter${count !== 1 ? 's' : ''} found` : 'No new chapters',
+            count > 0 ? t('manga.header.scan.found', { count, s: count !== 1 ? 's' : '' }) : t('manga.header.scan.none'),
             { type: count > 0 ? 'success' : 'info' },
           );
         } catch (e) {
@@ -570,7 +571,7 @@ function _renderBtnGroup(btnGroupEl, info, source, ctx) {
       const existId = ctx.existingDbId() ?? ctx.addedDbId();
       const goBtn = document.createElement('a');
       goBtn.className = 'btn-primary w-full text-center';
-      goBtn.textContent = 'Go to Library Entry';
+      goBtn.textContent = t('manga.header.go_to_entry');
       goBtn.href = `/manga/${existId}`;
       goBtn.addEventListener('click', e => { e.preventDefault(); navigate(`/manga/${existId}`); });
       btnGroupEl.appendChild(goBtn);
@@ -578,7 +579,7 @@ function _renderBtnGroup(btnGroupEl, info, source, ctx) {
       const addBtn = document.createElement('button');
       addBtn.type = 'button';
       addBtn.className = 'btn-primary w-full';
-      addBtn.textContent = 'Add to Library';
+      addBtn.textContent = t('manga.header.add_to_library');
       addBtn.addEventListener('click', async () => {
         addBtn.disabled = true;
         try {
@@ -611,7 +612,7 @@ function _showDuplicateModal(suggestions, sid, mangaId, onAddedToLibrary, btnGro
 
   const top = document.createElement('div');
   top.className = 'font-medium text-warn';
-  top.textContent = 'Possible duplicate detected';
+  top.textContent = t('manga.header.duplicate.title');
   overlay.appendChild(top);
 
   for (const s of suggestions.slice(0, 3)) {
@@ -636,7 +637,7 @@ function _showDuplicateModal(suggestions, sid, mangaId, onAddedToLibrary, btnGro
   const forceBtn = document.createElement('button');
   forceBtn.type = 'button';
   forceBtn.className = 'btn-primary btn-sm';
-  forceBtn.textContent = 'Add anyway';
+  forceBtn.textContent = t('manga.header.duplicate.add_anyway');
   forceBtn.addEventListener('click', async () => {
     forceBtn.disabled = true;
     try {
@@ -650,7 +651,7 @@ function _showDuplicateModal(suggestions, sid, mangaId, onAddedToLibrary, btnGro
   const cancelBtn = document.createElement('button');
   cancelBtn.type = 'button';
   cancelBtn.className = 'btn-secondary btn-sm';
-  cancelBtn.textContent = 'Cancel';
+  cancelBtn.textContent = t('common.cancel');
   cancelBtn.addEventListener('click', () => overlay.remove());
 
   actions.appendChild(forceBtn);

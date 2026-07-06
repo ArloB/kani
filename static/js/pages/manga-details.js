@@ -260,7 +260,7 @@ export async function init(container, params) {
     a.target = '_blank';
     a.rel = 'noopener';
     a.className = 'btn-secondary btn-sm';
-    a.textContent = 'View on source';
+    a.textContent = t('manga.details.view_on_source');
     return a;
   })();
   setPageHeader({ crumbs, actions: _headerActions });
@@ -496,14 +496,14 @@ async function _renderManageTab(contentEl) {
   if (hasPermission('library:manage') && _isLocal) {
     const enrichSection = document.createElement('div');
     enrichSection.className = 'flex flex-col gap-3';
-    enrichSection.appendChild(mkSectionHeader('Enrich Metadata', 'Pull metadata from an external provider to fill missing fields. Existing local overrides are preserved.'));
+    enrichSection.appendChild(mkSectionHeader(t('manga.details.enrich.section'), t('manga.details.enrich.section.desc')));
     const enrichCard = mkCard();
     const enrichBtn = document.createElement('button');
     enrichBtn.type = 'button';
     enrichBtn.className = 'btn-secondary btn-sm';
-    enrichBtn.textContent = 'Enrich Metadata…';
+    enrichBtn.textContent = t('manga.details.enrich');
     enrichBtn.addEventListener('click', () => _openEnrichMetadataModal());
-    enrichCard.appendChild(mkItem(mkRow('External providers', 'Fetch title, description, and external IDs from AniList, MangaUpdates, or other providers', enrichBtn)));
+    enrichCard.appendChild(mkItem(mkRow(t('manga.details.enrich.row'), t('manga.details.enrich.row.desc'), enrichBtn)));
     enrichSection.appendChild(enrichCard);
     contentEl.appendChild(enrichSection);
   }
@@ -517,7 +517,7 @@ async function _renderManageTab(contentEl) {
   if (hasLibSection) {
     const section = document.createElement('div');
     section.className = 'flex flex-col gap-3';
-    section.appendChild(mkSectionHeader('Library', 'Sync this manga\'s metadata and configure download behaviour.'));
+    section.appendChild(mkSectionHeader(t('manga.details.library.section'), t('manga.details.library.section.desc')));
     mountLibrarySettingsPanel(section, { dbId: _dbId, autoScan: _autoScan });
     contentEl.appendChild(section);
   }
@@ -527,7 +527,7 @@ async function _renderManageTab(contentEl) {
   if (hasPermission('library:manage') && _isLocal) {
     const volumesSection = document.createElement('div');
     volumesSection.className = 'flex flex-col gap-3';
-    volumesSection.appendChild(mkSectionHeader('Volumes', 'Group chapters into volumes.'));
+    volumesSection.appendChild(mkSectionHeader(t('manga.details.volumes.section'), t('manga.details.volumes.section.desc')));
     contentEl.appendChild(volumesSection);
     _mountVolumesPanel(volumesSection, _dbId);
   }
@@ -537,7 +537,7 @@ async function _renderManageTab(contentEl) {
   {
     const trackSection = document.createElement('div');
     trackSection.className = 'flex flex-col gap-3';
-    trackSection.appendChild(mkSectionHeader('Tracking', 'Set your reading status and score for this manga.'));
+    trackSection.appendChild(mkSectionHeader(t('manga.details.tracking.section'), t('manga.details.tracking.section.desc')));
     mountTrackerPanel(trackSection, { dbId: _dbId });
     contentEl.appendChild(trackSection);
   }
@@ -547,11 +547,11 @@ async function _renderManageTab(contentEl) {
   if (hasPermission('library:manage')) {
     const notesSection = document.createElement('div');
     notesSection.className = 'flex flex-col gap-3';
-    notesSection.appendChild(mkSectionHeader('Notes', 'Private notes about this manga.'));
+    notesSection.appendChild(mkSectionHeader(t('manga.details.notes.section'), t('manga.details.notes.section.desc')));
     const notesCard = mkCard();
     const notesArea = document.createElement('textarea');
     notesArea.className = 'input w-full text-sm resize-y min-h-24 p-3';
-    notesArea.placeholder = 'Add notes…';
+    notesArea.placeholder = t('manga.details.notes.placeholder');
     notesArea.value = _mangaData?.notes ?? '';
     let _notesSaveTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
     const notesSaveStatus = document.createElement('span');
@@ -561,12 +561,12 @@ async function _renderManageTab(contentEl) {
       _notesSaveTimer = setTimeout(async () => {
         try {
           await api.updateMangaNotes(_dbId, notesArea.value);
-          notesSaveStatus.textContent = 'Saved';
+          notesSaveStatus.textContent = t('manga.details.notes.saved');
           notesSaveStatus.classList.remove('hidden', 'text-error');
           notesSaveStatus.classList.add('text-success');
           setTimeout(() => notesSaveStatus.classList.add('hidden'), 2000);
         } catch {
-          notesSaveStatus.textContent = 'Failed to save';
+          notesSaveStatus.textContent = t('manga.details.notes.failed');
           notesSaveStatus.classList.remove('hidden', 'text-success');
           notesSaveStatus.classList.add('text-error');
         }
@@ -582,14 +582,14 @@ async function _renderManageTab(contentEl) {
       chapNotesDiv.className = 'flex flex-col gap-1 border-t border-border-subtle pt-3';
       const chapNotesTitle = document.createElement('p');
       chapNotesTitle.className = 'text-xs font-medium text-muted px-0';
-      chapNotesTitle.textContent = 'Chapter notes';
+      chapNotesTitle.textContent = t('manga.details.chapter_notes');
       chapNotesDiv.appendChild(chapNotesTitle);
       for (const n of _chapterNotes) {
         const item = document.createElement('div');
         item.className = 'flex flex-col gap-0.5 py-1.5 border-t border-border-subtle';
         const lbl = document.createElement('p');
         lbl.className = 'text-xs text-muted font-medium';
-        lbl.textContent = `Ch. ${n.chapter_number}`;
+        lbl.textContent = t('manga.details.chapter_notes.label', { num: n.chapter_number });
         const txt = document.createElement('p');
         txt.className = 'text-sm text-text whitespace-pre-wrap';
         txt.textContent = n.note;
@@ -646,7 +646,7 @@ async function _renderManageTab(contentEl) {
   if (hasDangerSection) {
     const section = document.createElement('div');
     section.className = 'flex flex-col gap-3';
-    section.appendChild(mkSectionHeader('Danger Zone', 'These actions are difficult or impossible to reverse. Proceed with care.'));
+    section.appendChild(mkSectionHeader(t('manga.details.danger.section'), t('manga.details.danger.section.desc')));
 
     const card = mkCard();
 
@@ -654,7 +654,7 @@ async function _renderManageTab(contentEl) {
       const migrateBtn = document.createElement('button');
       migrateBtn.type = 'button';
       migrateBtn.className = 'btn-ghost btn-sm';
-      migrateBtn.textContent = 'Migrate';
+      migrateBtn.textContent = t('manga.details.migrate');
       migrateBtn.addEventListener('click', () => {
         const coverUrl = api.getMangaCoverUrl(_dbId, 'lg');
         _unmountMigration = mountMigrationDialogue({
@@ -667,19 +667,19 @@ async function _renderManageTab(contentEl) {
           onClose: () => { _unmountMigration?.(); _unmountMigration = null; },
         });
       });
-      card.appendChild(mkItem(mkRow('Migrate source', 'Move this manga to a different source plugin', migrateBtn)));
+      card.appendChild(mkItem(mkRow(t('manga.details.migrate.row'), t('manga.details.migrate.row.desc'), migrateBtn)));
     }
 
     if (hasPermission('library:delete')) {
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.className = 'btn-danger btn-sm';
-      removeBtn.textContent = 'Remove';
+      removeBtn.textContent = t('manga.details.remove');
       removeBtn.addEventListener('click', async () => {
         const confirmed = await confirmDialog({
-          title: 'Remove from Library?',
-          message: 'This will remove this manga and all downloaded chapters.',
-          confirmLabel: 'Remove',
+          title: t('manga.details.remove.confirm.title'),
+          message: t('manga.details.remove.confirm.body'),
+          confirmLabel: t('manga.details.remove'),
           danger: true,
         });
         if (!confirmed) return;
@@ -707,7 +707,7 @@ async function _renderManageTab(contentEl) {
         }
         catch { removeBtn.disabled = false; }
       });
-      card.appendChild(mkItem(mkRow('Remove from Library', 'Permanently deletes all chapter data for this manga', removeBtn)));
+      card.appendChild(mkItem(mkRow(t('manga.details.remove.row'), t('manga.details.remove.row.desc'), removeBtn)));
     }
 
     section.appendChild(card);
@@ -803,10 +803,10 @@ function _updateStreamingCounter(received, complete) {
     document.body.appendChild(_streamingBannerEl);
   }
   if (complete) {
-    _streamingBannerEl.textContent = `Loaded ${received} chapters`;
+    _streamingBannerEl.textContent = t('manga.details.streaming.loaded', { count: received });
     setTimeout(() => _clearStreamingCounter(), 2500);
   } else {
-    _streamingBannerEl.textContent = `Loading chapters… ${received} so far`;
+    _streamingBannerEl.textContent = t('manga.details.streaming.loading', { count: received });
   }
 }
 
@@ -840,9 +840,9 @@ function _openEnrichMetadataModal() {
         const result = await api.enrichMangaMetadata(_dbId, selected);
         onClose();
         if (result.fields_updated.length > 0) {
-          showToast(`Metadata updated: ${result.fields_updated.join(', ')}`);
+          showToast(t('manga.details.enrich.updated', { fields: result.fields_updated.join(', ') }));
         } else {
-          showToast('No new fields to fill');
+          showToast(t('manga.details.enrich.none'));
         }
       } catch (err) {
         showApiError(err);
@@ -852,22 +852,22 @@ function _openEnrichMetadataModal() {
     };
 
     const footer = html`
-      <button type="button" class="btn-ghost btn-sm" onClick=${onClose} disabled=${submitting}>Cancel</button>
+      <button type="button" class="btn-ghost btn-sm" onClick=${onClose} disabled=${submitting}>${t('common.cancel')}</button>
       <button type="submit" form="enrich-form" class="btn-primary btn-sm" disabled=${submitting || loading || !selected}>
-        ${submitting ? 'Enriching…' : 'Enrich'}
+        ${submitting ? t('manga.details.enrich.ing') : t('manga.details.enrich.action')}
       </button>
     `;
 
     return html`
-      <${Modal} open=${true} title="Enrich Metadata" onClose=${onClose} footer=${footer}>
+      <${Modal} open=${true} title=${t('manga.details.enrich.section')} onClose=${onClose} footer=${footer}>
         <form id="enrich-form" class="flex flex-col gap-4 px-1" onSubmit=${handleSubmit}>
           ${loading
-            ? html`<p class="text-sm text-muted">Loading providers…</p>`
+            ? html`<p class="text-sm text-muted">${t('manga.details.enrich.loading')}</p>`
             : providers.length === 0
-              ? html`<p class="text-sm text-muted">No metadata providers available.</p>`
+              ? html`<p class="text-sm text-muted">${t('manga.details.enrich.empty')}</p>`
               : html`
                   <div class="flex flex-col gap-1">
-                    <label class="text-sm font-medium text-text" for="enrich-provider">Provider</label>
+                    <label class="text-sm font-medium text-text" for="enrich-provider">${t('manga.details.enrich.provider')}</label>
                     <select id="enrich-provider" class="input"
                       value=${selected}
                       onChange=${(e) => setSelected(e.target.value)}
@@ -876,7 +876,7 @@ function _openEnrichMetadataModal() {
                       ${providers.map(p => html`<option key=${p.id} value=${p.id}>${p.name}</option>`)}
                     </select>
                   </div>
-                  <p class="text-xs text-muted">Only blank fields will be filled. Local overrides and existing values are preserved.</p>
+                  <p class="text-xs text-muted">${t('manga.details.enrich.hint')}</p>
                 `
           }
         </form>
@@ -900,10 +900,10 @@ function _openChapterNotesModal() {
   hdr.className = 'flex items-center justify-between gap-3 px-5 py-4 border-b border-border shrink-0';
   const title = document.createElement('h2');
   title.className = 'text-lg font-semibold text-text';
-  title.textContent = 'Chapter Notes';
+  title.textContent = t('manga.details.chapter_notes.modal_title');
   const closeBtn = document.createElement('button');
   closeBtn.className = 'btn-icon';
-  closeBtn.setAttribute('aria-label', 'Close');
+  closeBtn.setAttribute('aria-label', t('common.close'));
   closeBtn.textContent = '✕';
   hdr.appendChild(title);
   hdr.appendChild(closeBtn);
@@ -915,7 +915,7 @@ function _openChapterNotesModal() {
     item.className = 'px-5 py-3';
     const lbl = document.createElement('p');
     lbl.className = 'text-xs text-muted font-medium mb-1';
-    lbl.textContent = `Chapter ${n.chapter_number}`;
+    lbl.textContent = t('manga.details.chapter_notes.chapter', { num: n.chapter_number });
     const text = document.createElement('p');
     text.className = 'text-sm text-text whitespace-pre-wrap';
     text.textContent = n.note;
@@ -961,7 +961,7 @@ async function _fetchChapters(sectionEl) {
 
   const headerTitle = document.createElement('h2');
   headerTitle.className = 'text-xl font-semibold text-text';
-  headerTitle.textContent = 'Chapters';
+  headerTitle.textContent = t('manga.details.chapters');
   header.appendChild(headerTitle);
 
   const controls = document.createElement('div');
@@ -969,7 +969,7 @@ async function _fetchChapters(sectionEl) {
 
   const sortEl = document.createElement('select');
   sortEl.className = 'input w-auto text-sm';
-  sortEl.setAttribute('aria-label', 'Sort order');
+  sortEl.setAttribute('aria-label', t('manga.details.sort.aria'));
 
   if (!_isLocal && _remoteChapterSorts && _remoteChapterSorts.length > 0) {
     for (const { id, name } of _remoteChapterSorts) {
@@ -1009,7 +1009,7 @@ async function _fetchChapters(sectionEl) {
   if (!infinite) {
     const sizeEl = document.createElement('select');
     sizeEl.className = 'input w-20 text-sm';
-    sizeEl.setAttribute('aria-label', 'Page size');
+    sizeEl.setAttribute('aria-label', t('manga.details.page_size.aria'));
     for (const n of [20, 50, 100]) {
       const opt = document.createElement('option');
       opt.value = String(n); opt.textContent = String(n);
@@ -1028,8 +1028,8 @@ async function _fetchChapters(sectionEl) {
     const dlBtn = document.createElement('button');
     dlBtn.type = 'button';
     dlBtn.className = 'btn-ghost btn-sm' + (_filterDownloaded ? ' text-accent' : '');
-    dlBtn.textContent = 'Downloaded';
-    dlBtn.title = _filterDownloaded ? 'Show all chapters' : 'Show downloaded chapters only';
+    dlBtn.textContent = t('manga.details.filter.downloaded');
+    dlBtn.title = _filterDownloaded ? t('manga.details.filter.all') : t('manga.details.filter.downloaded.show');
     dlBtn.addEventListener('click', () => {
       _filterDownloaded = !_filterDownloaded;
       setLocal(`kani_filter_downloaded_${_dbId}`, String(_filterDownloaded));
@@ -1040,8 +1040,8 @@ async function _fetchChapters(sectionEl) {
     const unreadBtn = document.createElement('button');
     unreadBtn.type = 'button';
     unreadBtn.className = 'btn-ghost btn-sm' + (_filterUnread ? ' text-accent' : '');
-    unreadBtn.textContent = 'Unread';
-    unreadBtn.title = _filterUnread ? 'Show all chapters' : 'Show unread chapters only';
+    unreadBtn.textContent = t('manga.details.filter.unread');
+    unreadBtn.title = _filterUnread ? t('manga.details.filter.all') : t('manga.details.filter.unread.show');
     unreadBtn.addEventListener('click', () => {
       _filterUnread = !_filterUnread;
       _page = 1; _updateUrl(); _fetchChapters(sectionEl);
@@ -1051,8 +1051,8 @@ async function _fetchChapters(sectionEl) {
     const cachedBtn = document.createElement('button');
     cachedBtn.type = 'button';
     cachedBtn.className = 'btn-ghost btn-sm' + (_filterCached ? ' text-accent' : '');
-    cachedBtn.textContent = 'Cached';
-    cachedBtn.title = _filterCached ? 'Show all chapters' : 'Show cached chapters only';
+    cachedBtn.textContent = t('manga.details.filter.cached');
+    cachedBtn.title = _filterCached ? t('manga.details.filter.all') : t('manga.details.filter.cached.show');
     cachedBtn.addEventListener('click', () => {
       _filterCached = !_filterCached;
       _renderChapterList();
@@ -1062,9 +1062,9 @@ async function _fetchChapters(sectionEl) {
     if (_availableScanlators.length > 1) {
       const scanSel = document.createElement('select');
       scanSel.className = 'input w-auto text-sm';
-      scanSel.setAttribute('aria-label', 'Filter by scanlator');
+      scanSel.setAttribute('aria-label', t('manga.details.scanlator.aria'));
       const allOpt = document.createElement('option');
-      allOpt.value = ''; allOpt.textContent = 'All scanlators';
+      allOpt.value = ''; allOpt.textContent = t('manga.details.all_scanlators');
       scanSel.appendChild(allOpt);
       for (const s of _availableScanlators) {
         const opt = document.createElement('option');
@@ -1282,7 +1282,7 @@ function _renderChapterList() {
         await api.setChapterReadStatus(ids, isRead);
         const idSet = new Set(ids);
         _chapters = _chapters.map(ch => idSet.has(ch.id) ? { ...ch, read: isRead } : ch);
-        showToast(`${ids.length} chapter${ids.length !== 1 ? 's' : ''} marked as ${isRead ? 'read' : 'unread'}`);
+        showToast(t('manga.details.bulk.read', { count: ids.length, s: ids.length !== 1 ? 's' : '', status: isRead ? t('manga.details.bulk.read.read') : t('manga.details.bulk.read.unread') }));
         _selected.clear(); _selectMode = false; _allSelected = false; _renderChapterList();
       } catch (err) { showApiError(err); }
     }}
@@ -1291,15 +1291,15 @@ function _renderChapterList() {
       if (!ids.length) return;
       await Promise.allSettled(ids.map(id => api.downloadChapter(id)));
       _selected.clear(); _selectMode = false; _allSelected = false; _renderChapterList();
-      showToast(`Queued ${ids.length} chapter${ids.length !== 1 ? 's' : ''} for download`);
+      showToast(t('manga.details.bulk.download', { count: ids.length, s: ids.length !== 1 ? 's' : '' }));
     }}
     onBulkDelete=${async () => {
       const ids = [..._selected].filter(id => { const ch = _chapters.find(c => c.id === id); return ch && ch.downloaded; });
       if (!ids.length) return;
       const ok = await confirmDialog({
-        title: `Delete ${ids.length} downloaded chapter${ids.length !== 1 ? 's' : ''}?`,
-        message: 'This will remove the downloaded files. This cannot be undone.',
-        confirmLabel: 'Delete',
+        title: t('manga.details.bulk.delete.confirm', { count: ids.length, s: ids.length !== 1 ? 's' : '' }),
+        message: t('manga.details.bulk.delete.body'),
+        confirmLabel: t('common.delete'),
         danger: true,
       });
       if (!ok) return;
@@ -1307,7 +1307,7 @@ function _renderChapterList() {
       const idSet = new Set(ids);
       _chapters = _chapters.filter(ch => !(idSet.has(ch.id) && ch.is_orphaned)).map(ch => idSet.has(ch.id) ? { ...ch, download_status: 0, page_count: null, downloaded: false } : ch);
       _selected.clear(); _selectMode = false; _allSelected = false; _renderChapterList();
-      showToast(`Deleted ${ids.length} downloaded chapter${ids.length !== 1 ? 's' : ''}`);
+      showToast(t('manga.details.bulk.deleted', { count: ids.length, s: ids.length !== 1 ? 's' : '' }));
     }}
     onExitSelect=${() => { _selectMode = false; _selected.clear(); _allSelected = false; _renderChapterList(); }}
     onEnterSelectWithChapter=${(id) => { _selectMode = true; _selected.clear(); _allSelected = false; _selected.add(id); _renderChapterList(); }}
@@ -1407,12 +1407,12 @@ async function _mountVolumesPanel(section, mangaId) {
 
   const head = document.createElement('div');
   head.className = 'detail-card-head';
-  head.innerHTML = '<span>Loading…</span>';
+  head.innerHTML = `<span>${t('manga.details.volumes.loading')}</span>`;
 
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'btn-primary btn-sm';
-  addBtn.textContent = '+ Add volume';
+  addBtn.textContent = t('manga.details.volumes.add');
   head.appendChild(addBtn);
   card.appendChild(head);
 
@@ -1421,28 +1421,28 @@ async function _mountVolumesPanel(section, mangaId) {
   card.appendChild(list);
 
   async function _load() {
-    list.innerHTML = '<p class="px-4 py-3 text-sm text-text-muted">Loading…</p>';
+    list.innerHTML = `<p class="px-4 py-3 text-sm text-text-muted">${t('manga.details.volumes.loading')}</p>`;
     try {
       const volumes = await api.listVolumes(mangaId);
-      head.querySelector('span').textContent = `${volumes.length} volume${volumes.length === 1 ? '' : 's'}`;
+      head.querySelector('span').textContent = t('manga.details.volumes.count', { count: volumes.length, s: volumes.length === 1 ? '' : 's' });
       list.innerHTML = '';
       if (volumes.length === 0) {
-        list.innerHTML = '<p class="px-4 py-3 text-sm text-text-muted">No volumes. Add one to start grouping chapters.</p>';
+        list.innerHTML = `<p class="px-4 py-3 text-sm text-text-muted">${t('manga.details.volumes.empty')}</p>`;
       } else {
         for (const v of volumes) list.appendChild(_mkVolumeRow(v, mangaId, _load));
       }
     } catch (e) {
-      list.innerHTML = `<p class="px-4 py-3 text-sm text-danger">${e.message ?? 'Failed to load.'}</p>`;
+      list.innerHTML = `<p class="px-4 py-3 text-sm text-danger">${e.message ?? t('manga.details.volumes.error')}</p>`;
     }
   }
 
   const addForm = document.createElement('div');
   addForm.className = 'hidden items-center gap-2 px-4 py-2 border-b border-border-subtle';
   addForm.innerHTML = `
-    <input type="text" placeholder="Name (optional)" class="input text-sm flex-1" />
-    <input type="number" placeholder="Vol. #" class="input text-sm w-20" min="0" step="1" />
-    <button type="button" class="btn-primary btn-sm">Add</button>
-    <button type="button" class="btn-ghost btn-sm">Cancel</button>
+    <input type="text" placeholder="${t('manga.details.volumes.name_placeholder')}" class="input text-sm flex-1" />
+    <input type="number" placeholder="${t('manga.details.volumes.num_placeholder')}" class="input text-sm w-20" min="0" step="1" />
+    <button type="button" class="btn-primary btn-sm">${t('common.add')}</button>
+    <button type="button" class="btn-ghost btn-sm">${t('common.cancel')}</button>
   `;
   card.appendChild(addForm);
 
@@ -1508,16 +1508,16 @@ function _mkVolumeRow(volume, mangaId, reload) {
   const editBtn = document.createElement('button');
   editBtn.type = 'button';
   editBtn.className = 'btn-icon text-text-muted shrink-0';
-  editBtn.setAttribute('aria-label', 'Rename volume');
+  editBtn.setAttribute('aria-label', t('manga.details.volumes.rename'));
   editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
 
   const delBtn = document.createElement('button');
   delBtn.type = 'button';
   delBtn.className = 'btn-icon text-danger shrink-0';
-  delBtn.setAttribute('aria-label', 'Delete volume');
+  delBtn.setAttribute('aria-label', t('manga.details.volumes.delete'));
   delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
   delBtn.addEventListener('click', async () => {
-    const ok = await confirmDialog({ title: 'Delete volume', body: 'Remove this volume? Chapters will be unassigned but not deleted.', confirmLabel: 'Delete' });
+    const ok = await confirmDialog({ title: t('manga.details.volumes.delete'), body: t('manga.details.volumes.delete.body'), confirmLabel: t('common.delete') });
     if (!ok) return;
     delBtn.disabled = true;
     try {
@@ -1539,25 +1539,25 @@ function _mkVolumeRow(volume, mangaId, reload) {
   nameInput.type = 'text';
   nameInput.className = 'input text-sm flex-1';
   nameInput.value = volume.name ?? '';
-  nameInput.placeholder = 'Volume name (optional)';
+  nameInput.placeholder = t('manga.details.volumes.edit_name_placeholder');
 
   const numInput = document.createElement('input');
   numInput.type = 'number';
   numInput.className = 'input text-sm w-20';
   numInput.value = volume.volume_num != null ? String(volume.volume_num) : '';
-  numInput.placeholder = 'Vol. #';
+  numInput.placeholder = t('manga.details.volumes.num_placeholder');
   numInput.min = '0';
   numInput.step = '1';
 
   const saveEditBtn = document.createElement('button');
   saveEditBtn.type = 'button';
   saveEditBtn.className = 'btn-primary btn-sm shrink-0';
-  saveEditBtn.textContent = 'Save';
+  saveEditBtn.textContent = t('common.save');
 
   const cancelEditBtn = document.createElement('button');
   cancelEditBtn.type = 'button';
   cancelEditBtn.className = 'btn-ghost btn-sm shrink-0';
-  cancelEditBtn.textContent = 'Cancel';
+  cancelEditBtn.textContent = t('common.cancel');
 
   editForm.append(nameInput, numInput, saveEditBtn, cancelEditBtn);
   row.appendChild(editForm);
