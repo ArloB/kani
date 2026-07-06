@@ -12,31 +12,31 @@ const CATEGORY_LABELS = {
 };
 
 const NAV_ITEMS = [
-  { id: 'nav-library',        label: 'Library',            description: 'Your manga collection',          category: 'nav',      path: '/' },
-  { id: 'nav-updates',        label: 'Recent Updates',      description: 'Newly released chapters',        category: 'nav',      path: '/updates' },
-  { id: 'nav-sources',        label: 'Sources',             description: 'Browse and manage sources',      category: 'nav',      path: '/sources' },
-  { id: 'nav-downloads',      label: 'Downloads',           description: 'Active and queued downloads',    category: 'nav',      path: '/downloads' },
-  { id: 'nav-jobs',           label: 'Background Jobs',     description: 'Running and completed jobs',     category: 'nav',      path: '/jobs' },
-  { id: 'nav-settings',       label: 'Settings',            description: 'App preferences',                category: 'nav',      path: '/settings' },
+  { id: 'nav-library',        get label() { return t('palette.nav.library.label'); },        get description() { return t('palette.nav.library.desc'); },        category: 'nav', path: '/' },
+  { id: 'nav-updates',        get label() { return t('palette.nav.updates.label'); },        get description() { return t('palette.nav.updates.desc'); },        category: 'nav', path: '/updates' },
+  { id: 'nav-sources',        get label() { return t('palette.nav.sources.label'); },        get description() { return t('palette.nav.sources.desc'); },        category: 'nav', path: '/sources' },
+  { id: 'nav-downloads',      get label() { return t('palette.nav.downloads.label'); },      get description() { return t('palette.nav.downloads.desc'); },      category: 'nav', path: '/downloads' },
+  { id: 'nav-jobs',           get label() { return t('palette.nav.jobs.label'); },           get description() { return t('palette.nav.jobs.desc'); },           category: 'nav', path: '/jobs' },
+  { id: 'nav-settings',       get label() { return t('palette.nav.settings.label'); },       get description() { return t('palette.nav.settings.desc'); },       category: 'nav', path: '/settings' },
 ];
 
 const SETTINGS_ITEMS = [
-  { id: 's-general',          label: 'General',             description: 'Display preferences, reading behaviour, and notifications.',            category: 'settings', path: '/settings?section=general' },
-  { id: 's-library',          label: 'Library',             description: 'Manage categories and import/export your manga collection.',             category: 'settings', path: '/settings?section=library' },
-  { id: 's-collections',      label: 'Collections',         description: 'Create and manage smart collections that group manga by rules.',         category: 'settings', path: '/settings?section=collections' },
-  { id: 's-manga-management', label: 'Manga Management',    description: 'Pending imports, duplicate detection, and orphaned manga.',              category: 'settings', path: '/settings?section=manga-management' },
-  { id: 's-trash',            label: 'Trash',               description: 'Trashed manga waiting to be restored or permanently deleted.',           category: 'settings', path: '/settings?section=trash' },
-  { id: 's-downloads',        label: 'Downloads',           description: 'Control download concurrency, queue size, and reading-ahead behaviour.', category: 'settings', path: '/settings?section=downloads' },
-  { id: 's-offline',          label: 'Offline',             description: 'Configure offline reading, page cache, and the OPDS catalog server.',    category: 'settings', path: '/settings?section=offline' },
-  { id: 's-scan',             label: 'Scan',                description: 'Configure automatic scanning for new chapters.',                         category: 'settings', path: '/settings?section=scan' },
-  { id: 's-trackers',         label: 'Trackers',            description: 'Link external tracking services like AniList and MyAnimeList.',          category: 'settings', path: '/settings?section=trackers' },
-  { id: 's-email',            label: 'Email / SMTP',        description: 'Configure outbound email for password reset and notifications.',          category: 'settings', path: '/settings?section=email' },
-  { id: 's-webhooks',         label: 'Webhooks',            description: 'Send HTTP POST notifications to external services when events occur.',    category: 'settings', path: '/settings?section=webhooks' },
-  { id: 's-advanced',         label: 'Advanced',            description: 'FlareSolverr, library path, and other low-level options.',               category: 'settings', path: '/settings?section=advanced' },
-  { id: 's-storage',          label: 'Storage',             description: 'Disk usage and library integrity check.',                                 category: 'settings', path: '/settings?section=storage' },
-  { id: 's-server',           label: 'Lifecycle',           description: 'Stop or restart the server process.',                                     category: 'settings', path: '/settings?section=server' },
-  { id: 's-account',          label: 'My Account',          description: 'Change your password and manage active sessions.',                        category: 'settings', path: '/settings?section=account' },
-  { id: 's-security',         label: 'Security',            description: 'Two-factor authentication, session management, and security status.',     category: 'settings', path: '/settings?section=security' },
+  { id: 's-general',          get label() { return t('palette.settings.general.label'); },          get description() { return t('palette.settings.general.desc'); },          category: 'settings', path: '/settings?section=general' },
+  { id: 's-library',          get label() { return t('palette.settings.library.label'); },          get description() { return t('palette.settings.library.desc'); },          category: 'settings', path: '/settings?section=library' },
+  { id: 's-collections',      get label() { return t('palette.settings.collections.label'); },      get description() { return t('palette.settings.collections.desc'); },      category: 'settings', path: '/settings?section=collections' },
+  { id: 's-manga-management', get label() { return t('palette.settings.manga_management.label'); }, get description() { return t('palette.settings.manga_management.desc'); }, category: 'settings', path: '/settings?section=manga-management' },
+  { id: 's-trash',            get label() { return t('palette.settings.trash.label'); },            get description() { return t('palette.settings.trash.desc'); },            category: 'settings', path: '/settings?section=trash' },
+  { id: 's-downloads',        get label() { return t('palette.settings.downloads.label'); },        get description() { return t('palette.settings.downloads.desc'); },        category: 'settings', path: '/settings?section=downloads' },
+  { id: 's-offline',          get label() { return t('palette.settings.offline.label'); },          get description() { return t('palette.settings.offline.desc'); },          category: 'settings', path: '/settings?section=offline' },
+  { id: 's-scan',             get label() { return t('palette.settings.scan.label'); },             get description() { return t('palette.settings.scan.desc'); },             category: 'settings', path: '/settings?section=scan' },
+  { id: 's-trackers',         get label() { return t('palette.settings.trackers.label'); },         get description() { return t('palette.settings.trackers.desc'); },         category: 'settings', path: '/settings?section=trackers' },
+  { id: 's-email',            get label() { return t('palette.settings.email.label'); },            get description() { return t('palette.settings.email.desc'); },            category: 'settings', path: '/settings?section=email' },
+  { id: 's-webhooks',         get label() { return t('palette.settings.webhooks.label'); },         get description() { return t('palette.settings.webhooks.desc'); },         category: 'settings', path: '/settings?section=webhooks' },
+  { id: 's-advanced',         get label() { return t('palette.settings.advanced.label'); },         get description() { return t('palette.settings.advanced.desc'); },         category: 'settings', path: '/settings?section=advanced' },
+  { id: 's-storage',          get label() { return t('palette.settings.storage.label'); },          get description() { return t('palette.settings.storage.desc'); },          category: 'settings', path: '/settings?section=storage' },
+  { id: 's-server',           get label() { return t('palette.settings.server.label'); },           get description() { return t('palette.settings.server.desc'); },           category: 'settings', path: '/settings?section=server' },
+  { id: 's-account',          get label() { return t('palette.settings.account.label'); },          get description() { return t('palette.settings.account.desc'); },          category: 'settings', path: '/settings?section=account' },
+  { id: 's-security',         get label() { return t('palette.settings.security.label'); },         get description() { return t('palette.settings.security.desc'); },         category: 'settings', path: '/settings?section=security' },
 ];
 
 /**

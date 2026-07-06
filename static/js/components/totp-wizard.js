@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
 import { Modal } from './modal.js';
+import { t } from '../i18n.js';
 
 const html = htm.bind(h);
 
@@ -23,7 +24,7 @@ export function TotpWizard({ onComplete, onCancel }) {
   useEffect(() => {
     api.beginTotpSetup()
       .then(data => { setSetup(data); setLoading(false); })
-      .catch(e => { setError(e?.message ?? 'Failed to start setup'); setLoading(false); });
+      .catch(e => { setError(e?.message ?? t('totp.setup.start_failed')); setLoading(false); });
   }, []);
 
   async function handleVerify(code) {
@@ -33,17 +34,17 @@ export function TotpWizard({ onComplete, onCancel }) {
       setCodes(res.backup_codes ?? []);
       setStep('codes');
     } catch (e) {
-      setError(e?.message ?? 'Incorrect code — check your authenticator app');
+      setError(e?.message ?? t('totp.verify.wrong_code'));
     }
   }
 
-  const title = step === 'scan' ? 'Set up two-factor authentication'
-    : step === 'verify' ? 'Verify your authenticator app'
-    : 'Save your backup codes';
+  const title = step === 'scan' ? t('totp.step.scan.title')
+    : step === 'verify' ? t('totp.step.verify.title')
+    : t('totp.step.codes.title');
 
   return html`
     <${Modal} open=${true} title=${title} onClose=${onCancel}>
-      ${loading && html`<div class="py-8 text-center text-text-muted text-sm">Setting up…</div>`}
+      ${loading && html`<div class="py-8 text-center text-text-muted text-sm">${t('totp.setup.loading')}</div>`}
       ${!loading && error && step === 'scan' && html`
         <div class="py-4 text-sm text-danger">${error}</div>
       `}
@@ -65,25 +66,22 @@ function ScanStep({ setup, error, onNext, onCancel }) {
 
   return html`
     <div class="flex flex-col gap-4">
-      <p class="text-sm text-text-muted">
-        Scan the QR code below with your authenticator app (Google Authenticator, Authy, etc.),
-        or enter the secret manually.
-      </p>
+      <p class="text-sm text-text-muted">${t('totp.scan.desc')}</p>
       ${setup.qr_data_url && html`
         <div class="flex justify-center">
-          <img src=${setup.qr_data_url} alt="TOTP QR code" class="w-48 h-48 rounded border border-border-subtle" />
+          <img src=${setup.qr_data_url} alt=${t('totp.scan.qr_alt')} class="w-48 h-48 rounded border border-border-subtle" />
         </div>
       `}
       <div class="flex items-center gap-2">
         <code class="flex-1 text-xs font-mono bg-surface-raised px-2 py-1.5 rounded truncate select-all">${setup.secret}</code>
         <button type="button" class="btn-ghost btn-sm shrink-0" onClick=${copySecret}>
-          ${copied ? 'Copied!' : 'Copy'}
+          ${copied ? t('common.copied') : t('common.copy')}
         </button>
       </div>
       ${error && html`<div class="text-sm text-danger">${error}</div>`}
       <div class="flex gap-2 justify-end mt-2">
-        <button type="button" class="btn-ghost btn-sm" onClick=${onCancel}>Cancel</button>
-        <button type="button" class="btn-primary btn-sm" onClick=${onNext}>Next</button>
+        <button type="button" class="btn-ghost btn-sm" onClick=${onCancel}>${t('common.cancel')}</button>
+        <button type="button" class="btn-primary btn-sm" onClick=${onNext}>${t('totp.action.next')}</button>
       </div>
     </div>
   `;
@@ -102,9 +100,7 @@ function VerifyStep({ error, onVerify, onBack }) {
 
   return html`
     <form onSubmit=${handleSubmit} class="flex flex-col gap-4">
-      <p class="text-sm text-text-muted">
-        Enter the 6-digit code from your authenticator app to confirm setup.
-      </p>
+      <p class="text-sm text-text-muted">${t('totp.verify.desc')}</p>
       <input
         ref=${inputRef}
         type="text"
@@ -119,8 +115,8 @@ function VerifyStep({ error, onVerify, onBack }) {
       />
       ${error && html`<div class="text-sm text-danger">${error}</div>`}
       <div class="flex gap-2 justify-end mt-2">
-        <button type="button" class="btn-ghost btn-sm" onClick=${onBack}>Back</button>
-        <button type="submit" class="btn-primary btn-sm" disabled=${code.length !== 6}>Verify</button>
+        <button type="button" class="btn-ghost btn-sm" onClick=${onBack}>${t('totp.action.back')}</button>
+        <button type="submit" class="btn-primary btn-sm" disabled=${code.length !== 6}>${t('totp.action.verify')}</button>
       </div>
     </form>
   `;
@@ -147,8 +143,7 @@ function CodesStep({ codes, confirmed, onConfirm, onDone }) {
   return html`
     <div class="flex flex-col gap-4">
       <p class="text-sm text-text">
-        <strong>Save these backup codes in a safe place.</strong> Each code can only be used once
-        and will be unavailable after this screen.
+        <strong>${t('totp.codes.desc_bold')}</strong> ${t('totp.codes.desc_rest')}
       </p>
       <div class="grid grid-cols-2 gap-2 font-mono text-sm">
         ${codes.map(c => html`
@@ -156,15 +151,15 @@ function CodesStep({ codes, confirmed, onConfirm, onDone }) {
         `)}
       </div>
       <div class="flex gap-2">
-        <button type="button" class="btn-ghost btn-sm flex-1" onClick=${copyAll}>${copied ? 'Copied!' : 'Copy all'}</button>
-        <button type="button" class="btn-ghost btn-sm flex-1" onClick=${downloadCodes}>Download</button>
+        <button type="button" class="btn-ghost btn-sm flex-1" onClick=${copyAll}>${copied ? t('common.copied') : t('totp.codes.copy_all')}</button>
+        <button type="button" class="btn-ghost btn-sm flex-1" onClick=${downloadCodes}>${t('totp.codes.download')}</button>
       </div>
       <label class="flex items-center gap-2 text-sm cursor-pointer">
         <input type="checkbox" class="rounded" checked=${confirmed} onChange=${e => onConfirm(e.target.checked)} />
-        I have saved my backup codes in a safe place
+        ${t('totp.codes.saved_label')}
       </label>
       <div class="flex justify-end mt-2">
-        <button type="button" class="btn-primary btn-sm" disabled=${!confirmed} onClick=${onDone}>Done</button>
+        <button type="button" class="btn-primary btn-sm" disabled=${!confirmed} onClick=${onDone}>${t('totp.action.done')}</button>
       </div>
     </div>
   `;

@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import { Modal } from './modal.js';
 import * as api from '../api.js';
+import { t } from '../i18n.js';
 
 const html = htm.bind(h);
 
@@ -43,7 +44,7 @@ export function PathMigrationDialog({ open, field, currentPath, newPath, onDone,
       setEstimate(est);
       setPhase('confirm');
     }).catch((/** @type {any} */ e) => {
-      setEstimateError(e?.message ?? 'Could not estimate migration');
+      setEstimateError(e?.message ?? t('path_migration.error.estimate_failed'));
       setPhase('confirm');
     });
   }, [open, field, newPath]);
@@ -84,7 +85,7 @@ export function PathMigrationDialog({ open, field, currentPath, newPath, onDone,
         setTimeout(() => onDone(true), 800);
       } else if (data.type === 'path_migration_failed') {
         detachSseListener();
-        setMigError(data.error ?? 'Migration failed');
+        setMigError(data.error ?? t('path_migration.error.failed'));
         setPhase('error');
       }
     };
@@ -96,7 +97,7 @@ export function PathMigrationDialog({ open, field, currentPath, newPath, onDone,
       await api.startPathMigration(field, newPath);
     } catch (/** @type {any} */ e) {
       detachSseListener();
-      setMigError(e?.message ?? 'Failed to start migration');
+      setMigError(e?.message ?? t('path_migration.error.start_failed'));
       setPhase('error');
     }
   }
@@ -113,14 +114,14 @@ export function PathMigrationDialog({ open, field, currentPath, newPath, onDone,
   }
 
   const progressPct = totalBytes > 0 ? Math.round((bytesCopied / totalBytes) * 100) : 0;
-  const label = field === 'library_path' ? 'Library' : 'WASM storage';
+  const label = t(field === 'library_path' ? 'path_migration.label.library' : 'path_migration.label.wasm');
 
   let footer = null;
   if (phase === 'confirm') {
     footer = html`
-      <button type="button" class="btn-ghost btn-sm" onClick=${onCancel}>Cancel</button>
+      <button type="button" class="btn-ghost btn-sm" onClick=${onCancel}>${t('common.cancel')}</button>
       <button type="button" class="btn-ghost btn-sm" onClick=${handleChangePathOnly}>
-        Change path only
+        ${t('path_migration.btn.change_path_only')}
       </button>
       <button
         type="button"
@@ -128,7 +129,7 @@ export function PathMigrationDialog({ open, field, currentPath, newPath, onDone,
         onClick=${handleMoveFiles}
         disabled=${estimateError != null || (estimate && !estimate.can_migrate)}
       >
-        Move files
+        ${t('path_migration.btn.move_files')}
       </button>
     `;
   }
@@ -137,21 +138,21 @@ export function PathMigrationDialog({ open, field, currentPath, newPath, onDone,
     <${Modal}
       open=${open}
       onClose=${phase === 'migrating' ? undefined : onCancel}
-      title=${'Move ' + label + ' files'}
+      title=${t('path_migration.title', { label })}
       footer=${footer}
     >
       ${phase === 'estimating' && html`
-        <p class="text-sm text-text-muted">Checking available space…</p>
+        <p class="text-sm text-text-muted">${t('path_migration.estimating')}</p>
       `}
 
       ${phase === 'confirm' && html`
         <div class="space-y-4 text-sm">
           <div class="flex flex-col gap-1">
-            <span class="text-text-muted">From</span>
+            <span class="text-text-muted">${t('path_migration.confirm.from')}</span>
             <span class="font-mono text-text break-all">${currentPath}</span>
           </div>
           <div class="flex flex-col gap-1">
-            <span class="text-text-muted">To</span>
+            <span class="text-text-muted">${t('path_migration.confirm.to')}</span>
             <span class="font-mono text-text break-all">${newPath}</span>
           </div>
 
@@ -162,30 +163,29 @@ export function PathMigrationDialog({ open, field, currentPath, newPath, onDone,
           ${estimate && html`
             <div class="bg-surface-2 rounded-lg p-3 space-y-1">
               <div class="flex justify-between">
-                <span class="text-text-muted">Data to copy</span>
+                <span class="text-text-muted">${t('path_migration.confirm.data_to_copy')}</span>
                 <span class="font-medium">${fmtBytes(estimate.current_bytes)}</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-text-muted">Available space</span>
+                <span class="text-text-muted">${t('path_migration.confirm.available_space')}</span>
                 <span class="font-medium">${fmtBytes(estimate.available_bytes)}</span>
               </div>
             </div>
           `}
 
           ${estimate && !estimate.can_migrate && html`
-            <p class="text-danger text-sm">${estimate.reason ?? 'Migration not possible'}</p>
+            <p class="text-danger text-sm">${estimate.reason ?? t('path_migration.confirm.not_possible')}</p>
           `}
 
           <p class="text-text-muted text-xs">
-            <strong>Change path only</strong> updates the setting without moving files —
-            existing covers and downloads will be inaccessible until you move them manually.
+            <strong>${t('path_migration.confirm.note_bold')}</strong> ${t('path_migration.confirm.note_rest')}
           </p>
         </div>
       `}
 
       ${phase === 'migrating' && html`
         <div class="space-y-3 text-sm">
-          <p class="text-text">Copying files… do not close this window.</p>
+          <p class="text-text">${t('path_migration.migrating')}</p>
           <progress
             class="w-full h-2"
             value=${bytesCopied}
@@ -198,16 +198,14 @@ export function PathMigrationDialog({ open, field, currentPath, newPath, onDone,
       `}
 
       ${phase === 'done' && html`
-        <p class="text-success text-sm">Files moved successfully.</p>
+        <p class="text-success text-sm">${t('path_migration.done')}</p>
       `}
 
       ${phase === 'error' && html`
         <div class="space-y-3">
-          <p class="text-danger text-sm">${migError ?? 'Migration failed'}</p>
-          <p class="text-text-muted text-xs">
-            Your files have not been moved. The original path is still active.
-          </p>
-          <button type="button" class="btn-ghost btn-sm" onClick=${onCancel}>Close</button>
+          <p class="text-danger text-sm">${migError ?? t('path_migration.error.failed')}</p>
+          <p class="text-text-muted text-xs">${t('path_migration.error.not_moved')}</p>
+          <button type="button" class="btn-ghost btn-sm" onClick=${onCancel}>${t('common.close')}</button>
         </div>
       `}
     </${Modal}>

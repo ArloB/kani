@@ -131,15 +131,15 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
           />
         </svg>
       `;
-      statusIndicator = html`<span class="text-accent shrink-0" aria-label=${'Downloading' + (pct > 0 ? ` (${pct}%)` : '')}>${ring}</span>`;
+      statusIndicator = html`<span class="text-accent shrink-0" aria-label=${pct > 0 ? t('chapter.status.downloading_pct', { pct }) : t('chapter.status.downloading')}>${ring}</span>`;
     } else if (isFailed || (chapter.download_error && !downloaded)) {
       statusIndicator = html`<span class="text-danger text-xs shrink-0 font-medium" aria-label=${t('chapter.status.failed')}>!</span>`;
     } else if (downloaded && !isCancelled) {
       statusIndicator = null;
     } else if (isRead) {
-      statusIndicator = html`<span class="text-text-faint shrink-0 icon-xs" aria-label="Read, not downloaded"><${Icon} svg=${iconCheck} /></span>`;
+      statusIndicator = html`<span class="text-text-faint shrink-0 icon-xs" aria-label=${t('chapter.status.read_not_downloaded')}><${Icon} svg=${iconCheck} /></span>`;
     } else {
-      statusIndicator = html`<span class="text-text-faint shrink-0 icon-xs" aria-label="Not downloaded"><${Icon} svg=${iconDownload} /></span>`;
+      statusIndicator = html`<span class="text-text-faint shrink-0 icon-xs" aria-label=${t('chapter.status.not_downloaded')}><${Icon} svg=${iconDownload} /></span>`;
     }
   }
 
@@ -207,32 +207,30 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
 
   /** @type {import('./menu.js').MenuItem[]} */
   const menuItems = inLibrary ? [
-    { label: 'Select', action: () => { if (onEnterSelectWithChapter) onEnterSelectWithChapter(chapter.id); } },
+    { label: t('chapter.menu.select'), action: () => { if (onEnterSelectWithChapter) onEnterSelectWithChapter(chapter.id); } },
     { divider: true },
-    { label: isRead ? 'Mark as unread' : 'Mark as read', action: handleToggleRead },
+    { label: isRead ? t('chapter.menu.mark_unread') : t('chapter.menu.mark_read'), action: handleToggleRead },
     ...(chapter.chapter_number != null ? [
-      { label: 'Mark as read up to here', action: () => handleMarkUpTo(true) },
-      { label: 'Mark as unread from here', action: () => handleMarkUpTo(false) },
+      { label: t('chapter.menu.mark_read_up_to'), action: () => handleMarkUpTo(true) },
+      { label: t('chapter.menu.mark_unread_from'), action: () => handleMarkUpTo(false) },
     ] : []),
     ...((canDownload || canDelete) ? [{ divider: /** @type {true} */ (true) }] : []),
-    ...(isActive && canDownload ? [{ label: 'Cancel download', action: handleCancel }] : []),
+    ...(isActive && canDownload ? [{ label: t('chapter.menu.cancel_download'), action: handleCancel }] : []),
     ...((isFailed || chapter.download_error) && canDownload ? [{ label: t('chapter.action.retry'), action: handleRetry }] : []),
-    ...(!isActive && !isFailed && !downloaded && canDownload ? [{ label: 'Download', action: handleDownload }] : []),
-    ...(!isActive && downloaded && !isCancelled && canDelete ? [{ label: 'Delete download', action: handleDelete, danger: true }] : []),
-    // ── Offline caching ───────────────────────────────────────────────────
+    ...(!isActive && !isFailed && !downloaded && canDownload ? [{ label: t('chapter.menu.download'), action: handleDownload }] : []),
+    ...(!isActive && downloaded && !isCancelled && canDelete ? [{ label: t('chapter.menu.delete_download'), action: handleDelete, danger: true }] : []),
     ...(!isActive && downloaded && !isCancelled && ('caches' in window) ? [
       { divider: /** @type {true} */ (true) },
       ...(isCached
-        ? [{ label: 'Remove from offline cache', action: handleCacheToggle }]
-        : [{ label: 'Save for offline', action: handleCacheToggle }]),
+        ? [{ label: t('chapter.menu.remove_offline'), action: handleCacheToggle }]
+        : [{ label: t('chapter.menu.save_offline'), action: handleCacheToggle }]),
     ] : []),
-    // ── Export ────────────────────────────────────────────────────────────
     ...(!isActive && downloaded && !isCancelled ? [
       { divider: /** @type {true} */ (true) },
-      { label: 'Export as EPUB', action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/epub`) },
-      { label: 'Export as EPUB (Kindle)', action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/epub?profile=kindle-pw`) },
-      { label: 'Export as KEPUB (Kobo)', action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/kepub?profile=kobo-libra`) },
-      ...(kccAvailable ? [{ label: 'Export as MOBI (Kindle)', action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/kcc?format=MOBI&profile=KPW5&manga=true`) }] : []),
+      { label: t('chapter.menu.export_epub'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/epub`) },
+      { label: t('chapter.menu.export_epub_kindle'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/epub?profile=kindle-pw`) },
+      { label: t('chapter.menu.export_kepub_kobo'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/kepub?profile=kobo-libra`) },
+      ...(kccAvailable ? [{ label: t('chapter.menu.export_mobi_kindle'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/kcc?format=MOBI&profile=KPW5&manga=true`) }] : []),
     ] : []),
   ] : [];
 
@@ -241,7 +239,7 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
       <button
         ref=${btnRef}
         class="inline-flex items-center justify-center w-9 h-9 text-text-muted hover:text-text rounded-md cursor-pointer select-none transition-colors"
-        aria-label="More actions"
+        aria-label=${t('chapter.list.more_actions')}
         aria-expanded=${menuOpen}
         tabindex="-1"
         onClick=${(e) => { e.preventDefault(); e.stopPropagation(); setMenuOpen(o => !o); }}
@@ -287,7 +285,7 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
   let nonClickableClass = '', nonClickableTitle = '';
   if (!isClickable) {
     nonClickableClass = ' cursor-default';
-    nonClickableTitle = !inLibrary ? 'Add to library to read' : isActive ? 'Downloading…' : 'Download to read';
+    nonClickableTitle = !inLibrary ? t('chapter.list.add_to_library') : isActive ? t('chapter.list.downloading') : t('chapter.list.download_to_read');
   }
 
   let rowBorderClass = 'border-l-2 border-l-transparent ';
@@ -313,7 +311,7 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
       <div class="flex-1 min-w-0 flex flex-col gap-0.5">
         <div class="flex items-center gap-2">
           ${chapter.is_orphaned && html`
-            <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-sm bg-warn/20 text-warn">Orphaned</span>
+            <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-sm bg-warn/20 text-warn">${t('chapter.badge.orphaned')}</span>
           `}
           ${statusIndicator}
           ${isClickable
@@ -324,18 +322,18 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
         <div class="flex items-center gap-3 text-xs text-text-muted">
           ${chapter.scanlator && html`<span>${chapter.scanlator}</span>`}
           ${chapter.date_uploaded && html`<span>${formatDate(chapter.date_uploaded)}</span>`}
-          ${hasNote && html`<span class="text-accent" title="Has note">✎</span>`}
+          ${hasNote && html`<span class="text-accent" title=${t('chapter.badge.has_note')}>✎</span>`}
         </div>
       </div>
       <div class="flex items-center gap-1 shrink-0">
         ${(isFailed || chapter.download_error) && canDownload && html`
-          <button class="btn-ghost btn-xs text-accent" onClick=${(e) => { e.preventDefault(); e.stopPropagation(); handleRetry(); }} aria-label=${t('chapter.action.retry')}>Retry</button>
+          <button class="btn-ghost btn-xs text-accent" onClick=${(e) => { e.preventDefault(); e.stopPropagation(); handleRetry(); }} aria-label=${t('chapter.action.retry')}>${t('common.retry')}</button>
         `}
         ${downloaded && !isActive && !isCancelled && html`
           <span
             class=${'icon-xs ' + (isCached ? 'text-accent' : 'text-text-faint')}
-            title=${isCached ? 'Cached for offline' : 'Not cached for offline'}
-            aria-label=${isCached ? 'Cached for offline' : 'Not cached for offline'}
+            title=${isCached ? t('chapter.badge.cached') : t('chapter.badge.not_cached')}
+            aria-label=${isCached ? t('chapter.badge.cached') : t('chapter.badge.not_cached')}
           >
             <${Icon} svg=${isCached ? iconCloudCheck : iconCloud} />
           </span>
@@ -503,37 +501,37 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
     <div class="sticky bottom-0 z-20 flex flex-col bg-surface border-t border-border">
       <div class="flex items-center gap-2 flex-wrap px-3 py-2">
       <div class="flex flex-col">
-        <span class="text-sm text-text-muted">${selectedCount} selected</span>
+        <span class="text-sm text-text-muted">${t('chapter.bulk.selected', { count: selectedCount })}</span>
         ${selectedCount > 0 && html`
           <span class="text-xs text-text-faint">
-            ${selectedDownloadedCount > 0 ? `${selectedDownloadedCount} downloaded` : ''}${selectedDownloadedCount > 0 && selectedUndownloadedCount > 0 ? ', ' : ''}${selectedUndownloadedCount > 0 ? `${selectedUndownloadedCount} not downloaded` : ''}
+            ${selectedDownloadedCount > 0 ? t('chapter.bulk.stat_downloaded', { count: selectedDownloadedCount }) : ''}${selectedDownloadedCount > 0 && selectedUndownloadedCount > 0 ? ', ' : ''}${selectedUndownloadedCount > 0 ? t('chapter.bulk.stat_not_downloaded', { count: selectedUndownloadedCount }) : ''}
           </span>
         `}
       </div>
       <div class="flex items-center gap-1.5 flex-wrap flex-1">
         <button class="btn-ghost btn-sm" onClick=${() => onSelectAll && onSelectAll()}>
-          ${allSelected ? 'Deselect all' : 'Select all'}
+          ${allSelected ? t('chapter.bulk.deselect_all') : t('chapter.bulk.select_all')}
         </button>
         ${onFlipSelection && html`
-          <button class="btn-ghost btn-sm" onClick=${() => onFlipSelection()}>Flip</button>
+          <button class="btn-ghost btn-sm" onClick=${() => onFlipSelection()}>${t('chapter.bulk.flip')}</button>
         `}
         ${onSelectUndownloaded && html`
-          <button class="btn-ghost btn-sm" onClick=${() => onSelectUndownloaded()}>Undownloaded</button>
+          <button class="btn-ghost btn-sm" onClick=${() => onSelectUndownloaded()}>${t('chapter.bulk.undownloaded')}</button>
         `}
         ${onSelectUnread && html`
-          <button class="btn-ghost btn-sm" onClick=${() => onSelectUnread()}>Unread</button>
+          <button class="btn-ghost btn-sm" onClick=${() => onSelectUnread()}>${t('chapter.bulk.unread')}</button>
         `}
       </div>
       <div class="flex items-center gap-1.5 flex-wrap">
-        <button class="btn-primary btn-sm" disabled=${selectedCount === 0 || bulkBusy} onClick=${() => onBulkRead && runBulk(() => onBulkRead(true))}>Mark read</button>
-        <button class="btn-ghost btn-sm" disabled=${selectedCount === 0 || bulkBusy} onClick=${() => onBulkRead && runBulk(() => onBulkRead(false))}>Mark unread</button>
+        <button class="btn-primary btn-sm" disabled=${selectedCount === 0 || bulkBusy} onClick=${() => onBulkRead && runBulk(() => onBulkRead(true))}>${t('chapter.bulk.mark_read')}</button>
+        <button class="btn-ghost btn-sm" disabled=${selectedCount === 0 || bulkBusy} onClick=${() => onBulkRead && runBulk(() => onBulkRead(false))}>${t('chapter.bulk.mark_unread')}</button>
         ${canDownload && onBulkDownload && html`
-          <button class="btn-ghost btn-sm" disabled=${selectedUndownloadedCount === 0 || bulkBusy} onClick=${() => runBulk(() => onBulkDownload())}>Download</button>
+          <button class="btn-ghost btn-sm" disabled=${selectedUndownloadedCount === 0 || bulkBusy} onClick=${() => runBulk(() => onBulkDownload())}>${t('chapter.bulk.download')}</button>
         `}
         ${canDelete && onBulkDelete && html`
-          <button class="btn-ghost btn-sm" disabled=${selectedDownloadedCount === 0 || bulkBusy} onClick=${() => runBulk(() => onBulkDelete())}>Delete</button>
+          <button class="btn-ghost btn-sm" disabled=${selectedDownloadedCount === 0 || bulkBusy} onClick=${() => runBulk(() => onBulkDelete())}>${t('common.delete')}</button>
         `}
-        <button class="btn-ghost btn-sm" onClick=${() => onExitSelect && onExitSelect()}>Cancel</button>
+        <button class="btn-ghost btn-sm" onClick=${() => onExitSelect && onExitSelect()}>${t('common.cancel')}</button>
       </div>
       </div>
     </div>
@@ -551,7 +549,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
       <div
         class="flex flex-col"
         role="listbox"
-        aria-label="Chapters"
+        aria-label=${t('chapter.list.label')}
         tabindex="0"
         aria-activedescendant=${focused ? activeDescendant : undefined}
         onKeyDown=${handleListKeyDown}
@@ -605,7 +603,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
     <div
       class="flex flex-col"
       role="listbox"
-      aria-label="Chapters"
+      aria-label=${t('chapter.list.label')}
       tabindex="0"
       aria-activedescendant=${focused ? activeDescendant : undefined}
       onKeyDown=${handleListKeyDown}

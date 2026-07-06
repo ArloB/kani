@@ -283,7 +283,7 @@ async function _loadOrphanedManga(el) {
     _renderOrphanedManga(el, items);
   } catch (e) {
     el.innerHTML = '';
-    el.appendChild(createErrorState({ message: `Failed to load: ${e?.message ?? 'Unknown error'}`, onRetry: () => _loadOrphanedManga(el) }));
+    el.appendChild(createErrorState({ message: t('settings.manga_mgmt.load_failed', { msg: e?.message ?? '' }), onRetry: () => _loadOrphanedManga(el) }));
   }
 }
 

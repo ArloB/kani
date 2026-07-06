@@ -8,6 +8,7 @@ import * as api from '../api.js';
 import { Modal } from './modal.js';
 import { iconChevronRight } from '../icons.js';
 import { Icon } from './icon.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /** @typedef {'search'|'previewing'|'preview'|'confirming'|'done'} MigrationStep */
@@ -69,7 +70,7 @@ export function MigrationDialogue({
         : [];
       setSearchResults(grouped);
     } catch (e) {
-      if (e?.name !== 'AbortError') setSearchError('Search failed');
+      if (e?.name !== 'AbortError') setSearchError(t('migration.error.search_failed'));
     } finally {
       setSearching(false);
     }
@@ -87,7 +88,7 @@ export function MigrationDialogue({
       setPreview(res);
       setStep('preview');
     } catch {
-      setError('Failed to load migration preview.');
+      setError(t('migration.error.preview_failed'));
       setStep('search');
     }
   }
@@ -100,7 +101,7 @@ export function MigrationDialogue({
       setResult(res);
       setStep('done');
     } catch {
-      setError('Migration failed.');
+      setError(t('migration.error.migrate_failed'));
       setStep('preview');
     }
   }
@@ -118,28 +119,28 @@ export function MigrationDialogue({
 
   const footer = step === 'preview' && html`
     <div class="flex gap-3 justify-end">
-      <button class="btn-ghost" onClick=${() => setStep('search')}>Back</button>
-      <button class="btn-primary" onClick=${_confirmMigration}>Migrate</button>
+      <button class="btn-ghost" onClick=${() => setStep('search')}>${t('migration.action.back')}</button>
+      <button class="btn-primary" onClick=${_confirmMigration}>${t('migration.action.migrate')}</button>
     </div>
   `;
 
   const footerDone = step === 'done' && html`
     <div class="flex justify-end">
       <button class="btn-primary" onClick=${() => onComplete(targetSid, targetMid)}>
-        Go to new manga
+        ${t('migration.action.go_to_new')}
       </button>
     </div>
   `;
 
   return html`
-    <${Modal} open=${true} onClose=${onClose} title="Migrate Manga" wide=${true} footer=${footer || footerDone || undefined}>
+    <${Modal} open=${true} onClose=${onClose} title=${t('migration.title')} wide=${true} footer=${footer || footerDone || undefined}>
 
       ${step === 'search' && html`
         <div class="flex flex-col gap-3 mb-4">
           <input
             type="search"
             class="input"
-            placeholder="Search for manga…"
+            placeholder=${t('migration.search.placeholder')}
             value=${query}
             onInput=${(e) => setQuery(/** @type {HTMLInputElement} */ (e.target).value)}
           />
@@ -150,15 +151,15 @@ export function MigrationDialogue({
                 type="button"
                 class=${scope === s ? 'chip chip-active' : 'chip'}
                 onClick=${() => setScope(/** @type {any} */ (s))}
-              >${s === 'FavouritedOnly' ? 'Favourites' : 'All enabled'}</button>
+              >${s === 'FavouritedOnly' ? t('migration.scope.favourites') : t('migration.scope.all_enabled')}</button>
             `)}
           </div>
         </div>
 
-        ${searching && html`<p class="text-sm text-text-muted py-2">Searching…</p>`}
+        ${searching && html`<p class="text-sm text-text-muted py-2">${t('migration.search.searching')}</p>`}
         ${searchError && html`<p class="text-sm text-danger">${searchError}</p>`}
         ${!searching && searchResults.length === 0 && query.trim() && html`
-          <p class="text-sm text-text-muted py-2">No results found.</p>
+          <p class="text-sm text-text-muted py-2">${t('migration.search.no_results')}</p>
         `}
 
         ${[...bySource.entries()].map(([sid, { sourceName, sourceId, items }]) => html`
@@ -166,7 +167,7 @@ export function MigrationDialogue({
             <span>${sourceName}</span>
           </div>
           ${items.length === 0
-            ? html`<p class="text-sm text-text-muted px-1">No results from this source.</p>`
+            ? html`<p class="text-sm text-text-muted px-1">${t('migration.search.no_source_results')}</p>`
             : html`
               <div class="manga-row" role="list">
                 ${items.map(item => html`
@@ -181,7 +182,7 @@ export function MigrationDialogue({
                     <div class="cover">
                       ${item.cover_url
                         ? html`<img src=${item.cover_url} alt=${item.title} loading="lazy" />`
-                        : html`<div class="no-cover">No Cover</div>`
+                        : html`<div class="no-cover">${t('migration.preview.no_cover')}</div>`
                       }
                     </div>
                     <p class="title"><span>${item.title}</span></p>
@@ -205,7 +206,7 @@ export function MigrationDialogue({
           </div>
           <span class="text-text-muted icon-lg shrink-0"><${Icon} svg=${iconChevronRight} /></span>
           <div class="flex flex-col items-center gap-2 w-32">
-            <strong class="text-xs font-semibold text-text-muted text-center">Loading…</strong>
+            <strong class="text-xs font-semibold text-text-muted text-center">${t('migration.preview.loading')}</strong>
             <div class="skeleton h-40 w-full rounded-md"></div>
             <div class="skeleton h-3 w-24 rounded"></div>
           </div>
@@ -237,10 +238,10 @@ export function MigrationDialogue({
 
         <div class="flex flex-col border border-border rounded-lg overflow-hidden mt-4">
           ${[
-            { label: 'Chapters matched', value: preview.chapters_matched, cls: '' },
-            { label: 'New chapters', value: preview.chapters_new, cls: preview.chapters_new > 0 ? 'text-success bg-success/5' : '' },
-            { label: 'Orphaned chapters', value: preview.chapters_orphaned, cls: '' },
-            { label: 'Downloaded at risk', value: preview.downloaded_chapters_at_risk, cls: preview.downloaded_chapters_at_risk > 0 ? 'text-warn bg-warn/5' : '' },
+            { get label() { return t('migration.preview.chapters_matched'); }, value: preview.chapters_matched, cls: '' },
+            { get label() { return t('migration.preview.chapters_new'); }, value: preview.chapters_new, cls: preview.chapters_new > 0 ? 'text-success bg-success/5' : '' },
+            { get label() { return t('migration.preview.chapters_orphaned'); }, value: preview.chapters_orphaned, cls: '' },
+            { get label() { return t('migration.preview.downloaded_at_risk'); }, value: preview.downloaded_chapters_at_risk, cls: preview.downloaded_chapters_at_risk > 0 ? 'text-warn bg-warn/5' : '' },
           ].map(({ label, value, cls }) => html`
             <div key=${label} class=${'flex items-center justify-between px-4 py-2 border-b border-border-subtle last:border-b-0 text-sm ' + cls}>
               <span class="text-text-muted">${label}</span>
@@ -251,9 +252,9 @@ export function MigrationDialogue({
 
         ${preview.downloaded_chapters_at_risk > 0 && html`
           <div class="mt-4 p-3 rounded-lg bg-warn/10 border border-warn/30 text-sm text-warn">
-            ${preview.downloaded_chapters_at_risk} downloaded chapter(s) may be lost. Keep them as orphaned?
+            ${t('migration.preview.orphan_warning', { count: preview.downloaded_chapters_at_risk })}
             <div class="flex items-center gap-2 mt-2">
-              <label class="kani-toggle" title=${keepOrphaned ? 'Disable' : 'Enable'}>
+              <label class="kani-toggle">
                 <input
                     type="checkbox"
                     class="kani-toggle__input"
@@ -262,25 +263,25 @@ export function MigrationDialogue({
                 />
                 <span class="kani-toggle__track"></span>
               </label>
-              Keep downloaded chapters
+              ${t('migration.preview.keep_downloaded')}
             </div>
           </div>
         `}
         ${error && html`<p class="text-sm text-danger mt-2">${error}</p>`}
       `}
 
-      ${step === 'confirming' && html`<p class="text-sm text-text-muted py-2">Migrating…</p>`}
+      ${step === 'confirming' && html`<p class="text-sm text-text-muted py-2">${t('migration.step.confirming')}</p>`}
 
       ${step === 'done' && result && html`
         <div class="flex flex-col gap-4">
-          <p class="text-sm text-success font-medium">Migration complete!</p>
+          <p class="text-sm text-success font-medium">${t('migration.done.success')}</p>
           <div class="flex flex-col border border-border rounded-lg overflow-hidden">
             <div class="flex items-center justify-between px-4 py-2 border-b border-border-subtle text-sm">
-              <span class="text-text-muted">Chapters migrated</span>
+              <span class="text-text-muted">${t('migration.done.chapters_migrated')}</span>
               <span class="font-semibold text-text">${result.chapters_migrated ?? 0}</span>
             </div>
             <div class="flex items-center justify-between px-4 py-2 text-sm">
-              <span class="text-text-muted">Orphaned</span>
+              <span class="text-text-muted">${t('migration.done.orphaned')}</span>
               <span class="font-semibold text-text">${result.chapters_orphaned ?? 0}</span>
             </div>
           </div>

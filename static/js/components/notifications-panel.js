@@ -8,6 +8,7 @@ import { getState, subscribe, setState, updateState } from '../state.js';
 import { navigate } from '../router.js';
 import { iconBell, iconX, iconDownload, iconCheck } from '../icons.js';
 import { Icon } from './icon.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /** @typedef {import('../state.js').ScanNotification} ScanNotification */
@@ -99,7 +100,7 @@ function NotificationsPanel() {
       <button
         type="button"
         class=${'relative inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:outline-none ' + (badgeCount === 0 && activeDownloads === 0 ? 'text-text-muted hover:bg-surface-2' : 'text-accent hover:bg-accent/10')}
-        aria-label=${'Notifications' + (badgeCount > 0 ? ': ' + badgeCount + ' unread' : '')}
+        aria-label=${badgeCount > 0 ? t('notifications.btn.unread', { count: badgeCount }) : t('notifications.btn.label')}
         aria-expanded=${open}
         onClick=${() => setOpen(v => !v)}
       >
@@ -126,9 +127,9 @@ function NotificationsPanel() {
             >
               <span class="shrink-0 icon-sm text-accent"><${Icon} svg=${iconDownload} /></span>
               <span class="flex-1 text-sm text-text">
-                <strong>${activeDownloads}</strong> chapter${activeDownloads !== 1 ? 's' : ''} downloading
+                <strong>${activeDownloads}</strong> ${t('notifications.active.text', { s: activeDownloads !== 1 ? 's' : '' })}
               </span>
-              <span class="text-xs text-accent shrink-0">View →</span>
+              <span class="text-xs text-accent shrink-0">${t('notifications.active.view')}</span>
             </a>
           `}
 
@@ -141,15 +142,15 @@ function NotificationsPanel() {
             >
               <span class="shrink-0 icon-sm text-danger"><${Icon} svg=${iconDownload} /></span>
               <span class="flex-1 text-sm text-text">
-                <strong class="text-danger">${failedDownloads}</strong> download${failedDownloads !== 1 ? 's' : ''} failed
+                <strong class="text-danger">${failedDownloads}</strong> ${t('notifications.failed.text', { s: failedDownloads !== 1 ? 's' : '' })}
               </span>
-              <span class="text-xs text-accent shrink-0">View →</span>
+              <span class="text-xs text-accent shrink-0">${t('notifications.active.view')}</span>
             </a>
           `}
 
           <!-- Merged notification feed -->
           ${feed.length === 0
-            ? html`<p class="p-4 text-sm text-text-muted">No new notifications.</p>`
+            ? html`<p class="p-4 text-sm text-text-muted">${t('notifications.empty')}</p>`
             : html`
               <ul class="max-h-80 overflow-y-auto divide-y divide-border-subtle">
                 ${feed.map(item => {
@@ -159,13 +160,13 @@ function NotificationsPanel() {
                       <li key=${'dl-' + dl.id} class="flex items-center gap-2 px-4 py-2.5">
                         <span class="shrink-0 text-success icon-xs"><${Icon} svg=${iconCheck} /></span>
                         <div class="flex-1 min-w-0">
-                          <p class="text-2xs font-semibold uppercase tracking-wide text-text-muted mb-0.5">Chapter Downloaded</p>
+                          <p class="text-2xs font-semibold uppercase tracking-wide text-text-muted mb-0.5">${t('notifications.chapter_downloaded.header')}</p>
                           ${dl.mangaId > 0 && html`
                             <a
                               href=${'/manga/' + dl.mangaId}
                               class="text-xs text-text-muted truncate block hover:text-accent transition-colors"
                               onClick=${(/** @type {MouseEvent} */ e) => { e.preventDefault(); setOpen(false); navigate('/manga/' + dl.mangaId); }}
-                            >${dl.mangaTitle || 'Manga'}</a>
+                            >${dl.mangaTitle || t('notifications.manga_fallback')}</a>
                           `}
                           <a
                             href=${'/reader/' + dl.id}
@@ -176,7 +177,7 @@ function NotificationsPanel() {
                         <button
                           type="button"
                           class="btn-icon w-6 h-6 shrink-0"
-                          aria-label="Dismiss"
+                          aria-label=${t('notifications.dismiss')}
                           onClick=${() => dismissCompletedDownload(dl.id)}
                         ><${Icon} svg=${iconX} /></button>
                       </li>
@@ -188,15 +189,15 @@ function NotificationsPanel() {
                         <div class="flex items-center gap-3">
                           <span class="shrink-0 text-accent icon-xs"><${Icon} svg=${iconBell} /></span>
                           <div class="flex-1 min-w-0">
-                            <p class="text-2xs font-semibold uppercase tracking-wide text-text-muted mb-0.5">New Chapter${n.count !== 1 ? 's' : ''}</p>
+                            <p class="text-2xs font-semibold uppercase tracking-wide text-text-muted mb-0.5">${t('notifications.new_chapters.header', { s: n.count !== 1 ? 's' : '' })}</p>
                             <a
                               href=${'/manga/' + n.mangaId}
                               class="text-sm font-medium text-text truncate block hover:text-accent transition-colors"
                               onClick=${() => setOpen(false)}
                             >${n.mangaName}</a>
                           </div>
-                          <span class="text-xs text-text-muted whitespace-nowrap shrink-0">+${n.count} new</span>
-                          <button type="button" class="btn-icon w-7 h-7 shrink-0" aria-label="Dismiss" onClick=${() => dismiss(n.mangaId)}><${Icon} svg=${iconX} /></button>
+                          <span class="text-xs text-text-muted whitespace-nowrap shrink-0">${t('notifications.new_chapters.count', { count: n.count })}</span>
+                          <button type="button" class="btn-icon w-7 h-7 shrink-0" aria-label=${t('notifications.dismiss')} onClick=${() => dismiss(n.mangaId)}><${Icon} svg=${iconX} /></button>
                         </div>
                         ${n.chapterNames?.length > 0 && html`
                           <div class="flex flex-col gap-0.5 pl-6">
@@ -220,7 +221,7 @@ function NotificationsPanel() {
           ${hasAnyDismissable && html`
             <div class="px-4 py-2.5 border-t border-border-subtle shrink-0">
               <button type="button" class="btn-ghost btn-sm w-full" onClick=${dismissAll}>
-                Dismiss all
+                ${t('notifications.dismiss_all')}
               </button>
             </div>
           `}

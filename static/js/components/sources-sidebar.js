@@ -64,10 +64,10 @@ export function AddSourceModal({ open, onClose, onCreated }) {
 
   async function handleSubmit() {
     if (mode === 'url') {
-      if (!wasmUrl.trim()) { setError('URL is required.'); return; }
-      if (!wasmUrl.trim().startsWith('https://')) { setError('URL must start with https://.'); return; }
+      if (!wasmUrl.trim()) { setError(t('source.add.error.url_required')); return; }
+      if (!wasmUrl.trim().startsWith('https://')) { setError(t('source.add.error.url_https')); return; }
     } else {
-      if (!wasmFile) { setError('Please select a .wasm file.'); return; }
+      if (!wasmFile) { setError(t('source.add.error.file_required')); return; }
     }
 
     setLoading(true);
@@ -83,7 +83,7 @@ export function AddSourceModal({ open, onClose, onCreated }) {
       sourceId = result.id;
       _pendingSourceId = sourceId;
     } catch (e) {
-      setError(/** @type {any} */ (e)?.message ?? 'Failed to create source.');
+      setError(/** @type {any} */ (e)?.message ?? t('source.add.error.create_failed'));
       setLoading(false);
       return;
     }
@@ -97,7 +97,7 @@ export function AddSourceModal({ open, onClose, onCreated }) {
     } catch (e) {
       api.deleteSource(sourceId).catch(() => {});
       _pendingSourceId = null;
-      setError(/** @type {any} */ (e)?.message ?? 'Failed to install extension.');
+      setError(/** @type {any} */ (e)?.message ?? t('source.add.error.install_failed'));
       setLoading(false);
       return;
     }
@@ -109,16 +109,16 @@ export function AddSourceModal({ open, onClose, onCreated }) {
   }
 
   const footer = html`
-    <button class="btn-ghost" disabled=${loading} onClick=${handleClose}>Cancel</button>
+    <button class="btn-ghost" disabled=${loading} onClick=${handleClose}>${t('common.cancel')}</button>
     <button
       class="btn-primary"
       disabled=${loading || (mode === 'url' ? !wasmUrl.trim() : !wasmFile)}
       onClick=${handleSubmit}
-    >${loading ? 'Installing…' : 'Add source'}</button>
+    >${loading ? t('source.add.installing') : t('source.add.btn')}</button>
   `;
 
   return html`
-    <${Modal} open=${open} onClose=${handleClose} title="Add source" footer=${footer}>
+    <${Modal} open=${open} onClose=${handleClose} title=${t('source.add.title')} footer=${footer}>
       <div class="flex flex-col gap-4">
 
         <div class="flex items-center gap-1 p-1 bg-surface-2 rounded-lg w-fit">
@@ -127,18 +127,18 @@ export function AddSourceModal({ open, onClose, onCreated }) {
             class=${'px-3 py-1.5 text-sm rounded-md transition-colors ' + (mode === 'url' ? 'bg-surface shadow text-text' : 'text-muted hover:text-text')}
             disabled=${loading}
             onClick=${() => setMode('url')}
-          >From URL</button>
+          >${t('source.add.mode.url')}</button>
           <button
             type="button"
             class=${'px-3 py-1.5 text-sm rounded-md transition-colors ' + (mode === 'file' ? 'bg-surface shadow text-text' : 'text-muted hover:text-text')}
             disabled=${loading}
             onClick=${() => setMode('file')}
-          >Upload file</button>
+          >${t('source.add.mode.file')}</button>
         </div>
 
         ${mode === 'url' && html`
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="add-source-url">Extension URL</label>
+            <label class="text-sm font-medium text-text" for="add-source-url">${t('source.add.url.label')}</label>
             <input
               id="add-source-url"
               type="url"
@@ -154,7 +154,7 @@ export function AddSourceModal({ open, onClose, onCreated }) {
 
         ${mode === 'file' && html`
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="add-source-file">Extension file</label>
+            <label class="text-sm font-medium text-text" for="add-source-file">${t('source.add.file.label')}</label>
             <input
               id="add-source-file"
               type="file"
@@ -229,8 +229,8 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
       <input
         type="search"
         class="input input-sm w-full"
-        placeholder="Filter sources…"
-        aria-label="Filter sources"
+        placeholder=${t('source.sidebar.filter.placeholder')}
+        aria-label=${t('source.sidebar.filter.label')}
         value=${query}
         onInput=${(/** @type {any} */ e) => setQuery(e.target.value)}
       />
@@ -238,7 +238,7 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
 
     <${SidebarNav}>
       ${filtered.length === 0
-        ? html`<p class="text-xs text-text-muted px-3 py-2">No sources found.</p>`
+        ? html`<p class="text-xs text-text-muted px-3 py-2">${t('source.sidebar.empty')}</p>`
         : filtered.map(src => {
             const isActive  = src.id === activeSourceId;
             const isStarred = starred[src.id] ?? false;
@@ -285,7 +285,7 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
                             'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent',
                             isStarred ? 'text-accent' : 'text-text-faint opacity-0 group-hover:opacity-100',
                         ].join(' ')}
-                        aria-label=${isStarred ? 'Unfavourite' : 'Favourite'}
+                        aria-label=${isStarred ? t('source.sidebar.unstar') : t('source.sidebar.star')}
                         onClick=${(/** @type {MouseEvent} */ e) => {
                             e.preventDefault();
                             e.stopPropagation();

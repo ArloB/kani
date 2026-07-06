@@ -10,6 +10,7 @@ import { PreferenceRow } from './preference-row.js';
 import { iconWarning, iconStarFilled, iconStarOutline } from '../icons.js';
 import { Icon } from './icon.js';
 import { showToast, showApiError } from './toast.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /**
@@ -85,7 +86,7 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
       await api.fetchWasm(sid, wasmUrl);
       setWasmUrl('');
       setInstallOpen(false);
-      showToast('Extension installed successfully.', { type: 'success' });
+      showToast(t('source.card.install.success'), { type: 'success' });
     } catch (e) {
       showApiError(e);
     } finally {
@@ -108,12 +109,12 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
     <${Modal}
       open=${modalOpen}
       onClose=${() => setModalOpen(false)}
-      title=${'Preferences: ' + source.name}
+      title=${t('source.card.prefs.title', { name: source.name })}
     >
       ${prefsLoading
-        ? html`<p class="text-sm text-text-muted py-2">Loading preferences…</p>`
+        ? html`<p class="text-sm text-text-muted py-2">${t('source.card.prefs.loading')}</p>`
         : schema.length === 0
-          ? html`<p class="text-sm text-text-muted">No preferences available.</p>`
+          ? html`<p class="text-sm text-text-muted">${t('source.card.prefs.empty')}</p>`
           : html`
             <div class="flex flex-col">
               ${[...groups.entries()].map(([group, descriptors]) => html`
@@ -145,8 +146,8 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
           <div class="flex items-center gap-2">
             <span class="text-sm font-semibold text-text">${source.name}</span>
             ${source.unrestricted_http && html`
-              <span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-warn/20 text-warn" title="This extension uses unrestricted HTTP">
-                <${Icon} svg=${iconWarning} /> Unsafe
+              <span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded bg-warn/20 text-warn" title=${t('source.card.badge.unsafe.title')}>
+                <${Icon} svg=${iconWarning} /> ${t('source.card.badge.unsafe')}
               </span>
             `}
           </div>
@@ -155,16 +156,16 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
 
         <div class="flex items-center gap-2 shrink-0">
           <span class=${'inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ' + (isActive ? 'bg-success/20 text-success' : 'bg-surface-2 text-text-muted')}>
-            ${isActive ? 'Loaded' : 'Unloaded'}
+            ${isActive ? t('source.card.badge.loaded') : t('source.card.badge.unloaded')}
           </span>
 
-          <label class="star-checkbox" title="Favourite">
+          <label class="star-checkbox" title=${t('source.card.star.label')}>
             <input
               type="checkbox"
               class="star-checkbox__input"
               checked=${starred}
               onChange=${(e) => toggleStarred(/** @type {HTMLInputElement} */ (e.target).checked)}
-              aria-label="Favourite"
+              aria-label=${t('source.card.star.label')}
             />
             <span class="star-checkbox__icon" aria-hidden="true"><${Icon} svg=${starred ? iconStarFilled : iconStarOutline} /></span>
           </label>
@@ -174,7 +175,7 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
               type="checkbox"
               class="kani-toggle__input"
               checked=${enabled}
-              aria-label=${enabled ? 'Disable source' : 'Enable source'}
+              aria-label=${enabled ? t('source.card.toggle.disable') : t('source.card.toggle.enable')}
               onChange=${(e) => toggleEnabled(/** @type {HTMLInputElement} */ (e.target).checked)}
             />
             <span class="kani-toggle__track"></span>
@@ -185,27 +186,27 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
       ${confirming && html`
         <div class="rounded-lg bg-warn/10 border border-warn/30 p-3 flex flex-col gap-2">
           <p class="text-sm text-warn">
-            This extension uses unrestricted HTTP. Only enable it if you trust the source.
+            ${t('source.card.unsafe.warning')}
           </p>
           <div class="flex items-center gap-2 justify-end">
-            <button class="btn-ghost btn-sm" onClick=${() => setConfirming(false)}>Cancel</button>
-            <button class="btn-danger btn-sm" onClick=${() => toggleEnabled(true)}>Enable Anyway</button>
+            <button class="btn-ghost btn-sm" onClick=${() => setConfirming(false)}>${t('common.cancel')}</button>
+            <button class="btn-danger btn-sm" onClick=${() => toggleEnabled(true)}>${t('source.card.unsafe.enable')}</button>
           </div>
         </div>
       `}
 
       <div class="flex items-center gap-2 flex-wrap">
-        <button class="btn-ghost btn-sm" onClick=${() => setModalOpen(true)}>Configure</button>
-        <button class="btn-ghost btn-sm" onClick=${() => setInstallOpen(v => !v)}>Install WASM</button>
+        <button class="btn-ghost btn-sm" onClick=${() => setModalOpen(true)}>${t('source.card.action.configure')}</button>
+        <button class="btn-ghost btn-sm" onClick=${() => setInstallOpen(v => !v)}>${t('source.card.action.install_wasm')}</button>
 
         ${!confirmingDelete
-          ? html`<button class="btn-danger btn-sm" onClick=${() => setConfirmingDelete(true)}>Delete</button>`
+          ? html`<button class="btn-danger btn-sm" onClick=${() => setConfirmingDelete(true)}>${t('common.delete')}</button>`
           : html`
             <div class="flex flex-col gap-2">
-              <p class="text-sm text-danger">Delete this source? This cannot be undone.</p>
+              <p class="text-sm text-danger">${t('source.card.delete.confirm')}</p>
               <div class="flex items-center gap-2 justify-end">
-                <button class="btn-ghost btn-sm" onClick=${() => setConfirmingDelete(false)}>Cancel</button>
-                <button class="btn-danger btn-sm" onClick=${handleDelete}>Confirm Delete</button>
+                <button class="btn-ghost btn-sm" onClick=${() => setConfirmingDelete(false)}>${t('common.cancel')}</button>
+                <button class="btn-danger btn-sm" onClick=${handleDelete}>${t('source.card.delete.btn')}</button>
               </div>
             </div>
           `
@@ -228,7 +229,7 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
               class="btn-primary btn-sm"
               disabled=${wasmFetching || !wasmUrl.trim()}
               onClick=${handleFetchWasm}
-            >${wasmFetching ? 'Fetching…' : 'Fetch'}</button>
+            >${wasmFetching ? t('source.card.install.fetching') : t('source.card.install.fetch')}</button>
           </div>
         </div>
       `}
