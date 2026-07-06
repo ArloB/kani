@@ -3,10 +3,11 @@
 
 import { iconX } from '../icons.js';
 import { navigate } from '../router.js';
+import { t } from '../i18n.js';
 
 /** @param {HTMLElement} container */
 export async function init(container) {
-  document.title = 'Create Account - Kani';
+  document.title = t('auth.register.page_title');
 
   // Pre-flight: redirect if registration is disabled
   try {
@@ -36,7 +37,7 @@ export async function init(container) {
       <div class="w-full max-w-sm bg-surface rounded-2xl shadow-lg border border-border p-8 flex flex-col gap-6">
         <div class="text-center flex flex-col gap-1">
           <h1 class="text-2xl font-bold text-text">Kani</h1>
-          <p class="text-sm text-text-muted">Create an account</p>
+          <p class="text-sm text-text-muted">${t('auth.register.subtitle')}</p>
         </div>
 
         <div
@@ -51,28 +52,28 @@ export async function init(container) {
 
         <form class="flex flex-col gap-4" id="reg-form" novalidate>
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="reg-username">Username</label>
+            <label class="text-sm font-medium text-text" for="reg-username">${t('auth.login.username')}</label>
             <input id="reg-username" class="input" type="text" name="username" autocomplete="username" required autofocus />
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="reg-email">Email</label>
+            <label class="text-sm font-medium text-text" for="reg-email">${t('auth.register.email')}</label>
             <input id="reg-email" class="input" type="email" name="email" autocomplete="email" />
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="reg-password">Password</label>
+            <label class="text-sm font-medium text-text" for="reg-password">${t('auth.login.password')}</label>
             <input id="reg-password" class="input" type="password" name="password" autocomplete="new-password" required />
           </div>
           <div class="flex flex-col gap-1.5">
             <label class="text-sm font-medium text-text" for="reg-captcha">
-              <span id="reg-captcha-prompt">Loading…</span>
+              <span id="reg-captcha-prompt">${t('common.loading')}</span>
             </label>
             <input id="reg-captcha" class="input" type="number" inputMode="numeric" name="captcha" required />
           </div>
-          <button type="submit" class="btn-primary w-full h-11 mt-2" id="reg-submit">Create account</button>
+          <button type="submit" class="btn-primary w-full h-11 mt-2" id="reg-submit">${t('auth.register.submit')}</button>
         </form>
 
         <p class="text-center text-sm text-text-muted">
-          Already have an account? <a href="/login" class="text-accent hover:underline">Sign in</a>
+          ${t('auth.register.have_account')} <a href="/login" class="text-accent hover:underline">${t('auth.register.sign_in')}</a>
         </p>
       </div>
     </div>
@@ -96,7 +97,7 @@ export async function init(container) {
     errBox.classList.add('hidden');
     errBox.classList.remove('flex');
     btn.disabled = true;
-    btn.textContent = 'Creating…';
+    btn.textContent = t('auth.register.submitting');
 
     const username = /** @type {HTMLInputElement} */ (container.querySelector('#reg-username')).value.trim();
     const email    = /** @type {HTMLInputElement} */ (container.querySelector('#reg-email')).value.trim();
@@ -120,16 +121,16 @@ export async function init(container) {
       }
 
       const data = await res.json().catch(() => ({}));
-      _showError(data.error ?? 'Registration failed. Please try again.');
+      _showError(data.error ?? t('auth.register.error.failed'));
       await _loadCaptcha();
     } catch (/** @type {any} */ err) {
       _showError(err?.name === 'TimeoutError'
-        ? 'Server is taking too long to respond. Please try again.'
-        : 'Could not reach the server. Please try again.');
+        ? t('auth.error.server_slow')
+        : t('auth.error.network'));
     } finally {
       clearTimeout(timer);
       btn.disabled = false;
-      btn.textContent = 'Create account';
+      btn.textContent = t('auth.register.submit');
     }
   });
 }

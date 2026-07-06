@@ -7,6 +7,7 @@ import htm from 'htm';
 import * as api from '../api.js';
 import { hasPermission } from '../state.js';
 import { escapeHtml, openConfirm, formatDate } from '../utils.js';
+import { t } from '../i18n.js';
 import { showToast } from '../components/toast.js';
 import { Modal, mountIntoModalRoot } from '../components/modal.js';
 import { mountMasterDetail } from '../components/master-detail.js';
@@ -40,19 +41,18 @@ const ALL_PERMISSIONS = [
 
 /** @param {HTMLElement} container */
 export async function init(container) {
-  document.title = 'Accounts - Kani';
+  document.title = t('accounts.page_title');
   _container = container;
   _activeTab = 'users';
   _selected = null;
 
-  // Set breadcrumb early, before data loads
-  setPageHeader({ crumbs: [{ label: 'Accounts' }] });
+  setPageHeader({ crumbs: [{ label: t('accounts.crumb') }] });
 
   if (!hasPermission('user:manage')) {
     container.innerHTML = `
       <div class="flex flex-col items-center justify-center gap-3 py-20 text-text-muted">
-        <p class="text-base font-medium text-text">Access denied</p>
-        <p class="text-sm">You do not have permission to manage accounts.</p>
+        <p class="text-base font-medium text-text">${t('accounts.denied.title')}</p>
+        <p class="text-sm">${t('accounts.denied.desc')}</p>
       </div>
     `;
     return;
@@ -97,7 +97,7 @@ function _updateHeaderActions() {
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
   addBtn.className = 'btn-primary btn-sm';
-  addBtn.textContent = _activeTab === 'users' ? '+ Add user' : '+ Add role';
+  addBtn.textContent = _activeTab === 'users' ? t('accounts.add_user') : t('accounts.add_role');
   addBtn.addEventListener('click', () => {
     if (_activeTab === 'users') {
       _showUserModal(null, async () => { await _reload(); _rerenderList(); });
@@ -106,8 +106,8 @@ function _updateHeaderActions() {
     }
   });
 
-  const tabLabel = _activeTab === 'users' ? 'Users' : 'Roles';
-  const crumbs = [{ label: 'Accounts', href: '/accounts' }];
+  const tabLabel = _activeTab === 'users' ? t('accounts.tab.users') : t('accounts.tab.roles');
+  const crumbs = [{ label: t('accounts.crumb'), href: '/accounts' }];
   if (_selected) {
     crumbs.push({ label: tabLabel, href: '/accounts?tab=' + _activeTab });
     crumbs.push({ label: _activeTab === 'users' ? _selected.username : _selected.slug });
@@ -159,7 +159,7 @@ function _renderDetail(detailEl) {
     detailEl.innerHTML = `
       <div class="flex flex-col items-center justify-center gap-3 h-full py-20 text-text-muted">
         <span class="icon-2xl opacity-30" aria-hidden="true">${iconAccounts}</span>
-        <p class="text-sm">Select a ${_activeTab === 'users' ? 'user' : 'role'} to view details</p>
+        <p class="text-sm">${_activeTab === 'users' ? t('accounts.detail.empty.user') : t('accounts.detail.empty.role')}</p>
       </div>
     `;
     return;
@@ -173,7 +173,7 @@ function _renderDetail(detailEl) {
   const backBtn = document.createElement('button');
   backBtn.type = 'button';
   backBtn.className = 'btn-ghost btn-sm md:hidden mb-3 ml-4 mt-4';
-  backBtn.textContent = '← Back';
+  backBtn.textContent = t('accounts.back');
   backBtn.addEventListener('click', () => {
     _selected = null;
     _setMdView?.('list');
@@ -195,8 +195,8 @@ function _renderList(listEl) {
   const tabsEl = document.createElement('div');
   renderTabs(tabsEl, {
     tabs: [
-      { id: 'users', name: 'Users', count: _users.length },
-      { id: 'roles', name: 'Roles', count: _roles.length },
+      { id: 'users', name: t('accounts.tab.users'), count: _users.length },
+      { id: 'roles', name: t('accounts.tab.roles'), count: _roles.length },
     ],
     activeId: _activeTab,
     stretch: true,
@@ -215,7 +215,7 @@ function _renderList(listEl) {
   const searchInput = document.createElement('input');
   searchInput.type = 'search';
   searchInput.className = 'input input-sm';
-  searchInput.placeholder = `Search...`;
+  searchInput.placeholder = t('accounts.search');
   headerEl.appendChild(searchInput);
   listEl.appendChild(headerEl);
 
@@ -234,9 +234,9 @@ function _renderList(listEl) {
 
     if (filtered.length === 0) {
       const emptyTitle = filter
-        ? 'No results'
-        : _activeTab === 'users' ? 'No users yet' : 'No custom roles yet';
-      const emptySub = filter ? 'Try a different search term.' : undefined;
+        ? t('accounts.empty.no_results')
+        : _activeTab === 'users' ? t('accounts.empty.users') : t('accounts.empty.roles');
+      const emptySub = filter ? t('accounts.empty.no_results.desc') : undefined;
       bodyEl.appendChild(createEmptyState({ title: emptyTitle, subtitle: emptySub }));
       return;
     }
@@ -258,7 +258,7 @@ function _renderList(listEl) {
               <span class="li-title truncate">${escapeHtml(item.username)}</span>
               <span class="li-sub truncate">${item.roles?.join(', ') ?? ''}</span>
             </span>
-            <span class="${item.is_active ? 'badge badge-success' : 'badge badge-danger'} shrink-0">${item.is_active ? 'Active' : 'Inactive'}</span>
+            <span class="${item.is_active ? 'badge badge-success' : 'badge badge-danger'} shrink-0">${item.is_active ? t('accounts.user.active') : t('accounts.user.inactive')}</span>
           </div>
         `;
       } else {
@@ -267,9 +267,9 @@ function _renderList(listEl) {
           <span class="flex flex-col min-w-0 flex-1">
             <span class="li-title font-mono truncate flex items-center gap-2">
               ${escapeHtml(item.slug)}
-              ${isSystemRole ? '<span class="badge badge-muted text-2xs shrink-0">System</span>' : ''}
+              ${isSystemRole ? `<span class="badge badge-muted text-2xs shrink-0">${t('accounts.role.system')}</span>` : ''}
             </span>
-            <span class="li-sub truncate">${escapeHtml(item.description ?? `${item.permissions?.length ?? 0} permissions`)}</span>
+            <span class="li-sub truncate">${escapeHtml(item.description ?? t('accounts.role.perm_count', { count: item.permissions?.length ?? 0 }))}</span>
           </span>
         `;
       }
@@ -322,51 +322,51 @@ function _renderUserDetail(el, user) {
         <span class="avatar xl" aria-hidden="true">${escapeHtml((user.username ?? '?')[0].toUpperCase())}</span>
         <div class="flex flex-col gap-1 flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text truncate">${escapeHtml(user.username)}</h2>
-          <p class="meta">${escapeHtml(user.email ?? '')} · Created ${formatDate(user.created_at) || 'unknown'}</p>
+          <p class="meta">${escapeHtml(user.email ?? '')} · ${t('accounts.user.created_meta', { date: formatDate(user.created_at) || t('accounts.user.unknown_date') })}</p>
         </div>
         <div class="flex items-center gap-1 shrink-0">
-          <button type="button" class="btn-ghost btn-sm js-edit-user">Edit</button>
-          <button type="button" class="btn-danger btn-sm js-delete-user">Delete</button>
+          <button type="button" class="btn-ghost btn-sm js-edit-user">${t('accounts.action.edit')}</button>
+          <button type="button" class="btn-danger btn-sm js-delete-user">${t('common.delete')}</button>
         </div>
       </div>
 
       <!-- Identity card -->
       <div class="detail-card">
-        <div class="detail-card-head">Identity</div>
-        <div class="kv"><span class="k">Username</span><span class="v">${escapeHtml(user.username)}</span></div>
-        <div class="kv"><span class="k">Email</span><span class="v">${escapeHtml(user.email ?? '—')}</span></div>
-        <div class="kv"><span class="k">Status</span><span class="v">
-          <span class="${user.is_active ? 'badge badge-success' : 'badge badge-danger'}">${user.is_active ? 'Active' : 'Inactive'}</span>
+        <div class="detail-card-head">${t('accounts.identity')}</div>
+        <div class="kv"><span class="k">${t('accounts.user.username')}</span><span class="v">${escapeHtml(user.username)}</span></div>
+        <div class="kv"><span class="k">${t('accounts.user.email')}</span><span class="v">${escapeHtml(user.email ?? '—')}</span></div>
+        <div class="kv"><span class="k">${t('accounts.user.status')}</span><span class="v">
+          <span class="${user.is_active ? 'badge badge-success' : 'badge badge-danger'}">${user.is_active ? t('accounts.user.active') : t('accounts.user.inactive')}</span>
         </span></div>
-        <div class="kv"><span class="k">Created</span><span class="v">${escapeHtml(formatDate(user.created_at) || '—')}</span></div>
+        <div class="kv"><span class="k">${t('accounts.user.created')}</span><span class="v">${escapeHtml(formatDate(user.created_at) || '—')}</span></div>
       </div>
 
       <!-- Roles card -->
       <div class="detail-card">
         <div class="detail-card-head">
-          <span>Roles</span>
+          <span>${t('accounts.user.roles')}</span>
         </div>
         <div class="p-3 flex flex-wrap gap-2">
-          ${(user.roles ?? []).map(r => `<span class="badge badge-muted font-mono">${escapeHtml(r)}</span>`).join('') || '<span class="meta p-1">No roles assigned.</span>'}
+          ${(user.roles ?? []).map(r => `<span class="badge badge-muted font-mono">${escapeHtml(r)}</span>`).join('') || `<span class="meta p-1">${t('accounts.user.no_roles')}</span>`}
         </div>
       </div>
 
       <!-- Effective permissions card -->
       <div class="detail-card">
-        <div class="detail-card-head">Effective permissions — ${effectivePerms.size}</div>
+        <div class="detail-card-head">${t('accounts.user.perms', { count: effectivePerms.size })}</div>
         <div>
           ${[...effectivePerms.entries()].map(([perm, via]) => `
             <div class="flex items-center justify-between gap-3 px-3 py-2 border-b border-border-subtle last:border-0 text-sm">
               <span class="font-mono text-xs text-text">${escapeHtml(perm)}</span>
-              <span class="meta shrink-0">via ${escapeHtml(via)}</span>
+              <span class="meta shrink-0">${t('accounts.user.perm.via', { role: escapeHtml(via) })}</span>
             </div>
-          `).join('') || '<p class="meta px-3 py-3">No permissions.</p>'}
+          `).join('') || `<p class="meta px-3 py-3">${t('accounts.user.no_perms')}</p>`}
         </div>
       </div>
 
       <!-- Activity feed card -->
       <div class="detail-card">
-        <div class="detail-card-head">Recent activity</div>
+        <div class="detail-card-head">${t('accounts.user.activity')}</div>
         <div class="js-activity-feed"></div>
       </div>
     </div>
@@ -383,17 +383,17 @@ function _renderUserDetail(el, user) {
 
   const _delUserBtn = /** @type {HTMLButtonElement|null} */ (el.querySelector('.js-delete-user'));
   _delUserBtn?.addEventListener('click', async () => {
-    if (!(await openConfirm({ title: 'Delete user', message: `Delete "${user.username}"? This cannot be undone.`, danger: true }))) return;
+    if (!(await openConfirm({ title: t('accounts.user.delete.title'), message: t('accounts.user.delete.message', { username: user.username }), danger: true }))) return;
     if (_delUserBtn) _delUserBtn.disabled = true;
     try {
       await api.adminDeleteUser(user.id);
-      showToast(`User "${user.username}" deleted.`);
+      showToast(t('accounts.user.deleted', { username: user.username }));
       await _reload();
       _selected = null;
       _rerenderList();
       if (_detailEl) _renderDetail(_detailEl);
     } catch (e) {
-      showToast(e?.message ?? 'Failed to delete user.', { type: 'error' });
+      showToast(e?.message ?? t('accounts.user.delete.failed'), { type: 'error' });
       if (_delUserBtn) _delUserBtn.disabled = false;
     }
   });
@@ -425,7 +425,7 @@ function _renderUserDetail(el, user) {
       }));
       _activityError = null;
     } catch {
-      _activityError = 'Failed to load activity.';
+      _activityError = t('accounts.user.activity.failed');
     }
     _activityLoading = false;
     _renderFeed();
@@ -466,12 +466,12 @@ function _renderRoleDetail(el, role) {
   ).join('');
 
   const inheritedChips = [...inheritedPerms.entries()].map(([p, via]) =>
-    `<span class="badge badge-muted font-mono opacity-60 italic" title="Inherited from ${escapeHtml(via)}">${escapeHtml(p)}</span>`
+    `<span class="badge badge-muted font-mono opacity-60 italic" title="${t('accounts.role.inherited_from', { parent: escapeHtml(via) })}">${escapeHtml(p)}</span>`
   ).join('');
 
   const inheritedSection = inheritedChips ? `
     <div class="flex items-center gap-2 px-3 py-1.5 border-t border-border-subtle">
-      <span class="text-2xs uppercase tracking-wide font-semibold text-text-faint">Inherited</span>
+      <span class="text-2xs uppercase tracking-wide font-semibold text-text-faint">${t('accounts.role.inherited_label')}</span>
     </div>
     <div class="px-3 pb-3 flex flex-wrap gap-1.5">${inheritedChips}</div>
   ` : '';
@@ -491,31 +491,31 @@ function _renderRoleDetail(el, role) {
         <div class="flex flex-col gap-1 flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <h2 class="text-lg font-semibold text-text font-mono">${escapeHtml(role.slug)}</h2>
-            ${isProtected ? '<span class="badge badge-muted text-2xs">System role</span>' : ''}
+            ${isProtected ? `<span class="badge badge-muted text-2xs">${t('accounts.role.system_label')}</span>` : ''}
           </div>
-          <p class="meta">${role.permissions?.length ?? 0} permissions${role.parent ? ` · inherits from ${escapeHtml(role.parent)}` : ''}</p>
+          <p class="meta">${t('accounts.role.perm_count', { count: role.permissions?.length ?? 0 })}${role.parent ? ` · ${t('accounts.role.inherits', { parent: escapeHtml(role.parent) })}` : ''}</p>
           ${role.description ? `<p class="text-sm text-text-muted mt-0.5">${escapeHtml(role.description)}</p>` : ''}
         </div>
         <div class="flex items-center gap-1 shrink-0">
-          <button type="button" class="btn-ghost btn-sm js-edit-role">Edit</button>
-          ${!isProtected ? '<button type="button" class="btn-danger btn-sm js-delete-role">Delete</button>' : ''}
+          <button type="button" class="btn-ghost btn-sm js-edit-role">${t('accounts.action.edit')}</button>
+          ${!isProtected ? `<button type="button" class="btn-danger btn-sm js-delete-role">${t('common.delete')}</button>` : ''}
         </div>
       </div>
 
       <!-- Permissions card -->
       <div class="detail-card">
-        <div class="detail-card-head">Permissions — ${directPerms.size + inheritedPerms.size}</div>
+        <div class="detail-card-head">${t('accounts.role.perms', { count: directPerms.size + inheritedPerms.size })}</div>
         <div class="p-3 flex flex-wrap gap-1.5">
-          ${directChips || '<span class="meta p-1">No direct permissions.</span>'}
+          ${directChips || `<span class="meta p-1">${t('accounts.role.no_perms')}</span>`}
         </div>
         ${inheritedSection}
       </div>
 
       <!-- Users with this role -->
       <div class="detail-card">
-        <div class="detail-card-head">Users with this role — ${usersWithRole.length}</div>
+        <div class="detail-card-head">${t('accounts.role.users', { count: usersWithRole.length })}</div>
         <div class="p-3 flex flex-wrap gap-1.5">
-          ${usersChips || '<p class="meta p-1">No users have this role.</p>'}
+          ${usersChips || `<p class="meta p-1">${t('accounts.role.no_users')}</p>`}
         </div>
       </div>
     </div>
@@ -533,17 +533,17 @@ function _renderRoleDetail(el, role) {
 
   const _delRoleBtn = /** @type {HTMLButtonElement|null} */ (el.querySelector('.js-delete-role'));
   _delRoleBtn?.addEventListener('click', async () => {
-    if (!(await openConfirm({ title: 'Delete role', message: `Delete role "${role.slug}"? This cannot be undone.`, danger: true }))) return;
+    if (!(await openConfirm({ title: t('accounts.role.delete.title'), message: t('accounts.role.delete.message', { slug: role.slug }), danger: true }))) return;
     if (_delRoleBtn) _delRoleBtn.disabled = true;
     try {
       await api.adminDeleteRole(role.slug);
-      showToast(`Role "${role.slug}" deleted.`);
+      showToast(t('accounts.role.deleted', { slug: role.slug }));
       await _reload();
       _selected = null;
       _rerenderList();
       if (_detailEl) _renderDetail(_detailEl);
     } catch (e) {
-      showToast(e?.message ?? 'Failed to delete role.', { type: 'error' });
+      showToast(e?.message ?? t('accounts.role.delete.failed'), { type: 'error' });
       if (_delRoleBtn) _delRoleBtn.disabled = false;
     }
   });
@@ -585,10 +585,10 @@ function _showUserModal(user, onSaved) {
       setRoles(prev => prev.includes(slug) ? prev.filter(r => r !== slug) : [...prev, slug]);
 
     const save = async () => {
-      if (!username.trim()) { setError('Username is required.'); return; }
-      if (!email.trim())    { setError('Email is required.'); return; }
-      if (!isEdit && !password) { setError('Password is required.'); return; }
-      if (!isEdit && password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+      if (!username.trim()) { setError(t('accounts.modal.user.error.username')); return; }
+      if (!email.trim())    { setError(t('accounts.modal.user.error.email')); return; }
+      if (!isEdit && !password) { setError(t('accounts.modal.user.error.password')); return; }
+      if (!isEdit && password.length < 8) { setError(t('accounts.modal.user.error.password_short')); return; }
       setSaving(true); setError('');
       try {
         if (isEdit) {
@@ -600,57 +600,57 @@ function _showUserModal(user, onSaved) {
           const cur = user.roles ?? [];
           for (const r of roles) if (!cur.includes(r)) await api.adminGrantRole(user.id, r);
           for (const r of cur)   if (!roles.includes(r)) await api.adminRevokeRole(user.id, r);
-          showToast('User updated.');
+          showToast(t('accounts.modal.user.updated'));
         } else {
           const created = await api.adminCreateUser({ username: username.trim(), email: email.trim(), password, roles });
-          showToast(`User "${created.username}" created.`);
+          showToast(t('accounts.modal.user.created', { username: created.username }));
         }
         onClose();
         await onSaved();
       } catch (e) {
-        showToast(e?.message ?? 'Failed to save.', { type: 'error' });
+        showToast(e?.message ?? t('accounts.save.failed'), { type: 'error' });
         setSaving(false);
       }
     };
 
     return html`
-      <${Modal} open=${true} onClose=${onClose} title=${isEdit ? `Edit ${user.username}` : 'Add user'}
+      <${Modal} open=${true} onClose=${onClose} title=${isEdit ? t('accounts.modal.user.edit', { username: user.username }) : t('accounts.modal.user.add')}
         footer=${html`
-          <button class="btn-ghost btn-sm" onClick=${onClose}>Cancel</button>
+          <button class="btn-ghost btn-sm" onClick=${onClose}>${t('common.cancel')}</button>
           <button class="btn-primary btn-sm" onClick=${save} disabled=${saving}>
-            ${saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create user'}
+            ${saving ? t('common.saving') : isEdit ? t('accounts.modal.save') : t('accounts.modal.user.create')}
           </button>
         `}
       >
         <div class="flex flex-col gap-4">
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="modal-username">Username</label>
+            <label class="text-sm font-medium text-text" for="modal-username">${t('accounts.user.username')}</label>
             <input id="modal-username" type="text" class="input" value=${username}
               onInput=${(e) => setUsername(e.target.value)} autocomplete="off" />
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="modal-email">Email</label>
+            <label class="text-sm font-medium text-text" for="modal-email">${t('accounts.user.email')}</label>
             <input id="modal-email" type="email" class="input" value=${email}
               onInput=${(e) => setEmail(e.target.value)} />
           </div>
           ${!isEdit && html`
             <div class="flex flex-col gap-1.5">
-              <label class="text-sm font-medium text-text" for="modal-password">Password</label>
+              <label class="text-sm font-medium text-text" for="modal-password">${t('accounts.modal.user.password')}</label>
               <input id="modal-password" type="password" class="input" value=${password}
-                onInput=${(e) => setPassword(e.target.value)} autocomplete="new-password" placeholder="Min 8 characters" />
+                onInput=${(e) => setPassword(e.target.value)} autocomplete="new-password" placeholder=${t('accounts.modal.user.password.placeholder')} />
             </div>
           `}
           ${isEdit && html`
             <div class="flex flex-col gap-1.5">
-              <label class="text-sm font-medium text-text">Status</label>
+              <label class="text-sm font-medium text-text">${t('accounts.user.status')}</label>
               <label class="flex items-center gap-2 text-sm text-text cursor-pointer">
                 <input type="checkbox" checked=${isActive} onChange=${(e) => setIsActive(e.target.checked)} />
-                Active
+                ${t('accounts.modal.user.active')}
               </label>
             </div>
           `}
           <div class="flex flex-col gap-1.5">
-            <span class="text-sm font-medium text-text">Roles</span>
+            <span class="text-sm font-medium text-text">${t('accounts.user.roles')}</span>
             <div class="flex flex-col gap-2">
               ${_roles.map(r => html`
                 <label key=${r.slug} class="flex items-center gap-2 text-sm text-text cursor-pointer">
@@ -696,47 +696,47 @@ function _showRoleModal(role, onSaved) {
         const desc = description.trim() || null;
         if (isEdit) {
           await api.adminUpdateRole(role.slug, { description: desc ?? undefined, permissions: perms });
-          showToast(`Role "${role.slug}" updated.`);
+          showToast(t('accounts.modal.role.updated', { slug: role.slug }));
         } else {
           const s = slug.trim();
-          if (!s) { setError('Slug is required.'); setSaving(false); return; }
+          if (!s) { setError(t('accounts.modal.role.error.slug')); setSaving(false); return; }
           await api.adminCreateRole({ slug: s, description: desc ?? undefined, permissions: perms });
-          showToast(`Role "${s}" created.`);
+          showToast(t('accounts.modal.role.created', { slug: s }));
         }
         onClose();
         await onSaved();
       } catch (e) {
-        showToast(e?.message ?? 'Failed to save.', { type: 'error' });
+        showToast(e?.message ?? t('accounts.save.failed'), { type: 'error' });
         setSaving(false);
       }
     };
 
     return html`
       <${Modal} open=${true} onClose=${onClose}
-        title=${isEdit ? `Edit role: ${role.slug}` : 'Add role'}
+        title=${isEdit ? t('accounts.modal.role.edit', { slug: role.slug }) : t('accounts.modal.role.add')}
         footer=${html`
-          <button class="btn-ghost btn-sm" onClick=${onClose}>Cancel</button>
+          <button class="btn-ghost btn-sm" onClick=${onClose}>${t('common.cancel')}</button>
           <button class="btn-primary btn-sm" onClick=${save} disabled=${saving}>
-            ${saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create role'}
+            ${saving ? t('common.saving') : isEdit ? t('accounts.modal.save') : t('accounts.modal.role.create')}
           </button>
         `}
       >
         <div class="flex flex-col gap-4">
           ${!isEdit && html`
             <div class="flex flex-col gap-1.5">
-              <label class="text-sm font-medium text-text" for="modal-role-slug">Slug</label>
+              <label class="text-sm font-medium text-text" for="modal-role-slug">${t('accounts.modal.role.slug')}</label>
               <input id="modal-role-slug" type="text" class="input font-mono"
                 value=${slug} onInput=${(e) => setSlug(e.target.value)}
-                placeholder="e.g. moderator" autocomplete="off" />
+                placeholder=${t('accounts.modal.role.slug.placeholder')} autocomplete="off" />
             </div>
           `}
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="modal-role-desc">Description</label>
+            <label class="text-sm font-medium text-text" for="modal-role-desc">${t('accounts.modal.role.desc')}</label>
             <input id="modal-role-desc" type="text" class="input" value=${description}
-              onInput=${(e) => setDesc(e.target.value)} placeholder="Short description" />
+              onInput=${(e) => setDesc(e.target.value)} placeholder=${t('accounts.modal.role.desc.placeholder')} />
           </div>
           <div class="flex flex-col gap-1.5">
-            <span class="text-sm font-medium text-text">Permissions</span>
+            <span class="text-sm font-medium text-text">${t('accounts.modal.role.perms')}</span>
             <div class="flex flex-col gap-1.5">
               ${ALL_PERMISSIONS.map(perm => html`
                 <label key=${perm} class="flex items-center gap-2 text-sm text-text cursor-pointer">

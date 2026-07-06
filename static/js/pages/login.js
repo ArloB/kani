@@ -3,17 +3,18 @@
 
 import { iconX } from '../icons.js';
 import { getPasswordResetEnabled, getRegistrationEnabled } from '../api.js';
+import { t } from '../i18n.js';
 
 /** @param {HTMLElement} container */
 export function init(container) {
-  document.title = 'Login - Kani';
+  document.title = t('auth.login.page_title');
 
   container.innerHTML = `
     <div class="min-h-screen flex items-center justify-center p-4 bg-bg">
       <div class="w-full max-w-sm bg-surface rounded-2xl shadow-lg border border-border p-8 flex flex-col gap-6">
         <div class="text-center flex flex-col gap-1">
           <h1 class="text-2xl font-bold text-text">Kani</h1>
-          <p class="text-sm text-text-muted">Sign in to continue</p>
+          <p class="text-sm text-text-muted">${t('auth.login.subtitle')}</p>
         </div>
 
         <div
@@ -28,7 +29,7 @@ export function init(container) {
 
         <form class="flex flex-col gap-4" id="login-form" novalidate>
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="login-username">Username</label>
+            <label class="text-sm font-medium text-text" for="login-username">${t('auth.login.username')}</label>
             <input
               id="login-username"
               class="input"
@@ -41,7 +42,7 @@ export function init(container) {
             />
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="login-password">Password</label>
+            <label class="text-sm font-medium text-text" for="login-password">${t('auth.login.password')}</label>
             <input
               id="login-password"
               class="input"
@@ -52,13 +53,13 @@ export function init(container) {
               aria-describedby="login-error"
             />
           </div>
-          <button type="submit" class="btn-primary w-full h-11 mt-2" id="login-submit">Sign in</button>
+          <button type="submit" class="btn-primary w-full h-11 mt-2" id="login-submit">${t('auth.login.submit')}</button>
         </form>
         <p class="text-center text-sm text-text-muted hidden" id="login-forgot-link">
-          <a href="/forgot-password" class="text-accent hover:underline">Forgot password?</a>
+          <a href="/forgot-password" class="text-accent hover:underline">${t('auth.login.forgot_password')}</a>
         </p>
         <p class="text-center text-sm text-text-muted hidden" id="login-register-link">
-          Don't have an account? <a href="/register" class="text-accent hover:underline">Create one</a>
+          ${t('auth.login.no_account')} <a href="/register" class="text-accent hover:underline">${t('auth.login.create')}</a>
         </p>
       </div>
     </div>
@@ -69,7 +70,6 @@ export function init(container) {
   const errBox = /** @type {HTMLElement}       */ (container.querySelector('#login-error'));
   const errMsg = /** @type {HTMLElement}       */ (container.querySelector('#login-error-msg'));
 
-  // Show register link if registration is enabled
   getRegistrationEnabled()
     .then(d => {
       if (d?.enabled) {
@@ -78,7 +78,6 @@ export function init(container) {
     })
     .catch(() => {});
 
-  // Show forgot password link if password reset is enabled
   getPasswordResetEnabled()
     .then(d => {
       if (d?.enabled) {
@@ -92,7 +91,7 @@ export function init(container) {
     errBox.classList.add('hidden');
     errBox.classList.remove('flex');
     btn.disabled = true;
-    btn.textContent = 'Signing in…';
+    btn.textContent = t('auth.login.submitting');
 
     const username = /** @type {HTMLInputElement} */ (container.querySelector('#login-username')).value;
     const password = /** @type {HTMLInputElement} */ (container.querySelector('#login-password')).value;
@@ -115,22 +114,22 @@ export function init(container) {
 
       const data = await res.json().catch(() => ({}));
       const msg = res.status === 401
-        ? 'Invalid username or password.'
-        : (data.error ?? 'Something went wrong. Please try again.');
+        ? t('auth.login.error.invalid')
+        : (data.error ?? t('auth.login.error.unknown'));
 
       errMsg.textContent = msg;
       errBox.classList.remove('hidden');
       errBox.classList.add('flex');
     } catch (/** @type {any} */ err) {
       errMsg.textContent = err?.name === 'TimeoutError'
-        ? 'Server is taking too long to respond. Please try again.'
-        : 'Could not reach the server. Please try again.';
+        ? t('auth.error.server_slow')
+        : t('auth.error.network');
       errBox.classList.remove('hidden');
       errBox.classList.add('flex');
     } finally {
       clearTimeout(timer);
       btn.disabled = false;
-      btn.textContent = 'Sign in';
+      btn.textContent = t('auth.login.submit');
     }
   });
 }
