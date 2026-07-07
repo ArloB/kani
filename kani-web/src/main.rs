@@ -460,7 +460,9 @@ async fn main() {
             header::CONTENT_SECURITY_POLICY,
             {
                 let script_src = if cfg!(debug_assertions) {
-                    "script-src 'self' 'wasm-unsafe-eval' 'sha256-BJKz37AmPw+fUEipsvCRxBFhDsl5WKhFeDeCFQe5hGY='"
+                    // Two hashes: the importmap script, then the FOUC theme-application
+                    // script in index.html. Recompute (sha256, base64) if either changes.
+                    "script-src 'self' 'wasm-unsafe-eval' 'sha256-BJKz37AmPw+fUEipsvCRxBFhDsl5WKhFeDeCFQe5hGY=' 'sha256-a8Yu3uMo0VtuaKAhlOI+lhOQMvvd9KUuF32GGtk/iDw='"
                 } else {
                     "script-src 'self' 'wasm-unsafe-eval'"
                 };
