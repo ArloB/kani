@@ -11,6 +11,7 @@ import { setPageHeader, clearPageHeader } from '../../components/app-header.js';
 import { startLoading, finishLoading } from '../../components/page-loading-bar.js';
 import { createErrorState } from '../../components/error-state.js';
 import { iconDownload } from '../../icons.js';
+import { t } from '../../i18n.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -45,8 +46,8 @@ export async function init(container) {
   if (!hasPermission('admin:view_logs')) {
     container.innerHTML = `
       <div class="flex flex-col items-center justify-center gap-3 py-20 text-text-muted">
-        <p class="text-base font-medium text-text">Access denied</p>
-        <p class="text-sm">You do not have permission to view logs.</p>
+        <p class="text-base font-medium text-text">${escapeHtml(t('logs.access_denied'))}</p>
+        <p class="text-sm">${escapeHtml(t('logs.access_denied.desc'))}</p>
       </div>
     `;
     return;
@@ -54,11 +55,11 @@ export async function init(container) {
 
   const downloadBtn = document.createElement('button');
   downloadBtn.className = 'btn-secondary btn-sm flex items-center gap-1.5';
-  downloadBtn.innerHTML = `<span class="icon-xs">${iconDownload}</span>Download`;
+  downloadBtn.innerHTML = `<span class="icon-xs">${iconDownload}</span>${escapeHtml(t('logs.download'))}`;
   downloadBtn.addEventListener('click', _handleDownload);
 
   setPageHeader({
-    crumbs: [{ label: 'Admin' }, { label: 'Logs' }],
+    crumbs: [{ label: t('admin.crumb') }, { label: t('logs.crumb') }],
     actions: downloadBtn,
   });
 
@@ -76,8 +77,8 @@ export async function init(container) {
 
   _destroyTabs = renderTabs(tabBar, {
     tabs: [
-      { id: 'app',   name: 'Application Logs' },
-      { id: 'audit', name: 'Audit Log' },
+      { id: 'app',   name: t('logs.tab.app') },
+      { id: 'audit', name: t('logs.tab.audit') },
     ],
     activeId: _activeTab,
     onSelect: (id) => {
@@ -141,13 +142,13 @@ function _mountAppLogsTab(container) {
         </label>
       `).join('')}
     </div>
-    <input type="search" id="log-search" placeholder="Search messages…"
+    <input type="search" id="log-search" placeholder="${escapeHtml(t('logs.filter.search_placeholder'))}"
       class="input input-sm flex-1 min-w-32" value="" />
-    <input type="date" id="log-from" class="input input-sm" title="From date" />
-    <input type="date" id="log-to" class="input input-sm" title="To date" />
+    <input type="date" id="log-from" class="input input-sm" title="${escapeHtml(t('logs.filter.from_date'))}" />
+    <input type="date" id="log-to" class="input input-sm" title="${escapeHtml(t('logs.filter.to_date'))}" />
     <label class="flex items-center gap-1.5 text-sm cursor-pointer select-none ml-auto">
       <input type="checkbox" id="log-live" class="accent-accent" />
-      <span>Live</span>
+      <span>${t('logs.filter.live')}</span>
     </label>
   `;
   root.appendChild(filterBar);
@@ -212,7 +213,7 @@ function _mountAppLogsTab(container) {
     });
     _sse.onerror = () => {
       if (_sse?.readyState === EventSource.CLOSED) {
-        showToast('Live log stream disconnected.', 'warn');
+        showToast(t('logs.sse.disconnected'), 'warn');
       }
     };
   }
@@ -237,7 +238,7 @@ function _mountAppLogsTab(container) {
         logList.appendChild(_buildLogRow(entry));
       }
       if (!res.entries?.length) {
-        logList.innerHTML = `<div class="px-4 py-8 text-center text-text-muted text-sm">No log entries found.</div>`;
+        logList.innerHTML = `<div class="px-4 py-8 text-center text-text-muted text-sm">${t('logs.app.empty')}</div>`;
       }
       destroyPagin?.();
       const totalPages = Math.ceil((res.total ?? 0) / PAGE_SIZE);
@@ -256,7 +257,7 @@ function _mountAppLogsTab(container) {
       }
     } catch (err) {
       logList.innerHTML = '';
-      createErrorState(logList, { message: err?.message ?? 'Failed to load logs' });
+      createErrorState(logList, { message: err?.message ?? t('logs.error.load_failed') });
     } finally {
       finishLoading();
     }
@@ -306,9 +307,9 @@ function _mountAuditTab(container) {
   const filterBar = document.createElement('div');
   filterBar.className = 'flex flex-wrap items-center gap-2 px-4 md:px-6 py-3 border-b border-border shrink-0';
   filterBar.innerHTML = `
-    <input type="search" id="audit-search" placeholder="Search action/details…" class="input input-sm flex-1 min-w-40" />
-    <input type="date" id="audit-from" class="input input-sm" title="From date" />
-    <input type="date" id="audit-to"   class="input input-sm" title="To date" />
+    <input type="search" id="audit-search" placeholder="${escapeHtml(t('logs.audit.search_placeholder'))}" class="input input-sm flex-1 min-w-40" />
+    <input type="date" id="audit-from" class="input input-sm" title="${escapeHtml(t('logs.filter.from_date'))}" />
+    <input type="date" id="audit-to"   class="input input-sm" title="${escapeHtml(t('logs.filter.to_date'))}" />
   `;
   root.appendChild(filterBar);
 
@@ -350,7 +351,7 @@ function _mountAuditTab(container) {
       tbody.innerHTML = '';
 
       if (!res.entries?.length) {
-        tbody.innerHTML = `<div class="px-4 py-8 text-center text-text-muted text-sm">No audit entries found.</div>`;
+        tbody.innerHTML = `<div class="px-4 py-8 text-center text-text-muted text-sm">${t('logs.audit.empty')}</div>`;
       } else {
         for (const e of res.entries) {
           tbody.appendChild(_buildAuditRow(e));
@@ -374,7 +375,7 @@ function _mountAuditTab(container) {
       }
     } catch (err) {
       tbody.innerHTML = '';
-      createErrorState(tbody, { message: err?.message ?? 'Failed to load audit log' });
+      createErrorState(tbody, { message: err?.message ?? t('logs.error.audit_load_failed') });
     } finally {
       finishLoading();
     }
@@ -401,7 +402,7 @@ function _buildAuditRow(entry) {
     <span class="shrink-0 font-medium w-24 truncate" title="${escapeHtml(entry.username ?? '')}">${escapeHtml(entry.username ?? '—')}</span>
     <span class="shrink-0 text-accent w-40 truncate" title="${escapeHtml(entry.action ?? '')}">${escapeHtml(entry.action ?? '')}</span>
     <span class="shrink-0 text-text-muted w-32 truncate" title="${escapeHtml(entry.target ?? '')}">${escapeHtml(entry.target ?? '')}</span>
-    ${entry.details ? `<details class="flex-1 min-w-0"><summary class="cursor-pointer text-text-muted">details</summary><pre class="text-xs mt-1 whitespace-pre-wrap break-all">${escapeHtml(entry.details)}</pre></details>` : ''}
+    ${entry.details ? `<details class="flex-1 min-w-0"><summary class="cursor-pointer text-text-muted">${t('logs.audit.details')}</summary><pre class="text-xs mt-1 whitespace-pre-wrap break-all">${escapeHtml(entry.details)}</pre></details>` : ''}
   `;
   return row;
 }

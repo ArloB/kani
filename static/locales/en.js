@@ -1730,4 +1730,23 @@ export default {
   'library.tachiyomi.success': 'Import complete: {count} manga added.',
 
   'common.unknown': 'unknown',
+
+  'admin.crumb': 'Admin',
+  'logs.crumb': 'Logs',
+  'logs.access_denied': 'Access denied',
+  'logs.access_denied.desc': 'You do not have permission to view logs.',
+  'logs.download': 'Download',
+  'logs.tab.app': 'Application Logs',
+  'logs.tab.audit': 'Audit Log',
+  'logs.filter.search_placeholder': 'Search messages…',
+  'logs.filter.from_date': 'From date',
+  'logs.filter.to_date': 'To date',
+  'logs.filter.live': 'Live',
+  'logs.sse.disconnected': 'Live log stream disconnected.',
+  'logs.app.empty': 'No log entries found.',
+  'logs.error.load_failed': 'Failed to load logs',
+  'logs.audit.search_placeholder': 'Search action/details…',
+  'logs.audit.empty': 'No audit entries found.',
+  'logs.error.audit_load_failed': 'Failed to load audit log',
+  'logs.audit.details': 'details',
 };
