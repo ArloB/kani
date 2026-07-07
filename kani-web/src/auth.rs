@@ -629,6 +629,7 @@ fn is_public_path(path: &str) -> bool {
         || path.starts_with("/rest/auth/")
         || path.starts_with("/js/")
         || path.starts_with("/css/")
+        || path.starts_with("/locales/")
         || path == "/favicon.ico"
         || path == "/health"
         || path == "/ready"
@@ -764,6 +765,7 @@ mod tests {
         assert!(is_public_path("/js/app.js"));
         assert!(is_public_path("/js/vendor/preact.module.js"));
         assert!(is_public_path("/css/main.css"));
+        assert!(is_public_path("/locales/en.js"));
     }
 
     #[test]

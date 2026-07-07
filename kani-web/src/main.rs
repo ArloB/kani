@@ -435,6 +435,7 @@ async fn main() {
         .merge(health_router)
         .nest_service("/js", ServeDir::new(format!("{static_dir}/js")))
         .nest_service("/css", ServeDir::new(format!("{static_dir}/css")))
+        .nest_service("/locales", ServeDir::new(format!("{static_dir}/locales")))
         .fallback_service(ServeFile::new(index_html))
         .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
         .layer(auth_layer)
