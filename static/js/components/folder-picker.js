@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'preact/hooks';
 import htm from 'htm';
 import { Modal } from './modal.js';
 import * as api from '../api.js';
+import { t } from '../i18n.js';
 
 const html = htm.bind(h);
 
@@ -40,7 +41,7 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
       setSegments(result.segments ?? []);
       setDrives(result.drives ?? []);
     } catch (/** @type {any} */ e) {
-      setError(e?.message ?? 'Could not read directory');
+      setError(e?.message ?? t('folder_picker.error.read_dir'));
     } finally {
       setLoading(false);
     }
@@ -74,27 +75,27 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
       setNewFolderName('');
       await load(result.path);
     } catch (/** @type {any} */ e) {
-      setCreateError(e?.message ?? 'Could not create folder');
+      setCreateError(e?.message ?? t('folder_picker.error.create_folder'));
     } finally {
       setCreating(false);
     }
   }
 
   const footer = html`
-    <button type="button" class="btn-ghost btn-sm" onClick=${onClose}>Cancel</button>
+    <button type="button" class="btn-ghost btn-sm" onClick=${onClose}>${t('common.cancel')}</button>
     <button type="button" class="btn-primary btn-sm" onClick=${() => onSelect(selectedPath)}>
-      Select
+      ${t('folder_picker.select')}
     </button>
   `;
 
   return html`
-    <${Modal} open=${open} onClose=${onClose} title="Browse for folder" wide=${true} footer=${footer}>
-      ${loading && html`<p class="text-sm text-text-muted py-2">Loading…</p>`}
+    <${Modal} open=${open} onClose=${onClose} title=${t('folder_picker.title')} wide=${true} footer=${footer}>
+      ${loading && html`<p class="text-sm text-text-muted py-2">${t('common.loading')}</p>`}
       ${error && html`<p class="text-sm text-danger py-2">${error}</p>`}
 
       ${/* Drives (Windows only, shown at root level) */ drives.length > 0 && html`
         <div class="mb-3">
-          <p class="text-xs text-text-muted mb-1 uppercase tracking-wide">Drives</p>
+          <p class="text-xs text-text-muted mb-1 uppercase tracking-wide">${t('folder_picker.drives')}</p>
           <div class="flex flex-wrap gap-2">
             ${drives.map(d => html`
               <button
@@ -123,7 +124,7 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
       ${/* Directory list */ !loading && html`
         <div class="border border-border rounded-lg overflow-hidden mb-3">
           ${dirs.length === 0 && html`
-            <p class="text-sm text-text-muted px-3 py-2">No subdirectories</p>
+            <p class="text-sm text-text-muted px-3 py-2">${t('folder_picker.no_subdirs')}</p>
           `}
           ${dirs.map(dir => html`
             <button
@@ -149,7 +150,7 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
         <input
           type="text"
           class="input text-sm flex-1"
-          placeholder="New folder name"
+          placeholder=${t('folder_picker.new_folder_placeholder')}
           value=${newFolderName}
           onInput=${(/** @type {any} */ e) => { setNewFolderName(e.target.value); setCreateError(null); }}
           onKeyDown=${(/** @type {any} */ e) => { if (e.key === 'Enter') handleCreate(); }}
@@ -160,12 +161,12 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
           class="btn-ghost btn-sm"
           onClick=${handleCreate}
           disabled=${creating || !newFolderName.trim()}
-        >${creating ? 'Creating…' : '+ New folder'}</button>
+        >${creating ? t('folder_picker.creating') : t('folder_picker.new_folder')}</button>
       </div>
       ${createError && html`<p class="text-xs text-danger mt-1">${createError}</p>`}
 
       <div class="mt-4 pt-3 border-t border-border-subtle">
-        <p class="text-xs text-text-muted">Selected:</p>
+        <p class="text-xs text-text-muted">${t('folder_picker.selected')}</p>
         <p class="text-sm font-mono text-text break-all">${selectedPath}</p>
       </div>
     </${Modal}>

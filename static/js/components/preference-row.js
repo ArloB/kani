@@ -8,6 +8,7 @@ import * as api from '../api.js';
 import { iconX, iconChevronRight, iconChevronLeft } from '../icons.js';
 import { Icon } from './icon.js';
 import { getJsonSafe } from '../utils.js';
+import { t } from '../i18n.js';
 import { Combobox } from './combobox.js';
 import { updateState } from '../state.js';
 const html = htm.bind(h);
@@ -193,7 +194,7 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
       />`;
   } else if (kindName === 'MultiValueList') {
     const list /** @type {string[]} */ = getJsonSafe(currentValue) || [];
-    const placeholder = selectOptions.find(o => o.label === 'placeholder')?.value ?? 'Add item…';
+    const placeholder = selectOptions.find(o => o.label === 'placeholder')?.value ?? t('pref_row.add_item_placeholder');
 
     if (onOpenDetail) {
       return html`
@@ -218,7 +219,7 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
               <span class="flex-1 text-sm text-text">${item}</span>
               <button
                 class="btn-icon w-8 h-8 text-text-muted"
-                aria-label=${'Remove ' + item}
+                aria-label=${t('pref_row.remove_item', { item })}
                 onClick=${async () => {
                   await api.removePreferenceItem(sourceId, key, item);
                   onValueChange(key, list.filter((_, j) => j !== i));
@@ -315,7 +316,7 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
 
   if (kindName === 'MultiValueList') {
     const list = /** @type {string[]} */ (getJsonSafe(currentValue) || []);
-    const placeholder = selectOptions.find(o => o.label === 'placeholder')?.value ?? 'Add item…';
+    const placeholder = selectOptions.find(o => o.label === 'placeholder')?.value ?? t('pref_row.add_item_placeholder');
     return html`
       <div class="flex flex-col gap-3 py-3">
         ${header}
@@ -325,7 +326,7 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
               <span class="flex-1 text-sm text-text">${item}</span>
               <button
                 class="btn-icon w-8 h-8 text-text-muted"
-                aria-label=${'Remove ' + item}
+                aria-label=${t('pref_row.remove_item', { item })}
                 onClick=${async () => {
                   await api.removePreferenceItem(sourceId, key, item);
                   onValueChange(key, list.filter((_, j) => j !== i));

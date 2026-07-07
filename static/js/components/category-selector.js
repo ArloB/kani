@@ -5,6 +5,7 @@ import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /**
@@ -29,7 +30,7 @@ export function CategorySelector({ mangaId }) {
           : [];
         setMemberIds(new Set(ids));
       })
-      .catch(() => setError('Failed to load categories'))
+      .catch(() => setError(t('category_selector.error.load_failed')))
       .finally(() => setLoading(false));
   }, [mangaId]);
 
@@ -41,19 +42,19 @@ export function CategorySelector({ mangaId }) {
       await api.setMangaCategories(mangaId, [...next]);
       setMemberIds(next);
     } catch {
-      setError('Failed to update categories');
+      setError(t('category_selector.error.update_failed'));
     } finally {
       setSaving(false);
     }
   }
 
-  if (loading) return html`<div class="flex flex-col gap-3"><p class="text-sm text-text-muted">Loading categories…</p></div>`;
+  if (loading) return html`<div class="flex flex-col gap-3"><p class="text-sm text-text-muted">${t('category_selector.loading')}</p></div>`;
   if (error) return html`<div class="flex flex-col gap-3"><p class="text-sm text-danger">${error}</p></div>`;
 
   if (allCategories.length === 0) {
     return html`
       <div class="flex flex-col gap-3">
-        <p class="text-sm text-text-muted">No categories yet. Create some in Settings.</p>
+        <p class="text-sm text-text-muted">${t('category_selector.empty')}</p>
       </div>
     `;
   }

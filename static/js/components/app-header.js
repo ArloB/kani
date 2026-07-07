@@ -2,6 +2,7 @@
 // Global app-shell header — mounted once by app.js, updated per-page via setPageHeader().
 
 import { navigate } from '../router.js';
+import { t } from '../i18n.js';
 
 /** @typedef {{ label: string, href?: string }} Crumb */
 /** @typedef {{ crumbs?: Crumb[], actions?: HTMLElement | HTMLElement[] | null }} HeaderState */
@@ -26,11 +27,11 @@ let _state = { crumbs: [], actions: null };
 export function mountAppHeader(container) {
   _headerEl = document.createElement('header');
   _headerEl.className = 'app-header';
-  _headerEl.setAttribute('aria-label', 'Page header');
+  _headerEl.setAttribute('aria-label', t('app_header.aria'));
 
   _breadcrumbSlot = document.createElement('nav');
   _breadcrumbSlot.className = 'breadcrumb';
-  _breadcrumbSlot.setAttribute('aria-label', 'Breadcrumb');
+  _breadcrumbSlot.setAttribute('aria-label', t('app_header.breadcrumb_aria'));
 
   _actionsSlot = document.createElement('div');
   _actionsSlot.className = 'header-actions';

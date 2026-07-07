@@ -1749,4 +1749,31 @@ export default {
   'logs.audit.empty': 'No audit entries found.',
   'logs.error.audit_load_failed': 'Failed to load audit log',
   'logs.audit.details': 'details',
+
+  'app_header.aria': 'Page header',
+  'app_header.breadcrumb_aria': 'Breadcrumb',
+
+  'activity_feed.empty': 'No recent activity.',
+  'activity_feed.load_more': 'Load more',
+  'activity_feed.time.now': 'now',
+  'activity_feed.time.yesterday': 'Yesterday',
+
+  'category_selector.loading': 'Loading categories…',
+  'category_selector.empty': 'No categories yet. Create some in Settings.',
+  'category_selector.error.load_failed': 'Failed to load categories',
+  'category_selector.error.update_failed': 'Failed to update categories',
+
+  'folder_picker.title': 'Browse for folder',
+  'folder_picker.select': 'Select',
+  'folder_picker.drives': 'Drives',
+  'folder_picker.no_subdirs': 'No subdirectories',
+  'folder_picker.new_folder_placeholder': 'New folder name',
+  'folder_picker.new_folder': '+ New folder',
+  'folder_picker.creating': 'Creating…',
+  'folder_picker.selected': 'Selected:',
+  'folder_picker.error.read_dir': 'Could not read directory',
+  'folder_picker.error.create_folder': 'Could not create folder',
+
+  'pref_row.remove_item': 'Remove {item}',
+  'pref_row.add_item_placeholder': 'Add item…',
 };

@@ -4,6 +4,7 @@
 import { h } from 'preact';
 import htm from 'htm';
 import { formatRelativeTime } from '../utils.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /**
@@ -21,7 +22,7 @@ export function ActivityFeed({ events, loading = false, error = null, hasMore = 
   }
 
   if (!loading && events.length === 0) {
-    return html`<p class="meta px-3 py-4">No recent activity.</p>`;
+    return html`<p class="meta px-3 py-4">${t('activity_feed.empty')}</p>`;
   }
 
   return html`
@@ -33,10 +34,10 @@ export function ActivityFeed({ events, loading = false, error = null, hasMore = 
           <span class="badge badge-muted shrink-0">${ev.kind}</span>
         </div>
       `)}
-      ${loading ? html`<p class="meta px-3 py-3">Loading…</p>` : null}
+      ${loading ? html`<p class="meta px-3 py-3">${t('common.loading')}</p>` : null}
       ${!loading && hasMore ? html`
         <button type="button" class="btn-ghost btn-sm w-full mt-2" onClick=${onLoadMore}>
-          Load more
+          ${t('activity_feed.load_more')}
         </button>
       ` : null}
     </div>
@@ -54,12 +55,12 @@ function _shortTime(isoDate) {
     if (isNaN(d.getTime())) return '';
     const diffMs = Date.now() - d.getTime();
     const diffMin = Math.floor(diffMs / 60000);
-    if (diffMin < 1)  return 'now';
+    if (diffMin < 1)  return t('activity_feed.time.now');
     if (diffMin < 60) return `${diffMin}m`;
     const diffHr = Math.floor(diffMin / 60);
     if (diffHr  < 24) return `${diffHr}h`;
     const diffDay = Math.floor(diffHr / 24);
-    if (diffDay === 1) return 'Yesterday';
+    if (diffDay === 1) return t('activity_feed.time.yesterday');
     if (diffDay < 7)   return `${diffDay}d`;
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   } catch { return ''; }
