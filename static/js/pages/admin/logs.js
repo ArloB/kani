@@ -257,7 +257,7 @@ function _mountAppLogsTab(container) {
       }
     } catch (err) {
       logList.innerHTML = '';
-      createErrorState(logList, { message: err?.message ?? t('logs.error.load_failed') });
+      logList.appendChild(createErrorState({ message: err?.message ?? t('logs.error.load_failed') }));
     } finally {
       finishLoading();
     }
@@ -375,7 +375,7 @@ function _mountAuditTab(container) {
       }
     } catch (err) {
       tbody.innerHTML = '';
-      createErrorState(tbody, { message: err?.message ?? t('logs.error.audit_load_failed') });
+      tbody.appendChild(createErrorState({ message: err?.message ?? t('logs.error.audit_load_failed') }));
     } finally {
       finishLoading();
     }

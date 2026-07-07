@@ -2,6 +2,7 @@
 
 import { getState, setState } from './state.js';
 import { showApiError } from './components/toast.js';
+import { showConfirm } from './components/modal.js';
 
 /**
  * Returns a debounced version of `fn` that delays invocation by `ms`.
@@ -128,83 +129,15 @@ export function resetAllConfirmDialogs() {
 }
 
 /**
- * Shows a confirmation modal dialog and resolves with true (confirmed) or false (cancelled).
- * Pass `rememberKey` to enable a "Don't ask again" checkbox backed by localStorage.
- * @param {{ title?: string, message: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, rememberKey?: string }} opts
+ * Shows a confirmation dialog (options-object form for backward compatibility).
+ * Delegates to `showConfirm` in `components/modal.js`.
+ * @param {{ title?: string, message?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, rememberKey?: string }} opts
  * @returns {Promise<boolean>}
  */
-export function confirmDialog({ title = 'Are you sure?', message, confirmLabel = 'Confirm', cancelLabel = 'Cancel', danger = false, rememberKey }) {
-  if (rememberKey && localStorage.getItem(_CONFIRM_SKIP_PREFIX + rememberKey) === '1') {
-    return Promise.resolve(true);
-  }
-
-  return new Promise(resolve => {
-    const titleId = 'confirm-dialog-title-' + Math.random().toString(36).slice(2);
-    const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 bg-scrim z-top flex items-center justify-center p-4';
-    overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-modal', 'true');
-    overlay.setAttribute('aria-labelledby', titleId);
-
-    const rememberHtml = rememberKey
-      ? `<label class="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none">
-           <input type="checkbox" class="js-remember accent-accent" />
-           Don't ask again
-         </label>`
-      : '';
-
-    const dialog = document.createElement('div');
-    dialog.className = 'bg-surface rounded-xl shadow-xl w-full max-w-sm flex flex-col overflow-hidden';
-    dialog.innerHTML = `
-      <div class="px-6 pt-5 pb-4 flex flex-col gap-2">
-        <h2 id="${titleId}" class="text-base font-semibold text-text">${escapeHtml(title)}</h2>
-        <p class="text-sm text-text-muted">${escapeHtml(message)}</p>
-      </div>
-      <div class="flex items-center justify-between gap-2 px-6 py-4 border-t border-border-subtle">
-        <div>${rememberHtml}</div>
-        <div class="flex items-center gap-2">
-          <button type="button" class="btn-ghost js-cancel">${escapeHtml(cancelLabel)}</button>
-          <button type="button" class="${danger ? 'btn-danger' : 'btn-primary'} js-confirm">${escapeHtml(confirmLabel)}</button>
-        </div>
-      </div>
-    `;
-
-    overlay.appendChild(dialog);
-
-    const _trigger = /** @type {HTMLElement|null} */ (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    const close = (/** @type {boolean} */ result) => {
-      if (result && rememberKey) {
-        const cb = /** @type {HTMLInputElement|null} */ (dialog.querySelector('.js-remember'));
-        if (cb?.checked) localStorage.setItem(_CONFIRM_SKIP_PREFIX + rememberKey, '1');
-      }
-      overlay.remove();
-      if (_trigger) _trigger.focus();
-      resolve(result);
-    };
-
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
-    overlay.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); close(false); return; }
-      if (e.key === 'Tab') {
-        const focusable = /** @type {HTMLElement[]} */ ([...dialog.querySelectorAll('button, input')]);
-        if (focusable.length < 2) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey ? document.activeElement === first : document.activeElement === last) {
-          e.preventDefault();
-          (e.shiftKey ? last : first).focus();
-        }
-      }
-    });
-    dialog.querySelector('.js-cancel')?.addEventListener('click', () => close(false));
-    dialog.querySelector('.js-confirm')?.addEventListener('click', () => close(true));
-
-    document.body.appendChild(overlay);
-    setTimeout(() => /** @type {HTMLElement|null} */ (dialog.querySelector('.js-confirm'))?.focus(), 10);
-  });
+export function confirmDialog({ title, message = '', confirmLabel, cancelLabel, danger, rememberKey } = {}) {
+  return showConfirm(message, { title, confirmLabel, cancelLabel, danger, rememberKey });
 }
 
-/** Preferred alias for new call sites — same promise-returning, focus-trapped confirm dialog. */
 export const openConfirm = confirmDialog;
 
 /**

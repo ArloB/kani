@@ -109,7 +109,7 @@ async function _load() {
     _renderWidgets(stats);
   } catch (err) {
     _contentEl.innerHTML = '';
-    createErrorState(_contentEl, { message: err?.message ?? 'Failed to load statistics' });
+    _contentEl.appendChild(createErrorState({ message: err?.message ?? 'Failed to load statistics' }));
   } finally {
     finishLoading();
   }

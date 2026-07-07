@@ -1426,7 +1426,7 @@ function _showManageSearchesDialog(parentEl, searches) {
       delBtn.setAttribute('aria-label', t('common.delete'));
       delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
       delBtn.addEventListener('click', async () => {
-        const ok = await confirmDialog({ title: t('common.delete'), body: t('saved_searches.delete.confirm', { name: s.name }), confirmLabel: t('common.delete') });
+        const ok = await confirmDialog({ title: t('common.delete'), message: t('saved_searches.delete.confirm', { name: s.name }), confirmLabel: t('common.delete') });
         if (!ok) return;
         delBtn.disabled = true;
         try {

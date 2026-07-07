@@ -130,6 +130,7 @@ export default {
   'repo.key_changed.new': 'New fingerprint',
   'repo.key_changed.trust': 'Trust new key',
   'repo.extensions.empty': 'No extensions in this repository.',
+  'repo.extensions.load_failed': 'Failed to load extensions.',
   'repo.extensions.install': 'Install',
   'repo.extensions.installing': 'Installing…',
   'repo.extensions.update': 'Update',
@@ -1526,6 +1527,10 @@ export default {
 
   'filter.panel.label': 'Filters',
   'filter.panel.title': 'Filters',
+  'filter.apply': 'Apply',
+  'filter.reset': 'Reset',
+  'filter.any_option': '— Any —',
+  'filter.default_option': '— Default —',
 
   'sources.crumb': 'Sources',
   'sources.tab.extensions': 'Extensions',
@@ -1776,4 +1781,8 @@ export default {
 
   'pref_row.remove_item': 'Remove {item}',
   'pref_row.add_item_placeholder': 'Add item…',
+
+  'confirm.title': 'Are you sure?',
+  'confirm.confirm': 'Confirm',
+  'common.dont_ask_again': "Don't ask again",
 };

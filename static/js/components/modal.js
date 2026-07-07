@@ -2,13 +2,14 @@
 // Generic modal component — focus trap, escape-to-close, backdrop click.
 
 import { h, render } from 'preact';
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import htm from 'htm';
 import { iconX } from '../icons.js';
 import { Icon } from './icon.js';
-import { confirmDialog } from '../utils.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
+
+const _SKIP_PREFIX = 'kani-confirm-skip-';
 
 /**
  * Modal component. Renders a centred overlay with a card.
@@ -110,20 +111,111 @@ export function mountIntoModalRoot(vnode) {
   return () => render(null, root);
 }
 
-// ── Imperative helpers ────────────────────────────────────────────────────────
+// ── Confirm dialog ────────────────────────────────────────────────────────────
 
 /**
- * Shows a confirm dialog. Returns a Promise resolving to true (confirmed) or
- * false (cancelled / Escape). Delegates to `confirmDialog` in utils.js so both
- * call paths share one implementation with full feature parity (danger,
- * rememberKey, cancelLabel, Tab-trap, Escape).
+ * @param {{
+ *   title: string,
+ *   message: string,
+ *   confirmLabel: string,
+ *   cancelLabel: string,
+ *   danger: boolean,
+ *   rememberKey?: string,
+ *   onResolve: (result: boolean) => void,
+ * }} props
+ */
+function ConfirmModal({ title, message, confirmLabel, cancelLabel, danger, rememberKey, onResolve }) {
+  const [remember, setRemember] = useState(false);
+  const confirmBtnRef = useRef(/** @type {HTMLButtonElement | null} */ (null));
+
+  useEffect(() => {
+    const id = setTimeout(() => confirmBtnRef.current?.focus(), 15);
+    return () => clearTimeout(id);
+  }, []);
+
+  function confirm() {
+    if (rememberKey && remember) {
+      localStorage.setItem(_SKIP_PREFIX + rememberKey, '1');
+    }
+    onResolve(true);
+  }
+
+  return html`
+    <${Modal}
+      open=${true}
+      title=${title}
+      onClose=${() => onResolve(false)}
+      footer=${html`
+        <div class="flex items-center w-full gap-2">
+          ${rememberKey && html`
+            <label class="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none mr-auto">
+              <input
+                type="checkbox"
+                class="accent-accent"
+                checked=${remember}
+                onChange=${(/** @type {any} */ e) => setRemember(e.target.checked)}
+              />
+              ${t('common.dont_ask_again')}
+            </label>
+          `}
+          <div class=${'flex items-center gap-2' + (rememberKey ? '' : ' ml-auto')}>
+            <button type="button" class="btn-ghost btn-sm" onClick=${() => onResolve(false)}>${cancelLabel}</button>
+            <button
+              type="button"
+              class=${(danger ? 'btn-danger' : 'btn-primary') + ' btn-sm'}
+              ref=${confirmBtnRef}
+              onClick=${confirm}
+            >${confirmLabel}</button>
+          </div>
+        </div>
+      `}
+    >
+      <p class="text-sm text-text-muted">${message}</p>
+    </${Modal}>
+  `;
+}
+
+/**
+ * Shows a confirm dialog. Returns a Promise resolving to true (confirmed) or false (cancelled).
+ * Pass `rememberKey` to enable a "Don't ask again" checkbox backed by localStorage.
  * @param {string} message
- * @param {{ title?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, rememberKey?: string }} [opts]
+ * @param {{
+ *   title?: string,
+ *   confirmLabel?: string,
+ *   cancelLabel?: string,
+ *   danger?: boolean,
+ *   rememberKey?: string,
+ * }} [opts]
  * @returns {Promise<boolean>}
  */
 export function showConfirm(message, opts = {}) {
-  return confirmDialog({ message, ...opts });
+  const title = opts.title ?? t('confirm.title');
+  const confirmLabel = opts.confirmLabel ?? t('confirm.confirm');
+  const cancelLabel = opts.cancelLabel ?? t('common.cancel');
+  const danger = opts.danger ?? false;
+  const { rememberKey } = opts;
+
+  if (rememberKey && localStorage.getItem(_SKIP_PREFIX + rememberKey) === '1') {
+    return Promise.resolve(true);
+  }
+
+  return new Promise(resolve => {
+    let cleanup = () => {};
+    cleanup = mountIntoModalRoot(html`
+      <${ConfirmModal}
+        title=${title}
+        message=${message}
+        confirmLabel=${confirmLabel}
+        cancelLabel=${cancelLabel}
+        danger=${danger}
+        rememberKey=${rememberKey}
+        onResolve=${(/** @type {boolean} */ result) => { cleanup(); resolve(result); }}
+      />
+    `);
+  });
 }
+
+// ── Alert dialog ──────────────────────────────────────────────────────────────
 
 /**
  * @param {{ message: string, title?: string, closeLabel?: string, onClose: () => void }} props

@@ -1,68 +1,91 @@
 // @ts-check
-// Manage tab — Library section (refresh, auto-download, preferred-only).
 
+import { h, render } from 'preact';
+import { useState, useEffect } from 'preact/hooks';
+import htm from 'htm';
 import * as api from '../../api.js';
 import { hasPermission } from '../../state.js';
-import { mkCard, mkRow, mkItem } from './_shared.js';
 import { t } from '../../i18n.js';
+const html = htm.bind(h);
 
 /**
  * @param {HTMLElement} containerEl
  * @param {{ dbId: number, autoScan: boolean }} ctx
  */
 export function mountLibrarySettingsPanel(containerEl, ctx) {
-  const { dbId, autoScan } = ctx;
+  const mount = document.createElement('div');
+  containerEl.appendChild(mount);
+  render(html`<${LibrarySettingsPanel} dbId=${ctx.dbId} initialAutoScan=${ctx.autoScan} />`, mount);
+}
 
-  const card = mkCard();
+function ToggleRow({ label, desc, checked, onChange }) {
+  return html`
+    <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-medium text-text">${label}</p>
+          <p class="text-xs text-text-muted mt-0.5">${desc}</p>
+        </div>
+        <label class="kani-toggle cursor-pointer shrink-0">
+          <input type="checkbox" class="kani-toggle__input" checked=${checked} onChange=${onChange} />
+          <span class="kani-toggle__track"></span>
+        </label>
+      </div>
+    </div>
+  `;
+}
 
-  if (hasPermission('library:manage')) {
-    const toggle = document.createElement('label');
-    toggle.className = 'kani-toggle cursor-pointer';
-    toggle.innerHTML = `<input type="checkbox" class="kani-toggle__input" aria-label="${t('manga.settings.auto_scan')}"><span class="kani-toggle__track"></span>`;
-    const input = /** @type {HTMLInputElement} */ (toggle.querySelector('.kani-toggle__input'));
-    input.checked = autoScan;
-    input.addEventListener('change', async () => {
-      try { await api.toggleAutoScan(dbId, input.checked); } catch { input.checked = !input.checked; }
-    });
-    card.appendChild(mkItem(mkRow(t('manga.settings.auto_scan'), t('manga.settings.auto_scan.desc'), toggle)));
+function LibrarySettingsPanel({ dbId, initialAutoScan }) {
+  const [autoScan, setAutoScan] = useState(/** @type {boolean} */ (initialAutoScan));
+  const [autoDownload, setAutoDownload] = useState(false);
+  const [webhooks, setWebhooks] = useState(true);
+  const [preferredOnly, setPreferredOnly] = useState(true);
+
+  useEffect(() => {
+    api.getMangaDetails(dbId).then(res => {
+      if (res?.auto_download != null) setAutoDownload(res.auto_download);
+      if (res?.download_all_preferred_only != null) setPreferredOnly(res.download_all_preferred_only);
+    }).catch(() => {});
+    api.getMangaWebhookNotify(dbId).then(res => {
+      if (res?.enabled != null) setWebhooks(res.enabled);
+    }).catch(() => {});
+  }, [dbId]);
+
+  async function handleToggle(current, setter, apiFn) {
+    setter(!current);
+    try { await apiFn(!current); } catch { setter(current); }
   }
 
-  if (hasPermission('library:manage')) {
-    const toggle = document.createElement('label');
-    toggle.className = 'kani-toggle cursor-pointer';
-    toggle.innerHTML = `<input type="checkbox" class="kani-toggle__input" aria-label="${t('manga.settings.auto_download')}"><span class="kani-toggle__track"></span>`;
-    const input = /** @type {HTMLInputElement} */ (toggle.querySelector('.kani-toggle__input'));
-    api.getMangaDetails(dbId).then(res => { input.checked = res?.auto_download ?? false; }).catch(() => {});
-    input.addEventListener('change', async () => {
-      try { await api.toggleAutoDownload(dbId, input.checked); } catch { input.checked = !input.checked; }
-    });
-    card.appendChild(mkItem(mkRow(t('manga.settings.auto_download'), t('manga.settings.auto_download.desc'), toggle)));
-  }
+  const canManage = hasPermission('library:manage');
+  const canDownload = hasPermission('chapter:download');
+  if (!canManage && !canDownload) return null;
 
-  if (hasPermission('library:manage')) {
-    const toggle = document.createElement('label');
-    toggle.className = 'kani-toggle cursor-pointer';
-    toggle.innerHTML = `<input type="checkbox" class="kani-toggle__input" aria-label="${t('manga.settings.webhooks')}"><span class="kani-toggle__track"></span>`;
-    const input = /** @type {HTMLInputElement} */ (toggle.querySelector('.kani-toggle__input'));
-    input.checked = true;
-    api.getMangaWebhookNotify(dbId).then(res => { input.checked = res?.enabled ?? true; }).catch(() => {});
-    input.addEventListener('change', async () => {
-      try { await api.setMangaWebhookNotify(dbId, input.checked); } catch { input.checked = !input.checked; }
-    });
-    card.appendChild(mkItem(mkRow(t('manga.settings.webhooks'), t('manga.settings.webhooks.desc'), toggle)));
-  }
-
-  if (hasPermission('chapter:download')) {
-    const toggle = document.createElement('label');
-    toggle.className = 'kani-toggle cursor-pointer';
-    toggle.innerHTML = `<input type="checkbox" class="kani-toggle__input" aria-label="${t('manga.settings.preferred_only')}"><span class="kani-toggle__track"></span>`;
-    const input = /** @type {HTMLInputElement} */ (toggle.querySelector('.kani-toggle__input'));
-    api.getMangaDetails(dbId).then(res => { input.checked = res?.download_all_preferred_only ?? true; }).catch(() => {});
-    input.addEventListener('change', async () => {
-      try { await api.toggleDownloadAllPreferred(dbId, input.checked); } catch { input.checked = !input.checked; }
-    });
-    card.appendChild(mkItem(mkRow(t('manga.settings.preferred_only'), t('manga.settings.preferred_only.desc'), toggle)));
-  }
-
-  containerEl.appendChild(card);
+  return html`
+    <div class="bg-surface border border-border rounded-xl px-4 md:px-6 py-1">
+      ${canManage && html`<${ToggleRow}
+        label=${t('manga.settings.auto_scan')}
+        desc=${t('manga.settings.auto_scan.desc')}
+        checked=${autoScan}
+        onChange=${() => handleToggle(autoScan, setAutoScan, v => api.toggleAutoScan(dbId, v))}
+      />`}
+      ${canManage && html`<${ToggleRow}
+        label=${t('manga.settings.auto_download')}
+        desc=${t('manga.settings.auto_download.desc')}
+        checked=${autoDownload}
+        onChange=${() => handleToggle(autoDownload, setAutoDownload, v => api.toggleAutoDownload(dbId, v))}
+      />`}
+      ${canManage && html`<${ToggleRow}
+        label=${t('manga.settings.webhooks')}
+        desc=${t('manga.settings.webhooks.desc')}
+        checked=${webhooks}
+        onChange=${() => handleToggle(webhooks, setWebhooks, v => api.setMangaWebhookNotify(dbId, v))}
+      />`}
+      ${canDownload && html`<${ToggleRow}
+        label=${t('manga.settings.preferred_only')}
+        desc=${t('manga.settings.preferred_only.desc')}
+        checked=${preferredOnly}
+        onChange=${() => handleToggle(preferredOnly, setPreferredOnly, v => api.toggleDownloadAllPreferred(dbId, v))}
+      />`}
+    </div>
+  `;
 }

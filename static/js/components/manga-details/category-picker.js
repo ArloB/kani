@@ -1,52 +1,60 @@
 // @ts-check
-// Manage tab — Categories chip picker.
 
+import { h, render } from 'preact';
+import { useState } from 'preact/hooks';
+import htm from 'htm';
 import * as api from '../../api.js';
-import { createEmptyState } from '../empty-state.js';
-import { showApiError } from '../toast.js';
 import { t } from '../../i18n.js';
+import { EmptyState } from '../empty-state.js';
+import { showApiError } from '../toast.js';
+const html = htm.bind(h);
 
 /**
- * @param {HTMLElement} bodyEl  Card body element (already mounted by caller)
+ * @param {HTMLElement} bodyEl
  * @param {any[]} allCats
  * @param {any[]} mangaCats
  * @param {number} dbId
  */
 export function mountCategoryPicker(bodyEl, allCats, mangaCats, dbId) {
-  const memberIds = new Set((Array.isArray(mangaCats) ? mangaCats : []).map(c => c.id ?? c));
+  const mount = document.createElement('div');
+  bodyEl.appendChild(mount);
+  render(html`<${CategoryPicker} allCats=${allCats} mangaCats=${mangaCats} dbId=${dbId} />`, mount);
+}
+
+function CategoryPicker({ allCats, mangaCats, dbId }) {
   const all = Array.isArray(allCats) ? allCats : [];
+  const [memberIds, setMemberIds] = useState(
+    () => new Set((Array.isArray(mangaCats) ? mangaCats : []).map(c => c.id ?? c))
+  );
 
   if (all.length === 0) {
-    bodyEl.appendChild(createEmptyState({ title: t('manga.categories.empty') }));
-    return;
+    return html`<${EmptyState} title=${t('manga.categories.empty')} />`;
   }
 
-  const chips = document.createElement('div');
-  chips.className = 'flex flex-wrap gap-2 p-1';
-
-  const rerender = () => {
-    chips.innerHTML = '';
-    for (const cat of all) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = memberIds.has(cat.id) ? 'chip chip-active' : 'chip';
-      btn.textContent = cat.name;
-      btn.setAttribute('aria-pressed', String(memberIds.has(cat.id)));
-      btn.addEventListener('click', async () => {
-        const wasIn = memberIds.has(cat.id);
-        if (wasIn) memberIds.delete(cat.id); else memberIds.add(cat.id);
-        rerender();
-        try {
-          await api.setMangaCategories(dbId, [...memberIds]);
-        } catch (err) {
-          if (wasIn) memberIds.add(cat.id); else memberIds.delete(cat.id);
-          rerender();
-          showApiError(err);
-        }
-      });
-      chips.appendChild(btn);
+  async function handleToggle(catId) {
+    const wasIn = memberIds.has(catId);
+    const next = new Set(memberIds);
+    if (wasIn) next.delete(catId); else next.add(catId);
+    setMemberIds(next);
+    try {
+      await api.setMangaCategories(dbId, [...next]);
+    } catch (err) {
+      setMemberIds(memberIds);
+      showApiError(err);
     }
-  };
-  rerender();
-  bodyEl.appendChild(chips);
+  }
+
+  return html`
+    <div class="flex flex-wrap gap-2 p-1">
+      ${all.map(cat => html`
+        <button
+          key=${cat.id}
+          type="button"
+          class=${memberIds.has(cat.id) ? 'chip chip-active' : 'chip'}
+          aria-pressed=${memberIds.has(cat.id)}
+          onClick=${() => handleToggle(cat.id)}
+        >${cat.name}</button>
+      `)}
+    </div>
+  `;
 }

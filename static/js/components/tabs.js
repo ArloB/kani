@@ -1,5 +1,8 @@
 // @ts-check
-// Generic tab bar component — renders a horizontal tab strip.
+import { h, render } from 'preact';
+import htm from 'htm';
+
+const html = htm.bind(h);
 
 /**
  * @template T
@@ -7,8 +10,52 @@
  */
 
 /**
- * Renders a generic tab bar into `container`.
- *
+ * @template T
+ * @param {{
+ *   tabs: Tab<T>[],
+ *   activeId: T,
+ *   onSelect: (id: T) => void,
+ *   variant?: 'underline' | 'pill',
+ *   stretch?: boolean,
+ * }} props
+ */
+export function Tabs({ tabs, activeId, onSelect, variant = 'underline', stretch = false }) {
+  const barClass = variant === 'pill'
+    ? 'flex gap-1 p-1 rounded-lg bg-surface-2 border border-border'
+    : 'flex gap-1 overflow-x-auto [scrollbar-width:none] border-b border-border';
+
+  return html`
+    <div class=${barClass} role="tablist">
+      ${tabs.map(tab => {
+        const isActive = tab.id === activeId;
+        let cls = 'flex items-center gap-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+        if (variant === 'pill') {
+          cls += ' px-3 py-1.5 rounded-md flex-1 justify-center'
+            + (isActive ? ' bg-surface text-text shadow-sm' : ' text-text-muted hover:text-text');
+        } else {
+          cls += ' px-4 py-2 rounded-t-md'
+            + (stretch ? ' flex-1 justify-center' : '')
+            + (isActive ? ' text-accent border-b-2 border-accent' : ' text-text-muted');
+        }
+        return html`
+          <button
+            key=${tab.id}
+            type="button"
+            role="tab"
+            aria-selected=${String(isActive)}
+            class=${cls}
+            onClick=${() => onSelect(tab.id)}
+          >
+            ${tab.name}
+            ${tab.count != null && html`<span class="nav-badge">${tab.count}</span>`}
+          </button>
+        `;
+      })}
+    </div>
+  `;
+}
+
+/**
  * @template T
  * @param {HTMLElement} container
  * @param {{
@@ -21,64 +68,30 @@
  * @returns {{ update: (activeId: T) => void, destroy: () => void }}
  */
 export function renderTabs(container, { tabs, activeId, onSelect, variant = 'underline', stretch = false }) {
-  let _activeId = activeId;
-
-  const bar = document.createElement('div');
-  if (variant === 'pill') {
-    bar.className = 'flex gap-1 p-1 rounded-lg bg-surface-2 border border-border';
-  } else {
-    bar.className = 'flex gap-1 overflow-x-auto [scrollbar-width:none] border-b border-border';
-  }
-  bar.setAttribute('role', 'tablist');
-  container.appendChild(bar);
+  let _props = { tabs, activeId, onSelect, variant, stretch };
+  const _mount = document.createElement('div');
+  _mount.style.display = 'contents';
+  container.appendChild(_mount);
 
   function _render() {
-    bar.innerHTML = '';
-    for (const tab of tabs) {
-      const isActive = tab.id === _activeId;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('role', 'tab');
-      btn.setAttribute('aria-selected', String(isActive));
-
-      if (variant === 'pill') {
-        btn.className = 'flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex-1 justify-center'
-          + (isActive ? ' bg-surface text-text shadow-sm' : ' text-text-muted hover:text-text');
-      } else {
-        btn.className = 'flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-t-md'
-          + (stretch ? ' flex-1 justify-center' : '')
-          + (isActive ? ' text-accent border-b-2 border-accent' : ' text-text-muted');
-      }
-
-      btn.innerHTML = tab.name
-        + (tab.count != null ? ` <span class="nav-badge">${tab.count}</span>` : '');
-
-      btn.addEventListener('click', () => {
-        _activeId = tab.id;
-        _render();
-        onSelect(tab.id);
-      });
-      bar.appendChild(btn);
-    }
+    render(html`<${Tabs} ...${_props} />`, _mount);
   }
 
   _render();
 
   return {
     update(newActiveId) {
-      _activeId = newActiveId;
+      _props = { ..._props, activeId: newActiveId };
       _render();
     },
     destroy() {
-      bar.remove();
+      render(null, _mount);
+      _mount.remove();
     },
   };
 }
 
 /**
- * Convenience wrapper for the common category-filter case where IDs are
- * `number | null` (null = "All").
- *
  * @param {HTMLElement} container
  * @param {{
  *   tabs: { id: number | null, name: string }[],

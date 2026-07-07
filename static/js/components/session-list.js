@@ -5,7 +5,7 @@ import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
-import { openConfirm } from '../utils.js';
+import { showConfirm } from './modal.js';
 import { t } from '../i18n.js';
 
 const html = htm.bind(h);
@@ -43,7 +43,7 @@ export function SessionList() {
   }, []);
 
   async function handleRevoke(id) {
-    const ok = await openConfirm(t('session.confirm.revoke'));
+    const ok = await showConfirm(t('session.confirm.revoke'));
     if (!ok) return;
     try {
       await api.revokeSession(id);
@@ -54,7 +54,7 @@ export function SessionList() {
   }
 
   async function handleRevokeAll() {
-    const ok = await openConfirm(t('session.confirm.revoke_all'));
+    const ok = await showConfirm(t('session.confirm.revoke_all'));
     if (!ok) return;
     try {
       await api.revokeOtherSessions();
