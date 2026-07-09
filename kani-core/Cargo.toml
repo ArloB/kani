@@ -4,15 +4,17 @@ version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
+[lints.clippy]
+unwrap_used = { level = "deny", priority = 1 }
+
 [features]
-streaming-chapters = []
 test-util = []
 
 [dependencies]
 kani-shared = { path = "../kani-shared", features = ["host"] }
 
 # Async runtime
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "sync", "time", "fs", "io-util", "macros"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "sync", "time", "fs", "io-util", "macros", "process"] }
 futures.workspace = true
 tokio-util = { workspace = true, features = ["compat"] }
 
@@ -22,8 +24,8 @@ rquest-util = "2.2.1"
 governor.workspace = true
 
 # WASM runtime
-wasmtime = { version = "41.0.2", features = ["async", "component-model"] }
-wit-bindgen = "0.53.1"
+wasmtime = { version = "46.0.1", features = ["async", "component-model"] }
+wit-bindgen = "0.58.0"
 
 # Serialization
 serde.workspace = true

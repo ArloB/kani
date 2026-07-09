@@ -177,7 +177,7 @@ impl ExtensionError {
             ExtensionErrorKind::InvalidInput => WitKind::InvalidInput,
             ExtensionErrorKind::Internal => WitKind::Internal,
             ExtensionErrorKind::Unknown => WitKind::Unknown,
-            ExtensionErrorKind::Updating => WitKind::Internal,
+            ExtensionErrorKind::Updating => WitKind::SourceUpdating,
         };
         WitErr {
             kind: wit_kind,
@@ -255,6 +255,41 @@ pub trait MangaExtension {
             "get_url not implemented for this source".into(),
         ))
     }
+}
+
+#[cfg(target_family = "wasm")]
+pub fn bridge_chapter_list_stream<E: MangaExtension + Sync + 'static>(
+    ext: &'static E,
+    manga_id: String,
+    sort: Option<String>,
+) -> wit_bindgen::StreamReader<
+    Result<crate::wit_types::ChapterInfo, crate::wit_types::ExtensionError>,
+> {
+    let (mut tx, rx) = crate::bindings::wit_stream::new();
+    wit_bindgen::spawn_local(async move {
+        let mut page = 1;
+        loop {
+            match ext.get_chapter_list(&manga_id, page, None, sort.clone()) {
+                Ok(list) => {
+                    if list.chapters.is_empty() {
+                        break;
+                    }
+                    let has_next_page = list.has_next_page;
+                    let items: Vec<_> = list.chapters.into_iter().map(Ok).collect();
+                    let (result, _buf) = tx.write(items).await;
+                    if !matches!(result, wit_bindgen::StreamResult::Complete(_)) || !has_next_page {
+                        break;
+                    }
+                    page += 1;
+                }
+                Err(e) => {
+                    let _ = tx.write(vec![Err(e.into_wit())]).await;
+                    break;
+                }
+            }
+        }
+    });
+    rx
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -437,6 +472,14 @@ mod tests {
     fn kind_display() {
         assert_eq!(ExtensionErrorKind::Network.to_string(), "network");
         assert_eq!(ExtensionErrorKind::RateLimited.to_string(), "rate-limited");
+    }
+
+    #[test]
+    fn into_wit_maps_updating_to_source_updating() {
+        use crate::bindings::kani::extension::types::ExtensionErrorKind as WitKind;
+
+        let wit_err = ExtensionError::source_updating().into_wit();
+        assert_eq!(wit_err.kind, WitKind::SourceUpdating);
     }
 
     #[test]

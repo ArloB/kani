@@ -51,7 +51,12 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a
         .then(text::digits(10))
         .then(just('.').ignore_then(text::digits(10)).or_not())
         .to_slice()
-        .map(|s: &str| ParseExpr::Number(s.parse::<f64>().unwrap()))
+        .map(|s: &str| {
+            ParseExpr::Number(
+                s.parse::<f64>()
+                    .expect("grammar restricts this slice to valid float syntax"),
+            )
+        })
         .padded_by(ws());
 
     let val_bool = choice((

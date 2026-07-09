@@ -91,6 +91,47 @@ pub async fn check_password(
     })
 }
 
+/// Compute the SHA-1 hex of `password` in uppercase. Public for testing.
+pub fn sha1_hex_upper(password: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(password.as_bytes());
+    format!("{:X}", hasher.finalize())
+}
+
+/// SHA-1 k-anonymity lookup against the HIBP Pwned Passwords API.
+/// Returns `None` if the network call fails (advisory only).
+async fn check_hibp(password: &str, http_client: &kani_core::http::SmartClient) -> Option<u64> {
+    // 1. SHA-1 of the password.
+    let mut hasher = Sha1::new();
+    hasher.update(password.as_bytes());
+    let hash = format!("{:X}", hasher.finalize()); // uppercase hex
+
+    let prefix = &hash[..5];
+    let suffix = &hash[5..];
+
+    // 2. k-anonymity API call — only the 5-character prefix is sent.
+    let url = format!("https://api.pwnedpasswords.com/range/{prefix}");
+    let response = http_client.inner().get(&url).send().await.ok()?;
+
+    if !response.status().is_success() {
+        tracing::warn!("HIBP API returned status {}", response.status());
+        return None;
+    }
+
+    let body = response.text().await.ok()?;
+
+    // 3. Check locally whether our suffix matches any returned line.
+    for line in body.lines() {
+        if let Some((line_suffix, count_str)) = line.split_once(':')
+            && line_suffix.eq_ignore_ascii_case(suffix)
+        {
+            return count_str.trim().parse().ok();
+        }
+    }
+
+    Some(0) // hash prefix returned, our suffix not found → not pwned
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -142,45 +183,4 @@ mod tests {
         // The check is: password.to_lowercase() == identity.to_lowercase()
         assert_eq!("alice".to_lowercase(), "ALICE".to_lowercase());
     }
-}
-
-/// Compute the SHA-1 hex of `password` in uppercase. Public for testing.
-pub fn sha1_hex_upper(password: &str) -> String {
-    let mut hasher = Sha1::new();
-    hasher.update(password.as_bytes());
-    format!("{:X}", hasher.finalize())
-}
-
-/// SHA-1 k-anonymity lookup against the HIBP Pwned Passwords API.
-/// Returns `None` if the network call fails (advisory only).
-async fn check_hibp(password: &str, http_client: &kani_core::http::SmartClient) -> Option<u64> {
-    // 1. SHA-1 of the password.
-    let mut hasher = Sha1::new();
-    hasher.update(password.as_bytes());
-    let hash = format!("{:X}", hasher.finalize()); // uppercase hex
-
-    let prefix = &hash[..5];
-    let suffix = &hash[5..];
-
-    // 2. k-anonymity API call — only the 5-character prefix is sent.
-    let url = format!("https://api.pwnedpasswords.com/range/{prefix}");
-    let response = http_client.inner().get(&url).send().await.ok()?;
-
-    if !response.status().is_success() {
-        tracing::warn!("HIBP API returned status {}", response.status());
-        return None;
-    }
-
-    let body = response.text().await.ok()?;
-
-    // 3. Check locally whether our suffix matches any returned line.
-    for line in body.lines() {
-        if let Some((line_suffix, count_str)) = line.split_once(':')
-            && line_suffix.eq_ignore_ascii_case(suffix)
-        {
-            return count_str.trim().parse().ok();
-        }
-    }
-
-    Some(0) // hash prefix returned, our suffix not found → not pwned
 }

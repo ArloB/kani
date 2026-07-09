@@ -91,6 +91,7 @@ interface types {
         invalid-input,
         internal,
         unknown,
+        source-updating,
     }
 
     record extension-error {
@@ -161,11 +162,6 @@ interface types {
 
     record chapter {
         pages: list<page>
-    }
-
-    record chapter-list-chunk {
-        chapters: list<chapter-info>,
-        cursor: option<string>,
     }
 
     enum filter-type-tag {
@@ -246,7 +242,7 @@ interface prefs {
 }
 
 interface manga-provider {
-    use types.{manga-list, manga-info, chapter-list, chapter, preference-spec, filter-list, active-filter, sort-option, extension-error};
+    use types.{manga-list, manga-info, chapter-list, chapter-info, chapter, preference-spec, filter-list, active-filter, sort-option, extension-error};
 
     // Returns a JSON-encoded `kani_shared::extension::ExtensionMetadata`. Encoded as a
     // string (rather than a WIT record) so new metadata fields are serde-only additions
@@ -257,6 +253,7 @@ interface manga-provider {
     search-manga: func(query: string, page: s32, page-size: s32, filters: list<active-filter>) -> result<manga-list, extension-error>;
     get-manga-details: func(manga-id: string) -> result<manga-info, extension-error>;
     get-chapter-list: func(manga-id: string, page: s32, page-size: option<s32>, sort: option<string>) -> result<chapter-list, extension-error>;
+    get-chapter-list-stream: async func(manga-id: string, sort: option<string>) -> stream<result<chapter-info, extension-error>>;
     get-pages: func(manga-id: string, chapter-id: string) -> result<chapter, extension-error>;
 
     get-chapter-sort-list: func() -> result<list<sort-option>, extension-error>;
@@ -267,13 +264,6 @@ interface manga-provider {
     get-preferences: func() -> result<list<preference-spec>, extension-error>;
 
     get-url: func(manga-id: string) -> result<string, extension-error>;
-}
-
-interface streaming-chapter-provider {
-    use types.{chapter-list-chunk, extension-error};
-
-    chapter-list-init: func(manga-id: string) -> result<string, extension-error>;
-    chapter-list-next: func(cursor: string) -> result<chapter-list-chunk, extension-error>;
 }
 
 interface extraction {
@@ -351,18 +341,4 @@ world kani-extension {
     import cache;
     import scripting;
     export manga-provider;
-}
-
-world kani-extension-streaming {
-    import types;
-    import http;
-    import html;
-    import utility;
-    import json;
-    import prefs;
-    import extraction;
-    import cache;
-    import scripting;
-    export manga-provider;
-    export streaming-chapter-provider;
 }

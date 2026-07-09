@@ -1809,6 +1809,8 @@ factory:
 
 Endpoints can declare `via: browser_payload` to indicate that the page must be loaded in a headless browser rather than fetched via direct HTTP. Codegen emits a `capture_page_payload` call with the declared script and timeout; the browser *runtime* (Chromium lifecycle, `passPayload` injection, `AllowedHost` gating, resource caps) is tracked in `overviews/EXT_BROWSER_PAYLOAD_FEATURE_OVERVIEW.md`.
 
+**Tier note:** the compiled tier's codegen currently emits the `capture_page_payload` call but not the extraction step from its result (`kani-cli/src/codegen/endpoints.rs::try_emit_browser_fetch` is `unimplemented!()` there). The interpreted tier's `browser_payload` support (§5.1) has no such gap — it extracts the captured JSON payload the same way as any other JSON endpoint.
+
 ```yaml
 browser_scripts:
   fetch_manga: |
@@ -1933,9 +1935,7 @@ The host uses `get_or_insert` internally for caching auth tokens; scripts expres
 
 `eval` and module `import`/`export` are disabled. Closures and `FnPtr` are not available to scripts.
 
-#### Deferred
-
-`RefreshAuth { endpoint_id }` dispatch (invoking a named YAML endpoint from within a hook) is **not yet implemented**. The host-side endpoint-by-name registry required for this is tracked under `EXT_INTERPRETED_BACKEND_AND_DISTRIBUTION`. As a workaround, scripts can refresh auth imperatively via `ctx.cache.put` and return `retry()`.
+`RefreshAuth { endpoint_id }` dispatch invokes a named YAML endpoint (one of `popular`, `search`, `manga_details`, `chapter_list`, `pages`) from within a hook via `ValidatedExtension::endpoint_by_name`, then retries the original request. Scripts can also refresh auth imperatively via `ctx.cache.put` and return `retry()` when a dedicated endpoint isn't needed.
 
 #### Example
 
@@ -2034,7 +2034,7 @@ A source is loaded by one of two interchangeable backends, abstracted behind `So
 
 ### 5.1 Interpreted YAML backend
 
-A `.yaml` extension is parsed and validated by `kani-yaml::parse_and_validate` into a `ValidatedExtension` (DSL strings already compiled to `Expr` trees) and wrapped in a `YamlSource`. Each dispatch method resolves the relevant endpoint, builds a `Blueprint`, constructs a `HostState`, and calls the same `extract_html`/`extract_json` evaluators the WASM path uses — there is no WIT/FFI hop. Preferences are injected as `$pref:key`; `browser_payload` endpoints first run the V8 subprocess.
+A `.yaml` extension is parsed and validated by `kani-yaml::parse_and_validate` into a `ValidatedExtension` (DSL strings already compiled to `Expr` trees) and wrapped in a `YamlSource`. Each dispatch method resolves the relevant endpoint, builds a `Blueprint`, constructs a `HostState`, and calls the same `extract_html`/`extract_json` evaluators the WASM path uses — there is no WIT/FFI hop. Preferences are injected as `$pref:key`; `browser_payload` endpoints first run the V8 subprocess, and the returned payload is extracted via ordinary JSON field blueprints, same as any other JSON endpoint. `Fetched` (`options_fetched_by`) filter option sets are resolved live at request time rather than returning an empty list. `RefreshAuth { endpoint_id }` hook dispatch (§3.10) works identically to the compiled tier. The `Blueprint`-construction logic itself (`build_blueprint`/`build_blueprint_core`, `kani-yaml/src/lib.rs`) is shared with `kani-cli`'s codegen, so the two tiers cannot silently diverge on field/scalar/binding/pagination assembly.
 
 ### 5.2 Evaluator resource limits
 
@@ -2046,7 +2046,7 @@ Sources live in a single directory (`wasm_storage_path`). When both `<name>.yaml
 
 ### 5.4 Hot-swap
 
-`SourceRegistry::hot_swap` installs a new backend atomically via `ArcSwap`. For WASM it first drains in-flight leases (30 s default) before swapping the `InstancePre`; new leases during draining return a "source updating" error. YAML swaps are immediate (no leases).
+`SourceRegistry::hot_swap` installs a new backend atomically via `ArcSwap`. For WASM it first drains in-flight leases (30 s default) before swapping the `InstancePre`; new leases during draining return `ExtensionError::source_updating()` (`ExtensionErrorKind::Updating`, WIT `source-updating`), a 2-second-retry-hinted transient error. YAML swaps are immediate (no leases).
 
 ## 6. Signed Distribution
 

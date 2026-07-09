@@ -20,21 +20,9 @@ pub mod bindings {
         world: "kani-extension",
         imports: {
             "kani:extension/http": async,
-        },
-        exports: {
-            default: async
-        },
-        additional_derives: [serde::Serialize, serde::Deserialize]
-    });
-}
-
-#[cfg(feature = "streaming-chapters")]
-pub mod streaming_bindings {
-    wasmtime::component::bindgen!({
-        path: "wit/kani.wit",
-        world: "kani-extension-streaming",
-        imports: {
-            "kani:extension/http": async,
+            "kani:extension/extraction": async,
+            "kani:extension/cache": async,
+            "kani:extension/scripting": async,
         },
         exports: {
             default: async
@@ -137,7 +125,12 @@ impl StoredNode {
         F: FnOnce(scraper::ElementRef) -> std::result::Result<T, String>,
     {
         let guard = self.doc.lock().map_err(|_| "HTML document lock poisoned")?;
-        match scraper::ElementRef::wrap(guard.0.tree.get(self.node_id).unwrap()) {
+        let tree_node = guard
+            .0
+            .tree
+            .get(self.node_id)
+            .ok_or("HTML node no longer present in document tree")?;
+        match scraper::ElementRef::wrap(tree_node) {
             Some(el) => f(el),
             None => Err("node is not an element".into()),
         }
@@ -150,12 +143,15 @@ impl StoredNode {
         F: FnOnce(scraper::ElementRef) -> std::result::Result<Option<T>, String>,
     {
         let guard = self.doc.lock().map_err(|_| "HTML document lock poisoned")?;
-        Ok(
-            match scraper::ElementRef::wrap(guard.0.tree.get(self.node_id).unwrap()) {
-                Some(el) => f(el)?,
-                None => None,
-            },
-        )
+        let tree_node = guard
+            .0
+            .tree
+            .get(self.node_id)
+            .ok_or("HTML node no longer present in document tree")?;
+        Ok(match scraper::ElementRef::wrap(tree_node) {
+            Some(el) => f(el)?,
+            None => None,
+        })
     }
 }
 
@@ -291,13 +287,13 @@ impl HostState {
 impl Default for HostState {
     fn default() -> Self {
         HostState::new(
-            SmartClient::new(None).unwrap(),
+            SmartClient::new(None).expect("failed to build default SmartClient"),
             AllowedHost::MetadataOnly,
             Arc::new(crate::cache::InMemoryCache::new()),
             String::new(),
-            Arc::new(Mutex::new(None)),
+            crate::v8_process::new_handle(),
         )
-        .unwrap()
+        .expect("failed to construct default HostState")
     }
 }
 
@@ -311,8 +307,8 @@ pub struct WasmRuntime {
 impl WasmRuntime {
     pub fn new(max_instances: u32) -> Result<Self> {
         let mut config = Config::new();
-        config.async_support(true);
         config.wasm_component_model(true);
+        config.concurrency_support(true);
         config.epoch_interruption(true);
 
         let mut pool = wasmtime::PoolingAllocationConfig::default();
@@ -325,8 +321,8 @@ impl WasmRuntime {
 
     pub fn new_on_demand() -> Result<Self> {
         let mut config = Config::new();
-        config.async_support(true);
         config.wasm_component_model(true);
+        config.concurrency_support(true);
         config.epoch_interruption(true);
 
         Self::new_with_config(config)
@@ -481,6 +477,7 @@ pub fn ext_error_from_wit(
         WitKind::InvalidInput => ExtensionErrorKind::InvalidInput,
         WitKind::Internal => ExtensionErrorKind::Internal,
         WitKind::Unknown => ExtensionErrorKind::Unknown,
+        WitKind::SourceUpdating => ExtensionErrorKind::Updating,
     };
     kani_shared::extension::ExtensionError {
         kind,

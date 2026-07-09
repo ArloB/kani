@@ -944,16 +944,13 @@ pub async fn fetch_body(
         let request = builder.build().map_err(|e| e.to_string())?;
 
         let ttfb_start = std::time::Instant::now();
-        let response = match tokio::time::timeout(
+        let response = tokio::time::timeout(
             std::time::Duration::from_secs(90),
             state.http_client.send_request(request),
         )
         .await
-        {
-            Ok(Ok(r)) => r,
-            Ok(Err(e)) => return Err(e.to_string()),
-            Err(_) => return Err("HTTP request timed out after 90 seconds".into()),
-        };
+        .map_err(|_| "HTTP request timed out after 90 seconds".to_string())?
+        .map_err(|e| e.to_string())?;
         let ttfb = ttfb_start.elapsed();
         state.last_io_at = Some(std::time::Instant::now());
 
@@ -1082,6 +1079,83 @@ pub fn blueprint_has_fetch(bp: &kani_shared::ast::Blueprint) -> bool {
     bp.fields.iter().any(|f| expr_has_fetch(&f.expr))
         || bp.scalars.iter().any(|f| expr_has_fetch(&f.expr))
         || bp.bindings.iter().any(|b| expr_has_fetch(&b.expr))
+}
+
+/// Charges the io/host-allowlist budget and builds a `RequestDef` without sending it. Only
+/// valid when `state.hook_registry` is `None`, since hooks can retry/rewrite a request after
+/// seeing the response — see [`send_prepared_request`].
+pub fn charge_fetch_request(
+    state: &mut crate::wasm::HostState,
+    url: &str,
+    method: &kani_shared::ast::HttpMethod,
+    headers: Vec<(String, String)>,
+    endpoint_id: Option<String>,
+) -> Result<kani_shared::ast::RequestDef, String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL: {}", e))?;
+    state.check_allowed_host(parsed.host_str().unwrap_or(""))?;
+    state.charge_io()?;
+
+    let method_str = match method {
+        kani_shared::ast::HttpMethod::Get => "GET",
+        kani_shared::ast::HttpMethod::Post => "POST",
+        kani_shared::ast::HttpMethod::Put => "PUT",
+        kani_shared::ast::HttpMethod::Delete => "DELETE",
+    };
+    Ok(kani_shared::ast::RequestDef {
+        url: url.to_string(),
+        method: method_str.to_string(),
+        headers,
+        queries: vec![],
+        endpoint_id,
+    })
+}
+
+/// Sends a request prepared by [`charge_fetch_request`] and reads its body. Takes an owned,
+/// `Clone`-cheap `SmartClient` instead of `&mut HostState` so callers can run several of these
+/// concurrently; the per-domain rate limiter/semaphore in `SmartClient::send_request` still
+/// applies. Mirrors `fetch_body`'s no-hooks path exactly.
+pub async fn send_prepared_request(
+    client: crate::http::SmartClient,
+    req: kani_shared::ast::RequestDef,
+) -> Result<String, String> {
+    let method = match req.method.to_uppercase().as_str() {
+        "GET" => rquest::Method::GET,
+        "POST" => rquest::Method::POST,
+        "PUT" => rquest::Method::PUT,
+        "DELETE" => rquest::Method::DELETE,
+        m => return Err(format!("Unsupported HTTP method: {}", m)),
+    };
+
+    let mut url = url::Url::parse(&req.url).map_err(|e| format!("Invalid URL: {}", e))?;
+    if !req.queries.is_empty() {
+        url.query_pairs_mut().extend_pairs(req.queries.iter());
+    }
+    let rquest_url = url
+        .to_string()
+        .parse::<rquest::Url>()
+        .map_err(|e| format!("Invalid URL: {}", e))?;
+
+    let mut builder = client.inner().request(method, rquest_url);
+    for (k, v) in &req.headers {
+        builder = builder.header(k, v);
+    }
+    let request = builder.build().map_err(|e| e.to_string())?;
+
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        client.send_request(request),
+    )
+    .await
+    .map_err(|_| "HTTP request timed out after 90 seconds".to_string())?
+    .map_err(|e| e.to_string())?;
+
+    const MAX_BYTES: usize = 15 * 1024 * 1024;
+    let body = response
+        .bytes_limited(MAX_BYTES)
+        .await
+        .map_err(|e| e.to_string())?
+        .to_vec();
+    String::from_utf8(body).map_err(|_| "Invalid UTF-8 in response body".to_string())
 }
 
 pub async fn eval_fetch_field(
@@ -1217,8 +1291,10 @@ mod tests {
 
     #[tokio::test]
     async fn pre_request_hook_disallowed_host_after_mutation_errors() {
-        let mut state = HostState::default();
-        state.allowed_host = AllowedHost::Restricted("example.com".to_string());
+        let mut state = HostState {
+            allowed_host: AllowedHost::Restricted("example.com".to_string()),
+            ..Default::default()
+        };
 
         let scripts = HookScripts {
             pre_request: Some(r#"req.url = "https://evil.com/api"; proceed()"#.to_string()),
@@ -1251,9 +1327,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        let mut state = HostState::default();
-        state.allowed_host = AllowedHost::Unrestricted;
-        state.max_hook_requests = 2;
+        let mut state = HostState {
+            allowed_host: AllowedHost::Unrestricted,
+            max_hook_requests: 2,
+            ..Default::default()
+        };
 
         let mut on_status = std::collections::BTreeMap::new();
         on_status.insert("401".to_string(), "retry()".to_string());

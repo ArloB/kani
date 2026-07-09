@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
+[lints.clippy]
+unwrap_used = { level = "deny", priority = 1 }
+
 [features]
 test-util = ["kani-app/test-util"]
 

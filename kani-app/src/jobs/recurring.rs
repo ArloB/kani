@@ -233,10 +233,7 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
 
 /// Submits the background job that backs a recurring kind, returning its id.
 /// Shared by the scheduler and the manual trigger path.
-async fn submit_kind_job(
-    svc: &AppService,
-    kind: RecurringJobKind,
-) -> Result<crate::jobs::JobId> {
+async fn submit_kind_job(svc: &AppService, kind: RecurringJobKind) -> Result<crate::jobs::JobId> {
     match kind {
         RecurringJobKind::DbMaintenance => {
             svc.job_manager

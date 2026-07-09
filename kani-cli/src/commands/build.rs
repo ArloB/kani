@@ -373,7 +373,10 @@ fn check_talc_present(wasm_bytes: &[u8]) -> bool {
 }
 
 fn tmp_path(path: &Path) -> PathBuf {
-    let file_name = path.file_name().unwrap().to_string_lossy();
+    let file_name = path
+        .file_name()
+        .expect("path should have a file name")
+        .to_string_lossy();
     path.with_file_name(format!("{file_name}.tmp"))
 }
 

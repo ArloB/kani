@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
+[lints.clippy]
+unwrap_used = { level = "deny", priority = 1 }
+
 [dependencies]
 kani-core   = { path = "../kani-core" }
 kani-shared = { path = "../kani-shared", features = ["ssr"] }
 kani-yaml   = { path = "../kani-yaml" }
-wasmtime    = { version = "41.0.2", features = ["async", "component-model"] }
+wasmtime    = { version = "46.0.1", features = ["async", "component-model"] }
 
 serde.workspace = true
 serde_json.workspace = true
@@ -58,7 +61,6 @@ dunce         = "1"
 
 [features]
 test-util = ["kani-core/test-util"]
-streaming-chapters = ["kani-core/streaming-chapters"]
 
 [dev-dependencies]
 kani-core        = { path = "../kani-core", features = ["test-util"] }

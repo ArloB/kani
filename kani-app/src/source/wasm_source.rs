@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc, Mutex,
+    Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -52,7 +52,7 @@ impl WasmSource {
             base_url,
             unrestricted_http,
             preferences: Arc::new(std::sync::RwLock::new(preferences)),
-            v8_process: Arc::new(Mutex::new(None)),
+            v8_process: kani_core::v8_process::new_handle(),
             ext_cache,
             ext_cache_namespace,
             pure_fn_registry,
@@ -204,38 +204,6 @@ impl Drop for LeaseGuard {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used)]
-    use super::LeaseGuard;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
-    #[test]
-    fn lease_guard_decrements_on_drop() {
-        let count = Arc::new(AtomicUsize::new(1));
-        {
-            let _guard = LeaseGuard(Arc::clone(&count));
-            assert_eq!(count.load(Ordering::SeqCst), 1);
-        }
-        assert_eq!(count.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn multiple_lease_guards_decrement_independently() {
-        let count = Arc::new(AtomicUsize::new(2));
-        let g1 = LeaseGuard(Arc::clone(&count));
-        let g2 = LeaseGuard(Arc::clone(&count));
-        assert_eq!(count.load(Ordering::SeqCst), 2);
-        drop(g1);
-        assert_eq!(count.load(Ordering::SeqCst), 1);
-        drop(g2);
-        assert_eq!(count.load(Ordering::SeqCst), 0);
-    }
-}
-
 pub struct OwnedSourceInstance {
     store: Store<HostState>,
     bindings: kani_core::wasm::KaniExtension,
@@ -336,5 +304,37 @@ impl OwnedSourceInstance {
 
     pub async fn get_url(&mut self, manga_id: &str) -> Result<String> {
         kani_core::execute_wasm!(self, call_get_url, manga_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::LeaseGuard;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    #[test]
+    fn lease_guard_decrements_on_drop() {
+        let count = Arc::new(AtomicUsize::new(1));
+        {
+            let _guard = LeaseGuard(Arc::clone(&count));
+            assert_eq!(count.load(Ordering::SeqCst), 1);
+        }
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn multiple_lease_guards_decrement_independently() {
+        let count = Arc::new(AtomicUsize::new(2));
+        let g1 = LeaseGuard(Arc::clone(&count));
+        let g2 = LeaseGuard(Arc::clone(&count));
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        drop(g1);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        drop(g2);
+        assert_eq!(count.load(Ordering::SeqCst), 0);
     }
 }

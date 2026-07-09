@@ -3,6 +3,9 @@ name = "kani-yaml"
 version = "0.1.0"
 edition = "2024"
 
+[lints.clippy]
+unwrap_used = { level = "deny", priority = 1 }
+
 [lib]
 name = "kani_yaml"
 path = "src/lib.rs"

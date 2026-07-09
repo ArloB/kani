@@ -705,6 +705,7 @@ impl AuthzBackend for AuthBackend {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 pub(crate) async fn test_db() -> SqlitePool {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
     sqlx::migrate!("../migrations").run(&pool).await.unwrap();
@@ -717,6 +718,7 @@ pub(crate) async fn test_db() -> SqlitePool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
     use axum_login::AuthzBackend;
 

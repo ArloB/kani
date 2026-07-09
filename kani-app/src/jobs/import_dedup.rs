@@ -27,7 +27,10 @@ impl BackgroundJob for ImportDedupJob {
     }
 
     fn description(&self) -> String {
-        format!("Record duplicates for {} imported manga", self.manga_ids.len())
+        format!(
+            "Record duplicates for {} imported manga",
+            self.manga_ids.len()
+        )
     }
 
     fn priority(&self) -> JobPriority {

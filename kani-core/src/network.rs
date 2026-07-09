@@ -101,6 +101,7 @@ impl Resolve for ValidatingResolver {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     fn ip4(s: &str) -> IpAddr {

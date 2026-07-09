@@ -89,7 +89,10 @@ async fn main() {
         .expect("Failed to initialise AppState");
 
     let session_store = SqliteStore::new(state.db.clone());
-    session_store.migrate().await.unwrap();
+    session_store
+        .migrate()
+        .await
+        .expect("Failed to migrate session store");
 
     let secure_cookies = std::env::var("KANI_SECURE_COOKIES")
         .map(|v| v == "true" || v == "1")
@@ -172,14 +175,14 @@ async fn main() {
             .per_second(API_RATE_PER_SECOND)
             .burst_size(API_BURST_SIZE)
             .finish()
-            .unwrap(),
+            .expect("API_RATE_PER_SECOND/API_BURST_SIZE constants are valid"),
     );
     let proxy_governor_conf = Arc::new(
         GovernorConfigBuilder::default()
             .per_second(PROXY_RATE_PER_SECOND)
             .burst_size(PROXY_BURST_SIZE)
             .finish()
-            .unwrap(),
+            .expect("PROXY_RATE_PER_SECOND/PROXY_BURST_SIZE constants are valid"),
     );
 
     let cors_layer = {

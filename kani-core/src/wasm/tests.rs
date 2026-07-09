@@ -488,3 +488,20 @@ fn utility_encode_form_produces_form_data() {
     assert!(out.contains("a=1"));
     assert!(out.contains("b=hello+world") || out.contains("b=hello%20world"));
 }
+
+#[test]
+fn ext_error_from_wit_maps_source_updating() {
+    use super::kani::extension::types::{ExtensionError as WitErr, ExtensionErrorKind as WitKind};
+
+    let wit_err = WitErr {
+        kind: WitKind::SourceUpdating,
+        message: "Source is being updated".to_string(),
+        source_url: None,
+        retry_after_secs: Some(2),
+    };
+    let err = super::ext_error_from_wit(wit_err);
+    assert_eq!(
+        err.kind,
+        kani_shared::extension::ExtensionErrorKind::Updating
+    );
+}

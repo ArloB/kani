@@ -384,6 +384,7 @@ fn now_secs() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
 

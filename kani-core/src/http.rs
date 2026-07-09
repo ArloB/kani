@@ -443,7 +443,8 @@ impl SmartClient {
                     );
                     self.record_failure(&domain);
                     tokio::time::sleep(delay).await;
-                    current_request = request_clone_for_retry.unwrap();
+                    current_request = request_clone_for_retry
+                        .expect("guarded by is_some() in the match arm above");
                     attempt += 1;
                     continue;
                 }
@@ -850,7 +851,7 @@ impl SmartClient {
             }
             if !header_map.is_empty() {
                 body.as_object_mut()
-                    .unwrap()
+                    .expect("body was constructed as a json! object literal above")
                     .insert("headers".to_string(), json!(header_map));
             }
         }

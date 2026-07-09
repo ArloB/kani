@@ -89,6 +89,7 @@ pub fn assert_within_root(root: &Path, target: &Path) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
     use std::fs;
     use tempfile::tempdir;

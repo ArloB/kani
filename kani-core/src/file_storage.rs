@@ -86,6 +86,7 @@ pub fn validate_wasm_magic(bytes: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     fn valid_wasm() -> Vec<u8> {

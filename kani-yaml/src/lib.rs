@@ -17,22 +17,39 @@ pub fn parse_and_validate(
     yaml::validate::validate(&ext, text, path)
 }
 
-/// Build a `Blueprint` from a validated endpoint at runtime.
+/// Build a `Blueprint` from a validated endpoint at runtime, with a request attached.
 ///
-/// This mirrors the `emit_blueprint_bytes` codegen logic but produces a live
-/// `Blueprint` value instead of serialised bytes, so the host can evaluate it
-/// directly without going through the WASM ABI.
+/// Used by the interpreted YAML tier, which always has a live `RequestDef` in hand.
+/// Codegen (`kani-cli`) uses [`build_blueprint_core`] directly instead, since its
+/// `emit_blueprint_bytes` path serialises the blueprint at build time with no request
+/// attached (the request is built and attached separately in the generated Rust).
 pub fn build_blueprint(
     ep: &yaml::model::ValidatedEndpoint,
     ext: &yaml::model::ValidatedExtension,
     endpoint_name: &str,
     req: kani_shared::ast::RequestDef,
 ) -> kani_shared::ast::Blueprint {
-    use kani_shared::ast::{BlueprintBuilder, Expr, OffsetType};
-    use yaml::model::{FieldSource, ValidatedHnp};
-    use yaml::schema::{ResponseType, YamlOffsetType};
+    build_blueprint_core(ep, ext, endpoint_name)
+        .with_request(req)
+        .build()
+}
 
-    let mut builder = BlueprintBuilder::new(&ep.container).with_request(req);
+/// Build the `BlueprintBuilder` for a validated endpoint: bindings, `then`/`for_each`
+/// sub-fetches, fields, scalars, `has_next_page`, and pagination — everything except the
+/// request, which callers attach (or omit) as needed.
+///
+/// Shared by the interpreted tier ([`build_blueprint`]) and `kani-cli`'s codegen
+/// (`emit_blueprint_bytes`), so the two consumption paths can't silently diverge.
+pub fn build_blueprint_core(
+    ep: &yaml::model::ValidatedEndpoint,
+    ext: &yaml::model::ValidatedExtension,
+    endpoint_name: &str,
+) -> kani_shared::ast::BlueprintBuilder {
+    use kani_shared::ast::{BlueprintBuilder, OffsetType};
+    use yaml::model::{FieldSource, ValidatedHnp};
+    use yaml::schema::YamlOffsetType;
+
+    let mut builder = BlueprintBuilder::new(&ep.container);
 
     for b in &ep.bindings {
         builder = builder.bind(&b.name, b.expr.clone());
@@ -40,14 +57,8 @@ pub fn build_blueprint(
 
     for step in &ep.then_steps {
         if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
-            let sub_bp = build_sub_blueprint(sub_ep);
-            let fetch = match sub_ep.response_type {
-                ResponseType::Html => Expr::fetch_html(step.url_expr.clone(), sub_bp),
-                ResponseType::Json => Expr::fetch_json(step.url_expr.clone(), sub_bp),
-            };
-            let fetch = fetch
-                .with_endpoint_id(format!("{endpoint_name}/{}", step.merge_as))
-                .with_on_failure(step.on_failure.clone());
+            let endpoint_id = Some(format!("{endpoint_name}/{}", step.merge_as));
+            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure, endpoint_id);
             builder = builder.bind(&step.merge_as, fetch);
         }
     }
@@ -64,14 +75,8 @@ pub fn build_blueprint(
 
     for step in &ep.for_each_steps {
         if let Some(sub_ep) = ext.endpoint_by_name(&step.endpoint_name) {
-            let sub_bp = build_sub_blueprint(sub_ep);
-            let fetch = match sub_ep.response_type {
-                ResponseType::Html => Expr::fetch_html(step.url_expr.clone(), sub_bp),
-                ResponseType::Json => Expr::fetch_json(step.url_expr.clone(), sub_bp),
-            };
-            let fetch = fetch
-                .with_endpoint_id(format!("{endpoint_name}/{}", step.merge_as))
-                .with_on_failure(step.on_failure.clone());
+            let endpoint_id = Some(format!("{endpoint_name}/{}", step.merge_as));
+            let fetch = make_fetch_expr(&step.url_expr, sub_ep, &step.on_failure, endpoint_id);
             builder = builder.field(&step.merge_as, fetch);
         }
     }
@@ -100,10 +105,12 @@ pub fn build_blueprint(
         builder = builder.paginated(pag.native_page_size, &pag.offset_param, offset_type);
     }
 
-    builder.build()
+    builder
 }
 
-fn build_sub_blueprint(ep: &yaml::model::ValidatedEndpoint) -> kani_shared::ast::Blueprint {
+/// Build a sub-`Blueprint` from a `ValidatedEndpoint` (no request, no chaining steps).
+/// Used to embed sub-blueprints inside `Expr::Fetch` nodes for `then`/`for_each` steps.
+pub fn build_sub_blueprint(ep: &yaml::model::ValidatedEndpoint) -> kani_shared::ast::Blueprint {
     use kani_shared::ast::BlueprintBuilder;
     use yaml::model::FieldSource;
 
@@ -130,6 +137,30 @@ fn build_sub_blueprint(ep: &yaml::model::ValidatedEndpoint) -> kani_shared::ast:
         }
     }
     builder.build()
+}
+
+/// Build the `Expr::Fetch` node for a `then`/`for_each` step: constructs the sub-endpoint's
+/// blueprint, wraps it in a `fetch_html`/`fetch_json` expr, and attaches endpoint-id + on-failure.
+pub fn make_fetch_expr(
+    url_expr: &kani_shared::ast::Expr,
+    sub_ep: &yaml::model::ValidatedEndpoint,
+    on_failure: &kani_shared::ast::OnFailurePolicy,
+    endpoint_id: Option<String>,
+) -> kani_shared::ast::Expr {
+    use kani_shared::ast::Expr;
+    use yaml::schema::ResponseType;
+
+    let sub_bp = build_sub_blueprint(sub_ep);
+    let fetch = match sub_ep.response_type {
+        ResponseType::Html => Expr::fetch_html(url_expr.clone(), sub_bp),
+        ResponseType::Json => Expr::fetch_json(url_expr.clone(), sub_bp),
+    };
+    let fetch = if let Some(id) = endpoint_id {
+        fetch.with_endpoint_id(id)
+    } else {
+        fetch
+    };
+    fetch.with_on_failure(on_failure.clone())
 }
 
 /// Build a URL by substituting `$var$` placeholders in `route` from `args`.

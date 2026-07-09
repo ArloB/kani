@@ -32,6 +32,7 @@ pub fn check_required_capabilities(required: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     #[test]

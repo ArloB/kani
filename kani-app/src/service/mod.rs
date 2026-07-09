@@ -60,7 +60,6 @@ mod settings;
 pub mod smart_collections;
 mod sources;
 mod stats;
-pub mod streaming;
 pub mod thumbnails;
 pub mod totp;
 pub mod trackers;

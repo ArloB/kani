@@ -3,7 +3,7 @@
 use kani_core::evaluator::json_eval::extract_json_paginated;
 use kani_core::wasm::{AllowedHost, HostState};
 use kani_shared::ast::{BlueprintBuilder, Expr, OffsetType, RequestDef};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -14,7 +14,7 @@ fn make_state(allowed: AllowedHost) -> HostState {
         allowed,
         Arc::new(kani_core::cache::InMemoryCache::new()),
         String::new(),
-        Arc::new(Mutex::new(None)),
+        kani_core::v8_process::new_handle(),
     )
     .unwrap()
 }

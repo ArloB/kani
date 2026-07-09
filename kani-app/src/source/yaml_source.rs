@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use kani_core::error::{Error, Result};
 use kani_core::wasm::AllowedHost;
@@ -74,7 +74,7 @@ impl YamlSource {
             http,
             cache,
             cache_namespace,
-            v8_process: Arc::new(Mutex::new(None)),
+            v8_process: kani_core::v8_process::new_handle(),
             prefs: Arc::new(std::sync::RwLock::new(preferences)),
             semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
             hook_registry,
@@ -162,6 +162,46 @@ impl YamlSource {
         }
     }
 
+    async fn eval_browser_payload_endpoint(
+        &self,
+        ep: &kani_yaml::ValidatedEndpoint,
+        endpoint_name: &str,
+        args: &HashMap<String, String>,
+    ) -> std::result::Result<serde_json::Value, String> {
+        use kani_core::evaluator::json_eval;
+
+        let page_url_template = ep
+            .page_url
+            .as_deref()
+            .ok_or_else(|| "browser_payload endpoint missing page_url".to_string())?;
+        let script_name = ep
+            .script_name
+            .as_deref()
+            .ok_or_else(|| "browser_payload endpoint missing script".to_string())?;
+        let init_script = self
+            .config
+            .browser_scripts
+            .get(script_name)
+            .ok_or_else(|| format!("browser script '{script_name}' not declared"))?;
+
+        let mut resolved = args.clone();
+        kani_yaml::resolve_composite_ids(ep, &mut resolved);
+        let page_url = kani_yaml::build_url_with_args("", page_url_template, &resolved);
+
+        let payload = kani_core::v8_process::capture_page_payload(
+            &self.v8_process,
+            &page_url,
+            init_script,
+            ep.timeout_ms,
+        )
+        .await?;
+
+        let req = Self::make_request(ep, &self.config, args, endpoint_name);
+        let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
+        let mut state = self.make_host_state().map_err(|e| e.to_string())?;
+        json_eval::extract_json_str(&mut state, &payload, &bp).await
+    }
+
     async fn eval_endpoint(
         &self,
         ep: &kani_yaml::ValidatedEndpoint,
@@ -171,9 +211,10 @@ impl YamlSource {
         use kani_yaml::yaml::schema::EndpointVia;
 
         if ep.via == Some(EndpointVia::BrowserPayload) {
-            return Err(Error::Internal(
-                "browser_payload endpoint requires browser runtime (not yet enabled)".into(),
-            ));
+            return self
+                .eval_browser_payload_endpoint(ep, endpoint_name, args)
+                .await
+                .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)));
         }
 
         let mut retries_left = self.max_hook_requests;
@@ -479,6 +520,42 @@ impl YamlSource {
         Ok(FilterList { filters })
     }
 
+    pub async fn get_fetched_option_sets(&self) -> Result<String> {
+        use kani_yaml::yaml::schema::{OptionSetDef, ResponseType};
+
+        let entries: Vec<kani_shared::filter_fetch::FilterFetchDef> = self
+            .config
+            .filters
+            .iter()
+            .filter_map(|f| {
+                let options_ref = f.options_ref.as_ref()?;
+                let OptionSetDef::Fetched {
+                    options_fetched_by: def,
+                } = self.config.option_sets.get(options_ref)?
+                else {
+                    return None;
+                };
+                Some(kani_shared::filter_fetch::FilterFetchDef {
+                    filter_id: f.id.clone(),
+                    option_set_name: options_ref.clone(),
+                    route: def.route.clone(),
+                    response_type: match def.response_type {
+                        ResponseType::Html => "html".to_string(),
+                        ResponseType::Json => "json".to_string(),
+                    },
+                    container: def.container.clone(),
+                    fields: def.fields.clone(),
+                    nsfw_field: def.nsfw_field.clone(),
+                    cache_key: def.cache.as_ref().map(|c| c.key.clone()),
+                    cache_ttl: def.cache.as_ref().map(|c| c.ttl).unwrap_or(300),
+                })
+            })
+            .collect();
+
+        serde_json::to_string(&entries)
+            .map_err(|e| Error::Internal(format!("fetched option sets: {e}")))
+    }
+
     pub async fn get_preferences(&self) -> Result<Vec<PreferenceSpec>> {
         use kani_yaml::yaml::schema::PreferenceKind;
 
@@ -686,7 +763,7 @@ impl YamlSource {
             http: kani_core::http::SmartClient::new(None).expect("SmartClient::new"),
             cache,
             cache_namespace: String::new(),
-            v8_process: Arc::new(Mutex::new(None)),
+            v8_process: kani_core::v8_process::new_handle(),
             prefs: Arc::new(std::sync::RwLock::new(HashMap::new())),
             semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
             hook_registry: None,

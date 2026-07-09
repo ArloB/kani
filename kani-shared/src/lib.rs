@@ -41,6 +41,9 @@ pub mod bindings {
 pub use bindings::kani::extension::types as wit_types;
 pub use bindings::kani::extension::{html, http, scripting, utility};
 
+#[cfg(target_family = "wasm")]
+pub use wit_bindgen::{StreamReader, StreamResult, spawn_local};
+
 #[cfg(any(feature = "host", feature = "builder", feature = "meta"))]
 pub use serde_json;
 

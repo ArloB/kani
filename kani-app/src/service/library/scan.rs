@@ -437,6 +437,18 @@ impl AppService {
     /// Used during bulk import to avoid spamming `NewChapters` notifications.
     /// Returns the IDs of newly inserted chapters.
     pub async fn fetch_and_store_chapters_silent(&self, manga_row_id: MangaId) -> Result<Vec<i64>> {
+        self.fetch_and_store_chapters_impl(manga_row_id, false)
+            .await
+    }
+
+    /// Core chapter fetch/store loop shared by the silent (bulk import) and streaming
+    /// (scan jobs) callers. `emit_progress` gates `ChapterListPartial`/`Complete`/`Error`
+    /// broadcasts so bulk import keeps its documented zero-SSE-events guarantee.
+    async fn fetch_and_store_chapters_impl(
+        &self,
+        manga_row_id: MangaId,
+        emit_progress: bool,
+    ) -> Result<Vec<i64>> {
         let ids = sqlx::query!(
             "SELECT source_id, source_manga_id FROM manga WHERE id = ?",
             manga_row_id
@@ -452,12 +464,25 @@ impl AppService {
 
         let mut tx = self.db.begin().await?;
         let mut new_chapter_ids = Vec::new();
+        let mut total_received = 0usize;
         let mut page = 1;
 
         loop {
-            let res = backend
+            let res = match backend
                 .get_chapter_list(&ids.source_manga_id, page, None, None)
-                .await?;
+                .await
+            {
+                Ok(res) => res,
+                Err(e) => {
+                    if emit_progress {
+                        let _ = self.refresh_tx.send(AppEvent::ChapterListError {
+                            manga_id: manga_row_id,
+                            error: e.to_string(),
+                        });
+                    }
+                    return Err(ServiceError::Core(e));
+                }
+            };
             let json = serde_json::to_string(&res)
                 .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))?;
             let chapter_list: wit_types::ChapterList =
@@ -477,8 +502,16 @@ impl AppService {
                 page_new_ids.extend(chunk_ids);
             }
 
+            total_received += chapter_list.chapters.len();
             let new_on_page = page_new_ids.len();
             new_chapter_ids.extend(page_new_ids);
+
+            if emit_progress {
+                let _ = self.refresh_tx.send(AppEvent::ChapterListPartial {
+                    manga_id: manga_row_id,
+                    received: total_received,
+                });
+            }
 
             if new_on_page == 0 || !chapter_list.has_next_page {
                 break;
@@ -495,11 +528,20 @@ impl AppService {
                 .await;
         }
 
+        if emit_progress {
+            let _ = self.refresh_tx.send(AppEvent::ChapterListComplete {
+                manga_id: manga_row_id,
+                total: total_received,
+            });
+        }
+
         Ok(new_chapter_ids)
     }
 
     pub async fn scan_for_new_chapters(&self, manga_row_id: MangaId) -> Result<Vec<i64>> {
-        let new_chapter_ids = self.fetch_and_store_chapters_silent(manga_row_id).await?;
+        let new_chapter_ids = self
+            .fetch_and_store_chapters_impl(manga_row_id, true)
+            .await?;
 
         if !new_chapter_ids.is_empty() {
             let manga_name =

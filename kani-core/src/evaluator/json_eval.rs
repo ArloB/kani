@@ -1,10 +1,99 @@
 use crate::evaluator::shared::{
-    Env, EvalBudget, Value, eval_common_expr, eval_fetch_field, fetch_body,
+    Env, EvalBudget, Value, blueprint_has_fetch, charge_fetch_request, eval_common_expr,
+    eval_fetch_field, fetch_body, send_prepared_request,
 };
-use kani_shared::ast::{Blueprint, Expr, OffsetType};
+use kani_shared::ast::{Blueprint, Expr, OffsetType, OnFailurePolicy, SubBlueprintKind};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+
+struct PendingFetch<'a> {
+    row_index: usize,
+    field_name: String,
+    optional: bool,
+    item: &'a serde_json::Value,
+    item_index: usize,
+    env: Env,
+    sub_blueprint: &'a Blueprint,
+    kind: &'a SubBlueprintKind,
+    on_failure: &'a OnFailurePolicy,
+    request: kani_shared::ast::RequestDef,
+}
+
+async fn resolve_url_and_headers(
+    state: &crate::wasm::HostState,
+    doc: &serde_json::Value,
+    item: &serde_json::Value,
+    item_index: usize,
+    env: Env,
+    url_expr: &Expr,
+    headers: &[(Expr, Expr)],
+) -> Result<(String, Vec<(String, String)>), String> {
+    let registry_arc = state.pure_fn_registry.clone();
+    let registry = registry_arc.as_deref();
+    let budget = Arc::clone(&state.eval_budget);
+    let current = Some((item, item_index));
+
+    let url_val = eval_json_expr(
+        url_expr,
+        doc,
+        current,
+        env.clone(),
+        registry,
+        Arc::clone(&budget),
+    )
+    .await?;
+    let url = match url_val {
+        Value::Str(s) => s,
+        _ => return Err("Fetch: url_expr must evaluate to a String".into()),
+    };
+
+    let mut resolved_headers = Vec::with_capacity(headers.len());
+    for (k_expr, v_expr) in headers {
+        let k = eval_json_expr(
+            k_expr,
+            doc,
+            current,
+            env.clone(),
+            registry,
+            Arc::clone(&budget),
+        )
+        .await?;
+        let v = eval_json_expr(
+            v_expr,
+            doc,
+            current,
+            env.clone(),
+            registry,
+            Arc::clone(&budget),
+        )
+        .await?;
+        match (k, v) {
+            (Value::Str(k), Value::Str(v)) => resolved_headers.push((k, v)),
+            _ => return Err("Fetch: header keys and values must be strings".into()),
+        }
+    }
+    Ok((url, resolved_headers))
+}
+
+fn insert_field_value(
+    row: &mut serde_json::Map<String, serde_json::Value>,
+    field_name: &str,
+    optional: bool,
+    val: Value,
+) -> Result<(), String> {
+    match val.to_json() {
+        Some(v) => {
+            row.insert(field_name.to_string(), v);
+            Ok(())
+        }
+        None if optional => {
+            row.insert(field_name.to_string(), serde_json::Value::Null);
+            Ok(())
+        }
+        None => Err(format!("Required field '{}' produced null", field_name)),
+    }
+}
 
 pub async fn extract_json(
     state: &mut crate::wasm::HostState,
@@ -71,25 +160,147 @@ async fn extract_json_with_doc(
         }
     }
 
-    let mut results = Vec::with_capacity(items.len());
+    let can_fan_out = state.hook_registry.is_none();
+    let mut results: Vec<serde_json::Map<String, serde_json::Value>> =
+        Vec::with_capacity(items.len());
+    let mut pending: Vec<PendingFetch> = Vec::new();
+
     for (index, item) in items.iter().enumerate() {
         let mut row = serde_json::Map::new();
         for field in &blueprint.fields {
+            if can_fan_out
+                && let Expr::Fetch {
+                    url_expr,
+                    blueprint: sub_bp,
+                    method,
+                    headers,
+                    kind,
+                    on_failure,
+                    endpoint_id,
+                } = &field.expr
+            {
+                let (url, resolved_headers) = resolve_url_and_headers(
+                    state,
+                    &doc,
+                    item,
+                    index,
+                    env.clone(),
+                    url_expr,
+                    headers,
+                )
+                .await?;
+                let charge_result = if blueprint_has_fetch(sub_bp) {
+                    Err("Nested Expr::Fetch inside a sub-blueprint is not allowed".to_string())
+                } else {
+                    charge_fetch_request(state, &url, method, resolved_headers, endpoint_id.clone())
+                };
+                match charge_result {
+                    Ok(request) => {
+                        pending.push(PendingFetch {
+                            row_index: index,
+                            field_name: field.name.clone(),
+                            optional: field.optional,
+                            item,
+                            item_index: index,
+                            env: env.clone(),
+                            sub_blueprint: sub_bp,
+                            kind,
+                            on_failure,
+                            request,
+                        });
+                        row.insert(field.name.clone(), serde_json::Value::Null);
+                    }
+                    Err(e) => match on_failure {
+                        kani_shared::ast::OnFailurePolicy::Skip => {
+                            row.insert(field.name.clone(), serde_json::Value::Null);
+                        }
+                        kani_shared::ast::OnFailurePolicy::Fail => return Err(e),
+                        kani_shared::ast::OnFailurePolicy::Use(fallback) => {
+                            let registry_arc = state.pure_fn_registry.clone();
+                            let registry = registry_arc.as_deref();
+                            let budget = Arc::clone(&state.eval_budget);
+                            let val = eval_json_expr(
+                                fallback,
+                                &doc,
+                                Some((item, index)),
+                                env.clone(),
+                                registry,
+                                budget,
+                            )
+                            .await?;
+                            insert_field_value(&mut row, &field.name, field.optional, val)?;
+                        }
+                    },
+                }
+                continue;
+            }
             let val =
                 eval_json_field(state, &field.expr, &doc, Some((item, index)), env.clone()).await?;
-            match val.to_json() {
-                Some(v) => {
-                    row.insert(field.name.clone(), v);
-                }
-                None if field.optional => {
-                    row.insert(field.name.clone(), serde_json::Value::Null);
-                }
-                None => return Err(format!("Required field '{}' produced null", field.name)),
-            }
+            insert_field_value(&mut row, &field.name, field.optional, val)?;
         }
-        results.push(serde_json::Value::Object(row));
+        results.push(row);
     }
 
+    if !pending.is_empty() {
+        let client = state.http_client.clone();
+        let sends = pending
+            .iter()
+            .map(|p| send_prepared_request(client.clone(), p.request.clone()));
+        let bodies: Vec<Result<String, String>> = futures::future::join_all(sends).await;
+
+        for (p, body_result) in pending.into_iter().zip(bodies) {
+            state.last_io_at = Some(std::time::Instant::now());
+            let outcome: Result<Value, String> = match body_result {
+                Ok(body) => {
+                    let parsed = match p.kind {
+                        SubBlueprintKind::Html => {
+                            Box::pin(crate::evaluator::html_eval::extract_html_str(
+                                state,
+                                &body,
+                                p.sub_blueprint,
+                            ))
+                            .await
+                        }
+                        SubBlueprintKind::Json => {
+                            Box::pin(extract_json_str(state, &body, p.sub_blueprint)).await
+                        }
+                    };
+                    parsed.map(|result| {
+                        let first = result["rows"].as_array().and_then(|a| a.first()).cloned();
+                        first.map(Value::Json).unwrap_or(Value::Null)
+                    })
+                }
+                Err(e) => Err(e),
+            };
+            match (outcome, p.on_failure) {
+                (Ok(v), _) => {
+                    insert_field_value(&mut results[p.row_index], &p.field_name, p.optional, v)?
+                }
+                (Err(_), OnFailurePolicy::Skip) => {
+                    results[p.row_index].insert(p.field_name.clone(), serde_json::Value::Null);
+                }
+                (Err(e), OnFailurePolicy::Fail) => return Err(e),
+                (Err(_), OnFailurePolicy::Use(fallback)) => {
+                    let registry_arc = state.pure_fn_registry.clone();
+                    let registry = registry_arc.as_deref();
+                    let budget = Arc::clone(&state.eval_budget);
+                    let val = eval_json_expr(
+                        fallback,
+                        &doc,
+                        Some((p.item, p.item_index)),
+                        p.env,
+                        registry,
+                        budget,
+                    )
+                    .await?;
+                    insert_field_value(&mut results[p.row_index], &p.field_name, p.optional, val)?
+                }
+            }
+        }
+    }
+
+    let results: Vec<serde_json::Value> =
+        results.into_iter().map(serde_json::Value::Object).collect();
     Ok(serde_json::json!({ "rows": results, "scalars": scalars }))
 }
 

@@ -1,4 +1,5 @@
 #![allow(clippy::approx_constant)]
+#![allow(clippy::unwrap_used)]
 
 #[cfg(test)]
 mod helpers {

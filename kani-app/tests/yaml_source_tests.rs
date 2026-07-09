@@ -541,6 +541,88 @@ async fn get_filter_list_maps_all_kinds_and_options() {
 }
 
 #[tokio::test]
+async fn get_fetched_option_sets_lists_fetch_configured_filters() {
+    use kani_yaml::yaml::schema::{FetchedOptionsDef, OptionSetDef, ResponseType};
+    use std::collections::BTreeMap;
+
+    let mut option_sets = BTreeMap::new();
+    option_sets.insert(
+        "genres".to_string(),
+        OptionSetDef::Fetched {
+            options_fetched_by: FetchedOptionsDef {
+                route: "/genres".into(),
+                response_type: ResponseType::Html,
+                container: Some(".genre".into()),
+                fields: BTreeMap::from([
+                    ("name".to_string(), ".name".to_string()),
+                    ("value".to_string(), "data-id".to_string()),
+                ]),
+                nsfw_field: None,
+                cache: None,
+            },
+        },
+    );
+
+    let src = yaml_source(
+        "http://127.0.0.1:1",
+        ValidatedExtension {
+            id: "fixture-source".into(),
+            name: "Fixture Source".into(),
+            version: "1.0.0".into(),
+            base_url: "http://127.0.0.1:1".into(),
+            language: "en".into(),
+            filters: vec![
+                FilterEntry {
+                    id: "genre".into(),
+                    name: "Genre".into(),
+                    kind: FilterKind::Select,
+                    options: vec![],
+                    default: None,
+                    semantic: None,
+                    name_i18n: None,
+                    options_ref: Some("genres".into()),
+                    min: None,
+                    max: None,
+                    step: None,
+                },
+                FilterEntry {
+                    id: "author".into(),
+                    name: "Author".into(),
+                    kind: FilterKind::TextInput,
+                    options: vec![],
+                    default: None,
+                    semantic: Some(FilterSemantic::Author),
+                    name_i18n: None,
+                    options_ref: None,
+                    min: None,
+                    max: None,
+                    step: None,
+                },
+            ],
+            option_sets,
+            ..Default::default()
+        },
+    );
+
+    let raw = src.get_fetched_option_sets().await.unwrap();
+    let parsed: Vec<kani_shared::filter_fetch::FilterFetchDef> =
+        serde_json::from_str(&raw).unwrap();
+
+    assert_eq!(
+        parsed.len(),
+        1,
+        "only the filter with a Fetched options_ref should be listed"
+    );
+    let entry = &parsed[0];
+    assert_eq!(entry.filter_id, "genre");
+    assert_eq!(entry.option_set_name, "genres");
+    assert_eq!(entry.route, "/genres");
+    assert_eq!(entry.response_type, "html");
+    assert_eq!(entry.container.as_deref(), Some(".genre"));
+    assert_eq!(entry.cache_ttl, 300, "default TTL when no cache block set");
+}
+
+#[tokio::test]
 async fn get_preferences_maps_all_kinds() {
     let src = yaml_source(
         "http://127.0.0.1:1",
@@ -800,6 +882,82 @@ async fn browser_payload_endpoint_returns_clear_error() {
     assert!(
         err_str.contains("browser_payload") || err_str.contains("browser runtime"),
         "error should mention browser_payload: {err_str}"
+    );
+}
+
+#[tokio::test]
+async fn browser_payload_endpoint_missing_script_returns_clear_error() {
+    use kani_yaml::yaml::schema::EndpointVia;
+
+    let mut ep = list_endpoint("/popular", ".item");
+    ep.via = Some(EndpointVia::BrowserPayload);
+    ep.page_url = Some("https://example.com/manga/$manga_id$".into());
+    ep.script_name = Some("undeclared_script".into());
+
+    let src = yaml_source(
+        "http://127.0.0.1:1",
+        ValidatedExtension {
+            id: "bp-test".into(),
+            name: "bp-test".into(),
+            version: "1.0.0".into(),
+            base_url: "http://127.0.0.1:1".into(),
+            language: "en".into(),
+            unrestricted_http: true,
+            manga_details: Some(ep),
+            ..Default::default()
+        },
+    );
+
+    let result = src.get_manga_details("manga-1").await;
+    assert!(result.is_err());
+    let err_str = result.unwrap_err().to_string();
+    assert!(
+        err_str.contains("undeclared_script"),
+        "error should name the missing script: {err_str}"
+    );
+}
+
+#[tokio::test]
+async fn browser_payload_endpoint_reaches_capture_page_payload() {
+    use kani_yaml::yaml::schema::EndpointVia;
+
+    // Deterministic, environment-independent short-circuit inside
+    // v8_process::capture_page_payload — proves arg resolution and script
+    // lookup succeeded and the call reached the browser-runtime boundary,
+    // without needing a real headless browser available in the test env.
+    unsafe {
+        std::env::set_var("KANI_BROWSER_ENABLED", "false");
+    }
+
+    let mut ep = list_endpoint("/popular", ".item");
+    ep.via = Some(EndpointVia::BrowserPayload);
+    ep.page_url = Some("https://example.com/manga/$manga_id$".into());
+    ep.script_name = Some("fetch_manga".into());
+
+    let mut browser_scripts = std::collections::BTreeMap::new();
+    browser_scripts.insert("fetch_manga".to_string(), "passPayload('{}');".to_string());
+
+    let src = yaml_source(
+        "http://127.0.0.1:1",
+        ValidatedExtension {
+            id: "bp-test".into(),
+            name: "bp-test".into(),
+            version: "1.0.0".into(),
+            base_url: "http://127.0.0.1:1".into(),
+            language: "en".into(),
+            unrestricted_http: true,
+            manga_details: Some(ep),
+            browser_scripts,
+            ..Default::default()
+        },
+    );
+
+    let result = src.get_manga_details("manga-1").await;
+    assert!(result.is_err());
+    let err_str = result.unwrap_err().to_string();
+    assert!(
+        err_str.contains("KANI_BROWSER_ENABLED") || err_str.contains("disabled"),
+        "expected the deterministic browser-disabled error, got: {err_str}"
     );
 }
 

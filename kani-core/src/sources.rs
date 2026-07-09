@@ -2,7 +2,7 @@
 
 use crate::error::{Error, Result};
 use crate::wasm::{AllowedHost, HostState};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use wasmtime::Store;
 use wasmtime::component::Linker;
@@ -72,16 +72,16 @@ impl SourceInstance {
             (None, false) => AllowedHost::MetadataOnly,
         };
 
-        let mut store = Store::new(
+        let mut store = Store::try_new(
             engine,
             HostState::new(
                 self.smart_client.clone(),
                 allowed_host,
                 Arc::new(crate::cache::InMemoryCache::new()),
                 String::new(),
-                Arc::new(Mutex::new(None)),
+                crate::v8_process::new_handle(),
             )?,
-        );
+        )?;
 
         store.set_epoch_deadline(EPOCH_DEADLINE_TICKS);
         store.epoch_deadline_callback(|mut ctx| {

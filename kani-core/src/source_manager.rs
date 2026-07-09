@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use wasmtime::Store;
 
@@ -47,7 +47,7 @@ impl SourceManager {
             base_url,
             unrestricted_http,
             preferences: Arc::new(std::sync::RwLock::new(preferences)),
-            v8_process: Arc::new(Mutex::new(None)),
+            v8_process: crate::v8_process::new_handle(),
             ext_cache,
             ext_cache_namespace,
             pure_fn_registry,
@@ -86,7 +86,7 @@ impl SourceManager {
         host_state.pure_fn_registry = self.pure_fn_registry.clone();
         host_state.hook_registry = self.hook_registry.clone();
         host_state.max_hook_requests = self.max_hook_requests;
-        let mut store = Store::new(&self.engine, host_state);
+        let mut store = Store::try_new(&self.engine, host_state)?;
 
         store.set_epoch_deadline(crate::sources::EPOCH_DEADLINE_TICKS);
         store.epoch_deadline_callback(|ctx| {

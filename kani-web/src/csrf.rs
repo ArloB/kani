@@ -38,47 +38,6 @@ pub fn compute_token(session_id: &str, csrf_secret: &[u8; 32]) -> String {
     URL_SAFE_NO_PAD.encode(&result[..32])
 }
 
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used)]
-    use super::*;
-
-    const SECRET: [u8; 32] = [0xDE; 32];
-
-    #[test]
-    fn compute_token_is_stable() {
-        let t1 = compute_token("session-abc", &SECRET);
-        let t2 = compute_token("session-abc", &SECRET);
-        assert_eq!(
-            t1, t2,
-            "token must be deterministic for same session + secret"
-        );
-    }
-
-    #[test]
-    fn different_sessions_produce_different_tokens() {
-        let t1 = compute_token("session-aaa", &SECRET);
-        let t2 = compute_token("session-bbb", &SECRET);
-        assert_ne!(t1, t2);
-    }
-
-    #[test]
-    fn different_secrets_produce_different_tokens() {
-        let secret2 = [0xAB; 32];
-        let t1 = compute_token("session-xyz", &SECRET);
-        let t2 = compute_token("session-xyz", &secret2);
-        assert_ne!(t1, t2);
-    }
-
-    #[test]
-    fn token_is_base64url_no_padding() {
-        let t = compute_token("test", &SECRET);
-        assert!(!t.contains('+'), "base64url must not contain '+'");
-        assert!(!t.contains('/'), "base64url must not contain '/'");
-        assert!(!t.contains('='), "no-pad base64url must not contain '='");
-    }
-}
-
 /// Tower middleware that enforces CSRF protection on state-changing routes.
 pub async fn csrf_middleware(
     State(state): State<AppState>,
@@ -153,5 +112,46 @@ pub async fn csrf_middleware(
             })),
         )
             .into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    const SECRET: [u8; 32] = [0xDE; 32];
+
+    #[test]
+    fn compute_token_is_stable() {
+        let t1 = compute_token("session-abc", &SECRET);
+        let t2 = compute_token("session-abc", &SECRET);
+        assert_eq!(
+            t1, t2,
+            "token must be deterministic for same session + secret"
+        );
+    }
+
+    #[test]
+    fn different_sessions_produce_different_tokens() {
+        let t1 = compute_token("session-aaa", &SECRET);
+        let t2 = compute_token("session-bbb", &SECRET);
+        assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn different_secrets_produce_different_tokens() {
+        let secret2 = [0xAB; 32];
+        let t1 = compute_token("session-xyz", &SECRET);
+        let t2 = compute_token("session-xyz", &secret2);
+        assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn token_is_base64url_no_padding() {
+        let t = compute_token("test", &SECRET);
+        assert!(!t.contains('+'), "base64url must not contain '+'");
+        assert!(!t.contains('/'), "base64url must not contain '/'");
+        assert!(!t.contains('='), "no-pad base64url must not contain '='");
     }
 }

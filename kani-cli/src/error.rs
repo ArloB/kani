@@ -46,7 +46,7 @@ pub fn report_errors(filename: &str, source: &str, errors: Vec<chumsky::error::R
             )
             .finish()
             .eprint((filename, Source::from(source)))
-            .unwrap();
+            .expect("failed to write diagnostic to stderr");
     }
 }
 
@@ -67,5 +67,5 @@ pub fn report_custom_error(
         )
         .finish()
         .eprint((filename, Source::from(source)))
-        .unwrap();
+        .expect("failed to write diagnostic to stderr");
 }

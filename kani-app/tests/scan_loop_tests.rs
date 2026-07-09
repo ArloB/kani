@@ -57,7 +57,7 @@ async fn find_similar_manga_finds_close_title_match() {
         .await
         .unwrap();
     assert!(
-        hits.len() >= 1,
+        !hits.is_empty(),
         "at least 'Dragon Ball' should match 'Dragon Ball Z'"
     );
     let hit_ids: Vec<MangaId> = hits.iter().map(|h| h.id).collect();

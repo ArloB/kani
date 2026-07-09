@@ -3,7 +3,7 @@
 use kani_core::evaluator::{html_eval::extract_html, json_eval::extract_json};
 use kani_core::wasm::{AllowedHost, HostState};
 use kani_shared::ast::{BlueprintBuilder, Expr, RequestDef};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -14,7 +14,7 @@ fn make_state(allowed: AllowedHost) -> HostState {
         allowed,
         Arc::new(kani_core::cache::InMemoryCache::new()),
         String::new(),
-        Arc::new(Mutex::new(None)),
+        kani_core::v8_process::new_handle(),
     )
     .unwrap()
 }
@@ -414,4 +414,178 @@ async fn on_failure_use_evaluates_fallback() {
     let rows = result["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["detail"], "fallback_value");
+}
+
+// ── Concurrent fan-out ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn html_sub_fetches_run_concurrently_not_sequentially() {
+    use std::time::Duration;
+
+    let server = MockServer::start().await;
+    const N: usize = 5;
+    const DELAY_MS: u64 = 200;
+
+    let list_items: String = (1..=N)
+        .map(|i| format!(r#"<li><a href="/item/{i}">Item {i}</a></li>"#))
+        .collect();
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/list"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(format!("<ul>{list_items}</ul>")))
+        .mount(&server)
+        .await;
+
+    for i in 1..=N {
+        let body = format!(r#"<html><body><h1>Detail {i}</h1></body></html>"#);
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::path(format!("/item/{i}")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .set_delay(Duration::from_millis(DELAY_MS)),
+            )
+            .mount(&server)
+            .await;
+    }
+
+    let detail_bp = BlueprintBuilder::new(":root")
+        .field("heading", Expr::dom("h1").text())
+        .build();
+
+    let list_bp = BlueprintBuilder::new("li")
+        .with_request(RequestDef {
+            url: format!("{}/list", server.uri()),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        })
+        .field(
+            "detail",
+            Expr::fetch_html(
+                Expr::format(
+                    "{}{}",
+                    vec![
+                        Expr::lit(server.uri()),
+                        Expr::self_ref().first("a").attr("href"),
+                    ],
+                ),
+                detail_bp,
+            ),
+        )
+        .build();
+
+    let base_url = server.uri();
+    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+
+    let started = std::time::Instant::now();
+    let result = extract_html(&mut state, None, &list_bp).await.unwrap();
+    let elapsed = started.elapsed();
+
+    let rows = result["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), N);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(row["detail"]["heading"], format!("Detail {}", i + 1));
+    }
+    assert_eq!(
+        state.io_count as usize,
+        N + 1,
+        "1 list fetch + N detail fetches"
+    );
+
+    // Sequential would take at least N * DELAY_MS; concurrent fan-out should
+    // finish well under that even accounting for CI scheduling jitter.
+    assert!(
+        elapsed < Duration::from_millis(DELAY_MS * (N as u64) / 2),
+        "expected concurrent fan-out to run in well under {}ms, took {:?}",
+        DELAY_MS * (N as u64),
+        elapsed
+    );
+}
+
+#[tokio::test]
+async fn json_sub_fetches_run_concurrently_not_sequentially() {
+    use std::time::Duration;
+
+    let server = MockServer::start().await;
+    const N: usize = 5;
+    const DELAY_MS: u64 = 200;
+
+    let list_body = format!(
+        "[{}]",
+        (1..=N)
+            .map(|i| format!(r#"{{"id":{i},"detail_url":"/detail/{i}"}}"#))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path("/list"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(list_body))
+        .mount(&server)
+        .await;
+
+    for i in 1..=N {
+        let body = format!(r#"{{"id":{i},"title":"Title {i}"}}"#);
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::path(format!("/detail/{i}")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(body)
+                    .set_delay(Duration::from_millis(DELAY_MS)),
+            )
+            .mount(&server)
+            .await;
+    }
+
+    let detail_bp = BlueprintBuilder::new("")
+        .field("title", Expr::self_ref().ptr("/title").str_val())
+        .build();
+
+    let list_bp = BlueprintBuilder::new("")
+        .with_request(RequestDef {
+            url: format!("{}/list", server.uri()),
+            method: "GET".into(),
+            headers: vec![],
+            queries: vec![],
+            endpoint_id: None,
+        })
+        .field(
+            "detail",
+            Expr::fetch_json(
+                Expr::format(
+                    "{}{}",
+                    vec![
+                        Expr::lit(server.uri()),
+                        Expr::self_ref().ptr("/detail_url").str_val(),
+                    ],
+                ),
+                detail_bp,
+            ),
+        )
+        .build();
+
+    let base_url = server.uri();
+    let mut state = make_state(AllowedHost::Restricted(base_url.to_string()));
+
+    let started = std::time::Instant::now();
+    let result = extract_json(&mut state, None, &list_bp).await.unwrap();
+    let elapsed = started.elapsed();
+
+    let rows = result["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), N);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(row["detail"]["title"], format!("Title {}", i + 1));
+    }
+    assert_eq!(
+        state.io_count as usize,
+        N + 1,
+        "1 list fetch + N detail fetches"
+    );
+
+    assert!(
+        elapsed < Duration::from_millis(DELAY_MS * (N as u64) / 2),
+        "expected concurrent fan-out to run in well under {}ms, took {:?}",
+        DELAY_MS * (N as u64),
+        elapsed
+    );
 }

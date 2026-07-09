@@ -57,43 +57,39 @@ impl http::Host for HostState {
         let request = builder.build().map_err(|e| e.to_string())?;
 
         let ttfb_start = std::time::Instant::now();
-        let result = tokio::time::timeout(
+        let response = tokio::time::timeout(
             std::time::Duration::from_secs(90),
             self.http_client.send_request(request),
         )
-        .await;
+        .await
+        .map_err(|_| "HTTP request timed out after 90 seconds".to_string())?
+        .map_err(|e| e.to_string())?;
         let ttfb = ttfb_start.elapsed();
         self.last_io_at = Some(std::time::Instant::now());
 
-        match result {
-            Ok(Ok(response)) => {
-                let status = response.status().as_u16();
-                if crate::HTTP_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
-                    tracing::info!(
-                        ttfb_ms = ttfb.as_millis(),
-                        status_code = status,
-                        "Connection established and headers received"
-                    );
-                }
-                let headers = response
-                    .headers()
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-                    .collect();
-                let body = response
-                    .bytes_limited(MAX_HTTP_RESPONSE_BYTES)
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .to_vec();
-                Ok(http::Response {
-                    status,
-                    headers,
-                    body,
-                })
-            }
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => Err("HTTP request timed out after 90 seconds".into()),
+        let status = response.status().as_u16();
+        if crate::HTTP_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+            tracing::info!(
+                ttfb_ms = ttfb.as_millis(),
+                status_code = status,
+                "Connection established and headers received"
+            );
         }
+        let headers = response
+            .headers()
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        let body = response
+            .bytes_limited(MAX_HTTP_RESPONSE_BYTES)
+            .await
+            .map_err(|e| e.to_string())?
+            .to_vec();
+        Ok(http::Response {
+            status,
+            headers,
+            body,
+        })
     }
 }
 
@@ -101,7 +97,13 @@ impl html::Host for HostState {
     fn parse(&mut self, html: String) -> wasmtime::Result<html::DocHandle, String> {
         self.check_handle_capacity()?;
         let parsed = SendHtml::parse_document(&html);
-        let root_id = parsed.0.lock().unwrap().0.root_element().id();
+        let root_id = parsed
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .0
+            .root_element()
+            .id();
         let handle = self.next_doc_handle;
         self.next_doc_handle += 1;
         self.html_docs.insert(
@@ -457,15 +459,13 @@ impl prefs::Host for HostState {
 impl types::Host for HostState {}
 
 impl extraction::Host for HostState {
-    fn extract_html(
+    async fn extract_html(
         &mut self,
         doc: Option<i32>,
         blueprint: Vec<u8>,
     ) -> wasmtime::Result<i32, String> {
         let bp = decode_blueprint(&blueprint)?;
-        let value = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(extract_html(self, doc, &bp))
-        })?;
+        let value = extract_html(self, doc, &bp).await?;
         self.check_handle_capacity()?;
         let handle = self.next_doc_handle;
         self.next_doc_handle += 1;
@@ -473,17 +473,14 @@ impl extraction::Host for HostState {
         Ok(handle)
     }
 
-    fn paginated_extract_html(
+    async fn paginated_extract_html(
         &mut self,
         page: i32,
         page_size: i32,
         blueprint: Vec<u8>,
     ) -> wasmtime::Result<i32, String> {
         let bp = decode_blueprint(&blueprint)?;
-        let value = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(extract_html_paginated(self, page, page_size, &bp))
-        })?;
+        let value = extract_html_paginated(self, page, page_size, &bp).await?;
         self.check_handle_capacity()?;
         let handle = self.next_doc_handle;
         self.next_doc_handle += 1;
@@ -491,15 +488,13 @@ impl extraction::Host for HostState {
         Ok(handle)
     }
 
-    fn extract_json(
+    async fn extract_json(
         &mut self,
         doc: Option<i32>,
         blueprint: Vec<u8>,
     ) -> wasmtime::Result<i32, String> {
         let bp = decode_blueprint(&blueprint)?;
-        let value = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(extract_json(self, doc, &bp))
-        })?;
+        let value = extract_json(self, doc, &bp).await?;
         self.check_handle_capacity()?;
         let handle = self.next_doc_handle;
         self.next_doc_handle += 1;
@@ -507,7 +502,7 @@ impl extraction::Host for HostState {
         Ok(handle)
     }
 
-    fn paginated_extract_html_raw(
+    async fn paginated_extract_html_raw(
         &mut self,
         page: i32,
         page_size: i32,
@@ -525,10 +520,7 @@ impl extraction::Host for HostState {
             queries,
             endpoint_id: None,
         });
-        let value = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(extract_html_paginated(self, page, page_size, &bp))
-        })?;
+        let value = extract_html_paginated(self, page, page_size, &bp).await?;
         self.check_handle_capacity()?;
         let handle = self.next_doc_handle;
         self.next_doc_handle += 1;
@@ -536,18 +528,14 @@ impl extraction::Host for HostState {
         Ok(handle)
     }
 
-    fn paginated_extract_json(
+    async fn paginated_extract_json(
         &mut self,
         page: i32,
         page_size: i32,
         blueprint: Vec<u8>,
     ) -> wasmtime::Result<i32, String> {
-        let bp: kani_shared::ast::Blueprint =
-            postcard::from_bytes(&blueprint).map_err(|e| format!("Invalid blueprint: {}", e))?;
-        let value = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(extract_json_paginated(self, page, page_size, &bp))
-        })?;
+        let bp = decode_blueprint(&blueprint)?;
+        let value = extract_json_paginated(self, page, page_size, &bp).await?;
         self.check_handle_capacity()?;
         let handle = self.next_doc_handle;
         self.next_doc_handle += 1;
@@ -555,7 +543,7 @@ impl extraction::Host for HostState {
         Ok(handle)
     }
 
-    fn paginated_extract_json_raw(
+    async fn paginated_extract_json_raw(
         &mut self,
         page: i32,
         page_size: i32,
@@ -565,8 +553,7 @@ impl extraction::Host for HostState {
         queries: Vec<(String, String)>,
         blueprint: Vec<u8>,
     ) -> wasmtime::Result<i32, String> {
-        let mut bp: kani_shared::ast::Blueprint =
-            postcard::from_bytes(&blueprint).map_err(|e| format!("Invalid blueprint: {}", e))?;
+        let mut bp = decode_blueprint(&blueprint)?;
         bp.request = Some(kani_shared::ast::RequestDef {
             url,
             method,
@@ -574,10 +561,7 @@ impl extraction::Host for HostState {
             queries,
             endpoint_id: None,
         });
-        let value = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(extract_json_paginated(self, page, page_size, &bp))
-        })?;
+        let value = extract_json_paginated(self, page, page_size, &bp).await?;
         self.check_handle_capacity()?;
         let handle = self.next_doc_handle;
         self.next_doc_handle += 1;
@@ -587,23 +571,23 @@ impl extraction::Host for HostState {
 }
 
 impl scripting::Host for HostState {
-    fn v8_context_exists(&mut self, name: String) -> bool {
-        crate::v8_process::v8_context_exists(&self.v8_process, &name)
+    async fn v8_context_exists(&mut self, name: String) -> bool {
+        crate::v8_process::v8_context_exists(&self.v8_process, &name).await
     }
 
-    fn v8_context_create(&mut self, name: String, init_script: String) -> Result<(), String> {
-        crate::v8_process::v8_context_create(&self.v8_process, &name, &init_script)
+    async fn v8_context_create(&mut self, name: String, init_script: String) -> Result<(), String> {
+        crate::v8_process::v8_context_create(&self.v8_process, &name, &init_script).await
     }
 
-    fn v8_context_eval(&mut self, name: String, script: String) -> Result<String, String> {
-        crate::v8_process::v8_context_eval(&self.v8_process, &name, &script)
+    async fn v8_context_eval(&mut self, name: String, script: String) -> Result<String, String> {
+        crate::v8_process::v8_context_eval(&self.v8_process, &name, &script).await
     }
 
-    fn v8_context_drop(&mut self, name: String) {
-        crate::v8_process::v8_context_drop(&self.v8_process, &name);
+    async fn v8_context_drop(&mut self, name: String) {
+        crate::v8_process::v8_context_drop(&self.v8_process, &name).await;
     }
 
-    fn capture_url_param(
+    async fn capture_url_param(
         &mut self,
         page_url: String,
         opts: scripting::CaptureUrlParamOpts,
@@ -621,14 +605,15 @@ impl scripting::Host for HostState {
                 cache_ttl_ms: opts.cache_ttl_ms,
                 extra_headers: &opts.extra_headers,
             },
-        );
+        )
+        .await;
         // Reset the epoch deadline reference point so the post-browser-wait WASM
         // code doesn't immediately trip the "no recent IO" deadline check.
         self.last_io_at = Some(std::time::Instant::now());
         result
     }
 
-    fn capture_page_payload(
+    async fn capture_page_payload(
         &mut self,
         page_url: String,
         init_script: String,
@@ -640,47 +625,42 @@ impl scripting::Host for HostState {
             &page_url,
             &init_script,
             timeout_ms,
-        );
+        )
+        .await;
         self.last_io_at = Some(std::time::Instant::now());
         result
     }
 }
 
 impl cache::Host for HostState {
-    fn get(&mut self, key: String) -> Option<Vec<u8>> {
+    async fn get(&mut self, key: String) -> Option<Vec<u8>> {
         let ns = self.ext_cache_namespace.clone();
         let backend = std::sync::Arc::clone(&self.ext_cache);
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(backend.get(&ns, &key))
-        })
+        backend.get(&ns, &key).await
     }
 
-    fn put(&mut self, key: String, value: Vec<u8>, ttl_secs: u32) {
+    async fn put(&mut self, key: String, value: Vec<u8>, ttl_secs: u32) {
         let ns = self.ext_cache_namespace.clone();
         let backend = std::sync::Arc::clone(&self.ext_cache);
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(backend.put(
+        backend
+            .put(
                 &ns,
                 &key,
                 value,
                 std::time::Duration::from_secs(u64::from(ttl_secs)),
-            ))
-        });
+            )
+            .await;
     }
 
-    fn delete(&mut self, key: String) {
+    async fn delete(&mut self, key: String) {
         let ns = self.ext_cache_namespace.clone();
         let backend = std::sync::Arc::clone(&self.ext_cache);
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(backend.delete(&ns, &key))
-        });
+        backend.delete(&ns, &key).await;
     }
 
-    fn clear(&mut self) {
+    async fn clear(&mut self) {
         let ns = self.ext_cache_namespace.clone();
         let backend = std::sync::Arc::clone(&self.ext_cache);
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(backend.clear_namespace(&ns))
-        });
+        backend.clear_namespace(&ns).await;
     }
 }

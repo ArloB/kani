@@ -4,8 +4,11 @@ description = "Shared types and traits for Kani."
 version = "0.1.0"
 edition = "2024"
 
+[lints.clippy]
+unwrap_used = { level = "deny", priority = 1 }
+
 [dependencies]
-wit-bindgen = "0.53.1"
+wit-bindgen = { version = "0.58.0", features = ["async-spawn"] }
 talc = { workspace = true }
 base64 = "0.22.1"
 hex = "0.4"

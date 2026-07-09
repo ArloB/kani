@@ -85,7 +85,11 @@ impl SourceBackend {
             }
             Self::Yaml(y) => {
                 let filter_list = y.get_filter_list().await?;
-                Ok((filter_list, "[]".to_string()))
+                let fetched = y
+                    .get_fetched_option_sets()
+                    .await
+                    .unwrap_or_else(|_| "[]".to_string());
+                Ok((filter_list, fetched))
             }
         }
     }

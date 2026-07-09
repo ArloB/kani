@@ -3,6 +3,9 @@ name = "kani-cli"
 version = "0.1.0"
 edition = "2024"
 
+[lints.clippy]
+unwrap_used = { level = "deny", priority = 1 }
+
 [lib]
 name = "kani_cli"
 path = "src/lib.rs"
@@ -14,6 +17,7 @@ path = "src/main.rs"
 [dev-dependencies]
 insta = { version = "1", features = ["yaml"] }
 tempfile = "3"
+postcard = { version = "1", features = ["alloc"] }
 
 [dependencies]
 clap        = { version = "4", features = ["derive"] }

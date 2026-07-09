@@ -24,6 +24,15 @@
 //!   get_chapter_list("error-auth")     → ExtensionError::Auth kind round-trip
 //!   get_chapter_list("error-timeout")  → ExtensionError::Timeout kind round-trip
 //!   get_chapter_list("error-internal") → ExtensionError::Internal kind round-trip
+//!   get_chapter_list("paginated-stream")     → 2-page ChapterList (2 chapters/page), used
+//!                                               to prove the default get_chapter_list_stream
+//!                                               bridge delivers all chapters in order
+//!   get_chapter_list_stream("native-stream") → native stream<chapter-info> override that
+//!                                               calls extraction::extract_html (an async
+//!                                               host import) between two stream writes,
+//!                                               proving a guest can make a reentrant host
+//!                                               call from inside its spawn_local writer
+//!                                               while the host is concurrently draining
 
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::bindings::kani::extension::{json, prefs as prefs_raw};
@@ -357,6 +366,49 @@ fn test_extract_json() -> ExtensionResult<MangaList> {
     Ok(list(items))
 }
 
+// ── Native stream<chapter-info> override (manga_id = "native-stream") ────────
+
+fn test_native_chapter_list_stream()
+-> kani_shared::StreamReader<Result<wit_types::ChapterInfo, wit_types::ExtensionError>> {
+    let (mut tx, rx) = bindings::wit_stream::new();
+    kani_shared::spawn_local(async move {
+        let first = wit_types::ChapterInfo {
+            id: "native-1".into(),
+            number: 1.0,
+            title: None,
+            volume: None,
+            scanlator: None,
+            date_uploaded: None,
+            language: "en".into(),
+        };
+        let (result, _buf) = tx.write(vec![Ok(first)]).await;
+        if !matches!(result, kani_shared::StreamResult::Complete(_)) {
+            return;
+        }
+
+        if let Ok(doc) = html::parse(EXTRACT_HTML) {
+            use kani_shared::ast::{BlueprintBuilder, Expr};
+            let bp = BlueprintBuilder::new(".item")
+                .field("id", Expr::self_ref().attr("data-id"))
+                .build();
+            let _ = extract::html(Some(doc), &bp);
+            html::drop_doc(doc);
+        }
+
+        let second = wit_types::ChapterInfo {
+            id: "native-2".into(),
+            number: 2.0,
+            title: None,
+            volume: None,
+            scanlator: None,
+            date_uploaded: None,
+            language: "en".into(),
+        };
+        let _ = tx.write(vec![Ok(second)]).await;
+    });
+    rx
+}
+
 // ── Error-path verification (manga_id = "error-paths") ───────────────────────
 
 fn test_error_paths() -> ExtensionResult<MangaInfo> {
@@ -418,6 +470,39 @@ fn test_error_paths() -> ExtensionResult<MangaInfo> {
         status: MangaStatus::Unknown,
         tags: vec![],
     })
+}
+
+// ── Multi-page chapter list (manga_id = "paginated-stream") ──────────────────
+
+fn test_paginated_chapter_list(page: i32) -> ChapterList {
+    fn chapter(id: &str, number: f64) -> wit_types::ChapterInfo {
+        wit_types::ChapterInfo {
+            id: id.to_string(),
+            number,
+            title: None,
+            volume: None,
+            scanlator: None,
+            date_uploaded: None,
+            language: "en".to_string(),
+        }
+    }
+    match page {
+        1 => ChapterList {
+            chapters: vec![chapter("p1-1", 1.0), chapter("p1-2", 2.0)],
+            has_next_page: true,
+            total_pages: Some(2),
+        },
+        2 => ChapterList {
+            chapters: vec![chapter("p2-1", 3.0), chapter("p2-2", 4.0)],
+            has_next_page: false,
+            total_pages: Some(2),
+        },
+        _ => ChapterList {
+            chapters: vec![],
+            has_next_page: false,
+            total_pages: Some(2),
+        },
+    }
 }
 
 // ── Error kind round-trip (manga_id = "error-*") ─────────────────────────────
@@ -497,6 +582,15 @@ impl Guest for TestAbi {
             .get_chapter_list(&manga_id, page, page_size, sort)
             .map_err(|e| e.into_wit())
     }
+    async fn get_chapter_list_stream(
+        manga_id: String,
+        sort: Option<String>,
+    ) -> kani_shared::StreamReader<Result<wit_types::ChapterInfo, wit_types::ExtensionError>> {
+        if manga_id == "native-stream" {
+            return test_native_chapter_list_stream();
+        }
+        kani_shared::bridge_chapter_list_stream(get_extension(), manga_id, sort)
+    }
 
     fn get_chapter_sort_list() -> Result<Vec<wit_types::SortOption>, WitError> {
         get_extension()
@@ -573,10 +667,13 @@ impl MangaExtension for TestAbi {
     fn get_chapter_list(
         &self,
         manga_id: &str,
-        _page: i32,
+        page: i32,
         _page_size: Option<i32>,
         _sort: Option<String>,
     ) -> ExtensionResult<ChapterList> {
+        if manga_id == "paginated-stream" {
+            return Ok(test_paginated_chapter_list(page));
+        }
         test_error_kind(manga_id)
     }
 

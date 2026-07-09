@@ -265,6 +265,10 @@ pub fn emit_guest_impl(ext: &ValidatedExtension) -> String {
         get_extension().get_chapter_list(&manga_id, page, page_size, sort).map_err(|e| e.into_wit())
     }}
 
+    async fn get_chapter_list_stream(manga_id: String, sort: Option<String>) -> kani_shared::StreamReader<Result<ChapterInfo, wit_types::ExtensionError>> {{
+        kani_shared::bridge_chapter_list_stream(get_extension(), manga_id, sort)
+    }}
+
     fn get_chapter_sort_list() -> Result<Vec<wit_types::SortOption>, wit_types::ExtensionError> {{
         get_extension().get_chapter_sort_list().map_err(|e| e.into_wit())
     }}

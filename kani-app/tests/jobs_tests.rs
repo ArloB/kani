@@ -446,7 +446,11 @@ async fn audit_prune_job_runs_to_completion() {
 #[tokio::test]
 async fn trash_purge_job_runs_to_completion() {
     let svc = test_service().await;
-    let job_id = svc.job_manager.submit(TrashPurgeJob::new(30)).await.unwrap();
+    let job_id = svc
+        .job_manager
+        .submit(TrashPurgeJob::new(30))
+        .await
+        .unwrap();
     assert_eq!(await_terminal(&svc, job_id).await, "completed");
 }
 

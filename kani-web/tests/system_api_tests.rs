@@ -35,7 +35,7 @@ async fn system_info_reports_first_run_true_on_fresh_db() {
     let app = build_test_app(state).await;
     let res = app.oneshot(get_req("/rest/system/info")).await.unwrap();
     let body = body_json(res).await;
-    assert_eq!(body["first_run"].as_bool().unwrap(), true);
+    assert!(body["first_run"].as_bool().unwrap());
 }
 
 #[tokio::test]
@@ -84,7 +84,7 @@ async fn complete_first_run_flips_flag() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
     let app = build_test_app(state).await;
-    let cookie = login(&app, &username, &password).await;
+    let cookie = login(&app, username, password).await;
 
     let res = app
         .clone()
@@ -99,5 +99,5 @@ async fn complete_first_run_flips_flag() {
 
     let res2 = app.oneshot(get_req("/rest/system/info")).await.unwrap();
     let body = body_json(res2).await;
-    assert_eq!(body["first_run"].as_bool().unwrap(), false);
+    assert!(!body["first_run"].as_bool().unwrap());
 }

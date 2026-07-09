@@ -21,6 +21,14 @@ import { confirmDialog } from '../utils.js';
 
 const html = htm.bind(h);
 
+// Fallback values used only when a theme token is unset — these ARE token source
+// values (see static/js/theme.js's audit-ignore-file header), not app UI styling.
+const DEFAULT_SWATCH_COLOR = '#000000'; // audit-ignore
+const DEFAULT_PREVIEW_BG = '#0f0f17'; // audit-ignore
+const DEFAULT_PREVIEW_SURFACE = '#18181f'; // audit-ignore
+const DEFAULT_ACCENT_COLOR = '#e8545a'; // audit-ignore
+const DEFAULT_PREVIEW_TEXT = '#ddddf0'; // audit-ignore
+
 /** @type {ReadonlyArray<{ label: string, tokens: ReadonlyArray<{ key: string, label: string }> }>} */
 const TOKEN_GROUPS = [
   {
@@ -100,13 +108,13 @@ function ColorRow({ tokenKey, label, value, onChange }) {
     <div class="flex items-center gap-3 px-4 py-2.5">
       <label
         class="w-8 h-8 rounded-md cursor-pointer shrink-0 shadow-sm overflow-hidden relative border border-border-subtle"
-        style=${{ background: value || '#000000' }}
+        style=${{ background: value || DEFAULT_SWATCH_COLOR }}
         aria-label=${label}
       >
         <input
           ref=${colorRef}
           type="color"
-          value=${value || '#000000'}
+          value=${value || DEFAULT_SWATCH_COLOR}
           class="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
           onInput=${handleColorInput}
         />
@@ -132,10 +140,10 @@ function ColorRow({ tokenKey, label, value, onChange }) {
  */
 export function ThemePreviewSwatch({ tokens }) {
   const colors = [
-    tokens['--color-bg']      || '#0f0f17',
-    tokens['--color-surface'] || '#18181f',
-    tokens['--color-accent']  || '#e8545a',
-    tokens['--color-text']    || '#ddddf0',
+    tokens['--color-bg']      || DEFAULT_PREVIEW_BG,
+    tokens['--color-surface'] || DEFAULT_PREVIEW_SURFACE,
+    tokens['--color-accent']  || DEFAULT_ACCENT_COLOR,
+    tokens['--color-text']    || DEFAULT_PREVIEW_TEXT,
   ];
   return html`
     <div class="flex rounded-md overflow-hidden h-7 w-24 shrink-0 border border-border-subtle" aria-hidden="true">
@@ -210,7 +218,7 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
     const trimmedName = name.trim();
     if (!trimmedName) return;
     const id = themeId || generateThemeId();
-    const accent = tokens['--color-accent'] || '#e8545a';
+    const accent = tokens['--color-accent'] || DEFAULT_ACCENT_COLOR;
     const { hover, dim } = accentFromHex(accent);
     saveCustomTheme({
       id,
@@ -288,7 +296,7 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
                     key=${group.tokens[0].key}
                     tokenKey=${group.tokens[0].key}
                     label=${group.tokens[0].label}
-                    value=${tokens[group.tokens[0].key] || '#000000'}
+                    value=${tokens[group.tokens[0].key] || DEFAULT_SWATCH_COLOR}
                     onChange=${handleTokenChange}
                   />
                   <p class="text-xs text-text-faint px-4 pb-2.5">Hover and focus-ring colours are auto-derived.</p>
@@ -301,7 +309,7 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
                       key=${tok.key}
                       tokenKey=${tok.key}
                       label=${tok.label}
-                      value=${tokens[tok.key] || '#000000'}
+                      value=${tokens[tok.key] || DEFAULT_SWATCH_COLOR}
                       onChange=${handleTokenChange}
                     />
                   `)}

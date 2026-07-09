@@ -37,7 +37,7 @@ fn parse_negative_number() {
 
 #[test]
 fn parse_float_number() {
-    assert_eq!(parse_ok("3.14"), Expr::Number(3.14));
+    assert_eq!(parse_ok("3.25"), Expr::Number(3.25));
 }
 
 #[test]

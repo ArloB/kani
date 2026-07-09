@@ -13,7 +13,13 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::pedantic)]
 
+use futures::channel::mpsc;
 use kani_core::wasm::WasmRuntime;
+use kani_core::wasm::kani::extension::types::ChapterInfo;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use wasmtime::StoreContextMut;
+use wasmtime::component::{Source, StreamConsumer, StreamResult};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -379,4 +385,137 @@ async fn abi_handles_are_cleaned_up_after_each_call() {
         store.data().json_docs.is_empty(),
         "json_docs should be empty after JSON test"
     );
+}
+
+// ── test_abi: get_chapter_list_stream (CM_ASYNC stream<chapter-info>) ────────
+
+type ChapterStreamItem =
+    Result<ChapterInfo, kani_core::wasm::kani::extension::types::ExtensionError>;
+
+struct CollectConsumer(mpsc::UnboundedSender<ChapterStreamItem>);
+
+impl<D> StreamConsumer<D> for CollectConsumer {
+    type Item = ChapterStreamItem;
+
+    fn poll_consume(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        store: StoreContextMut<D>,
+        mut source: Source<Self::Item>,
+        _finish: bool,
+    ) -> Poll<wasmtime::Result<StreamResult>> {
+        let this = self.get_mut();
+        let value = &mut None;
+        source.read(store, value)?;
+        if let Some(v) = value.take() {
+            let _ = this.0.unbounded_send(v);
+        }
+        Poll::Ready(Ok(StreamResult::Completed))
+    }
+}
+
+async fn drain_chapter_list_stream(
+    store: &mut wasmtime::Store<kani_core::wasm::HostState>,
+    instance: &kani_core::wasm::KaniExtension,
+    manga_id: &str,
+) -> Vec<ChapterStreamItem> {
+    let provider = instance.kani_extension_manga_provider();
+    store
+        .run_concurrent(
+            async move |accessor| -> wasmtime::Result<Vec<ChapterStreamItem>> {
+                let stream = provider
+                    .call_get_chapter_list_stream(accessor, manga_id.to_string(), None)
+                    .await?;
+                let (tx, mut rx) = mpsc::unbounded();
+                accessor.with(|store| stream.pipe(store, CollectConsumer(tx)))?;
+                let mut items = Vec::new();
+                while let Some(v) = futures::StreamExt::next(&mut rx).await {
+                    items.push(v);
+                }
+                Ok(items)
+            },
+        )
+        .await
+        .expect("run_concurrent failed")
+        .expect("stream drain failed")
+}
+
+fn ok_chapters(items: Vec<ChapterStreamItem>) -> Vec<ChapterInfo> {
+    items
+        .into_iter()
+        .map(|r| r.expect("expected Ok chapter item"))
+        .collect()
+}
+
+#[tokio::test]
+async fn abi_get_chapter_list_stream_bridge_yields_nothing_for_empty_sync_list() {
+    let bytes = skip_if_missing!("kani-test-abi");
+    let (_rt, mut store, instance) = make_instance(&bytes).await;
+
+    let chapters = ok_chapters(drain_chapter_list_stream(&mut store, &instance, "any").await);
+
+    assert!(
+        chapters.is_empty(),
+        "default bridge over test-abi's empty sync get_chapter_list should yield zero chapters"
+    );
+}
+
+#[tokio::test]
+async fn abi_get_chapter_list_stream_bridge_delivers_all_pages_in_order() {
+    let bytes = skip_if_missing!("kani-test-abi");
+    let (_rt, mut store, instance) = make_instance(&bytes).await;
+
+    let chapters =
+        ok_chapters(drain_chapter_list_stream(&mut store, &instance, "paginated-stream").await);
+
+    assert_eq!(
+        chapters.len(),
+        4,
+        "default bridge should page through get_chapter_list until has_next_page is false"
+    );
+    assert_eq!(
+        chapters.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+        vec!["p1-1", "p1-2", "p2-1", "p2-2"],
+        "chapters should arrive in page/within-page order"
+    );
+}
+
+#[tokio::test]
+async fn abi_get_chapter_list_stream_native_override_survives_reentrant_host_call() {
+    let bytes = skip_if_missing!("kani-test-abi");
+    let (_rt, mut store, instance) = make_instance(&bytes).await;
+
+    let chapters =
+        ok_chapters(drain_chapter_list_stream(&mut store, &instance, "native-stream").await);
+
+    assert_eq!(
+        chapters.len(),
+        2,
+        "native override should stream two chapters around a reentrant extraction::extract_html call"
+    );
+    assert_eq!(chapters[0].id, "native-1");
+    assert_eq!(chapters[1].id, "native-2");
+}
+
+#[tokio::test]
+async fn abi_get_chapter_list_stream_bridge_surfaces_fetch_error_instead_of_swallowing_it() {
+    let bytes = skip_if_missing!("kani-test-abi");
+    let (_rt, mut store, instance) = make_instance(&bytes).await;
+
+    let items = drain_chapter_list_stream(&mut store, &instance, "error-timeout").await;
+
+    assert_eq!(
+        items.len(),
+        1,
+        "a get_chapter_list error on the first page should surface as exactly one Err item, \
+         not be silently swallowed by an empty stream"
+    );
+    let err = items[0]
+        .as_ref()
+        .expect_err("expected the stream's only item to be an Err");
+    assert_eq!(
+        err.kind,
+        kani_core::wasm::kani::extension::types::ExtensionErrorKind::Timeout
+    );
+    assert_eq!(err.message, "request timed out");
 }

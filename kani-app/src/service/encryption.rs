@@ -77,6 +77,7 @@ pub fn maybe_decrypt(cipher: Option<&CredentialCipher>, stored: &str) -> Result<
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     fn test_cipher() -> CredentialCipher {

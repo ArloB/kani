@@ -18,7 +18,7 @@ pub fn run(expression: &str, scripts_path: Option<&Path>) -> Result<(), CliError
         ));
     }
 
-    let parse_ast = result.into_result().unwrap();
+    let parse_ast = result.into_result().expect("checked has_errors() above");
 
     let ast_raw: Result<Expr, Vec<kani_yaml::YamlError>> = parse_ast.clone().try_into();
 
@@ -34,7 +34,7 @@ pub fn run(expression: &str, scripts_path: Option<&Path>) -> Result<(), CliError
         return Err(CliError::Other("Validation Error (see above)".to_string()));
     }
 
-    let expr: Expr = ast_raw.unwrap();
+    let expr: Expr = ast_raw.expect("checked Err case and returned early above");
 
     if !pure_scripts.is_empty() {
         check_user_fns(&expr, &pure_scripts);
