@@ -1,21 +1,22 @@
 // @ts-check
 // Settings — Library section (categories with drag-and-drop reordering + import/export).
 
-import { h } from 'preact';
+import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
-import { openConfirm } from '../../utils.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { iconPencil, iconX } from '../../icons.js';
-import { Modal, mountIntoModalRoot } from '../../components/modal.js';
+import { Modal, mountIntoModalRoot, showConfirm } from '../../components/modal.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow, mkNumberRow } from './_shared.js';
 import { t } from '../../i18n.js';
 import { mountSortableList } from '../../components/sortable-list.js';
 import { createEmptyState } from '../../components/empty-state.js';
+import { mkAddRow } from '../../components/editable-row.js';
+import { escapeHtml } from '../../utils.js';
+import { FolderPicker } from '../../components/folder-picker.js';
 
 const html = htm.bind(h);
-const _DRAG_HANDLE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>`;
 
 /**
  * @param {HTMLElement} el
@@ -33,15 +34,9 @@ export function mount(el, initialCategories) {
     const card  = mkSettingsGroupCard(group);
     el.appendChild(group);
 
-    // Card header with Add button
     const cardHead = document.createElement('div');
     cardHead.className = 'detail-card-head';
     cardHead.innerHTML = `<span>${t('library.categories.count', { count: cats.length, s: cats.length !== 1 ? 'ies' : 'y' })}</span>`;
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'btn-primary btn-sm';
-    addBtn.textContent = t('library.categories.add');
-    cardHead.appendChild(addBtn);
     card.appendChild(cardHead);
 
     // Sortable list container
@@ -72,7 +67,35 @@ export function mount(el, initialCategories) {
       });
     }
 
-    addBtn.addEventListener('click', () => _showInlineAdd(listContainer, addBtn));
+    const addWrap = document.createElement('div');
+    addWrap.className = 'border-t border-border-subtle';
+    addWrap.appendChild(mkAddRow({
+      label: t('library.categories.add'),
+      renderForm: () => {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'input text-sm w-full';
+        input.placeholder = t('library.categories.name.placeholder');
+        input.setAttribute('aria-label', t('library.categories.name.label'));
+        return {
+          el: input,
+          focusEl: input,
+          validate: () => {
+            if (!input.value.trim()) { input.focus(); return false; }
+            return true;
+          },
+          reset: () => { input.value = ''; },
+          getValue: () => input.value.trim(),
+        };
+      },
+      onAdd: async (name) => {
+        await api.createCategory(name, cats.length);
+        const updated = await api.getCategories();
+        cats = Array.isArray(updated) ? updated : cats;
+        _render();
+      },
+    }));
+    card.appendChild(addWrap);
 
     _mountImportExport(el);
   }
@@ -80,7 +103,7 @@ export function mount(el, initialCategories) {
   /** @param {any} cat */
   function _renderCatRow(cat) {
     const wrap = document.createElement('div');
-    wrap.className = 'flex items-center gap-2 px-4 py-2.5 flex-1 min-w-0';
+    wrap.className = 'flex items-center gap-2 px-2 flex-1 min-w-0';
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'flex-1 text-sm text-text truncate js-cat-name';
@@ -94,13 +117,13 @@ export function mount(el, initialCategories) {
 
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
-    editBtn.className = 'btn-icon shrink-0';
+    editBtn.className = 'btn-icon btn-sm shrink-0';
     editBtn.setAttribute('aria-label', t('library.categories.rename', { name: cat.name }));
     editBtn.innerHTML = iconPencil;
 
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
-    delBtn.className = 'btn-icon text-danger shrink-0';
+    delBtn.className = 'btn-icon btn-sm text-danger shrink-0';
     delBtn.setAttribute('aria-label', t('library.categories.delete', { name: cat.name }));
     delBtn.innerHTML = iconX;
 
@@ -145,7 +168,7 @@ export function mount(el, initialCategories) {
     });
 
     delBtn.addEventListener('click', async () => {
-      if (!(await openConfirm({ title: t('library.categories.confirm.delete.title'), message: t('library.categories.confirm.delete.msg', { name: cat.name }), danger: true }))) return;
+      if (!(await showConfirm(t('library.categories.confirm.delete.msg', { name: cat.name }), { title: t('library.categories.confirm.delete.title'), danger: true }))) return;
       delBtn.disabled = true;
       try {
         await api.deleteCategory(cat.id);
@@ -159,84 +182,6 @@ export function mount(el, initialCategories) {
     });
 
     return wrap;
-  }
-
-  /**
-   * Insert an inline text input at the bottom of the list.
-   * On Enter/blur with a name: calls API and refreshes. On Escape/blur empty: discards.
-   * @param {HTMLElement} listContainer
-   * @param {HTMLButtonElement} addBtn
-   */
-  function _showInlineAdd(listContainer, addBtn) {
-    // Prevent double-open
-    if (listContainer.querySelector('.js-pending-cat')) return;
-    addBtn.disabled = true;
-
-    // Visually matches a real sortable row: drag handle + input + disabled action buttons
-    const pendingRow = document.createElement('div');
-    pendingRow.className = 'js-pending-cat flex items-center gap-3 py-2 px-2 border-t border-border-subtle';
-
-    const grip = document.createElement('span');
-    grip.className = 'text-text-muted/30 shrink-0 select-none icon-sm pointer-events-none';
-    grip.innerHTML = _DRAG_HANDLE_SVG;
-    pendingRow.appendChild(grip);
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'input flex-1 text-sm';
-    input.placeholder = t('library.categories.name.placeholder');
-    input.setAttribute('aria-label', t('library.categories.name.label'));
-    pendingRow.appendChild(input);
-
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.className = 'btn-icon shrink-0 opacity-30';
-    editBtn.disabled = true;
-    editBtn.innerHTML = iconPencil;
-    pendingRow.appendChild(editBtn);
-
-    const delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.className = 'btn-icon text-danger shrink-0 opacity-30';
-    delBtn.disabled = true;
-    delBtn.innerHTML = iconX;
-    pendingRow.appendChild(delBtn);
-
-    listContainer.appendChild(pendingRow);
-    input.focus();
-
-    let _committed = false;
-
-    async function _commit() {
-      if (_committed) return;
-      const name = input.value.trim();
-      if (!name) { _discard(); return; }
-      _committed = true;
-      input.disabled = true;
-      try {
-        await api.createCategory(name, cats.length);
-        const updated = await api.getCategories();
-        cats = Array.isArray(updated) ? updated : cats;
-        _render();
-      } catch (e) {
-        showToast(/** @type {any} */(e)?.message ?? t('library.categories.error.add'), { type: 'error' });
-        _discard();
-        _committed = false;
-      }
-    }
-
-    function _discard() {
-      pendingRow.remove();
-      addBtn.disabled = false;
-    }
-
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); _commit(); }
-      if (e.key === 'Escape') { _discard(); }
-    });
-    input.addEventListener('blur', () => {
-      if (!_committed) _commit();
-    });
   }
 
   _render();
@@ -254,63 +199,76 @@ function _refreshHead(headEl, count) {
 
 // ── Import & Export ───────────────────────────────────────────────────────────
 
+/**
+ * Action-card builder for the import/export grid: title, description, then
+ * the action's own controls stacked in reading order.
+ * @param {string} title
+ * @param {string} desc
+ * @returns {{ card: HTMLElement, body: HTMLElement }}
+ */
+function _mkActionCard(title, desc) {
+  const card = document.createElement('div');
+  card.className = 'bg-surface border border-border-subtle rounded-xl p-4 flex flex-col gap-3 min-w-0';
+  const head = document.createElement('div');
+  head.innerHTML = `
+    <p class="text-sm font-medium text-text">${escapeHtml(title)}</p>
+    <p class="text-xs text-text-muted mt-0.5">${escapeHtml(desc)}</p>
+  `;
+  card.appendChild(head);
+  const body = document.createElement('div');
+  body.className = 'flex flex-col gap-2';
+  card.appendChild(body);
+  return { card, body };
+}
+
 /** @param {HTMLElement} el */
 function _mountImportExport(el) {
   const group = mkSettingsGroup(t('library.import_export.group'));
-  const card  = mkSettingsGroupCard(group);
+  const oldCard = mkSettingsGroupCard(group);
+  const grid = document.createElement('div');
+  grid.className = 'grid sm:grid-cols-2 gap-3';
+  group.replaceChild(grid, oldCard);
   el.appendChild(group);
 
-  // ── Export ────────────────────────────────────────────────────────────────
+  // ── Export card ───────────────────────────────────────────────────────────
   let includeProgress = false;
-
-  const exportCtrl = document.createElement('div');
-  exportCtrl.className = 'flex flex-col gap-2 items-end';
-
-  const exportTopRow = document.createElement('div');
-  exportTopRow.className = 'flex items-center gap-2';
+  const { card: exportCard, body: exportBody } = _mkActionCard(t('library.export.label'), t('library.export.desc'));
 
   const progressLabel = document.createElement('label');
-  progressLabel.className = 'flex items-center gap-1.5 text-xs text-text-muted cursor-pointer select-none';
+  progressLabel.className = 'flex items-center gap-2 text-sm text-text cursor-pointer select-none';
   const progressCheck = document.createElement('input');
   progressCheck.type = 'checkbox';
-  progressCheck.className = 'rounded';
   progressCheck.addEventListener('change', () => { includeProgress = progressCheck.checked; });
   progressLabel.appendChild(progressCheck);
   progressLabel.appendChild(document.createTextNode(t('library.export.include_progress')));
+  exportBody.appendChild(progressLabel);
 
   const exportPassphrase = document.createElement('input');
   exportPassphrase.type = 'password';
-  exportPassphrase.className = 'input text-sm w-44';
+  exportPassphrase.className = 'input text-sm w-full';
   exportPassphrase.placeholder = t('backup.export.passphrase');
   exportPassphrase.autocomplete = 'new-password';
   exportPassphrase.title = t('backup.export.passphrase.desc');
+  exportBody.appendChild(exportPassphrase);
 
   const exportBtn = document.createElement('button');
   exportBtn.type = 'button';
-  exportBtn.className = 'btn-primary btn-sm';
+  exportBtn.className = 'btn-secondary btn-sm w-full';
   exportBtn.textContent = t('library.export.btn');
   exportBtn.addEventListener('click', () => api.downloadBackupEncrypted(includeProgress, exportPassphrase.value));
+  exportBody.appendChild(exportBtn);
 
-  exportTopRow.appendChild(progressLabel);
-  exportTopRow.appendChild(exportBtn);
-  exportCtrl.appendChild(exportTopRow);
-  exportCtrl.appendChild(exportPassphrase);
-  card.appendChild(mkSettingsRow({ label: t('library.export.label'), description: t('library.export.desc'), control: exportCtrl }));
+  grid.appendChild(exportCard);
 
-  // ── Restore ───────────────────────────────────────────────────────────────
-  const restoreCtrl = document.createElement('div');
-  restoreCtrl.className = 'flex flex-col gap-2 items-end';
+  // ── Import card (restore + Tachiyomi) ─────────────────────────────────────
+  const { card: importCard, body: importBody } = _mkActionCard(t('library.restore.label'), t('library.restore.desc'));
 
   const restorePassphrase = document.createElement('input');
   restorePassphrase.type = 'password';
-  restorePassphrase.className = 'input text-sm w-44';
+  restorePassphrase.className = 'input text-sm w-full';
   restorePassphrase.placeholder = t('backup.restore.passphrase');
   restorePassphrase.autocomplete = 'current-password';
-
-  const restoreBtn = document.createElement('button');
-  restoreBtn.type = 'button';
-  restoreBtn.className = 'btn-secondary btn-sm';
-  restoreBtn.textContent = t('library.restore.choose_file');
+  importBody.appendChild(restorePassphrase);
 
   const restoreInput = document.createElement('input');
   restoreInput.type = 'file';
@@ -327,19 +285,25 @@ function _mountImportExport(el) {
       showToast(t('library.restore.preview_failed', { msg: e.message }), 'error');
     }
   });
+  importBody.appendChild(restoreInput);
 
+  const restoreBtn = document.createElement('button');
+  restoreBtn.type = 'button';
+  restoreBtn.className = 'btn-secondary btn-sm w-full';
+  restoreBtn.textContent = t('library.restore.choose_file');
   restoreBtn.addEventListener('click', () => restoreInput.click());
-  restoreCtrl.appendChild(restoreInput);
-  restoreCtrl.appendChild(restorePassphrase);
-  restoreCtrl.appendChild(restoreBtn);
-  card.appendChild(mkSettingsRow({ label: t('library.restore.label'), description: t('library.restore.desc'), control: restoreCtrl }));
+  importBody.appendChild(restoreBtn);
 
-  // ── Tachiyomi ─────────────────────────────────────────────────────────────
-  const tachiCtrl = document.createElement('div');
-  const tachiBtn = document.createElement('button');
-  tachiBtn.type = 'button';
-  tachiBtn.className = 'btn-secondary btn-sm';
-  tachiBtn.textContent = t('library.tachiyomi.choose_file');
+  const divider = document.createElement('div');
+  divider.className = 'border-t border-border-subtle my-1';
+  importBody.appendChild(divider);
+
+  const tachiHead = document.createElement('div');
+  tachiHead.innerHTML = `
+    <p class="text-sm font-medium text-text">${escapeHtml(t('library.tachiyomi.label'))}</p>
+    <p class="text-xs text-text-muted mt-0.5">${escapeHtml(t('library.tachiyomi.desc'))}</p>
+  `;
+  importBody.appendChild(tachiHead);
 
   const tachiInput = document.createElement('input');
   tachiInput.type = 'file';
@@ -356,11 +320,16 @@ function _mountImportExport(el) {
       showToast(t('library.tachiyomi.preview_failed', { msg: e.message }), 'error');
     }
   });
+  importBody.appendChild(tachiInput);
 
+  const tachiBtn = document.createElement('button');
+  tachiBtn.type = 'button';
+  tachiBtn.className = 'btn-secondary btn-sm w-full';
+  tachiBtn.textContent = t('library.tachiyomi.choose_file');
   tachiBtn.addEventListener('click', () => tachiInput.click());
-  tachiCtrl.appendChild(tachiInput);
-  tachiCtrl.appendChild(tachiBtn);
-  card.appendChild(mkSettingsRow({ label: t('library.tachiyomi.label'), description: t('library.tachiyomi.desc'), control: tachiCtrl }));
+  importBody.appendChild(tachiBtn);
+
+  grid.appendChild(importCard);
 
   _mountScheduledBackup(el);
 }
@@ -410,7 +379,7 @@ async function _mountScheduledBackup(el) {
   card.appendChild(freqRow);
 
   const hourRow = mkNumberRow({
-    label: t('backup.schedule.hour'), id: 'backup-hour',
+    label: t('backup.schedule.hour'), tooltip: t('backup.schedule.hour.tooltip'), id: 'backup-hour',
     value: cfg.frequency?.hour ?? 2, min: 0, max: 23,
     onChange: v => { cfg = { ...cfg, frequency: { ...cfg.frequency, hour: v } }; dirty = true; },
   });
@@ -426,18 +395,44 @@ async function _mountScheduledBackup(el) {
   card.appendChild(weekdayRow);
 
   const retainRow = mkNumberRow({
-    label: t('backup.schedule.retain'), id: 'backup-retain',
-    value: cfg.retain_n ?? 7, min: 1, max: 365,
+    label: t('backup.schedule.retain'), tooltip: t('backup.schedule.retain.tooltip'), id: 'backup-retain',
+    value: cfg.retain_n ?? 7, min: 1, max: 365, stepper: true,
     onChange: v => { cfg = { ...cfg, retain_n: v }; dirty = true; },
   });
   card.appendChild(retainRow);
 
-  const pathCtrl = document.createElement('input');
-  pathCtrl.type = 'text';
-  pathCtrl.className = 'input text-sm w-48';
-  pathCtrl.value = cfg.destination?.path ?? '/backups';
-  pathCtrl.addEventListener('change', () => { cfg = { ...cfg, destination: { type: 'local', path: pathCtrl.value } }; dirty = true; });
-  card.appendChild(mkSettingsRow({ label: t('backup.schedule.path'), control: pathCtrl }));
+  const pathCtrl = document.createElement('div');
+  pathCtrl.className = 'flex items-center gap-2';
+  const pathText = document.createElement('span');
+  pathText.className = 'font-mono text-sm text-text truncate max-w-56';
+  pathText.textContent = cfg.destination?.path ?? '/backups';
+  const browseBtn = document.createElement('button');
+  browseBtn.type = 'button';
+  browseBtn.className = 'btn-secondary btn-sm shrink-0';
+  browseBtn.textContent = t('backup.schedule.path.browse');
+  pathCtrl.append(pathText, browseBtn);
+
+  const pickerRoot = document.createElement('div');
+  el.appendChild(pickerRoot);
+  let pickerOpen = false;
+  const _renderPicker = () => {
+    render(html`<${FolderPicker}
+      open=${pickerOpen}
+      initialPath=${cfg.destination?.path ?? '/backups'}
+      onClose=${() => { pickerOpen = false; _renderPicker(); }}
+      onSelect=${(/** @type {string} */ path) => {
+        pickerOpen = false;
+        _renderPicker();
+        pathText.textContent = path;
+        cfg = { ...cfg, destination: { type: 'local', path } };
+        dirty = true;
+      }}
+    />`, pickerRoot);
+  };
+  _renderPicker();
+  browseBtn.addEventListener('click', () => { pickerOpen = true; _renderPicker(); });
+
+  card.appendChild(mkSettingsRow({ label: t('backup.schedule.path'), tooltip: t('backup.schedule.path.tooltip'), control: pathCtrl }));
 
   const passphraseCtrl = document.createElement('input');
   passphraseCtrl.type = 'password';

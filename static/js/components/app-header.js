@@ -2,6 +2,7 @@
 // Global app-shell header — mounted once by app.js, updated per-page via setPageHeader().
 
 import { navigate } from '../router.js';
+import { iconEllipsisVertical } from '../icons.js';
 import { t } from '../i18n.js';
 
 /** @typedef {{ label: string, href?: string }} Crumb */
@@ -15,6 +16,13 @@ let _breadcrumbSlot = null;
 let _actionsSlot = null;
 /** @type {HeaderState} */
 let _state = { crumbs: [], actions: null };
+/** @type {HTMLElement | null} */
+let _overflowPanel = null;
+/** @type {(() => void) | null} */
+let _removeOverflowListeners = null;
+
+/** Below this width the header can't hold more than one action beside the crumb. */
+const ACTION_COLLAPSE_WIDTH = 768;
 
 /**
  * Mount the global app header into `container`.
@@ -24,7 +32,17 @@ let _state = { crumbs: [], actions: null };
  * @param {HTMLElement} container
  * @returns {{ notificationsMount: HTMLElement, destroy: () => void }}
  */
+let _resizeBound = false;
+
 export function mountAppHeader(container) {
+  if (!_resizeBound) {
+    let raf = 0;
+    window.addEventListener('resize', () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => _applyState());
+    });
+    _resizeBound = true;
+  }
   _headerEl = document.createElement('header');
   _headerEl.className = 'app-header';
   _headerEl.setAttribute('aria-label', t('app_header.aria'));
@@ -81,13 +99,6 @@ function _applyState() {
 
   _breadcrumbSlot.innerHTML = '';
   const crumbs = _state.crumbs ?? [];
-  if (crumbs.length > 0) {
-    const leadSep = document.createElement('span');
-    leadSep.className = 'sep';
-    leadSep.setAttribute('aria-hidden', 'true');
-    leadSep.textContent = '/';
-    _breadcrumbSlot.appendChild(leadSep);
-  }
   crumbs.forEach((crumb, i) => {
     const isLast = i === crumbs.length - 1;
 
@@ -117,13 +128,68 @@ function _applyState() {
     }
   });
 
+  _closeOverflow();
   _actionsSlot.innerHTML = '';
   const actions = _state.actions;
-  if (actions) {
-    if (Array.isArray(actions)) {
-      for (const el of actions) _actionsSlot.appendChild(el);
-    } else {
-      _actionsSlot.appendChild(actions);
+  const actionEls = actions
+    ? (Array.isArray(actions) ? actions : [actions])
+    : [];
+  for (const el of actionEls) _actionsSlot.appendChild(el);
+
+  _applyActionOverflow(actionEls);
+}
+
+/**
+ * On narrow screens a row of action pills squeezes the breadcrumb down to a
+ * letter or two. Keep the last action (pages put their primary one last) in the
+ * bar and move the rest into a kebab menu — the real nodes are moved, not cloned,
+ * so their listeners survive.
+ * @param {HTMLElement[]} actionEls
+ */
+function _applyActionOverflow(actionEls) {
+  if (!_actionsSlot || !_headerEl) return;
+
+  const collapse = window.innerWidth < ACTION_COLLAPSE_WIDTH && actionEls.length > 1;
+  if (!collapse) return;
+
+  const overflow = actionEls.slice(0, -1);
+  if (!overflow.length) return;
+
+  const panel = document.createElement('div');
+  panel.className = 'header-overflow-panel';
+  panel.hidden = true;
+  for (const el of overflow) panel.appendChild(el);
+
+  const kebab = document.createElement('button');
+  kebab.type = 'button';
+  kebab.className = 'btn-icon shrink-0';
+  kebab.setAttribute('aria-label', t('app_header.more_actions'));
+  kebab.setAttribute('aria-haspopup', 'true');
+  kebab.setAttribute('aria-expanded', 'false');
+  kebab.innerHTML = `<span class="icon-sm">${iconEllipsisVertical}</span>`;
+  kebab.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = panel.hidden;
+    panel.hidden = !open;
+    kebab.setAttribute('aria-expanded', String(open));
+  });
+
+  _actionsSlot.insertBefore(kebab, _actionsSlot.firstChild);
+  _actionsSlot.appendChild(panel);
+  _overflowPanel = panel;
+
+  const onDocClick = (/** @type {MouseEvent} */ ev) => {
+    if (!panel.hidden && !panel.contains(/** @type {Node} */ (ev.target)) && ev.target !== kebab) {
+      panel.hidden = true;
+      kebab.setAttribute('aria-expanded', 'false');
     }
-  }
+  };
+  document.addEventListener('click', onDocClick);
+  _removeOverflowListeners = () => document.removeEventListener('click', onDocClick);
+}
+
+function _closeOverflow() {
+  _removeOverflowListeners?.();
+  _removeOverflowListeners = null;
+  _overflowPanel = null;
 }

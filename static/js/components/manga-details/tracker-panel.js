@@ -5,18 +5,22 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
 import { t } from '../../i18n.js';
-import { getState, setState } from '../../state.js';
+import { getState, setState } from '../../ui-state.js';
 import { showAlert } from '../modal.js';
+import { ManageRow } from './manage-row.js';
+import { Select } from '../form/select.js';
+import { NumberInput } from '../form/number-input.js';
+import { showTrackerSearchModal } from './tracker-search-modal.js';
 const html = htm.bind(h);
 
 /**
  * @param {HTMLElement} containerEl
- * @param {{ dbId: number }} ctx
+ * @param {{ dbId: number, title?: string }} ctx
  */
 export function mountTrackerPanel(containerEl, ctx) {
   const mount = document.createElement('div');
   containerEl.appendChild(mount);
-  render(html`<${TrackerPanel} dbId=${ctx.dbId} />`, mount);
+  render(html`<${TrackerPanel} dbId=${ctx.dbId} title=${ctx.title ?? ''} />`, mount);
 }
 
 // ── Internal tracking ─────────────────────────────────────────────────────────
@@ -43,12 +47,10 @@ function InternalTrackingCard({ dbId }) {
     }).catch(() => {});
   }, [dbId]);
 
-  function handleScoreInput(e) {
-    const raw = /** @type {HTMLInputElement} */ (e.target).value;
-    setScore(raw);
+  function handleScoreChange(/** @type {number} */ val) {
+    setScore(String(val));
     if (scoreTimerRef.current) clearTimeout(scoreTimerRef.current);
     scoreTimerRef.current = setTimeout(() => {
-      const val = parseFloat(raw);
       if (!isNaN(val) && val >= 0 && val <= 10) {
         api.setMangaTracking(dbId, { score: val }).catch(() => {});
       }
@@ -94,7 +96,7 @@ function InternalTrackingCard({ dbId }) {
       <p class="text-xs text-text-muted mt-0.5">${t('manga.tracker.card.desc')}</p>
       <div class="border-t border-border-subtle mt-3 mb-4"></div>
 
-      <${TrackingRow} label=${t('manga.tracker.sync_enabled')} desc=${t('manga.tracker.sync_enabled.desc')}>
+      <${ManageRow} label=${t('manga.tracker.sync_enabled')} desc=${t('manga.tracker.sync_enabled.desc')}>
         <label class="kani-toggle shrink-0">
           <input type="checkbox" class="kani-toggle__input" checked=${trackingEnabled} onChange=${e => {
             const val = /** @type {HTMLInputElement} */ (e.target).checked;
@@ -105,30 +107,34 @@ function InternalTrackingCard({ dbId }) {
         </label>
       <//>
 
-      <${TrackingRow} label=${t('manga.tracker.status')} desc=${t('manga.tracker.status.desc')}>
-        <select class="bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-text shrink-0" value=${status} onChange=${e => {
-          const val = /** @type {HTMLSelectElement} */ (e.target).value;
-          setStatus(val);
-          api.setMangaTracking(dbId, val ? { status: val } : { status: null }).catch(() => {});
-        }}>
-          ${statusOptions.map(o => html`<option key=${o.value} value=${o.value}>${o.label}</option>`)}
-        </select>
-      <//>
-
-      <${TrackingRow} label=${t('manga.tracker.score')} desc=${t('manga.tracker.score.desc')}>
-        <input
-          type="number" min="0" max="10" step="0.5" placeholder="—"
-          class="bg-surface border border-border rounded-lg px-3 py-1.5 text-sm text-text w-20 shrink-0"
-          value=${score}
-          onInput=${handleScoreInput}
+      <${ManageRow} label=${t('manga.tracker.status')} desc=${t('manga.tracker.status.desc')}>
+        <${Select}
+          class="shrink-0"
+          options=${statusOptions}
+          value=${status}
+          ariaLabel=${t('manga.tracker.status')}
+          onChange=${(/** @type {string} */ val) => {
+            setStatus(val);
+            api.setMangaTracking(dbId, val ? { status: val } : { status: null }).catch(() => {});
+          }}
         />
       <//>
 
-      <${TrackingRow} label=${t('manga.tracker.progress')} desc=${t('manga.tracker.progress.desc')}>
+      <${ManageRow} label=${t('manga.tracker.score')} desc=${t('manga.tracker.score.desc')}>
+        <${NumberInput}
+          class="shrink-0"
+          value=${score}
+          min=${0} max=${10} step=${0.5}
+          ariaLabel=${t('manga.tracker.score')}
+          onChange=${handleScoreChange}
+        />
+      <//>
+
+      <${ManageRow} label=${t('manga.tracker.progress')} desc=${t('manga.tracker.progress.desc')}>
         <span class="text-sm text-text-muted shrink-0">${progress}</span>
       <//>
 
-      <${TrackingRow} label=${t('manga.tracker.notify')} desc=${t('manga.tracker.notify.desc')}>
+      <${ManageRow} label=${t('manga.tracker.notify')} desc=${t('manga.tracker.notify.desc')}>
         <label class="kani-toggle shrink-0">
           <input type="checkbox" class="kani-toggle__input" checked=${notify} onChange=${handleNotifyChange} />
           <span class="kani-toggle__track"></span>
@@ -138,23 +144,9 @@ function InternalTrackingCard({ dbId }) {
   `;
 }
 
-function TrackingRow({ label, desc, children }) {
-  return html`
-    <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <p class="text-sm font-medium text-text">${label}</p>
-          <p class="text-xs text-text-muted mt-0.5">${desc}</p>
-        </div>
-        ${children}
-      </div>
-    </div>
-  `;
-}
-
 // ── External trackers ─────────────────────────────────────────────────────────
 
-function ExternalTrackersCard({ dbId }) {
+function ExternalTrackersCard({ dbId, title }) {
   const [state, setState_] = useState(/** @type {'loading'|'ready'|'error'} */ ('loading'));
   const [trackers, setTrackers] = useState(/** @type {any[]} */ ([]));
   const [mappings, setMappings] = useState(/** @type {any[]} */ ([]));
@@ -180,6 +172,7 @@ function ExternalTrackersCard({ dbId }) {
             tracker=${tr}
             mapping=${mappings.find(m => m.tracker_id === tr.id)}
             dbId=${dbId}
+            title=${title}
             onMappingSet=${(id) => setMappings(prev => {
               const next = prev.filter(m => m.tracker_id !== tr.id);
               next.push({ tracker_id: tr.id, tracker_manga_id: id });
@@ -192,7 +185,7 @@ function ExternalTrackersCard({ dbId }) {
   `;
 }
 
-function TrackerRow({ tracker: tr, mapping, dbId, onMappingSet, onMappingClear }) {
+function TrackerRow({ tracker: tr, mapping, dbId, title, onMappingSet, onMappingClear }) {
   const [syncLabel, setSyncLabel] = useState(/** @type {string|null} */ (null));
   const [syncing, setSyncing] = useState(false);
 
@@ -205,24 +198,14 @@ function TrackerRow({ tracker: tr, mapping, dbId, onMappingSet, onMappingClear }
     statusText = t('manga.tracker.linked_not_mapped');
   }
 
-  async function handleSearch() {
-    const query = prompt(t('manga.tracker.search_prompt', { name: tr.name }));
-    if (!query) return;
-    try {
-      const results = await api.searchTrackerManga(tr.id, query);
-      if (!results.length) { await showAlert(t('manga.tracker.no_results'), { title: t('manga.tracker.search.title') }); return; }
-      const choice = prompt(
-        results.map((r, i) => `${i + 1}. ${r.title} (${r.tracker_manga_id})`).join('\n') +
-        '\n\n' + t('manga.tracker.enter_number')
-      );
-      const idx = parseInt(choice ?? '', 10) - 1;
-      if (idx >= 0 && idx < results.length) {
-        await api.setTrackerMapping(dbId, tr.id, results[idx].tracker_manga_id);
-        onMappingSet(results[idx].tracker_manga_id);
-      }
-    } catch (err) {
-      await showAlert(t('manga.tracker.search_failed', { message: /** @type {any} */(err)?.message ?? String(err) }), { title: t('manga.tracker.error.title') });
-    }
+  function handleSearch() {
+    showTrackerSearchModal(tr, {
+      initialQuery: title,
+      onLink: async (trackerMangaId) => {
+        await api.setTrackerMapping(dbId, tr.id, trackerMangaId);
+        onMappingSet(trackerMangaId);
+      },
+    });
   }
 
   async function handleSync() {
@@ -268,11 +251,11 @@ function TrackerRow({ tracker: tr, mapping, dbId, onMappingSet, onMappingClear }
 
 // ── Root ──────────────────────────────────────────────────────────────────────
 
-function TrackerPanel({ dbId }) {
+function TrackerPanel({ dbId, title }) {
   return html`
     <div class="flex flex-col gap-4">
       <${InternalTrackingCard} dbId=${dbId} />
-      <${ExternalTrackersCard} dbId=${dbId} />
+      <${ExternalTrackersCard} dbId=${dbId} title=${title} />
     </div>
   `;
 }

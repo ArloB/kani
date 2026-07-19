@@ -2,6 +2,7 @@
 // Settings — Storage: disk usage and library integrity check (admin only).
 
 import * as api from '../../api.js';
+import { createEmptyState } from '../../components/empty-state.js';
 import { t } from '../../i18n.js';
 import { showApiError } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
@@ -39,21 +40,20 @@ async function _mountUsage(el) {
     const stats = await api.getAdminStorageStats();
     placeholder.remove();
 
-    /** @type {[string, any][]} */
+    /** @type {[string, any, boolean][]} */
     const rows = [
-      [t('storage.stat.library'),       stats.library_used_bytes],
-      [t('storage.stat.chapters'),      stats.chapter_used_bytes],
-      [t('storage.stat.covers'),        stats.cover_used_bytes],
-      [t('storage.stat.data'),          stats.data_used_bytes],
-      [t('storage.stat.free'),          stats.library_free_bytes],
-      [t('storage.stat.manga'),         stats.total_manga],
-      [t('storage.stat.chapters_count'), stats.total_chapters],
+      [t('storage.stat.library'),        stats.library_used_bytes, true],
+      [t('storage.stat.chapters'),       stats.chapter_used_bytes, true],
+      [t('storage.stat.covers'),         stats.cover_used_bytes,   true],
+      [t('storage.stat.data'),           stats.data_used_bytes,    true],
+      [t('storage.stat.free'),           stats.library_free_bytes, true],
+      [t('storage.stat.manga'),          stats.total_manga,        false],
+      [t('storage.stat.chapters_count'), stats.total_chapters,     false],
     ];
 
-    for (const [label, value] of rows) {
+    for (const [label, value, isBytes] of rows) {
       const valueEl = document.createElement('span');
       valueEl.className = 'text-sm font-medium text-text';
-      const isBytes = label !== t('storage.stat.manga') && label !== t('storage.stat.chapters_count');
       valueEl.textContent = isBytes ? _fmt(value) : (value ?? '—').toString();
       card.appendChild(mkSettingsRow({ label, control: valueEl }));
     }
@@ -171,35 +171,30 @@ async function _mountHistory(el) {
     placeholder.remove();
 
     if (!Array.isArray(rows) || rows.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'px-4 py-3 text-sm text-text-muted';
-      empty.textContent = t('storage.history.empty');
-      card.appendChild(empty);
+      card.appendChild(createEmptyState({ title: t('storage.history.empty'), compact: true }));
       return;
     }
 
     const table = document.createElement('table');
-    table.className = 'w-full text-xs';
+    table.className = 'data-table';
 
     const thead = document.createElement('thead');
-    thead.className = 'text-left border-b border-border-subtle';
     thead.innerHTML = `<tr>
-      <th class="px-4 py-2 font-medium text-text-muted">${t('storage.history.date')}</th>
-      <th class="px-4 py-2 font-medium text-text-muted text-right">${t('storage.history.chapters')}</th>
-      <th class="px-4 py-2 font-medium text-text-muted text-right">${t('storage.history.covers')}</th>
-      <th class="px-4 py-2 font-medium text-text-muted text-right">${t('storage.history.free')}</th>
+      <th>${t('storage.history.date')}</th>
+      <th class="num">${t('storage.history.chapters')}</th>
+      <th class="num">${t('storage.history.covers')}</th>
+      <th class="num">${t('storage.history.free')}</th>
     </tr>`;
 
     const tbody = document.createElement('tbody');
-    tbody.className = 'divide-y divide-border-subtle';
     for (const r of rows.slice(0, 30)) {
       const tr = document.createElement('tr');
       const date = r.captured_at ? new Date(r.captured_at).toLocaleDateString() : '—';
       tr.innerHTML = `
-        <td class="px-4 py-2 text-text-muted">${date}</td>
-        <td class="px-4 py-2 text-right font-medium text-text">${_fmt(r.chapter_used_bytes)}</td>
-        <td class="px-4 py-2 text-right text-text">${_fmt(r.cover_used_bytes)}</td>
-        <td class="px-4 py-2 text-right text-text">${_fmt(r.free_bytes)}</td>
+        <td class="muted">${date}</td>
+        <td class="num font-medium">${_fmt(r.chapter_used_bytes)}</td>
+        <td class="num">${_fmt(r.cover_used_bytes)}</td>
+        <td class="num">${_fmt(r.free_bytes)}</td>
       `;
       tbody.appendChild(tr);
     }

@@ -4,8 +4,9 @@ import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
-import { hasPermission } from '../../state.js';
+import { hasPermission } from '../../session.js';
 import { t } from '../../i18n.js';
+import { ManageRow } from './manage-row.js';
 const html = htm.bind(h);
 
 /**
@@ -18,20 +19,15 @@ export function mountLibrarySettingsPanel(containerEl, ctx) {
   render(html`<${LibrarySettingsPanel} dbId=${ctx.dbId} initialAutoScan=${ctx.autoScan} />`, mount);
 }
 
+/** @param {{ label: any, desc: any, checked: boolean, onChange: (e: Event) => void }} props */
 function ToggleRow({ label, desc, checked, onChange }) {
   return html`
-    <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <p class="text-sm font-medium text-text">${label}</p>
-          <p class="text-xs text-text-muted mt-0.5">${desc}</p>
-        </div>
-        <label class="kani-toggle cursor-pointer shrink-0">
-          <input type="checkbox" class="kani-toggle__input" checked=${checked} onChange=${onChange} />
-          <span class="kani-toggle__track"></span>
-        </label>
-      </div>
-    </div>
+    <${ManageRow} label=${label} desc=${desc}>
+      <label class="kani-toggle cursor-pointer shrink-0">
+        <input type="checkbox" class="kani-toggle__input" checked=${checked} onChange=${onChange} />
+        <span class="kani-toggle__track"></span>
+      </label>
+    <//>
   `;
 }
 

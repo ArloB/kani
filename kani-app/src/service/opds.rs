@@ -173,7 +173,7 @@ impl AppService {
     pub async fn opds_manga_feed(&self, manga_id: MangaId, base_url: &str) -> Result<String> {
         let manga = self.get_manga_by_id(manga_id).await?;
 
-        let (chapters, _, _) = self
+        let (chapters, _, _, _) = self
             .get_local_chapters(
                 manga_id,
                 1,

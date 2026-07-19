@@ -27,6 +27,10 @@ pub struct User {
     pub email: String,
     pub is_active: bool,
     pub roles: Vec<String>,
+    /// RFC3339 UTC. Only populated by `list_users` (the only consumer that shows it);
+    /// the session/auth paths leave it `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
 
     /// Never serialised to the client.
     #[serde(skip)]
@@ -99,6 +103,7 @@ impl AuthBackend {
             password_hash: row.password_hash,
             change_id: row.change_id,
             is_active: row.is_active,
+            created_at: None,
             roles,
         }))
     }
@@ -140,6 +145,7 @@ impl AuthBackend {
             password_hash: row.password_hash,
             change_id: row.change_id,
             is_active: row.is_active,
+            created_at: None,
             roles,
         }))
     }
@@ -307,6 +313,7 @@ impl AuthBackend {
             password_hash: String,
             change_id: Vec<u8>,
             is_active: bool,
+            created_at: Option<Option<String>>,
             roles_csv: Option<Option<String>>,
         }
 
@@ -318,6 +325,7 @@ impl AuthBackend {
                       u.password_hash,
                       u.change_id    as "change_id: Vec<u8>",
                       u.is_active    as "is_active: bool",
+                      strftime('%Y-%m-%dT%H:%M:%SZ', u.created_at) as "created_at: Option<String>",
                       GROUP_CONCAT(ur.role_slug) as "roles_csv: Option<String>"
                FROM users u
                LEFT JOIN user_roles ur ON ur.user_id = u.id
@@ -342,6 +350,7 @@ impl AuthBackend {
                     password_hash: row.password_hash,
                     change_id: row.change_id,
                     is_active: row.is_active,
+                    created_at: row.created_at.flatten(),
                     roles,
                 }
             })
@@ -626,10 +635,15 @@ pub async fn auth_guard(auth: AuthSession, request: Request, next: Next) -> Resp
 /// Returns `true` for paths that are always accessible without a session.
 fn is_public_path(path: &str) -> bool {
     path == "/login"
+        || path == "/register"
+        || path == "/forgot-password"
+        || path == "/reset-password"
+        || path == "/verify-email"
         || path.starts_with("/rest/auth/")
         || path.starts_with("/js/")
         || path.starts_with("/css/")
         || path.starts_with("/locales/")
+        || path.starts_with("/fonts/")
         || path == "/favicon.ico"
         || path == "/health"
         || path == "/ready"
@@ -757,6 +771,14 @@ mod tests {
     }
 
     #[test]
+    fn auth_pages_are_public() {
+        assert!(is_public_path("/register"));
+        assert!(is_public_path("/forgot-password"));
+        assert!(is_public_path("/reset-password"));
+        assert!(is_public_path("/verify-email"));
+    }
+
+    #[test]
     fn rest_auth_is_public() {
         assert!(is_public_path("/rest/auth/login"));
         assert!(is_public_path("/rest/auth/logout"));
@@ -768,6 +790,10 @@ mod tests {
         assert!(is_public_path("/js/vendor/preact.module.js"));
         assert!(is_public_path("/css/main.css"));
         assert!(is_public_path("/locales/en.js"));
+        assert!(is_public_path("/fonts/fonts.css"));
+        assert!(is_public_path(
+            "/fonts/aFTT7PB1QTsUX8KYth-orYadYY35Zlk.woff2"
+        ));
     }
 
     #[test]

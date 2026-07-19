@@ -1,7 +1,10 @@
 // @ts-check
 // Server-cache state atoms: SSE-populated, cross-tab broadcast where noted.
+// Signal-backed via the shared store factory; `sigFor` is exported for
+// reactive readers.
 
 import { broadcastStateChange } from './sync.js';
+import { createSignalStore } from './signal-store.js';
 
 /**
  * @typedef {{ id: number, name: string, mangaId: number, mangaTitle: string,
@@ -17,8 +20,7 @@ import { broadcastStateChange } from './sync.js';
 
 const _BROADCAST_KEYS = new Set(['chaptersProgress', 'libraryInvalidation', 'sourcesInvalidation']);
 
-/** @type {Record<string, any>} */
-const _state = {
+const _store = createSignalStore({
   /** @type {Map<number, ChapterProgress>} */
   chaptersProgress: new Map(),
 
@@ -37,28 +39,9 @@ const _state = {
 
   /** @type {Set<number>} */
   scanningMangaIds: new Set(),
-};
+});
 
-/** @type {Map<string, Set<Function>>} */
-const _listeners = new Map();
-
-/** @param {string} key */
-function _notify(key) {
-  const set = _listeners.get(key);
-  if (!set) return;
-  const value = _state[key];
-  for (const fn of set) {
-    try { fn(value); } catch (e) { console.error('Cache state listener error:', e); }
-  }
-}
-
-/**
- * @param {string} key
- * @returns {any}
- */
-export function getState(key) {
-  return _state[key];
-}
+export const { sigFor, getState, updateState, subscribe } = _store;
 
 /**
  * @param {string} key
@@ -66,28 +49,6 @@ export function getState(key) {
  * @param {{ broadcast?: boolean }} [opts]
  */
 export function setState(key, value, { broadcast = true } = {}) {
-  _state[key] = value;
-  _notify(key);
+  _store.setState(key, value);
   if (broadcast && _BROADCAST_KEYS.has(key)) broadcastStateChange(key, value);
-}
-
-/**
- * @param {string} key
- * @param {(current: any) => any} fn
- */
-export function updateState(key, fn) {
-  _state[key] = fn(_state[key]);
-  _notify(key);
-}
-
-/**
- * @param {string} key
- * @param {(value: any) => void} listener
- * @returns {() => void}
- */
-export function subscribe(key, listener) {
-  let set = _listeners.get(key);
-  if (!set) { set = new Set(); _listeners.set(key, set); }
-  set.add(listener);
-  return () => _listeners.get(key)?.delete(listener);
 }

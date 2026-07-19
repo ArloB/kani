@@ -7,6 +7,7 @@ import htm from 'htm';
 import * as api from '../../api.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
 import { SessionList } from '../../components/session-list.js';
+import { createErrorState } from '../../components/error-state.js';
 import { TotpWizard } from '../../components/totp-wizard.js';
 import { t } from '../../i18n.js';
 
@@ -29,7 +30,6 @@ export function mount(el) {
     render(html`<${TotpStatusRow} />`, totpEl);
     destroys.push(() => render(null, totpEl));
   });
-  if (unmountTotp) destroys.push(unmountTotp);
 
   // ── Session inventory section ───────────────────────────────────────────────
   const sessGroup = mkSettingsGroup(t('settings.security.sessions.group'));
@@ -42,31 +42,39 @@ export function mount(el) {
     render(html`<${SessionList} />`, sessEl);
     destroys.push(() => render(null, sessEl));
   });
-  if (unmountSessions) destroys.push(unmountSessions);
 
   // ── Security status section ─────────────────────────────────────────────────
   const statusGroup = mkSettingsGroup(t('settings.security.status.group'));
   const statusCard  = mkSettingsGroupCard(statusGroup);
   el.appendChild(statusGroup);
 
-  api.getFeatures().then(features => {
-    if (features?.public_instance) {
-      const badge = document.createElement('div');
-      badge.className = 'px-3 py-2 rounded bg-accent/10 text-accent text-sm font-medium';
-      badge.textContent = t('settings.security.status.public_instance');
-      statusCard.appendChild(badge);
-    }
-    statusCard.appendChild(mkSettingsRow({
-      label: t('settings.security.status.https.label'),
-      description: features?.public_instance
-        ? t('settings.security.status.https.desc_public')
-        : t('settings.security.status.https.desc'),
-    }));
-    statusCard.appendChild(mkSettingsRow({
-      label: t('settings.security.status.headers.label'),
-      description: t('settings.security.status.headers.desc'),
-    }));
-  }).catch(() => {});
+  function _loadStatus() {
+    statusCard.innerHTML = '';
+    api.getFeatures().then(features => {
+      if (features?.public_instance) {
+        const badge = document.createElement('div');
+        badge.className = 'px-3 py-2 rounded bg-accent/10 text-accent text-sm font-medium';
+        badge.textContent = t('settings.security.status.public_instance');
+        statusCard.appendChild(badge);
+      }
+      statusCard.appendChild(mkSettingsRow({
+        label: t('settings.security.status.https.label'),
+        description: features?.public_instance
+          ? t('settings.security.status.https.desc_public')
+          : t('settings.security.status.https.desc'),
+      }));
+      statusCard.appendChild(mkSettingsRow({
+        label: t('settings.security.status.headers.label'),
+        description: t('settings.security.status.headers.desc'),
+      }));
+    }).catch(() => {
+      statusCard.appendChild(createErrorState({
+        message: t('settings.security.status.load_failed'),
+        onRetry: _loadStatus,
+      }));
+    });
+  }
+  _loadStatus();
 
   return {
     destroy() {

@@ -4,7 +4,8 @@
 
 import * as api from '../../api.js';
 import { t } from '../../i18n.js';
-import { hasPermission, getState, subscribe } from '../../state.js';
+import { hasPermission } from '../../session.js';
+import { getState, subscribe } from '../../cache.js';
 import { navigate } from '../../router.js';
 import { getLocal, setLocal, escapeHtml } from '../../utils.js';
 import { createCoverImage } from '../cover-image.js';
@@ -119,7 +120,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
   // ── Cover ──
   const coverInner = document.createElement('div');
-  coverInner.className = 'aspect-[2/3] rounded-xl overflow-hidden bg-surface-2 shrink-0 cursor-pointer'; /* justified: manga cover aspect ratio */
+  coverInner.className = 'aspect-[2/3] rounded-xl overflow-hidden bg-surface-2 shrink-0 cursor-pointer shadow-lg'; /* justified: manga cover aspect ratio */
   coverInner.appendChild(createCoverImage({ url: coverUrl, alt: info?.title ?? '' }));
 
   // Cover lightbox
@@ -163,73 +164,74 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
   // ── Meta rows ──
   const meta = document.createElement('div');
-  meta.className = 'flex flex-col gap-1.5';
+  meta.className = 'flex flex-col gap-3';
+
+  const META_LINK_CLS = 'text-text hover:text-accent hover:underline underline-offset-4 transition-colors focus-visible:outline-none focus-visible:text-accent';
+
+  /**
+   * @param {string} label
+   * @param {string} valueHtml
+   * @returns {HTMLElement} the value paragraph, for wiring links
+   */
+  function mkMetaRow(label, valueHtml) {
+    const row = document.createElement('div');
+    row.className = 'flex flex-col gap-0.5 min-w-0';
+    const lbl = document.createElement('p');
+    lbl.className = 'eyebrow';
+    lbl.textContent = label;
+    const val = document.createElement('p');
+    val.className = 'text-sm leading-snug';
+    val.innerHTML = valueHtml;
+    row.appendChild(lbl);
+    row.appendChild(val);
+    meta.appendChild(row);
+    return val;
+  }
 
   if (isLocal && (source || info?.source_id || sid)) {
-    const p = document.createElement('p');
-    p.className = 'text-base md:text-sm flex items-center gap-2';
     const sname = escapeHtml(source?.name || info?.source_name || 'Source');
     const srcId = source?.id || info?.source_id || sid;
-    p.innerHTML = `<span class="font-semibold text-text">${t('manga.header.source')}</span> <a href="/source/${srcId}" class="text-accent hover:underline focus-visible:outline-none focus-visible:underline">${sname}</a>`;
-    p.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/source/${srcId}`); });
-    meta.appendChild(p);
+    const val = mkMetaRow(t('manga.header.source'), `<a href="/source/${srcId}" class="${META_LINK_CLS}">${sname}</a>`);
+    val.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/source/${srcId}`); });
   }
 
-  if (info?.status && info.status !== 'Unknown') {
-    const statusEl = document.createElement('p');
-    statusEl.className = 'text-base md:text-sm';
+  if (info?.status && info.status.toLowerCase() !== 'unknown') {
     const statusVal = info.status.toLowerCase();
     const statusDisplay = info.status.charAt(0).toUpperCase() + info.status.slice(1);
-    statusEl.innerHTML = `<span class="font-semibold text-text">${t('manga.header.status')}</span> <a href="/?status=${statusVal}" class="text-accent hover:underline focus-visible:outline-none focus-visible:underline">${escapeHtml(statusDisplay)}</a>`;
-    statusEl.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/?status=${statusVal}`); });
-    meta.appendChild(statusEl);
+    const dotCls = {
+      ongoing: 'bg-success', publishing: 'bg-success', releasing: 'bg-success',
+      completed: 'bg-text-faint', finished: 'bg-text-faint',
+      hiatus: 'bg-warn', 'on hiatus': 'bg-warn',
+      cancelled: 'bg-danger', dropped: 'bg-danger',
+    }[statusVal] ?? 'bg-text-faint';
+    const val = mkMetaRow(t('manga.header.status'),
+      `<a href="/?status=${statusVal}" class="${META_LINK_CLS} inline-flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full ${dotCls}" aria-hidden="true"></span>${escapeHtml(statusDisplay)}</a>`);
+    val.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/?status=${statusVal}`); });
   }
 
-  if (info?.authors?.length) {
-    const p = document.createElement('p');
-    p.className = 'text-base md:text-sm';
-    if (isLocal) {
-      p.innerHTML = `<span class="font-semibold text-text">${t('manga.header.authors')}</span> ` + info.authors.map((a, i) =>
-        `<a class="text-accent hover:underline focus-visible:outline-none focus-visible:underline" href="/?author_id=${a.id}" data-idx="${i}">${escapeHtml(a.name)}</a>`
-      ).join(', ');
-      p.querySelectorAll('a').forEach(el => {
-        const id = info.authors[Number(/** @type {HTMLElement} */(el).dataset.idx)].id;
-        el.addEventListener('click', e => { e.preventDefault(); navigate(`/?author_id=${id}`); });
+  /**
+   * @param {string} label
+   * @param {Array<{ id?: number, name: string }>} people
+   * @param {'Author'|'Artist'} kind
+   * @param {string} localParam
+   */
+  function mkPeopleRow(label, people, kind, localParam) {
+    const val = mkMetaRow(label, people.map((a, i) => isLocal
+      ? `<a class="${META_LINK_CLS}" href="/?${localParam}=${a.id}" data-idx="${i}">${escapeHtml(a.name)}</a>`
+      : `<a class="${META_LINK_CLS}" href="/source/${sid}?q=${encodeURIComponent(a.name)}" data-idx="${i}">${escapeHtml(a.name)}</a>`
+    ).join(', '));
+    val.querySelectorAll('a').forEach(el => {
+      const person = people[Number(/** @type {HTMLElement} */(el).dataset.idx)];
+      el.addEventListener('click', e => {
+        e.preventDefault();
+        if (isLocal) navigate(`/?${localParam}=${person.id}`);
+        else buildSourceMetaUrl(sid, person.name, kind).then(url => navigate(url));
       });
-    } else {
-      p.innerHTML = `<span class="font-semibold text-text">${t('manga.header.authors')}</span> ` + info.authors.map((a, i) =>
-        `<a class="text-accent hover:underline focus-visible:outline-none focus-visible:underline" href="/source/${sid}?q=${encodeURIComponent(a.name)}" data-idx="${i}">${escapeHtml(a.name)}</a>`
-      ).join(', ');
-      p.querySelectorAll('a').forEach(el => {
-        const name = info.authors[Number(/** @type {HTMLElement} */(el).dataset.idx)].name;
-        el.addEventListener('click', e => { e.preventDefault(); buildSourceMetaUrl(sid, name, 'Author').then(url => navigate(url)); });
-      });
-    }
-    meta.appendChild(p);
+    });
   }
 
-  if (info?.artists?.length) {
-    const p = document.createElement('p');
-    p.className = 'text-base md:text-sm';
-    if (isLocal) {
-      p.innerHTML = `<span class="font-semibold text-text">${t('manga.header.artists')}</span> ` + info.artists.map((a, i) =>
-        `<a class="text-accent hover:underline focus-visible:outline-none focus-visible:underline" href="/?artist_id=${a.id}" data-idx="${i}">${escapeHtml(a.name)}</a>`
-      ).join(', ');
-      p.querySelectorAll('a').forEach(el => {
-        const id = info.artists[Number(/** @type {HTMLElement} */(el).dataset.idx)].id;
-        el.addEventListener('click', e => { e.preventDefault(); navigate(`/?artist_id=${id}`); });
-      });
-    } else {
-      p.innerHTML = `<span class="font-semibold text-text">${t('manga.header.artists')}</span> ` + info.artists.map((a, i) =>
-        `<a class="text-accent hover:underline focus-visible:outline-none focus-visible:underline" href="/source/${sid}?q=${encodeURIComponent(a.name)}" data-idx="${i}">${escapeHtml(a.name)}</a>`
-      ).join(', ');
-      p.querySelectorAll('a').forEach(el => {
-        const name = info.artists[Number(/** @type {HTMLElement} */(el).dataset.idx)].name;
-        el.addEventListener('click', e => { e.preventDefault(); buildSourceMetaUrl(sid, name, 'Artist').then(url => navigate(url)); });
-      });
-    }
-    meta.appendChild(p);
-  }
+  if (info?.authors?.length) mkPeopleRow(t('manga.header.authors'), info.authors, 'Author', 'author_id');
+  if (info?.artists?.length) mkPeopleRow(t('manga.header.artists'), info.artists, 'Artist', 'artist_id');
 
   // ── Button group ──
   const btnGroupEl = document.createElement('div');
@@ -262,7 +264,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
     const toggle = document.createElement('button');
     toggle.type = 'button';
-    toggle.className = 'text-xs text-accent hover:underline text-left mt-1 self-start';
+    toggle.className = 'text-xs text-text-muted underline underline-offset-2 decoration-border hover:text-accent text-left mt-1 self-start';
     toggle.textContent = t('manga.header.show_more');
     toggle.style.display = 'none';
     descWrap.appendChild(toggle);
@@ -273,72 +275,79 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
       });
     });
 
+    // Expand/collapse is a plain clamp toggle with a max-height tween: the
+    // description grows in place. A long description is capped at ~55vh and
+    // scrolls internally so it never pushes a huge page scrollbar; a short one
+    // just expands fully. (The previous version slid the whole content card up
+    // over the cover — fragile and disorienting.)
+    // Cap the expanded height to the space between the description's top and the
+    // viewport bottom, so a long description scrolls internally instead of
+    // running off the page (its start point varies with the column layout).
+    const _expandCap = () => {
+      const top = desc ? desc.getBoundingClientRect().top : 0;
+      return Math.max(160, Math.round(window.innerHeight - top - 24));
+    };
+
     toggle.addEventListener('click', () => {
       expanded = !expanded;
       toggle.textContent = expanded ? t('manga.header.show_less') : t('manga.header.show_more');
       if (!desc) return;
 
-      if (isDesktop()) {
-        const slideAmount = coverInner ? Math.round(coverInner.offsetHeight * 0.55) : 80;
-        if (expanded) {
-          const clampedHeight = desc.offsetHeight;
-          desc.dataset.clampedHeight = String(clampedHeight);
-          desc.classList.remove('line-clamp-3');
-          desc.style.overflow = 'hidden';
-          const fullHeight = desc.scrollHeight;
-          desc.style.maxHeight = clampedHeight + 'px';
-          desc.offsetHeight; // force reflow
-          desc.style.transition = 'max-height 0.4s ease';
-          desc.style.maxHeight = fullHeight + 'px';
-          contentCard.style.marginTop = `-${slideAmount}px`;
+      const natural = expanded ? (desc.scrollHeight) : 0;
+      const cap = _expandCap();
+      const capped = expanded && natural > cap;
 
-          let settled = false;
-          const expand = () => {
-            if (settled) return; settled = true;
-            contentCard.removeEventListener('transitionend', expand);
-            clearTimeout(safety);
-            if (!desc || !descWrap) return;
-            const descTop = descWrap.getBoundingClientRect().top;
-            const maxH = Math.max(80, window.innerHeight - descTop - 48);
-            desc.style.maxHeight = maxH + 'px';
-            desc.style.overflow = '';
-            desc.style.overflowY = 'auto';
-            desc.style.scrollbarWidth = 'none';
-          };
-          const safety = setTimeout(expand, 450);
-          contentCard.addEventListener('transitionend', expand, { once: true });
+      const applyExpandedOverflow = () => {
+        if (!desc) return;
+        if (capped) {
+          desc.style.maxHeight = cap + 'px';
+          desc.style.overflowY = 'auto';
+          desc.style.scrollbarWidth = 'thin';
         } else {
-          const currentHeight = desc.offsetHeight;
-          if (descWrap) descWrap.style.overflow = 'hidden';
-          desc.style.overflow = 'hidden';
+          desc.style.maxHeight = '';
+          desc.style.overflow = '';
+          desc.style.overflowY = '';
+        }
+      };
+
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        desc.classList.toggle('line-clamp-3', !expanded);
+        if (expanded) applyExpandedOverflow();
+        else { desc.style.maxHeight = ''; desc.style.overflow = ''; desc.style.overflowY = ''; desc.style.scrollbarWidth = ''; }
+        return;
+      }
+
+      const settle = () => {
+        if (!desc) return;
+        desc.style.transition = '';
+        if (expanded) {
+          applyExpandedOverflow();
+        } else {
+          desc.style.maxHeight = '';
+          desc.style.overflow = '';
           desc.style.overflowY = '';
           desc.style.scrollbarWidth = '';
-          desc.style.maxHeight = currentHeight + 'px';
-          desc.offsetHeight; // force reflow
-          desc.style.transition = 'max-height 0.4s ease';
-          desc.style.maxHeight = (desc.dataset.clampedHeight || '72') + 'px';
-          contentCard.style.marginTop = '-0.5rem';
-
-          let settled = false;
-          const collapse = () => {
-            if (settled) return; settled = true;
-            contentCard.removeEventListener('transitionend', collapse);
-            clearTimeout(safety);
-            if (!desc) return;
-            desc.classList.add('line-clamp-3');
-            desc.style.overflow = '';
-            desc.style.transition = '';
-            desc.style.maxHeight = '';
-            if (descWrap) descWrap.style.overflow = '';
-          };
-          const safety = setTimeout(collapse, 450);
-          contentCard.addEventListener('transitionend', collapse, { once: true });
+          desc.classList.add('line-clamp-3');
         }
+      };
+
+      const from = desc.offsetHeight;
+      desc.style.overflow = 'hidden';
+      desc.style.maxHeight = from + 'px';
+      let to;
+      if (expanded) {
+        desc.dataset.clampedHeight = String(from);
+        desc.classList.remove('line-clamp-3');
+        to = Math.min(natural, cap);
       } else {
-        desc.classList.toggle('line-clamp-3', !expanded);
-        desc.style.maxHeight = expanded ? '50vh' : '';
-        desc.style.overflowY = expanded ? 'auto' : '';
+        to = parseInt(desc.dataset.clampedHeight ?? '', 10) || 72;
       }
+      desc.offsetHeight; // force reflow so the transition has a start value
+      desc.style.transition = 'max-height 0.3s ease';
+      desc.style.maxHeight = to + 'px';
+
+      const safety = setTimeout(settle, 350);
+      desc.addEventListener('transitionend', () => { clearTimeout(safety); settle(); }, { once: true });
     });
   }
 
@@ -352,60 +361,50 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   contentCard.style.position = 'relative';
   contentCard.style.zIndex = '1';
 
+  // Desktop-only reference panel: wraps the metadata rows and the description
+  // as one subtle surface (the action buttons stay free-standing above it).
+  const metaPanel = document.createElement('div');
+  metaPanel.className = 'meta-card flex flex-col gap-3 min-w-0';
+
   const heroRow = document.createElement('div');
   leftCol.appendChild(heroRow);
 
   // ── Responsive layout ──
   function applyHeroLayout() {
     if (!isDesktop()) {
+      leftCol.style.maxWidth = '';
       heroRow.style.cssText = 'display:flex;flex-direction:row;align-items:flex-start;gap:0.75rem';
       coverInner.style.width = '35%';
       coverInner.style.marginLeft = '';
       coverInner.style.marginRight = '';
+      // Pull meta/description out of the desktop panel back to their mobile homes.
+      if (!titleMetaCard.contains(meta)) titleMetaCard.appendChild(meta);
       if (!heroRow.contains(coverInner)) heroRow.insertBefore(coverInner, heroRow.firstChild);
       if (!heroRow.contains(titleMetaCard)) heroRow.appendChild(titleMetaCard);
       if (heroRow.contains(contentCard)) heroRow.removeChild(contentCard);
       titleMetaCard.style.flex = '1 1 0%';
-      if (!titleMetaCard.contains(meta)) titleMetaCard.appendChild(meta);
       btnGroupEl.style.paddingTop = '0.5rem';
       btnGroupEl.style.paddingBottom = '0.5rem';
       if (!leftCol.contains(btnGroupEl)) leftCol.appendChild(btnGroupEl);
       if (descWrap && !leftCol.contains(descWrap)) leftCol.appendChild(descWrap);
-      contentCard.style.backgroundImage = '';
-      contentCard.style.paddingTop = '';
-      contentCard.style.marginTop = '';
-      contentCard.style.transition = '';
     } else {
-      heroRow.style.cssText = '';
+      // Cap the column so the cover and panel don't sprawl across a quarter of
+      // an ultra-wide viewport.
+      leftCol.style.maxWidth = '20rem';
+      heroRow.style.cssText = 'display:flex;flex-direction:column;gap:1rem';
       btnGroupEl.style.paddingTop = '';
       btnGroupEl.style.paddingBottom = '';
       if (!heroRow.contains(coverInner)) heroRow.insertBefore(coverInner, heroRow.firstChild);
       if (!heroRow.contains(contentCard)) heroRow.appendChild(contentCard);
       if (heroRow.contains(titleMetaCard)) heroRow.removeChild(titleMetaCard);
-      if (!contentCard.contains(meta)) contentCard.insertBefore(meta, contentCard.firstChild);
-      if (!contentCard.contains(btnGroupEl)) {
-        if (descWrap && contentCard.contains(descWrap)) contentCard.insertBefore(btnGroupEl, descWrap);
-        else contentCard.appendChild(btnGroupEl);
-      }
-      if (descWrap && !contentCard.contains(descWrap)) contentCard.appendChild(descWrap);
-      contentCard.style.backgroundImage = 'linear-gradient(to bottom, transparent, var(--color-bg) 3rem)';
-      contentCard.style.paddingTop = '3rem';
-      if (!expanded) contentCard.style.marginTop = '-0.5rem';
-      contentCard.style.transition = 'margin-top 0.35s ease';
-      const colTop = leftCol.getBoundingClientRect().top;
-      const available = window.innerHeight - colTop - 48;
-      const maxCoverH = Math.max(120, available - contentCard.offsetHeight + 8);
-      const naturalH = leftCol.offsetWidth * 1.5;
-      if (naturalH > maxCoverH) {
-        const w = Math.round(maxCoverH * (2 / 3));
-        coverInner.style.width = w + 'px';
-        coverInner.style.marginLeft = 'auto';
-        coverInner.style.marginRight = 'auto';
-      } else {
-        coverInner.style.width = '100%';
-        coverInner.style.marginLeft = '';
-        coverInner.style.marginRight = '';
-      }
+      // Order: actions (free) then the reference panel (metadata + description).
+      if (contentCard.firstChild !== btnGroupEl) contentCard.insertBefore(btnGroupEl, contentCard.firstChild);
+      if (!metaPanel.contains(meta)) metaPanel.insertBefore(meta, metaPanel.firstChild);
+      if (descWrap && !metaPanel.contains(descWrap)) metaPanel.appendChild(descWrap);
+      if (!contentCard.contains(metaPanel)) contentCard.appendChild(metaPanel);
+      coverInner.style.width = '100%';
+      coverInner.style.marginLeft = '';
+      coverInner.style.marginRight = '';
     }
   }
 
@@ -620,7 +619,7 @@ function _showDuplicateModal(suggestions, sid, mangaId, onAddedToLibrary, btnGro
     row.className = 'flex items-center justify-between gap-2';
     const nameLink = document.createElement('a');
     nameLink.href = `/manga/${s.id}`;
-    nameLink.className = 'text-accent hover:underline truncate';
+    nameLink.className = 'text-text-muted underline underline-offset-2 decoration-border hover:text-accent truncate';
     nameLink.textContent = s.name;
     nameLink.addEventListener('click', e => { e.preventDefault(); navigate(`/manga/${s.id}`); });
     const meta = document.createElement('span');

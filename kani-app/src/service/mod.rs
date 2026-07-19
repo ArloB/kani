@@ -1106,7 +1106,7 @@ impl AppService {
         };
 
         let manga_to_scan: Vec<(i64, bool)> = {
-            let base = "SELECT m.id, m.auto_download FROM manga m WHERE m.auto_scan = true";
+            let base = "SELECT m.id, m.auto_download FROM manga m WHERE m.auto_scan = true AND m.deleted_at IS NULL AND m.is_orphaned = FALSE";
             let completed_clause = if exclude_completed {
                 " AND m.status != 1"
             } else {

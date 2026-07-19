@@ -10,7 +10,7 @@ import { Combobox } from '../combobox.js';
 import { showApiError } from '../toast.js';
 import { iconPencil, iconRefresh, iconX } from '../../icons.js';
 import { mkCard, mkRow, mkItem } from './_shared.js';
-import { hasPermission } from '../../state.js';
+import { hasPermission } from '../../session.js';
 import { getLocal, setLocal } from '../../utils.js';
 import { subscribeJob } from '../../sse.js';
 import { t } from '../../i18n.js';
@@ -360,7 +360,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
 
   return html`
     <${Modal} open=${true} onClose=${onClose} title=${t('manga.meta.title')} wide=${true}
-      footer=${html`<button type="button" class="btn-primary btn-sm" onClick=${onClose}>${t('common.close')}</button>`}
+      footer=${html`<button type="button" class="btn-ghost btn-sm" onClick=${onClose}>${t('common.close')}</button>`}
     >
       ${canRefresh && html`
         <div class="border-b border-border pb-4 mb-2">
@@ -391,8 +391,11 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
         </div>
       `}
 
-      <div class="flex flex-col gap-6">
+      <!-- Two columns at wide: the cover and status sit beside the text fields,
+           which are what actually need the width. -->
+      <div class="flex flex-col lg:flex-row gap-6 lg:gap-8">
 
+        <div class="flex flex-col gap-6 lg:w-52 lg:shrink-0">
         <!-- Cover -->
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between gap-2">
@@ -412,14 +415,14 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
               `}
             </div>
           </div>
-          <div class="flex items-start gap-4">
+          <div class="flex items-start gap-4 lg:flex-col">
             <img
               src=${`/rest/manga/${dbId}/cover?v=${coverTs}`}
               alt=${t('manga.meta.cover')}
-              class="w-16 h-24 object-cover rounded-lg border border-border flex-shrink-0 bg-surface-2"
+              class="w-20 h-30 lg:w-full lg:h-auto lg:aspect-[2/3] object-cover rounded-lg border border-border flex-shrink-0 bg-surface-2"
               onError=${(/** @type {Event} */e) => { /** @type {HTMLImageElement} */(e.target).style.display = 'none'; }}
             />
-            <div class="flex flex-col gap-2">
+            <div class="flex flex-col gap-2 lg:w-full">
               <label class="btn-ghost btn-sm cursor-pointer">
                 ${t('manga.meta.choose_image')}
                 <input type="file" accept="image/*" class="sr-only"
@@ -433,6 +436,48 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
           </div>
         </div>
 
+        <!-- Status -->
+        <div class="flex flex-col gap-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-sm font-semibold text-text">
+              ${t('manga.meta.field.status')}
+              ${statusOverridden && html`<${OverrideDot} />`}
+            </span>
+            <div class="flex items-center gap-2 shrink-0">
+              <${SaveStatus} status=${statusStatus} />
+              ${statusOverridden ? html`
+                <button type="button"
+                  class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
+                  onClick=${resetStatus}>
+                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
+                  ${t('manga.meta.restore')}
+                </button>
+              ` : null}
+              ${canRefresh && statusOverridden && html`
+                <button type="button"
+                  class="btn-ghost btn-sm text-xs text-text-muted"
+                  disabled=${!!pulling} onClick=${() => handlePullField('status')}
+                  title=${t('manga.meta.pull.status')}>
+                  ${pulling === 'status' ? '…' : t('manga.meta.pull')}
+                </button>
+              `}
+            </div>
+          </div>
+          <select class="input w-full text-sm" value=${localStatus}
+            disabled=${pulling === 'status'}
+            onChange=${handleStatusChange}>
+            ${STATUS_OPTIONS().map(opt => html`
+              <option key=${opt.value} value=${String(opt.value)}>${opt.label}</option>
+            `)}
+          </select>
+          ${statusOverridden && srcStatusLabel && html`
+            <p class="text-xs text-text-muted">${t('manga.header.source')} ${srcStatusLabel}</p>
+          `}
+        </div>
+
+        </div>
+
+        <div class="flex flex-col gap-6 flex-1 min-w-0">
         <!-- Title -->
         <div class="flex flex-col gap-1.5">
           <div class="flex items-center justify-between gap-2">
@@ -469,7 +514,7 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
             onKeyDown=${(/** @type {KeyboardEvent} */e) => { if (e.key === 'Enter') /** @type {HTMLElement} */(e.target).blur(); }}
           />
           ${d.local_name != null && html`
-            <p class="text-xs text-text-muted">Source: ${d.source_name}</p>
+            <p class="text-xs text-text-muted">${t('manga.header.source')} ${d.source_name}</p>
           `}
         </div>
 
@@ -508,47 +553,8 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
           ></textarea>
           ${descOverridden && d.source_description != null && html`
             <p class="text-xs text-text-muted">
-              Source: ${d.source_description.slice(0, 120)}${d.source_description.length > 120 ? '…' : ''}
+              ${t('manga.header.source')} ${d.source_description.slice(0, 120)}${d.source_description.length > 120 ? '…' : ''}
             </p>
-          `}
-        </div>
-
-        <!-- Status -->
-        <div class="flex flex-col gap-1.5">
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-sm font-semibold text-text">
-              ${t('manga.meta.field.status')}
-              ${statusOverridden && html`<${OverrideDot} />`}
-            </span>
-            <div class="flex items-center gap-2 shrink-0">
-              <${SaveStatus} status=${statusStatus} />
-              ${statusOverridden ? html`
-                <button type="button"
-                  class="btn-ghost btn-sm flex items-center gap-1 text-xs text-text-muted"
-                  onClick=${resetStatus}>
-                  <span class="icon-xs" dangerouslySetInnerHTML=${{ __html: iconX }}></span>
-                  ${t('manga.meta.restore')}
-                </button>
-              ` : null}
-              ${canRefresh && statusOverridden && html`
-                <button type="button"
-                  class="btn-ghost btn-sm text-xs text-text-muted"
-                  disabled=${!!pulling} onClick=${() => handlePullField('status')}
-                  title=${t('manga.meta.pull.status')}>
-                  ${pulling === 'status' ? '…' : t('manga.meta.pull')}
-                </button>
-              `}
-            </div>
-          </div>
-          <select class="input w-full text-sm" value=${localStatus}
-            disabled=${pulling === 'status'}
-            onChange=${handleStatusChange}>
-            ${STATUS_OPTIONS().map(opt => html`
-              <option key=${opt.value} value=${String(opt.value)}>${opt.label}</option>
-            `)}
-          </select>
-          ${statusOverridden && srcStatusLabel && html`
-            <p class="text-xs text-text-muted">Source: ${srcStatusLabel}</p>
           `}
         </div>
 
@@ -635,6 +641,8 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
             placeholder=${t('manga.meta.add_tag')}
             creatable=${true}
           />
+        </div>
+
         </div>
 
       </div>

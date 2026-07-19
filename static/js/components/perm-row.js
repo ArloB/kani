@@ -3,6 +3,7 @@
 
 import { h } from 'preact';
 import htm from 'htm';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 /**
@@ -15,7 +16,7 @@ export function PermRow({ permission, via }) {
   return html`
     <div class="flex items-center justify-between gap-3 px-3 py-2 text-sm border-b border-border-subtle last:border-0">
       <span class="font-mono text-xs text-text">${permission}</span>
-      ${via ? html`<span class="meta shrink-0">via ${via}</span>` : null}
+      ${via ? html`<span class="meta shrink-0">${t('perm_row.via', { source: via })}</span>` : null}
     </div>
   `;
 }

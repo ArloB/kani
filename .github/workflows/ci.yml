@@ -176,6 +176,9 @@ jobs:
       - name: Check JS syntax
         run: find static/js -name '*.js' -not -path '*/dist/*' -not -path '*/vendor/*' -print0 | xargs -0 node --check
 
+      - name: Unit tests (pure JS modules)
+        run: node --test "static/js/**/*.test.js"
+
       - name: Restore kani-cli binary
         uses: actions/cache/restore@v5
         id: kani-cli-cache
@@ -236,3 +239,6 @@ jobs:
 
       - name: i18n key check
         run: node scripts/check-i18n-keys.js
+
+      - name: Untranslated string check
+        run: node scripts/check-untranslated-strings.js

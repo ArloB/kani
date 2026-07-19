@@ -2,12 +2,11 @@
 // Sources page — sidebar list of sources (desktop), full list (mobile).
 
 import * as api from '../api.js';
-import { escapeHtml, deferredSkeleton } from '../utils.js';
-import { hasPermission } from '../state.js';
+import { deferredSkeleton } from '../utils.js';
+import { hasPermission } from '../session.js';
 import { skeletonSourceList } from '../components/skeletons.js';
 import { createErrorState } from '../components/error-state.js';
-import { createEmptyState } from '../components/empty-state.js';
-import { iconCube, iconStarFilled, iconStarOutline } from '../icons.js';
+import { iconCube } from '../icons.js';
 import { h, render } from 'preact';
 import htm from 'htm';
 import { mountIntoModalRoot } from '../components/modal.js';
@@ -19,6 +18,8 @@ const html = htm.bind(h);
 
 /** @type {HTMLElement | null} */
 let _asideEl = null;
+/** @type {HTMLElement | null} */
+let _mobileEl = null;
 /** @type {{ destroy: () => void } | null} */
 let _repoManager = null;
 
@@ -60,12 +61,12 @@ export async function init(container) {
     return btn;
   })();
 
-  const _actionsEl = document.createElement('div');
-  _actionsEl.className = 'flex items-center gap-2';
-  _actionsEl.appendChild(_tabsEl);
-  if (_addSourceBtn) _actionsEl.appendChild(_addSourceBtn);
+  // Passed as separate actions (not one wrapper) so the header can collapse the
+  // tab switcher into its kebab on narrow screens and keep "Add source" visible.
+  const _actions = /** @type {HTMLElement[]} */ ([_tabsEl]);
+  if (_addSourceBtn) _actions.push(_addSourceBtn);
 
-  setPageHeader({ crumbs: [{ label: t('sources.crumb') }], actions: _actionsEl });
+  setPageHeader({ crumbs: [{ label: t('sources.crumb') }], actions: _actions });
 
   container.innerHTML = `
     <!-- Sources view -->
@@ -74,35 +75,28 @@ export async function init(container) {
       <!-- Sidebar (lg+) — SourcesSidebar mounts here -->
       <aside
         class="hidden lg:flex flex-col w-72 shrink-0 border-r border-border-subtle sticky overflow-y-auto"
-        style="top:var(--header-h);height:calc(100vh - var(--header-h));"
+        style="top:var(--header-h);height:calc(100dvh - var(--header-h));"
         aria-label="${t('sources.crumb')}"
       ></aside>
 
       <!-- Content -->
       <div class="flex-1 min-w-0">
 
-        <!-- Mobile source list (hidden on lg+) -->
-        <div class="lg:hidden max-w-page mx-auto px-4 md:px-6 py-4 md:pt-6 md:pb-0 flex flex-col gap-4">
-          <input
-            type="search"
-            class="input input-sm w-full max-w-sm js-mobile-search"
-            placeholder="Filter sources…"
-            aria-label="Filter sources"
-          />
-          <div class="js-mobile-list flex flex-col divide-y divide-border-subtle" aria-live="polite"></div>
-        </div>
+        <!-- Mobile source list (hidden on lg+) — same component as the sidebar -->
+        <div class="js-mobile-sources lg:hidden max-w-page mx-auto w-full px-2 sm:px-4 md:px-6 py-2 md:pt-4" aria-live="polite"></div>
 
         <!-- Desktop "select a source" prompt -->
         <div class="hidden lg:flex flex-col items-center justify-center min-h-96 gap-3 text-text-muted">
           <span class="icon-xl opacity-30" aria-hidden="true">${iconCube}</span>
-          <p class="text-sm">Select a source from the sidebar to browse.</p>
+          <p class="text-sm">${t('source.select_prompt')}</p>
         </div>
 
       </div>
     </div>
 
-    <!-- Repos view (hidden initially) -->
-    <div class="js-repos-view hidden" style="min-height:calc(100vh - var(--header-h));"></div>
+    <!-- Repos view (hidden initially). Flex column with a bounded height so the
+         repo-manager master-detail stretches its list pane to the bottom. -->
+    <div class="js-repos-view hidden flex flex-col" style="height:calc(100dvh - var(--header-h));"></div>
   `;
 
   const sourcesView = /** @type {HTMLElement} */ (container.querySelector('.js-sources-view'));
@@ -131,100 +125,20 @@ export async function init(container) {
   _switchTab('extensions');
 
   _asideEl = /** @type {HTMLElement} */ (container.querySelector('aside'));
-  const mobileList   = /** @type {HTMLElement} */ (container.querySelector('.js-mobile-list'));
-  const mobileSearch = /** @type {HTMLInputElement} */ (container.querySelector('.js-mobile-search'));
-
-  // ── Mobile list ──────────────────────────────────────────────────────────
+  _mobileEl = /** @type {HTMLElement} */ (container.querySelector('.js-mobile-sources'));
 
   let allSources = /** @type {any[]} */ ([]);
 
   // Show skeleton only if sources take > 150 ms to load
-  const cancelSkeleton = deferredSkeleton(() => { mobileList.innerHTML = skeletonSourceList(5); });
-
-  /** @param {string} query */
-  function _renderMobile(query) {
-    mobileList.innerHTML = '';
-    const filtered = query
-      ? allSources.filter(s => s.name?.toLowerCase().includes(query.toLowerCase()))
-      : allSources;
-
-    if (filtered.length === 0) {
-      mobileList.appendChild(createEmptyState({
-        icon: iconCube,
-        title: query ? 'No sources match your search.' : 'No sources yet.',
-        subtitle: query ? undefined : 'Create a source to get started.',
-      }));
-      return;
-    }
-
-    for (const src of filtered) {
-      const item = document.createElement('div');
-      item.className = 'flex items-center gap-2 py-3';
-
-      const a = document.createElement('a');
-      a.href = `/source/${src.id}`;
-      a.className = [
-        'flex-1 flex items-center gap-3 min-w-0 text-sm transition-colors',
-        'focus-visible:outline-none focus-visible:text-accent hover:text-accent',
-        src.enabled ? 'text-text' : 'text-text-muted opacity-60',
-      ].join(' ');
-      const circuitDot = src.circuit_state && src.circuit_state !== 'closed'
-        ? `<span class="shrink-0 w-2 h-2 rounded-full ${src.circuit_state === 'open' ? 'bg-danger' : 'bg-warn'}" role="img" aria-label="Status: ${src.circuit_state === 'open' ? t('source.circuit.open') : t('source.circuit.half_open')}"></span>`
-        : '';
-      a.innerHTML = `
-        <span class="flex-1 font-medium truncate">${escapeHtml(src.name)}</span>
-        ${circuitDot}
-        <span class="text-xs text-text-muted shrink-0">
-          v${escapeHtml(src.version ?? '?')}${src.language ? ' · ' + escapeHtml(src.language) : ''}${!src.enabled ? ' · Disabled' : ''}
-        </span>
-      `;
-
-      let starred = src.favourited ?? false;
-      const starBtn = document.createElement('button');
-      starBtn.type = 'button';
-      starBtn.className = [
-        'shrink-0 p-1.5 rounded-md transition-colors',
-        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent',
-        'icon-sm',
-        starred ? 'text-accent' : 'text-text-faint',
-      ].join(' ');
-      starBtn.setAttribute('aria-label', starred ? 'Unfavourite' : 'Favourite');
-      starBtn.innerHTML = starred ? iconStarFilled : iconStarOutline;
-
-      starBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const newVal = !starred;
-        starred = newVal;
-        starBtn.innerHTML = newVal ? iconStarFilled : iconStarOutline;
-        starBtn.setAttribute('aria-label', newVal ? 'Unfavourite' : 'Favourite');
-        starBtn.classList.toggle('text-accent', newVal);
-        starBtn.classList.toggle('text-text-faint', !newVal);
-        try {
-          await api.toggleSourceFavourite(src.id, newVal);
-        } catch {
-          starred = !newVal;
-          starBtn.innerHTML = starred ? iconStarFilled : iconStarOutline;
-          starBtn.setAttribute('aria-label', starred ? 'Unfavourite' : 'Favourite');
-          starBtn.classList.toggle('text-accent', starred);
-          starBtn.classList.toggle('text-text-faint', !starred);
-        }
-      });
-
-      item.appendChild(a);
-      item.appendChild(starBtn);
-      mobileList.appendChild(item);
-    }
-  }
+  const cancelSkeleton = deferredSkeleton(() => { if (_mobileEl) _mobileEl.innerHTML = skeletonSourceList(5); });
 
   // ── Sidebar component ────────────────────────────────────────────────────
 
-  /** Mounts/updates the sidebar with the latest sources. */
-  function _mountSidebar() {
-    render(html`<${SourcesSidebar}
-      sources=${allSources}
-      onCreated=${_refresh}
-    />`, _asideEl);
+  /** Mounts/updates the source list into both the desktop aside and the mobile slot. */
+  function _mountSourceList() {
+    const vnode = html`<${SourcesSidebar} sources=${allSources} onCreated=${_refresh} />`;
+    if (_asideEl)  render(vnode, _asideEl);
+    if (_mobileEl) render(html`<${SourcesSidebar} sources=${allSources} onCreated=${_refresh} />`, _mobileEl);
   }
 
   // ── Fetch ────────────────────────────────────────────────────────────────
@@ -234,8 +148,7 @@ export async function init(container) {
       const updated = await api.getSources();
       if (Array.isArray(updated)) {
         allSources = updated;
-        _renderMobile(mobileSearch?.value ?? '');
-        _mountSidebar();
+        _mountSourceList();
       }
     } catch { /* ignore refresh failures */ }
   }
@@ -245,33 +158,33 @@ export async function init(container) {
     sources = await api.getSources();
   } catch {
     cancelSkeleton();
-    mobileList.innerHTML = '';
-    mobileList.appendChild(createErrorState({ message: 'Failed to load sources.', onRetry: () => init(container) }));
+    if (_mobileEl) {
+      _mobileEl.innerHTML = '';
+      _mobileEl.appendChild(createErrorState({ message: t('sources.error.load'), onRetry: () => init(container) }));
+    }
     return;
   }
 
   cancelSkeleton();
   allSources = Array.isArray(sources) ? sources : [];
-  _renderMobile('');
-  _mountSidebar();
-
-  mobileSearch?.addEventListener('input', () => _renderMobile(mobileSearch.value));
+  _mountSourceList();
 
   // ── Add source modal ─────────────────────────────────────────────────────
 
+  // Mount once per click and close via the returned cleanup — mountIntoModalRoot
+  // gives each call its own container, so re-mounting with open=false would stack
+  // an empty modal instead of closing the open one.
   if (canInstall && _addSourceBtn) {
-    let _modalOpen = false;
-    const _setOpen = (open) => {
-      _modalOpen = open;
-      mountIntoModalRoot(html`
+    _addSourceBtn.addEventListener('click', () => {
+      let cleanup = () => {};
+      cleanup = mountIntoModalRoot(html`
         <${AddSourceModal}
-          open=${_modalOpen}
-          onClose=${() => _setOpen(false)}
-          onCreated=${() => { _setOpen(false); _refresh(); }}
+          open=${true}
+          onClose=${() => cleanup()}
+          onCreated=${() => { cleanup(); _refresh(); }}
         />
       `);
-    };
-    _addSourceBtn.addEventListener('click', () => _setOpen(true));
+    });
   }
 }
 
@@ -280,8 +193,10 @@ export function destroy(container) {
   clearPageHeader();
   const pendingId = consumePendingSourceId();
   if (pendingId !== null) api.deleteSource(pendingId).catch(() => {});
-  if (_asideEl) render(null, _asideEl);
+  if (_asideEl)  render(null, _asideEl);
+  if (_mobileEl) render(null, _mobileEl);
   _asideEl = null;
+  _mobileEl = null;
   _repoManager?.destroy();
   _repoManager = null;
   mountIntoModalRoot(null);

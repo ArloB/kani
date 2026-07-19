@@ -109,11 +109,20 @@ pub(crate) async fn get_library_filtered(
                 r.cover_url
                     .map(|url| sign_image_url(&url, &r.base_url, &state, None))
             };
+            let resume =
+                r.resume_chapter_id
+                    .map(|chapter_id| crate::types::ContinueReadingChapter {
+                        chapter_id,
+                        chapter_number: r.resume_chapter_number.unwrap_or(0.0),
+                        last_page: r.resume_last_page.unwrap_or(0),
+                        page_count: r.resume_page_count.unwrap_or(0),
+                    });
             crate::types::MangaListItem {
                 id: r.id.to_string(),
                 title: r.name,
                 cover_url,
                 new_chapter_count: r.new_chapter_count,
+                resume,
             }
         })
         .collect();
@@ -207,6 +216,7 @@ pub(crate) async fn get_continue_reading_shelf(
                 "chapter_id": item.chapter_id,
                 "chapter_number": item.chapter_number,
                 "last_page": item.last_page,
+                "page_count": item.page_count,
             })
         })
         .collect();
@@ -890,6 +900,7 @@ mod tests {
             username: "test".into(),
             email: "test@example.com".into(),
             is_active: true,
+            created_at: None,
             roles: vec![],
             password_hash: String::new(),
             change_id: vec![],

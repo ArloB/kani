@@ -9,7 +9,8 @@ import { showToast, showApiError } from './toast.js';
 import { EmptyState } from './empty-state.js';
 import { ErrorState } from './error-state.js';
 import * as api from '../api.js';
-import { hasPermission } from '../state.js';
+import { hasPermission } from '../session.js';
+import { iconCube } from '../icons.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
@@ -18,7 +19,7 @@ const html = htm.bind(h);
  * @returns {{ destroy: () => void }}
  */
 export function mountRepoManager(container) {
-  const { listEl, detailEl, setView, destroy: destroyLayout } = mountMasterDetail(container, { listWidth: 320 });
+  const { listEl, detailEl, setView, destroy: destroyLayout } = mountMasterDetail(container, { listWidth: 288 });
 
   /** @type {any[]} */
   let _repos = [];
@@ -319,7 +320,7 @@ function KeyChangedBanner({ oldFp, newFp, onDismiss, onTrustNew }) {
 
 function RepoList({ repos, selectedRepoId, onSelect }) {
   if (repos.length === 0) {
-    return html`<${EmptyState} title=${t('repo.empty.title')} subtitle=${t('repo.empty.subtitle')} />`;
+    return html`<${EmptyState} icon=${iconCube} title=${t('repo.empty.title')} subtitle=${t('repo.empty.subtitle')} />`;
   }
   return html`
     <div>
@@ -340,7 +341,7 @@ function RepoList({ repos, selectedRepoId, onSelect }) {
 
 function RepoDetail({ status, repo, extensions, sources, repoId, onRefresh, onRemove }) {
   if (status === 'prompt') {
-    return html`<${EmptyState} title=${t('repo.select_prompt')} />`;
+    return html`<${EmptyState} icon=${iconCube} title=${t('repo.select_prompt')} />`;
   }
   if (status === 'loading') {
     return html`<div class="p-6 text-sm text-text-muted">${t('common.loading')}</div>`;
@@ -359,7 +360,7 @@ function RepoDetail({ status, repo, extensions, sources, repoId, onRefresh, onRe
         ${hasPermission('source:install') && html`
           <div class="flex gap-2 shrink-0">
             <button class="btn-ghost btn-sm" onClick=${onRefresh}>${t('repo.action.refresh')}</button>
-            <button class="btn-ghost btn-sm text-error" onClick=${onRemove}>${t('repo.action.remove')}</button>
+            <button class="btn-ghost btn-sm text-danger" onClick=${onRemove}>${t('repo.action.remove')}</button>
           </div>
         `}
       </div>
@@ -416,7 +417,7 @@ function ExtensionRow({ ext, repoId, sources, onInstalled }) {
           <span class="text-sm font-medium text-text">${ext.name}</span>
           ${hasUpdate && html`<span class="text-2xs px-1.5 py-0.5 rounded-full bg-accent/15 text-accent font-medium">${t('repo.extensions.update_available')}</span>`}
           ${!hasUpdate && isInstalled && html`<span class="text-2xs px-1.5 py-0.5 rounded-full bg-surface-2 text-text-muted">${t('repo.extensions.installed')}</span>`}
-          ${ext.nsfw && html`<span class="text-2xs px-1.5 py-0.5 rounded-full bg-error/15 text-error font-medium">${t('repo.extensions.nsfw')}</span>`}
+          ${ext.nsfw && html`<span class="text-2xs px-1.5 py-0.5 rounded-full bg-danger/15 text-danger font-medium">${t('repo.extensions.nsfw')}</span>`}
         </div>
         <p class="text-xs text-text-muted">${parts.join(' · ')}</p>
         ${ext.description && html`<p class="text-xs text-text-faint mt-0.5 line-clamp-1">${ext.description}</p>`}
@@ -424,7 +425,7 @@ function ExtensionRow({ ext, repoId, sources, onInstalled }) {
       ${hasPermission('source:install') && html`
         <button
           type="button"
-          class=${hasUpdate ? 'btn-primary btn-sm shrink-0' : isInstalled ? 'btn-ghost btn-sm shrink-0' : 'btn-primary btn-sm shrink-0'}
+          class=${hasUpdate ? 'btn-secondary btn-sm shrink-0' : isInstalled ? 'btn-ghost btn-sm shrink-0' : 'btn-secondary btn-sm shrink-0'}
           disabled=${isInstalled && !hasUpdate}
           onClick=${(/** @type {MouseEvent} */ e) => {
             const btn = /** @type {HTMLButtonElement} */ (e.currentTarget);

@@ -6,6 +6,8 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
 import { Modal } from './modal.js';
+import { EmptyState } from './empty-state.js';
+import { Callout } from './form/callout.js';
 import { iconChevronRight } from '../icons.js';
 import { Icon } from './icon.js';
 import { t } from '../i18n.js';
@@ -132,18 +134,29 @@ export function MigrationDialogue({
     </div>
   `;
 
+  const footerSearch = step === 'search' && html`
+    <button type="button" class="btn-ghost btn-sm" onClick=${onClose}>${t('common.cancel')}</button>
+  `;
+
   return html`
-    <${Modal} open=${true} onClose=${onClose} title=${t('migration.title')} wide=${true} footer=${footer || footerDone || undefined}>
+    <${Modal} open=${true} onClose=${onClose} title=${t('migration.title')} wide=${true}
+      footer=${footer || footerDone || footerSearch || undefined}>
 
       ${step === 'search' && html`
         <div class="flex flex-col gap-3 mb-4">
-          <input
-            type="search"
-            class="input"
-            placeholder=${t('migration.search.placeholder')}
-            value=${query}
-            onInput=${(e) => setQuery(/** @type {HTMLInputElement} */ (e.target).value)}
-          />
+          <p class="text-sm text-text-muted">
+            ${t('migration.intro', { title: currentTitle, source: currentSourceName })}
+          </p>
+          <label class="flex flex-col gap-1.5">
+            <span class="text-sm font-medium text-text">${t('migration.search.label')}</span>
+            <input
+              type="search"
+              class="input"
+              placeholder=${t('migration.search.placeholder')}
+              value=${query}
+              onInput=${(e) => setQuery(/** @type {HTMLInputElement} */ (e.target).value)}
+            />
+          </label>
           <div class="flex flex-wrap gap-2">
             ${(['FavouritedOnly', 'AllEnabled']).map(s => html`
               <button
@@ -157,9 +170,18 @@ export function MigrationDialogue({
         </div>
 
         ${searching && html`<p class="text-sm text-text-muted py-2">${t('migration.search.searching')}</p>`}
-        ${searchError && html`<p class="text-sm text-danger">${searchError}</p>`}
-        ${!searching && searchResults.length === 0 && query.trim() && html`
-          <p class="text-sm text-text-muted py-2">${t('migration.search.no_results')}</p>
+        ${searchError && html`
+          <${Callout} tone="danger">${searchError}</${Callout}>
+        `}
+        ${!searching && !query.trim() && html`
+          <${EmptyState} compact=${true}
+            title=${t('migration.search.prequery')}
+            subtitle=${t('migration.search.prequery.desc')} />
+        `}
+        ${!searching && !searchError && searchResults.length === 0 && query.trim() && html`
+          <${EmptyState} compact=${true}
+            title=${t('migration.search.no_results')}
+            subtitle=${t('migration.search.no_results.desc')} />
         `}
 
         ${[...bySource.entries()].map(([sid, { sourceName, sourceId, items }]) => html`
@@ -200,7 +222,7 @@ export function MigrationDialogue({
             <div class="cover">
               ${currentCoverUrl
                 ? html`<img src=${currentCoverUrl} alt=${currentTitle} />`
-                : html`<div class="no-cover">No Cover</div>`}
+                : html`<div class="no-cover">${t('common.no_cover')}</div>`}
             </div>
             <span class="text-xs text-text text-center line-clamp-2">${currentTitle}</span>
           </div>
@@ -220,7 +242,7 @@ export function MigrationDialogue({
             <div class="cover">
               ${currentCoverUrl
                 ? html`<img src=${currentCoverUrl} alt=${currentTitle} />`
-                : html`<div class="no-cover">No Cover</div>`}
+                : html`<div class="no-cover">${t('common.no_cover')}</div>`}
             </div>
             <span class="text-xs text-text text-center line-clamp-2">${currentTitle}</span>
           </div>
@@ -230,7 +252,7 @@ export function MigrationDialogue({
             <div class="cover">
               ${targetCoverUrl
                 ? html`<img src=${targetCoverUrl} alt=${targetTitle} />`
-                : html`<div class="no-cover">No Cover</div>`}
+                : html`<div class="no-cover">${t('common.no_cover')}</div>`}
             </div>
             <span class="text-xs text-text text-center line-clamp-2">${targetTitle}</span>
           </div>

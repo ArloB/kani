@@ -5,17 +5,20 @@ import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
-import { hasPermission } from '../state.js';
-import { escapeHtml, openConfirm, formatDate } from '../utils.js';
+import { hasPermission } from '../session.js';
+import { escapeHtml, formatDate } from '../utils.js';
 import { t } from '../i18n.js';
 import { showToast } from '../components/toast.js';
-import { Modal, mountIntoModalRoot } from '../components/modal.js';
+import { Modal, mountIntoModalRoot, showConfirm } from '../components/modal.js';
 import { mountMasterDetail } from '../components/master-detail.js';
 import { renderTabs } from '../components/tabs.js';
 import { iconPencil, iconX, iconAccounts } from '../icons.js';
 import { ActivityFeed } from '../components/activity-feed.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
-import { createEmptyState } from '../components/empty-state.js';
+import { EmptyState } from '../components/empty-state.js';
+import { createSearchInput } from '../components/form/search-input.js';
+import { ListItem } from '../components/list-item.js';
+import { pushState } from '../url-params.js';
 const html = htm.bind(h);
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -60,7 +63,7 @@ export async function init(container) {
 
   // Content area — full height master-detail (below global header)
   const contentEl = document.createElement('div');
-  contentEl.style.cssText = 'display:flex;flex-direction:column;overflow:hidden;height:calc(100vh - var(--header-h));';
+  contentEl.style.cssText = 'display:flex;flex-direction:column;overflow:hidden;height:calc(100dvh - var(--header-h));';
 
   container.innerHTML = '';
   container.appendChild(contentEl);
@@ -193,7 +196,7 @@ function _renderList(listEl) {
   headerEl.className = 'list-pane-header';
 
   const tabsEl = document.createElement('div');
-  renderTabs(tabsEl, {
+  const tabsHandle = renderTabs(tabsEl, {
     tabs: [
       { id: 'users', name: t('accounts.tab.users'), count: _users.length },
       { id: 'roles', name: t('accounts.tab.roles'), count: _roles.length },
@@ -203,7 +206,8 @@ function _renderList(listEl) {
     onSelect: (id) => {
       _activeTab = /** @type {'users' | 'roles'} */ (id);
       _selected = null;
-      history.pushState(null, '', '/accounts?tab=' + id);
+      pushState({ tab: id });
+      tabsHandle.update(id);
       _updateHeaderActions();
       _renderList(listEl);
       if (_detailEl) _renderDetail(_detailEl);
@@ -212,11 +216,11 @@ function _renderList(listEl) {
   headerEl.appendChild(tabsEl);
 
   // Search
-  const searchInput = document.createElement('input');
-  searchInput.type = 'search';
-  searchInput.className = 'input input-sm';
-  searchInput.placeholder = t('accounts.search');
-  headerEl.appendChild(searchInput);
+  const { el: searchEl, input: searchInput } = createSearchInput({
+    size: 'sm',
+    placeholder: t('accounts.search'),
+  });
+  headerEl.appendChild(searchEl);
   listEl.appendChild(headerEl);
 
   // List body
@@ -226,8 +230,19 @@ function _renderList(listEl) {
   const items = _activeTab === 'users' ? _users : _roles;
   let filter = '';
 
+  /** @param {any} item */
+  function _selectItem(item) {
+    _selected = item;
+    pushState(_activeTab === 'users'
+      ? { tab: _activeTab, user: item.id }
+      : { tab: _activeTab, role: item.slug });
+    _renderList(listEl);
+    _updateHeaderActions();
+    if (_detailEl) _renderDetail(_detailEl);
+    _setMdView?.('detail');
+  }
+
   function renderItems() {
-    bodyEl.innerHTML = '';
     const filtered = filter
       ? items.filter(i => (i.username ?? i.slug ?? '').toLowerCase().includes(filter.toLowerCase()))
       : items;
@@ -237,57 +252,36 @@ function _renderList(listEl) {
         ? t('accounts.empty.no_results')
         : _activeTab === 'users' ? t('accounts.empty.users') : t('accounts.empty.roles');
       const emptySub = filter ? t('accounts.empty.no_results.desc') : undefined;
-      bodyEl.appendChild(createEmptyState({ title: emptyTitle, subtitle: emptySub }));
+      render(html`<${EmptyState} title=${emptyTitle} subtitle=${emptySub} />`, bodyEl);
       return;
     }
 
-    for (const item of filtered) {
-      const div = document.createElement('div');
+    render(html`${filtered.map(item => {
       const isActive = _selected != null && (
         _activeTab === 'users' ? _selected.id   === item.id
                                : _selected.slug === item.slug
       );
-      div.className = 'list-item' + (isActive ? ' active' : '');
-
       if (_activeTab === 'users') {
-        const initial = (item.username ?? '?')[0].toUpperCase();
-        div.innerHTML = `
-          <div class="flex items-center gap-3 border-b border-border-subtle last:border-0 w-full">
-            <span class="avatar" aria-hidden="true">${escapeHtml(initial)}</span>
-            <span class="flex flex-col min-w-0 flex-1">
-              <span class="li-title truncate">${escapeHtml(item.username)}</span>
-              <span class="li-sub truncate">${item.roles?.join(', ') ?? ''}</span>
-            </span>
-            <span class="${item.is_active ? 'badge badge-success' : 'badge badge-danger'} shrink-0">${item.is_active ? t('accounts.user.active') : t('accounts.user.inactive')}</span>
-          </div>
-        `;
-      } else {
-        const isSystemRole = item.slug === 'user' || item.slug === 'admin';
-        div.innerHTML = `
-          <span class="flex flex-col min-w-0 flex-1">
-            <span class="li-title font-mono truncate flex items-center gap-2">
-              ${escapeHtml(item.slug)}
-              ${isSystemRole ? `<span class="badge badge-muted text-2xs shrink-0">${t('accounts.role.system')}</span>` : ''}
-            </span>
-            <span class="li-sub truncate">${escapeHtml(item.description ?? t('accounts.role.perm_count', { count: item.permissions?.length ?? 0 }))}</span>
-          </span>
-        `;
+        return html`<${ListItem}
+          key=${item.id}
+          avatar=${(item.username ?? '?')[0].toUpperCase()}
+          title=${item.username}
+          subtitle=${item.roles?.join(', ') ?? ''}
+          right=${html`<span class=${item.is_active ? 'badge badge-success' : 'badge badge-danger'}>${item.is_active ? t('accounts.user.active') : t('accounts.user.inactive')}</span>`}
+          active=${isActive}
+          onClick=${() => _selectItem(item)}
+        />`;
       }
-
-      div.addEventListener('click', () => {
-        _selected = item;
-        const params = new URLSearchParams();
-        params.set('tab', _activeTab);
-        if (_activeTab === 'users') params.set('user', String(item.id));
-        else params.set('role', item.slug);
-        history.pushState(null, '', '/accounts?' + params.toString());
-        _renderList(listEl);
-        _updateHeaderActions();
-        if (_detailEl) _renderDetail(_detailEl);
-        _setMdView?.('detail');
-      });
-      bodyEl.appendChild(div);
-    }
+      const isSystemRole = item.slug === 'user' || item.slug === 'admin';
+      return html`<${ListItem}
+        key=${item.slug}
+        title=${html`<span class="font-mono">${item.slug}</span>`}
+        subtitle=${item.description ?? t('accounts.role.perm_count', { count: item.permissions?.length ?? 0 })}
+        right=${isSystemRole ? html`<span class="badge badge-muted text-2xs">${t('accounts.role.system')}</span>` : null}
+        active=${isActive}
+        onClick=${() => _selectItem(item)}
+      />`;
+    })}`, bodyEl);
   }
 
   renderItems();
@@ -316,9 +310,9 @@ function _renderUserDetail(el, user) {
   }
 
   el.innerHTML = `
-    <div class="p-6 flex flex-col gap-5 min-h-0">
+    <div class="p-6 flex flex-col gap-5 min-h-0 md:h-full">
       <!-- User header -->
-      <div class="flex items-start gap-4">
+      <div class="flex items-start gap-4 shrink-0">
         <span class="avatar xl" aria-hidden="true">${escapeHtml((user.username ?? '?')[0].toUpperCase())}</span>
         <div class="flex flex-col gap-1 flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text truncate">${escapeHtml(user.username)}</h2>
@@ -331,43 +325,37 @@ function _renderUserDetail(el, user) {
       </div>
 
       <!-- Identity card -->
-      <div class="detail-card">
+      <div class="detail-card shrink-0">
         <div class="detail-card-head">${t('accounts.identity')}</div>
         <div class="kv"><span class="k">${t('accounts.user.username')}</span><span class="v">${escapeHtml(user.username)}</span></div>
         <div class="kv"><span class="k">${t('accounts.user.email')}</span><span class="v">${escapeHtml(user.email ?? '—')}</span></div>
         <div class="kv"><span class="k">${t('accounts.user.status')}</span><span class="v">
           <span class="${user.is_active ? 'badge badge-success' : 'badge badge-danger'}">${user.is_active ? t('accounts.user.active') : t('accounts.user.inactive')}</span>
         </span></div>
+        <div class="kv"><span class="k">${t('accounts.user.roles')}</span><span class="v flex flex-wrap gap-1.5 justify-end">
+          ${(user.roles ?? []).map(r => `<span class="badge badge-muted font-mono">${escapeHtml(r)}</span>`).join('') || `<span class="meta">${t('accounts.user.no_roles')}</span>`}
+        </span></div>
         <div class="kv"><span class="k">${t('accounts.user.created')}</span><span class="v">${escapeHtml(formatDate(user.created_at) || '—')}</span></div>
       </div>
 
-      <!-- Roles card -->
-      <div class="detail-card">
-        <div class="detail-card-head">
-          <span>${t('accounts.user.roles')}</span>
+      <!-- Permissions | Activity — two columns, each scrolling independently -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:flex-1 md:min-h-0">
+        <div class="detail-card flex flex-col md:min-h-0">
+          <div class="detail-card-head shrink-0">${t('accounts.user.perms', { count: effectivePerms.size })}</div>
+          <div class="md:flex-1 md:min-h-0 md:overflow-y-auto">
+            ${[...effectivePerms.entries()].map(([perm, via]) => `
+              <div class="flex items-center justify-between gap-3 px-3 py-2 border-b border-border-subtle last:border-0 text-sm">
+                <span class="font-mono text-xs text-text">${escapeHtml(perm)}</span>
+                <span class="meta shrink-0">${t('accounts.user.perm.via', { role: escapeHtml(via) })}</span>
+              </div>
+            `).join('') || `<p class="meta px-3 py-3">${t('accounts.user.no_perms')}</p>`}
+          </div>
         </div>
-        <div class="p-3 flex flex-wrap gap-2">
-          ${(user.roles ?? []).map(r => `<span class="badge badge-muted font-mono">${escapeHtml(r)}</span>`).join('') || `<span class="meta p-1">${t('accounts.user.no_roles')}</span>`}
-        </div>
-      </div>
 
-      <!-- Effective permissions card -->
-      <div class="detail-card">
-        <div class="detail-card-head">${t('accounts.user.perms', { count: effectivePerms.size })}</div>
-        <div>
-          ${[...effectivePerms.entries()].map(([perm, via]) => `
-            <div class="flex items-center justify-between gap-3 px-3 py-2 border-b border-border-subtle last:border-0 text-sm">
-              <span class="font-mono text-xs text-text">${escapeHtml(perm)}</span>
-              <span class="meta shrink-0">${t('accounts.user.perm.via', { role: escapeHtml(via) })}</span>
-            </div>
-          `).join('') || `<p class="meta px-3 py-3">${t('accounts.user.no_perms')}</p>`}
+        <div class="detail-card flex flex-col md:min-h-0">
+          <div class="detail-card-head shrink-0">${t('accounts.user.activity')}</div>
+          <div class="js-activity-feed md:flex-1 md:min-h-0 md:overflow-y-auto"></div>
         </div>
-      </div>
-
-      <!-- Activity feed card -->
-      <div class="detail-card">
-        <div class="detail-card-head">${t('accounts.user.activity')}</div>
-        <div class="js-activity-feed"></div>
       </div>
     </div>
   `;
@@ -383,7 +371,7 @@ function _renderUserDetail(el, user) {
 
   const _delUserBtn = /** @type {HTMLButtonElement|null} */ (el.querySelector('.js-delete-user'));
   _delUserBtn?.addEventListener('click', async () => {
-    if (!(await openConfirm({ title: t('accounts.user.delete.title'), message: t('accounts.user.delete.message', { username: user.username }), danger: true }))) return;
+    if (!(await showConfirm(t('accounts.user.delete.message', { username: user.username }), { title: t('accounts.user.delete.title'), danger: true }))) return;
     if (_delUserBtn) _delUserBtn.disabled = true;
     try {
       await api.adminDeleteUser(user.id);
@@ -533,7 +521,7 @@ function _renderRoleDetail(el, role) {
 
   const _delRoleBtn = /** @type {HTMLButtonElement|null} */ (el.querySelector('.js-delete-role'));
   _delRoleBtn?.addEventListener('click', async () => {
-    if (!(await openConfirm({ title: t('accounts.role.delete.title'), message: t('accounts.role.delete.message', { slug: role.slug }), danger: true }))) return;
+    if (!(await showConfirm(t('accounts.role.delete.message', { slug: role.slug }), { title: t('accounts.role.delete.title'), danger: true }))) return;
     if (_delRoleBtn) _delRoleBtn.disabled = true;
     try {
       await api.adminDeleteRole(role.slug);

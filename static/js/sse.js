@@ -2,7 +2,9 @@
 // Server-Sent Events client for real-time download/refresh/scan notifications.
 // Manages reconnection with exponential backoff and detects server restarts.
 
-import { getState, setState, updateState } from './state.js';
+import { getState as getSession, setState as setSession } from './session.js';
+import { getState, setState, updateState } from './cache.js';
+import { getState as getUiState } from './ui-state.js';
 import { postToServiceWorker, cacheChapter } from './offline.js';
 
 const SSE_URL = '/rest/events';
@@ -108,14 +110,14 @@ function _handleEvent(data) {
 
   // ── Initial state snapshot ───────────────────────────────────────────────
   if (type === 'state_snapshot') {
-    const prev = getState('bootId');
+    const prev = getSession('bootId');
     if (data.boot_id && prev && data.boot_id !== prev) {
       window.dispatchEvent(new CustomEvent('kani:server-restart'));
     }
-    if (data.boot_id) setState('bootId', data.boot_id);
+    if (data.boot_id) setSession('bootId', data.boot_id);
 
     // Repopulate chapter progress from snapshot
-    /** @type {Map<number, import('./state.js').ChapterProgress>} */
+    /** @type {Map<number, import('./cache.js').ChapterProgress>} */
     const map = new Map();
     for (const ch of (data.chapters ?? [])) {
       map.set(Number(ch.chapter_id), {
@@ -279,7 +281,7 @@ function _handleEvent(data) {
 
     // Browser push notifications
     const mangaId = Number(data.manga_id);
-    const notifyPrefs = getState('mangaNotifyPrefs');
+    const notifyPrefs = getUiState('mangaNotifyPrefs');
     const notifyAllowed = notifyPrefs instanceof Map
       ? (notifyPrefs.has(mangaId) ? notifyPrefs.get(mangaId) : true)
       : true;

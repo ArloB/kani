@@ -211,8 +211,12 @@ pub async fn build_test_app_with_opds(state: AppState) -> Router {
 
     Router::new()
         .nest("/rest", kani_web::rest::routes(state.clone()))
-        .nest("/opds", kani_web::opds::routes(state))
+        .nest("/opds", kani_web::opds::routes(state.clone()))
         .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            kani_web::session_touch::session_touch_middleware,
+        ))
         .layer(auth_layer)
 }
 

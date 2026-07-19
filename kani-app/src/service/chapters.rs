@@ -15,7 +15,8 @@ pub struct ChapterCbzInfo {
 }
 
 impl AppService {
-    /// Returns a paginated chapter list for a manga. Returns (chapters, has_next_page, total_pages).
+    /// Returns a paginated chapter list for a manga.
+    /// Returns (chapters, has_next_page, total_pages, total_count).
     #[allow(clippy::too_many_arguments)]
     pub async fn get_local_chapters(
         &self,
@@ -27,7 +28,7 @@ impl AppService {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
-    ) -> Result<(Vec<kani_shared::types::Chapter>, bool, Option<u32>)> {
+    ) -> Result<(Vec<kani_shared::types::Chapter>, bool, Option<u32>, u32)> {
         let limit = (page_size as i64) + 1;
         let offset = ((page - 1).max(0) as i64) * (page_size as i64);
 
@@ -111,7 +112,12 @@ impl AppService {
         let ps = page_size as i64;
         let total_pages = Some(((total_count + ps - 1) / ps).max(0) as u32);
 
-        Ok((chapters, has_next_page, total_pages))
+        Ok((
+            chapters,
+            has_next_page,
+            total_pages,
+            total_count.max(0) as u32,
+        ))
     }
 
     /// Returns all chapter IDs for a manga matching the given filters (no pagination).

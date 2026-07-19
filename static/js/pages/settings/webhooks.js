@@ -4,7 +4,8 @@
 import * as api from '../../api.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
-import { escapeHtml, confirmDialog } from '../../utils.js';
+import { escapeHtml } from '../../utils.js';
+import { showConfirm } from '../../components/modal.js';
 import { t } from '../../i18n.js';
 import { createErrorState } from '../../components/error-state.js';
 import { createEmptyState } from '../../components/empty-state.js';
@@ -41,7 +42,7 @@ function serializeEvents(state) {
 }
 
 /** @param {HTMLElement} el */
-export async function mount(el) {
+export function mount(el) {
   el.innerHTML = '';
 
   // ── Webhook list group ────────────────────────────────────────────────────
@@ -90,13 +91,15 @@ export async function mount(el) {
     "const sig = 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');\n" +
     "assert.strictEqual(sig, req.headers['x-kani-signature']);"
   );
+  // A real HTTP header name — not translatable prose.
+  const _sigHeaderExample = 'X-Kani-Signature: sha256=&lt;hex&gt;';
 
   const details = document.createElement('details');
   details.className = 'px-4 py-3';
   details.innerHTML = `
     <summary class="text-sm font-medium text-text cursor-pointer select-none">${t('settings.webhooks.payload.show')}</summary>
     <pre class="mt-3 text-xs bg-surface rounded-lg p-3 overflow-x-auto text-text-muted leading-relaxed">${_examplePayload}</pre>
-    <p class="mt-3 text-xs text-text-muted">${t('settings.webhooks.payload.hmac_prefix')} <code class="bg-surface px-1 rounded">X-Kani-Signature: sha256=&lt;hex&gt;</code> ${t('settings.webhooks.payload.hmac_suffix')}</p>
+    <p class="mt-3 text-xs text-text-muted">${t('settings.webhooks.payload.hmac_prefix')} <code class="bg-surface px-1 rounded">${_sigHeaderExample}</code> ${t('settings.webhooks.payload.hmac_suffix')}</p>
     <pre class="mt-2 text-xs bg-surface rounded-lg p-3 overflow-x-auto text-text-muted leading-relaxed">${_hmacSnippet}</pre>
   `;
   refCard.appendChild(details);
@@ -114,6 +117,7 @@ export async function mount(el) {
       return;
     }
 
+    listEl.innerHTML = '';
     if (webhooks.length === 0) {
       listEl.appendChild(createEmptyState({
         title: t('settings.webhooks.empty.title'),
@@ -141,7 +145,7 @@ export async function mount(el) {
     el.insertBefore(_formEl, refGroup);
   });
 
-  await _reload();
+  _reload();
 
   return {
     destroy() { el.innerHTML = ''; },
@@ -244,7 +248,7 @@ function _mkWebhookRow(wh, reload) {
   delBtn.className = 'btn-ghost btn-sm text-xs text-danger';
   delBtn.textContent = t('common.delete');
   delBtn.addEventListener('click', async () => {
-    const ok = await confirmDialog({ title: t('settings.webhooks.row.delete.title'), message: t('settings.webhooks.row.delete.message', { url: wh.url }), confirmLabel: t('common.delete'), danger: true });
+    const ok = await showConfirm(t('settings.webhooks.row.delete.message', { url: wh.url }), { title: t('settings.webhooks.row.delete.title'), confirmLabel: t('common.delete'), danger: true });
     if (!ok) return;
     delBtn.disabled = true;
     try {
@@ -320,13 +324,13 @@ function _mkDeliveryLog(deliveries) {
   }
 
   const table = document.createElement('table');
-  table.className = 'w-full text-xs border-collapse mt-1';
+  table.className = 'data-table mt-1';
   table.innerHTML = `
     <thead>
-      <tr class="text-text-muted">
-        <th class="text-left py-1 pr-3 font-medium">${t('settings.webhooks.deliveries.col.event')}</th>
-        <th class="text-left py-1 pr-3 font-medium">${t('settings.webhooks.deliveries.col.status')}</th>
-        <th class="text-left py-1 font-medium">${t('settings.webhooks.deliveries.col.time')}</th>
+      <tr>
+        <th>${t('settings.webhooks.deliveries.col.event')}</th>
+        <th>${t('settings.webhooks.deliveries.col.status')}</th>
+        <th>${t('settings.webhooks.deliveries.col.time')}</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -336,9 +340,9 @@ function _mkDeliveryLog(deliveries) {
     const tr = document.createElement('tr');
     const ok = d.http_status && d.http_status >= 200 && d.http_status < 300;
     tr.innerHTML = `
-      <td class="py-1 pr-3 text-text">${escapeHtml(d.event_type)}</td>
-      <td class="py-1 pr-3 ${ok ? 'text-success' : 'text-danger'}">${d.http_status ?? '—'}${d.error ? ` · ${escapeHtml(d.error.slice(0, 60))}` : ''}</td>
-      <td class="py-1 text-text-muted">${new Date(d.delivered_at).toLocaleString()}</td>
+      <td>${escapeHtml(d.event_type)}</td>
+      <td class="${ok ? 'text-success' : 'text-danger'}">${d.http_status ?? '—'}${d.error ? ` · ${escapeHtml(d.error.slice(0, 60))}` : ''}</td>
+      <td class="muted">${new Date(d.delivered_at).toLocaleString()}</td>
     `;
     tbody.appendChild(tr);
   }

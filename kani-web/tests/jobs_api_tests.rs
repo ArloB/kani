@@ -40,7 +40,30 @@ async fn list_jobs_200_admin() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = common::body_json(res).await;
-    assert!(body.is_array());
+    assert!(
+        body["jobs"].is_array(),
+        "jobs list is paged: {{ jobs, total }}"
+    );
+    assert_eq!(body["total"], serde_json::json!(0));
+}
+
+#[tokio::test]
+async fn list_jobs_accepts_comma_separated_status_filter() {
+    let state = common::test_state().await;
+    let app = common::build_test_app(state.clone()).await;
+    common::create_admin(&state).await;
+    let cookie = common::login(&app, "admin", "Password1234!").await;
+    let app = common::build_test_app(state).await;
+    let res = app
+        .oneshot(common::authed_get(
+            "/rest/jobs?status=pending,running&limit=10",
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = common::body_json(res).await;
+    assert!(body["jobs"].is_array());
 }
 
 #[tokio::test]

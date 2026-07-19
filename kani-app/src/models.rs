@@ -134,13 +134,16 @@ pub struct Manga {
     pub auto_scan: bool,
     #[sqlx(try_from = "i64")]
     pub status: kani_shared::MangaStatus,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: time::OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: time::OffsetDateTime,
     pub scanlator_mode: String,
     pub download_all_preferred_only: bool,
     pub notes: Option<String>,
     pub is_orphaned: bool,
     pub cover_hash: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub deleted_at: Option<time::OffsetDateTime>,
 }
 
@@ -179,6 +182,17 @@ pub struct LibraryManga {
     pub new_chapter_count: i64,
     #[sqlx(default)]
     pub is_orphaned: bool,
+    /// In-progress chapter (partially read) to power a hover "resume" affordance
+    /// on the library grid card. `None` when the user has no in-progress chapter
+    /// for this manga.
+    #[sqlx(default)]
+    pub resume_chapter_id: Option<i64>,
+    #[sqlx(default)]
+    pub resume_chapter_number: Option<f64>,
+    #[sqlx(default)]
+    pub resume_last_page: Option<i64>,
+    #[sqlx(default)]
+    pub resume_page_count: Option<i64>,
 }
 
 /// One item in the "continue reading" shelf.
@@ -192,6 +206,7 @@ pub struct ContinueReadingItem {
     pub chapter_id: ChapterId,
     pub chapter_number: f64,
     pub last_page: i64,
+    pub page_count: i64,
 }
 
 /// Payload for updating local metadata overrides on a manga.
@@ -431,4 +446,65 @@ pub struct ReadingStats {
     pub genre_breakdown: Vec<GenreCount>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub reading_pace: Vec<PaceEntry>,
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn sample_manga() -> Manga {
+        Manga {
+            id: MangaId(1),
+            source_id: 1,
+            source_manga_id: "abc".into(),
+            name: "Test".into(),
+            cover_url: None,
+            local_cover_path: None,
+            local_name: None,
+            local_description: None,
+            local_status: None,
+            cover_overridden: false,
+            description: None,
+            auto_download: false,
+            auto_scan: false,
+            status: kani_shared::MangaStatus::Ongoing,
+            created_at: time::macros::datetime!(2026-07-13 04:33:34 UTC),
+            updated_at: time::macros::datetime!(2026-07-13 04:33:34 UTC),
+            scanlator_mode: "priority".into(),
+            download_all_preferred_only: false,
+            notes: None,
+            is_orphaned: false,
+            cover_hash: None,
+            deleted_at: Some(time::macros::datetime!(2026-07-13 05:00:00 UTC)),
+        }
+    }
+
+    #[test]
+    fn manga_timestamps_serialize_as_rfc3339_strings() {
+        let json = serde_json::to_value(sample_manga()).unwrap();
+        assert_eq!(json["deleted_at"], "2026-07-13T05:00:00Z");
+        assert_eq!(json["created_at"], "2026-07-13T04:33:34Z");
+        assert!(
+            json["deleted_at"].is_string(),
+            "JS `new Date(...)` needs a string, not the component array time's default serde emits"
+        );
+    }
+
+    #[test]
+    fn manga_absent_deleted_at_serializes_as_null() {
+        let mut m = sample_manga();
+        m.deleted_at = None;
+        let json = serde_json::to_value(m).unwrap();
+        assert!(json["deleted_at"].is_null());
+    }
+
+    #[test]
+    fn manga_timestamps_round_trip() {
+        let original = sample_manga();
+        let json = serde_json::to_string(&original).unwrap();
+        let back: Manga = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.created_at, original.created_at);
+        assert_eq!(back.deleted_at, original.deleted_at);
+    }
 }

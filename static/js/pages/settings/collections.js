@@ -3,11 +3,12 @@
 
 import * as api from '../../api.js';
 import { t } from '../../i18n.js';
-import { showToast, showApiError } from '../../components/toast.js';
+import { showToast } from '../../components/toast.js';
 import { showConfirm } from '../../components/modal.js';
 import { createEmptyState } from '../../components/empty-state.js';
 import { createErrorState } from '../../components/error-state.js';
 import { mkSettingsGroup, mkSettingsGroupCard } from './_shared.js';
+import { mkAddRow, mkEditableRow } from '../../components/editable-row.js';
 
 const _STATUS_LABELS = ['Ongoing', 'Completed', 'Hiatus', 'Cancelled', 'Unknown'];
 
@@ -166,109 +167,55 @@ function _render(el, collections) {
 function _mkRow(col, containerEl) {
   const simple = _parseSimpleRule(col.rule_json);
 
-  const row = document.createElement('div');
-  row.className = 'px-4 py-3';
+  return mkEditableRow({
+    canEdit: !!simple,
+    renderView: () => {
+      const frag = document.createElement('div');
+      frag.className = 'flex-1 flex items-center gap-3 min-w-0';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'flex-1 text-sm font-medium text-text truncate';
+      nameEl.textContent = col.name;
+      const descEl = document.createElement('span');
+      descEl.className = 'text-xs text-text-muted shrink-0 max-w-[10rem] truncate';
+      descEl.textContent = _describeRule(col.rule_json);
+      frag.append(nameEl, descEl);
+      return frag;
+    },
+    renderForm: () => {
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'input text-sm w-full';
+      nameInput.value = col.name;
 
-  const viewRow = document.createElement('div');
-  viewRow.className = 'flex items-center gap-3';
+      const { el: builderEl, getRule } = _mkRuleBuilder(simple);
 
-  const nameEl = document.createElement('span');
-  nameEl.className = 'flex-1 text-sm font-medium text-text truncate';
-  nameEl.textContent = col.name;
+      const wrap = document.createElement('div');
+      wrap.className = 'flex flex-col gap-2';
+      wrap.append(nameInput, builderEl);
 
-  const descEl = document.createElement('span');
-  descEl.className = 'text-xs text-text-muted shrink-0 max-w-[10rem] truncate';
-  descEl.textContent = _describeRule(col.rule_json);
-
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'btn-icon text-text-muted shrink-0' + (simple ? '' : ' hidden');
-  editBtn.setAttribute('aria-label', t('common.edit'));
-  editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-
-  const delBtn = document.createElement('button');
-  delBtn.type = 'button';
-  delBtn.className = 'btn-icon text-danger shrink-0';
-  delBtn.setAttribute('aria-label', t('common.delete'));
-  delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
-
-  viewRow.append(nameEl, descEl, editBtn, delBtn);
-  row.appendChild(viewRow);
-
-  const editForm = document.createElement('div');
-  editForm.className = 'hidden flex-col gap-2 mt-3';
-
-  const nameInput = document.createElement('input');
-  nameInput.type = 'text';
-  nameInput.className = 'input text-sm w-full';
-  nameInput.value = col.name;
-
-  const { el: builderEl, getRule } = _mkRuleBuilder(simple);
-
-  const editActions = document.createElement('div');
-  editActions.className = 'flex gap-2 justify-end';
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'btn-ghost btn-sm';
-  cancelBtn.textContent = t('common.cancel');
-
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'button';
-  saveBtn.className = 'btn-primary btn-sm';
-  saveBtn.textContent = t('common.save');
-
-  editActions.append(cancelBtn, saveBtn);
-  editForm.append(nameInput, builderEl, editActions);
-  row.appendChild(editForm);
-
-  const _showEdit = () => {
-    editForm.classList.remove('hidden');
-    editForm.classList.add('flex');
-    editBtn.classList.add('hidden');
-    delBtn.classList.add('hidden');
-    nameInput.focus();
-  };
-
-  const _hideEdit = () => {
-    editForm.classList.add('hidden');
-    editForm.classList.remove('flex');
-    editBtn.classList.remove('hidden');
-    delBtn.classList.remove('hidden');
-    nameInput.value = col.name;
-  };
-
-  editBtn.addEventListener('click', _showEdit);
-  cancelBtn.addEventListener('click', _hideEdit);
-
-  saveBtn.addEventListener('click', async () => {
-    const name = nameInput.value.trim();
-    if (!name) { nameInput.focus(); return; }
-    saveBtn.disabled = true;
-    try {
-      await api.updateCollection(col.id, { name, rule: getRule(), sort_order: col.sort_order });
+      return {
+        el: wrap,
+        focusEl: nameInput,
+        validate: () => {
+          if (!nameInput.value.trim()) { nameInput.focus(); return false; }
+          return true;
+        },
+        reset: () => { nameInput.value = col.name; },
+        getValue: () => ({ name: nameInput.value.trim(), rule: getRule() }),
+      };
+    },
+    onSave: async ({ name, rule }) => {
+      await api.updateCollection(col.id, { name, rule, sort_order: col.sort_order });
       showToast(t('collections.toast.updated'), { type: 'success' });
       _load(containerEl);
-    } catch (e) {
-      showApiError(e);
-      saveBtn.disabled = false;
-    }
-  });
-
-  delBtn.addEventListener('click', async () => {
-    if (!(await showConfirm(t('collections.delete.confirm', { name: col.name }), { confirmLabel: t('common.delete') }))) return;
-    delBtn.disabled = true;
-    try {
+    },
+    onDelete: async () => {
+      if (!(await showConfirm(t('collections.delete.confirm', { name: col.name }), { confirmLabel: t('common.delete') }))) return;
       await api.deleteCollection(col.id);
       showToast(t('collections.toast.deleted'), { type: 'success' });
       _load(containerEl);
-    } catch (e) {
-      showApiError(e);
-      delBtn.disabled = false;
-    }
+    },
   });
-
-  return row;
 }
 
 /** @param {HTMLElement} containerEl */
@@ -276,80 +223,38 @@ function _mkAddForm(containerEl) {
   const wrap = document.createElement('div');
   wrap.className = 'border-t border-border-subtle';
 
-  const trigger = document.createElement('div');
-  trigger.className = 'flex items-center justify-between px-4 py-3';
+  wrap.appendChild(mkAddRow({
+    label: t('collections.add'),
+    confirmLabel: t('collections.add'),
+    renderForm: () => {
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'input text-sm w-full';
+      nameInput.placeholder = t('collections.name.placeholder');
 
-  const triggerLabel = document.createElement('span');
-  triggerLabel.className = 'text-sm font-medium text-text';
-  triggerLabel.textContent = t('collections.add');
+      const { el: builderEl, getRule } = _mkRuleBuilder(null);
 
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'btn-primary btn-sm';
-  addBtn.textContent = '+';
-  addBtn.setAttribute('aria-label', t('collections.add'));
-  addBtn.setAttribute('aria-expanded', 'false');
+      const formBody = document.createElement('div');
+      formBody.className = 'flex flex-col gap-2';
+      formBody.append(nameInput, builderEl);
 
-  trigger.append(triggerLabel, addBtn);
-  wrap.appendChild(trigger);
-
-  const form = document.createElement('div');
-  form.className = 'hidden flex-col gap-2 px-4 pb-4';
-
-  const nameInput = document.createElement('input');
-  nameInput.type = 'text';
-  nameInput.className = 'input text-sm w-full';
-  nameInput.placeholder = t('collections.name.placeholder');
-
-  const { el: builderEl, getRule } = _mkRuleBuilder(null);
-
-  const btnRow = document.createElement('div');
-  btnRow.className = 'flex gap-2 justify-end';
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'btn-ghost btn-sm';
-  cancelBtn.textContent = t('common.cancel');
-
-  const submitBtn = document.createElement('button');
-  submitBtn.type = 'button';
-  submitBtn.className = 'btn-primary btn-sm';
-  submitBtn.textContent = t('collections.add');
-
-  btnRow.append(cancelBtn, submitBtn);
-  form.append(nameInput, builderEl, btnRow);
-  wrap.appendChild(form);
-
-  const _showForm = () => {
-    form.classList.remove('hidden');
-    form.classList.add('flex');
-    addBtn.setAttribute('aria-expanded', 'true');
-    nameInput.focus();
-  };
-
-  const _hideForm = () => {
-    form.classList.add('hidden');
-    form.classList.remove('flex');
-    addBtn.setAttribute('aria-expanded', 'false');
-    nameInput.value = '';
-  };
-
-  addBtn.addEventListener('click', _showForm);
-  cancelBtn.addEventListener('click', _hideForm);
-
-  submitBtn.addEventListener('click', async () => {
-    const name = nameInput.value.trim();
-    if (!name) { nameInput.focus(); return; }
-    submitBtn.disabled = true;
-    try {
-      await api.createCollection({ name, rule: getRule(), sort_order: 0 });
+      return {
+        el: formBody,
+        focusEl: nameInput,
+        validate: () => {
+          if (!nameInput.value.trim()) { nameInput.focus(); return false; }
+          return true;
+        },
+        reset: () => { nameInput.value = ''; },
+        getValue: () => ({ name: nameInput.value.trim(), rule: getRule() }),
+      };
+    },
+    onAdd: async ({ name, rule }) => {
+      await api.createCollection({ name, rule, sort_order: 0 });
       showToast(t('collections.toast.created'), { type: 'success' });
       _load(containerEl);
-    } catch (e) {
-      showApiError(e);
-      submitBtn.disabled = false;
-    }
-  });
+    },
+  }));
 
   return wrap;
 }

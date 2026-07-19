@@ -5,10 +5,18 @@ fn main() {
 
     let is_release = std::env::var("PROFILE").unwrap_or_default() == "release";
 
+    copy_changelog();
     build_css(is_release);
 
     if is_release {
         build_js();
+    }
+}
+
+fn copy_changelog() {
+    println!("cargo:rerun-if-changed=../CHANGELOG.md");
+    if let Err(e) = std::fs::copy("../CHANGELOG.md", "../static/changelog.md") {
+        println!("cargo:warning=failed to copy CHANGELOG.md into static/: {e}");
     }
 }
 
@@ -88,6 +96,9 @@ fn build_js() {
             "--alias:preact=../static/js/vendor/preact.module.js",
             "--alias:preact/hooks=../static/js/vendor/preact-hooks.module.js",
             "--alias:htm=../static/js/vendor/htm.module.js",
+            "--alias:@preact/signals-core=../static/js/vendor/signals-core.module.js",
+            "--alias:@preact/signals=../static/js/vendor/signals.module.js",
+            "--alias:preact/compat=../static/js/vendor/compat.module.js",
         ])
         .status()
         .unwrap_or_else(|e| panic!("failed to spawn {}: {e}", binary.display()));

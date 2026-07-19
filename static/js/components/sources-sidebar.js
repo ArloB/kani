@@ -7,12 +7,19 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
 import { Modal } from './modal.js';
+import { SearchInput } from './form/search-input.js';
 import { SidebarNav } from './sidebar-nav.js';
 import { iconStarFilled, iconStarOutline } from '../icons.js';
 import { navigate } from '../router.js';
 import { t } from '../i18n.js';
 import { StatusDot } from './status-dot.js';
+import { Tabs } from './tabs.js';
 const html = htm.bind(h);
+
+/** True if a filename / URL path points at an interpreted-YAML extension. */
+function _isYamlName(name) {
+  return /\.ya?ml$/i.test(name ?? '');
+}
 
 // ── Pending source cleanup ─────────────────────────────────────────────────
 
@@ -41,9 +48,10 @@ export function consumePendingSourceId() {
  * }} props
  */
 export function AddSourceModal({ open, onClose, onCreated }) {
-  const [mode, setMode]         = useState(/** @type {'url'|'file'} */ ('url'));
+  const [mode, setMode]         = useState(/** @type {'url'|'file'|'yaml'} */ ('url'));
   const [wasmUrl, setWasmUrl]   = useState('');
   const [wasmFile, setWasmFile] = useState(/** @type {File|null} */ (null));
+  const [yamlText, setYamlText] = useState('');
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState(/** @type {string|null} */ (null));
 
@@ -53,6 +61,7 @@ export function AddSourceModal({ open, onClose, onCreated }) {
       setMode('url');
       setWasmUrl('');
       setWasmFile(null);
+      setYamlText('');
       setLoading(false);
       setError(null);
       _pendingSourceId = null;
@@ -62,47 +71,63 @@ export function AddSourceModal({ open, onClose, onCreated }) {
   // Block close while install is in-flight to prevent orphaned source records
   const handleClose = () => { if (!loading) onClose(); };
 
+  const canSubmit = mode === 'url' ? !!wasmUrl.trim()
+    : mode === 'file' ? !!wasmFile
+    : !!yamlText.trim();
+
   async function handleSubmit() {
     if (mode === 'url') {
       if (!wasmUrl.trim()) { setError(t('source.add.error.url_required')); return; }
       if (!wasmUrl.trim().startsWith('https://')) { setError(t('source.add.error.url_https')); return; }
-    } else {
+    } else if (mode === 'file') {
       if (!wasmFile) { setError(t('source.add.error.file_required')); return; }
+    } else if (!yamlText.trim()) {
+      setError(t('source.add.error.yaml_required')); return;
     }
 
     setLoading(true);
     setError(null);
 
-    const placeholderName = mode === 'url'
-      ? (new URL(wasmUrl.trim()).pathname.split('/').pop()?.replace(/\.wasm$/i, '') || 'extension')
-      : (wasmFile?.name.replace(/\.wasm$/i, '') ?? 'extension');
-
-    let sourceId;
-    try {
-      const result = await api.createSource(placeholderName);
-      sourceId = result.id;
-      _pendingSourceId = sourceId;
-    } catch (e) {
-      setError(/** @type {any} */ (e)?.message ?? t('source.add.error.create_failed'));
-      setLoading(false);
-      return;
-    }
+    // Decide format. YAML installs in one step (the endpoint finds-or-creates
+    // the source by the definition's own id). WASM needs a placeholder source
+    // first, then the binary is compiled into it.
+    const url = wasmUrl.trim();
+    const isYaml = mode === 'yaml'
+      || (mode === 'url' && _isYamlName(new URL(url).pathname))
+      || (mode === 'file' && _isYamlName(/** @type {File} */ (wasmFile).name));
 
     try {
-      if (mode === 'url') {
-        await api.fetchWasm(sourceId, wasmUrl.trim());
+      if (isYaml) {
+        if (mode === 'yaml') {
+          await api.installYaml(yamlText);
+        } else if (mode === 'url') {
+          await api.fetchYaml(url);
+        } else {
+          const text = await /** @type {File} */ (wasmFile).text();
+          await api.installYaml(text);
+        }
       } else {
-        await api.uploadWasm(sourceId, /** @type {File} */ (wasmFile));
+        // WASM two-step: placeholder source → binary. Unique placeholder name
+        // avoids colliding with an existing (or soft-deleted) source name.
+        const placeholder = 'pending-' + Date.now().toString(36);
+        const { id: sourceId } = await api.createSource(placeholder);
+        _pendingSourceId = sourceId;
+        try {
+          if (mode === 'url') await api.fetchWasm(sourceId, url);
+          else await api.uploadWasm(sourceId, /** @type {File} */ (wasmFile));
+        } catch (e) {
+          api.deleteSource(sourceId).catch(() => {});
+          _pendingSourceId = null;
+          throw e;
+        }
+        _pendingSourceId = null;
       }
     } catch (e) {
-      api.deleteSource(sourceId).catch(() => {});
-      _pendingSourceId = null;
       setError(/** @type {any} */ (e)?.message ?? t('source.add.error.install_failed'));
       setLoading(false);
       return;
     }
 
-    _pendingSourceId = null;
     setLoading(false);
     onClose();
     onCreated();
@@ -112,7 +137,7 @@ export function AddSourceModal({ open, onClose, onCreated }) {
     <button class="btn-ghost" disabled=${loading} onClick=${handleClose}>${t('common.cancel')}</button>
     <button
       class="btn-primary"
-      disabled=${loading || (mode === 'url' ? !wasmUrl.trim() : !wasmFile)}
+      disabled=${loading || !canSubmit}
       onClick=${handleSubmit}
     >${loading ? t('source.add.installing') : t('source.add.btn')}</button>
   `;
@@ -121,20 +146,16 @@ export function AddSourceModal({ open, onClose, onCreated }) {
     <${Modal} open=${open} onClose=${handleClose} title=${t('source.add.title')} footer=${footer}>
       <div class="flex flex-col gap-4">
 
-        <div class="flex items-center gap-1 p-1 bg-surface-2 rounded-lg w-fit">
-          <button
-            type="button"
-            class=${'px-3 py-1.5 text-sm rounded-md transition-colors ' + (mode === 'url' ? 'bg-surface shadow text-text' : 'text-muted hover:text-text')}
-            disabled=${loading}
-            onClick=${() => setMode('url')}
-          >${t('source.add.mode.url')}</button>
-          <button
-            type="button"
-            class=${'px-3 py-1.5 text-sm rounded-md transition-colors ' + (mode === 'file' ? 'bg-surface shadow text-text' : 'text-muted hover:text-text')}
-            disabled=${loading}
-            onClick=${() => setMode('file')}
-          >${t('source.add.mode.file')}</button>
-        </div>
+        <${Tabs}
+          variant="pill"
+          tabs=${[
+            { id: 'url', name: t('source.add.mode.url') },
+            { id: 'file', name: t('source.add.mode.file') },
+            { id: 'yaml', name: t('source.add.mode.yaml') },
+          ]}
+          activeId=${mode}
+          onSelect=${(/** @type {string} */ id) => { if (!loading) setMode(/** @type {any} */ (id)); }}
+        />
 
         ${mode === 'url' && html`
           <div class="flex flex-col gap-1.5">
@@ -149,6 +170,7 @@ export function AddSourceModal({ open, onClose, onCreated }) {
               onInput=${(/** @type {any} */ e) => setWasmUrl(e.target.value)}
               onKeyDown=${(/** @type {KeyboardEvent} */ e) => { if (e.key === 'Enter') handleSubmit(); }}
             />
+            <p class="text-xs text-text-muted">${t('source.add.url.hint')}</p>
           </div>
         `}
 
@@ -159,10 +181,26 @@ export function AddSourceModal({ open, onClose, onCreated }) {
               id="add-source-file"
               type="file"
               class="input"
-              accept=".wasm"
+              accept=".wasm,.yaml,.yml"
               disabled=${loading}
               onChange=${(/** @type {any} */ e) => setWasmFile(e.target.files?.[0] ?? null)}
             />
+            <p class="text-xs text-text-muted">${t('source.add.file.hint')}</p>
+          </div>
+        `}
+
+        ${mode === 'yaml' && html`
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium text-text" for="add-source-yaml">${t('source.add.yaml.label')}</label>
+            <textarea
+              id="add-source-yaml"
+              class="input font-mono text-xs resize-y min-h-48 p-3"
+              placeholder=${t('source.add.yaml.placeholder')}
+              value=${yamlText}
+              disabled=${loading}
+              onInput=${(/** @type {any} */ e) => setYamlText(e.target.value)}
+            ></textarea>
+            <p class="text-xs text-text-muted">${t('source.add.yaml.hint')}</p>
           </div>
         `}
 
@@ -226,13 +264,12 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
 
   return html`
     <div class="p-3 border-b border-border-subtle">
-      <input
-        type="search"
-        class="input input-sm w-full"
-        placeholder=${t('source.sidebar.filter.placeholder')}
-        aria-label=${t('source.sidebar.filter.label')}
+      <${SearchInput}
+        size="sm"
         value=${query}
-        onInput=${(/** @type {any} */ e) => setQuery(e.target.value)}
+        onInput=${setQuery}
+        placeholder=${t('source.sidebar.filter.placeholder')}
+        ariaLabel=${t('source.sidebar.filter.label')}
       />
     </div>
 
@@ -246,7 +283,7 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
             return html`
               <div
                 key=${src.id}
-                class=${['list-item group cursor-pointer', isActive ? 'active' : '', !src.enabled ? 'opacity-60' : ''].filter(Boolean).join(' ')}
+                class=${['li-row group cursor-pointer', isActive ? 'active' : '', !src.enabled ? 'opacity-60' : ''].filter(Boolean).join(' ')}
                 style="padding: 9px 12px; gap: 10px;"
                 role="link"
                 tabIndex=${0}
@@ -273,7 +310,7 @@ export function SourcesSidebar({ sources, activeSourceId, onCreated }) {
                         <span class="li-sub flex items-center gap-1.5">
                             <span>v${(src.version ?? '').replace('+debug', '')}${src.language ? ` · ${src.language}` : ''}</span>
                             ${src.version?.includes('+debug') && html`<span class="text-2xs px-1 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none">DEBUG</span>`}
-                            ${!src.enabled && html`<span class="text-2xs px-1 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none">Off</span>`}
+                            ${!src.enabled && html`<span class="text-2xs px-1 py-0.5 rounded bg-warn/20 text-warn font-medium leading-none">${t('source.status.off')}</span>`}
                             ${src.circuit_state === 'open' && html`<${StatusDot} state="open" label=${t('source.circuit.open')} />`}
                             ${src.circuit_state === 'half_open' && html`<${StatusDot} state="half_open" label=${t('source.circuit.half_open')} />`}
                         </span>

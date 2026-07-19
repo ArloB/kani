@@ -3,11 +3,12 @@
 
 import { createCoverImage } from './cover-image.js';
 import { getMangaCoverUrl } from '../api.js';
-import { iconEllipsisVertical } from '../icons.js';
+import { iconEllipsisVertical, iconPlay } from '../icons.js';
 import { t } from '../i18n.js';
 
 /**
- * @typedef {{ id: number, title: string, source_id?: number | null, cover_image_url?: string | null, new_chapter_count?: number, is_orphaned?: boolean }} MangaCardData
+ * @typedef {{ chapter_id: number, chapter_number: number, last_page: number, page_count: number }} MangaCardResume
+ * @typedef {{ id: number, title: string, source_id?: number | null, cover_image_url?: string | null, new_chapter_count?: number, is_orphaned?: boolean, resume?: MangaCardResume | null }} MangaCardData
  */
 
 /**
@@ -20,10 +21,11 @@ import { t } from '../i18n.js';
  *   eager?: boolean,
  *   onCardClick?: ((manga: MangaCardData) => void) | null,
  *   onMenuClick?: ((manga: MangaCardData, btnEl: HTMLElement) => void) | null,
+ *   onResumeClick?: ((manga: MangaCardData) => void) | null,
  * }} props
  * @returns {HTMLElement}
  */
-export function createMangaCard({ manga, href, badge = null, extraClass = '', eager = false, onCardClick = null, onMenuClick = null }) {
+export function createMangaCard({ manga, href, badge = null, extraClass = '', eager = false, onCardClick = null, onMenuClick = null, onResumeClick = null }) {
   const card = document.createElement('div');
   card.className = ['manga-card', extraClass].filter(Boolean).join(' ');
   card.dataset.mangaId = String(manga.id);
@@ -85,6 +87,20 @@ export function createMangaCard({ manga, href, badge = null, extraClass = '', ea
       onMenuClick(manga, menuBtn);
     });
     coverWrap.appendChild(menuBtn);
+  }
+
+  if (manga.resume && onResumeClick) {
+    const resumeBtn = document.createElement('button');
+    resumeBtn.type = 'button';
+    resumeBtn.className = 'manga-card__resume-btn';
+    resumeBtn.setAttribute('aria-label', t('manga.resume.aria'));
+    resumeBtn.innerHTML = iconPlay;
+    resumeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onResumeClick(manga);
+    });
+    coverWrap.appendChild(resumeBtn);
   }
 
   if (badge) {
@@ -186,9 +202,10 @@ export function setMangaCardDownloadProgress(mangaId, pct, root = document) {
  *   eagerCount?: number,
  *   onCardClick?: ((manga: MangaCardData) => void) | null,
  *   onMenuClick?: ((manga: MangaCardData, btnEl: HTMLElement) => void) | null,
+ *   onResumeClick?: ((manga: MangaCardData) => void) | null,
  * }} props
  */
-export function renderMangaGrid(container, { items, getHref, getBadge, large = false, onCardClick = null, onMenuClick = null, eagerCount = 16 }) {
+export function renderMangaGrid(container, { items, getHref, getBadge, large = false, onCardClick = null, onMenuClick = null, onResumeClick = null, eagerCount = 16 }) {
   const grid = document.createElement('div');
   grid.className = large ? 'manga-grid manga-grid--large' : 'manga-grid';
 
@@ -201,6 +218,7 @@ export function renderMangaGrid(container, { items, getHref, getBadge, large = f
       eager: i < eagerCount,
       onCardClick: onCardClick ? () => onCardClick(manga) : null,
       onMenuClick: onMenuClick ? (m, btn) => onMenuClick(m, btn) : null,
+      onResumeClick: onResumeClick ? () => onResumeClick(manga) : null,
     });
     grid.appendChild(card);
   }

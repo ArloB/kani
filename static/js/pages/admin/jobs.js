@@ -2,13 +2,16 @@
 // Admin Jobs page — background job queue and history.
 
 import { h, render } from 'preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useCallback } from 'preact/hooks';
 import htm from 'htm';
-import { hasPermission } from '../../state.js';
+import { hasPermission } from '../../session.js';
 import { getJobs, cancelJob } from '../../api.js';
 import { showApiError, showToast } from '../../components/toast.js';
 import { setPageHeader, clearPageHeader } from '../../components/app-header.js';
-import { createEmptyState } from '../../components/empty-state.js';
+import { EmptyState } from '../../components/empty-state.js';
+import { Tabs } from '../../components/tabs.js';
+import { Pagination } from '../../components/pagination.js';
+import { Select } from '../../components/form/select.js';
 import { Icon } from '../../components/icon.js';
 import { iconCheck, iconWarning, iconDocument } from '../../icons.js';
 import { t } from '../../i18n.js';
@@ -36,17 +39,6 @@ function _pct(job) {
   return Math.round((p.current / p.total) * 100);
 }
 
-// ── Empty state adapter ───────────────────────────────────────────────────────
-
-function EmptyState({ icon, title, subtitle }) {
-  const ref = useRef(/** @type {HTMLDivElement|null} */ (null));
-  useEffect(() => {
-    if (!ref.current) return;
-    ref.current.innerHTML = '';
-    ref.current.appendChild(createEmptyState({ icon, title, subtitle }));
-  }, []);
-  return html`<div ref=${ref} />`;
-}
 
 // ── Row components ─────────────────────────────────────────────────────────────
 
@@ -134,110 +126,114 @@ function FailedJobRow({ job }) {
   `;
 }
 
-// ── Tab button ────────────────────────────────────────────────────────────────
-
-function TabBtn({ id, label, count, activeTab, onClick }) {
-  const isActive = activeTab === id;
-  return html`
-    <button
-      type="button"
-      role="tab"
-      aria-selected=${isActive}
-      class=${'px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-t-md'
-        + (isActive ? ' text-accent border-b-2 border-accent' : ' text-text-muted hover:text-text')}
-      onClick=${() => onClick(id)}
-    >
-      ${label}${count > 0 ? html` <span class="ml-1 text-xs opacity-70">${count}</span>` : ''}
-    </button>
-  `;
-}
-
 // ── Page root ─────────────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 25;
+
+/** Status groups per tab — the server accepts a comma-separated status list. */
+const TAB_STATUSES = {
+  active:    ['pending', 'running'],
+  completed: ['completed'],
+  failed:    ['failed', 'cancelled'],
+};
 
 function JobsPage() {
   const [tab, setTab] = useState(/** @type {'active'|'completed'|'failed'} */ ('active'));
-  const [active, setActive] = useState(/** @type {any[]} */ ([]));
-  const [completed, setCompleted] = useState(/** @type {any[]} */ ([]));
-  const [failed, setFailed] = useState(/** @type {any[]} */ ([]));
+  const [jobType, setJobType] = useState('');
+  const [page, setPage] = useState(1);
+  const [jobs, setJobs] = useState(/** @type {any[]} */ ([]));
+  const [total, setTotal] = useState(0);
+  const [jobTypes, setJobTypes] = useState(/** @type {string[]} */ ([]));
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    getJobs({ limit: 100 }).then(items => {
-      if (!Array.isArray(items)) return;
-      setActive(items.filter(j => j.status === 'running' || j.status === 'pending'));
-      setCompleted(items.filter(j => j.status === 'completed'));
-      setFailed(items.filter(j => j.status === 'failed' || j.status === 'cancelled'));
-    }).catch(showApiError);
-  }, []);
+  const _load = useCallback(() => {
+    setLoading(true);
+    getJobs({
+      status: TAB_STATUSES[tab].join(','),
+      job_type: jobType || undefined,
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    }).then(res => {
+      setJobs(Array.isArray(res?.jobs) ? res.jobs : []);
+      setTotal(res?.total ?? 0);
+      setJobTypes(Array.isArray(res?.job_types) ? res.job_types : []);
+    }).catch(showApiError).finally(() => setLoading(false));
+  }, [tab, jobType, page]);
 
+  useEffect(() => { _load(); }, [_load]);
+
+  // A job changing state can move it in or out of the current tab, so refetch
+  // rather than patching a page whose offsets the server owns.
   useEffect(() => {
-    function onSSE(/** @type {CustomEvent} */ e) {
-      const data = /** @type {any} */ (e).detail;
-      const type = data.type;
-      if (type === 'job_started') {
-        setActive(prev => {
-          if (prev.some(j => j.id === data.job_id)) return prev;
-          return [{ id: data.job_id, job_type: data.job_type, status: 'running', description: data.description, progress: null }, ...prev];
-        });
-      } else if (type === 'job_progress') {
-        setActive(prev => prev.map(j => j.id === data.job_id
-          ? { ...j, status: 'running', progress: { current: data.current, total: data.total, message: data.message } }
-          : j));
-      } else if (type === 'job_completed') {
-        setActive(prev => prev.filter(j => j.id !== data.job_id));
-        setCompleted(prev => [{ id: data.job_id, job_type: data.job_type, status: 'completed', description: data.description, completed_at: Math.floor(Date.now() / 1000) }, ...prev].slice(0, 100));
-      } else if (type === 'job_failed') {
-        setActive(prev => prev.filter(j => j.id !== data.job_id));
-        setFailed(prev => [{ id: data.job_id, job_type: data.job_type, status: 'failed', description: '', completed_at: Math.floor(Date.now() / 1000), error: { message: data.message } }, ...prev].slice(0, 100));
-      } else if (type === 'job_cancelled') {
-        setActive(prev => prev.filter(j => j.id !== data.job_id));
-      }
-    }
-    window.addEventListener('kani:sse', onSSE);
-    return () => window.removeEventListener('kani:sse', onSSE);
-  }, []);
+    const onSSE = (/** @type {CustomEvent} */ e) => {
+      const type = /** @type {any} */ (e).detail?.type;
+      if (typeof type === 'string' && type.startsWith('job_')) _load();
+    };
+    window.addEventListener('kani:sse', /** @type {any} */ (onSSE));
+    return () => window.removeEventListener('kani:sse', /** @type {any} */ (onSSE));
+  }, [_load]);
 
   async function handleCancel(id) {
     try {
       await cancelJob(id);
       showToast(t('jobs.action.cancelled'));
+      _load();
     } catch (err) {
       showApiError(err);
     }
   }
 
+  const _setTab = (/** @type {any} */ id) => { setTab(id); setPage(1); };
+
+  const typeOptions = [
+    { value: '', label: t('jobs.filter.all_types') },
+    ...jobTypes.map(jt => ({ value: jt, label: _jobLabel(jt) })),
+  ];
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const emptyFor = {
+    active:    { icon: iconDocument, title: t('jobs.empty.active'),    subtitle: t('jobs.empty.active.desc') },
+    completed: { icon: iconCheck,    title: t('jobs.empty.completed'), subtitle: t('jobs.empty.completed.desc') },
+    failed:    { icon: iconWarning,  title: t('jobs.empty.failed'),    subtitle: undefined },
+  }[tab];
+
   return html`
-    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-6 flex flex-col gap-6">
-      <div class="flex items-center gap-1 border-b border-border -mb-3 min-h-9" role="tablist">
-        <${TabBtn} id="active"    label=${t('jobs.tab.active')}    count=${active.length}  activeTab=${tab} onClick=${setTab} />
-        <${TabBtn} id="completed" label=${t('jobs.tab.completed')} count=${0}              activeTab=${tab} onClick=${setTab} />
-        <${TabBtn} id="failed"    label=${t('jobs.tab.failed')}    count=${failed.length}  activeTab=${tab} onClick=${setTab} />
+    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-6 flex flex-col gap-4">
+      <${Tabs}
+        tabs=${[
+          { id: 'active',    name: t('jobs.tab.active') },
+          { id: 'completed', name: t('jobs.tab.completed') },
+          { id: 'failed',    name: t('jobs.tab.failed') },
+        ]}
+        activeId=${tab}
+        onSelect=${_setTab}
+      />
+
+      <div class="flex items-center gap-3 flex-wrap">
+        <${Select}
+          options=${typeOptions}
+          value=${jobType}
+          ariaLabel=${t('jobs.filter.type')}
+          onChange=${(/** @type {string} */ v) => { setJobType(v); setPage(1); }}
+        />
+        ${total > 0 && html`
+          <span class="text-xs text-text-muted">${t('jobs.count', { count: total, s: total !== 1 ? 's' : '' })}</span>
+        `}
       </div>
 
-      ${tab === 'active' && html`
-        <div class="bg-surface border border-border rounded-xl overflow-hidden">
-          ${active.length === 0
-            ? html`<${EmptyState} icon=${iconDocument} title=${t('jobs.empty.active')} subtitle=${t('jobs.empty.active.desc')} />`
-            : active.map(j => html`<${ActiveJobRow} key=${j.id} job=${j} onCancel=${handleCancel} />`)
-          }
-        </div>
-      `}
+      <div class=${'bg-surface border border-border rounded-xl overflow-hidden' + (loading ? ' opacity-60' : '')}>
+        ${jobs.length === 0 && !loading
+          ? html`<${EmptyState} icon=${emptyFor.icon} title=${emptyFor.title} subtitle=${emptyFor.subtitle} />`
+          : jobs.map(j => {
+              if (tab === 'active')    return html`<${ActiveJobRow}    key=${j.id} job=${j} onCancel=${handleCancel} />`;
+              if (tab === 'completed') return html`<${CompletedJobRow} key=${j.id} job=${j} />`;
+              return html`<${FailedJobRow} key=${j.id} job=${j} />`;
+            })
+        }
+      </div>
 
-      ${tab === 'completed' && html`
-        <div class="bg-surface border border-border rounded-xl overflow-hidden">
-          ${completed.length === 0
-            ? html`<${EmptyState} icon=${iconCheck} title=${t('jobs.empty.completed')} subtitle=${t('jobs.empty.completed.desc')} />`
-            : completed.map(j => html`<${CompletedJobRow} key=${j.id} job=${j} />`)
-          }
-        </div>
-      `}
-
-      ${tab === 'failed' && html`
-        <div class="bg-surface border border-border rounded-xl overflow-hidden">
-          ${failed.length === 0
-            ? html`<${EmptyState} icon=${iconWarning} title=${t('jobs.empty.failed')} />`
-            : failed.map(j => html`<${FailedJobRow} key=${j.id} job=${j} />`)
-          }
-        </div>
+      ${totalPages > 1 && html`
+        <${Pagination} page=${page} hasNext=${page < totalPages} total=${totalPages} onPageChange=${setPage} />
       `}
     </div>
   `;

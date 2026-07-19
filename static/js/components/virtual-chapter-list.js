@@ -2,9 +2,11 @@
 // Virtual chapter list — windowed rendering for large chapter counts.
 
 import { h } from 'preact';
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { memo } from 'preact/compat';
+import { useState, useEffect, useRef, useMemo } from 'preact/hooks';
 import htm from 'htm';
-import { getState, subscribe, hasPermission } from '../state.js';
+import { hasPermission } from '../session.js';
+import { getState, subscribe } from '../cache.js';
 import { formatDate, isChapterDownloaded } from '../utils.js';
 import { useBusy } from '../hooks/use-busy.js';
 import { navigate } from '../router.js';
@@ -12,14 +14,23 @@ import { downloadChapter, deleteChapter, cancelDownload, setChapterReadStatus, m
 import { iconCheck, iconDownload, iconCloud, iconCloudCheck } from '../icons.js';
 import { Icon } from './icon.js';
 import { ContextMenu } from './menu.js';
+import { BulkBar } from './bulk-bar.js';
 import { cacheChapter, evictChapter } from '../offline.js';
 import { showApiError } from './toast.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
-/** @typedef {import('../state.js').ChapterProgress} ChapterProgress */
+/** @typedef {import('../cache.js').ChapterProgress} ChapterProgress */
 
-const ROW_H = 56; // px — must match the rendered height of each chapter row
+/**
+ * Row height for the windowed layout, from the --chapter-row-h token (56px
+ * comfortable, denser in compact mode). Read per mount: `.chapter-row` in CSS
+ * consumes the same token, so JS offsets and rendered heights stay in lockstep.
+ */
+function _readRowH() {
+  const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chapter-row-h'), 10);
+  return Number.isFinite(v) && v > 0 ? v : 56;
+}
 const OVERSCAN = 5;
 
 /**
@@ -57,7 +68,7 @@ const OVERSCAN = 5;
  *   onCacheChange?: (id: number, cached: boolean) => void,
  * }} props
  */
-function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selected, isCached, kccAvailable, hasNote, isKeyboardActive, menuTick, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange }) {
+function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, selected, isCached, kccAvailable, hasNote, showScanlator, isKeyboardActive, menuTick, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange }) {
   const [progress, setProgress] = useState(/** @type {ChapterProgress|null} */(null));
   const [isRead, setIsRead] = useState(!!chapter.read);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -110,6 +121,9 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
 
   const canDownload = hasPermission('chapter:download');
   const canDelete = hasPermission('chapter:delete');
+  // Left-edge status stripe (a short centred segment via .chapter-row::before,
+  // not a full-height border).
+  const rowIndicator = downloaded ? 'downloaded' : (isRead ? 'read' : '');
 
   // Download state button — still needed for in-progress / failed visual in context menu trigger area
   // We render a small status indicator inline with the title row instead of a full button
@@ -249,30 +263,31 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
   ` : null;
 
   if (selectMode) {
-    let selectRowBorder = 'border-l-2 border-l-transparent ';
-    if (downloaded) {
-      selectRowBorder = 'border-l-2 border-l-success/60 ';
-    } else if (isRead) {
-      selectRowBorder = 'border-l-2 border-l-text-faint/30 ';
-    }
     return html`
       <div
         id=${'chapter-opt-' + chapter.id}
         role="option"
         tabindex="-1"
         aria-selected=${!!selected}
-        class=${selectRowBorder + 'flex items-center gap-3 px-3 py-2.5 border-b border-border-subtle cursor-pointer select-none' + (chapter.is_orphaned ? ' opacity-60' : '') + (selected ? ' bg-accent/10' : '') + (isKeyboardActive ? ' ring-2 ring-inset ring-accent/60' : '')}
+        data-indicator=${rowIndicator || undefined}
+        class=${'chapter-row flex items-center gap-3 px-3 border-b border-border-subtle cursor-pointer select-none' + (chapter.is_orphaned ? ' opacity-60' : '') + (selected ? ' bg-accent/10' : '') + (isKeyboardActive ? ' ring-2 ring-inset ring-accent/60' : '')}
         onClick=${() => {
           // Absorb the click from pointer-up that fires right after a long-press entered select mode
           if (longPressFiredRef.current) { longPressFiredRef.current = false; return; }
           onToggleSelect && onToggleSelect(chapter.id);
         }}
       >
-        <input type="checkbox" class="shrink-0 accent-accent" checked=${!!selected} readOnly />
+        <span class="kani-checkbox pointer-events-none shrink-0" aria-hidden="true">
+          <input type="checkbox" checked=${!!selected} tabindex="-1" readOnly />
+          <span class="kani-checkbox__box">
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 6.5 2.5 2.5 4.5-5.5"/></svg>
+          </span>
+        </span>
         <div class="flex-1 min-w-0 flex flex-col gap-0.5">
           <span class=${'text-sm truncate ' + (isRead ? 'text-text-faint' : 'text-text')}>${chapter.title}</span>
           <div class="flex items-center gap-3 text-xs text-text-muted">
-            ${chapter.scanlator && html`<span>${chapter.scanlator}</span>`}
+            ${showScanlator && chapter.scanlator && html`<span>${chapter.scanlator}</span>`}
             ${chapter.date_uploaded && html`<span>${formatDate(chapter.date_uploaded)}</span>`}
           </div>
         </div>
@@ -280,19 +295,13 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
     `;
   }
 
-  // For local chapters, only fully downloaded chapters are clickable (not while downloading)
-  const isClickable = inLibrary && downloaded && !isActive;
+  // Local chapters open the reader when downloaded, or when the user can
+  // download (the reader downloads on open); active downloads stay non-clickable.
+  const isClickable = inLibrary && !isActive && (downloaded || canDownload);
   let nonClickableClass = '', nonClickableTitle = '';
   if (!isClickable) {
     nonClickableClass = ' cursor-default';
     nonClickableTitle = !inLibrary ? t('chapter.list.add_to_library') : isActive ? t('chapter.list.downloading') : t('chapter.list.download_to_read');
-  }
-
-  let rowBorderClass = 'border-l-2 border-l-transparent ';
-  if (downloaded) {
-    rowBorderClass = 'border-l-2 border-l-success/60 ';
-  } else if (isRead) {
-    rowBorderClass = 'border-l-2 border-l-text-faint/30 ';
   }
 
   return html`
@@ -301,7 +310,8 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
       role="option"
       tabindex="-1"
       aria-selected=${undefined}
-      class=${rowBorderClass + 'flex items-center gap-3 px-3 py-2.5 border-b border-border-subtle' + (chapter.is_orphaned ? ' opacity-60' : '') + (menuOpen ? ' relative' : '') + (isKeyboardActive ? ' ring-2 ring-inset ring-accent/60' : '')}
+      data-indicator=${rowIndicator || undefined}
+      class=${'chapter-row flex items-center gap-3 px-3 border-b border-border-subtle' + (chapter.is_orphaned ? ' opacity-60' : '') + (menuOpen ? ' relative' : '') + (isKeyboardActive ? ' ring-2 ring-inset ring-accent/60' : '')}
       style=${menuOpen ? 'z-index: 50' : undefined}
       onPointerDown=${_startLongPress}
       onPointerUp=${_cancelLongPress}
@@ -315,12 +325,12 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
           `}
           ${statusIndicator}
           ${isClickable
-      ? html`<a class=${'text-sm truncate hover:text-accent transition-colors ' + (isRead ? 'text-text-faint' : 'text-text')} href=${readerHref} tabindex="-1">${chapter.title}</a>`
+      ? html`<a class=${'text-sm truncate hover:text-accent transition-colors ' + (!downloaded ? 'text-text-muted' : isRead ? 'text-text-faint' : 'text-text')} href=${readerHref} tabindex="-1" title=${!downloaded ? t('chapter.list.download_to_read') : undefined}>${chapter.title}</a>`
       : html`<span class=${'text-sm truncate' + nonClickableClass + (isRead ? ' text-text-faint' : ' text-text-muted')} title=${nonClickableTitle || undefined}>${chapter.title}</span>`
     }
         </div>
         <div class="flex items-center gap-3 text-xs text-text-muted">
-          ${chapter.scanlator && html`<span>${chapter.scanlator}</span>`}
+          ${showScanlator && chapter.scanlator && html`<span>${chapter.scanlator}</span>`}
           ${chapter.date_uploaded && html`<span>${formatDate(chapter.date_uploaded)}</span>`}
           ${hasNote && html`<span class="text-accent" title=${t('chapter.badge.has_note')}>✎</span>`}
         </div>
@@ -343,6 +353,8 @@ function ChapterRow({ chapter, readerHref, inLibrary, mangaId, selectMode, selec
     </div>
   `;
 }
+
+const ChapterRow = memo(ChapterRowInner);
 
 /**
  * Chapter list with optional windowed rendering and infinite-scroll load-more.
@@ -390,6 +402,15 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
   const [activeIndex, setActiveIndex] = useState(0);
   const [focused, setFocused] = useState(false);
   const [menuSignal, setMenuSignal] = useState({ id: /** @type {number|null} */ (null), tick: 0 });
+  const [ROW_H] = useState(_readRowH);
+  const showScanlator = useMemo(() => {
+    const seen = new Set();
+    for (const c of chapters) {
+      if (c.scanlator) seen.add(c.scanlator);
+      if (seen.size > 1) return true;
+    }
+    return false;
+  }, [chapters]);
   const sentinelRef = useRef(/** @type {HTMLDivElement | null} */(null));
   const scrollRef = useRef(/** @type {HTMLDivElement | null} */(null));
   // Disable all bulk actions while any one is in flight (prevents double-submit).
@@ -497,44 +518,36 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
     : 0;
   const selectedUndownloadedCount = selectedCount - selectedDownloadedCount;
 
+  const statParts = [];
+  if (selectedDownloadedCount > 0) statParts.push(t('chapter.bulk.stat_downloaded', { count: selectedDownloadedCount }));
+  if (selectedUndownloadedCount > 0) statParts.push(t('chapter.bulk.stat_not_downloaded', { count: selectedUndownloadedCount }));
+
+  const bulkHelpers = [
+    { label: allSelected ? t('chapter.bulk.deselect_all') : t('chapter.bulk.select_all'), onClick: () => onSelectAll && onSelectAll() },
+    ...(onFlipSelection ? [{ label: t('chapter.bulk.flip'), onClick: () => onFlipSelection() }] : []),
+    ...(onSelectUndownloaded ? [{ label: t('chapter.bulk.undownloaded'), onClick: () => onSelectUndownloaded() }] : []),
+    ...(onSelectUnread ? [{ label: t('chapter.bulk.unread'), onClick: () => onSelectUnread() }] : []),
+  ];
+  const bulkActions = [
+    { label: t('chapter.bulk.mark_read'), onClick: () => onBulkRead && runBulk(() => onBulkRead(true)), disabled: selectedCount === 0 },
+    { label: t('chapter.bulk.mark_unread'), onClick: () => onBulkRead && runBulk(() => onBulkRead(false)), disabled: selectedCount === 0 },
+    ...(canDownload && onBulkDownload
+      ? [{ label: t('chapter.bulk.download'), onClick: () => runBulk(() => onBulkDownload()), disabled: selectedUndownloadedCount === 0 }]
+      : []),
+    ...(canDelete && onBulkDelete
+      ? [{ label: t('common.delete'), kind: /** @type {'danger'} */ ('danger'), onClick: () => runBulk(() => onBulkDelete()), disabled: selectedDownloadedCount === 0 }]
+      : []),
+  ];
+
   const bulkBar = selectMode ? html`
-    <div class="sticky bottom-0 z-20 flex flex-col bg-surface border-t border-border">
-      <div class="flex items-center gap-2 flex-wrap px-3 py-2">
-      <div class="flex flex-col">
-        <span class="text-sm text-text-muted">${t('chapter.bulk.selected', { count: selectedCount })}</span>
-        ${selectedCount > 0 && html`
-          <span class="text-xs text-text-faint">
-            ${selectedDownloadedCount > 0 ? t('chapter.bulk.stat_downloaded', { count: selectedDownloadedCount }) : ''}${selectedDownloadedCount > 0 && selectedUndownloadedCount > 0 ? ', ' : ''}${selectedUndownloadedCount > 0 ? t('chapter.bulk.stat_not_downloaded', { count: selectedUndownloadedCount }) : ''}
-          </span>
-        `}
-      </div>
-      <div class="flex items-center gap-1.5 flex-wrap flex-1">
-        <button class="btn-ghost btn-sm" onClick=${() => onSelectAll && onSelectAll()}>
-          ${allSelected ? t('chapter.bulk.deselect_all') : t('chapter.bulk.select_all')}
-        </button>
-        ${onFlipSelection && html`
-          <button class="btn-ghost btn-sm" onClick=${() => onFlipSelection()}>${t('chapter.bulk.flip')}</button>
-        `}
-        ${onSelectUndownloaded && html`
-          <button class="btn-ghost btn-sm" onClick=${() => onSelectUndownloaded()}>${t('chapter.bulk.undownloaded')}</button>
-        `}
-        ${onSelectUnread && html`
-          <button class="btn-ghost btn-sm" onClick=${() => onSelectUnread()}>${t('chapter.bulk.unread')}</button>
-        `}
-      </div>
-      <div class="flex items-center gap-1.5 flex-wrap">
-        <button class="btn-primary btn-sm" disabled=${selectedCount === 0 || bulkBusy} onClick=${() => onBulkRead && runBulk(() => onBulkRead(true))}>${t('chapter.bulk.mark_read')}</button>
-        <button class="btn-ghost btn-sm" disabled=${selectedCount === 0 || bulkBusy} onClick=${() => onBulkRead && runBulk(() => onBulkRead(false))}>${t('chapter.bulk.mark_unread')}</button>
-        ${canDownload && onBulkDownload && html`
-          <button class="btn-ghost btn-sm" disabled=${selectedUndownloadedCount === 0 || bulkBusy} onClick=${() => runBulk(() => onBulkDownload())}>${t('chapter.bulk.download')}</button>
-        `}
-        ${canDelete && onBulkDelete && html`
-          <button class="btn-ghost btn-sm" disabled=${selectedDownloadedCount === 0 || bulkBusy} onClick=${() => runBulk(() => onBulkDelete())}>${t('common.delete')}</button>
-        `}
-        <button class="btn-ghost btn-sm" onClick=${() => onExitSelect && onExitSelect()}>${t('common.cancel')}</button>
-      </div>
-      </div>
-    </div>
+    <${BulkBar}
+      countLabel=${t('chapter.bulk.selected', { count: selectedCount })}
+      statLine=${selectedCount > 0 && statParts.length ? statParts.join(', ') : null}
+      helpers=${bulkHelpers}
+      actions=${bulkActions}
+      busy=${bulkBusy}
+      onCancel=${() => onExitSelect && onExitSelect()}
+    />
   ` : null;
 
   // Slice indices — used by both windowed rendering and the aria-activedescendant guard
@@ -568,6 +581,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
               selected=${selected ? selected.has(ch.id) : false}
               isKeyboardActive=${focused && i === activeIndex}
               menuTick=${menuSignal.id === ch.id ? menuSignal.tick : 0}
+              showScanlator=${showScanlator}
               onToggleRead=${onToggleRead}
               onMarkUpTo=${onMarkUpTo}
               onToggleSelect=${onToggleSelect}
@@ -613,7 +627,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
       <div
         ref=${scrollRef}
         class="overflow-y-auto"
-        style=${{ height: (selectMode ? Math.max(100, height - 60) : height) + 'px', scrollbarWidth: 'none' }}
+        style=${{ height: height + 'px', scrollbarWidth: 'none' }}
         onScroll=${handleScroll}
       >
         <div style=${{ height: totalH + 'px', position: 'relative' }}>
@@ -631,6 +645,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
                 selected=${selected ? selected.has(ch.id) : false}
                 isKeyboardActive=${focused && startIdx + i === activeIndex}
                 menuTick=${menuSignal.id === ch.id ? menuSignal.tick : 0}
+              showScanlator=${showScanlator}
                 onToggleRead=${onToggleRead}
                 onMarkUpTo=${onMarkUpTo}
                 onToggleSelect=${onToggleSelect}

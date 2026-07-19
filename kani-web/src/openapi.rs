@@ -11,6 +11,7 @@ use utoipa::OpenApi;
     paths(
         // system
         crate::rest::system::system_info,
+        crate::rest::system::system_changelog,
         crate::rest::system::complete_first_run,
         crate::rest::admin::system_capabilities,
         // auth
@@ -146,6 +147,8 @@ use utoipa::OpenApi;
         crate::rest::sources::get_metadata,
         crate::rest::sources::upload_wasm,
         crate::rest::sources::fetch_wasm,
+        crate::rest::sources::install_yaml,
+        crate::rest::sources::fetch_yaml,
         crate::rest::sources::reload_source_handler,
         crate::rest::sources::get_popular_manga,
         crate::rest::sources::search_manga,
@@ -234,6 +237,8 @@ use utoipa::OpenApi;
             crate::models::CreateSource,
             crate::models::UpdateSource,
             crate::models::FetchWasmRequest,
+            crate::models::InstallYamlRequest,
+            crate::models::FetchYamlRequest,
             crate::models::SearchMangaRequest,
             crate::models::UpdateLocalMetadataRequest,
             crate::models::AddDownloadRuleRequest,

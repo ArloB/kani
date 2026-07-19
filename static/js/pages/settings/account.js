@@ -5,10 +5,9 @@ import { h } from 'preact';
 import { useState } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
-import { openConfirm } from '../../utils.js';
 import { navigate } from '../../router.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
-import { Modal, mountIntoModalRoot } from '../../components/modal.js';
+import { Modal, mountIntoModalRoot, showConfirm } from '../../components/modal.js';
 import { t } from '../../i18n.js';
 const html = htm.bind(h);
 
@@ -87,7 +86,7 @@ export function mount(el) {
   changePwBtn.addEventListener('click', () => _showChangePasswordModal());
 
   logoutBtn.addEventListener('click', async () => {
-    if (!(await openConfirm({ title: t('settings.account.sessions.signout_all'), message: t('settings.account.sessions.confirm.message'), danger: true }))) return;
+    if (!(await showConfirm(t('settings.account.sessions.confirm.message'), { title: t('settings.account.sessions.signout_all'), danger: true }))) return;
     logoutBtn.disabled = true;
     try {
       await api.logoutEverywhere();

@@ -57,6 +57,7 @@ impl AppService {
                 chapter_id: crate::ids::ChapterId(next.chapter_id),
                 chapter_number: next.chapter_number,
                 last_page: next.last_page,
+                page_count: next.page_count,
             });
         }
         Ok(items)

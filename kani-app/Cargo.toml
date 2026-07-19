@@ -28,7 +28,7 @@ ordered-float.workspace = true
 moka.workspace = true
 dashmap.workspace = true
 arc-swap.workspace = true
-time          = { workspace = true, features = ["serde", "formatting", "macros"] }
+time          = { workspace = true, features = ["serde", "serde-well-known", "formatting", "macros"] }
 base64.workspace = true
 sha2.workspace = true
 ed25519-dalek.workspace = true

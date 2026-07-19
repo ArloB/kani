@@ -1,7 +1,7 @@
 // @ts-check
 // Reusable context/dropdown menu component.
 
-import { h } from 'preact';
+import { h, render } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 const html = htm.bind(h);
@@ -96,7 +96,7 @@ export function ContextMenu({ items, trigger, onClose }) {
       role="menu"
       style=${{
         position: 'fixed',
-        zIndex: 9999,
+        zIndex: 'var(--z-popover)',
         visibility: visible ? 'visible' : 'hidden',
         top: pos.top != null ? pos.top + 'px' : 'auto',
         bottom: pos.bottom != null ? pos.bottom + 'px' : 'auto',
@@ -126,4 +126,26 @@ export function ContextMenu({ items, trigger, onClose }) {
       })}
     </div>
   `;
+}
+
+/**
+ * Imperatively show a ContextMenu in a body-appended container, owning the
+ * mount/unmount ritual. Returns a close function (idempotent).
+ *
+ * @param {MenuItem[]} items
+ * @param {{ current: HTMLElement | null } | { x: number, y: number }} trigger
+ * @returns {() => void}
+ */
+export function showContextMenu(items, trigger) {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    render(null, container);
+    container.remove();
+  };
+  render(html`<${ContextMenu} items=${items} trigger=${trigger} onClose=${close} />`, container);
+  return close;
 }

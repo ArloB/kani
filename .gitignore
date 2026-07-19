@@ -17,6 +17,8 @@ changes
 .kani_admin_password
 log/
 static/js/vendor/
+static/fonts/
+static/changelog.md
 static/js/dist/
 static/types/
 static/css/main.css

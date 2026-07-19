@@ -309,7 +309,7 @@ pub(crate) async fn get_local_chapters(
     Path(manga_id): Path<MangaId>,
     ValidatedQuery(q): ValidatedQuery<LocalChaptersQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let (chapters, has_next_page, total_pages) = svc
+    let (chapters, has_next_page, total_pages, total) = svc
         .get_local_chapters(
             manga_id,
             q.page,
@@ -325,6 +325,7 @@ pub(crate) async fn get_local_chapters(
         chapters,
         has_next_page,
         total_pages,
+        total: Some(total),
     }))
 }
 
@@ -913,7 +914,7 @@ mod tests {
             _filter_downloaded: Option<bool>,
             _filter_unread: Option<bool>,
             _filter_scanlator: Option<String>,
-        ) -> kani_app::error::Result<(Vec<Chapter>, bool, Option<u32>)> {
+        ) -> kani_app::error::Result<(Vec<Chapter>, bool, Option<u32>, u32)> {
             unimplemented!()
         }
         #[allow(clippy::too_many_arguments)]
@@ -1091,6 +1092,7 @@ mod tests {
             username: "test".into(),
             email: "test@example.com".into(),
             is_active: true,
+            created_at: None,
             roles: vec![],
             password_hash: String::new(),
             change_id: vec![],

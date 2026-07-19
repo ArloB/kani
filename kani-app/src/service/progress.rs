@@ -400,11 +400,12 @@ impl AppService {
         let in_progress = sqlx::query!(
             r#"
             SELECT c.id as "id: i64", c.chapter_number as "chapter_number: f64",
-                   uct.last_page_read as "last_page_read: i64"
+                   uct.last_page_read as "last_page_read: i64",
+                   COALESCE(c.page_count, 0) as "page_count!: i64"
             FROM chapters c
             JOIN manga m ON m.id = c.manga_id
             JOIN user_chapter_tracking uct ON uct.chapter_id = c.id
-            LEFT JOIN scanlator_preferences sp 
+            LEFT JOIN scanlator_preferences sp
                 ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator
             WHERE c.manga_id = ? AND uct.user_id = ?
               AND uct.is_read = false AND uct.last_page_read > 0
@@ -427,6 +428,7 @@ impl AppService {
                 chapter_id: row.id,
                 chapter_number: row.chapter_number,
                 last_page: row.last_page_read,
+                page_count: row.page_count,
             }));
         }
 
@@ -467,7 +469,7 @@ impl AppService {
         // Step 3: pick the preferred scanlator version for that number.
         let chapter = sqlx::query!(
             r#"
-            SELECT c.id as "id: i64"
+            SELECT c.id as "id: i64", COALESCE(c.page_count, 0) as "page_count!: i64"
             FROM chapters c
             JOIN manga m ON m.id = c.manga_id
             LEFT JOIN scanlator_preferences sp
@@ -491,6 +493,7 @@ impl AppService {
             chapter_id: r.id,
             chapter_number,
             last_page: 0,
+            page_count: r.page_count,
         }))
     }
 

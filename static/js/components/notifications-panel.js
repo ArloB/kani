@@ -4,15 +4,16 @@
 import { h, render } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
-import { getState, subscribe, setState, updateState } from '../state.js';
+import { getState, subscribe, setState, updateState } from '../cache.js';
 import { navigate } from '../router.js';
 import { iconBell, iconX, iconDownload, iconCheck } from '../icons.js';
 import { Icon } from './icon.js';
 import { t } from '../i18n.js';
+import { useOutsideClose } from './popover.js';
 const html = htm.bind(h);
 
-/** @typedef {import('../state.js').ScanNotification} ScanNotification */
-/** @typedef {import('../state.js').ChapterProgress} ChapterProgress */
+/** @typedef {import('../cache.js').ScanNotification} ScanNotification */
+/** @typedef {import('../cache.js').ChapterProgress} ChapterProgress */
 
 function NotificationsPanel() {
   const [open, setOpen] = useState(false);
@@ -47,16 +48,7 @@ function NotificationsPanel() {
     return subscribe('chaptersProgress', syncDownloads);
   }, []);
 
-  // Close panel on outside click
-  useEffect(() => {
-    if (!open) return;
-    /** @param {MouseEvent} e */
-    const handler = (e) => {
-      if (!wrapRef.current?.contains(/** @type {Node} */ (e.target))) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  useOutsideClose(open, [wrapRef], () => setOpen(false));
 
   const chapterCount = notifications.reduce((sum, n) => sum + n.count, 0);
   const badgeCount = chapterCount + failedDownloads + completedDownloads.length;
@@ -205,7 +197,7 @@ function NotificationsPanel() {
                               <span class="text-xs text-text-muted truncate">${name}</span>
                             `)}
                             ${n.chapterNames.length > 3 && html`
-                              <span class="text-xs text-text-faint">+${n.chapterNames.length - 3} more</span>
+                              <span class="text-xs text-text-faint">${t('notifications.more', { n: n.chapterNames.length - 3 })}</span>
                             `}
                           </div>
                         `}

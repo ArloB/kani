@@ -8,7 +8,11 @@ import { escapeHtml } from '../utils.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
+import { createEmptyState } from '../components/empty-state.js';
 import { t } from '../i18n.js';
+
+// A real CLI command — not translatable prose.
+const _SETUP_CMD = 'kani-cli setup';
 
 // ── CSS variable resolver ─────────────────────────────────────────────────────
 // Chart.js renders on <canvas> and cannot read CSS custom properties.
@@ -109,7 +113,7 @@ async function _load() {
     _renderWidgets(stats);
   } catch (err) {
     _contentEl.innerHTML = '';
-    _contentEl.appendChild(createErrorState({ message: err?.message ?? 'Failed to load statistics' }));
+    _contentEl.appendChild(createErrorState({ message: err?.message ?? t('stats.error.load') }));
   } finally {
     finishLoading();
   }
@@ -167,7 +171,15 @@ function summaryWidget() {
         { label: t('stats.card.chapters_read'), value: data.total_chapters_read ?? 0 },
         { label: t('stats.card.manga_read'),    value: data.total_manga_read    ?? 0 },
         { label: t('stats.card.completed'),     value: data.completed_manga     ?? 0 },
-        { label: t('stats.card.streak'),        value: `${data.current_streak ?? 0}d` },
+        {
+          label: t('stats.card.streak'),
+          value: `${data.current_streak ?? 0}d`,
+          // Longest streak is context for the current one, not a stat of its own —
+          // it belongs in this card, not floating beneath the grid.
+          note: data.longest_streak
+            ? t('stats.summary.longest_streak_note', { days: data.longest_streak })
+            : null,
+        },
       ];
 
       container.innerHTML = `
@@ -176,14 +188,35 @@ function summaryWidget() {
             <div class="card p-4 flex flex-col gap-1">
               <span class="text-2xl font-bold text-text">${escapeHtml(String(c.value))}</span>
               <span class="text-sm text-text-muted">${escapeHtml(c.label)}</span>
+              ${c.note ? `<span class="text-xs text-text-faint mt-0.5">${escapeHtml(c.note)}</span>` : ''}
             </div>
           `).join('')}
         </div>
-        ${data.longest_streak ? `<p class="text-sm text-text-muted mt-2">${escapeHtml(t('stats.summary.longest_streak'))}: <span class="font-medium text-text">${data.longest_streak}d</span></p>` : ''}
       `;
       return { destroy() { container.innerHTML = ''; } };
     },
   };
+}
+
+/**
+ * Fill missing days with zero-value rows so the category axis represents
+ * time honestly — sparse activity dates plotted as-is make a month gap look
+ * like a day.
+ * @param {Array<Record<string, any>>} rows — rows with a YYYY-MM-DD `date`
+ * @param {string} key — the value field to zero on filler rows
+ */
+function _zeroFillDays(rows, key) {
+  if (rows.length === 0) return rows;
+  const sorted = [...rows].sort((a, b) => a.date < b.date ? -1 : 1);
+  const byDate = new Map(sorted.map(r => [r.date, r]));
+  const out = [];
+  const start = new Date(sorted[0].date + 'T00:00:00Z');
+  const end = new Date();
+  for (let t = start.getTime(), i = 0; t <= end.getTime() && i < 400; t += 86400000, i++) {
+    const iso = new Date(t).toISOString().slice(0, 10);
+    out.push(byDate.get(iso) ?? { date: iso, [key]: 0 });
+  }
+  return out;
 }
 
 // ── Widget: Reading-pace line chart (#34) ─────────────────────────────────────
@@ -195,7 +228,7 @@ function readingPaceWidget() {
     id: 'reading_pace',
     /** @param {HTMLElement} container @param {any} data */
     render(container, data) {
-      const rows = data.reading_pace ?? [];
+      const rows = _zeroFillDays(data.reading_pace ?? [], 'pages');
       if (!rows.length) {
         container.innerHTML = `<div class="card p-4 text-text-muted text-sm">${escapeHtml(t('stats.empty.no_activity'))}</div>`;
         return { destroy() { container.innerHTML = ''; } };
@@ -240,7 +273,7 @@ function readingPaceWidget() {
           },
         });
       }).catch(() => {
-        container.innerHTML = `<div class="card p-4 text-sm text-text-muted">Chart.js not available. Run <code>kani-cli setup</code> to download vendor files.</div>`;
+        container.innerHTML = `<div class="card p-4 text-sm text-text-muted">${t('stats.chart_unavailable_prefix')} <code>${_SETUP_CMD}</code> ${t('stats.chart_unavailable_suffix')}</div>`;
       });
 
       return {
@@ -263,7 +296,7 @@ function dailyActivityWidget() {
     id: 'daily_activity',
     /** @param {HTMLElement} container @param {any} data */
     render(container, data) {
-      const rows = data.daily_activity ?? [];
+      const rows = _zeroFillDays(data.daily_activity ?? [], 'chapters_read');
       if (!rows.length) {
         container.innerHTML = `<div class="card p-4 text-text-muted text-sm">${escapeHtml(t('stats.empty.no_activity'))}</div>`;
         return { destroy() { container.innerHTML = ''; } };
@@ -292,6 +325,8 @@ function dailyActivityWidget() {
               data: rows.map((r) => r.chapters_read),
               backgroundColor: chartColor('--chart-1', 0.6),
               borderRadius: 3,
+              // Without a cap, a handful of data points renders as absurdly wide slabs.
+              maxBarThickness: 28,
             }],
           },
           options: {
@@ -306,7 +341,7 @@ function dailyActivityWidget() {
         });
       }).catch(() => {
         // Chart.js unavailable — show plain text fallback
-        container.innerHTML = `<div class="card p-4 text-sm text-text-muted">Chart.js not available. Run <code>kani-cli setup</code> to download vendor files.</div>`;
+        container.innerHTML = `<div class="card p-4 text-sm text-text-muted">${t('stats.chart_unavailable_prefix')} <code>${_SETUP_CMD}</code> ${t('stats.chart_unavailable_suffix')}</div>`;
       });
 
       return {
@@ -331,7 +366,16 @@ function topMangaWidget() {
     render(container, data) {
       const rows = (data.top_manga ?? []).slice(0, 10);
       if (!rows.length) {
-        container.innerHTML = '';
+        container.innerHTML = `
+          <div class="card p-4">
+            <h2 class="text-base font-semibold mb-2">${escapeHtml(t('stats.chart.most_read'))}</h2>
+          </div>
+        `;
+        container.querySelector('.card')?.appendChild(createEmptyState({
+          title: t('stats.empty.no_reading'),
+          subtitle: t('stats.empty.no_reading.desc'),
+          compact: true,
+        }));
         return { destroy() {} };
       }
 
@@ -357,6 +401,7 @@ function topMangaWidget() {
               data: rows.map((r) => r.chapters_read),
               backgroundColor: chartColor('--chart-2', 0.65),
               borderRadius: 3,
+              maxBarThickness: 22,
             }],
           },
           options: {
@@ -407,9 +452,18 @@ function genreBreakdownWidget() {
     id: 'genre_breakdown',
     /** @param {HTMLElement} container @param {any} data */
     render(container, data) {
-      const rows = (data.genre_breakdown ?? []).slice(0, 12);
+      const rows = (data.genre_breakdown ?? []).slice(0, 11);
       if (!rows.length) {
-        container.innerHTML = '';
+        container.innerHTML = `
+          <div class="card p-4">
+            <h2 class="text-base font-semibold mb-2">${escapeHtml(t('stats.chart.genre_breakdown'))}</h2>
+          </div>
+        `;
+        container.querySelector('.card')?.appendChild(createEmptyState({
+          title: t('stats.empty.no_genres'),
+          subtitle: t('stats.empty.no_genres.desc'),
+          compact: true,
+        }));
         return { destroy() {} };
       }
 
@@ -426,8 +480,9 @@ function genreBreakdownWidget() {
 
       const PALETTE = [
         cssVar('--chart-1'), cssVar('--chart-2'), cssVar('--chart-3'),
-        cssVar('--chart-4'), cssVar('--chart-5'), cssVar('--color-accent-hover'),
-        '#ec4899', '#14b8a6', '#f97316', '#84cc16', '#06b6d4', '#a855f7', // audit-ignore: extended categorical chart palette beyond --chart-1..5
+        cssVar('--chart-4'), cssVar('--chart-5'), cssVar('--chart-6'),
+        cssVar('--chart-7'), cssVar('--chart-8'), cssVar('--chart-9'),
+        cssVar('--chart-10'), cssVar('--chart-11'),
       ];
 
       _loadChartJs().then(Chart => {

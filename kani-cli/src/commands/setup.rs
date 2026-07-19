@@ -11,6 +11,7 @@ pub fn run(vendors: bool, tailwind: bool, esbuild: bool) -> Result<(), CliError>
 
     if run_all || vendors {
         fetch_vendors(&client)?;
+        fetch_fonts(&client)?;
     }
     if run_all || tailwind {
         fetch_tailwind(&client)?;
@@ -70,6 +71,26 @@ fn fetch_vendors(client: &Client) -> Result<(), CliError> {
             "htm.module.js",
         ),
         (
+            "https://unpkg.com/@preact/signals-core@1.8.0/dist/signals-core.module.js",
+            "signals-core.module.js",
+        ),
+        (
+            "https://unpkg.com/@preact/signals@2.0.1/dist/signals.module.js",
+            "signals.module.js",
+        ),
+        (
+            "https://unpkg.com/preact@10.26.4/compat/dist/compat.module.js",
+            "compat.module.js",
+        ),
+        (
+            "https://unpkg.com/preact@10.26.4/debug/dist/debug.module.js",
+            "debug.module.js",
+        ),
+        (
+            "https://unpkg.com/preact@10.26.4/devtools/dist/devtools.module.js",
+            "devtools.module.js",
+        ),
+        (
             "https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js",
             "chart.umd.min.js",
         ),
@@ -101,6 +122,56 @@ fn fetch_vendors(client: &Client) -> Result<(), CliError> {
     println!("SRI hashes written to {}", sri_path.display());
 
     println!("Vendor files saved to {}", vendor_dir.display());
+    Ok(())
+}
+
+/// Self-hosts the DM Sans / DM Mono webfonts used by `static/css/app.css`.
+///
+/// Google's CSS2 endpoint serves different `@font-face` rules (and file
+/// formats) depending on the requesting User-Agent; requesting it with a
+/// modern-Chrome UA gets woff2 rules. Fetches that stylesheet, downloads
+/// every referenced font file into `static/fonts/`, rewrites the `url(...)`
+/// references to local relative paths, and writes the result as
+/// `static/fonts/fonts.css` — `app.css` imports that file locally instead of
+/// hitting fonts.googleapis.com at request time.
+fn fetch_fonts(client: &Client) -> Result<(), CliError> {
+    let fonts_dir = Path::new("static/fonts");
+    fs::create_dir_all(fonts_dir)?;
+
+    let css_url = "https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&family=Zen+Kaku+Gothic+New:wght@700;900&display=swap";
+
+    println!("Fetching font stylesheet...");
+    let css_text = client
+        .get(css_url)
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+             (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        )
+        .send()?
+        .text()?;
+
+    let url_re = regex::Regex::new(r"url\((https://fonts\.gstatic\.com/[^)]+)\)")
+        .map_err(|e| CliError::Other(format!("font URL regex: {e}")))?;
+
+    let mut localized_css = css_text.clone();
+    for cap in url_re.captures_iter(&css_text) {
+        let remote_url = &cap[1];
+        let filename = remote_url
+            .rsplit('/')
+            .next()
+            .ok_or_else(|| CliError::Other(format!("unexpected font URL: {remote_url}")))?;
+
+        println!("Downloading font {filename}...");
+        let bytes = client.get(remote_url).send()?.bytes()?;
+        fs::write(fonts_dir.join(filename), &bytes)?;
+
+        localized_css = localized_css.replace(remote_url, &format!("./{filename}"));
+    }
+
+    let out_path = fonts_dir.join("fonts.css");
+    fs::write(&out_path, localized_css)?;
+    println!("Font files + stylesheet saved to {}", fonts_dir.display());
     Ok(())
 }
 

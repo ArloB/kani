@@ -591,12 +591,14 @@ impl AppService {
             return Err(ServiceError::Internal("Refresh already in progress".into()));
         }
 
-        let ids: Vec<(MangaId, String)> = sqlx::query!("SELECT id, name FROM manga ORDER BY id")
-            .fetch_all(&self.db_read)
-            .await?
-            .into_iter()
-            .map(|r| (r.id.into(), r.name))
-            .collect();
+        let ids: Vec<(MangaId, String)> = sqlx::query!(
+            "SELECT id, name FROM manga WHERE deleted_at IS NULL AND is_orphaned = FALSE ORDER BY id"
+        )
+        .fetch_all(&self.db_read)
+        .await?
+        .into_iter()
+        .map(|r| (r.id.into(), r.name))
+        .collect();
 
         let total = ids.len();
         let state = self.clone();
@@ -720,12 +722,14 @@ impl AppService {
     /// Queues a background scan for every manga in the library.
     /// Returns immediately with the count of manga queued.
     pub async fn scan_all_manga(&self) -> Result<uuid::Uuid> {
-        let ids: Vec<MangaId> = sqlx::query!("SELECT id FROM manga ORDER BY id")
-            .fetch_all(&self.db_read)
-            .await?
-            .into_iter()
-            .map(|r| r.id.into())
-            .collect();
+        let ids: Vec<MangaId> = sqlx::query!(
+            "SELECT id FROM manga WHERE deleted_at IS NULL AND is_orphaned = FALSE ORDER BY id"
+        )
+        .fetch_all(&self.db_read)
+        .await?
+        .into_iter()
+        .map(|r| r.id.into())
+        .collect();
         self.scan_manga_ids(ids).await
     }
 

@@ -417,11 +417,9 @@ impl DownloaderManager {
             .await
             .map_err(DownloadError::Io)?;
 
-        let cbz_path = assert_within_root(
-            &library_path,
-            &save_path.join(format!("{}.cbz", &safe_name)),
-        )
-        .map_err(|e| DownloadError::PageFetch(e.to_string()))?;
+        let cbz_path =
+            assert_within_root(&library_path, &save_path.join(format!("{}.cbz", safe_name)))
+                .map_err(|e| DownloadError::PageFetch(e.to_string()))?;
 
         let staging_dir = assert_within_root(
             &library_path,

@@ -9,6 +9,7 @@ import { navigate } from '../../router.js';
 import { skeletonSettingsCards } from '../../components/skeletons.js';
 import { createEmptyState } from '../../components/empty-state.js';
 import { createErrorState } from '../../components/error-state.js';
+import { renderTabs } from '../../components/tabs.js';
 import { t } from '../../i18n.js';
 
 /** @param {HTMLElement} el */
@@ -17,45 +18,37 @@ export function mount(el) {
 
   // ── Tab bar ───────────────────────────────────────────────────────────────
   const tabs = [
-    { id: 'pending',  label: t('settings.manga_mgmt.tab.pending') },
-    { id: 'dupes',    label: t('settings.manga_mgmt.tab.dupes') },
-    { id: 'orphaned', label: t('settings.manga_mgmt.tab.orphaned') },
+    { id: 'pending',  name: t('settings.manga_mgmt.tab.pending') },
+    { id: 'dupes',    name: t('settings.manga_mgmt.tab.dupes') },
+    { id: 'orphaned', name: t('settings.manga_mgmt.tab.orphaned') },
   ];
 
   const tabBar = document.createElement('div');
-  tabBar.className = 'flex border-b border-border-subtle mb-4 gap-0';
+  tabBar.className = 'mb-4';
 
   const panels = /** @type {Record<string, HTMLElement>} */ ({});
-  /** @type {string} */
-  let activeTab = 'pending';
 
-  tabs.forEach(tab => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.dataset.tab = tab.id;
-    btn.className = 'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors';
-    btn.textContent = tab.label;
-    btn.addEventListener('click', () => _switchTab(tab.id));
-    tabBar.appendChild(btn);
-
+  for (const tab of tabs) {
     const panel = document.createElement('div');
     panel.id = `tab-${tab.id}`;
     panel.className = 'hidden';
     panels[tab.id] = panel;
     el.appendChild(panel);
-  });
+  }
 
   el.insertBefore(tabBar, el.firstChild);
 
   function _switchTab(id) {
-    activeTab = id;
-    tabBar.querySelectorAll('button').forEach(b => {
-      const active = b.dataset.tab === id;
-      b.className = `px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${active ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text'}`;
-    });
+    tabsHandle.update(id);
     Object.values(panels).forEach(p => p.classList.add('hidden'));
     panels[id]?.classList.remove('hidden');
   }
+
+  const tabsHandle = renderTabs(tabBar, {
+    tabs,
+    activeId: 'pending',
+    onSelect: _switchTab,
+  });
 
   _switchTab('pending');
 
@@ -68,7 +61,12 @@ export function mount(el) {
   // ── Orphaned Manga ────────────────────────────────────────────────────────
   _loadOrphanedManga(panels['orphaned']);
 
-  return { destroy() { el.innerHTML = ''; } };
+  return {
+    destroy() {
+      tabsHandle.destroy();
+      el.innerHTML = '';
+    },
+  };
 }
 
 // ── Pending Imports ───────────────────────────────────────────────────────────
@@ -121,7 +119,7 @@ function _renderPendingImports(el, items) {
     if (item.possible_duplicate_of) {
       const dup = document.createElement('p');
       dup.className = 'text-xs text-warn';
-      dup.innerHTML = `${t('settings.manga_mgmt.pending.dup.prefix')} <a href="/manga/${item.possible_duplicate_of}" class="underline text-accent" data-dupid="${item.possible_duplicate_of}">${escapeHtml(item.possible_duplicate_title ?? '#' + item.possible_duplicate_of)}</a>${item.duplicate_similarity ? ' ' + t('settings.manga_mgmt.pending.dup.match', { pct: Math.round(item.duplicate_similarity * 100) }) : ''}`;
+      dup.innerHTML = `${t('settings.manga_mgmt.pending.dup.prefix')} <a href="/manga/${item.possible_duplicate_of}" class="underline font-medium" data-dupid="${item.possible_duplicate_of}">${escapeHtml(item.possible_duplicate_title ?? '#' + item.possible_duplicate_of)}</a>${item.duplicate_similarity ? ' ' + t('settings.manga_mgmt.pending.dup.match', { pct: Math.round(item.duplicate_similarity * 100) }) : ''}`;
       dup.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/manga/${item.possible_duplicate_of}`); });
       left.appendChild(dup);
     }
@@ -133,7 +131,7 @@ function _renderPendingImports(el, items) {
 
     const findBtn = document.createElement('a');
     findBtn.href = `/sources?search=${encodeURIComponent(item.title)}`;
-    findBtn.className = 'btn-primary btn-sm';
+    findBtn.className = 'btn-secondary btn-sm';
     findBtn.textContent = t('settings.manga_mgmt.pending.find_btn');
     findBtn.addEventListener('click', e => { e.preventDefault(); navigate(`/sources?search=${encodeURIComponent(item.title)}`); });
     actions.appendChild(findBtn);
@@ -204,7 +202,7 @@ function _renderDuplicates(el, pairs) {
       col.className = 'flex-1 min-w-0';
       const link = document.createElement('a');
       link.href = `/manga/${m.id}`;
-      link.className = 'font-medium text-sm text-accent hover:underline truncate block';
+      link.className = 'font-medium text-sm text-text hover:underline truncate block';
       link.textContent = m.name;
       link.addEventListener('click', e => { e.preventDefault(); navigate(`/manga/${m.id}`); });
       col.appendChild(link);
@@ -224,13 +222,15 @@ function _renderDuplicates(el, pairs) {
     const actions = document.createElement('div');
     actions.className = 'flex gap-2 flex-wrap';
 
+    // Merging discards one of the two manga — destructive, so it gets the danger
+    // treatment rather than an accent fill.
     const mkMergeBtn = (keep, discard, label) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'btn-primary btn-sm';
+      btn.className = 'btn-danger btn-sm';
       btn.textContent = label;
       btn.addEventListener('click', async () => {
-        if (!await showConfirm(t('settings.manga_mgmt.dupes.merge.confirm', { keep: keep.name, discard: discard.name }), { title: t('settings.manga_mgmt.dupes.merge.title'), confirmLabel: t('settings.manga_mgmt.dupes.merge.btn') })) return;
+        if (!await showConfirm(t('settings.manga_mgmt.dupes.merge.confirm', { keep: keep.name, discard: discard.name }), { title: t('settings.manga_mgmt.dupes.merge.title'), confirmLabel: t('settings.manga_mgmt.dupes.merge.btn'), danger: true })) return;
         btn.disabled = true;
         try {
           await api.mergeDuplicate(keep.id, discard.id);
@@ -319,7 +319,7 @@ function _renderOrphanedManga(el, items) {
 
     const migrateBtn = document.createElement('a');
     migrateBtn.href = `/manga/${item.id}`;
-    migrateBtn.className = 'btn-primary btn-sm';
+    migrateBtn.className = 'btn-secondary btn-sm';
     migrateBtn.textContent = t('settings.manga_mgmt.orphaned.migrate');
     migrateBtn.addEventListener('click', e => { e.preventDefault(); navigate(`/manga/${item.id}`); });
     actions.appendChild(migrateBtn);

@@ -1,10 +1,14 @@
 // @ts-check
 // Admin logs page — Application Logs and Audit Log tabs.
 
+import { h, render } from 'preact';
+import htm from 'htm';
 import * as api from '../../api.js';
-import { hasPermission } from '../../state.js';
+import { hasPermission } from '../../session.js';
 import { escapeHtml, debounce } from '../../utils.js';
 import { renderTabs } from '../../components/tabs.js';
+import { renderChipGroup } from '../../components/chip-group.js';
+import { DateRange } from '../../components/form/date-range.js';
 import { renderPagination } from '../../components/pagination.js';
 import { showToast } from '../../components/toast.js';
 import { setPageHeader, clearPageHeader } from '../../components/app-header.js';
@@ -13,13 +17,17 @@ import { createErrorState } from '../../components/error-state.js';
 import { iconDownload } from '../../icons.js';
 import { t } from '../../i18n.js';
 
+const html = htm.bind(h);
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const LOG_LEVELS = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
+// Semantic severity only: red means error, amber means warning. INFO is ordinary
+// text — colouring it accent made every log line read as an alarm.
 const LEVEL_CLASSES = {
   ERROR: 'text-danger font-semibold',
   WARN:  'text-warn font-semibold',
-  INFO:  'text-accent',
+  INFO:  'text-text',
   DEBUG: 'text-text-muted',
   TRACE: 'text-text-muted opacity-70',
 };
@@ -64,7 +72,7 @@ export async function init(container) {
   });
 
   const wrap = document.createElement('div');
-  wrap.className = 'flex flex-col overflow-hidden h-full';
+  wrap.className = 'flex flex-col overflow-hidden flex-1 min-h-0';
   container.appendChild(wrap);
 
   const tabBar = document.createElement('div');
@@ -75,7 +83,7 @@ export async function init(container) {
   content.className = 'flex flex-col flex-1 overflow-hidden';
   wrap.appendChild(content);
 
-  _destroyTabs = renderTabs(tabBar, {
+  const tabsHandle = renderTabs(tabBar, {
     tabs: [
       { id: 'app',   name: t('logs.tab.app') },
       { id: 'audit', name: t('logs.tab.audit') },
@@ -84,9 +92,11 @@ export async function init(container) {
     onSelect: (id) => {
       _stopSse();
       _activeTab = /** @type {'app' | 'audit'} */ (id);
+      tabsHandle.update(id);
       _renderTab(content);
     },
-  }).destroy;
+  });
+  _destroyTabs = tabsHandle.destroy;
 
   _renderTab(content);
 }
@@ -134,28 +144,47 @@ function _mountAppLogsTab(container) {
   const filterBar = document.createElement('div');
   filterBar.className = 'flex flex-wrap items-center gap-2 px-4 md:px-6 py-3 border-b border-border shrink-0';
   filterBar.innerHTML = `
-    <div class="flex items-center gap-1 flex-wrap" id="level-filters">
-      ${LOG_LEVELS.map(l => `
-        <label class="flex items-center gap-1 text-xs cursor-pointer select-none">
-          <input type="checkbox" value="${l}" class="level-cb accent-accent" />
-          <span class="${LEVEL_CLASSES[l] || ''}">${l}</span>
-        </label>
-      `).join('')}
-    </div>
+    <div id="level-filters" class="w-full sm:w-auto shrink-0"></div>
     <input type="search" id="log-search" placeholder="${escapeHtml(t('logs.filter.search_placeholder'))}"
-      class="input input-sm flex-1 min-w-32" value="" />
-    <input type="date" id="log-from" class="input input-sm" title="${escapeHtml(t('logs.filter.from_date'))}" />
-    <input type="date" id="log-to" class="input input-sm" title="${escapeHtml(t('logs.filter.to_date'))}" />
-    <label class="flex items-center gap-1.5 text-sm cursor-pointer select-none ml-auto">
-      <input type="checkbox" id="log-live" class="accent-accent" />
+      class="input input-sm w-full sm:flex-1 min-w-32" value="" />
+    <div id="log-dates" class="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0"></div>
+    <label class="flex items-center gap-2 text-sm cursor-pointer select-none ml-auto">
       <span>${t('logs.filter.live')}</span>
+      <span class="kani-toggle">
+        <input type="checkbox" id="log-live" class="kani-toggle__input" />
+        <span class="kani-toggle__track"></span>
+      </span>
     </label>
   `;
   root.appendChild(filterBar);
 
+  const levelChips = renderChipGroup(
+    /** @type {HTMLElement} */ (filterBar.querySelector('#level-filters')),
+    {
+      items: LOG_LEVELS.map(l => ({ id: l, label: l })),
+      selected: new Set(),
+      onToggle: () => {
+        state.level = [...levelChips.selected()];
+        state.page = 1;
+        if (state.live) _startSseMode(); else _fetch();
+      },
+    },
+  );
+
+  const datesEl = /** @type {HTMLElement} */ (filterBar.querySelector('#log-dates'));
+  const _renderDates = () => {
+    render(html`
+      <${DateRange} from=${state.from} to=${state.to}
+        onChange=${(/** @type {{ from: string, to: string }} */ r) => {
+          state.from = r.from; state.to = r.to; state.page = 1; _renderDates(); _fetch();
+        }} />
+    `, datesEl);
+  };
+  _renderDates();
+
   // Scrollable log area
   const tableWrap = document.createElement('div');
-  tableWrap.className = 'flex-1 overflow-y-auto font-mono text-xs';
+  tableWrap.className = 'flex-1 overflow-auto font-mono text-xs';
   root.appendChild(tableWrap);
 
   const logList = document.createElement('div');
@@ -170,24 +199,11 @@ function _mountAppLogsTab(container) {
 
   // Wire up filter controls
   const searchEl = /** @type {HTMLInputElement} */ (filterBar.querySelector('#log-search'));
-  const fromEl   = /** @type {HTMLInputElement} */ (filterBar.querySelector('#log-from'));
-  const toEl     = /** @type {HTMLInputElement} */ (filterBar.querySelector('#log-to'));
   const liveEl   = /** @type {HTMLInputElement} */ (filterBar.querySelector('#log-live'));
 
   const doSearch = debounce(() => { state.page = 1; _fetch(); }, 300);
 
-  for (const cb of /** @type {NodeListOf<HTMLInputElement>} */ (filterBar.querySelectorAll('.level-cb'))) {
-    cb.addEventListener('change', () => {
-      state.level = [...filterBar.querySelectorAll('.level-cb:checked')].map(
-        el => /** @type {HTMLInputElement} */ (el).value
-      );
-      state.page = 1; _fetch();
-    });
-  }
-
   searchEl.addEventListener('input', () => { state.search = searchEl.value; doSearch(); });
-  fromEl.addEventListener('change', () => { state.from = fromEl.value; state.page = 1; _fetch(); });
-  toEl.addEventListener('change',   () => { state.to   = toEl.value;   state.page = 1; _fetch(); });
   liveEl.addEventListener('change', () => {
     state.live = liveEl.checked;
     if (state.live) { _startSseMode(); } else { _stopSse(); _fetch(); }
@@ -269,6 +285,8 @@ function _mountAppLogsTab(container) {
     abort?.abort();
     destroyPagin?.();
     doSearch.cancel();
+    levelChips.destroy();
+    render(null, datesEl);
   };
 }
 
@@ -281,12 +299,14 @@ function _buildLogRow(entry) {
   const row = document.createElement('div');
   const lvl = (entry.level ?? 'INFO').toUpperCase();
   const levelCls = LEVEL_CLASSES[lvl] ?? 'text-text-muted';
-  row.className = 'flex items-baseline gap-2 px-4 py-0.5 hover:bg-surface-2 border-b border-border/30';
+  // Single-line entries: the list scrolls horizontally (overflow-auto parent)
+  // rather than wrapping, which clipped on narrow screens.
+  row.className = 'flex items-baseline gap-2 px-4 py-0.5 hover:bg-surface-2 border-b border-border/30 w-max min-w-full';
   row.innerHTML = `
     <span class="shrink-0 text-text-muted/60 whitespace-nowrap">${escapeHtml(entry.timestamp ?? '')}</span>
     <span class="shrink-0 w-11 text-right ${levelCls}">${escapeHtml(lvl)}</span>
     <span class="shrink-0 text-text-muted truncate max-w-[14rem]" title="${escapeHtml(entry.target ?? '')}">${escapeHtml(entry.target ?? '')}</span>
-    <span class="flex-1 break-all">${escapeHtml(entry.message ?? '')}</span>
+    <span class="shrink-0 whitespace-nowrap">${escapeHtml(entry.message ?? '')}</span>
   `;
   return row;
 }
@@ -308,10 +328,20 @@ function _mountAuditTab(container) {
   filterBar.className = 'flex flex-wrap items-center gap-2 px-4 md:px-6 py-3 border-b border-border shrink-0';
   filterBar.innerHTML = `
     <input type="search" id="audit-search" placeholder="${escapeHtml(t('logs.audit.search_placeholder'))}" class="input input-sm flex-1 min-w-40" />
-    <input type="date" id="audit-from" class="input input-sm" title="${escapeHtml(t('logs.filter.from_date'))}" />
-    <input type="date" id="audit-to"   class="input input-sm" title="${escapeHtml(t('logs.filter.to_date'))}" />
+    <div id="audit-dates" class="flex items-center gap-2 shrink-0"></div>
   `;
   root.appendChild(filterBar);
+
+  const datesEl = /** @type {HTMLElement} */ (filterBar.querySelector('#audit-dates'));
+  const _renderDates = () => {
+    render(html`
+      <${DateRange} from=${state.from} to=${state.to}
+        onChange=${(/** @type {{ from: string, to: string }} */ r) => {
+          state.from = r.from; state.to = r.to; state.page = 1; _renderDates(); _fetch();
+        }} />
+    `, datesEl);
+  };
+  _renderDates();
 
   const tableWrap = document.createElement('div');
   tableWrap.className = 'flex-1 overflow-y-auto';
@@ -326,14 +356,10 @@ function _mountAuditTab(container) {
   root.appendChild(paginEl);
 
   const searchEl = /** @type {HTMLInputElement} */ (filterBar.querySelector('#audit-search'));
-  const fromEl   = /** @type {HTMLInputElement} */ (filterBar.querySelector('#audit-from'));
-  const toEl     = /** @type {HTMLInputElement} */ (filterBar.querySelector('#audit-to'));
 
   const doSearch = debounce(() => { state.page = 1; _fetch(); }, 300);
 
   searchEl.addEventListener('input', () => { state.search = searchEl.value; doSearch(); });
-  fromEl.addEventListener('change', () => { state.from = fromEl.value; state.page = 1; _fetch(); });
-  toEl.addEventListener('change',   () => { state.to   = toEl.value;   state.page = 1; _fetch(); });
 
   async function _fetch() {
     abort?.abort();
@@ -387,6 +413,7 @@ function _mountAuditTab(container) {
     abort?.abort();
     destroyPagin?.();
     doSearch.cancel();
+    render(null, datesEl);
   };
 }
 
@@ -400,7 +427,7 @@ function _buildAuditRow(entry) {
   row.innerHTML = `
     <span class="shrink-0 text-text-muted text-xs whitespace-nowrap mt-0.5">${escapeHtml(entry.created_at ?? '')}</span>
     <span class="shrink-0 font-medium w-24 truncate" title="${escapeHtml(entry.username ?? '')}">${escapeHtml(entry.username ?? '—')}</span>
-    <span class="shrink-0 text-accent w-40 truncate" title="${escapeHtml(entry.action ?? '')}">${escapeHtml(entry.action ?? '')}</span>
+    <span class="shrink-0 font-mono text-xs text-text w-40 truncate mt-0.5" title="${escapeHtml(entry.action ?? '')}">${escapeHtml(entry.action ?? '')}</span>
     <span class="shrink-0 text-text-muted w-32 truncate" title="${escapeHtml(entry.target ?? '')}">${escapeHtml(entry.target ?? '')}</span>
     ${entry.details ? `<details class="flex-1 min-w-0"><summary class="cursor-pointer text-text-muted">${t('logs.audit.details')}</summary><pre class="text-xs mt-1 whitespace-pre-wrap break-all">${escapeHtml(entry.details)}</pre></details>` : ''}
   `;

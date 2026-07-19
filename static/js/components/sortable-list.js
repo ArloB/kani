@@ -2,11 +2,7 @@
 // Shared drag-and-drop sortable list component.
 // Extracted from manga-details/scanlator-prefs-panel.js for reuse.
 
-const DRAG_HANDLE_SVG = `<svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/>
-  <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
-  <circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/>
-</svg>`;
+import { iconDragHandle } from '../icons.js';
 
 /**
  * Mounts a drag-sortable list into `container`.
@@ -74,7 +70,7 @@ export function mountSortableList(container, opts) {
       grip.setAttribute('tabindex', '0');
       grip.setAttribute('aria-label', 'Drag to reorder');
       grip.setAttribute('role', 'button');
-      grip.innerHTML = DRAG_HANDLE_SVG;
+      grip.innerHTML = iconDragHandle;
 
       grip.addEventListener('keydown', (e) => {
         const idx = Number(li.dataset.idx);

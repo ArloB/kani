@@ -11,7 +11,7 @@ async fn get_local_chapters_empty_returns_empty_list() {
     let src = insert_source(&svc.db, "src").await;
     let manga_id = insert_manga(&svc.db, src, "m1", "Manga").await;
 
-    let (chapters, has_next, _) = svc
+    let (chapters, has_next, _, _) = svc
         .get_local_chapters(
             manga_id,
             1,
@@ -36,7 +36,7 @@ async fn get_local_chapters_returns_inserted_chapters() {
     insert_chapter(&svc.db, manga_id, "ch1", 1.0).await;
     insert_chapter(&svc.db, manga_id, "ch2", 2.0).await;
 
-    let (chapters, _, _) = svc
+    let (chapters, _, _, total) = svc
         .get_local_chapters(
             manga_id,
             1,
@@ -50,6 +50,7 @@ async fn get_local_chapters_returns_inserted_chapters() {
         .await
         .unwrap();
     assert_eq!(chapters.len(), 2);
+    assert_eq!(total, 2);
     assert!((chapters[0].number - 2.0).abs() < f64::EPSILON);
     assert!((chapters[1].number - 1.0).abs() < f64::EPSILON);
 }
@@ -63,7 +64,7 @@ async fn get_local_chapters_paging_works() {
         insert_chapter(&svc.db, manga_id, &format!("ch{i}"), f64::from(i)).await;
     }
 
-    let (page1, has_next1, total1) = svc
+    let (page1, has_next1, total1, _) = svc
         .get_local_chapters(
             manga_id,
             1,
@@ -80,7 +81,7 @@ async fn get_local_chapters_paging_works() {
     assert!(has_next1);
     assert_eq!(total1, Some(2)); // ceil(5/3) = 2
 
-    let (page2, has_next2, _) = svc
+    let (page2, has_next2, _, _) = svc
         .get_local_chapters(
             manga_id,
             2,
@@ -111,7 +112,7 @@ async fn download_status_filter_works() {
         .await
         .unwrap();
 
-    let (downloaded, _, _) = svc
+    let (downloaded, _, _, _) = svc
         .get_local_chapters(
             manga_id,
             1,
@@ -126,7 +127,7 @@ async fn download_status_filter_works() {
         .unwrap();
     assert_eq!(downloaded.len(), 1);
 
-    let (not_downloaded, _, _) = svc
+    let (not_downloaded, _, _, _) = svc
         .get_local_chapters(
             manga_id,
             1,
@@ -155,7 +156,7 @@ async fn orphaned_chapters_are_excluded() {
         .await
         .unwrap();
 
-    let (chapters, _, _) = svc
+    let (chapters, _, _, _) = svc
         .get_local_chapters(
             manga_id,
             1,

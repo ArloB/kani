@@ -24,6 +24,7 @@ async fn serve_changelog() -> impl IntoResponse {
 }
 
 pub async fn build_app(state: AppState) -> Router {
+    let touch_state = state.clone();
     let session_store = SqliteStore::new(state.db.clone());
     session_store
         .migrate()
@@ -58,5 +59,9 @@ pub async fn build_app(state: AppState) -> Router {
 
     router
         .layer(axum::middleware::from_fn(crate::auth::auth_guard))
+        .layer(axum::middleware::from_fn_with_state(
+            touch_state,
+            crate::session_touch::session_touch_middleware,
+        ))
         .layer(auth_layer)
 }

@@ -5,10 +5,17 @@ import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
+import { t } from '../i18n.js';
 
 const html = htm.bind(h);
 
-const SCORE_LABELS = ['Very weak', 'Weak', 'Fair', 'Strong', 'Very strong'];
+const SCORE_LABEL_KEYS = [
+  'pwstrength.score.very_weak',
+  'pwstrength.score.weak',
+  'pwstrength.score.fair',
+  'pwstrength.score.strong',
+  'pwstrength.score.very_strong',
+];
 const SCORE_COLORS = [
   'bg-danger',   // 0
   'bg-danger',   // 1
@@ -39,7 +46,7 @@ export function PasswordStrength({ password, identity = '' }) {
   if (!result) return null;
 
   const score = result.score ?? 0;
-  const label = SCORE_LABELS[score] ?? 'Unknown';
+  const label = SCORE_LABEL_KEYS[score] ? t(SCORE_LABEL_KEYS[score]) : t('pwstrength.score.unknown');
   const color = SCORE_COLORS[score] ?? 'bg-danger';
 
   return html`
@@ -47,7 +54,7 @@ export function PasswordStrength({ password, identity = '' }) {
       <div class="flex items-center gap-2">
         <div class="flex-1 flex gap-0.5 h-1.5">
           ${[0,1,2,3].map(i => html`
-            <div key=${i} class="flex-1 rounded-full ${i <= score - 1 ? color : 'bg-surface-raised'} transition-colors"></div>
+            <div key=${i} class="flex-1 rounded-full ${i <= score - 1 ? color : 'bg-surface-3'} transition-colors"></div>
           `)}
         </div>
         <span class="text-xs text-text-muted shrink-0">${label}</span>
@@ -57,9 +64,7 @@ export function PasswordStrength({ password, identity = '' }) {
       `}
       ${result.pwned && html`
         <p class="text-xs text-danger">
-          ⚠ This password has appeared in a data breach
-          ${result.pwned_count ? html` (${result.pwned_count.toLocaleString()} times)` : ''}.
-          Please choose a different password.
+          ${result.pwned_count ? t('pwstrength.pwned.with_count', { count: result.pwned_count.toLocaleString() }) : t('pwstrength.pwned.plain')}
         </p>
       `}
     </div>

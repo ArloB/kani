@@ -2,18 +2,20 @@
 // Recent updates page — paginated list of newly added chapters grouped by date then manga.
 
 import * as api from '../api.js';
-import { hasPermission } from '../state.js';
+import { hasPermission } from '../session.js';
 import { t } from '../i18n.js';
 import { renderPagination } from '../components/pagination.js';
 import { getParam, replaceState as urlReplaceState } from '../url-params.js';
+import { scrollPageTop } from '../router.js';
 import { getMangaCoverUrl } from '../api.js';
-import { formatChapterTitle, hasNextPage, formatDate, escapeHtml, deferredSkeleton, addPullToRefresh } from '../utils.js';
+import { formatChapterTitle, hasNextPage, escapeHtml, deferredSkeleton, addPullToRefresh } from '../utils.js';
 import { skeletonUpdateList } from '../components/skeletons.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
 import { iconBookOpen, iconDownload, iconCheck, iconSpinner } from '../icons.js';
-import { getState, updateState, subscribe } from '../state.js';
+import { getState as getCache, subscribe } from '../cache.js';
+import { getState as getUiState, updateState as updateUiState } from '../ui-state.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -32,6 +34,11 @@ function _renderDownloadControl(ch, canDownload) {
     return `<button class="dl-btn shrink-0" aria-label="${t('updates.action.download', { title: escapeHtml(ch.title) })}" data-chapter-id="${ch.id}" data-chapter-title="${escapeHtml(ch.title)}" title="${t('updates.action.download_title')}">${iconDownload}</button>`;
   }
   return '';
+}
+
+/** Formats a chapter number for the group subtitle (e.g. 167.5 stays 167.5). */
+function _fmtNum(n) {
+  return String(n);
 }
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -150,6 +157,7 @@ async function _fetch(listEl, paginEl) {
     byManga.get(mid).chapters.push({
       id: item.chapter_id ?? item.id,
       title: formatChapterTitle(item),
+      chapter_number: item.chapter_number,
       date_uploaded: rawDate,
       is_downloaded: item.is_downloaded ?? false,
     });
@@ -168,53 +176,99 @@ async function _fetch(listEl, paginEl) {
   );
 
   for (const [dateLabel, mangaMap] of sortedGroups) {
-    // Date group header
-    const dateHeader = document.createElement('div');
-    dateHeader.className = 'text-sm font-semibold uppercase tracking-wider text-text-muted mt-6 mb-2 pb-1 border-b border-border-subtle first:mt-2';
+    const daySection = document.createElement('section');
+    daySection.className = 'flex flex-col mt-6 first:mt-0';
+
+    const dateHeader = document.createElement('h2');
+    dateHeader.className = 'update-day__label';
     dateHeader.textContent = dateLabel;
-    listEl.appendChild(dateHeader);
+    daySection.appendChild(dateHeader);
+
+    const dayItems = document.createElement('div');
+    dayItems.className = 'update-day__items';
+    daySection.appendChild(dayItems);
 
     // Manga groups within date
     for (const group of mangaMap.values()) {
       const groupEl = document.createElement('div');
-      groupEl.className = 'flex flex-col gap-2 bg-surface border border-border rounded-xl p-4 min-w-0';
+      groupEl.className = 'update-group';
 
-      // Header: cover + title link
+      // Header: cover + title + chapter-count subtitle (a lone title reads hollow)
       const coverUrl = getMangaCoverUrl(group.manga_id, 'sm');
       const mangaHref = `/manga/${group.manga_id}`;
+      const n = group.chapters.length;
+      const nums = group.chapters
+        .map(c => c.chapter_number)
+        .filter(v => typeof v === 'number' && !isNaN(v))
+        .sort((a, b) => a - b);
+      const range = nums.length
+        ? (nums[0] === nums[nums.length - 1]
+            ? t('updates.group.chapter_one', { n: _fmtNum(nums[0]) })
+            : t('updates.group.chapter_range', { from: _fmtNum(nums[0]), to: _fmtNum(nums[nums.length - 1]) }))
+        : '';
+      const subtitle = [t('updates.group.count', { count: n, s: n === 1 ? '' : 's' }), range]
+        .filter(Boolean)
+        .join(' · ');
+
+      const coverHtml = `
+        <a href="${escapeHtml(mangaHref)}" class="w-11 h-16 rounded-md overflow-hidden shrink-0 bg-surface-2 block focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none">
+          <img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(group.manga_title)}" class="w-full h-full object-cover" loading="lazy" />
+        </a>`;
+      const titleHtml = `
+        <a href="${escapeHtml(mangaHref)}" class="text-base font-semibold text-text hover:underline truncate focus-visible:outline-none focus-visible:underline">
+          ${escapeHtml(group.manga_title)}
+        </a>`;
+
+      if (n === 1) {
+        // Single new chapter: one line — cover, title, chapter, control. A
+        // group header plus a one-row list repeats the same information.
+        const ch = group.chapters[0];
+        groupEl.innerHTML = `
+          <div class="flex items-center gap-3 min-w-0">
+            ${coverHtml}
+            <div class="flex flex-col min-w-0 flex-1">
+              ${titleHtml}
+              <span class="text-sm text-text-muted truncate mt-0.5">${escapeHtml(ch.title)}</span>
+            </div>
+            <span class="js-dl-ctrl shrink-0">${_renderDownloadControl(ch, canDownload)}</span>
+          </div>
+        `;
+        dayItems.appendChild(groupEl);
+        continue;
+      }
 
       groupEl.innerHTML = `
-        <div class="flex items-center gap-3">
-          <a href="${escapeHtml(mangaHref)}" class="w-16 h-24 rounded-md overflow-hidden shrink-0 bg-surface-2 block focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none">
-            <img src="${escapeHtml(coverUrl)}" alt="${escapeHtml(group.manga_title)}" class="w-full h-full object-cover" loading="lazy" />
-          </a>
-          <a href="${escapeHtml(mangaHref)}" class="text-base font-semibold text-text hover:text-accent transition-colors flex-1 truncate focus-visible:outline-none focus-visible:underline">
-            ${escapeHtml(group.manga_title)}
-          </a>
+        <div class="flex items-start gap-3 min-w-0">
+          ${coverHtml}
+          <div class="flex flex-col min-w-0 flex-1 pt-0.5">
+            ${titleHtml}
+            <span class="text-xs text-text-muted mt-0.5">${escapeHtml(subtitle)}</span>
+          </div>
         </div>
       `;
 
       // Chapter list
       const chList = document.createElement('ul');
-      chList.className = 'flex flex-col gap-0 mt-2';
+      chList.className = 'update-group__chapters';
       chList.setAttribute('role', 'list');
 
       for (const ch of group.chapters) {
         const li = document.createElement('li');
-        li.className = 'flex items-center justify-between gap-2 py-2.5 border-b border-border-subtle last:border-b-0';
+        li.className = 'update-chapter-row flex items-center justify-between gap-2 border-b border-border-subtle last:border-b-0';
         li.setAttribute('role', 'listitem');
         li.dataset.chapterId = String(ch.id);
         li.innerHTML = `
           <span class="text-sm text-text flex-1 truncate min-w-0">${escapeHtml(ch.title)}</span>
-          ${ch.date_uploaded ? `<span class="text-xs text-text-faint shrink-0">${escapeHtml(formatDate(ch.date_uploaded))}</span>` : ''}
           <span class="js-dl-ctrl shrink-0">${_renderDownloadControl(ch, canDownload)}</span>
         `;
         chList.appendChild(li);
       }
 
       groupEl.appendChild(chList);
-      listEl.appendChild(groupEl);
+      dayItems.appendChild(groupEl);
     }
+
+    listEl.appendChild(daySection);
   }
 
   // Wire download buttons with in-flight guard
@@ -223,9 +277,9 @@ async function _fetch(listEl, paginEl) {
       const id = Number(btn.dataset.chapterId);
       btn.addEventListener('click', async () => {
         /** @type {Set<number>} */
-        const inFlight = getState('inFlightChapters');
+        const inFlight = getUiState('inFlightChapters');
         if (inFlight.has(id)) return;
-        updateState('inFlightChapters', (/** @type {Set<number>} */ s) => { const n = new Set(s); n.add(id); return n; });
+        updateUiState('inFlightChapters', (/** @type {Set<number>} */ s) => { const n = new Set(s); n.add(id); return n; });
         btn.disabled = true;
         btn.innerHTML = iconSpinner;
         try {
@@ -235,14 +289,14 @@ async function _fetch(listEl, paginEl) {
           btn.innerHTML = iconDownload;
           btn.disabled = false;
         } finally {
-          updateState('inFlightChapters', (/** @type {Set<number>} */ s) => { const n = new Set(s); n.delete(id); return n; });
+          updateUiState('inFlightChapters', (/** @type {Set<number>} */ s) => { const n = new Set(s); n.delete(id); return n; });
         }
       });
     }
   }
 
   // Sync any already-in-progress downloads on render
-  _onProgressUpdate(getState('chaptersProgress'));
+  _onProgressUpdate(getCache('chaptersProgress'));
 
   const hasNext = hasNextPage(result);
   if (_page > 1 || hasNext) {
@@ -250,7 +304,7 @@ async function _fetch(listEl, paginEl) {
       page: _page,
       hasNext,
       total: result?.total_pages ?? undefined,
-      onPageChange: (p) => { _page = p; _updateUrl(); _fetch(listEl, paginEl); window.scrollTo(0, 0); },
+      onPageChange: (p) => { _page = p; _updateUrl(); _fetch(listEl, paginEl); scrollPageTop(); },
     });
     _destroyPagination = destroy;
   }
@@ -280,7 +334,7 @@ function _onProgressUpdate(progress) {
     } else if (p.status === 'failed' || p.status === 'cancelled') {
       btn.innerHTML = iconDownload;
       btn.disabled = false;
-      updateState('inFlightChapters', (/** @type {Set<number>} */ s) => { const n = new Set(s); n.delete(id); return n; });
+      updateUiState('inFlightChapters', (/** @type {Set<number>} */ s) => { const n = new Set(s); n.delete(id); return n; });
     }
   }
 }

@@ -19,7 +19,7 @@ const html = htm.bind(h);
 export function ListItem({ avatar, icon, title, subtitle, right, active, onClick }) {
   return html`
     <div
-      class=${`list-item${active ? ' active' : ''}`}
+      class=${`li-row${active ? ' active' : ''}`}
       role="button"
       tabindex="0"
       onClick=${onClick}

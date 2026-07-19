@@ -8,6 +8,7 @@ import { t } from '../../i18n.js';
 import { debounce } from '../../utils.js';
 import { showToast } from '../toast.js';
 import { EmptyState } from '../empty-state.js';
+import { Select } from '../form/select.js';
 import { Combobox } from '../combobox.js';
 import { iconX, iconPencil, iconCheck } from '../../icons.js';
 const html = htm.bind(h);
@@ -273,29 +274,26 @@ function RuleForm({ initType, initValue, initLangVal, langOptions, onSubmit, onC
 
   return html`
     <div class="flex flex-wrap items-center gap-2 mt-2">
-      <select class="input w-auto text-sm" value=${type} onChange=${(e) => {
-        setType(/** @type {HTMLSelectElement} */ (e.target).value);
-        setValue('');
-        setLangVal('');
-      }}>
-        <optgroup label=${t('manga.rules.group.language')}>
-          <option value="LanguageInclude">${t('manga.rules.type.lang_include')}</option>
-          <option value="LanguageExclude">${t('manga.rules.type.lang_exclude')}</option>
-        </optgroup>
-        <optgroup label=${t('manga.rules.group.title')}>
-          <option value="TitleContains">${t('manga.rules.type.title_contains')}</option>
-          <option value="TitleExcludes">${t('manga.rules.type.title_excludes')}</option>
-        </optgroup>
-        <optgroup label=${t('manga.rules.group.chapter_number')}>
-          <option value="ChapterNumberMin">${t('manga.rules.type.chapter_min')}</option>
-          <option value="ChapterNumberMax">${t('manga.rules.type.chapter_max')}</option>
-        </optgroup>
-        <optgroup label=${t('manga.rules.group.other')}>
-          <option value="ExcludeFractional">${t('manga.rules.type.exclude_fractional')}</option>
-          <option value="MaxAgeDays">${t('manga.rules.type.max_age')}</option>
-          <option value="PublishedAfter">${t('manga.rules.type.published_after')}</option>
-        </optgroup>
-      </select>
+      <${Select}
+        options=${[
+          { value: 'LanguageInclude', label: t('manga.rules.type.lang_include'), group: t('manga.rules.group.language') },
+          { value: 'LanguageExclude', label: t('manga.rules.type.lang_exclude'), group: t('manga.rules.group.language') },
+          { value: 'TitleContains', label: t('manga.rules.type.title_contains'), group: t('manga.rules.group.title') },
+          { value: 'TitleExcludes', label: t('manga.rules.type.title_excludes'), group: t('manga.rules.group.title') },
+          { value: 'ChapterNumberMin', label: t('manga.rules.type.chapter_min'), group: t('manga.rules.group.chapter_number') },
+          { value: 'ChapterNumberMax', label: t('manga.rules.type.chapter_max'), group: t('manga.rules.group.chapter_number') },
+          { value: 'ExcludeFractional', label: t('manga.rules.type.exclude_fractional'), group: t('manga.rules.group.other') },
+          { value: 'MaxAgeDays', label: t('manga.rules.type.max_age'), group: t('manga.rules.group.other') },
+          { value: 'PublishedAfter', label: t('manga.rules.type.published_after'), group: t('manga.rules.group.other') },
+        ]}
+        value=${type}
+        ariaLabel=${t('manga.rules.type.aria')}
+        onChange=${(/** @type {string} */ v) => {
+          setType(v);
+          setValue('');
+          setLangVal('');
+        }}
+      />
 
       ${isLang && html`
         <div class="flex-1 min-w-36">

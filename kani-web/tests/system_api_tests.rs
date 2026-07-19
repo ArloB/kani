@@ -3,7 +3,8 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_post, body_json, build_test_app, create_admin, get_req, login, post_json, test_state,
+    authed_get, authed_post, body_json, build_test_app, create_admin, get_req, login, post_json,
+    test_state,
 };
 use tower::ServiceExt;
 
@@ -100,4 +101,64 @@ async fn complete_first_run_flips_flag() {
     let res2 = app.oneshot(get_req("/rest/system/info")).await.unwrap();
     let body = body_json(res2).await;
     assert!(!body["first_run"].as_bool().unwrap());
+}
+
+#[tokio::test]
+async fn system_changelog_returns_401_unauthenticated() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+    let res = app
+        .oneshot(get_req("/rest/system/changelog"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn system_changelog_returns_rendered_html() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_get("/rest/system/changelog", &cookie))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_json(res).await;
+    assert!(body.get("version").is_some());
+    let html = body["html"].as_str().expect("html is a string");
+    assert!(
+        html.contains('<'),
+        "the changelog must arrive as rendered HTML, not raw markdown: {html}"
+    );
+    assert!(
+        !html.contains("# Changelog"),
+        "markdown headings must be rendered, not passed through: {html}"
+    );
+}
+
+#[tokio::test]
+async fn system_changelog_html_is_sanitised() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_get("/rest/system/changelog", &cookie))
+        .await
+        .unwrap();
+    let body = body_json(res).await;
+    let html = body["html"].as_str().unwrap();
+    // The client injects this with innerHTML, so it must never carry script.
+    assert!(
+        !html.contains("<script"),
+        "sanitised output has no <script>"
+    );
+    assert!(
+        !html.contains("onerror="),
+        "sanitised output has no handlers"
+    );
 }

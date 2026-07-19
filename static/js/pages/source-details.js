@@ -5,19 +5,23 @@
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
+import { replaceState } from '../url-params.js';
 import * as api from '../api.js';
-import { hasPermission, updateState, subscribe } from '../state.js';
-import { navigate } from '../router.js';
-import { setLocal, getLocal, getLocalInt, debounce, hasNextPage, confirmDialog, fmtCompactDate, errorCountAriaLabel } from '../utils.js';
-import { skeletonGrid } from '../components/skeletons.js';
+import { hasPermission } from '../session.js';
+import { subscribe as subscribeCache, updateState as updateCacheState } from '../cache.js';
+import { subscribe as subscribeUiState } from '../ui-state.js';
+import { navigate, scrollPageTop } from '../router.js';
+import { setLocal, getLocal, getLocalInt, debounce, hasNextPage, fmtCompactDate, errorCountAriaLabel } from '../utils.js';
+import { skeletonSettingsCards, skeletonKeyValueRows } from '../components/skeletons.js';
 import { renderPagination } from '../components/pagination.js';
 import { createMangaCard } from '../components/manga-card.js';
-import { Modal, mountIntoModalRoot } from '../components/modal.js';
+import { fetchPagedGrid } from '../components/paged-grid.js';
+import { Modal, mountIntoModalRoot, showConfirm } from '../components/modal.js';
 import { showApiError } from '../components/toast.js';
 import { SourcesSidebar, AddSourceModal, consumePendingSourceId } from '../components/sources-sidebar.js';
 import { PreferenceRow, PreferenceDetailView } from '../components/preference-row.js';
+import { PageSizeSelect } from '../components/page-size-select.js';
 import { Icon } from '../components/icon.js';
-import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
@@ -55,6 +59,8 @@ let _sentinelObserver = null;
 /** @type {HTMLElement | null} */
 let _settingsMountEl = null;
 /** @type {HTMLElement | null} */
+let _prefsMountEl = null;
+/** @type {HTMLElement | null} */
 let _asideEl = null;
 /** @type {HTMLButtonElement | null} */
 let _addSourceBtn = null;
@@ -62,9 +68,11 @@ let _addSourceBtn = null;
 let _popularPanelEl = null;
 /** @type {HTMLElement | null} */
 let _searchPanelEl = null;
-/** @type {((activeId: string) => void) | null} */
+/** @type {((activeId: string, tabs?: any[]) => void) | null} */
 let _tabsUpdateFn = null;
 let _settingsMounted = false;
+let _prefsMounted = false;
+let _hasPrefs = false;
 let _libPage = 1;
 let _libPageSize = 24;
 /** @type {any[]} */
@@ -85,6 +93,23 @@ let _pendingFilterParams = {};
  * @param {any} raw
  * @returns {any}
  */
+/** Builds the "source disabled" empty-state element shown in place of browse content. */
+function _disabledStateEl() {
+  return createEmptyState({
+    icon: iconWarning,
+    title: t('source.disabled.title'),
+    subtitle: t('source.disabled.hint'),
+  });
+}
+
+/** Shows a "disabled" placeholder in a panel, replacing its content. */
+function _showDisabledPanel(panelEl) {
+  const inner = panelEl.querySelector('.flex.flex-col');
+  if (!inner) return;
+  inner.innerHTML = '';
+  inner.appendChild(_disabledStateEl());
+}
+
 function _normalizeFilterState(raw) {
   if (!raw || typeof raw !== 'object') return raw;
   if (typeof raw.kind === 'string') return raw; // already adjacently-tagged
@@ -106,6 +131,108 @@ function _buildDefaultFilters(filterDefs) {
     if (f.default_value) defaults[f.id] = _normalizeFilterState(f.default_value);
   }
   return defaults;
+}
+
+// ── Preferences tab panel ─────────────────────────────────────────────────────
+
+/**
+ * Renders the source's full preference list. Complex preference types open in
+ * a modal, giving the same flow on desktop and mobile.
+ * @param {{ sourceId: number }} props
+ */
+function SourcePreferencesPanel({ sourceId }) {
+  const [schema, setSchema] = useState(/** @type {any[]} */ ([]));
+  const [liveValues, setLiveValues] = useState(/** @type {Record<string,any>} */ ({}));
+  const [loading, setLoading] = useState(true);
+  const [activeDescriptor, setActiveDescriptor] = useState(/** @type {any} */ (null));
+  const [collapsedGroups, setCollapsedGroups] = useState(/** @type {Set<string>} */ (new Set()));
+
+  useEffect(() => {
+    Promise.all([api.getPreferenceSchema(sourceId), api.getPreferences(sourceId)])
+      .then(([schemaRes, prefsRes]) => {
+        setSchema(Array.isArray(schemaRes) ? schemaRes : []);
+        setLiveValues(Array.isArray(prefsRes)
+          ? Object.fromEntries(prefsRes.map(pr => [pr.key, pr.value]))
+          : {});
+      })
+      .catch(showApiError)
+      .finally(() => setLoading(false));
+  }, [sourceId]);
+
+  /** @type {Map<string, any[]>} */
+  const groups = new Map();
+  for (const d of schema) {
+    const g = d.group ?? '';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(d);
+  }
+
+  const _toggleGroup = (/** @type {string} */ group) => setCollapsedGroups(prev => {
+    const next = new Set(prev);
+    next.has(group) ? next.delete(group) : next.add(group);
+    return next;
+  });
+
+  if (loading) {
+    return html`<div class="max-w-narrow py-1" dangerouslySetInnerHTML=${{ __html: skeletonSettingsCards(4) }} />`;
+  }
+  if (schema.length === 0) {
+    return html`<p class="text-sm text-text-muted py-4">${t('source.prefs.empty')}</p>`;
+  }
+
+  return html`
+    <div class="bg-surface border border-border rounded-xl px-4 md:px-6 py-1 max-w-narrow">
+      <div class="flex flex-col">
+        ${[...groups.entries()].map(([group, descriptors]) => {
+          const isCollapsed = collapsedGroups.has(group);
+          return html`
+            <div key=${group} class="flex flex-col">
+              ${group && html`
+                <button
+                  class="flex items-center justify-between gap-2 py-2 w-full text-left text-xs font-semibold uppercase tracking-wider text-text-muted hover:text-text transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
+                  onClick=${() => _toggleGroup(group)}
+                  aria-expanded=${!isCollapsed}
+                >
+                  ${group}
+                  <span class=${'icon-xs transition-transform ' + (isCollapsed ? '' : 'rotate-180')}>
+                    <${Icon} svg=${iconChevronDown} />
+                  </span>
+                </button>
+              `}
+              ${!isCollapsed && descriptors.map(d => html`
+                <${PreferenceRow}
+                  key=${d.key}
+                  sourceId=${sourceId}
+                  descriptor=${d}
+                  currentValue=${liveValues[d.key]}
+                  liveValues=${liveValues}
+                  onValueChange=${(key, val) => setLiveValues(prev => ({ ...prev, [key]: val }))}
+                  onOpenDetail=${(desc) => setActiveDescriptor(desc)}
+                />
+              `)}
+            </div>
+          `;
+        })}
+      </div>
+      <${Modal}
+        open=${activeDescriptor != null}
+        onClose=${() => setActiveDescriptor(null)}
+        title=${activeDescriptor ? (activeDescriptor.label ?? activeDescriptor.title ?? '') : ''}
+      >
+        ${activeDescriptor && html`
+          <${PreferenceDetailView}
+            sourceId=${sourceId}
+            descriptor=${activeDescriptor}
+            currentValue=${liveValues[activeDescriptor.key]}
+            liveValues=${liveValues}
+            onValueChange=${(key, val) => setLiveValues(prev => ({ ...prev, [key]: val }))}
+            onBack=${() => setActiveDescriptor(null)}
+            showHeader=${false}
+          />
+        `}
+      </${Modal}>
+    </div>
+  `;
 }
 
 // ── Source settings page component ───────────────────────────────────────────
@@ -132,12 +259,6 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
   );
   const [dlConcurrencySaving, setDlConcurrencySaving] = useState(false);
 
-  const [schema, setSchema] = useState(/** @type {any[]} */ ([]));
-  const [liveValues, setLiveValues] = useState(/** @type {Record<string,any>} */ ({}));
-  const [prefsLoading, setPrefsLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [activeDescriptor, setActiveDescriptor] = useState(/** @type {any} */ (null));
-  const [collapsedGroups, setCollapsedGroups] = useState(/** @type {Set<string>} */ (new Set()));
   const [health, setHealth] = useState(/** @type {any|null} */ (null));
   const [healthLoading, setHealthLoading] = useState(true);
   const [reloading, setReloading] = useState(false);
@@ -153,32 +274,6 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
     }).catch(() => {}).finally(() => setHealthLoading(false));
     api.getSourceCapabilities(sid).then(setCapabilities).catch(() => {});
   }, [sid]);
-
-  useEffect(() => {
-    Promise.all([api.getPreferenceSchema(sid), api.getPreferences(sid)])
-        .then(([schemaRes, prefsRes]) => {
-            setSchema(Array.isArray(schemaRes) ? schemaRes : []);
-
-            if (Array.isArray(prefsRes)) {
-                const liveObject = Object.fromEntries(
-                    prefsRes.map(p => [p.key, p.value])
-                );
-                setLiveValues(liveObject);
-            } else {
-                setLiveValues({});
-            }
-        })
-        .catch(showApiError)
-        .finally(() => setPrefsLoading(false));
-  }, [sid]);
-
-  /** @type {Map<string, any[]>} */
-  const groups = new Map();
-  for (const d of schema) {
-    const g = d.group ?? '';
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(d);
-  }
 
   async function toggleEnabled(val) {
     if (val && source.unrestricted_http && !confirming) {
@@ -218,9 +313,8 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
   }
 
   async function handleDelete() {
-    const confirmed = await confirmDialog({
+    const confirmed = await showConfirm(t('source.delete.message'), {
       title: t('source.delete.title'),
-      message: t('source.delete.message'),
       confirmLabel: t('common.delete'),
       danger: true,
     });
@@ -234,60 +328,6 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
   }
 
 
-
-  const _toggleGroup = (group) => setCollapsedGroups(prev => {
-    const next = new Set(prev);
-    next.has(group) ? next.delete(group) : next.add(group);
-    return next;
-  });
-
-  const prefContent = prefsLoading
-    ? html`<p class="text-sm text-text-muted py-2">Loading preferences…</p>`
-    : activeDescriptor
-      ? html`<${PreferenceDetailView}
-          sourceId=${sid}
-          descriptor=${activeDescriptor}
-          currentValue=${liveValues[activeDescriptor.key]}
-          liveValues=${liveValues}
-          onValueChange=${(key, val) => setLiveValues(prev => ({ ...prev, [key]: val }))}
-          onBack=${() => setActiveDescriptor(null)}
-        />`
-      : schema.length === 0
-        ? html`<p class="text-sm text-text-muted py-4">No preferences available.</p>`
-        : html`
-          <div class="flex flex-col">
-            ${[...groups.entries()].map(([group, descriptors]) => {
-              const isCollapsed = collapsedGroups.has(group);
-              return html`
-                <div key=${group} class="flex flex-col">
-                  ${group && html`
-                    <button
-                      class="flex items-center justify-between gap-2 py-2 w-full text-left text-xs font-semibold uppercase tracking-wider text-text-muted hover:text-text transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded"
-                      onClick=${() => _toggleGroup(group)}
-                      aria-expanded=${!isCollapsed}
-                    >
-                      ${group}
-                      <span class=${'icon-xs transition-transform ' + (isCollapsed ? '' : 'rotate-180')}>
-                        <${Icon} svg=${iconChevronDown} />
-                      </span>
-                    </button>
-                  `}
-                  ${!isCollapsed && descriptors.map(d => html`
-                    <${PreferenceRow}
-                      key=${d.key}
-                      sourceId=${sid}
-                      descriptor=${d}
-                      currentValue=${liveValues[d.key]}
-                      liveValues=${liveValues}
-                      onValueChange=${(key, val) => setLiveValues(prev => ({ ...prev, [key]: val }))}
-                      onOpenDetail=${(desc) => setActiveDescriptor(desc)}
-                    />
-                  `)}
-                </div>
-              `;
-            })}
-          </div>
-        `;
 
   /** @param {string} title @param {string} subtitle */
   const mkSectionHdr = (title, subtitle) => html`
@@ -410,7 +450,7 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
 
           ${capabilities?.streaming_chapters && html`
             <div class="py-4 first:pt-3 last:pb-3 border-b border-border-subtle last:border-b-0">
-              <div class="flex items-center gap-1.5 text-accent icon-sm">
+              <div class="flex items-center gap-1.5 text-text icon-sm">
                 <p class="text-sm font-medium">${t('source.settings.streaming')}</p>
               </div>
               <p class="text-xs text-text-muted mt-0.5">${t('source.settings.streaming.desc')}</p>
@@ -464,43 +504,12 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
         </div>
       </div>
 
-      <!-- 2. Preferences -->
-    <div class="flex flex-col gap-3">
-        ${mkSectionHdr(t('source.settings.preferences'), t('source.settings.preferences.desc'))}
-
-        <!-- Desktop: inline in card -->
-        <div class="hidden md:block bg-surface border border-border rounded-xl px-4 md:px-6 py-1">
-          ${prefContent}
-        </div>
-
-        <!-- Mobile: configure button + modal -->
-        <div class="md:hidden">
-            <div class="bg-surface border border-border rounded-xl px-4 md:px-6 py-1 flex flex-col divide-y divide-border-subtle">
-                <div class="py-4 first:pt-3 last:pb-3">
-                    <div class="flex items-start justify-between gap-4 flex-wrap">
-                        <div>
-                            <p class="text-sm font-medium text-text">${t('source.settings.prefs.configure')}</p>
-                            <p class="text-xs text-text-muted mt-0.5">${t('source.settings.prefs.configure.desc')}</p>
-                        </div>
-                        <button class="btn-ghost" onClick=${() => setModalOpen(true)}>${t('source.settings.prefs.configure.action')}</button>
-                    </div>
-                    <${Modal} open=${modalOpen} onClose=${() => setModalOpen(false)} title=${t('source.settings.prefs.modal_title')}>
-                        <div class="flex flex-col divide-y divide-border-subtle">
-                            ${prefContent}
-                        </div>
-                    </${Modal}>
-                </div>
-            </div>
-        </div>
-    </div>
-
-
       <!-- 3. Health -->
       <div class="flex flex-col gap-3">
         ${mkSectionHdr(t('source.settings.health'), t('source.settings.health.desc'))}
         <div class="bg-surface border border-border rounded-xl px-4 md:px-6 py-1">
           ${healthLoading
-            ? html`<p class="text-sm text-text-muted py-3">${t('common.loading')}</p>`
+            ? html`<div dangerouslySetInnerHTML=${{ __html: skeletonKeyValueRows(4) }} />`
             : health == null
               ? html`<p class="text-sm text-text-muted py-3">${t('source.settings.health.empty')}</p>`
               : html`
@@ -556,16 +565,17 @@ function SourceSettingsPage({ source, activeIds, onDeleted, onEnabledChange }) {
 // ── URL state ─────────────────────────────────────────────────────────────────
 
 function _updateUrl() {
-  const params = new URLSearchParams();
-  params.set('tab', _activeTab);
-  if (_page > 1) params.set('page', String(_page));
-  if (_libPage > 1) params.set('lib_page', String(_libPage));
-  if (_query) params.set('q', _query);
+  /** @type {Record<string, string|number|null>} */
+  const params = {
+    tab: _activeTab,
+    page: _page > 1 ? _page : null,
+    lib_page: _libPage > 1 ? _libPage : null,
+    q: _query || null,
+  };
   for (const [filterId, state] of Object.entries(_filters)) {
-    params.set('f_' + filterId, JSON.stringify(state));
+    params['f_' + filterId] = JSON.stringify(state);
   }
-  const qs = params.toString();
-  history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+  replaceState(params);
 }
 
 // ── Breadcrumb ────────────────────────────────────────────────────────────────
@@ -596,10 +606,13 @@ export async function init(container, { id }) {
   _sourceName = '';
   _sourceEnabled = true;
   _settingsMountEl = null;
+  _prefsMountEl = null;
   _popularPanelEl = null;
   _searchPanelEl = null;
   _tabsUpdateFn = null;
   _settingsMounted = false;
+  _prefsMounted = false;
+  _hasPrefs = false;
   _filterDefs = [];
   _filterModalDestroy?.();
   _filterModalDestroy = null;
@@ -613,7 +626,7 @@ export async function init(container, { id }) {
 
   // Restore tab from URL (takes precedence over query-based heuristic)
   const _tabParam = _urlParams.get('tab');
-  if (_tabParam && ['popular', 'search', 'library', 'settings'].includes(_tabParam)) {
+  if (_tabParam && ['popular', 'search', 'library', 'prefs', 'settings'].includes(_tabParam)) {
     _activeTab = _tabParam;
   } else {
     _activeTab = (_query || _preFilterName) ? 'search' : 'popular';
@@ -637,11 +650,13 @@ export async function init(container, { id }) {
     return;
   }
 
-  // Add source button (shown in header for consistency with sources page)
+  // Add source button (kept in the header for consistency with the sources
+  // page, but secondary here: this view is about browsing the selected
+  // source, so it doesn't own the accent).
   if (hasPermission('source:install')) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'btn-primary btn-sm';
+    btn.className = 'btn-secondary btn-sm';
     btn.textContent = t('source.add');
     _addSourceBtn = btn;
   } else {
@@ -654,7 +669,7 @@ export async function init(container, { id }) {
       <!-- Sidebar (lg+) — SourcesSidebar mounts here -->
       <aside
         class="hidden lg:flex flex-col w-72 shrink-0 border-r border-border-subtle sticky overflow-y-auto"
-        style="top:var(--header-h);height:calc(100vh - var(--header-h));"
+        style="top:var(--header-h);height:calc(100dvh - var(--header-h));"
         aria-label="${t('source.nav.sources')}"
       ></aside>
 
@@ -669,9 +684,7 @@ export async function init(container, { id }) {
           <div class="js-panel" data-panel="popular">
             <div class="flex flex-col gap-4">
               <div class="flex items-end justify-end gap-2">
-                <select class="input w-20 js-popular-page-size" aria-label="${t('common.page_size')}">
-                  ${[18, 27, 36].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
-                </select>
+                <div class="js-popular-page-size-mount w-20"></div>
               </div>
               <div class="js-popular-grid" aria-live="polite" aria-busy="false"></div>
               <div class="js-popular-pagination"></div>
@@ -691,10 +704,8 @@ export async function init(container, { id }) {
                     aria-label="${t('source.search.aria')}"
                   />
                 </div>
-                <select class="input w-20 js-page-size" aria-label="${t('common.page_size')}">
-                  ${[18, 27, 36].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
-                </select>
-                <button type="button" class="js-filter-btn btn-ghost btn-sm flex items-center gap-1.5" aria-label="${t('source.filters.open')}" style="display:none">${t('library.filters')}</button>
+                <div class="js-page-size-mount w-20 shrink-0"></div>
+                <button type="button" class="js-filter-btn input flex items-center justify-center gap-1.5 w-full sm:w-auto shrink-0" aria-label="${t('source.filters.open')}" style="display:none">${t('library.filters')}</button>
               </div>
               <div class="js-search-grid" aria-live="polite" aria-busy="false"></div>
               <div class="js-search-pagination"></div>
@@ -709,6 +720,11 @@ export async function init(container, { id }) {
             </div>
           </div>
 
+          <!-- Preferences panel (hidden initially) -->
+          <div class="js-panel hidden" data-panel="prefs">
+            <div class="js-prefs-mount flex flex-col gap-4"></div>
+          </div>
+
           <!-- Settings panel (hidden initially) -->
           <div class="js-panel hidden" data-panel="settings">
             <div class="js-settings-mount flex flex-col gap-4"></div>
@@ -720,56 +736,41 @@ export async function init(container, { id }) {
 
   _asideEl = /** @type {HTMLElement} */ (container.querySelector('aside'));
   _settingsMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-settings-mount'));
+  _prefsMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-prefs-mount'));
   _popularPanelEl  = /** @type {HTMLElement} */ (container.querySelector('[data-panel="popular"]'));
   _searchPanelEl   = /** @type {HTMLElement} */ (container.querySelector('[data-panel="search"]'));
 
   const popularGridEl  = /** @type {HTMLElement} */ (container.querySelector('.js-popular-grid'));
   const popularPaginEl = /** @type {HTMLElement} */ (container.querySelector('.js-popular-pagination'));
-  const popularSizeEl  = /** @type {HTMLSelectElement} */ (container.querySelector('.js-popular-page-size'));
+  const popularSizeMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-popular-page-size-mount'));
   const searchGridEl   = /** @type {HTMLElement} */ (container.querySelector('.js-search-grid'));
   const searchPaginEl  = /** @type {HTMLElement} */ (container.querySelector('.js-search-pagination'));
   const filterBtnEl    = /** @type {HTMLButtonElement} */ (container.querySelector('.js-filter-btn'));
   const searchEl       = /** @type {HTMLInputElement} */ (container.querySelector('.js-search'));
-  const searchSizeEl   = /** @type {HTMLSelectElement} */ (container.querySelector('.js-page-size'));
+  const searchSizeMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-page-size-mount'));
   const libGridEl      = /** @type {HTMLElement} */ (container.querySelector('.js-lib-grid'));
   const libPaginEl     = /** @type {HTMLElement} */ (container.querySelector('.js-lib-pagination'));
 
   // ── Breadcrumb + header ──
   _updateBreadcrumb();
 
-  // Wire add source button
+  // Wire add source button. Mount once per click and close via the returned
+  // cleanup — mountIntoModalRoot gives each call its own container, so
+  // re-mounting with open=false would stack an empty modal instead of closing.
   if (_addSourceBtn) {
-    let _addSourceModalOpen = false;
-    const _setAddOpen = (open) => {
-      _addSourceModalOpen = open;
-      mountIntoModalRoot(html`
+    _addSourceBtn.addEventListener('click', () => {
+      let cleanup = () => {};
+      cleanup = mountIntoModalRoot(html`
         <${AddSourceModal}
-          open=${_addSourceModalOpen}
-          onClose=${() => _setAddOpen(false)}
-          onCreated=${() => { _setAddOpen(false); _refreshSidebar(); }}
+          open=${true}
+          onClose=${() => cleanup()}
+          onCreated=${() => { cleanup(); _refreshSidebar(); }}
         />
       `);
-    };
-    _addSourceBtn.addEventListener('click', () => _setAddOpen(true));
+    });
   }
 
   if (_query) searchEl.value = _query;
-
-  // ── Disabled subpage helper ──
-  /** Shows a "disabled" placeholder in a panel, replacing its content. */
-  function _showDisabledPanel(panelEl) {
-    const inner = panelEl.querySelector('.flex.flex-col');
-    if (!inner) return;
-    inner.innerHTML = `
-      <div class="flex flex-col items-center justify-center py-20 gap-4 text-center">
-        <span class="icon-xl text-warn">${iconWarning}</span>
-        <div>
-          <p class="text-sm font-medium text-text">${t('source.disabled.title')}</p>
-          <p class="text-xs text-text-muted mt-1">${t('source.disabled.hint')}</p>
-        </div>
-      </div>
-    `;
-  }
 
   // ── Tab switching ──
   const panels = /** @type {NodeListOf<HTMLElement>} */ (container.querySelectorAll('.js-panel'));
@@ -783,6 +784,7 @@ export async function init(container, { id }) {
       panel.classList.toggle('hidden', panel.dataset.panel !== tab);
     }
     if (tab === 'settings') _mountSettings();
+    if (tab === 'prefs') _mountPrefs();
     if (tab === 'library') _fetchLibrary(libGridEl, libPaginEl);
     if (tab === 'popular' && !_popularFetched) {
       _popularFetched = true;
@@ -798,18 +800,27 @@ export async function init(container, { id }) {
   };
 
   // ── Tab bar ──
+  const _tabDefs = () => [
+    { id: 'popular', name: t('source.tab.popular') },
+    { id: 'search', name: t('source.tab.search') },
+    { id: 'library', name: t('source.tab.library') },
+    { id: 'prefs', name: t('source.tab.preferences'), disabled: !_hasPrefs },
+    { id: 'settings', name: t('source.tab.settings') },
+  ];
   const tabsEl = /** @type {HTMLElement} */ (container.querySelector('.js-tabs'));
   const { update: tabsUpdate } = renderTabs(tabsEl, {
-    tabs: [
-      { id: 'popular', name: t('source.tab.popular') },
-      { id: 'search', name: t('source.tab.search') },
-      { id: 'library', name: t('source.tab.library') },
-      { id: 'settings', name: 'Settings' },
-    ],
+    tabs: _tabDefs(),
     activeId: _activeTab,
     onSelect: (tab) => { _switchTab(tab); _updateUrl(); },
   });
   _tabsUpdateFn = tabsUpdate;
+
+  // The Preferences tab starts greyed out; enable it once the schema shows
+  // this source actually exposes preferences.
+  api.getPreferenceSchema(_sourceId).then(schema => {
+    _hasPrefs = Array.isArray(schema) && schema.length > 0;
+    if (_hasPrefs) _tabsUpdateFn?.(_activeTab, _tabDefs());
+  }).catch(() => {});
 
   _switchTab(_activeTab);
 
@@ -827,24 +838,34 @@ export async function init(container, { id }) {
     _fetch(searchGridEl, searchPaginEl, true);
   }, 600));
 
-  searchSizeEl.addEventListener('change', () => {
-    _pageSize = Number(searchSizeEl.value);
-    setLocal('kani_source_page_size', String(_pageSize));
-    _page = 1;
-    _updateUrl();
-    _fetch(searchGridEl, searchPaginEl, true);
-  });
+  render(html`<${PageSizeSelect}
+    options=${[18, 27, 36]}
+    value=${_pageSize}
+    ariaLabel=${t('common.page_size')}
+    onChange=${(/** @type {number} */ n) => {
+      _pageSize = n;
+      setLocal('kani_source_page_size', String(_pageSize));
+      _page = 1;
+      _updateUrl();
+      _fetch(searchGridEl, searchPaginEl, true);
+    }}
+  />`, searchSizeMountEl);
 
   // ── Popular tab page size ──
-  popularSizeEl.addEventListener('change', () => {
-    _pageSize = Number(popularSizeEl.value);
-    setLocal('kani_source_page_size', String(_pageSize));
-    _page = 1;
-    _popularFetched = false; // force re-fetch
-    _updateUrl();
-    _fetch(popularGridEl, popularPaginEl, false);
-    _popularFetched = true;
-  });
+  render(html`<${PageSizeSelect}
+    options=${[18, 27, 36]}
+    value=${_pageSize}
+    ariaLabel=${t('common.page_size')}
+    onChange=${(/** @type {number} */ n) => {
+      _pageSize = n;
+      setLocal('kani_source_page_size', String(_pageSize));
+      _page = 1;
+      _popularFetched = false; // force re-fetch
+      _updateUrl();
+      _fetch(popularGridEl, popularPaginEl, false);
+      _popularFetched = true;
+    }}
+  />`, popularSizeMountEl);
 
   // ── Filter modal — shown in Search tab, hidden until filter defs load ──
   _filterDefs = [];
@@ -929,11 +950,11 @@ export async function init(container, { id }) {
   }).catch(() => { _mountSidebar(); });
 
   // Re-fetch sidebar when any source is enabled/disabled (e.g. from Settings tab)
-  _unsubSourcesInvalidation = subscribe('sourcesInvalidation', _refreshSidebar);
+  _unsubSourcesInvalidation = subscribeCache('sourcesInvalidation', _refreshSidebar);
 
   // Re-fetch browse/search results when a preference changes for this source.
   let _prevPrefVersion = /** @type {number | undefined} */ (undefined);
-  _unsubPrefVersion = subscribe('sourcePreferenceVersion', (/** @type {Map<number, number>} */ map) => {
+  _unsubPrefVersion = subscribeUiState('sourcePreferenceVersion', (/** @type {Map<number, number>} */ map) => {
     const v = map.get(_sourceId);
     if (v === undefined || v === _prevPrefVersion) return;
     _prevPrefVersion = v;
@@ -948,6 +969,14 @@ export async function init(container, { id }) {
       _fetch(/** @type {HTMLElement} */ (searchGridEl), /** @type {HTMLElement} */ (searchPaginEl), true);
     }
   });
+}
+
+// ── Preferences tab ───────────────────────────────────────────────────────────
+
+function _mountPrefs() {
+  if (_prefsMounted || !_prefsMountEl) return;
+  _prefsMounted = true;
+  render(html`<${SourcePreferencesPanel} sourceId=${_sourceId} />`, _prefsMountEl);
 }
 
 // ── Settings tab ──────────────────────────────────────────────────────────────
@@ -979,7 +1008,7 @@ async function _mountSettings() {
       onEnabledChange=${(enabled) => {
         _sourceEnabled = enabled;
         // Notify sidebar to re-fetch so the "Off" badge updates immediately
-        updateState('sourcesInvalidation', n => n + 1);
+        updateCacheState('sourcesInvalidation', n => n + 1);
         // Refresh popular/search panels immediately
         if (_popularPanelEl) {
           const inner = _popularPanelEl.querySelector('.flex.flex-col');
@@ -996,15 +1025,8 @@ async function _mountSettings() {
               inner.appendChild(paginEl);
               _fetch(gridEl, paginEl, false);
             } else {
-              inner.innerHTML = `
-                <div class="flex flex-col items-center justify-center py-20 gap-4 text-center">
-                  <span class="icon-xl text-warn">${iconWarning}</span>
-                  <div>
-                    <p class="text-sm font-medium text-text">${t('source.disabled.title')}</p>
-                    <p class="text-xs text-text-muted mt-1">${t('source.disabled.hint')}</p>
-                  </div>
-                </div>
-              `;
+              inner.innerHTML = '';
+              inner.appendChild(_disabledStateEl());
             }
           }
         }
@@ -1014,15 +1036,8 @@ async function _mountSettings() {
             // Clear grid content but keep search bar; show disabled message in grid area
             const gridEl = inner.querySelector('.js-search-grid');
             if (gridEl) {
-              gridEl.innerHTML = `
-                <div class="flex flex-col items-center justify-center py-20 gap-4 text-center">
-                  <span class="icon-xl text-warn">${iconWarning}</span>
-                  <div>
-                    <p class="text-sm font-medium text-text">${t('source.disabled.title')}</p>
-                    <p class="text-xs text-text-muted mt-1">${t('source.disabled.hint')}</p>
-                  </div>
-                </div>
-              `;
+              gridEl.innerHTML = '';
+              gridEl.appendChild(_disabledStateEl());
             }
           }
         }
@@ -1046,60 +1061,34 @@ async function _fetchLibrary(gridEl, paginEl) {
   _destroyLibPagination?.();
   _destroyLibPagination = null;
   paginEl.innerHTML = '';
-  gridEl.innerHTML = skeletonGrid(_libPageSize);
-  gridEl.setAttribute('aria-busy', 'true');
-  startLoading();
 
-  let result;
-  try {
-    result = await api.getLibrary({
-      page: _libPage,
-      page_size: _libPageSize,
-      source_id: _sourceId,
-    }, _libAbort.signal);
-  } catch (e) {
-    if (e?.name === 'AbortError') return;
-    gridEl.innerHTML = '';
-    gridEl.setAttribute('aria-busy', 'false');
-    finishLoading();
-    gridEl.appendChild(createErrorState({ message: t('library.error.load') }));
-    return;
-  }
-
-  finishLoading();
-  gridEl.innerHTML = '';
-  gridEl.setAttribute('aria-busy', 'false');
-
-  const items = Array.isArray(result?.items) ? result.items
-    : Array.isArray(result?.manga)            ? result.manga
-    : Array.isArray(result)                   ? result
-    : [];
-
-  if (items.length === 0) {
-    gridEl.appendChild(createEmptyState({
-      icon: iconSearch,
-      title: t('source.library.empty'),
-    }));
-    return;
-  }
-
-  const grid = document.createElement('div');
-  grid.className = 'manga-grid';
-  for (const m of items) {
-    grid.appendChild(createMangaCard({
+  const outcome = await fetchPagedGrid({
+    gridEl,
+    pageSize: _libPageSize,
+    fetchPage: () => api.getLibrary({ page: _libPage, page_size: _libPageSize, source_id: _sourceId }, /** @type {AbortController} */ (_libAbort).signal),
+    mapItems: (result) => Array.isArray(result?.items) ? result.items
+      : Array.isArray(result?.manga)            ? result.manga
+      : Array.isArray(result)                   ? result
+      : [],
+    renderCard: (m) => createMangaCard({
       manga: { id: m.id, title: m.title, cover_image_url: m.cover_url ?? null },
       href: `/manga/${m.id}?from_source=${_sourceId}`,
-    }));
-  }
-  gridEl.appendChild(grid);
+    }),
+    emptyIcon: iconSearch,
+    emptyTitle: t('source.library.empty'),
+    errorMessage: t('library.error.load'),
+    onRetry: () => { _libLoaded = false; _fetchLibrary(gridEl, paginEl); },
+  });
+  if (!outcome || 'error' in outcome) return; // aborted, or error already rendered into gridEl
 
+  const { result, items } = outcome;
   const hasNext = hasNextPage(result, items.length, _libPageSize);
   if (_libPage > 1 || hasNext) {
     const { destroy } = renderPagination(paginEl, {
       page: _libPage,
       hasNext,
       total: result?.total_pages ?? undefined,
-      onPageChange: (p) => { _libPage = p; _libLoaded = false; _updateUrl(); _fetchLibrary(gridEl, paginEl); window.scrollTo(0, 0); },
+      onPageChange: (p) => { _libPage = p; _libLoaded = false; _updateUrl(); _fetchLibrary(gridEl, paginEl); scrollPageTop(); },
     });
     _destroyLibPagination = destroy;
   }
@@ -1129,15 +1118,9 @@ async function _fetch(gridEl, paginEl, isSearch) {
     _destroyPaginationPopular = null;
   }
   paginEl.innerHTML = '';
-
   if (isAppend) {
     paginEl.innerHTML = '<div class="h-14 mx-3 my-2 skeleton rounded-lg"></div>';
-  } else {
-    gridEl.innerHTML = skeletonGrid(_pageSize);
-    gridEl.setAttribute('aria-busy', 'true');
-    gridEl.classList.add('opacity-50', 'pointer-events-none');
   }
-  startLoading();
 
   const filtersJson = Object.keys(_filters).length > 0
     ? JSON.stringify(
@@ -1148,88 +1131,53 @@ async function _fetch(gridEl, paginEl, isSearch) {
     )
     : undefined;
 
-  let result;
-  try {
-    result = isSearch
-      ? await api.searchManga(_sourceId, _query, _page, _pageSize, filtersJson, _abort.signal)
-      : await api.getPopularManga(_sourceId, _page, _pageSize, undefined, _abort.signal);
-  } catch (e) {
-    if (e?.name === 'AbortError') return;
-    paginEl.innerHTML = '';
-    if (!isAppend) {
-      gridEl.innerHTML = '';
-      gridEl.setAttribute('aria-busy', 'false');
-      gridEl.classList.remove('opacity-50', 'pointer-events-none');
-      finishLoading();
-      if (/** @type {any} */ (e)?.code === 'source_disabled') {
-        const panel = /** @type {HTMLElement | null} */ (gridEl.closest('[data-panel]'));
-        if (panel) _showDisabledPanel(panel);
-        else gridEl.appendChild(createErrorState({ message: t('source.disabled.title') }));
-      } else {
-        gridEl.appendChild(createErrorState({ message: t('source.error.load_manga') }));
-      }
-    }
-    return;
-  }
+  const outcome = await fetchPagedGrid({
+    gridEl,
+    pageSize: _pageSize,
+    append: isAppend,
+    fetchPage: () => isSearch
+      ? api.searchManga(_sourceId, _query, _page, _pageSize, filtersJson, /** @type {AbortController} */ (_abort).signal)
+      : api.getPopularManga(_sourceId, _page, _pageSize, undefined, /** @type {AbortController} */ (_abort).signal),
+    mapItems: (result) => Array.isArray(result?.manga) ? result.manga
+      : Array.isArray(result)                          ? result
+      : [],
+    renderCard: (m) => createMangaCard({
+      manga: { id: m.db_id ?? m.id, title: m.title, cover_image_url: m.cover_url ?? null },
+      href: `/source/${_sourceId}/manga/${encodeURIComponent(m.source_manga_id ?? m.id)}`,
+    }),
+    emptyIcon: iconSearch,
+    emptyTitle: isSearch ? t('source.search.empty') : t('source.popular.empty'),
+    errorMessage: t('source.error.load_manga'),
+    onRetry: () => _fetch(gridEl, paginEl, isSearch),
+    onError: (e, gridEl) => {
+      if (/** @type {any} */ (e)?.code !== 'source_disabled') return false;
+      const panel = /** @type {HTMLElement | null} */ (gridEl.closest('[data-panel]'));
+      if (panel) _showDisabledPanel(panel);
+      else gridEl.appendChild(createErrorState({ message: t('source.disabled.title') }));
+      return true;
+    },
+  });
+  if (!outcome) return; // aborted — a newer fetch is already in flight, don't touch paginEl
+  if ('error' in outcome) { paginEl.innerHTML = ''; return; }
 
-  finishLoading();
+  const { result, items } = outcome;
   paginEl.innerHTML = '';
-  if (!isAppend) {
-    gridEl.innerHTML = '';
-    gridEl.setAttribute('aria-busy', 'false');
-    gridEl.classList.remove('opacity-50', 'pointer-events-none');
-  }
-
-  const items = Array.isArray(result?.manga) ? result.manga
-    : Array.isArray(result)                  ? result
-    : [];
-
-  if (items.length === 0 && !isAppend) {
-    gridEl.appendChild(createEmptyState({
-      icon: iconSearch,
-      title: _query ? 'No results found.' : 'No manga available.',
-    }));
-  } else if (items.length > 0) {
-    if (infinite) {
-      let grid = /** @type {HTMLElement|null} */ (gridEl.querySelector('.manga-grid'));
-      if (!grid) {
-        grid = document.createElement('div');
-        grid.className = 'manga-grid';
-        gridEl.appendChild(grid);
-      }
-      for (const m of items) {
-        grid.appendChild(createMangaCard({
-          manga: { id: m.db_id ?? m.id, title: m.title, cover_image_url: m.cover_url ?? null },
-          href: `/source/${_sourceId}/manga/${encodeURIComponent(m.source_manga_id ?? m.id)}`,
-        }));
-      }
-    } else {
-      const grid = document.createElement('div');
-      grid.className = 'manga-grid';
-      for (const m of items) {
-        grid.appendChild(createMangaCard({
-          manga: { id: m.db_id ?? m.id, title: m.title, cover_image_url: m.cover_url ?? null },
-          href: `/source/${_sourceId}/manga/${encodeURIComponent(m.source_manga_id ?? m.id)}`,
-        }));
-      }
-      gridEl.appendChild(grid);
-    }
-  }
-
   const hasNext = hasNextPage(result, items.length, _pageSize);
   if (infinite) {
     _setupSourceSentinel(gridEl, paginEl, hasNext, isSearch);
-  } else if (_page > 1 || hasNext) {
-    const { destroy } = renderPagination(paginEl, {
-      page: _page,
-      hasNext,
-      total: result?.total_pages ?? undefined,
-      onPageChange: (p) => { _page = p; _updateUrl(); _fetch(gridEl, paginEl, isSearch); window.scrollTo(0, 0); },
-    });
-    if (isSearch) {
-      _destroyPaginationSearch = destroy;
-    } else {
-      _destroyPaginationPopular = destroy;
+  } else {
+    if (_page > 1 || hasNext) {
+      const { destroy } = renderPagination(paginEl, {
+        page: _page,
+        hasNext,
+        total: result?.total_pages ?? undefined,
+        onPageChange: (p) => { _page = p; _updateUrl(); _fetch(gridEl, paginEl, isSearch); scrollPageTop(); },
+      });
+      if (isSearch) {
+        _destroyPaginationSearch = destroy;
+      } else {
+        _destroyPaginationPopular = destroy;
+      }
     }
   }
 }
@@ -1275,6 +1223,10 @@ export function destroy(container) {
   if (_settingsMountEl) render(null, _settingsMountEl);
   _settingsMountEl = null;
   _settingsMounted = false;
+  if (_prefsMountEl) render(null, _prefsMountEl);
+  _prefsMountEl = null;
+  _prefsMounted = false;
+  _hasPrefs = false;
   _libLoaded = false;
   _libPage = 1;
   _popularPanelEl = null;

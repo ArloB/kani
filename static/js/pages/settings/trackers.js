@@ -2,9 +2,10 @@
 // Settings — Trackers section.
 
 import * as api from '../../api.js';
-import { escapeHtml, openConfirm } from '../../utils.js';
+import { escapeHtml } from '../../utils.js';
+import { showConfirm } from '../../components/modal.js';
 import { showToast, showApiError } from '../../components/toast.js';
-import { hasPermission } from '../../state.js';
+import { hasPermission } from '../../session.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow, mkNumberRow } from './_shared.js';
 import { skeletonSettingsCards } from '../../components/skeletons.js';
 import { createErrorState } from '../../components/error-state.js';
@@ -101,7 +102,7 @@ export function mount(el, settings) {
       if (tracker.configured) {
         const linkBtn = document.createElement('button');
         linkBtn.type = 'button';
-        linkBtn.className = tracker.linked ? 'btn-danger btn-sm' : 'btn-primary btn-sm';
+        linkBtn.className = tracker.linked ? 'btn-danger btn-sm' : 'btn-secondary btn-sm';
         linkBtn.textContent = tracker.linked ? t('trackers.unlink') : t('trackers.link');
         trackerCard.appendChild(mkSettingsRow({
           label: tracker.linked ? t('trackers.linked_label') : t('trackers.not_linked_label'),
@@ -113,7 +114,7 @@ export function mount(el, settings) {
 
         linkBtn.addEventListener('click', async () => {
           if (tracker.linked) {
-            if (!(await openConfirm({ title: t('trackers.confirm.unlink.title'), message: t('trackers.confirm.unlink.msg', { name: tracker.name }), danger: true }))) return;
+            if (!(await showConfirm(t('trackers.confirm.unlink.msg', { name: tracker.name }), { title: t('trackers.confirm.unlink.title'), danger: true }))) return;
             linkBtn.disabled = true;
             try {
               await api.unlinkTracker(tracker.id);
@@ -182,7 +183,7 @@ export function mount(el, settings) {
               <p class="text-xs text-text-muted">${escapeHtml(t('trackers.setup.client_secret.note'))}</p>
             </div>` : ''}
             <div class="flex items-center gap-2 flex-wrap">
-              <button type="button" class="btn-primary btn-sm js-config-save">${escapeHtml(t('trackers.setup.save'))}</button>
+              <button type="button" class="btn-secondary btn-sm js-config-save">${escapeHtml(t('trackers.setup.save'))}</button>
               ${config?.client_id ? `<button type="button" class="btn-danger btn-sm js-config-delete">${escapeHtml(t('trackers.setup.remove'))}</button>` : ''}
             </div>
           </div>
@@ -211,7 +212,7 @@ export function mount(el, settings) {
         });
 
         deleteBtn?.addEventListener('click', async () => {
-          if (!(await openConfirm({ title: t('trackers.confirm.remove_creds.title'), message: t('trackers.confirm.remove_creds.msg', { name: tracker.name }), danger: true }))) return;
+          if (!(await showConfirm(t('trackers.confirm.remove_creds.msg', { name: tracker.name }), { title: t('trackers.confirm.remove_creds.title'), danger: true }))) return;
           deleteBtn.disabled = true;
           try {
             await api.deleteTrackerConfig(tracker.id);

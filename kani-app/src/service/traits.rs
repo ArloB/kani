@@ -227,11 +227,11 @@ impl DownloadDomain for AppService {
 
 // ── JobDomain ──────────────────────────────────────────────────────────────────
 
-pub use crate::jobs::manager::{JobListFilter, JobStatus, JobSummary};
+pub use crate::jobs::manager::{JobListFilter, JobListPage, JobStatus, JobSummary};
 
 #[async_trait::async_trait]
 pub trait JobDomain: Send + Sync {
-    async fn list_jobs(&self, filter: JobListFilter) -> Result<Vec<JobSummary>>;
+    async fn list_jobs(&self, filter: JobListFilter) -> Result<JobListPage>;
     async fn get_job_status(&self, id: uuid::Uuid) -> Result<JobStatus>;
     async fn cancel_job(&self, id: uuid::Uuid) -> Result<()>;
     fn active_job_summaries(&self) -> Vec<serde_json::Value>;
@@ -239,7 +239,7 @@ pub trait JobDomain: Send + Sync {
 
 #[async_trait::async_trait]
 impl JobDomain for AppService {
-    async fn list_jobs(&self, filter: JobListFilter) -> Result<Vec<JobSummary>> {
+    async fn list_jobs(&self, filter: JobListFilter) -> Result<JobListPage> {
         self.job_manager.list_jobs(filter).await
     }
 
@@ -565,7 +565,7 @@ pub trait MangaDomain: Send + Sync {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
-    ) -> Result<(Vec<Chapter>, bool, Option<u32>)>;
+    ) -> Result<(Vec<Chapter>, bool, Option<u32>, u32)>;
     #[allow(clippy::too_many_arguments)]
     async fn get_chapter_ids(
         &self,
@@ -668,7 +668,7 @@ impl MangaDomain for AppService {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
-    ) -> Result<(Vec<Chapter>, bool, Option<u32>)> {
+    ) -> Result<(Vec<Chapter>, bool, Option<u32>, u32)> {
         self.get_local_chapters(
             manga_id,
             page,
@@ -1620,7 +1620,7 @@ mod tests {
             _filter_downloaded: Option<bool>,
             _filter_unread: Option<bool>,
             _filter_scanlator: Option<String>,
-        ) -> Result<(Vec<Chapter>, bool, Option<u32>)> {
+        ) -> Result<(Vec<Chapter>, bool, Option<u32>, u32)> {
             unimplemented!()
         }
         #[allow(clippy::too_many_arguments)]

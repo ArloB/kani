@@ -1,17 +1,19 @@
 // @ts-check
 // App entry point. Bootstraps permissions, SSE, nav, and the SPA router.
 
-import { initPermissions, getState, setState, subscribe, hasPermission } from './state.js';
+import { initPermissions, getState, setState, subscribe, hasPermission } from './session.js';
 import { initTheme } from './theme.js';
 import { connectSSE } from './sse.js';
 import { initRouter, navigate, onNavigate } from './router.js';
-import { getBootId, logout, getFeatures, getSystemInfo } from './api.js';
-import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs, iconRefresh } from './icons.js';
+import { getBootId, logout, getFeatures, getSystemInfo, getChangelog, getCurrentUser } from './api.js';
+import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs, iconRefresh, iconEllipsisHorizontal } from './icons.js';
 import { mountNotificationsPanel } from './components/notifications-panel.js';
 import { mountAppHeader } from './components/app-header.js';
 import { initTooltip } from './components/tooltip.js';
 import { showAlert } from './components/modal.js';
-import { getLocal, setLocal } from './utils.js';
+import { showWhatsNew } from './components/whats-new.js';
+import { showMoreSheet } from './components/more-sheet.js';
+import { getLocal, setLocal, modKeyCombo } from './utils.js';
 import { t } from './i18n.js';
 import { listenForStateChanges } from './sync.js';
 import { registerShortcuts, showCheatsheet } from './shortcuts.js';
@@ -30,6 +32,7 @@ import { openCommandPalette } from './components/command-palette.js';
   }
 
   await initPermissions();
+  getCurrentUser().then(user => setState('user', user)).catch(() => { /* non-fatal */ });
   initTooltip();
   connectSSE();
   _mountConnectionBanner();
@@ -69,6 +72,7 @@ import { openCommandPalette } from './components/command-palette.js';
     // Re-hydrate permissions immediately — the SSE reconnect means the server
     // is up, so this should succeed without a full reload.
     initPermissions();
+    getCurrentUser().then(user => setState('user', user)).catch(() => { /* non-fatal */ });
     _handleServerRestart();
   });
 
@@ -95,13 +99,9 @@ async function _maybeShowWhatsNew(appEl) {
     const lastSeen = getLocal('kani_last_seen_version');
     if (lastSeen === info.version) return;
     setLocal('kani_last_seen_version', info.version);
-    const changelogRes = await fetch('/changelog.md').catch(() => null);
-    if (!changelogRes?.ok) return;
-    const text = await changelogRes.text();
-    const excerpt = text.split('\n').slice(0, 20).join('\n');
-    if (excerpt.trim()) {
-      showAlert(`What's new in v${info.version}\n\n${excerpt}`, { title: "What's new" });
-    }
+    const changelog = await getChangelog().catch(() => null);
+    if (!changelog?.html?.trim()) return;
+    showWhatsNew(changelog.version ?? info.version, changelog.html);
   } catch { /* non-fatal */ }
 }
 
@@ -114,14 +114,14 @@ function _renderDesktopNav(el) {
       <span class="sidebar-mark" aria-hidden="true">K</span>
       <span class="sidebar-title">Kani</span>
     </div>
-    <nav class="sidebar-nav" id="sidebar-nav-links" aria-label="Main navigation"></nav>
+    <nav class="sidebar-nav" id="sidebar-nav-links" aria-label="${t('nav.main.aria')}"></nav>
     <div class="sidebar-footer" id="sidebar-footer">
       <span class="avatar" id="sidebar-avatar" aria-hidden="true">U</span>
       <span class="flex flex-col min-w-0 flex-1">
-        <span class="text-sm font-medium text-text truncate" id="sidebar-username">User</span>
+        <span class="text-sm font-medium text-text truncate" id="sidebar-username">${t('nav.user_fallback')}</span>
         <span class="meta truncate" id="sidebar-role"></span>
       </span>
-      <button class="btn-icon shrink-0" id="nav-logout" aria-label="Sign out" title="Sign out">${iconLogout}</button>
+      <button class="btn-icon shrink-0" id="nav-logout" aria-label="${t('nav.sign_out')}" title="${t('nav.sign_out')}">${iconLogout}</button>
     </div>
   `;
 
@@ -163,8 +163,8 @@ function _updateSidebarUser(sidebar) {
   const nameEl   = sidebar.querySelector('#sidebar-username');
   const roleEl   = sidebar.querySelector('#sidebar-role');
   if (avatarEl) avatarEl.textContent = (user.username ?? 'U')[0].toUpperCase();
-  if (nameEl)   nameEl.textContent   = user.username ?? 'User';
-  if (roleEl)   roleEl.textContent   = user.role ?? '';
+  if (nameEl)   nameEl.textContent   = user.username ?? t('nav.user_fallback');
+  if (roleEl)   roleEl.textContent   = user.roles?.join(', ') ?? '';
 }
 
 /** @returns {string} */
@@ -179,7 +179,7 @@ function _buildNavLinks() {
     { href: '/stats',     label: 'Statistics', icon: iconStats,     perm: 'library:view' },
     { href: '/settings',  label: 'Settings',  icon: iconSettings,  perm: 'settings:view',  section: 'Admin' },
     { href: '/accounts',  label: 'Accounts',  icon: iconAccounts,  perm: 'user:manage' },
-    { href: '/admin/logs', label: 'Logs',     icon: iconLogs,      perm: 'admin:view_logs', matchPrefix: '/admin' },
+    { href: '/admin/logs', label: 'Logs',     icon: iconLogs,      perm: 'admin:view_logs', matchPrefix: '/admin/logs' },
     { href: '/jobs',       label: t('nav.jobs'), icon: iconRefresh,   perm: 'admin:jobs',      matchPrefix: '/jobs',  section: 'Admin' },
     { href: '/admin/ui-showcase', label: 'UI Showcase', icon: iconCube, perm: 'admin:manage', matchPrefix: '/admin/ui-showcase' },
   ];
@@ -226,26 +226,51 @@ function _updateDesktopActive(el, path) {
 function _renderBottomNav(el) {
   el.className = 'md:hidden fixed bottom-0 inset-x-0 z-30 h-16 bg-surface border-t border-border pb-safe';
 
+  // Four permanent slots; everything else lives behind "More". Without the sheet,
+  // Downloads / Statistics / Accounts / Logs / Jobs have no route on a phone at all.
   const tabs = [
-    { href: '/',         icon: iconBookOpen, label: 'Library',  perm: 'library:view' },
-    { href: '/sources',  icon: iconCube,     label: 'Sources',  perm: 'source:browse', matchPrefix: '/source' },
-    { href: '/search',   icon: iconSearch,   label: 'Search',   perm: 'source:browse' },
-    { href: '/updates',  icon: iconBell,     label: 'Updates',  perm: 'library:view' },
-    { href: '/settings', icon: iconSettings, label: 'Settings', perm: 'settings:view' },
-  ].filter(t => !t.perm || hasPermission(t.perm));
+    { href: '/',         icon: iconBookOpen, label: t('nav.library'), perm: 'library:view' },
+    { href: '/sources',  icon: iconCube,     label: t('nav.sources'), perm: 'source:browse', matchPrefix: '/source' },
+    { href: '/search',   icon: iconSearch,   label: t('nav.search'),  perm: 'source:browse' },
+    { href: '/updates',  icon: iconBell,     label: t('nav.updates'), perm: 'library:view' },
+  ].filter(tab => !tab.perm || hasPermission(tab.perm));
+
+  const moreItems = [
+    { href: '/settings',   icon: iconSettings,  label: t('nav.settings'),   perm: 'settings:view' },
+    { href: '/downloads',  icon: iconDownloads, label: t('nav.downloads'),  perm: 'chapter:download' },
+    { href: '/stats',      icon: iconStats,     label: t('nav.statistics'), perm: 'library:view' },
+    { href: '/accounts',   icon: iconAccounts,  label: t('nav.accounts'),   perm: 'user:manage' },
+    { href: '/admin/logs', icon: iconLogs,      label: t('nav.logs'),       perm: 'admin:view_logs' },
+    { href: '/jobs',       icon: iconRefresh,   label: t('nav.jobs'),       perm: 'admin:jobs' },
+  ];
 
   const inner = document.createElement('div');
   inner.className = 'flex h-full';
   inner.id = 'tab-bar-inner';
 
+  const _tabClass = 'tab-link flex flex-col items-center justify-center flex-1 gap-0.5 text-xs text-text-muted transition-colors hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent';
+
   for (const tab of tabs) {
     const a = document.createElement('a');
     a.href = tab.href;
-    a.className = 'tab-link flex flex-col items-center justify-center flex-1 gap-0.5 text-xs text-text-muted transition-colors hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent';
+    a.className = _tabClass;
     a.setAttribute('aria-label', tab.label);
     if (tab.matchPrefix) a.dataset.matchPrefix = tab.matchPrefix;
     a.innerHTML = `<span class="icon-md">${tab.icon}</span><span>${tab.label}</span>`;
     inner.appendChild(a);
+  }
+
+  if (moreItems.some(i => !i.perm || hasPermission(i.perm))) {
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.className = _tabClass;
+    moreBtn.setAttribute('aria-label', t('nav.more'));
+    moreBtn.setAttribute('aria-haspopup', 'dialog');
+    moreBtn.innerHTML = `<span class="icon-md">${iconEllipsisHorizontal}</span><span>${t('nav.more')}</span>`;
+    // Highlight "More" only when the current route lives behind it.
+    moreBtn.dataset.morePaths = moreItems.map(i => i.href).join(',');
+    moreBtn.addEventListener('click', () => showMoreSheet(moreItems));
+    inner.appendChild(moreBtn);
   }
 
   el.appendChild(inner);
@@ -263,10 +288,16 @@ function _renderBottomNav(el) {
  * @param {string} path
  */
 function _updateTabActive(el, path) {
-  for (const a of /** @type {NodeListOf<HTMLAnchorElement>} */ (el.querySelectorAll('.tab-link'))) {
-    const href = a.getAttribute('href') ?? '';
-    const matchPrefix = a.dataset.matchPrefix ?? href;
-    const isActive = href === '/' ? path === '/' : path.startsWith(matchPrefix);
+  for (const a of /** @type {NodeListOf<HTMLElement>} */ (el.querySelectorAll('.tab-link'))) {
+    let isActive;
+    if (a.dataset.morePaths != null) {
+      // "More" button: active when the path is one of its destinations.
+      isActive = a.dataset.morePaths.split(',').some(p => p && (p === '/' ? path === '/' : path.startsWith(p)));
+    } else {
+      const href = a.getAttribute('href') ?? '';
+      const matchPrefix = a.dataset.matchPrefix ?? href;
+      isActive = !matchPrefix ? false : (href === '/' ? path === '/' : path.startsWith(matchPrefix));
+    }
     a.classList.toggle('!text-accent', isActive);
     a.setAttribute('aria-current', isActive ? 'page' : 'false');
   }
@@ -306,14 +337,14 @@ function _handleServerRestart() {
   banner.className = 'fixed top-0 right-0 left-0 md:left-sidebar z-20 flex items-center gap-3 px-6 py-3 bg-warn/10 border-b border-warn/30 text-sm text-warn';
   banner.innerHTML = `
     <span aria-hidden="true" class="shrink-0 icon-sm">${iconWarning}</span>
-    <span class="flex-1">Server restarted. Reload to get the latest version.</span>
-    <button id="restart-reload-btn" class="btn-primary btn-sm ml-auto">Reload</button>
+    <span class="flex-1">${t('restart.banner.message')}</span>
+    <button id="restart-reload-btn" class="btn-primary btn-sm ml-auto">${t('restart.banner.reload')}</button>
   `;
   document.body.prepend(banner);
 
   document.getElementById('restart-reload-btn')?.addEventListener('click', async function () {
     this.disabled = true;
-    this.textContent = 'Waiting…';
+    this.textContent = t('restart.waiting');
     // Poll /ready until the server confirms it is fully initialised, then
     // reload. The SSE reconnect already proves the server is up, but the DB
     // and other subsystems may still be settling.
@@ -393,9 +424,9 @@ async function _maybeShowSecurityBanner(appEl) {
     banner.id = 'security-banner';
     banner.className = 'flex items-center gap-3 px-4 py-2 border-b border-warn/30 bg-warn/10 text-sm';
     banner.innerHTML = `
-      <span class="text-warn font-semibold shrink-0">Security notice:</span>
-      <span class="text-text flex-1">Enable two-factor authentication to protect your admin account.</span>
-      <a href="/settings?section=security" class="text-accent underline shrink-0">Enable 2FA</a>
+      <span class="text-warn font-semibold shrink-0">${t('security_banner.label')}</span>
+      <span class="text-text flex-1">${t('security_banner.message')}</span>
+      <a href="/settings?section=security" class="text-accent underline shrink-0">${t('security_banner.action')}</a>
     `;
     // Insert after the app-header element
     const header = appEl.querySelector('header');
@@ -440,7 +471,7 @@ function _registerGlobalShortcuts() {
       handler: () => showCheatsheet(),
     },
     {
-      key: '⌘K',
+      key: modKeyCombo('K'),
       description: 'Command palette',
       handler: () => {},
     },
@@ -464,8 +495,8 @@ function _showSwUpdateBanner(incoming) {
   banner.id = 'sw-update-banner';
   banner.className = 'fixed top-0 right-0 left-0 md:left-sidebar z-20 flex items-center gap-3 px-6 py-3 bg-surface-3 border-b border-border text-sm text-text';
   banner.innerHTML = `
-    <span class="flex-1">A new version is available.</span>
-    <button class="btn-primary btn-sm ml-auto" id="sw-update-reload">Update now</button>
+    <span class="flex-1">${t('sw_update.message')}</span>
+    <button class="btn-primary btn-sm ml-auto" id="sw-update-reload">${t('sw_update.action')}</button>
   `;
   document.body.prepend(banner);
 

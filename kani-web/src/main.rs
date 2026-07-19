@@ -439,8 +439,17 @@ async fn main() {
         .nest_service("/js", ServeDir::new(format!("{static_dir}/js")))
         .nest_service("/css", ServeDir::new(format!("{static_dir}/css")))
         .nest_service("/locales", ServeDir::new(format!("{static_dir}/locales")))
+        .nest_service("/fonts", ServeDir::new(format!("{static_dir}/fonts")))
+        .route_service(
+            "/changelog.md",
+            ServeFile::new(format!("{static_dir}/changelog.md")),
+        )
         .fallback_service(ServeFile::new(index_html))
         .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            kani_web::session_touch::session_touch_middleware,
+        ))
         .layer(auth_layer)
         .layer(CompressionLayer::new())
         .layer(SetResponseHeaderLayer::overriding(
@@ -465,7 +474,7 @@ async fn main() {
                 let script_src = if cfg!(debug_assertions) {
                     // Two hashes: the importmap script, then the FOUC theme-application
                     // script in index.html. Recompute (sha256, base64) if either changes.
-                    "script-src 'self' 'wasm-unsafe-eval' 'sha256-BJKz37AmPw+fUEipsvCRxBFhDsl5WKhFeDeCFQe5hGY=' 'sha256-a8Yu3uMo0VtuaKAhlOI+lhOQMvvd9KUuF32GGtk/iDw='"
+                    "script-src 'self' 'wasm-unsafe-eval' 'sha256-ZTuQJVyh0iAW+hoad/K7BcW9ZJN1l+yFJ/1Da8LGDJc=' 'sha256-OY6s4Q2QijBQ9AZF47LzWDgWw4/01jCMVcnpiCFAyRg='"
                 } else {
                     "script-src 'self' 'wasm-unsafe-eval'"
                 };

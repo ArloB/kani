@@ -200,10 +200,24 @@ pub struct JobStatus {
 #[derive(Debug, Default)]
 pub struct JobListFilter {
     pub job_type: Option<String>,
-    pub status: Option<String>,
+    /// Match any of these statuses. Empty means "no status filter" — the jobs UI
+    /// groups statuses per tab (active = pending+running, failed = failed+cancelled),
+    /// so a single-value filter can't express what it needs.
+    pub statuses: Vec<String>,
     pub limit: i64,
     pub offset: i64,
     pub user_id: Option<i64>,
+}
+
+/// One page of jobs plus the total matching count, so the UI can paginate.
+#[derive(Debug, serde::Serialize)]
+pub struct JobListPage {
+    pub jobs: Vec<JobSummary>,
+    pub total: i64,
+    /// Every job type present in the table (ignoring the current filter), so the
+    /// type filter can offer a complete option list rather than only what is on
+    /// the current page.
+    pub job_types: Vec<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1022,47 +1036,75 @@ impl JobManager {
         })
     }
 
-    pub async fn list_jobs(&self, filter: JobListFilter) -> Result<Vec<JobSummary>> {
+    pub async fn list_jobs(&self, filter: JobListFilter) -> Result<JobListPage> {
         let limit = filter.limit.clamp(1, 200);
         let offset = filter.offset.max(0);
 
-        let rows = sqlx::query!(
+        let mut qb = sqlx::QueryBuilder::new(
             "SELECT id, job_type, status, priority, description, created_at, \
-             started_at, completed_at, progress_json, error_json, user_id \
-             FROM jobs \
-             WHERE (? IS NULL OR job_type = ?) \
-               AND (? IS NULL OR status = ?) \
-               AND (? IS NULL OR user_id = ?) \
-             ORDER BY created_at DESC \
-             LIMIT ? OFFSET ?",
-            filter.job_type,
-            filter.job_type,
-            filter.status,
-            filter.status,
-            filter.user_id,
-            filter.user_id,
-            limit,
-            offset
-        )
-        .fetch_all(&self.pool)
-        .await?;
+             started_at, completed_at, progress_json, error_json, user_id, \
+             COUNT(*) OVER() AS total_count \
+             FROM jobs WHERE 1=1",
+        );
+        if let Some(ref jt) = filter.job_type {
+            qb.push(" AND job_type = ");
+            qb.push_bind(jt);
+        }
+        if !filter.statuses.is_empty() {
+            qb.push(" AND status IN (");
+            let mut sep = qb.separated(", ");
+            for s in &filter.statuses {
+                sep.push_bind(s);
+            }
+            qb.push(")");
+        }
+        if let Some(uid) = filter.user_id {
+            qb.push(" AND user_id = ");
+            qb.push_bind(uid);
+        }
+        qb.push(" ORDER BY created_at DESC LIMIT ");
+        qb.push_bind(limit);
+        qb.push(" OFFSET ");
+        qb.push_bind(offset);
 
-        Ok(rows
-            .into_iter()
+        let rows = qb.build().fetch_all(&self.pool).await?;
+
+        use sqlx::Row;
+        let total = rows
+            .first()
+            .map(|r| r.get::<i64, _>("total_count"))
+            .unwrap_or(0);
+
+        let jobs = rows
+            .iter()
             .map(|r| JobSummary {
-                id: r.id,
-                job_type: r.job_type,
-                status: r.status,
-                priority: r.priority,
-                description: r.description,
-                created_at: r.created_at,
-                started_at: r.started_at,
-                completed_at: r.completed_at,
-                progress: r.progress_json.and_then(|s| serde_json::from_str(&s).ok()),
-                error: r.error_json.and_then(|s| serde_json::from_str(&s).ok()),
-                user_id: r.user_id,
+                id: r.get("id"),
+                job_type: r.get("job_type"),
+                status: r.get("status"),
+                priority: r.get("priority"),
+                description: r.get("description"),
+                created_at: r.get("created_at"),
+                started_at: r.get("started_at"),
+                completed_at: r.get("completed_at"),
+                progress: r
+                    .get::<Option<String>, _>("progress_json")
+                    .and_then(|s| serde_json::from_str(&s).ok()),
+                error: r
+                    .get::<Option<String>, _>("error_json")
+                    .and_then(|s| serde_json::from_str(&s).ok()),
+                user_id: r.get("user_id"),
             })
-            .collect())
+            .collect();
+
+        let job_types = sqlx::query_scalar!("SELECT DISTINCT job_type FROM jobs ORDER BY job_type")
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(JobListPage {
+            jobs,
+            total,
+            job_types,
+        })
     }
 
     pub async fn prune_history(&self, max_history: usize) -> Result<u64> {

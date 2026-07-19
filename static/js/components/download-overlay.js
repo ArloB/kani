@@ -4,13 +4,13 @@
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
-import { getState, subscribe, updateState } from '../state.js';
+import { getState, subscribe, updateState } from '../cache.js';
 import { iconX } from '../icons.js';
 import { Icon } from './icon.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
-/** @typedef {import('../state.js').ChapterProgress} ChapterProgress */
+/** @typedef {import('../cache.js').ChapterProgress} ChapterProgress */
 
 function _statusLabel(status) {
   switch (status) {

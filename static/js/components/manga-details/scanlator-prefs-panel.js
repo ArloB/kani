@@ -10,6 +10,7 @@ import { EmptyState } from '../empty-state.js';
 import { Combobox } from '../combobox.js';
 import { iconX } from '../../icons.js';
 import { mountSortableList } from '../sortable-list.js';
+import { Tabs } from '../tabs.js';
 const html = htm.bind(h);
 
 /**
@@ -175,16 +176,17 @@ function ScanlatorPrefsPanel({ initialPrefs, initialMode, dbId, onPrefsChange })
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-3">
         <span class="text-sm font-medium text-text">${t('manga.scanlator.mode')}</span>
-        <button type="button"
-          class=${'btn-sm ' + (mode === 'priority' ? 'btn-primary' : 'btn-ghost')}
-          onClick=${() => handleModeChange('priority')}
-        >${t('manga.scanlator.mode.priority')}</button>
-        <button type="button"
-          class=${'btn-sm ' + (mode === 'whitelist' ? 'btn-primary' : 'btn-ghost')}
-          onClick=${() => handleModeChange('whitelist')}
-        >${t('manga.scanlator.mode.whitelist')}</button>
+        <${Tabs}
+          variant="pill"
+          tabs=${[
+            { id: 'priority', name: t('manga.scanlator.mode.priority') },
+            { id: 'whitelist', name: t('manga.scanlator.mode.whitelist') },
+          ]}
+          activeId=${mode}
+          onSelect=${(/** @type {string} */ id) => handleModeChange(id)}
+        />
       </div>
       <p class="text-xs text-text-muted">${mode === 'priority'
         ? t('manga.scanlator.mode.priority.desc')

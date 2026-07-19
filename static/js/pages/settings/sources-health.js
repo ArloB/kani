@@ -99,6 +99,9 @@ function _renderTable(card, rows) {
   }
 
   table.appendChild(tbody);
-  card.appendChild(table);
+  const scroller = document.createElement('div');
+  scroller.className = 'overflow-x-auto';
+  scroller.appendChild(table);
+  card.appendChild(scroller);
 }
 

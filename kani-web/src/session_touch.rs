@@ -40,12 +40,13 @@ pub async fn session_touch_middleware(
                 .and_then(|v| v.split(',').next())
                 .map(|s| s.trim().to_owned());
 
-            let svc = state.service.clone();
-            tokio::spawn(async move {
-                let _ = svc
-                    .touch_session(&sid, user_id, ua.as_deref(), ip.as_deref())
-                    .await;
-            });
+            if let Err(e) = state
+                .service
+                .touch_session(&sid, user_id, ua.as_deref(), ip.as_deref())
+                .await
+            {
+                tracing::debug!("session touch failed: {e}");
+            }
         }
     }
 

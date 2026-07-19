@@ -652,6 +652,8 @@ pub struct MangaListItem {
     pub cover_url: Option<String>,
     #[serde(default)]
     pub new_chapter_count: i64,
+    #[serde(default)]
+    pub resume: Option<ContinueReadingChapter>,
 }
 
 #[cfg(feature = "host")]
@@ -773,6 +775,8 @@ pub struct ChapterList {
     pub has_next_page: bool,
     #[serde(default)]
     pub total_pages: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u32>,
 }
 
 /// A sort option declared by an extension (e.g. for ordering a chapter list).
@@ -1406,6 +1410,7 @@ pub struct ContinueReadingChapter {
     pub chapter_id: i64,
     pub chapter_number: f64,
     pub last_page: i64,
+    pub page_count: i64,
 }
 
 #[cfg(all(test, feature = "host"))]
@@ -1519,6 +1524,7 @@ mod tests {
             title: "One Piece".into(),
             cover_url: Some("https://example.com/cover.jpg".into()),
             new_chapter_count: 5,
+            resume: None,
         });
     }
 
@@ -1539,6 +1545,7 @@ mod tests {
                 title: "A".into(),
                 cover_url: None,
                 new_chapter_count: 0,
+                resume: None,
             }],
             has_next_page: true,
             total_pages: Some(5),
@@ -1626,6 +1633,7 @@ mod tests {
             chapters: vec![],
             has_next_page: false,
             total_pages: None,
+            total: None,
         });
     }
 

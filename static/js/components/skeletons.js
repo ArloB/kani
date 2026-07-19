@@ -143,3 +143,18 @@ export function skeletonSettingsCards(count = 3) {
     </div>`;
   return `<div class="flex flex-col gap-3">${card.repeat(count)}</div>`;
 }
+
+/**
+ * Rows of label + value placeholders inside a single divided card,
+ * e.g. a source health/status summary.
+ * @param {number} count
+ * @returns {string}
+ */
+export function skeletonKeyValueRows(count = 4) {
+  const row = `
+    <div class="flex items-center justify-between gap-4 py-3">
+      <div class="skeleton h-4 w-32 rounded"></div>
+      <div class="skeleton h-4 w-16 rounded"></div>
+    </div>`;
+  return `<div class="flex flex-col divide-y divide-border-subtle">${row.repeat(count)}</div>`;
+}

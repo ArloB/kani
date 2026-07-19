@@ -2,7 +2,7 @@
 // Settings — Maintenance & Security (server-backed admin tunables).
 
 import * as api from '../../api.js';
-import { showToast, showApiError } from '../../components/toast.js';
+import { showToast } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkNumberRow, mkSelectRow } from './_shared.js';
 import { t } from '../../i18n.js';
 
@@ -73,35 +73,8 @@ export function mount(el, settings) {
     onChange: (v) => { maint.thumbnail_formats = v; },
   }));
 
-  const maintSaveRow = document.createElement('div');
-  maintSaveRow.className = 'flex items-center gap-3 px-4 py-3';
-  const maintSaveBtn = document.createElement('button');
-  maintSaveBtn.type = 'button';
-  maintSaveBtn.className = 'btn-primary btn-sm';
-  maintSaveBtn.textContent = t('settings.maintenance.save');
-  maintSaveRow.appendChild(maintSaveBtn);
-  maintCard.appendChild(maintSaveRow);
   el.appendChild(maintGroup);
 
-  maintSaveBtn.addEventListener('click', async () => {
-    maintSaveBtn.disabled = true;
-    try {
-      await api.updateSettings({
-        Maintenance: {
-          trash_retention_days: Number(maint.trash_retention_days),
-          audit_retention_days: Number(maint.audit_retention_days),
-          audit_security_retention_days: Number(maint.audit_security_retention_days),
-          disk_warn_threshold: Math.max(0, Math.min(100, Number(maint.disk_warn_pct))) / 100,
-          thumbnail_formats: String(maint.thumbnail_formats),
-        },
-      });
-      showToast(t('settings.maintenance.saved'), { type: 'success' });
-    } catch (e) {
-      showApiError(e);
-    } finally {
-      maintSaveBtn.disabled = false;
-    }
-  });
 
   // ── Security group ─────────────────────────────────────────────────────────
   const secGroup = mkSettingsGroup(t('settings.security.group'));
@@ -113,6 +86,7 @@ export function mount(el, settings) {
     id: 'sec_max_login_attempts',
     value: sec.max_login_attempts,
     min: 1,
+    stepper: true,
     onChange: (v) => { sec.max_login_attempts = v; },
   }));
   secCard.appendChild(mkNumberRow({
@@ -121,6 +95,7 @@ export function mount(el, settings) {
     id: 'sec_max_ip_attempts',
     value: sec.max_ip_attempts,
     min: 1,
+    stepper: true,
     onChange: (v) => { sec.max_ip_attempts = v; },
   }));
   secCard.appendChild(mkNumberRow({
@@ -141,34 +116,8 @@ export function mount(el, settings) {
     onChange: (v) => { sec.session_timeout_secs = v; },
   }));
 
-  const secSaveRow = document.createElement('div');
-  secSaveRow.className = 'flex items-center gap-3 px-4 py-3';
-  const secSaveBtn = document.createElement('button');
-  secSaveBtn.type = 'button';
-  secSaveBtn.className = 'btn-primary btn-sm';
-  secSaveBtn.textContent = t('settings.security.save');
-  secSaveRow.appendChild(secSaveBtn);
-  secCard.appendChild(secSaveRow);
   el.appendChild(secGroup);
 
-  secSaveBtn.addEventListener('click', async () => {
-    secSaveBtn.disabled = true;
-    try {
-      await api.updateSettings({
-        Security: {
-          max_login_attempts: Number(sec.max_login_attempts),
-          max_ip_attempts: Number(sec.max_ip_attempts),
-          login_lockout_seconds: Number(sec.login_lockout_seconds),
-          session_timeout_secs: Number(sec.session_timeout_secs),
-        },
-      });
-      showToast(t('settings.security.saved'), { type: 'success' });
-    } catch (e) {
-      showApiError(e);
-    } finally {
-      secSaveBtn.disabled = false;
-    }
-  });
 
   // ── Performance & schedules group ──────────────────────────────────────────
   /** @type {Record<string, number>} */
@@ -225,37 +174,47 @@ export function mount(el, settings) {
     onChange: (v) => { perf.trash_purge_interval_hours = v; },
   }));
 
-  const perfSaveRow = document.createElement('div');
-  perfSaveRow.className = 'flex items-center gap-3 px-4 py-3';
-  const perfSaveBtn = document.createElement('button');
-  perfSaveBtn.type = 'button';
-  perfSaveBtn.className = 'btn-primary btn-sm';
-  perfSaveBtn.textContent = t('settings.performance.save');
-  perfSaveRow.appendChild(perfSaveBtn);
-  perfCard.appendChild(perfSaveRow);
   el.appendChild(perfGroup);
 
-  perfSaveBtn.addEventListener('click', async () => {
-    perfSaveBtn.disabled = true;
-    try {
-      await api.updateSettings({
-        Performance: {
-          max_concurrent_jobs: Number(perf.max_concurrent_jobs),
-          db_maintenance_interval_hours: Number(perf.db_maintenance_interval_hours),
-          db_vacuum_interval_hours: Number(perf.db_vacuum_interval_hours),
-          audit_prune_interval_hours: Number(perf.audit_prune_interval_hours),
-          trash_purge_interval_hours: Number(perf.trash_purge_interval_hours),
-        },
-      });
-      showToast(t('settings.performance.saved'), { type: 'success' });
-    } catch (e) {
-      showApiError(e);
-    } finally {
-      perfSaveBtn.disabled = false;
-    }
-  });
+
+  const _snapshot = () => JSON.stringify([maint, sec, perf]);
+  let lastSaved = _snapshot();
+
+  async function _save() {
+    if (_snapshot() === lastSaved) return;
+    await api.updateSettings({
+      Maintenance: {
+        trash_retention_days: Number(maint.trash_retention_days),
+        audit_retention_days: Number(maint.audit_retention_days),
+        audit_security_retention_days: Number(maint.audit_security_retention_days),
+        disk_warn_threshold: Math.max(0, Math.min(100, Number(maint.disk_warn_pct))) / 100,
+        thumbnail_formats: String(maint.thumbnail_formats),
+      },
+    });
+    await api.updateSettings({
+      Security: {
+        max_login_attempts: Number(sec.max_login_attempts),
+        max_ip_attempts: Number(sec.max_ip_attempts),
+        login_lockout_seconds: Number(sec.login_lockout_seconds),
+        session_timeout_secs: Number(sec.session_timeout_secs),
+      },
+    });
+    await api.updateSettings({
+      Performance: {
+        max_concurrent_jobs: Number(perf.max_concurrent_jobs),
+        db_maintenance_interval_hours: Number(perf.db_maintenance_interval_hours),
+        db_vacuum_interval_hours: Number(perf.db_vacuum_interval_hours),
+        audit_prune_interval_hours: Number(perf.audit_prune_interval_hours),
+        trash_purge_interval_hours: Number(perf.trash_purge_interval_hours),
+      },
+    });
+    lastSaved = _snapshot();
+    showToast(t('settings.maintenance.saved'), { type: 'success' });
+  }
 
   return {
     destroy() { el.innerHTML = ''; },
+    isDirty() { return _snapshot() !== lastSaved; },
+    save: _save,
   };
 }

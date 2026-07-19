@@ -72,6 +72,7 @@ nav:
     - Request flow: developer/request-flow.md
     - Local development: developer/local-dev.md
     - Test conventions: developer/test-conventions.md
+    - Design system: developer/design-system.md
     - Release process: developer/release-process.md
   - API:
     - Overview: api/overview.md

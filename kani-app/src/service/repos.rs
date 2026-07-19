@@ -554,6 +554,22 @@ impl AppService {
         Ok(source_id)
     }
 
+    /// Install an interpreted-YAML extension from raw YAML bytes — the manual
+    /// add-source counterpart to `install_source` (WASM). Validates, saves to
+    /// storage, upserts the source row (find-or-create/revive by the YAML's own
+    /// id, so reinstalling a previously-removed source works), and hot-loads the
+    /// backend. Returns the source id.
+    pub async fn install_yaml_source(&self, bytes: &[u8]) -> Result<i64> {
+        let settings = self.settings.read().await;
+        let storage_path = settings
+            .wasm_storage_path
+            .to_str()
+            .ok_or_else(|| ServiceError::Internal("Failed to convert storage path".to_string()))?
+            .to_string();
+        drop(settings);
+        self.install_yaml_artifact(bytes, &storage_path, None).await
+    }
+
     async fn install_yaml_artifact(
         &self,
         bytes: &[u8],

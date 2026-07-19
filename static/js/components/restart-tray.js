@@ -12,6 +12,7 @@ import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { getLocal, setLocal, getJsonSafe } from '../utils.js';
 import { iconWarning } from '../icons.js';
+import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 const KEY_NEEDED  = 'kani_restart_needed';
@@ -76,13 +77,13 @@ function RestartTray({ currentBootId, onRestart }) {
     <div class="warn-tray mb-4" role="status">
       <span class="shrink-0 icon-sm" aria-hidden="true">${html([iconWarning])}</span>
       <div class="flex-1">
-        <strong>Restart required</strong>
+        <strong>${t('restart_tray.required')}</strong>
         <div class="flex flex-wrap gap-1 mt-1">
           ${fields.map(f => html`<span class="dirty-chip">${f}</span>`)}
         </div>
       </div>
       <button type="button" class="btn-primary btn-sm shrink-0" onClick=${onRestart}>
-        Restart now
+        ${t('restart_tray.action')}
       </button>
     </div>
   `;

@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
 import { Modal } from './modal.js';
+import { Checkbox } from './form/checkbox.js';
 import { t } from '../i18n.js';
 
 const html = htm.bind(h);
@@ -154,10 +155,11 @@ function CodesStep({ codes, confirmed, onConfirm, onDone }) {
         <button type="button" class="btn-ghost btn-sm flex-1" onClick=${copyAll}>${copied ? t('common.copied') : t('totp.codes.copy_all')}</button>
         <button type="button" class="btn-ghost btn-sm flex-1" onClick=${downloadCodes}>${t('totp.codes.download')}</button>
       </div>
-      <label class="flex items-center gap-2 text-sm cursor-pointer">
-        <input type="checkbox" class="rounded" checked=${confirmed} onChange=${e => onConfirm(e.target.checked)} />
-        ${t('totp.codes.saved_label')}
-      </label>
+      <${Checkbox}
+        label=${t('totp.codes.saved_label')}
+        checked=${confirmed}
+        onChange=${(/** @type {boolean} */ v) => onConfirm(v)}
+      />
       <div class="flex justify-end mt-2">
         <button type="button" class="btn-primary btn-sm" disabled=${!confirmed} onClick=${onDone}>${t('totp.action.done')}</button>
       </div>

@@ -5,11 +5,14 @@ import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../api.js';
-import { hasPermission, getState, subscribe } from '../state.js';
+import { hasPermission } from '../session.js';
 import { navigate } from '../router.js';
-import { getLocal, getLocalInt, setLocal, formatChapterTitle, hasNextPage, isChapterDownloaded, confirmDialog } from '../utils.js';
+import { getLocal, getLocalInt, setLocal, formatChapterTitle, hasNextPage, isChapterDownloaded } from '../utils.js';
+import { replaceState } from '../url-params.js';
 import { VirtualChapterList } from '../components/virtual-chapter-list.js';
 import { renderPagination } from '../components/pagination.js';
+import { Select } from '../components/form/select.js';
+import { PageSizeSelect } from '../components/page-size-select.js';
 import { skeletonMangaHero } from '../components/skeletons.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
@@ -18,13 +21,14 @@ import { mountMigrationDialogue } from '../components/migration-dialogue.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { renderTabs } from '../components/tabs.js';
 import { showToast, showApiError } from '../components/toast.js';
-import { Modal, mountIntoModalRoot } from '../components/modal.js';
+import { Modal, mountIntoModalRoot, showConfirm } from '../components/modal.js';
 import { iconDocument } from '../icons.js';
 import { getCachedChapterIds, onChapterCached } from '../offline.js';
 import { mountMangaHeader } from '../components/manga-details/manga-header.js';
 import { mountLibrarySettingsPanel } from '../components/manga-details/library-settings-panel.js';
 import { mountMetadataPanel } from '../components/manga-details/metadata-panel.js';
 import { mountTrackerPanel } from '../components/manga-details/tracker-panel.js';
+import { mountVolumesPanel } from '../components/manga-details/volumes-panel.js';
 import { mountCategoryPicker } from '../components/manga-details/category-picker.js';
 import { mountDownloadRulesPanel } from '../components/manga-details/download-rules-panel.js';
 import { mountScanlatorPrefsPanel } from '../components/manga-details/scanlator-prefs-panel.js';
@@ -36,15 +40,15 @@ const html = htm.bind(h);
 // ── URL state ─────────────────────────────────────────────────────────────────
 
 function _updateUrl() {
-  const params = new URLSearchParams(location.search);
-  if (_page > 1) { params.set('page', String(_page)); } else { params.delete('page'); }
-  if (_sortOrder && _sortOrder !== 'chapter_desc') { params.set('sort', _sortOrder); } else { params.delete('sort'); }
-  if (!_isLocal && _remoteSort) { params.set('rsort', _remoteSort); } else { params.delete('rsort'); }
-  if (_filterDownloaded) { params.set('dl', '1'); } else { params.delete('dl'); }
-  if (_filterUnread) { params.set('unread', '1'); } else { params.delete('unread'); }
-  if (_filterScanlator) { params.set('scanlator', _filterScanlator); } else { params.delete('scanlator'); }
-  const qs = params.toString();
-  history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+  replaceState({
+    from_source: _fromSourceId || null,
+    page: _page > 1 ? _page : null,
+    sort: (_sortOrder && _sortOrder !== 'chapter_desc') ? _sortOrder : null,
+    rsort: (!_isLocal && _remoteSort) ? _remoteSort : null,
+    dl: _filterDownloaded ? '1' : null,
+    unread: _filterUnread ? '1' : null,
+    scanlator: _filterScanlator || null,
+  });
 }
 
 // ── Module state ──────────────────────────────────────────────────────────────
@@ -72,6 +76,7 @@ let _kccAvailable = false;
 /** @type {(() => void)|null} */ let _unsubscribeCacheMsgs = null;
 /** @type {string[]} */ let _availableScanlators = [];
 let _allSelected = false;
+let _fromSourceId = /** @type {string|null} */ (null);
 
 /** @type {Array<{id:string,name:string}>|null} */ let _remoteChapterSorts = null;
 /** @type {string|null} */ let _remoteSort = null;
@@ -82,9 +87,11 @@ let _manageMounted = false;
 
 /** @type {AbortController|null} */ let _abort = null;
 /** @type {((e: Event) => void)|null} */ let _sseListener = null;
+/** @type {((e: KeyboardEvent) => void)|null} */ let _escHandler = null;
 /** @type {(() => void)|null} */   let _destroyPagination = null;
 /** @type {(() => void)|null} */   let _unmountMigration = null;
 /** @type {HTMLElement|null} */ let _listContainerEl = null;
+/** @type {HTMLElement[]} */ let _toolbarMounts = [];
 /** @type {HTMLElement|null} */ let _paginEl = null;
 /** @type {(() => void)|null} */ let _destroyHeader = null;
 /** @type {HTMLElement|null} */ let _streamingBannerEl = null;
@@ -234,7 +241,7 @@ export async function init(container, params) {
   wrap.className = 'max-w-page w-full mx-auto px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6 md:gap-8';
   container.appendChild(wrap);
 
-  const _fromSourceId = new URLSearchParams(location.search).get('from_source');
+  _fromSourceId = new URLSearchParams(location.search).get('from_source');
   // Breadcrumbs are mutually exclusive: either we came from the library
   // or from a source — never both at once.
   const _mangaTitle = info?.title ?? 'Manga';
@@ -265,8 +272,37 @@ export async function init(container, params) {
   })();
   setPageHeader({ crumbs, actions: _headerActions });
 
+  // ── Hero: cover-derived backdrop + display-face title ──
+  // The page had no heading at all — the title only appeared in the breadcrumb.
+  // The backdrop sits behind the top of the content so the cover (first child of
+  // leftCol) floats on it.
+  const heroCoverUrl = _isLocal
+    ? api.getMangaCoverUrl(_dbId, 'lg')
+    : (info?.cover_url ?? info?.cover_image_url ?? null);
+
+  const hero = document.createElement('div');
+  hero.className = 'manga-hero';
+  if (heroCoverUrl) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'manga-hero__backdrop';
+    backdrop.style.backgroundImage = `url("${heroCoverUrl.replace(/"/g, '%22')}")`;
+    hero.appendChild(backdrop);
+  }
+  const heroInner = document.createElement('div');
+  heroInner.className = 'manga-hero__inner';
+  const heroTitle = document.createElement('h1');
+  heroTitle.className = 'manga-hero__title';
+  heroTitle.textContent = _mangaTitle;
+  heroInner.appendChild(heroTitle);
+  hero.appendChild(heroInner);
+  // The hero sits OUTSIDE the max-w-page wrapper: the band must bleed across
+  // the whole pane (on wide monitors a wrapper-bound band floats as an island
+  // with hard vertical seams). The inner div re-centres the title onto the
+  // same content grid as the columns below.
+  container.insertBefore(hero, wrap);
+
   const layout = document.createElement('div');
-  layout.className = 'flex flex-col md:flex-row gap-6 md:gap-8 md:items-start';
+  layout.className = 'flex flex-col md:flex-row gap-6 md:gap-8 md:items-start manga-hero__body';
   wrap.appendChild(layout);
 
   const leftCol = document.createElement('div');
@@ -416,6 +452,14 @@ export async function init(container, params) {
     }
   };
   window.addEventListener('kani:sse', _sseListener);
+
+  // Escape leaves chapter select mode.
+  _escHandler = (e) => {
+    if (e.key === 'Escape' && _selectMode) {
+      _selectMode = false; _selected.clear(); _allSelected = false; _renderChapterList();
+    }
+  };
+  document.addEventListener('keydown', _escHandler);
 }
 
 // ── Tabs (local only) ─────────────────────────────────────────────────────────
@@ -425,8 +469,11 @@ function _renderTabs(wrap) {
   _contentSection = tabContent;
 
   const tabBar = document.createElement('div');
-  renderTabs(tabBar, {
-    tabs: [{ id: 'chapters', name: 'Chapters' }, { id: 'manage', name: 'Manage' }],
+  const tabsHandle = renderTabs(tabBar, {
+    tabs: [
+      { id: 'chapters', name: t('manga.details.tab.chapters') },
+      { id: 'manage', name: t('manga.details.tab.manage') },
+    ],
     activeId: _activeTab,
     onSelect: switchTab,
   });
@@ -436,6 +483,7 @@ function _renderTabs(wrap) {
 
   function switchTab(/** @type {string} */ tab) {
     _activeTab = tab;
+    tabsHandle.update(tab);
     if (_listContainerEl) { render(null, _listContainerEl); _listContainerEl = null; }
     _destroyPagination?.();
     _destroyPagination = null;
@@ -463,7 +511,27 @@ async function _renderManageTab(contentEl) {
   if (_manageMounted) return;
   _manageMounted = true;
 
-  contentEl.className = 'flex flex-col gap-8';
+  contentEl.className = 'flex flex-col gap-4';
+
+  const manageTabBar = document.createElement('div');
+  manageTabBar.className = 'sticky top-0 z-10 bg-bg pb-1';
+  contentEl.appendChild(manageTabBar);
+
+  const groupsWrap = document.createElement('div');
+  contentEl.appendChild(groupsWrap);
+
+  const mkGroup = () => {
+    const g = document.createElement('div');
+    g.className = 'flex flex-col gap-8';
+    return g;
+  };
+  const manageGroups = {
+    metadata: mkGroup(),
+    library: mkGroup(),
+    tracking: mkGroup(),
+    downloads: mkGroup(),
+    danger: mkGroup(),
+  };
 
   function applyManageHeight() {
     if (window.innerWidth >= 768) {
@@ -486,9 +554,9 @@ async function _renderManageTab(contentEl) {
   if (hasPermission('library:manage') && _isLocal) {
     const metaSection = document.createElement('div');
     metaSection.className = 'flex flex-col gap-3';
-    metaSection.appendChild(mkSectionHeader('Edit Metadata', 'Override title, description, status, authors, artists, tags, and cover. Source data is preserved and restored on refresh unless overridden.'));
+    metaSection.appendChild(mkSectionHeader(t('manga.details.metadata.section'), t('manga.details.metadata.section.desc')));
     mountMetadataPanel(metaSection, { dbId: _dbId, mangaData: _mangaData });
-    contentEl.appendChild(metaSection);
+    manageGroups.metadata.appendChild(metaSection);
   }
 
   // ── 0b. Enrich Metadata ──────────────────────────────────────────────────────
@@ -505,7 +573,7 @@ async function _renderManageTab(contentEl) {
     enrichBtn.addEventListener('click', () => _openEnrichMetadataModal());
     enrichCard.appendChild(mkItem(mkRow(t('manga.details.enrich.row'), t('manga.details.enrich.row.desc'), enrichBtn)));
     enrichSection.appendChild(enrichCard);
-    contentEl.appendChild(enrichSection);
+    manageGroups.metadata.appendChild(enrichSection);
   }
 
   // ── 1. Library ──────────────────────────────────────────────────────────────
@@ -519,7 +587,7 @@ async function _renderManageTab(contentEl) {
     section.className = 'flex flex-col gap-3';
     section.appendChild(mkSectionHeader(t('manga.details.library.section'), t('manga.details.library.section.desc')));
     mountLibrarySettingsPanel(section, { dbId: _dbId, autoScan: _autoScan });
-    contentEl.appendChild(section);
+    manageGroups.library.appendChild(section);
   }
 
   // ── 1a. Volumes ────────────────────────────────────────────────────────────
@@ -528,8 +596,8 @@ async function _renderManageTab(contentEl) {
     const volumesSection = document.createElement('div');
     volumesSection.className = 'flex flex-col gap-3';
     volumesSection.appendChild(mkSectionHeader(t('manga.details.volumes.section'), t('manga.details.volumes.section.desc')));
-    contentEl.appendChild(volumesSection);
-    _mountVolumesPanel(volumesSection, _dbId);
+    manageGroups.library.appendChild(volumesSection);
+    mountVolumesPanel(volumesSection, _dbId);
   }
 
   // ── 1b–1c. Tracking ────────────────────────────────────────────────────────
@@ -538,8 +606,8 @@ async function _renderManageTab(contentEl) {
     const trackSection = document.createElement('div');
     trackSection.className = 'flex flex-col gap-3';
     trackSection.appendChild(mkSectionHeader(t('manga.details.tracking.section'), t('manga.details.tracking.section.desc')));
-    mountTrackerPanel(trackSection, { dbId: _dbId });
-    contentEl.appendChild(trackSection);
+    mountTrackerPanel(trackSection, { dbId: _dbId, title: _mangaData?.title ?? '' });
+    manageGroups.tracking.appendChild(trackSection);
   }
 
   // ── 1d. Notes ──────────────────────────────────────────────────────────────
@@ -602,7 +670,7 @@ async function _renderManageTab(contentEl) {
 
     notesCard.appendChild(notesWrap);
     notesSection.appendChild(notesCard);
-    contentEl.appendChild(notesSection);
+    manageGroups.metadata.appendChild(notesSection);
   }
 
   // ── 2. Filters & Preferences ────────────────────────────────────────────────
@@ -616,25 +684,27 @@ async function _renderManageTab(contentEl) {
     ]).then(r => r.map(s => s.status === 'fulfilled' ? s.value : []));
     _scanlatorPrefs = Array.isArray(scanlatorPrefs) ? scanlatorPrefs : [];
 
-    const section = document.createElement('div');
-    section.className = 'flex flex-col gap-3';
-    section.appendChild(mkSectionHeader('Filters & Preferences', 'Control how chapters are organised, filtered, and prioritised.'));
-
-    const catsCard = mkTitledCard('Categories', 'Assign this manga to categories to keep your library organised. Toggle a category to add or remove it.');
+    const catsSection = document.createElement('div');
+    catsSection.className = 'flex flex-col gap-3';
+    const catsCard = mkTitledCard(t('manga.details.categories.title'), t('manga.details.categories.desc'));
     mountCategoryPicker(catsCard, cats, mangaCats, _dbId);
-    section.appendChild(catsCard);
+    catsSection.appendChild(catsCard);
+    manageGroups.library.appendChild(catsSection);
 
-    const rulesCard = mkTitledCard('Download Filters', 'Controls which chapters are automatically downloaded during scans. Rules are applied when new chapters are found.');
+    const dlSection = document.createElement('div');
+    dlSection.className = 'flex flex-col gap-3';
+
+    const rulesCard = mkTitledCard(t('manga.details.download_filters.title'), t('manga.details.download_filters.desc'));
     mountDownloadRulesPanel(rulesCard, rules, _dbId);
-    section.appendChild(rulesCard);
+    dlSection.appendChild(rulesCard);
 
-    const prefsCard = mkTitledCard('Scanlator Preferences', 'Priority and block settings for scanlators. Affects both auto-download and reader navigation.');
+    const prefsCard = mkTitledCard(t('manga.details.scanlator_prefs.title'), t('manga.details.scanlator_prefs.desc'));
     mountScanlatorPrefsPanel(prefsCard, _scanlatorPrefs, _scanlatorMode, _dbId, (updated) => {
       _scanlatorPrefs = updated;
     });
-    section.appendChild(prefsCard);
+    dlSection.appendChild(prefsCard);
 
-    contentEl.appendChild(section);
+    manageGroups.downloads.appendChild(dlSection);
   }
 
   // ── 3. Danger Zone ──────────────────────────────────────────────────────────
@@ -676,9 +746,8 @@ async function _renderManageTab(contentEl) {
       removeBtn.className = 'btn-danger btn-sm';
       removeBtn.textContent = t('manga.details.remove');
       removeBtn.addEventListener('click', async () => {
-        const confirmed = await confirmDialog({
+        const confirmed = await showConfirm(t('manga.details.remove.confirm.body'), {
           title: t('manga.details.remove.confirm.title'),
-          message: t('manga.details.remove.confirm.body'),
           confirmLabel: t('manga.details.remove'),
           danger: true,
         });
@@ -711,8 +780,39 @@ async function _renderManageTab(contentEl) {
     }
 
     section.appendChild(card);
-    contentEl.appendChild(section);
+    manageGroups.danger.appendChild(section);
   }
+
+  const tabDefs = /** @type {Array<[keyof typeof manageGroups, string]>} */ ([
+    ['metadata', t('manga.manage.tab.metadata')],
+    ['library', t('manga.manage.tab.library')],
+    ['tracking', t('manga.manage.tab.tracking')],
+    ['downloads', t('manga.manage.tab.downloads')],
+    ['danger', t('manga.manage.tab.danger')],
+  ]).filter(([id]) => manageGroups[id].children.length > 0);
+
+  if (tabDefs.length === 0) return;
+
+  let activeGroup = /** @type {string} */ (getLocal('kani_manage_tab') ?? '');
+  if (!tabDefs.some(([id]) => id === activeGroup)) activeGroup = tabDefs[0][0];
+
+  for (const [id] of tabDefs) {
+    manageGroups[id].classList.toggle('hidden', id !== activeGroup);
+    groupsWrap.appendChild(manageGroups[id]);
+  }
+
+  const tabsHandle = renderTabs(manageTabBar, {
+    tabs: tabDefs.map(([id, name]) => ({ id, name })),
+    activeId: activeGroup,
+    variant: 'pill',
+    onSelect: (id) => {
+      activeGroup = id;
+      setLocal('kani_manage_tab', id);
+      for (const [gid] of tabDefs) manageGroups[gid].classList.toggle('hidden', gid !== id);
+      tabsHandle.update(id);
+      contentEl.scrollTop = 0;
+    },
+  });
 }
 
 // ── Chapter helpers ───────────────────────────────────────────────────────────
@@ -946,6 +1046,8 @@ async function _fetchChapters(sectionEl) {
   const infinite = getLocal('kani_chapter_pagination') === 'infinite';
 
   if (_listContainerEl) { render(null, _listContainerEl); _listContainerEl = null; }
+  for (const el of _toolbarMounts) render(null, el);
+  _toolbarMounts = [];
   _destroyPagination?.();
   _destroyPagination = null;
   if (_chapterResizeListener) { window.removeEventListener('resize', _chapterResizeListener); _chapterResizeListener = null; }
@@ -960,123 +1062,123 @@ async function _fetchChapters(sectionEl) {
   header.className = 'flex items-center justify-between gap-3 flex-wrap';
 
   const headerTitle = document.createElement('h2');
-  headerTitle.className = 'text-xl font-semibold text-text';
+  headerTitle.className = 'text-sm font-medium text-text-muted';
   headerTitle.textContent = t('manga.details.chapters');
   header.appendChild(headerTitle);
 
   const controls = document.createElement('div');
   controls.className = 'flex items-center gap-2 flex-wrap';
 
-  const sortEl = document.createElement('select');
-  sortEl.className = 'input w-auto text-sm';
-  sortEl.setAttribute('aria-label', t('manga.details.sort.aria'));
+  const mountControl = (/** @type {any} */ vnode) => {
+    const el = document.createElement('div');
+    el.className = 'shrink-0';
+    render(vnode, el);
+    _toolbarMounts.push(el);
+    controls.appendChild(el);
+  };
 
   if (!_isLocal && _remoteChapterSorts && _remoteChapterSorts.length > 0) {
-    for (const { id, name } of _remoteChapterSorts) {
-      const opt = document.createElement('option');
-      opt.value = id; opt.textContent = name;
-      if (id === _remoteSort) opt.selected = true;
-      sortEl.appendChild(opt);
-    }
-    sortEl.addEventListener('change', () => {
-      _remoteSort = sortEl.value;
-      _allRemoteChapters = null;
-      _page = 1; _updateUrl(); _fetchChapters(sectionEl);
-    });
+    mountControl(html`<${Select}
+      options=${_remoteChapterSorts.map((/** @type {{id:string,name:string}} */ s) => ({ value: s.id, label: s.name }))}
+      value=${_remoteSort}
+      ariaLabel=${t('manga.details.sort.aria')}
+      onChange=${(/** @type {string} */ v) => {
+        _remoteSort = v;
+        _allRemoteChapters = null;
+        _page = 1; _updateUrl(); _fetchChapters(sectionEl);
+      }}
+    />`);
   } else {
-    for (const [v, l] of [
-      ['chapter_desc', 'Chapter ↓'], ['chapter_asc', 'Chapter ↑'],
-      ['uploaded_desc', 'Date ↓'], ['uploaded_asc', 'Date ↑'],
-      ['volume_desc', 'Volume ↓'], ['volume_asc', 'Volume ↑'],
-      ['language_asc', 'Language A–Z'], ['language_desc', 'Language Z–A'],
-      ['scanlator_asc', 'Scanlator A–Z'], ['scanlator_desc', 'Scanlator Z–A'],
-    ]) {
-      const opt = document.createElement('option');
-      opt.value = v; opt.textContent = l;
-      if (v === _sortOrder) opt.selected = true;
-      sortEl.appendChild(opt);
-    }
-    sortEl.addEventListener('change', () => {
-      _sortOrder = sortEl.value;
-      setLocal('kani_chapter_sort_order', _sortOrder);
-      _page = 1;
-      if (_allRemoteChapters !== null) _allRemoteChapters = _sortChaptersClientSide(_allRemoteChapters, _sortOrder);
-      _updateUrl(); _fetchChapters(sectionEl);
-    });
+    const sortOptions = [
+      ['chapter_desc', t('manga.details.sort.chapter_desc')],
+      ['chapter_asc', t('manga.details.sort.chapter_asc')],
+      ['uploaded_desc', t('manga.details.sort.uploaded_desc')],
+      ['uploaded_asc', t('manga.details.sort.uploaded_asc')],
+      ['volume_desc', t('manga.details.sort.volume_desc')],
+      ['volume_asc', t('manga.details.sort.volume_asc')],
+      ['language_asc', t('manga.details.sort.language_asc')],
+      ['language_desc', t('manga.details.sort.language_desc')],
+      ['scanlator_asc', t('manga.details.sort.scanlator_asc')],
+      ['scanlator_desc', t('manga.details.sort.scanlator_desc')],
+    ].map(([value, label]) => ({ value, label }));
+    mountControl(html`<${Select}
+      options=${sortOptions}
+      value=${_sortOrder}
+      ariaLabel=${t('manga.details.sort.aria')}
+      onChange=${(/** @type {string} */ v) => {
+        _sortOrder = v;
+        setLocal('kani_chapter_sort_order', _sortOrder);
+        _page = 1;
+        if (_allRemoteChapters !== null) _allRemoteChapters = _sortChaptersClientSide(_allRemoteChapters, _sortOrder);
+        _updateUrl(); _fetchChapters(sectionEl);
+      }}
+    />`);
   }
-  controls.appendChild(sortEl);
 
   if (!infinite) {
-    const sizeEl = document.createElement('select');
-    sizeEl.className = 'input w-20 text-sm';
-    sizeEl.setAttribute('aria-label', t('manga.details.page_size.aria'));
-    for (const n of [20, 50, 100]) {
-      const opt = document.createElement('option');
-      opt.value = String(n); opt.textContent = String(n);
-      if (n === _chapterPageSize) opt.selected = true;
-      sizeEl.appendChild(opt);
-    }
-    sizeEl.addEventListener('change', () => {
-      _chapterPageSize = Number(sizeEl.value);
-      setLocal('kani_chapter_page_size', String(_chapterPageSize));
-      _page = 1; _updateUrl(); _fetchChapters(sectionEl);
-    });
-    controls.appendChild(sizeEl);
+    mountControl(html`<${PageSizeSelect}
+      options=${[20, 50, 100]}
+      value=${_chapterPageSize}
+      ariaLabel=${t('manga.details.page_size.aria')}
+      onChange=${(/** @type {number} */ n) => {
+        _chapterPageSize = n;
+        setLocal('kani_chapter_page_size', String(_chapterPageSize));
+        _page = 1; _updateUrl(); _fetchChapters(sectionEl);
+      }}
+    />`);
   }
 
   if (_isLocal) {
-    const dlBtn = document.createElement('button');
-    dlBtn.type = 'button';
-    dlBtn.className = 'btn-ghost btn-sm' + (_filterDownloaded ? ' text-accent' : '');
-    dlBtn.textContent = t('manga.details.filter.downloaded');
-    dlBtn.title = _filterDownloaded ? t('manga.details.filter.all') : t('manga.details.filter.downloaded.show');
-    dlBtn.addEventListener('click', () => {
-      _filterDownloaded = !_filterDownloaded;
-      setLocal(`kani_filter_downloaded_${_dbId}`, String(_filterDownloaded));
-      _page = 1; _updateUrl(); _fetchChapters(sectionEl);
-    });
-    controls.appendChild(dlBtn);
+    const mkFilterChip = (/** @type {string} */ label, /** @type {boolean} */ active, /** @type {string} */ title, /** @type {() => void} */ onClick) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = active ? 'chip chip-active' : 'chip';
+      b.setAttribute('aria-pressed', String(active));
+      b.textContent = label;
+      b.title = title;
+      b.addEventListener('click', onClick);
+      controls.appendChild(b);
+    };
 
-    const unreadBtn = document.createElement('button');
-    unreadBtn.type = 'button';
-    unreadBtn.className = 'btn-ghost btn-sm' + (_filterUnread ? ' text-accent' : '');
-    unreadBtn.textContent = t('manga.details.filter.unread');
-    unreadBtn.title = _filterUnread ? t('manga.details.filter.all') : t('manga.details.filter.unread.show');
-    unreadBtn.addEventListener('click', () => {
-      _filterUnread = !_filterUnread;
-      _page = 1; _updateUrl(); _fetchChapters(sectionEl);
-    });
-    controls.appendChild(unreadBtn);
-
-    const cachedBtn = document.createElement('button');
-    cachedBtn.type = 'button';
-    cachedBtn.className = 'btn-ghost btn-sm' + (_filterCached ? ' text-accent' : '');
-    cachedBtn.textContent = t('manga.details.filter.cached');
-    cachedBtn.title = _filterCached ? t('manga.details.filter.all') : t('manga.details.filter.cached.show');
-    cachedBtn.addEventListener('click', () => {
-      _filterCached = !_filterCached;
-      _renderChapterList();
-    });
-    controls.appendChild(cachedBtn);
+    mkFilterChip(
+      t('manga.details.filter.downloaded'), _filterDownloaded,
+      _filterDownloaded ? t('manga.details.filter.all') : t('manga.details.filter.downloaded.show'),
+      () => {
+        _filterDownloaded = !_filterDownloaded;
+        setLocal(`kani_filter_downloaded_${_dbId}`, String(_filterDownloaded));
+        _page = 1; _updateUrl(); _fetchChapters(sectionEl);
+      },
+    );
+    mkFilterChip(
+      t('manga.details.filter.unread'), _filterUnread,
+      _filterUnread ? t('manga.details.filter.all') : t('manga.details.filter.unread.show'),
+      () => {
+        _filterUnread = !_filterUnread;
+        _page = 1; _updateUrl(); _fetchChapters(sectionEl);
+      },
+    );
+    mkFilterChip(
+      t('manga.details.filter.cached'), _filterCached,
+      _filterCached ? t('manga.details.filter.all') : t('manga.details.filter.cached.show'),
+      () => {
+        _filterCached = !_filterCached;
+        _renderChapterList();
+      },
+    );
 
     if (_availableScanlators.length > 1) {
-      const scanSel = document.createElement('select');
-      scanSel.className = 'input w-auto text-sm';
-      scanSel.setAttribute('aria-label', t('manga.details.scanlator.aria'));
-      const allOpt = document.createElement('option');
-      allOpt.value = ''; allOpt.textContent = t('manga.details.all_scanlators');
-      scanSel.appendChild(allOpt);
-      for (const s of _availableScanlators) {
-        const opt = document.createElement('option');
-        opt.value = s; opt.textContent = s;
-        if (s === _filterScanlator) opt.selected = true;
-        scanSel.appendChild(opt);
-      }
-      scanSel.addEventListener('change', () => {
-        _filterScanlator = scanSel.value || null;
-        _page = 1; _updateUrl(); _fetchChapters(sectionEl);
-      });
-      controls.appendChild(scanSel);
+      mountControl(html`<${Select}
+        options=${[
+          { value: '', label: t('manga.details.all_scanlators') },
+          ..._availableScanlators.map((/** @type {string} */ s) => ({ value: s, label: s })),
+        ]}
+        value=${_filterScanlator ?? ''}
+        ariaLabel=${t('manga.details.scanlator.aria')}
+        onChange=${(/** @type {string} */ v) => {
+          _filterScanlator = v || null;
+          _page = 1; _updateUrl(); _fetchChapters(sectionEl);
+        }}
+      />`);
     }
   }
 
@@ -1144,6 +1246,13 @@ async function _fetchChapters(sectionEl) {
     }
     mapped = rawChapters.map(_mapChapter);
     hasNext = hasNextPage(result, rawChapters.length, _chapterPageSize);
+  }
+
+  const totalCount = _isLocal
+    ? (typeof result?.total === 'number' ? result.total : null)
+    : (_allRemoteChapters !== null ? _allRemoteChapters.length : null);
+  if (totalCount != null && totalCount > 0) {
+    headerTitle.textContent = t('manga.details.chapter_count', { count: totalCount, s: totalCount === 1 ? '' : 's' });
   }
 
   if (infinite) {
@@ -1296,9 +1405,8 @@ function _renderChapterList() {
     onBulkDelete=${async () => {
       const ids = [..._selected].filter(id => { const ch = _chapters.find(c => c.id === id); return ch && ch.downloaded; });
       if (!ids.length) return;
-      const ok = await confirmDialog({
+      const ok = await showConfirm(t('manga.details.bulk.delete.body'), {
         title: t('manga.details.bulk.delete.confirm', { count: ids.length, s: ids.length !== 1 ? 's' : '' }),
-        message: t('manga.details.bulk.delete.body'),
         confirmLabel: t('common.delete'),
         danger: true,
       });
@@ -1375,6 +1483,7 @@ export function destroy(container) {
   _abort?.abort();
   _abort = null;
   if (_sseListener) { window.removeEventListener('kani:sse', _sseListener); _sseListener = null; }
+  if (_escHandler) { document.removeEventListener('keydown', _escHandler); _escHandler = null; }
   _clearStreamingCounter();
   _unsubscribeCacheMsgs?.();
   _unsubscribeCacheMsgs = null;
@@ -1385,6 +1494,8 @@ export function destroy(container) {
   if (_chapterResizeListener) { window.removeEventListener('resize', _chapterResizeListener); _chapterResizeListener = null; }
   if (_manageResizeListener) { window.removeEventListener('resize', _manageResizeListener); _manageResizeListener = null; }
   if (_listContainerEl) { render(null, _listContainerEl); _listContainerEl = null; }
+  for (const el of _toolbarMounts) render(null, el);
+  _toolbarMounts = [];
   _chapters = [];
   _chaptersHasMore = false;
   _chaptersLoading = false;
@@ -1398,198 +1509,3 @@ export function destroy(container) {
   container.innerHTML = '';
 }
 
-// ── Volumes panel ─────────────────────────────────────────────────────────────
-
-/** @param {HTMLElement} section @param {number} mangaId */
-async function _mountVolumesPanel(section, mangaId) {
-  const card = mkCard();
-  section.appendChild(card);
-
-  const head = document.createElement('div');
-  head.className = 'detail-card-head';
-  head.innerHTML = `<span>${t('manga.details.volumes.loading')}</span>`;
-
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'btn-primary btn-sm';
-  addBtn.textContent = t('manga.details.volumes.add');
-  head.appendChild(addBtn);
-  card.appendChild(head);
-
-  const list = document.createElement('div');
-  list.className = 'divide-y divide-border-subtle';
-  card.appendChild(list);
-
-  async function _load() {
-    list.innerHTML = `<p class="px-4 py-3 text-sm text-text-muted">${t('manga.details.volumes.loading')}</p>`;
-    try {
-      const volumes = await api.listVolumes(mangaId);
-      head.querySelector('span').textContent = t('manga.details.volumes.count', { count: volumes.length, s: volumes.length === 1 ? '' : 's' });
-      list.innerHTML = '';
-      if (volumes.length === 0) {
-        list.innerHTML = `<p class="px-4 py-3 text-sm text-text-muted">${t('manga.details.volumes.empty')}</p>`;
-      } else {
-        for (const v of volumes) list.appendChild(_mkVolumeRow(v, mangaId, _load));
-      }
-    } catch (e) {
-      list.innerHTML = `<p class="px-4 py-3 text-sm text-danger">${e.message ?? t('manga.details.volumes.error')}</p>`;
-    }
-  }
-
-  const addForm = document.createElement('div');
-  addForm.className = 'hidden items-center gap-2 px-4 py-2 border-b border-border-subtle';
-  addForm.innerHTML = `
-    <input type="text" placeholder="${t('manga.details.volumes.name_placeholder')}" class="input text-sm flex-1" />
-    <input type="number" placeholder="${t('manga.details.volumes.num_placeholder')}" class="input text-sm w-20" min="0" step="1" />
-    <button type="button" class="btn-primary btn-sm">${t('common.add')}</button>
-    <button type="button" class="btn-ghost btn-sm">${t('common.cancel')}</button>
-  `;
-  card.appendChild(addForm);
-
-  const addNameInput = /** @type {HTMLInputElement} */ (addForm.querySelector('input[type="text"]'));
-  const addNumInput  = /** @type {HTMLInputElement} */ (addForm.querySelector('input[type="number"]'));
-  const addSubmitBtn = /** @type {HTMLButtonElement} */ (addForm.querySelector('.btn-primary'));
-  const addCancelBtn = /** @type {HTMLButtonElement} */ (addForm.querySelector('.btn-ghost'));
-
-  addBtn.addEventListener('click', () => {
-    addBtn.classList.add('hidden');
-    addForm.classList.remove('hidden');
-    addForm.classList.add('flex');
-    addNameInput.focus();
-  });
-
-  addCancelBtn.addEventListener('click', () => {
-    addForm.classList.add('hidden');
-    addForm.classList.remove('flex');
-    addBtn.classList.remove('hidden');
-    addNameInput.value = '';
-    addNumInput.value = '';
-  });
-
-  addSubmitBtn.addEventListener('click', async () => {
-    addSubmitBtn.disabled = true;
-    try {
-      const volume_num = addNumInput.value ? Number(addNumInput.value) : undefined;
-      await api.createVolume(mangaId, { name: addNameInput.value.trim() || undefined, volume_num });
-      addForm.classList.add('hidden');
-      addForm.classList.remove('flex');
-      addBtn.classList.remove('hidden');
-      addNameInput.value = '';
-      addNumInput.value = '';
-      await _load();
-    } catch (e) {
-      showApiError(e);
-    } finally {
-      addSubmitBtn.disabled = false;
-    }
-  });
-
-  await _load();
-}
-
-/**
- * @param {any} volume
- * @param {number} mangaId
- * @param {() => Promise<void>} reload
- */
-function _mkVolumeRow(volume, mangaId, reload) {
-  const row = document.createElement('div');
-  row.className = 'px-4';
-
-  const viewRow = document.createElement('div');
-  viewRow.className = 'flex items-center gap-3 py-2.5';
-
-  const label = document.createElement('span');
-  label.className = 'flex-1 text-sm text-text truncate';
-  label.textContent = volume.name
-    ? (volume.volume_num != null ? `Vol. ${volume.volume_num} — ${volume.name}` : volume.name)
-    : (volume.volume_num != null ? `Volume ${volume.volume_num}` : `Volume #${volume.id}`);
-
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'btn-icon text-text-muted shrink-0';
-  editBtn.setAttribute('aria-label', t('manga.details.volumes.rename'));
-  editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-
-  const delBtn = document.createElement('button');
-  delBtn.type = 'button';
-  delBtn.className = 'btn-icon text-danger shrink-0';
-  delBtn.setAttribute('aria-label', t('manga.details.volumes.delete'));
-  delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
-  delBtn.addEventListener('click', async () => {
-    const ok = await confirmDialog({ title: t('manga.details.volumes.delete'), message: t('manga.details.volumes.delete.body'), confirmLabel: t('common.delete') });
-    if (!ok) return;
-    delBtn.disabled = true;
-    try {
-      await api.deleteVolume(mangaId, volume.id);
-      await reload();
-    } catch (e) {
-      showApiError(e);
-      delBtn.disabled = false;
-    }
-  });
-
-  viewRow.append(label, editBtn, delBtn);
-  row.appendChild(viewRow);
-
-  const editForm = document.createElement('div');
-  editForm.className = 'hidden items-center gap-2 py-2';
-
-  const nameInput = document.createElement('input');
-  nameInput.type = 'text';
-  nameInput.className = 'input text-sm flex-1';
-  nameInput.value = volume.name ?? '';
-  nameInput.placeholder = t('manga.details.volumes.edit_name_placeholder');
-
-  const numInput = document.createElement('input');
-  numInput.type = 'number';
-  numInput.className = 'input text-sm w-20';
-  numInput.value = volume.volume_num != null ? String(volume.volume_num) : '';
-  numInput.placeholder = t('manga.details.volumes.num_placeholder');
-  numInput.min = '0';
-  numInput.step = '1';
-
-  const saveEditBtn = document.createElement('button');
-  saveEditBtn.type = 'button';
-  saveEditBtn.className = 'btn-primary btn-sm shrink-0';
-  saveEditBtn.textContent = t('common.save');
-
-  const cancelEditBtn = document.createElement('button');
-  cancelEditBtn.type = 'button';
-  cancelEditBtn.className = 'btn-ghost btn-sm shrink-0';
-  cancelEditBtn.textContent = t('common.cancel');
-
-  editForm.append(nameInput, numInput, saveEditBtn, cancelEditBtn);
-  row.appendChild(editForm);
-
-  const _showEdit = () => {
-    editForm.classList.remove('hidden');
-    editForm.classList.add('flex');
-    editBtn.classList.add('hidden');
-    nameInput.focus();
-  };
-
-  const _hideEdit = () => {
-    editForm.classList.add('hidden');
-    editForm.classList.remove('flex');
-    editBtn.classList.remove('hidden');
-  };
-
-  editBtn.addEventListener('click', _showEdit);
-  cancelEditBtn.addEventListener('click', _hideEdit);
-
-  saveEditBtn.addEventListener('click', async () => {
-    saveEditBtn.disabled = true;
-    try {
-      const name = nameInput.value.trim() || undefined;
-      const volume_num = numInput.value ? Number(numInput.value) : undefined;
-      await api.updateVolume(mangaId, volume.id, { name, volume_num });
-      await reload();
-    } catch (e) {
-      showApiError(e);
-      saveEditBtn.disabled = false;
-    }
-  });
-
-  return row;
-}

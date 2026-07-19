@@ -6,7 +6,7 @@ const html = htm.bind(h);
 
 /**
  * @template T
- * @typedef {{ id: T, name: string, count?: number }} Tab
+ * @typedef {{ id: T, name: string, count?: number, disabled?: boolean }} Tab
  */
 
 /**
@@ -37,14 +37,17 @@ export function Tabs({ tabs, activeId, onSelect, variant = 'underline', stretch 
             + (stretch ? ' flex-1 justify-center' : '')
             + (isActive ? ' text-accent border-b-2 border-accent' : ' text-text-muted');
         }
+        if (tab.disabled) cls += ' opacity-40 cursor-not-allowed';
         return html`
           <button
             key=${tab.id}
             type="button"
             role="tab"
             aria-selected=${String(isActive)}
+            aria-disabled=${String(!!tab.disabled)}
+            disabled=${!!tab.disabled}
             class=${cls}
-            onClick=${() => onSelect(tab.id)}
+            onClick=${() => { if (!tab.disabled) onSelect(tab.id); }}
           >
             ${tab.name}
             ${tab.count != null && html`<span class="nav-badge">${tab.count}</span>`}
@@ -65,7 +68,7 @@ export function Tabs({ tabs, activeId, onSelect, variant = 'underline', stretch 
  *   variant?: 'underline' | 'pill',
  *   stretch?: boolean,
  * }} props
- * @returns {{ update: (activeId: T) => void, destroy: () => void }}
+ * @returns {{ update: (activeId: T, tabs?: Tab<T>[]) => void, destroy: () => void }}
  */
 export function renderTabs(container, { tabs, activeId, onSelect, variant = 'underline', stretch = false }) {
   let _props = { tabs, activeId, onSelect, variant, stretch };
@@ -80,8 +83,8 @@ export function renderTabs(container, { tabs, activeId, onSelect, variant = 'und
   _render();
 
   return {
-    update(newActiveId) {
-      _props = { ..._props, activeId: newActiveId };
+    update(newActiveId, newTabs) {
+      _props = { ..._props, activeId: newActiveId, ...(newTabs ? { tabs: newTabs } : {}) };
       _render();
     },
     destroy() {

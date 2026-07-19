@@ -2,7 +2,7 @@
 // Settings — Server section (restart, stop, admin controls).
 
 import * as api from '../../api.js';
-import { openConfirm } from '../../utils.js';
+import { showConfirm } from '../../components/modal.js';
 import { showToast } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
 import { t } from '../../i18n.js';
@@ -74,7 +74,7 @@ export function mount(el) {
     t('settings.server.admin.cancel_downloads.btn'),
     'btn-ghost',
     async () => {
-      if (!(await openConfirm({ title: t('settings.server.admin.cancel_downloads.label'), message: t('settings.server.admin.cancel_downloads.confirm'), confirmLabel: t('settings.server.admin.cancel_downloads.btn'), danger: true }))) return;
+      if (!(await showConfirm(t('settings.server.admin.cancel_downloads.confirm'), { title: t('settings.server.admin.cancel_downloads.label'), confirmLabel: t('settings.server.admin.cancel_downloads.btn'), danger: true }))) return;
       await api.cancelAllGlobalDownloads();
       showToast(t('settings.server.admin.cancel_downloads.done'), { type: 'info' });
     },
@@ -86,7 +86,7 @@ export function mount(el) {
     t('settings.server.admin.stop_scan.btn'),
     'btn-ghost',
     async () => {
-      if (!(await openConfirm({ title: t('settings.server.admin.stop_scan.btn'), message: t('settings.server.admin.stop_scan.confirm'), confirmLabel: t('settings.server.admin.stop_scan.btn'), danger: true }))) return;
+      if (!(await showConfirm(t('settings.server.admin.stop_scan.confirm'), { title: t('settings.server.admin.stop_scan.btn'), confirmLabel: t('settings.server.admin.stop_scan.btn'), danger: true }))) return;
       await api.stopScan();
       showToast(t('settings.server.admin.stop_scan.done'), { type: 'info' });
     },
@@ -126,7 +126,7 @@ export function mount(el) {
   el.appendChild(dangerGroup);
 
   restartBtn.addEventListener('click', async () => {
-    if (!(await openConfirm({ title: t('settings.server.danger.restart.label'), message: t('settings.server.danger.restart.confirm'), confirmLabel: t('settings.server.danger.restart.btn'), danger: true }))) return;
+    if (!(await showConfirm(t('settings.server.danger.restart.confirm'), { title: t('settings.server.danger.restart.label'), confirmLabel: t('settings.server.danger.restart.btn'), danger: true }))) return;
     restartBtn.disabled = true;
     stopBtn.disabled    = true;
     try {
@@ -140,7 +140,7 @@ export function mount(el) {
   });
 
   stopBtn.addEventListener('click', async () => {
-    if (!(await openConfirm({ title: t('settings.server.danger.stop.label'), message: t('settings.server.danger.stop.confirm'), confirmLabel: t('settings.server.danger.stop.btn'), danger: true }))) return;
+    if (!(await showConfirm(t('settings.server.danger.stop.confirm'), { title: t('settings.server.danger.stop.label'), confirmLabel: t('settings.server.danger.stop.btn'), danger: true }))) return;
     restartBtn.disabled = true;
     stopBtn.disabled    = true;
     try {

@@ -5,7 +5,7 @@
 
 /** @type {ReadonlyArray<{color: string, label: string}>} */
 export const ACCENT_SWATCHES = [
-  { color: '#e8545a', label: 'Kani red'  },
+  { color: '#e0523f', label: 'Kani vermilion' },
   { color: '#3d8ef5', label: 'Ocean'     },
   { color: '#3a9e67', label: 'Forest'    },
   { color: '#9b6ec8', label: 'Amethyst'  },
@@ -13,7 +13,7 @@ export const ACCENT_SWATCHES = [
   { color: '#e05585', label: 'Rose'      },
 ];
 
-const _DEFAULT_ACCENT = '#e8545a';
+const _DEFAULT_ACCENT = '#e0523f';
 
 /**
  * The 13 manually-editable colour tokens that define a custom theme.
@@ -172,7 +172,7 @@ function _applyRaw(theme, density, accent) {
     ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
     : theme;
   for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
-    meta.setAttribute('content', effectiveTheme === 'light' ? '#f4f5f9' : '#0f0f17');
+    meta.setAttribute('content', effectiveTheme === 'light' ? '#f5f4f0' : '#111113');
   }
 }
 

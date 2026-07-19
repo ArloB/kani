@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n            dp.manga_a_id,\n            ma.name AS name_a,\n            ma.source_id AS source_id_a,\n            ma.cover_url AS cover_url_a,\n            ma.local_cover_path AS local_cover_path_a,\n            dp.manga_b_id,\n            mb.name AS name_b,\n            mb.source_id AS source_id_b,\n            mb.cover_url AS cover_url_b,\n            mb.local_cover_path AS local_cover_path_b,\n            dp.similarity AS \"similarity: f64\",\n            dp.author_match AS \"author_match: bool\"\n           FROM duplicate_pairs dp\n           JOIN manga ma ON ma.id = dp.manga_a_id\n           JOIN manga mb ON mb.id = dp.manga_b_id\n           WHERE dp.dismissed = FALSE\n             AND ma.is_orphaned = FALSE\n             AND mb.is_orphaned = FALSE\n           ORDER BY dp.similarity DESC",
+  "query": "SELECT\n            dp.manga_a_id,\n            ma.name AS name_a,\n            ma.source_id AS source_id_a,\n            ma.cover_url AS cover_url_a,\n            ma.local_cover_path AS local_cover_path_a,\n            dp.manga_b_id,\n            mb.name AS name_b,\n            mb.source_id AS source_id_b,\n            mb.cover_url AS cover_url_b,\n            mb.local_cover_path AS local_cover_path_b,\n            dp.similarity AS \"similarity: f64\",\n            dp.author_match AS \"author_match: bool\"\n           FROM duplicate_pairs dp\n           JOIN manga ma ON ma.id = dp.manga_a_id\n           JOIN manga mb ON mb.id = dp.manga_b_id\n           WHERE dp.dismissed = FALSE\n             AND ma.is_orphaned = FALSE\n             AND mb.is_orphaned = FALSE\n             AND ma.deleted_at IS NULL\n             AND mb.deleted_at IS NULL\n           ORDER BY dp.similarity DESC",
   "describe": {
     "columns": [
       {
@@ -82,5 +82,5 @@
       false
     ]
   },
-  "hash": "d3fedba6e150a26b9afe3dd235057df6ee13448af22d2760819232a9e39d6b1e"
+  "hash": "46451cdac4c72027ee3afdef73b7fe1df7ad9b67ae05111523b9f50684eb3711"
 }

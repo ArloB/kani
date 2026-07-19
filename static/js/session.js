@@ -1,71 +1,27 @@
 // @ts-check
 // Session-scoped state atoms: auth/permissions and server identity.
+// Signal-backed via the shared store factory; `sigFor` is exported for
+// reactive readers.
 
 import { getPermissions } from './api.js';
+import { createSignalStore } from './signal-store.js';
 
-const _state = {
+const _store = createSignalStore({
   /** @type {Set<string>} */
   permissions: new Set(),
   bootId: '',
-};
+  /** @type {{ id: number, username: string, email?: string, roles?: string[], email_verified_at?: string|null } | null} */
+  user: null,
+});
 
-/** @type {Map<string, Set<Function>>} */
-const _listeners = new Map();
-
-/** @param {string} key */
-function _notify(key) {
-  const set = _listeners.get(key);
-  if (!set) return;
-  const value = _state[key];
-  for (const fn of set) {
-    try { fn(value); } catch (e) { console.error('Session state listener error:', e); }
-  }
-}
-
-/**
- * @param {string} key
- * @returns {any}
- */
-export function getState(key) {
-  return _state[key];
-}
-
-/**
- * @param {string} key
- * @param {any} value
- */
-export function setState(key, value) {
-  _state[key] = value;
-  _notify(key);
-}
-
-/**
- * @param {string} key
- * @param {(current: any) => any} fn
- */
-export function updateState(key, fn) {
-  _state[key] = fn(_state[key]);
-  _notify(key);
-}
-
-/**
- * @param {string} key
- * @param {(value: any) => void} listener
- * @returns {() => void}
- */
-export function subscribe(key, listener) {
-  let set = _listeners.get(key);
-  if (!set) { set = new Set(); _listeners.set(key, set); }
-  set.add(listener);
-  return () => _listeners.get(key)?.delete(listener);
-}
+export const { sigFor, getState, setState, updateState, subscribe } = _store;
 
 /**
  * @param {string} permission
  * @returns {boolean}
  */
 export function hasPermission(permission) {
-  return _state.permissions.has(permission);
+  return getState('permissions').has(permission);
 }
 
 export async function initPermissions() {

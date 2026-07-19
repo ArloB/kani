@@ -2,7 +2,7 @@
 // First-run onboarding wizard — shown only to admins on a fresh installation.
 
 import * as api from '../api.js';
-import { hasPermission } from '../state.js';
+import { hasPermission } from '../session.js';
 import { navigate } from '../router.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { showApiError } from '../components/toast.js';

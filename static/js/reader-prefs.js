@@ -18,6 +18,7 @@ import { getLocal, setLocal, getLocalJson, setLocalJson } from './utils.js';
 /** @typedef {'both'|'width'|'height'} FitMode */
 /** @typedef {'black'|'white'|'sepia'} BgColor */
 /** @typedef {'multiply'|'screen'|'overlay'|'color'} TintBlend */
+/** @typedef {'full'|'pagecount'|'off'} MiniStripMode */
 
 /**
  * @typedef {Object} ReaderPrefs
@@ -51,6 +52,8 @@ import { getLocal, setLocal, getLocalJson, setLocalJson } from './utils.js';
  * @property {TintBlend}       tintBlend
  * @property {number}          slideshowInterval
  * @property {number}          inactivityTimeout
+ * @property {boolean}         endCardInPaged — show the end-of-chapter card in paged/continuous modes
+ * @property {MiniStripMode}   miniStrip       — bottom progress strip: full segments / page-count only / off
  */
 
 /** Hardcoded fallbacks — every key must appear here so callers can depend on the shape. */
@@ -85,6 +88,8 @@ const DEFAULTS = /** @type {ReaderPrefs} */ ({
   tintBlend:          'multiply',
   slideshowInterval:  5,
   inactivityTimeout:  0,
+  endCardInPaged:     false,
+  miniStrip:          'full',
 });
 
 /** Keys that have a matching global localStorage entry (for backwards-compat). */

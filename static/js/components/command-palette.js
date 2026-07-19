@@ -4,6 +4,9 @@ import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { t } from '../i18n.js';
 import * as api from '../api.js';
 import { navigate } from '../router.js';
+import { showCheatsheet } from '../shortcuts.js';
+import { modKeyLabel } from '../utils.js';
+import { SECTION_SEARCH_PREFIXES, buildSettingsSearchIndex } from '../settings-search-index.js';
 
 const CATEGORY_LABELS = {
   nav: () => t('palette.category.nav'),
@@ -47,6 +50,43 @@ function _matches(text, query) {
   return text.toLowerCase().includes(query.toLowerCase());
 }
 
+/** @type {Map<string, string>} section id → its own palette label */
+const _SECTION_LABELS = new Map(
+  SETTINGS_ITEMS.map(item => [item.id.replace(/^s-/, ''), item.label])
+);
+
+/** Built once — the settings-search index is keyed off the static catalog, not user data. */
+const _SETTINGS_SEARCH_INDEX = buildSettingsSearchIndex(
+  Object.keys(SECTION_SEARCH_PREFIXES).map(id => ({ id }))
+);
+
+const _MAX_SETTING_HITS = 8;
+
+/**
+ * @param {string} query
+ * @returns {Array<{ id: string, label: string, description: string, category: string, path: string }>}
+ */
+function _matchIndividualSettings(query) {
+  /** @type {Array<{ id: string, label: string, description: string, category: string, path: string }>} */
+  const hits = [];
+  for (const [sectionId, items] of _SETTINGS_SEARCH_INDEX) {
+    const sectionLabel = _SECTION_LABELS.get(sectionId);
+    if (!sectionLabel) continue;
+    for (const { label: text } of items) {
+      if (hits.length >= _MAX_SETTING_HITS) return hits;
+      if (!_matches(text, query)) continue;
+      hits.push({
+        id: `is-${sectionId}-${text}`,
+        label: text,
+        description: sectionLabel,
+        category: 'settings',
+        path: `/settings?section=${sectionId}&q=${encodeURIComponent(text)}`,
+      });
+    }
+  }
+  return hits;
+}
+
 /**
  * @param {{ onClose: () => void }} props
  */
@@ -65,7 +105,7 @@ function CommandPalette({ onClose }) {
     : NAV_ITEMS;
 
   const filteredSettings = trimmed
-    ? SETTINGS_ITEMS.filter(i => _matches(i.label + ' ' + i.description, trimmed))
+    ? [...SETTINGS_ITEMS.filter(i => _matches(i.label + ' ' + i.description, trimmed)), ..._matchIndividualSettings(trimmed)]
     : [];
 
   const items = [...filteredNav, ...filteredSettings, ...libraryItems];
@@ -167,7 +207,7 @@ function CommandPalette({ onClose }) {
       onKeyDown,
     },
       h('div', { class: 'flex items-center gap-2 px-4 border-b border-border-subtle' },
-        h('span', { class: 'text-text-faint text-base shrink-0', 'aria-hidden': 'true' }, '⌘'),
+        h('span', { class: 'text-text-faint text-xs font-medium shrink-0', 'aria-hidden': 'true' }, modKeyLabel()),
         h('input', {
           ref: inputRef,
           type: 'text',
@@ -192,6 +232,14 @@ function CommandPalette({ onClose }) {
         : trimmed
           ? h('div', { class: 'px-4 py-8 text-center text-sm text-text-muted' }, t('palette.no_results'))
           : null,
+      h('button', {
+        type: 'button',
+        class: 'flex items-center gap-1.5 px-4 py-2 text-xs text-text-faint hover:text-text-muted border-t border-border-subtle transition-colors',
+        onClick: () => { onClose(); showCheatsheet(); },
+      },
+        h('kbd', { class: 'text-2xs border border-border-subtle rounded px-1 py-0.5' }, 'F1'),
+        t('palette.shortcuts_hint'),
+      ),
     ),
   );
 }

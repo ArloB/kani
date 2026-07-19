@@ -131,22 +131,10 @@ export function mount(el, settings) {
 
   el.appendChild(smtpGroup);
 
-  // ── Save / test row ───────────────────────────────────────────────────────
+  // ── Test row ──────────────────────────────────────────────────────────────
   const actionsGroup = mkSettingsGroup();
   const actionsCard  = mkSettingsGroupCard(actionsGroup);
 
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'button';
-  saveBtn.className = 'btn-primary btn-sm';
-  saveBtn.textContent = t('common.save');
-
-  const saveWrap = document.createElement('div');
-  saveWrap.className = 'flex items-center gap-3';
-  saveWrap.appendChild(saveBtn);
-
-  actionsCard.appendChild(mkSettingsRow({ label: t('settings.email.save.label'), description: t('settings.email.save.desc'), control: saveWrap }));
-
-  // Test email row
   const testInput = document.createElement('input');
   testInput.type = 'email';
   testInput.className = 'input w-40 text-sm';
@@ -168,8 +156,7 @@ export function mount(el, settings) {
 
   // ── Event handlers ────────────────────────────────────────────────────────
 
-  saveBtn.addEventListener('click', async () => {
-    saveBtn.disabled = true;
+  async function _save() {
     const providerConfig = JSON.stringify({
       host: hostInput.value.trim(),
       port: Number(portInput.value) || 587,
@@ -177,26 +164,20 @@ export function mount(el, settings) {
       username: userInput.value,
       password: pwInput.value,
     });
-    try {
-      await api.updateSettings({
-        Email: {
-          email_enabled: _emailEnabled,
-          email_provider: 'smtp',
-          email_provider_config: providerConfig,
-          email_from_address: fromInput.value.trim(),
-          app_url: appUrlInput.value.trim(),
-          password_reset_enabled: _resetEnabled,
-          email_verification_required: _verifyRequired,
-        },
-      });
-      _dirty = false;
-      showToast(t('common.saved'), { type: 'success' });
-    } catch (e) {
-      showApiError(e);
-    } finally {
-      saveBtn.disabled = false;
-    }
-  });
+    await api.updateSettings({
+      Email: {
+        email_enabled: _emailEnabled,
+        email_provider: 'smtp',
+        email_provider_config: providerConfig,
+        email_from_address: fromInput.value.trim(),
+        app_url: appUrlInput.value.trim(),
+        password_reset_enabled: _resetEnabled,
+        email_verification_required: _verifyRequired,
+      },
+    });
+    _dirty = false;
+    showToast(t('common.saved'), { type: 'success' });
+  }
 
   testBtn.addEventListener('click', async () => {
     const to = testInput.value.trim();
@@ -217,5 +198,6 @@ export function mount(el, settings) {
   return {
     destroy() { el.innerHTML = ''; },
     isDirty() { return _dirty; },
+    save: _save,
   };
 }

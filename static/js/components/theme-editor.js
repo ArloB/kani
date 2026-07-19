@@ -4,7 +4,7 @@
 import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
-import { Modal } from './modal.js';
+import { Modal, showConfirm } from './modal.js';
 import {
   CORE_TOKENS,
   getCustomThemes,
@@ -17,7 +17,6 @@ import {
   applyTheme,
 } from '../theme.js';
 import { t } from '../i18n.js';
-import { confirmDialog } from '../utils.js';
 
 const html = htm.bind(h);
 
@@ -231,8 +230,7 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
 
   async function handleDelete() {
     if (!themeId) return;
-    const confirmed = await confirmDialog({
-      message: t('theme.custom.delete.confirm'),
+    const confirmed = await showConfirm(t('theme.custom.delete.confirm'), {
       danger: true,
       confirmLabel: t('theme.custom.delete'),
     });
@@ -299,7 +297,7 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
                     value=${tokens[group.tokens[0].key] || DEFAULT_SWATCH_COLOR}
                     onChange=${handleTokenChange}
                   />
-                  <p class="text-xs text-text-faint px-4 pb-2.5">Hover and focus-ring colours are auto-derived.</p>
+                  <p class="text-xs text-text-faint px-4 pb-2.5">${t('theme_editor.auto_derived')}</p>
                 </div>
               `
               : html`

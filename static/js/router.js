@@ -3,6 +3,7 @@
 // Pages are lazy-imported modules that export init(container, params) and destroy(container).
 
 import { announce } from './utils.js';
+import { t } from './i18n.js';
 
 /**
  * @typedef {{ init: (container: HTMLElement, params: Record<string, string>) => void,
@@ -74,7 +75,7 @@ export function initRouter(container) {
  */
 export async function navigate(path, opts = {}) {
   if (_beforeNavigate && !(await _beforeNavigate())) return;
-  sessionStorage.setItem(`scroll:${location.pathname + location.search}`, String(window.scrollY));
+  sessionStorage.setItem(`scroll:${location.pathname + location.search}`, String(_container?.scrollTop ?? 0));
   if (opts.replace) {
     history.replaceState(null, '', path);
   } else {
@@ -89,6 +90,11 @@ export async function navigate(path, opts = {}) {
  */
 export function getCurrentParams() {
   return { ..._currentParams };
+}
+
+/** Scrolls the page content container back to the top (instant). */
+export function scrollPageTop() {
+  _container?.scrollTo({ top: 0, behavior: 'instant' });
 }
 
 /**
@@ -137,35 +143,57 @@ async function _route(path, fromPopstate = false) {
   _currentParams = params;
 
   if (!matched) {
-    _container.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--color-text-muted)">Page not found.</div>';
-    document.title = 'Not Found - Kani';
+    _container.innerHTML = `<div style="padding:2rem;text-align:center;color:var(--color-text-muted)">${t('router.not_found')}</div>`;
+    document.title = t('router.not_found.title');
   } else {
     try {
       const mod = await matched.load();
-      // Clear old content only once the new module is ready to render
-      _container.innerHTML = '';
-      _activePage = mod;
-      await mod.init(_container, params);
+      const swap = async () => {
+        // Clear old content only once the new module is ready to render
+        /** @type {HTMLElement} */ (_container).innerHTML = '';
+        _activePage = mod;
+        await mod.init(_container, params);
+      };
+      const vt = /** @type {any} */ (document).startViewTransition;
+      if (typeof vt === 'function'
+          && !_isInitialRoute
+          && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        await vt.call(document, swap).updateCallbackDone;
+      } else {
+        await swap();
+      }
     } catch (e) {
       console.error('Page init error:', e);
-      _container.innerHTML = '<div style="padding:2rem;color:var(--color-danger)">Failed to load page.</div>';
+      _container.innerHTML = `<div style="padding:2rem;color:var(--color-danger)">${t('router.load_failed')}</div>`;
     }
   }
 
   if (fromPopstate) {
     const saved = sessionStorage.getItem(`scroll:${location.pathname + location.search}`);
-    window.scrollTo(0, saved ? parseInt(saved, 10) : 0);
+    _container.scrollTo({ top: saved ? parseInt(saved, 10) : 0, behavior: 'instant' });
   } else {
-    window.scrollTo(0, 0);
+    _container.scrollTo({ top: 0, behavior: 'instant' });
   }
 
-  if (!_isInitialRoute) announce(document.title);
+  if (!_isInitialRoute) {
+    announce(document.title);
+    _moveFocusToMain();
+  }
   _isInitialRoute = false;
 
   // Notify nav and other listeners
   for (const cb of _navCallbacks) {
     try { cb(pathname); } catch {}
   }
+}
+
+/** Moves keyboard/screen-reader focus to the new page's heading (or the
+ * container itself if it has none) after a client-side navigation. */
+function _moveFocusToMain() {
+  if (!_container) return;
+  const target = /** @type {HTMLElement} */ (_container.querySelector('h1') ?? _container);
+  if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+  target.focus({ preventScroll: true });
 }
 
 /** @param {MouseEvent} e */

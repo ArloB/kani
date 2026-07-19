@@ -4,6 +4,7 @@ import { h, render } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import { Combobox } from './combobox.js';
+import { Modal } from './modal.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
@@ -138,29 +139,19 @@ function FilterModal({ filterDefs, committed, onApply, onClose }) {
   }
 
   return html`
-    <div
-      class="fixed inset-0 bg-scrim z-modal flex items-end sm:items-center justify-center p-0 sm:p-4"
-      onClick=${(/** @type {MouseEvent} */ e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label=${t('filter.panel.label')}
-        class="bg-surface rounded-t-2xl sm:rounded-xl w-full sm:max-w-lg max-h-sheet flex flex-col shadow-xl overflow-hidden"
-      >
-        <div class="flex items-center justify-between px-4 py-3 border-b border-border-subtle shrink-0">
-          <h2 class="text-sm font-semibold text-text">${t('filter.panel.title')}</h2>
-          <button type="button" class="btn-ghost btn-sm px-2! text-text-muted" aria-label=${t('common.close')} onClick=${onClose}>✕</button>
-        </div>
-        <div class="flex-1 overflow-y-auto p-4">
-          <${FilterControls} filterDefs=${filterDefs} draft=${draft} onChange=${handleChange} />
-        </div>
-        <div class="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle shrink-0">
-          <button type="button" class="btn-ghost btn-sm text-sm" onClick=${handleReset}>${t('filter.reset')}</button>
+    <${Modal}
+      open=${true}
+      title=${t('filter.panel.title')}
+      onClose=${onClose}
+      footer=${html`
+        <div class="w-full flex items-center justify-between gap-2">
+          <button type="button" class="btn-ghost btn-sm" onClick=${handleReset}>${t('filter.reset')}</button>
           <button type="button" class="btn-primary btn-sm" ref=${applyRef} onClick=${handleApply}>${t('filter.apply')}</button>
         </div>
-      </div>
-    </div>
+      `}
+    >
+      <${FilterControls} filterDefs=${filterDefs} draft=${draft} onChange=${handleChange} />
+    </${Modal}>
   `;
 }
 

@@ -9,6 +9,7 @@ import { ACCENT_SWATCHES, getCurrentTheme, saveAndApplyTheme, getCustomThemes, d
 import { t } from '../../i18n.js';
 import { showToast } from '../../components/toast.js';
 import { ThemeEditor, ThemePreviewSwatch } from '../../components/theme-editor.js';
+import { showCheatsheet } from '../../shortcuts.js';
 
 const html = htm.bind(h);
 
@@ -134,6 +135,17 @@ export function mount(el) {
       label: t('settings.display.reset_confirms'),
       description: t('settings.display.reset_confirms.desc'),
       control: resetBtn,
+    }));
+
+    const shortcutsBtn = document.createElement('button');
+    shortcutsBtn.type = 'button';
+    shortcutsBtn.className = 'btn-ghost btn-sm';
+    shortcutsBtn.textContent = t('settings.display.shortcuts.action');
+    shortcutsBtn.addEventListener('click', () => showCheatsheet());
+    displayCard.appendChild(mkSettingsRow({
+      label: t('settings.display.shortcuts'),
+      description: t('settings.display.shortcuts.desc'),
+      control: shortcutsBtn,
     }));
 
     el.appendChild(displayGroup);

@@ -2,7 +2,7 @@
 // Global search page — search manga across multiple sources with scope filtering.
 
 import * as api from '../api.js';
-import { hasPermission } from '../state.js';
+import { hasPermission } from '../session.js';
 import { navigate } from '../router.js';
 import { getParam, replaceState as urlReplaceState } from '../url-params.js';
 import { debounce, escapeHtml } from '../utils.js';
@@ -11,6 +11,7 @@ import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
 import { createMangaCard } from '../components/manga-card.js';
+import { createSearchInput } from '../components/form/search-input.js';
 import { iconSearch, iconChevronLeft, iconChevronRight } from '../icons.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { t } from '../i18n.js';
@@ -51,20 +52,10 @@ export async function init(container) {
   }
 
   container.innerHTML = `
-    <div class="max-w-page mx-auto w-full overflow-x-hidden px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4">
+    <div class="w-full overflow-x-hidden px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4">
       <!-- Large centered search bar -->
       <div class="flex flex-col items-center gap-4 py-4 md:py-8">
-        <div class="relative w-full max-w-2xl">
-          <span class="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none icon-md" aria-hidden="true">${iconSearch}</span>
-          <input
-            type="search"
-            class="input w-full pl-11 h-12 text-base"
-            id="search-input"
-            placeholder="${t('global_search.placeholder')}"
-            aria-label="${t('global_search.input.label')}"
-            autofocus
-          />
-        </div>
+        <div class="js-search-slot w-full max-w-2xl"></div>
         <!-- Scope chips -->
         <div class="flex flex-wrap justify-center gap-2" id="scope-chips" role="group" aria-label="${t('global_search.scope.label')}"></div>
       </div>
@@ -74,11 +65,19 @@ export async function init(container) {
     </div>
   `;
 
-  const searchInput = /** @type {HTMLInputElement} */ (container.querySelector('#search-input'));
+  const searchSlot = /** @type {HTMLElement} */ (container.querySelector('.js-search-slot'));
+  const { el: searchEl, input: searchInput } = createSearchInput({
+    value: _query,
+    placeholder: t('global_search.placeholder'),
+    ariaLabel: t('global_search.input.label'),
+    inputClass: 'h-12 text-base',
+    id: 'search-input',
+  });
+  searchSlot.appendChild(searchEl);
+  searchInput.focus();
+
   const chipsEl     = /** @type {HTMLElement} */ (container.querySelector('#scope-chips'));
   const resultsEl   = /** @type {HTMLElement} */ (container.querySelector('#search-results'));
-
-  searchInput.value = _query;
 
   // Load sources for scope chips
   try {
@@ -101,12 +100,13 @@ export async function init(container) {
   _renderChips(chipsEl, resultsEl);
 
   if (_query) _fetchSearch(resultsEl);
+  else _renderPreQueryState(resultsEl);
 
   const _debouncedSearch = debounce(() => {
     _query = searchInput.value.trim();
     _updateUrl();
     if (_query) _fetchSearch(resultsEl);
-    else { resultsEl.innerHTML = ''; resultsEl.setAttribute('aria-busy', 'false'); }
+    else _renderPreQueryState(resultsEl);
   }, 500);
 
   searchInput.addEventListener('input', _debouncedSearch);
@@ -159,6 +159,17 @@ export async function init(container) {
       });
     }
   }
+}
+
+/** @param {HTMLElement} resultsEl */
+function _renderPreQueryState(resultsEl) {
+  resultsEl.innerHTML = '';
+  resultsEl.setAttribute('aria-busy', 'false');
+  resultsEl.appendChild(createEmptyState({
+    icon: iconSearch,
+    title: t('global_search.prequery.title'),
+    subtitle: t('global_search.prequery.subtitle'),
+  }));
 }
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
@@ -238,7 +249,7 @@ async function _fetchSearch(resultsEl) {
       section.appendChild(empty);
     } else {
       const wrapper = document.createElement('div');
-      wrapper.className = 'manga-row-wrapper';
+      wrapper.className = 'manga-row-wrapper -mx-4 md:-mx-6';
 
       const navLeft = document.createElement('button');
       navLeft.type = 'button';
@@ -257,7 +268,7 @@ async function _fetchSearch(resultsEl) {
       navRight.innerHTML = iconChevronRight;
 
       const row = document.createElement('div');
-      row.className = 'manga-row';
+      row.className = 'manga-row px-4 md:px-6';
       row.setAttribute('role', 'list');
 
       /** Append manga cards to the row (before the sentinel if present) */

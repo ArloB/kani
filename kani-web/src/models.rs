@@ -31,6 +31,18 @@ pub struct FetchWasmRequest {
     pub url: String,
 }
 
+#[derive(garde::Validate, Deserialize, Debug, utoipa::ToSchema)]
+pub struct InstallYamlRequest {
+    #[garde(length(min = 1, max = 262_144))]
+    pub content: String,
+}
+
+#[derive(garde::Validate, Deserialize, Debug, utoipa::ToSchema)]
+pub struct FetchYamlRequest {
+    #[garde(length(min = 1, max = 2048), custom(validate_https_url))]
+    pub url: String,
+}
+
 // Types moved to kani-app. Re-exported here so that existing kani-web code
 // (rest.rs, tests) continues to compile unchanged.
 pub use kani_app::models::{DownloadRuleRow, LibraryManga, Manga, Settings};

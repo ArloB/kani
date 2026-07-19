@@ -14,7 +14,7 @@ async fn set_chapter_progress_creates_tracking_row() {
     svc.set_chapter_progress(user_id, ch_id, 5).await.unwrap();
     svc.flush_progress_buffer().await;
 
-    let (chapters, _, _) = svc
+    let (chapters, _, _, _) = svc
         .get_local_chapters(
             manga_id,
             1,
@@ -50,7 +50,7 @@ async fn set_chapter_progress_higher_page_marks_read() {
     svc.set_chapter_progress(user_id, ch_id, 9).await.unwrap();
     svc.flush_progress_buffer().await;
 
-    let (chapters, _, _) = svc
+    let (chapters, _, _, _) = svc
         .get_local_chapters(
             manga_id,
             1,
@@ -82,7 +82,7 @@ async fn set_chapter_read_status_marks_chapters_as_read() {
         .await
         .unwrap();
 
-    let (chapters, _, _) = svc
+    let (chapters, _, _, _) = svc
         .get_local_chapters(
             manga_id,
             1,
@@ -113,7 +113,7 @@ async fn set_chapter_read_status_can_mark_as_unread() {
         .await
         .unwrap();
 
-    let (chapters, _, _) = svc
+    let (chapters, _, _, _) = svc
         .get_local_chapters(
             manga_id,
             1,
@@ -142,7 +142,7 @@ async fn filter_unread_only_returns_unread_chapters() {
         .await
         .unwrap();
 
-    let (unread, _, _) = svc
+    let (unread, _, _, _) = svc
         .get_local_chapters(
             manga_id,
             1,

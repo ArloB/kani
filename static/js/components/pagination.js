@@ -36,10 +36,10 @@ export function Pagination({ page, hasNext, total, onPageChange }) {
             entry === null
               ? html`<span key=${'ellipsis-' + i} class="tile-btn border-0 text-text-muted select-none" aria-hidden="true">…</span>`
               : entry === page
-                ? html`<span key=${entry} class="tile-btn border-accent bg-accent text-on-accent font-medium" aria-current="page" aria-label=${'Page ' + entry}>${entry}</span>`
+                ? html`<span key=${entry} class="tile-btn border-text/40 bg-surface-2 text-text font-semibold" aria-current="page" aria-label=${'Page ' + entry}>${entry}</span>`
                 : html`<button key=${entry} type="button" class="tile-btn border-border bg-surface text-text-muted transition-colors hover:bg-surface-2 cursor-pointer" aria-label=${'Page ' + entry} onClick=${() => onPageChange(entry)}>${entry}</button>`
           )
-        : html`<span class="tile-btn border-accent bg-accent text-on-accent font-medium" aria-current="page">${page}</span>`
+        : html`<span class="tile-btn border-text/40 bg-surface-2 text-text font-semibold" aria-current="page">${page}</span>`
       }
       <button
         type="button"

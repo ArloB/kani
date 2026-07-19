@@ -66,9 +66,11 @@ pub async fn find_similar_manga(
     authors: &[String],
     exclude_manga_id: Option<MangaId>,
 ) -> Result<Vec<SimilarMangaHit>> {
-    let total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM manga WHERE is_orphaned = FALSE")
-        .fetch_one(pool)
-        .await?;
+    let total: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM manga WHERE is_orphaned = FALSE AND deleted_at IS NULL"
+    )
+    .fetch_one(pool)
+    .await?;
 
     if total > 5_000 {
         tracing::warn!("Library has {total} manga — skipping duplicate check (threshold: 5000)");
@@ -88,7 +90,7 @@ pub async fn find_similar_manga(
         sqlx::query_as!(
             CandidateRow,
             "SELECT id, name, source_id FROM manga \
-             WHERE is_orphaned = FALSE AND id != ? AND name LIKE '%' || ? || '%'",
+             WHERE is_orphaned = FALSE AND deleted_at IS NULL AND id != ? AND name LIKE '%' || ? || '%'",
             excl,
             first_word
         )
@@ -98,7 +100,7 @@ pub async fn find_similar_manga(
         sqlx::query_as!(
             CandidateRow,
             "SELECT id, name, source_id FROM manga \
-             WHERE is_orphaned = FALSE AND name LIKE '%' || ? || '%'",
+             WHERE is_orphaned = FALSE AND deleted_at IS NULL AND name LIKE '%' || ? || '%'",
             first_word
         )
         .fetch_all(pool)
@@ -236,6 +238,8 @@ pub async fn list_duplicate_pairs(pool: &SqlitePool) -> Result<Vec<DuplicatePair
            WHERE dp.dismissed = FALSE
              AND ma.is_orphaned = FALSE
              AND mb.is_orphaned = FALSE
+             AND ma.deleted_at IS NULL
+             AND mb.deleted_at IS NULL
            ORDER BY dp.similarity DESC"#
     )
     .fetch_all(pool)
@@ -291,9 +295,11 @@ pub async fn dismiss_duplicate_pair(
 /// Existing rows (including dismissed ones) are left untouched via INSERT OR IGNORE.
 /// Returns the number of new pairs recorded.
 pub async fn scan_and_persist_duplicates(pool: &SqlitePool) -> Result<u32> {
-    let total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM manga WHERE is_orphaned = FALSE")
-        .fetch_one(pool)
-        .await?;
+    let total: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM manga WHERE is_orphaned = FALSE AND deleted_at IS NULL"
+    )
+    .fetch_one(pool)
+    .await?;
 
     if total > 5_000 {
         tracing::warn!("Library has {total} manga — duplicate scan skipped (threshold: 5000)");
@@ -305,9 +311,12 @@ pub async fn scan_and_persist_duplicates(pool: &SqlitePool) -> Result<u32> {
         name: String,
     }
 
-    let all = sqlx::query_as!(Row, "SELECT id, name FROM manga WHERE is_orphaned = FALSE")
-        .fetch_all(pool)
-        .await?;
+    let all = sqlx::query_as!(
+        Row,
+        "SELECT id, name FROM manga WHERE is_orphaned = FALSE AND deleted_at IS NULL"
+    )
+    .fetch_all(pool)
+    .await?;
 
     let mut new_pairs: u32 = 0;
     let mut seen: std::collections::HashSet<(i64, i64)> = Default::default();

@@ -8,17 +8,12 @@ import htm from 'htm';
 import { iconX, iconChevronDown } from '../icons.js';
 import { Icon } from './icon.js';
 import { Pill } from './pill.js';
+import { renderPopover, useOutsideClose } from './popover.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
 const ITEM_H = 36;
 const VISIBLE = 8;
-
-/** Render a vnode into #popover-root (shared portal slot for dropdowns). */
-function _renderPopover(vnode) {
-  const root = document.getElementById('popover-root');
-  if (root) render(vnode, root);
-}
 
 /**
  * Single-select mode (default):
@@ -104,24 +99,12 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
   useEffect(() => { setHighlighted(0); }, [filtered]);
 
   // Close on outside click — checks both wrapRef and the portaled dropdownRef
-  useEffect(() => {
-    if (!open) return;
-    /** @param {MouseEvent} e */
-    const handler = (e) => {
-      const target = /** @type {Node} */ (e.target);
-      // If the clicked element was detached by a synchronous re-render triggered from
-      // onChange (e.g. _mountComboboxes), treat it as an inside click.
-      if (!document.contains(target)) return;
-      if (!wrapRef.current?.contains(target) && !dropdownRef.current?.contains(target)) _close();
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  useOutsideClose(open, [wrapRef, dropdownRef], _close);
 
   // Portal the dropdown into #popover-root so it escapes overflow:hidden in modals.
   useEffect(() => {
     if (!open || !filtered.length || !wrapRef.current) {
-      _renderPopover(null);
+      renderPopover(null);
       return;
     }
     const rect = wrapRef.current.getBoundingClientRect();
@@ -137,7 +120,7 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
     const dropWidth = Math.min(rect.width, window.innerWidth - 8);
     const dropLeft  = Math.max(4, Math.min(rect.left, window.innerWidth - dropWidth - 4));
 
-    _renderPopover(html`
+    renderPopover(html`
       <div
         role="listbox"
         style=${{
@@ -181,7 +164,7 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
   }, [open, filtered, highlighted, scrollTop]);
 
   // Clear portal on unmount
-  useEffect(() => () => _renderPopover(null), []);
+  useEffect(() => () => renderPopover(null), []);
 
   function _close() {
     isTyping.current = false;
@@ -295,24 +278,12 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
   useEffect(() => { setHighlighted(0); }, [filtered]);
 
   // Close on outside click — checks both wrapRef and the portaled dropdownRef
-  useEffect(() => {
-    if (!open) return;
-    /** @param {MouseEvent} e */
-    const handler = (e) => {
-      const target = /** @type {Node} */ (e.target);
-      if (!document.contains(target)) return;
-      if (!wrapRef.current?.contains(target) && !dropdownRef.current?.contains(target)) {
-        setOpen(false); setInputText('');
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  useOutsideClose(open, [wrapRef, dropdownRef], () => { setOpen(false); setInputText(''); });
 
   // Portal the dropdown into #popover-root
   useEffect(() => {
     if (!open || !filtered.length || !wrapRef.current) {
-      _renderPopover(null);
+      renderPopover(null);
       return;
     }
     const rect = wrapRef.current.getBoundingClientRect();
@@ -327,7 +298,7 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
     const dropWidth = Math.min(rect.width, window.innerWidth - 8);
     const dropLeft  = Math.max(4, Math.min(rect.left, window.innerWidth - dropWidth - 4));
 
-    _renderPopover(html`
+    renderPopover(html`
       <div
         role="listbox"
         aria-multiselectable="true"
@@ -379,7 +350,7 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
   }, [open, filtered, highlighted, scrollTop, selectedIds]);
 
   // Clear portal on unmount
-  useEffect(() => () => _renderPopover(null), []);
+  useEffect(() => () => renderPopover(null), []);
 
   function _toggle(opt) {
     const next = selectedIds.indexOf(opt.id) === -1
@@ -401,7 +372,9 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
   function _onKeyDown(e) {
     if (e.key === 'Backspace' && inputText === '' && selectedIds.length > 0) {
       // Remove last pill on backspace when search is empty
-      onChange(selectedIds.slice(0, -1));
+      const next = selectedIds.slice(0, -1);
+      setSelectedIds(next);
+      onChange(/** @type {any} */ (next));
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       const next = Math.min(highlighted + 1, filtered.length - 1);
@@ -423,27 +396,22 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
   }
 
   return html`
-    <div class="relative flex flex-col gap-1.5" ref=${wrapRef}>
-      ${selectedIds.length > 0 && html`
-        <div
-          class="flex flex-wrap gap-1.5"
-          onClick=${(/** @type {MouseEvent} */ e) => { e.stopPropagation(); if (open) { setOpen(false); setInputText(''); } }}
-        >
-          ${selectedIds.map(id => {
-            const opt = options.find(o => o.id === id);
-            if (!opt) return null;
-            return html`<${Pill} key=${id} label=${opt.name} onDismiss=${() => _toggle(opt)} />`;
-          })}
-        </div>
-      `}
-      <div class="relative flex items-center">
+    <div class="relative" ref=${wrapRef}>
+      <div
+        class="input-chips pr-8 relative"
+        onClick=${() => { if (!disabled) inputRef.current?.focus(); }}
+      >
+        ${selectedIds.map(id => {
+          const opt = options.find(o => o.id === id);
+          if (!opt) return null;
+          return html`<${Pill} key=${id} label=${opt.name} onDismiss=${() => _toggle(opt)} />`;
+        })}
         <input
           ref=${inputRef}
           type="text"
           role="combobox"
-          class="input pr-8"
           value=${inputText}
-          placeholder=${placeholder}
+          placeholder=${selectedIds.length === 0 ? placeholder : ''}
           disabled=${disabled}
           aria-expanded=${open}
           aria-autocomplete="list"
@@ -501,23 +469,11 @@ function CreatableMultiCombobox({ options, value, onChange, placeholder, disable
 
   useEffect(() => { setHighlighted(0); }, [dropItems]);
 
-  useEffect(() => {
-    if (!open) return;
-    /** @param {MouseEvent} e */
-    const handler = (e) => {
-      const target = /** @type {Node} */ (e.target);
-      if (!document.contains(target)) return;
-      if (!wrapRef.current?.contains(target) && !dropdownRef.current?.contains(target)) {
-        setOpen(false); setInputText('');
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  useOutsideClose(open, [wrapRef, dropdownRef], () => { setOpen(false); setInputText(''); });
 
   useEffect(() => {
     if (!open || !dropItems.length || !wrapRef.current) {
-      _renderPopover(null);
+      renderPopover(null);
       return;
     }
     const rect = wrapRef.current.getBoundingClientRect();
@@ -532,7 +488,7 @@ function CreatableMultiCombobox({ options, value, onChange, placeholder, disable
     const dropWidth = Math.min(rect.width, window.innerWidth - 8);
     const dropLeft  = Math.max(4, Math.min(rect.left, window.innerWidth - dropWidth - 4));
 
-    _renderPopover(html`
+    renderPopover(html`
       <div
         role="listbox"
         style=${{
@@ -569,7 +525,7 @@ function CreatableMultiCombobox({ options, value, onChange, placeholder, disable
                 onMouseEnter=${() => setHighlighted(idx)}
               >
                 ${isCreate
-                  ? html`<span class="text-accent font-medium">+</span><span>Add "<em>${opt.name}</em>"</span>`
+                  ? html`<span class="text-accent font-medium">+</span><span>${t('combobox.add_new')} "<em>${opt.name}</em>"</span>`
                   : opt.name
                 }
               </div>
@@ -580,7 +536,7 @@ function CreatableMultiCombobox({ options, value, onChange, placeholder, disable
     `);
   }, [open, dropItems, highlighted, scrollTop]);
 
-  useEffect(() => () => _renderPopover(null), []);
+  useEffect(() => () => renderPopover(null), []);
 
   /** @param {{ id: any, name: string }} opt */
   function _add(opt) {
@@ -622,23 +578,21 @@ function CreatableMultiCombobox({ options, value, onChange, placeholder, disable
   }
 
   return html`
-    <div class="relative flex flex-col gap-1.5" ref=${wrapRef}>
-      ${selectedNames.length > 0 && html`
-        <div class="flex flex-wrap gap-1.5">
-          ${selectedNames.map(name => html`
-            <${Pill} key=${name} label=${name}
-              onDismiss=${() => onChange(selectedNames.filter(n => n !== name))} />
-          `)}
-        </div>
-      `}
-      <div class="relative flex items-center">
+    <div class="relative" ref=${wrapRef}>
+      <div
+        class="input-chips pr-8 relative"
+        onClick=${() => { if (!disabled) inputRef.current?.focus(); }}
+      >
+        ${selectedNames.map(name => html`
+          <${Pill} key=${name} label=${name}
+            onDismiss=${() => onChange(selectedNames.filter(n => n !== name))} />
+        `)}
         <input
           ref=${inputRef}
           type="text"
           role="combobox"
-          class="input pr-8"
           value=${inputText}
-          placeholder=${placeholder}
+          placeholder=${selectedNames.length === 0 ? placeholder : ''}
           disabled=${disabled}
           aria-expanded=${open}
           aria-autocomplete="list"

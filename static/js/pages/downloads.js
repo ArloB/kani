@@ -4,19 +4,20 @@
 import { h, render } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import htm from 'htm';
-import { getState, subscribe } from '../state.js';
+import { getState, subscribe } from '../cache.js';
 import { cancelDownload, getDownloadHistory, retryChapterDownload } from '../api.js';
 import { navigate } from '../router.js';
-import { iconX, iconCheck, iconWarning } from '../icons.js';
+import { iconX, iconCheck, iconWarning, iconDownload } from '../icons.js';
 import { formatChapterTitle, formatRelativeTime, getLocalInt, setLocal } from '../utils.js';
 import { Icon } from '../components/icon.js';
+import { EmptyState } from '../components/empty-state.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { showApiError } from '../components/toast.js';
 import { useBulkSelect } from '../hooks/use-bulk-select.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
-/** @typedef {import('../state.js').ChapterProgress} ChapterProgress */
+/** @typedef {import('../cache.js').ChapterProgress} ChapterProgress */
 
 const HISTORY_SIZES = [5, 10, 25, 50, 100];
 const HISTORY_KEY = 'kani_download_history_size';
@@ -255,10 +256,7 @@ function DownloadsPage() {
           `}
           <div class="bg-surface border border-border rounded-xl overflow-hidden">
             ${active.length === 0
-              ? html`<div class="flex flex-col items-center gap-2 py-12 text-center">
-                  <p class="text-base font-medium text-text">${t('downloads.empty.title')}</p>
-                  <p class="text-sm text-text-muted">${t('downloads.empty.desc')}</p>
-                </div>`
+              ? html`<${EmptyState} icon=${iconDownload} title=${t('downloads.empty.title')} subtitle=${t('downloads.empty.desc')} />`
               : active.map(e => html`<${ActiveRow}
                   key=${e.id}
                   entry=${e}
@@ -295,10 +293,7 @@ function DownloadsPage() {
           `}
           <div class="bg-surface border border-border rounded-xl overflow-hidden">
             ${history.length === 0
-              ? html`<div class="flex flex-col items-center gap-2 py-12 text-center">
-                  <p class="text-base font-medium text-text">${t('downloads.history.empty.title')}</p>
-                  <p class="text-sm text-text-muted">${t('downloads.history.empty.desc')}</p>
-                </div>`
+              ? html`<${EmptyState} icon=${iconCheck} title=${t('downloads.history.empty.title')} subtitle=${t('downloads.history.empty.desc')} />`
               : history.map(e => html`<${HistoryRow} key=${e.id} entry=${e} />`)
             }
           </div>

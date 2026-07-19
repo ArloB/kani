@@ -1,8 +1,6 @@
 // @ts-check
 
-import { getState, setState } from './state.js';
-import { showApiError } from './components/toast.js';
-import { showConfirm } from './components/modal.js';
+import { t } from './i18n.js';
 
 /**
  * Returns a debounced version of `fn` that delays invocation by `ms`.
@@ -81,6 +79,23 @@ const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'
  * @param {string} str
  * @returns {string}
  */
+/**
+ * The modifier key label for this platform: Macs use ⌘, everything else Ctrl.
+ * Hard-coding ⌘ mislabels the shortcut for the majority of users.
+ */
+export function modKeyLabel() {
+  const p = typeof navigator !== 'undefined'
+    ? (navigator.userAgentData?.platform || navigator.platform || '')
+    : '';
+  return /mac|iphone|ipad|ipod/i.test(p) ? '\u2318' : 'Ctrl';
+}
+
+/** The mod-key label combined with a key, e.g. "⌘K" or "Ctrl+K". */
+export function modKeyCombo(key) {
+  const mod = modKeyLabel();
+  return mod === '\u2318' ? `${mod}${key}` : `${mod}+${key}`;
+}
+
 export function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => HTML_ESCAPES[c]);
 }
@@ -127,18 +142,6 @@ export function resetAllConfirmDialogs() {
     if (k?.startsWith(_CONFIRM_SKIP_PREFIX)) localStorage.removeItem(k);
   }
 }
-
-/**
- * Shows a confirmation dialog (options-object form for backward compatibility).
- * Delegates to `showConfirm` in `components/modal.js`.
- * @param {{ title?: string, message?: string, confirmLabel?: string, cancelLabel?: string, danger?: boolean, rememberKey?: string }} opts
- * @returns {Promise<boolean>}
- */
-export function confirmDialog({ title, message = '', confirmLabel, cancelLabel, danger, rememberKey } = {}) {
-  return showConfirm(message, { title, confirmLabel, cancelLabel, danger, rememberKey });
-}
-
-export const openConfirm = confirmDialog;
 
 /**
  * Disables the given control(s) for the duration of an async operation and
@@ -341,7 +344,7 @@ export function addPullToRefresh(el, onRefresh, { threshold = 60 } = {}) {
     indicator = document.createElement('div');
     indicator.className = 'flex items-center justify-center h-10 text-text-muted text-sm opacity-0 transition-opacity duration-200';
     indicator.setAttribute('aria-hidden', 'true');
-    indicator.textContent = '↓ Release to refresh';
+    indicator.textContent = t('pull_refresh.release');
     el.insertAdjacentElement('beforebegin', indicator);
     return indicator;
   }
@@ -407,20 +410,3 @@ export function announce(message) {
   requestAnimationFrame(() => { if (_liveRegion) _liveRegion.textContent = message; });
 }
 
-/**
- * Applies an optimistic state update, runs `apiFn`, and rolls back + shows an
- * error toast on failure.
- * @param {string} stateKey
- * @param {any} optimisticValue
- * @param {() => Promise<any>} apiFn
- */
-export async function optimisticUpdate(stateKey, optimisticValue, apiFn) {
-  const prev = getState(stateKey);
-  setState(stateKey, optimisticValue);
-  try {
-    await apiFn();
-  } catch (e) {
-    setState(stateKey, prev);
-    showApiError(e);
-  }
-}

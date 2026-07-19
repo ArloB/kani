@@ -130,8 +130,22 @@ impl AppService {
         qb.push(
             " WHERE c2.manga_id = m.id \
               AND c2.discovered_at IS NOT NULL \
-              AND c2.discovered_at > COALESCE(umt2.last_seen_at, m.created_at)) AS new_chapter_count \
-             FROM manga m JOIN sources s ON m.source_id = s.id",
+              AND c2.discovered_at > COALESCE(umt2.last_seen_at, m.created_at)) AS new_chapter_count, \
+             resume.resume_chapter_id, resume.resume_chapter_number, \
+             resume.resume_last_page, resume.resume_page_count \
+             FROM manga m JOIN sources s ON m.source_id = s.id \
+             LEFT JOIN (\
+               SELECT c.manga_id, c.id AS resume_chapter_id, c.chapter_number AS resume_chapter_number, \
+                      uct.last_page_read AS resume_last_page, COALESCE(c.page_count, 0) AS resume_page_count, \
+                      ROW_NUMBER() OVER (PARTITION BY c.manga_id ORDER BY c.chapter_number ASC) AS rn \
+               FROM chapters c \
+               JOIN user_chapter_tracking uct ON uct.chapter_id = c.id \
+               WHERE uct.user_id = ",
+        );
+        qb.push_bind(user_id);
+        qb.push(
+            " AND uct.is_read = 0 AND uct.last_page_read > 0 AND c.download_status = 2\
+             ) resume ON resume.manga_id = m.id AND resume.rn = 1",
         );
 
         if use_fts {

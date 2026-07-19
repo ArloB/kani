@@ -12,8 +12,12 @@ import { skeletonGrid, skeletonSourceList } from '../../components/skeletons.js'
 import { renderPagination } from '../../components/pagination.js';
 import { renderChipGroup } from '../../components/chip-group.js';
 import { renderTabs } from '../../components/tabs.js';
-import { createBreadcrumb } from '../../components/breadcrumb.js';
 import { Pill } from '../../components/pill.js';
+import { mountNumberInput } from '../../components/form/number-input.js';
+import { createCallout } from '../../components/form/callout.js';
+import { Select } from '../../components/form/select.js';
+import { DateInput } from '../../components/form/date-input.js';
+import { Combobox } from '../../components/combobox.js';
 import { h, render } from 'preact';
 import htm from 'htm';
 const html = htm.bind(h);
@@ -45,18 +49,6 @@ function ShowcaseSection({ title, children }) {
       </div>
     </section>
   `;
-}
-
-function ShowcasePage() {
-  // ── State ─────────────────────────────────────────────────────────────────
-  const [starred, setStarred] = /** @type {[boolean, (v: boolean) => void]} */ ([false, () => {}]);
-  const [chips, setChips] = /** @type {[Set<string>, any] } */ ([new Set(), () => {}]);
-  const [activeTab, setActiveTab] = /** @type {[string, any]} */ (['a', () => {}]);
-
-  // Use Preact's useState via htm/h
-  const { useState } = /** @type {any} */ (globalThis).__preactHooks__ ?? {};
-
-  return html`<div>TODO</div>`;
 }
 
 /** @param {HTMLElement} container */
@@ -252,13 +244,8 @@ export function init(container) {
       title: 'Star checkbox (favourite toggle)',
       usage: "createStarCheckbox({ checked, onChange, label: 'Favourite' })",
       mount: (el) => {
-        let checked = false;
-        const update = () => {
-          el.innerHTML = '';
-          const star = createStarCheckbox({ checked, onChange: (v) => { checked = v; update(); }, label: 'Favourite' });
-          el.appendChild(star);
-        };
-        update();
+        const star = createStarCheckbox({ checked: false, onChange: () => {}, label: 'Favourite' });
+        el.appendChild(star.el);
       },
     },
     {
@@ -282,27 +269,71 @@ export function init(container) {
       title: 'renderTabs()',
       usage: "renderTabs(el, { tabs, activeId, onSelect })",
       mount: (el) => {
-        let activeId = 'a';
-        const tabs = [{ id: 'a', label: 'Active' }, { id: 'b', label: 'History' }, { id: 'c', label: 'Failed' }];
-        const update = () => {
-          el.innerHTML = '';
-          renderTabs(el, { tabs, activeId, onSelect: (id) => { activeId = id; update(); } });
-        };
+        const tabs = [{ id: 'a', name: 'Active' }, { id: 'b', name: 'History' }, { id: 'c', name: 'Failed' }];
+        const handle = renderTabs(el, { tabs, activeId: 'a', onSelect: (id) => handle.update(id) });
+      },
+    },
+    {
+      title: 'NumberInput (steppers)',
+      usage: "mountNumberInput({ value, min, max, onChange })",
+      mount: (el) => {
+        const { el: numEl } = mountNumberInput({ value: 5, min: 0, max: 23, onChange: () => {} });
+        el.appendChild(numEl);
+      },
+    },
+    {
+      title: 'Select',
+      usage: "html`<${Select} options value onChange />`",
+      mount: (el) => {
+        let value = 'daily';
+        const options = [
+          { value: 'daily', label: 'Daily' },
+          { value: 'weekly', label: 'Weekly' },
+          { value: 'monthly', label: 'Monthly' },
+        ];
+        const update = () => render(html`<${Select} options=${options} value=${value} onChange=${(v) => { value = v; update(); }} />`, el);
         update();
+      },
+    },
+    {
+      title: 'DateInput',
+      usage: "html`<${DateInput} label value onChange />`",
+      mount: (el) => {
+        let value = '2026-07-12';
+        const update = () => render(html`<${DateInput} label="From" value=${value} onChange=${(v) => { value = v; update(); }} />`, el);
+        update();
+      },
+    },
+    {
+      title: 'Combobox — multi (chips in input)',
+      usage: "html`<${Combobox} multiple options value onChange />`",
+      mount: (el) => {
+        let value = [1];
+        const options = [{ id: 1, name: 'Action' }, { id: 2, name: 'Romance' }, { id: 3, name: 'Sci-Fi' }, { id: 4, name: 'Slice of Life' }];
+        const update = () => render(html`<div class="w-72"><${Combobox} multiple options=${options} value=${value} onChange=${(v) => { value = v; update(); }} /></div>`, el);
+        update();
+      },
+    },
+  ]));
+
+  // ── Feedback blocks ───────────────────────────────────────────────────────
+  root.appendChild(_renderSection('Callouts', [
+    {
+      title: 'Callout — info / warn / danger',
+      usage: "createCallout({ tone, text })",
+      mount: (el) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'flex flex-col gap-2 w-full';
+        wrap.appendChild(createCallout({ tone: 'info', text: 'Session timeout applies after the next restart.' }));
+        wrap.appendChild(createCallout({ tone: 'warn', text: 'SMTP credentials are stored unencrypted unless a secret key is set.' }));
+        wrap.appendChild(createCallout({ tone: 'danger', text: 'This permanently deletes all downloaded chapters.' }));
+        el.appendChild(wrap);
       },
     },
   ]));
 
   // ── Layout ────────────────────────────────────────────────────────────────
   root.appendChild(_renderSection('Layout & Navigation', [
-    {
-      title: 'createBreadcrumb()',
-      usage: "createBreadcrumb([{ label: 'Library', href: '/' }, { label: 'Manga' }])",
-      mount: (el) => {
-        const bc = createBreadcrumb([{ label: 'Library', href: '/' }, { label: 'Akira', href: '/manga/1' }, { label: 'Chapter 1' }]);
-        el.appendChild(bc);
-      },
-    },
     {
       title: 'renderPagination()',
       usage: "renderPagination(el, { page, hasNext, total, onPageChange })",

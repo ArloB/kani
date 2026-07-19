@@ -118,6 +118,50 @@ async fn logout_invalidates_session() {
 }
 
 #[tokio::test]
+async fn sessions_list_includes_current_session() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let mut sessions = serde_json::json!([]);
+    for _ in 0..20 {
+        let res = app
+            .clone()
+            .oneshot(authed_get("/rest/auth/sessions", &cookie))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_json(res).await;
+        sessions = body["sessions"].clone();
+        if sessions.as_array().is_some_and(|a| !a.is_empty()) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    let list = sessions.as_array().unwrap();
+    assert!(
+        !list.is_empty(),
+        "the live session must appear in the inventory"
+    );
+    assert!(
+        list.iter()
+            .any(|s| s["is_current"] == serde_json::json!(true)),
+        "the calling session should be flagged is_current: {list:?}"
+    );
+}
+
+#[tokio::test]
+async fn sessions_list_unauthenticated_returns_401() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+
+    let res = app.oneshot(get_req("/rest/auth/sessions")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn registration_enabled_returns_correct_flag() {
     let state = test_state().await;
     let app = build_test_app(state).await;

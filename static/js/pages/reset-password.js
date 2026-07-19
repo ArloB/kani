@@ -1,124 +1,116 @@
 // @ts-check
 // Reset password page — validates token, then allows the user to set a new password.
 
-import { iconX } from '../icons.js';
+import { h, render } from 'preact';
+import { useState, useEffect } from 'preact/hooks';
+import htm from 'htm';
 import { validateResetToken, confirmPasswordReset } from '../api.js';
+import { AuthCard, AuthError, AuthField, AuthSuccess } from '../components/auth-card.js';
+import { PasswordStrength } from '../components/password-strength.js';
+import { useBusy } from '../hooks/use-busy.js';
 import { t } from '../i18n.js';
+const html = htm.bind(h);
+
+function ResetPasswordPage() {
+  const token = new URLSearchParams(location.search).get('token') ?? '';
+  const [phase, setPhase] = useState(/** @type {'verifying'|'form'|'invalid'|'success'} */ (token ? 'verifying' : 'invalid'));
+  const [subtitle, setSubtitle] = useState(token ? t('auth.reset.verifying') : t('auth.reset.error.invalid_link'));
+  const [newPw, setNewPw] = useState('');
+  const [confPw, setConfPw] = useState('');
+  const [error, setError] = useState('');
+  const { busy, run } = useBusy();
+
+  useEffect(() => {
+    if (!token) return;
+    validateResetToken(token)
+      .then(data => {
+        setSubtitle(t('auth.reset.for_email', { email: data.email_hint }));
+        setPhase('form');
+      })
+      .catch(() => {
+        setSubtitle(t('auth.reset.error.expired'));
+        setPhase('invalid');
+      });
+  }, [token]);
+
+  const submit = (/** @type {Event} */ e) => {
+    e.preventDefault();
+    run(async () => {
+      setError('');
+      if (newPw.length < 8) {
+        setError(t('auth.reset.error.too_short'));
+        return;
+      }
+      if (newPw !== confPw) {
+        setError(t('auth.reset.error.mismatch'));
+        return;
+      }
+      try {
+        await confirmPasswordReset(token, newPw);
+        setPhase('success');
+      } catch (/** @type {any} */ err) {
+        setError(err?.message ?? t('auth.reset.error.failed'));
+      }
+    });
+  };
+
+  return html`
+    <${AuthCard} title=${t('auth.reset.title')} subtitle=${subtitle}>
+      <${AuthError} message=${error} id="rp-error" />
+      ${phase === 'success' && html`
+        <${AuthSuccess}>
+          ${t('auth.reset.success')} <a href="/login" class="underline">${t('auth.reset.success.signin')}</a>
+        </${AuthSuccess}>
+      `}
+      ${phase === 'form' && html`
+        <form class="flex flex-col gap-4" novalidate onSubmit=${submit}>
+          <div>
+            <${AuthField}
+              id="rp-new-pw"
+              label=${t('auth.reset.new_password')}
+              type="password"
+              value=${newPw}
+              onInput=${setNewPw}
+              autocomplete="new-password"
+              required=${true}
+              autofocus=${true}
+            />
+            <${PasswordStrength} password=${newPw} />
+          </div>
+          <${AuthField}
+            id="rp-conf-pw"
+            label=${t('auth.reset.confirm_password')}
+            type="password"
+            value=${confPw}
+            onInput=${setConfPw}
+            autocomplete="new-password"
+            required=${true}
+          />
+          <button type="submit" class="btn-primary w-full h-11 mt-2" disabled=${busy}>
+            ${busy ? t('common.saving') : t('auth.reset.submit')}
+          </button>
+        </form>
+      `}
+      ${phase === 'invalid' && html`
+        <p class="text-center text-sm">
+          <a href="/forgot-password" class="text-text-muted underline hover:text-text">${t('auth.reset.request_link')}</a>
+        </p>
+      `}
+      <p class="text-center text-sm text-text-muted">
+        <a href="/login" class="text-text-muted underline hover:text-text">${t('auth.reset.back')}</a>
+      </p>
+    </${AuthCard}>
+  `;
+}
 
 /** @param {HTMLElement} container */
-export async function init(container) {
+export function init(container) {
   document.title = t('auth.reset.page_title');
-
-  const token = new URLSearchParams(location.search).get('token') ?? '';
-
-  container.innerHTML = `
-    <div class="min-h-screen flex items-center justify-center p-4 bg-bg">
-      <div class="w-full max-w-sm bg-surface rounded-2xl shadow-lg border border-border p-8 flex flex-col gap-6">
-        <div class="text-center flex flex-col gap-1">
-          <h1 class="text-2xl font-bold text-text">${t('auth.reset.title')}</h1>
-          <p class="text-sm text-text-muted" id="rp-subtitle">${t('auth.reset.verifying')}</p>
-        </div>
-
-        <div
-          class="hidden items-center gap-2 px-3 py-2.5 rounded-lg bg-danger/10 border border-danger/30 text-sm text-danger"
-          role="alert"
-          id="rp-error"
-        >
-          <span aria-hidden="true" class="shrink-0 icon-sm">${iconX}</span>
-          <span id="rp-error-msg"></span>
-        </div>
-
-        <div id="rp-success" class="hidden px-3 py-2.5 rounded-lg bg-success/10 border border-success/30 text-sm text-success">
-          ${t('auth.reset.success')} <a href="/login" class="underline">${t('auth.reset.success.signin')}</a>
-        </div>
-
-        <form class="hidden flex-col gap-4" id="rp-form" novalidate>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="rp-new-pw">${t('auth.reset.new_password')}</label>
-            <input id="rp-new-pw" class="input" type="password" autocomplete="new-password" required autofocus />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label class="text-sm font-medium text-text" for="rp-conf-pw">${t('auth.reset.confirm_password')}</label>
-            <input id="rp-conf-pw" class="input" type="password" autocomplete="new-password" required />
-          </div>
-          <button type="submit" class="btn-primary w-full h-11 mt-2" id="rp-submit">${t('auth.reset.submit')}</button>
-        </form>
-
-        <p id="rp-invalid-link" class="hidden text-center text-sm">
-          <a href="/forgot-password" class="text-accent hover:underline">${t('auth.reset.request_link')}</a>
-        </p>
-
-        <p class="text-center text-sm text-text-muted">
-          <a href="/login" class="text-accent hover:underline">${t('auth.reset.back')}</a>
-        </p>
-      </div>
-    </div>
-  `;
-
-  const subtitle   = /** @type {HTMLElement}       */ (container.querySelector('#rp-subtitle'));
-  const errBox     = /** @type {HTMLElement}       */ (container.querySelector('#rp-error'));
-  const errMsg     = /** @type {HTMLElement}       */ (container.querySelector('#rp-error-msg'));
-  const successEl  = /** @type {HTMLElement}       */ (container.querySelector('#rp-success'));
-  const form       = /** @type {HTMLFormElement}   */ (container.querySelector('#rp-form'));
-  const btn        = /** @type {HTMLButtonElement} */ (container.querySelector('#rp-submit'));
-  const invalidLink = /** @type {HTMLElement}      */ (container.querySelector('#rp-invalid-link'));
-
-  function _showError(msg) {
-    errMsg.textContent = msg;
-    errBox.classList.remove('hidden');
-    errBox.classList.add('flex');
-  }
-
-  if (!token) {
-    subtitle.textContent = t('auth.reset.error.invalid_link');
-    invalidLink.classList.remove('hidden');
-    return;
-  }
-
-  try {
-    const data = await validateResetToken(token);
-    subtitle.textContent = t('auth.reset.for_email', { email: data.email_hint });
-    form.classList.remove('hidden');
-    form.classList.add('flex');
-  } catch {
-    subtitle.textContent = t('auth.reset.error.expired');
-    invalidLink.classList.remove('hidden');
-    return;
-  }
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errBox.classList.add('hidden');
-    errBox.classList.remove('flex');
-
-    const newPw  = /** @type {HTMLInputElement} */ (container.querySelector('#rp-new-pw')).value;
-    const confPw = /** @type {HTMLInputElement} */ (container.querySelector('#rp-conf-pw')).value;
-
-    if (newPw.length < 8) {
-      _showError(t('auth.reset.error.too_short'));
-      return;
-    }
-    if (newPw !== confPw) {
-      _showError(t('auth.reset.error.mismatch'));
-      return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = t('common.saving');
-
-    try {
-      await confirmPasswordReset(token, newPw);
-      form.classList.add('hidden');
-      successEl.classList.remove('hidden');
-    } catch (/** @type {any} */ err) {
-      _showError(err?.message ?? t('auth.reset.error.failed'));
-      btn.disabled = false;
-      btn.textContent = t('auth.reset.submit');
-    }
-  });
+  render(html`<${ResetPasswordPage} />`, container);
 }
 
 /** @param {HTMLElement} container */
 export function destroy(container) {
+  render(null, container);
   container.innerHTML = '';
 }

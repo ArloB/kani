@@ -16,6 +16,8 @@ pub fn router() -> Router<AppState> {
         .route("/sources/{id}/metadata", get(get_metadata))
         .route("/sources/{id}/wasm", post(upload_wasm))
         .route("/sources/{id}/wasm/fetch", post(fetch_wasm))
+        .route("/sources/yaml", post(install_yaml))
+        .route("/sources/yaml/fetch", post(fetch_yaml))
         .route("/sources/{id}/reload", post(reload_source_handler))
         .route(
             "/sources/{id}/download-concurrency",
@@ -390,6 +392,62 @@ pub(crate) async fn fetch_wasm(
         .install_source(id, &source.name, &bytes, crate::KANI_VERSION)
         .await?;
 
+    Ok(StatusCode::OK)
+}
+
+#[utoipa::path(
+    post, path = "/rest/sources/yaml",
+    request_body = InstallYamlRequest,
+    responses(
+        (status = 200, description = "Interpreted-YAML extension installed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 422, description = "Invalid YAML extension"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn install_yaml(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
+    State(state): State<AppState>,
+    ValidatedJson(payload): ValidatedJson<InstallYamlRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    if !crate::SOURCE_INSTALL_ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AppError::Forbidden(
+            "Source installation is disabled by the administrator".into(),
+        ));
+    }
+    state
+        .install_yaml_source(payload.content.as_bytes())
+        .await?;
+    Ok(StatusCode::OK)
+}
+
+#[utoipa::path(
+    post, path = "/rest/sources/yaml/fetch",
+    request_body = FetchYamlRequest,
+    responses(
+        (status = 200, description = "YAML fetched from URL and installed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 422, description = "Invalid YAML extension"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn fetch_yaml(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
+    State(state): State<AppState>,
+    ValidatedJson(payload): ValidatedJson<FetchYamlRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    if !crate::SOURCE_INSTALL_ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AppError::Forbidden(
+            "Source installation is disabled by the administrator".into(),
+        ));
+    }
+    let response = state.proxy_client.safe_get(&payload.url, None).await?;
+    let bytes = response.bytes_limited(MAX_WASM_BYTES).await?;
+    state.install_yaml_source(&bytes).await?;
     Ok(StatusCode::OK)
 }
 
@@ -1279,6 +1337,7 @@ mod tests {
             username: "test".into(),
             email: "test@example.com".into(),
             is_active: true,
+            created_at: None,
             roles: vec![],
             password_hash: String::new(),
             change_id: vec![],

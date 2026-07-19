@@ -1,7 +1,9 @@
 // @ts-check
 // Generic modal component — focus trap, escape-to-close, backdrop click.
 
-import { h, render } from 'preact';
+import { h, render, Fragment } from 'preact';
+import { createPortal } from 'preact/compat';
+import { signal, effect } from '@preact/signals';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import htm from 'htm';
 import { iconX } from '../icons.js';
@@ -18,11 +20,15 @@ const _SKIP_PREFIX = 'kani-confirm-skip-';
  *   onClose: () => void,
  *   title?: string,
  *   wide?: boolean,
+ *   sheet?: boolean,
  *   footer?: any,
  *   children?: any,
  * }} props
  */
-export function Modal({ open, onClose, title, wide = false, footer, children }) {
+/** Stack of currently-open Modals (tokens); the last entry owns Escape. */
+const _openStack = /** @type {object[]} */ ([]);
+
+export function Modal({ open, onClose, title, wide = false, sheet = false, footer, focusContainer = false, children }) {
   const dialogRef = useRef(/** @type {HTMLDivElement | null} */ (null));
   const triggerRef = useRef(/** @type {Element | null} */ (null));
   const titleId = 'modal-title';
@@ -37,13 +43,22 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
     }
   }, [open]);
 
-  // Escape key to close
+  // Escape key to close — only the topmost open dialog reacts, so a nested
+  // confirm doesn't drag its parent dialog down with it.
   useEffect(() => {
     if (!open) return;
+    const token = {};
+    _openStack.push(token);
     /** @param {KeyboardEvent} e */
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e) => {
+      if (e.key === 'Escape' && _openStack[_openStack.length - 1] === token) onClose();
+    };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    return () => {
+      const i = _openStack.indexOf(token);
+      if (i !== -1) _openStack.splice(i, 1);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [open, onClose]);
 
   // Focus trap: keep focus inside the modal
@@ -53,8 +68,10 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
     const focusable = /** @type {NodeListOf<HTMLElement>} */ (
       el.querySelectorAll('a,button:not(:disabled),input,select,textarea,[tabindex]:not([tabindex="-1"])')
     );
-    if (focusable.length) focusable[0].focus();
-    else el.focus();
+    // focusContainer: land focus on the dialog itself rather than the first
+    // control (e.g. the close ✕), so opening doesn't flash an accent ring on it.
+    if (focusContainer || !focusable.length) el.focus();
+    else focusable[0].focus();
 
     /** @param {KeyboardEvent} e */
     const trapTab = (e) => {
@@ -74,7 +91,8 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
 
   return html`
     <div
-      class="fixed inset-0 z-modal flex items-end sm:items-center justify-center p-0 sm:p-4 bg-scrim"
+      class=${'fixed inset-0 z-modal flex justify-center bg-scrim '
+        + (sheet ? 'items-end p-0' : 'items-end sm:items-center p-0 sm:p-4')}
       onClick=${(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
@@ -82,7 +100,10 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
         aria-modal="true"
         aria-labelledby=${title ? titleId : undefined}
         tabindex="-1"
-        class=${'relative bg-surface shadow-lg w-full flex flex-col overflow-hidden outline-none rounded-t-2xl sm:rounded-xl max-h-[85vh] sm:max-h-modal ' + (wide ? 'modal-wide' : 'modal-narrow')}
+        class=${'relative bg-surface shadow-lg w-full flex flex-col overflow-hidden outline-none max-h-[85dvh] '
+          + (sheet
+              ? 'rounded-t-2xl pb-safe'
+              : 'rounded-t-2xl sm:rounded-xl sm:max-h-modal ' + (wide ? 'modal-wide' : 'modal-narrow'))}
         ref=${dialogRef}
       >
         ${title && html`
@@ -98,17 +119,64 @@ export function Modal({ open, onClose, title, wide = false, footer, children }) 
   `;
 }
 
+// ── Signal-driven modal host ───────────────────────────────────────────────────
+//
+// A single persistent <ModalHost> owns every imperatively-opened dialog: each
+// mount pushes onto a signal-backed stack, and the host portals the stack into
+// #modal-root via createPortal — one Preact reconciler root for all dialogs
+// instead of N ad-hoc render() containers. Keyed entries stack (a confirm opened
+// from inside a dialog no longer replaces it) and reconcile without remounting
+// siblings.
+
+/** @type {import('@preact/signals').Signal<{ id: number, vnode: any }[]>} */
+const _modalStack = signal([]);
+let _nextModalId = 1;
+let _hostMounted = false;
+
+/** @param {{ stack: { id: number, vnode: any }[] }} props */
+function ModalHost({ stack }) {
+  const root = document.getElementById('modal-root');
+  if (!root) return null;
+  return createPortal(
+    stack.map((entry) => h(Fragment, { key: entry.id }, entry.vnode)),
+    root,
+  );
+}
+
+// Mount the host once (lazily, on first use) into a neutral container; its DOM
+// lives in #modal-root via the portal. Effect-driven render keeps the host in
+// sync with the stack signal — component auto-subscription is unreliable in this
+// vanilla-hosted island setup, so we re-render with a plain snapshot.
+function ensureModalHost() {
+  if (_hostMounted) return;
+  _hostMounted = true;
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  effect(() => {
+    render(h(ModalHost, { stack: _modalStack.value }), host);
+  });
+}
+
 /**
- * Imperatively render a Preact tree into #modal-root.
- * Returns a cleanup function that unmounts.
+ * Imperatively open a Preact tree as a modal. Returns a cleanup function that
+ * closes it. Dialogs stack; passing null closes everything (legacy teardown).
  * @param {any} vnode
  * @returns {() => void}
  */
 export function mountIntoModalRoot(vnode) {
-  const root = document.getElementById('modal-root');
-  if (!root) return () => {};
-  render(vnode, root);
-  return () => render(null, root);
+  ensureModalHost();
+  if (vnode == null) {
+    if (_modalStack.value.length) _modalStack.value = [];
+    return () => {};
+  }
+  const id = _nextModalId++;
+  _modalStack.value = [..._modalStack.value, { id, vnode }];
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    _modalStack.value = _modalStack.value.filter((e) => e.id !== id);
+  };
 }
 
 // ── Confirm dialog ────────────────────────────────────────────────────────────
@@ -220,7 +288,9 @@ export function showConfirm(message, opts = {}) {
 /**
  * @param {{ message: string, title?: string, closeLabel?: string, onClose: () => void }} props
  */
-function AlertModal({ message, title = 'Notice', closeLabel = 'OK', onClose }) {
+function AlertModal({ message, title, closeLabel, onClose }) {
+  title = title ?? t('common.notice');
+  closeLabel = closeLabel ?? t('common.ok');
   return html`
     <${Modal}
       open=${true}
@@ -248,7 +318,7 @@ export function showAlert(message, opts = {}) {
     cleanup = mountIntoModalRoot(html`
       <${AlertModal}
         message=${message}
-        title=${opts.title ?? 'Notice'}
+        title=${opts.title ?? t('common.notice')}
         onClose=${() => { cleanup(); resolve(); }}
       />
     `);

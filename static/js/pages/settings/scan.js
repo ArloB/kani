@@ -2,7 +2,7 @@
 // Settings — Scan section.
 
 import * as api from '../../api.js';
-import { showToast, showApiError } from '../../components/toast.js';
+import { showToast } from '../../components/toast.js';
 import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
 import { t } from '../../i18n.js';
 
@@ -53,13 +53,7 @@ export function mount(el, settings) {
   excludeToggleLabel.appendChild(excludeTrack);
   scanCard.appendChild(mkSettingsRow({ label: t('settings.scan.exclude.label'), description: t('settings.scan.exclude.desc'), control: excludeToggleLabel }));
 
-  const saveRow = document.createElement('div');
-  saveRow.className = 'flex items-center gap-3 px-4 py-3';
-  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-scan-save">${t('common.save')}</button>`;
-  scanCard.appendChild(saveRow);
   el.appendChild(scanGroup);
-
-  const saveBtn = /** @type {HTMLButtonElement} */ (el.querySelector('.js-scan-save'));
 
   let lastSaved = {
     auto_scan: !!settings?.auto_scan,
@@ -80,26 +74,17 @@ export function mount(el, settings) {
     };
   }
 
-  saveBtn.addEventListener('click', async () => {
-    saveBtn.disabled = true;
+  async function _save() {
     const payload = buildPayload();
-    if (JSON.stringify(payload) === JSON.stringify(lastSaved)) {
-      saveBtn.disabled = false;
-      return;
-    }
-    try {
-      await api.updateSettings({ Scan: payload });
-      lastSaved = { ...payload };
-      showToast(t('common.saved'), { type: 'success' });
-    } catch (e) {
-      showApiError(e);
-    } finally {
-      saveBtn.disabled = false;
-    }
-  });
+    if (JSON.stringify(payload) === JSON.stringify(lastSaved)) return;
+    await api.updateSettings({ Scan: payload });
+    lastSaved = { ...payload };
+    showToast(t('common.saved'), { type: 'success' });
+  }
 
   return {
     destroy() { el.innerHTML = ''; },
     isDirty() { return JSON.stringify(buildPayload()) !== JSON.stringify(lastSaved); },
+    save: _save,
   };
 }

@@ -206,6 +206,7 @@ mod tests {
             username: "test".into(),
             email: "test@example.com".into(),
             is_active: true,
+            created_at: None,
             roles: vec![],
             password_hash: String::new(),
             change_id: vec![],

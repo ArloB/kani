@@ -10,7 +10,7 @@ import { Icon } from './icon.js';
 import { getJsonSafe } from '../utils.js';
 import { t } from '../i18n.js';
 import { Combobox } from './combobox.js';
-import { updateState } from '../state.js';
+import { updateState } from '../ui-state.js';
 const html = htm.bind(h);
 
 /**
@@ -123,8 +123,8 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
           value=${textVal}
           onInput=${(e) => setTextVal(/** @type {HTMLInputElement} */ (e.target).value)}
         />
-        <button class="btn-primary btn-sm" disabled=${saving} onClick=${() => save(textVal)}>
-          ${saving ? '…' : 'Save'}
+        <button class="btn-secondary btn-sm" disabled=${saving} onClick=${() => save(textVal)}>
+          ${saving ? '…' : t('common.save')}
         </button>
       </div>
     `;
@@ -155,8 +155,8 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
           value=${numVal}
           onInput=${(e) => setNumVal(/** @type {HTMLInputElement} */ (e.target).value)}
         />
-        <button class="btn-primary btn-sm" disabled=${saving} onClick=${() => save(numVal)}>
-          ${saving ? '…' : 'Save'}
+        <button class="btn-secondary btn-sm" disabled=${saving} onClick=${() => save(numVal)}>
+          ${saving ? '…' : t('common.save')}
         </button>
       </div>
     `;
@@ -204,7 +204,7 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
         >
           ${meta}
           <div class="shrink-0 flex items-center gap-1.5 text-text-muted icon-sm">
-            <span class="text-sm">${list.length} item${list.length !== 1 ? 's' : ''}</span>
+            <span class="text-sm">${list.length !== 1 ? t('pref_row.items_other', { n: list.length }) : t('pref_row.items_one', { n: list.length })}</span>
             <${Icon} svg=${iconChevronRight} />
           </div>
         </button>
@@ -246,7 +246,7 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
             }}
           />
           <button
-            class="btn-primary btn-sm"
+            class="btn-secondary btn-sm"
             disabled=${!mvlInput.trim()}
             onClick=${async () => {
               if (!mvlInput.trim()) return;
@@ -255,12 +255,12 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
               setMvlInput('');
               bumpPrefVersion(sourceId);
             }}
-          >Add</button>
+          >${t('common.add')}</button>
         </div>
       </div>
     `;
   } else {
-    control = html`<span class="text-sm text-danger">Unknown preference kind: ${kindName}</span>`;
+    control = html`<span class="text-sm text-danger">${t('pref_row.unknown_kind', { kind: kindName })}</span>`;
   }
 
   return html`
@@ -281,9 +281,10 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
  *   liveValues: Record<string, any>,
  *   onValueChange: (key: string, value: any) => void,
  *   onBack: () => void,
+ *   showHeader?: boolean,
  * }} props
  */
-export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveValues, onValueChange, onBack }) {
+export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveValues, onValueChange, onBack, showHeader = true }) {
   const key = descriptor.key;
   const title = descriptor.label ?? descriptor.title ?? '';
   const description = descriptor.description;
@@ -302,10 +303,10 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
   const [mvlInput, setMvlInput] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const header = html`
+  const header = !showHeader ? null : html`
     <div class="flex items-start gap-3 pb-4 mb-2 border-b border-border-subtle">
       <button class="btn-ghost btn-sm shrink-0 flex items-center gap-1 icon-sm" onClick=${onBack}>
-        <${Icon} svg=${iconChevronLeft} /> Back
+        <${Icon} svg=${iconChevronLeft} /> ${t('common.back')}
       </button>
       <div class="flex flex-col gap-0.5 min-w-0">
         <span class="text-sm font-medium text-text">${title}</span>
@@ -353,7 +354,7 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
             }}
           />
           <button
-            class="btn-primary btn-sm"
+            class="btn-secondary btn-sm"
             disabled=${!mvlInput.trim()}
             onClick=${async () => {
               if (!mvlInput.trim()) return;
@@ -362,7 +363,7 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
               setMvlInput('');
               bumpPrefVersion(sourceId);
             }}
-          >Add</button>
+          >${t('common.add')}</button>
         </div>
       </div>
     `;
@@ -398,5 +399,5 @@ export function PreferenceDetailView({ sourceId, descriptor, currentValue, liveV
     `;
   }
 
-  return html`<p class="text-sm text-danger">No detail view for kind: ${kindName}</p>`;
+  return html`<p class="text-sm text-danger">${t('pref_row.no_detail_view', { kind: kindName })}</p>`;
 }

@@ -145,6 +145,7 @@ mod tests {
             username: "stub".into(),
             email: "stub@test.com".into(),
             is_active: true,
+            created_at: None,
             roles: vec![],
             password_hash: String::new(),
             change_id: vec![],

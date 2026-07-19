@@ -256,6 +256,16 @@ export async function fetchWasm(id, url) {
   return _req('POST', `/sources/${id}/wasm/fetch`, { body: { url } });
 }
 
+/** Install an interpreted-YAML extension from raw YAML text (find-or-create by id). @param {string} content */
+export async function installYaml(content) {
+  return _req('POST', '/sources/yaml', { body: { content } });
+}
+
+/** Fetch and install an interpreted-YAML extension from a URL. @param {string} url */
+export async function fetchYaml(url) {
+  return _req('POST', '/sources/yaml/fetch', { body: { url } });
+}
+
 /**
  * Upload a .wasm file to install an extension.
  * @param {number} id
@@ -1394,6 +1404,11 @@ export async function checkPasswordStrength(password, identity = '') {
  */
 export async function getSystemInfo() {
   return _req('GET', '/system/info');
+}
+
+/** Recent changelog, rendered to sanitised HTML server-side. */
+export async function getChangelog() {
+  return _req('GET', '/system/changelog');
 }
 
 /** @returns {Promise<void>} */

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, name FROM manga ORDER BY id",
+  "query": "SELECT id, name FROM manga WHERE deleted_at IS NULL AND is_orphaned = FALSE ORDER BY id",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       false
     ]
   },
-  "hash": "b3a24c962749dd94a8e7bfd9d530413144a59cf2c86d0f4e70f9681232832353"
+  "hash": "f31f03df37ba8b7dc2521f60de4f1462421f21d4606f734afa17f474b74fc20b"
 }

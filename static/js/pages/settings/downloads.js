@@ -76,17 +76,7 @@ export function mount(el, settings) {
     control: catContainer,
   }));
 
-  const saveRow = document.createElement('div');
-  saveRow.className = 'flex items-center gap-3 px-4 py-3';
-  const _saveBtn = document.createElement('button');
-  _saveBtn.type = 'button';
-  _saveBtn.className = 'btn-primary btn-sm js-dl-save';
-  _saveBtn.textContent = t('common.save');
-  saveRow.appendChild(_saveBtn);
-  serverCard.appendChild(saveRow);
   el.appendChild(serverGroup);
-
-  const saveBtn = /** @type {HTMLButtonElement} */ (el.querySelector('.js-dl-save'));
 
   /** @type {Record<string, any>} */
   let lastSaved = {
@@ -106,23 +96,13 @@ export function mount(el, settings) {
     return payload;
   }
 
-  saveBtn.addEventListener('click', async () => {
-    saveBtn.disabled = true;
+  async function _save() {
     const payload = buildPayload();
-    if (JSON.stringify(payload) === JSON.stringify(lastSaved)) {
-      saveBtn.disabled = false;
-      return;
-    }
-    try {
-      await api.updateSettings({ Download: payload });
-      lastSaved = { ...payload };
-      showToast(t('common.saved'), { type: 'success' });
-    } catch (e) {
-      showApiError(e);
-    } finally {
-      saveBtn.disabled = false;
-    }
-  });
+    if (JSON.stringify(payload) === JSON.stringify(lastSaved)) return;
+    await api.updateSettings({ Download: payload });
+    lastSaved = { ...payload };
+    showToast(t('common.saved'), { type: 'success' });
+  }
 
   // Download ahead — client-side localStorage setting
   const aheadGroup = mkSettingsGroup(t('settings.downloads.ahead.group'));
@@ -172,5 +152,6 @@ export function mount(el, settings) {
   return {
     destroy() { render(null, catContainer); el.innerHTML = ''; },
     isDirty() { return JSON.stringify(buildPayload()) !== JSON.stringify(lastSaved); },
+    save: _save,
   };
 }

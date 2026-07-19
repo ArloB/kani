@@ -4,14 +4,24 @@
 import { h, render } from 'preact';
 import htm from 'htm';
 import * as api from '../api.js';
-import { hasPermission, getState, setState, updateState, subscribe } from '../state.js';
-import { navigate } from '../router.js';
-import { debounce, getLocal, getLocalInt, setLocal, hasNextPage, confirmDialog, formatChapterTitle, deferredSkeleton, addPullToRefresh, withBusy } from '../utils.js';
+import { hasPermission } from '../session.js';
+import { getState, setState, updateState, subscribe } from '../cache.js';
+import { navigate, scrollPageTop } from '../router.js';
+import { debounce, getLocal, getLocalInt, setLocal, hasNextPage, deferredSkeleton, addPullToRefresh, withBusy } from '../utils.js';
+import { showConfirm } from '../components/modal.js';
+import { PageSizeSelect } from '../components/page-size-select.js';
+import { BulkBar } from '../components/bulk-bar.js';
+import { mountSavedSearches } from '../components/library/saved-searches.js';
+import { showCategoryAssignModal } from '../components/library/category-assign-modal.js';
+import { mountContinueShelf } from '../components/library/continue-shelf.js';
 import { getParam, pushState, replaceState } from '../url-params.js';
 
 /** @type {Record<string, number>} */
 const STATUS_VALUES = { ongoing: 0, completed: 1, hiatus: 2, cancelled: 3, unknown: 4 };
 import { Combobox } from '../components/combobox.js';
+import { Select } from '../components/form/select.js';
+import { createSearchInput } from '../components/form/search-input.js';
+import { mountDisplayMenu } from '../components/library/display-menu.js';
 import { renderCategoryTabs } from '../components/tabs.js';
 import { renderPagination } from '../components/pagination.js';
 import { renderMangaGrid, createMangaCard, setMangaCardScanning, setMangaCardDownloadProgress, setNewChapterCount } from '../components/manga-card.js';
@@ -19,9 +29,9 @@ import { skeletonGrid } from '../components/skeletons.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
-import { iconBookOpen, iconChevronDown, iconRefresh, iconSearch } from '../icons.js';
+import { iconBookOpen, iconChevronDown, iconRefresh } from '../icons.js';
 import { showToast, showApiError } from '../components/toast.js';
-import { ContextMenu } from '../components/menu.js';
+import { showContextMenu } from '../components/menu.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
@@ -44,6 +54,8 @@ let _pageSize = 0;
 
 /** @type {AbortController|null} */ let _abort = null;
 /** @type {(() => void)|null} */   let _removePullToRefresh = null;
+/** @type {{ destroy: () => void }|null} */ let _shelfHandle = null;
+/** @type {HTMLElement|null} */ let _savedSearchesEl = null;
 /** @type {(() => void)|null} */   let _unsubRefresh = null;
 /** @type {(() => void)|null} */   let _unsubInvalidation = null;
 /** @type {(() => void)|null} */   let _unsubScanning = null;
@@ -57,10 +69,16 @@ let _scanInProgress = false;
 /** @type {HTMLElement|null} */    let _authorContainer = null;
 /** @type {HTMLElement|null} */    let _artistContainer = null;
 /** @type {HTMLElement|null} */    let _tagsContainer = null;
+/** @type {HTMLElement[]} */       let _sortMountEls = [];
+/** @type {HTMLElement|null} */    let _statusMountEl = null;
+/** @type {HTMLElement|null} */    let _readingStatusMountEl = null;
+/** @type {HTMLElement[]} */       let _displayMountEls = [];
 /** @type {HTMLElement|null} */    let _gridEl = null;
 /** @type {HTMLElement|null} */    let _paginEl = null;
+/** @type {NodeListOf<HTMLInputElement>|null} */ let _searchEls = null;
 /** @type {HTMLElement|null} */    let _container = null;
 /** @type {(() => void)|null} */   let _mountComboboxesFn = null;
+/** @type {(() => void)|null} */   let _renderFilterControlsFn = null;
 /** @type {(() => void)|null} */   let _updateFilterCountFn = null;
 /** @type {(() => void)|null} */   let _cancelInitSkeleton = null;
 
@@ -68,7 +86,8 @@ let _scanInProgress = false;
 let _selectMode = false;
 /** @type {Set<number>} */ let _selected = new Set();
 /** @type {HTMLElement|null} */ let _bulkBarEl = null;
-/** @type {HTMLElement|null} */ let _contextMenuEl = null;
+/** @type {(() => void)|null} */ let _closeCtxMenu = null;
+/** @type {((e: KeyboardEvent) => void)|null} */ let _escHandler = null;
 // One-shot flag: absorbs the click that fires on pointer-up after a long-press
 // entered select mode. Set by the long-press timer; consumed by the first onCardClick.
 let _absorbNextCardClick = false;
@@ -100,17 +119,10 @@ function _clearAllFilters() {
   _page = 1;
   if (_container) {
     for (const el of _container.querySelectorAll('.js-search')) /** @type {HTMLInputElement} */ (el).value = '';
-    const status = _container.querySelector('.js-status');
-    if (status) /** @type {HTMLSelectElement} */ (status).value = '';
-    const readingStatus = _container.querySelector('.js-reading-status');
-    if (readingStatus) /** @type {HTMLSelectElement} */ (readingStatus).value = '';
-    const hideNoUnread = _container.querySelector('.js-hide-no-unread');
-    if (hideNoUnread) /** @type {HTMLInputElement} */ (hideNoUnread).checked = false;
-    const hideCompleted = _container.querySelector('.js-hide-completed');
-    if (hideCompleted) /** @type {HTMLInputElement} */ (hideCompleted).checked = false;
-    // Re-mount comboboxes with cleared values (includes tags)
+    // Re-mount comboboxes and filter controls with cleared values (includes tags)
     _mountComboboxesFn?.();
-  _updateFilterCountFn?.();
+    _renderFilterControlsFn?.();
+    _updateFilterCountFn?.();
   }
   _updateUrl();
   _fetchLibrary();
@@ -142,7 +154,7 @@ export async function init(container) {
   if (hasPermission('library:refresh')) {
     refreshBtn = document.createElement('button');
     refreshBtn.type = 'button';
-    refreshBtn.className = 'btn-primary btn-sm flex items-center gap-2';
+    refreshBtn.className = 'btn-secondary btn-sm flex items-center gap-2';
     refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>${t('library.refresh_all')}</span>`;
   }
 
@@ -189,105 +201,48 @@ export async function init(container) {
       <!-- Category tabs (horizontal scroll on mobile) -->
       <div class="js-tabs overflow-x-auto [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"></div>
 
-      <!-- Search bar (mobile only — on desktop it lives inside the filter bar) -->
-      <div class="relative lg:hidden">
-        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none icon-sm" aria-hidden="true">${iconSearch}</span>
-        <input
-          type="search"
-          class="input js-search w-full pl-9"
-          placeholder="${t('library.search.placeholder')}"
-          value="${_search.replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
-          aria-label="${t('library.search.aria')}"
-        />
-      </div>
+      <!-- Search bar (mobile only — on desktop it lives inline in the controls row) -->
+      <div class="js-search-slot-mobile lg:hidden"></div>
 
-      <!-- Filter toggle + page size (mobile only) -->
-      <div class="flex items-center gap-2 lg:hidden">
+      <!-- Controls row: search (desktop) + Filters toggle + sort + page size + display -->
+      <div class="flex items-center gap-2">
+        <div class="js-search-slot-desktop hidden lg:block lg:flex-1"></div>
         <button
           type="button"
-          class="flex-1 flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-border bg-surface text-sm font-medium text-text hover:bg-surface-2 transition-colors js-filter-toggle"
+          class="js-filter-toggle input flex items-center justify-between gap-2 text-left w-full lg:w-auto flex-1 lg:flex-none"
           aria-expanded="false"
           aria-controls="library-filters"
         >
-          <span class="flex items-center gap-2">
+          <span class="flex items-center gap-2 text-sm font-medium">
             ${t('library.filters')}
             <span class="js-filter-count hidden items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-accent text-on-accent text-xs font-medium"></span>
           </span>
-          <span class="icon-sm transition-transform js-filter-chevron">${iconChevronDown}</span>
+          <span class="icon-sm text-text-muted transition-transform js-filter-chevron">${iconChevronDown}</span>
         </button>
-        <select class="input js-page-size w-20 shrink-0" aria-label="${t('library.items_per_page')}">
-          ${[12, 24, 48, 96].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
-        </select>
+        <div class="js-sort-mount hidden lg:block shrink-0"></div>
+        <div class="js-page-size-mount hidden sm:block w-20 shrink-0"></div>
+        <div class="js-display-mount shrink-0"></div>
       </div>
 
-      <!-- Filter bar (hidden on mobile until toggled, always visible on lg+) -->
-      <div id="library-filters" class="js-filters hidden flex-col gap-3 lg:flex lg:flex-col lg:gap-3">
-        <!-- Row 1: Search + Sort + Page size (primary controls, desktop only) -->
-        <div class="flex flex-col lg:flex-row lg:items-center gap-2">
-          <div class="relative hidden lg:block lg:flex-1">
-            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none icon-sm" aria-hidden="true">${iconSearch}</span>
-            <input
-              type="search"
-              class="input js-search pl-9 w-full"
-              placeholder="${t('library.search.placeholder')}"
-              value="${_search.replace(/"/g, '&quot;').replace(/</g, '&lt;')}"
-              aria-label="${t('library.search.aria')}"
-            />
-          </div>
-          <select class="input js-sort w-full lg:w-auto" aria-label="${t('library.sort.aria')}">
-            ${[
-              ['updated_desc', t('library.sort.updated_desc')],['updated_asc', t('library.sort.updated_asc')],
-              ['name_asc', t('library.sort.name_asc')],['name_desc', t('library.sort.name_desc')],
-              ['added_desc', t('library.sort.added_desc')],['added_asc', t('library.sort.added_asc')],
-              ['score_desc', t('library.sort.score_desc')],['score_asc', t('library.sort.score_asc')],
-              ['last_read_desc', t('library.sort.last_read_desc')],
-            ].map(([v,l]) =>
-              `<option value="${v}"${v === _sortOrder ? ' selected' : ''}>${l}</option>`
-            ).join('')}
-          </select>
-          <select class="input js-page-size w-full lg:w-20 hidden lg:block" aria-label="${t('library.items_per_page')}">
-            ${[12, 24, 48, 96].map(n => `<option value="${n}"${n === _pageSize ? ' selected' : ''}>${n}</option>`).join('')}
-          </select>
+      <!-- Filter panel (hidden on every breakpoint until toggled) -->
+      <div id="library-filters" class="js-filters hidden flex-col gap-2">
+        <!-- Sort + page size (mobile only — inline in the controls row on desktop) -->
+        <div class="flex items-center gap-2 lg:hidden">
+          <div class="js-sort-mount flex-1"></div>
+          <div class="js-page-size-mount w-20 shrink-0 sm:hidden"></div>
         </div>
-        <!-- Row 2: Filter dropdowns + toggles -->
         <div class="flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-2">
-          <select class="input js-status w-full lg:w-auto lg:min-w-36" aria-label="${t('library.status.aria')}">
-            ${['', 'ongoing', 'completed', 'hiatus', 'cancelled', 'unknown'].map(v =>
-              `<option value="${v}"${v === (_statusFilter ?? '') ? ' selected' : ''}>${v || t('library.status.all')}</option>`
-            ).join('')}
-          </select>
-          <select class="input js-reading-status w-full lg:w-auto lg:min-w-40" aria-label="${t('library.reading_status.aria')}">
-            <option value="">${t('library.reading_status.all')}</option>
-            ${[['0', t('library.reading_status.reading')],['1', t('library.reading_status.on_hold')],['2', t('library.reading_status.dropped')],['3', t('library.reading_status.plan_to_read')],['4', t('library.reading_status.completed')],['5', t('library.reading_status.rereading')]].map(([v,l]) =>
-              `<option value="${v}"${String(_readingStatusFilter) === v ? ' selected' : ''}>${l}</option>`
-            ).join('')}
-          </select>
+          <div class="js-status-mount w-full lg:w-auto shrink-0"></div>
+          <div class="js-reading-status-mount w-full lg:w-auto shrink-0"></div>
           <div class="js-tags-combobox w-full lg:w-auto lg:min-w-36 lg:max-w-48"></div>
           <div class="js-author-combobox w-full lg:w-auto lg:max-w-44"></div>
           <div class="js-artist-combobox w-full lg:w-auto lg:max-w-44"></div>
-          <label class="flex items-center gap-3 text-sm text-text cursor-pointer whitespace-nowrap select-none">
-            <span>${t('library.hide_read')}</span>
-            <label class="kani-toggle">
-              <input type="checkbox" class="kani-toggle__input js-hide-no-unread" ${_hideNoUnread ? 'checked' : ''} />
-              <span class="kani-toggle__track"></span>
-            </label>
-          </label>
-          <label class="flex items-center gap-3 text-sm text-text cursor-pointer whitespace-nowrap select-none">
-            <span>${t('library.hide_completed')}</span>
-            <label class="kani-toggle">
-              <input type="checkbox" class="kani-toggle__input js-hide-completed" ${_hideCompletedStatus ? 'checked' : ''} />
-              <span class="kani-toggle__track"></span>
-            </label>
-          </label>
-          <div class="js-saved-searches flex items-center gap-2 ml-auto"></div>
+          <div class="js-saved-searches flex items-center gap-2 lg:ml-auto"></div>
         </div>
       </div>
 
-      <!-- Continue Reading shelf -->
-      <div class="js-shelf hidden flex flex-col gap-2">
-        <h2 class="text-sm font-semibold text-text-muted uppercase tracking-wide">${t('library.continue_reading')}</h2>
-        <div class="js-shelf-row flex gap-3 overflow-x-auto [scrollbar-width:none] [-webkit-overflow-scrolling:touch] pb-1"></div>
-      </div>
+      <!-- Continue Reading shelf (component owns its internals) -->
+      <div class="js-shelf"></div>
 
       <!-- Grid -->
       <div class="js-grid" aria-live="polite" aria-busy="false"></div>
@@ -304,15 +259,29 @@ export async function init(container) {
   _tagsContainer   = /** @type {HTMLElement} */ (container.querySelector('.js-tags-combobox'));
 
   const tabsEl           = /** @type {HTMLElement} */ (container.querySelector('.js-tabs'));
+
+  // Search fields (one per breakpoint, values kept in sync). Built via the
+  // shared factory; the inputs keep the js-search class so the sync/clear-all
+  // wiring below is unchanged.
+  for (const slotSel of ['.js-search-slot-mobile', '.js-search-slot-desktop']) {
+    const slot = /** @type {HTMLElement} */ (container.querySelector(slotSel));
+    if (!slot) continue;
+    const { el } = createSearchInput({
+      value: _search,
+      placeholder: t('library.search.placeholder'),
+      ariaLabel: t('library.search.aria'),
+      inputClass: 'js-search',
+    });
+    slot.appendChild(el);
+  }
   const searchEls        = /** @type {NodeListOf<HTMLInputElement>} */ (container.querySelectorAll('.js-search'));
-  const statusEl         = /** @type {HTMLSelectElement} */ (container.querySelector('.js-status'));
-  const readingStatusEl  = /** @type {HTMLSelectElement} */ (container.querySelector('.js-reading-status'));
-  const hideNoUnreadEl   = /** @type {HTMLInputElement} */ (container.querySelector('.js-hide-no-unread'));
-  const hideCompletedEl  = /** @type {HTMLInputElement} */ (container.querySelector('.js-hide-completed'));
-  const sortEl           = /** @type {HTMLSelectElement} */ (container.querySelector('.js-sort'));
-  const sizeEls          = /** @type {NodeListOf<HTMLSelectElement>} */ (container.querySelectorAll('.js-page-size'));
+  _searchEls = searchEls;
+  _sortMountEls         = [...container.querySelectorAll('.js-sort-mount')].map(el => /** @type {HTMLElement} */ (el));
+  _statusMountEl        = /** @type {HTMLElement} */ (container.querySelector('.js-status-mount'));
+  _readingStatusMountEl = /** @type {HTMLElement} */ (container.querySelector('.js-reading-status-mount'));
+  _displayMountEls      = [...container.querySelectorAll('.js-display-mount')].map(el => /** @type {HTMLElement} */ (el));
+  const sizeMountEls     = /** @type {NodeListOf<HTMLElement>} */ (container.querySelectorAll('.js-page-size-mount'));
   const shelfEl          = /** @type {HTMLElement} */ (container.querySelector('.js-shelf'));
-  const shelfRowEl       = /** @type {HTMLElement} */ (container.querySelector('.js-shelf-row'));
   const filterToggle    = /** @type {HTMLButtonElement} */ (container.querySelector('.js-filter-toggle'));
   const filtersEl       = /** @type {HTMLElement} */ (container.querySelector('.js-filters'));
   const filterCountEl   = /** @type {HTMLElement} */ (container.querySelector('.js-filter-count'));
@@ -361,6 +330,12 @@ export async function init(container) {
   _gridEl.addEventListener('pointercancel', _cancelLp);
   _gridEl.addEventListener('pointermove', _cancelLp);
 
+  // Escape leaves select mode (only when no dialog/popover is capturing it).
+  _escHandler = (e) => {
+    if (e.key === 'Escape' && _selectMode) { _exitSelectMode(); }
+  };
+  document.addEventListener('keydown', _escHandler);
+
   function _updateFilterCount() {
     if (!filterCountEl) return;
     const count = [_statusFilter, _readingStatusFilter != null ? true : null, _hideNoUnread || null, _hideCompletedStatus || null, _tagFilter != null ? true : null, _authorFilter != null ? true : null, _artistFilter != null ? true : null].filter(Boolean).length;
@@ -405,7 +380,7 @@ export async function init(container) {
 
   // Tab IDs: positive = category_id, negative = -(collection_id), null = All
   const tabItems = [
-    { id: null, name: 'All' },
+    { id: null, name: t('library.tab.all') },
     ...catList.map(c => ({ id: c.id, name: c.name })),
     ...collectionList.map(c => ({ id: -(c.id), name: `★ ${c.name}` })),
   ];
@@ -428,15 +403,16 @@ export async function init(container) {
     }
     _page = 1;
     _updateUrl();
+    tabsHandle.update(_activeTabId());
     _fetchLibrary();
   }
 
-  const { destroy: destroyTabs } = renderCategoryTabs(tabsEl, {
+  const tabsHandle = renderCategoryTabs(tabsEl, {
     tabs: tabItems,
     activeId: _activeTabId(),
     onSelect: _onTabSelect,
   });
-  _destroyTabs = destroyTabs;
+  _destroyTabs = tabsHandle.destroy;
 
   // Mount Preact Combobox for tags/author/artist
   const tagOptions    = (Array.isArray(tags)    ? tags    : []).map(t => ({ id: t.id ?? t, name: t.name ?? t }));
@@ -473,8 +449,8 @@ export async function init(container) {
   _mountComboboxes();
 
   // ── Saved searches ──
-  const savedSearchesEl = /** @type {HTMLElement|null} */ (container.querySelector('.js-saved-searches'));
-  if (savedSearchesEl) _mountSavedSearches(savedSearchesEl);
+  _savedSearchesEl = /** @type {HTMLElement|null} */ (container.querySelector('.js-saved-searches'));
+  if (_savedSearchesEl) mountSavedSearches(_savedSearchesEl, { getCurrentFilters: _currentFiltersForSavedSearch, onApply: _applySearchQuery });
 
   // ── Wire events ──
   for (const searchEl of searchEls) {
@@ -488,55 +464,87 @@ export async function init(container) {
     }, 300));
   }
 
-  statusEl.addEventListener('change', () => {
-    _statusFilter = statusEl.value || null;
-    _page = 1;
-    _updateFilterCount();
-    _updateUrl();
-    _fetchLibrary();
-  });
+  const SORT_OPTIONS = [
+    ['updated_desc', t('library.sort.updated_desc')],
+    ['updated_asc', t('library.sort.updated_asc')],
+    ['name_asc', t('library.sort.name_asc')],
+    ['name_desc', t('library.sort.name_desc')],
+    ['added_desc', t('library.sort.added_desc')],
+    ['added_asc', t('library.sort.added_asc')],
+    ['score_desc', t('library.sort.score_desc')],
+    ['score_asc', t('library.sort.score_asc')],
+    ['last_read_desc', t('library.sort.last_read_desc')],
+  ].map(([value, label]) => ({ value, label }));
 
-  readingStatusEl?.addEventListener('change', () => {
-    _readingStatusFilter = readingStatusEl.value ? Number(readingStatusEl.value) : null;
-    _page = 1;
-    _updateFilterCount();
-    _updateUrl();
-    _fetchLibrary();
-  });
+  const STATUS_OPTIONS = ['', 'ongoing', 'completed', 'hiatus', 'cancelled', 'unknown'].map(v => ({
+    value: v,
+    label: v ? t(`manga.status.${v}`) : t('library.status.all'),
+  }));
 
-  hideNoUnreadEl?.addEventListener('change', () => {
-    _hideNoUnread = hideNoUnreadEl.checked;
-    _page = 1;
-    _updateFilterCount();
-    _updateUrl();
-    _fetchLibrary();
-  });
+  const READING_STATUS_OPTIONS = [
+    ['', t('library.reading_status.all')],
+    ['0', t('library.reading_status.reading')],
+    ['1', t('library.reading_status.on_hold')],
+    ['2', t('library.reading_status.dropped')],
+    ['3', t('library.reading_status.plan_to_read')],
+    ['4', t('library.reading_status.completed')],
+    ['5', t('library.reading_status.rereading')],
+  ].map(([value, label]) => ({ value, label }));
 
-  hideCompletedEl?.addEventListener('change', () => {
-    _hideCompletedStatus = hideCompletedEl.checked;
-    _page = 1;
-    _updateFilterCount();
-    _updateUrl();
-    _fetchLibrary();
-  });
-
-  sortEl.addEventListener('change', () => {
-    _sortOrder = sortEl.value;
-    _page = 1;
-    _updateUrl();
-    _fetchLibrary();
-  });
-
-  for (const sizeEl of sizeEls) {
-    sizeEl.addEventListener('change', () => {
-      _pageSize = Number(sizeEl.value);
-      setLocal('kani_library_page_size', String(_pageSize));
-      _page = 1;
-      // Keep both selects in sync
-      for (const el of sizeEls) el.value = sizeEl.value;
-      _fetchLibrary();
-    });
+  function _renderFilterControls() {
+    for (const el of _sortMountEls) {
+      render(html`<${Select}
+        options=${SORT_OPTIONS}
+        value=${_sortOrder}
+        ariaLabel=${t('library.sort.aria')}
+        onChange=${(/** @type {string} */ v) => { _sortOrder = v; _page = 1; _renderFilterControls(); _updateUrl(); _fetchLibrary(); }}
+      />`, el);
+    }
+    if (_statusMountEl) {
+      render(html`<${Select}
+        options=${STATUS_OPTIONS}
+        value=${_statusFilter ?? ''}
+        ariaLabel=${t('library.status.aria')}
+        onChange=${(/** @type {string} */ v) => { _statusFilter = v || null; _page = 1; _renderFilterControls(); _updateFilterCount(); _updateUrl(); _fetchLibrary(); }}
+      />`, _statusMountEl);
+    }
+    if (_readingStatusMountEl) {
+      render(html`<${Select}
+        options=${READING_STATUS_OPTIONS}
+        value=${_readingStatusFilter != null ? String(_readingStatusFilter) : ''}
+        ariaLabel=${t('library.reading_status.aria')}
+        onChange=${(/** @type {string} */ v) => { _readingStatusFilter = v ? Number(v) : null; _page = 1; _renderFilterControls(); _updateFilterCount(); _updateUrl(); _fetchLibrary(); }}
+      />`, _readingStatusMountEl);
+    }
+    for (const el of _displayMountEls) {
+      mountDisplayMenu(el, {
+        hideRead: _hideNoUnread,
+        hideCompleted: _hideCompletedStatus,
+        onChangeHideRead: (/** @type {boolean} */ v) => { _hideNoUnread = v; _page = 1; _renderFilterControls(); _updateFilterCount(); _updateUrl(); _fetchLibrary(); },
+        onChangeHideCompleted: (/** @type {boolean} */ v) => { _hideCompletedStatus = v; _page = 1; _renderFilterControls(); _updateFilterCount(); _updateUrl(); _fetchLibrary(); },
+      });
+    }
   }
+  _renderFilterControlsFn = _renderFilterControls;
+  _renderFilterControls();
+
+  const _renderPageSize = () => {
+    for (const mountEl of sizeMountEls) {
+      render(html`<${PageSizeSelect}
+        options=${[12, 24, 48, 96]}
+        value=${_pageSize}
+        ariaLabel=${t('library.items_per_page')}
+        onChange=${(/** @type {number} */ n) => {
+          _pageSize = n;
+          setLocal('kani_library_page_size', String(_pageSize));
+          _page = 1;
+          _renderPageSize();
+          _fetchLibrary();
+        }}
+      />`, mountEl);
+    }
+  };
+  _renderPageSize();
 
   refreshBtn?.addEventListener('click', async () => {
     if (refreshBtn) refreshBtn.disabled = true;
@@ -609,7 +617,7 @@ export async function init(container) {
   });
 
   // ── Per-manga download progress subscription ──
-  _unsubDownloads = subscribe('chaptersProgress', (/** @type {Map<number, import('../state.js').ChapterProgress>} */ map) => {
+  _unsubDownloads = subscribe('chaptersProgress', (/** @type {Map<number, import('../cache.js').ChapterProgress>} */ map) => {
     if (!_gridEl) return;
     // Aggregate progress by manga: sum pages of in-progress chapters.
     /** @type {Map<number, { completed: number, total: number }>} */
@@ -659,45 +667,10 @@ export async function init(container) {
   });
 
   // ── Continue-reading shelf ──
-  if (shelfEl && shelfRowEl) {
-    api.getContinueReadingShelf(12).then(items => {
-      if (!shelfRowEl || !Array.isArray(items) || items.length === 0) return;
-      shelfEl.classList.remove('hidden');
-      shelfEl.classList.add('flex');
-      for (const item of items) {
-        const card = document.createElement('a');
-        card.className = 'flex flex-col gap-1 shrink-0 w-24 cursor-pointer';
-        card.href = `/reader/${item.chapter_id}`;
-        card.addEventListener('click', e => { e.preventDefault(); navigate(`/reader/${item.chapter_id}`); });
-
-        const cover = document.createElement('div');
-        cover.className = 'w-full aspect-[2/3] rounded bg-surface-2 overflow-hidden'; /* justified: manga cover ratio */
-        const coverSrc = item.local_cover_path
-          ? `/rest/manga/${item.manga_id}/cover?size=sm`
-          : item.cover_url ?? null;
-        if (coverSrc) {
-          const img = document.createElement('img');
-          img.src = coverSrc;
-          img.alt = item.manga_name;
-          img.className = 'w-full h-full object-cover';
-          img.loading = 'lazy';
-          cover.appendChild(img);
-        }
-        card.appendChild(cover);
-
-        const title = document.createElement('p');
-        title.className = 'text-xs text-text truncate';
-        title.textContent = item.manga_name;
-        card.appendChild(title);
-
-        const ch = document.createElement('p');
-        ch.className = 'text-xs text-text-muted';
-        ch.textContent = formatChapterTitle({ chapter_number: item.chapter_number });
-        card.appendChild(ch);
-
-        shelfRowEl.appendChild(card);
-      }
-    }).catch(() => {});
+  if (shelfEl) {
+    _shelfHandle = mountContinueShelf(shelfEl, {
+      loadItems: () => api.getContinueReadingShelf(12),
+    });
   }
 
   // Initial fetch
@@ -797,7 +770,7 @@ function _fetchLibrary() {
         _appendMangaCards(_gridEl, items);
       } else {
         renderMangaGrid(_gridEl, {
-          items: items.map(m => ({ id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0 })),
+          items: items.map(m => ({ id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0, resume: m.resume ?? null })),
           getHref: (m) => `/manga/${m.id}`,
           large: true,
           onCardClick: (m) => {
@@ -810,6 +783,7 @@ function _fetchLibrary() {
             const rect = btn.getBoundingClientRect();
             _showMangaContextMenu({ id: m.id, title: m.title }, rect.left, rect.bottom + 4, cardEl);
           },
+          onResumeClick: _onResumeClick,
         });
       }
     }
@@ -825,7 +799,7 @@ function _fetchLibrary() {
         page: _page,
         hasNext,
         total: result?.total_pages ?? undefined,
-        onPageChange: (p) => { _page = p; _updateUrl(); _fetchLibrary(); window.scrollTo(0, 0); },
+        onPageChange: (p) => { _page = p; _updateUrl(); _fetchLibrary(); scrollPageTop(); },
       });
       _destroyPagination = destroy;
     }
@@ -857,7 +831,7 @@ function _appendMangaCards(gridEl, items) {
   }
   for (const m of items) {
     grid.appendChild(createMangaCard({
-      manga: { id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0 },
+      manga: { id: m.id, title: m.title, cover_image_url: m.cover_url ?? null, new_chapter_count: m.new_chapter_count ?? 0, resume: m.resume ?? null },
       href: `/manga/${m.id}`,
       onCardClick: (manga) => {
         const cardEl = /** @type {HTMLElement} */ (gridEl.querySelector(`[data-manga-id="${manga.id}"]`));
@@ -869,8 +843,14 @@ function _appendMangaCards(gridEl, items) {
         const rect = btn.getBoundingClientRect();
         _showMangaContextMenu({ id: manga.id, title: manga.title }, rect.left, rect.bottom + 4, cardEl);
       },
+      onResumeClick: _onResumeClick,
     }));
   }
+}
+
+/** @param {{ resume?: { chapter_id: number } | null }} manga */
+function _onResumeClick(manga) {
+  if (manga.resume) navigate(`/reader/${manga.resume.chapter_id}`);
 }
 
 /** Sets up (or clears) the IntersectionObserver sentinel for infinite scroll. */
@@ -919,6 +899,10 @@ function _enterSelectMode() {
   _selectMode = true;
   _selected.clear();
   _gridEl?.classList.add('cursor-pointer', 'select-none', 'is-select-mode');
+  if (!_bulkBarEl) {
+    _bulkBarEl = document.createElement('div');
+    document.body.appendChild(_bulkBarEl);
+  }
   _renderBulkBar();
 }
 
@@ -931,6 +915,7 @@ function _exitSelectMode() {
     card.querySelector('.js-select-overlay')?.remove();
   });
   _gridEl?.classList.remove('cursor-pointer', 'select-none', 'is-select-mode');
+  if (_bulkBarEl) render(null, _bulkBarEl);
   _bulkBarEl?.remove();
   _bulkBarEl = null;
 }
@@ -957,58 +942,21 @@ function _toggleMangaSelected(id, cardEl) {
       if (coverWrap) /** @type {HTMLElement} */ (coverWrap).appendChild(overlay);
     }
   }
-  _updateBulkBar();
-}
-
-function _updateBulkBar() {
-  if (!_bulkBarEl) return;
-  const countEl = _bulkBarEl.querySelector('.js-select-count');
-  if (countEl) countEl.textContent = t('library.bulk.selected', { count: _selected.size });
-
-  const hasSelection = _selected.size > 0;
-  for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (_bulkBarEl.querySelectorAll('.js-bulk-action'))) {
-    btn.disabled = !hasSelection;
-  }
+  _renderBulkBar();
 }
 
 function _renderBulkBar() {
-  _bulkBarEl?.remove();
+  if (!_bulkBarEl) return;
 
-  const bar = document.createElement('div');
-  bar.className = [
-    'fixed bottom-0 md:bottom-6 inset-x-0 md:inset-x-auto md:left-1/2 md:-translate-x-1/2',
-    'z-40 md:w-auto md:min-w-96',
-    'bg-surface border border-border-subtle rounded-none md:rounded-2xl shadow-xl',
-    'flex items-center gap-2 px-4 py-3 flex-wrap',
-  ].join(' ');
-
-  bar.innerHTML = `
-    <span class="text-sm font-medium text-text-muted js-select-count flex-1">${t('library.bulk.selected', { count: 0 })}</span>
-    <button type="button" class="btn-icon js-select-all" title="${t('library.bulk.select_all')}">${t('library.bulk.all')}</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-download" disabled title="${t('library.bulk.download.title')}">${t('library.bulk.download')}</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-scan" disabled title="${t('library.bulk.scan.title')}">${t('library.bulk.scan')}</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-mark-read" disabled>${t('library.bulk.mark_read')}</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-mark-unread" disabled>${t('library.bulk.mark_unread')}</button>
-    <button type="button" class="btn-secondary btn-sm js-bulk-action js-bulk-categories" disabled>${t('library.bulk.categories')}</button>
-    <button type="button" class="btn-danger btn-sm js-bulk-action js-bulk-delete" disabled>${t('library.bulk.delete')}</button>
-    <button type="button" class="btn-ghost btn-sm js-bulk-cancel">${t('common.cancel')}</button>
-  `;
-  _bulkBarEl = bar;
-  document.body.appendChild(bar);
-
-  bar.querySelector('.js-bulk-cancel')?.addEventListener('click', () => _exitSelectMode());
-
-  // Select all visible
-  bar.querySelector('.js-select-all')?.addEventListener('click', () => {
+  const _onSelectAll = () => {
     const cards = /** @type {NodeListOf<HTMLElement>} */ (_gridEl?.querySelectorAll('[data-manga-id]') ?? []);
     for (const card of cards) {
       const id = parseInt(card.dataset.mangaId ?? '', 10);
       if (!isNaN(id) && !_selected.has(id)) _toggleMangaSelected(id, card);
     }
-  });
+  };
 
-  // Download all selected
-  bar.querySelector('.js-bulk-download')?.addEventListener('click', async () => {
+  const _onDownload = async () => {
     const ids = [..._selected];
     let done = 0;
     for (const id of ids) {
@@ -1017,15 +965,14 @@ function _renderBulkBar() {
     }
     showToast(t('library.bulk.toast.downloaded', { count: done }));
     _exitSelectMode();
-  });
+  };
 
-  // Scan selected for new chapters
-  bar.querySelector('.js-bulk-scan')?.addEventListener('click', async () => {
+  const _onScan = async () => {
     const ids = [..._selected].map(Number);
     _scanInProgress = true;
     try {
       // withBusy disables all bulk actions for the duration and restores them after.
-      await withBusy(bar.querySelectorAll('.js-bulk-action'), () => api.scanMangaMultiple(ids));
+      await withBusy(/** @type {HTMLElement} */ (_bulkBarEl).querySelectorAll('.js-bulk-action'), () => api.scanMangaMultiple(ids));
       // Card spinners and completion toast driven by SSE events.
       // Exit select mode so the user can see scan progress on cards.
       _exitSelectMode();
@@ -1034,10 +981,9 @@ function _renderBulkBar() {
       _scanInProgress = false;
       setState('scanningMangaIds', new Set());
     }
-  });
+  };
 
-  // Mark as read
-  bar.querySelector('.js-bulk-mark-read')?.addEventListener('click', async () => {
+  const _onMarkRead = async () => {
     const ids = [..._selected];
     let done = 0;
     for (const id of ids) {
@@ -1045,10 +991,9 @@ function _renderBulkBar() {
     }
     showToast(t('library.bulk.toast.read', { count: done }));
     _exitSelectMode();
-  });
+  };
 
-  // Mark as unread
-  bar.querySelector('.js-bulk-mark-unread')?.addEventListener('click', async () => {
+  const _onMarkUnread = async () => {
     const ids = [..._selected];
     let done = 0;
     for (const id of ids) {
@@ -1056,17 +1001,15 @@ function _renderBulkBar() {
     }
     showToast(t('library.bulk.toast.unread', { count: done }));
     _exitSelectMode();
-  });
+  };
 
-  // Add to categories
-  bar.querySelector('.js-bulk-categories')?.addEventListener('click', () => {
+  const _onCategories = () => {
     _showBulkCategoryModal([..._selected]);
-  });
+  };
 
-  // Delete selected
-  bar.querySelector('.js-bulk-delete')?.addEventListener('click', async () => {
+  const _onDelete = async () => {
     const count = _selected.size;
-    const ok = await confirmDialog({ title: t('library.remove.title'), message: t('library.remove.message.bulk', { count }), confirmLabel: t('library.remove.confirm'), danger: true });
+    const ok = await showConfirm(t('library.remove.message.bulk', { count }), { title: t('library.remove.title'), confirmLabel: t('library.remove.confirm'), danger: true });
     if (!ok) return;
     const ids = [..._selected];
     _exitSelectMode();
@@ -1077,7 +1020,22 @@ function _renderBulkBar() {
     showToast(t('library.bulk.toast.deleted', { count: done }));
     _page = 1;
     _fetchLibrary();
-  });
+  };
+
+  const hasSelection = _selected.size > 0;
+  render(html`<${BulkBar}
+    countLabel=${t('library.bulk.selected', { count: _selected.size })}
+    helpers=${[{ label: t('library.bulk.all'), title: t('library.bulk.select_all'), onClick: _onSelectAll }]}
+    actions=${[
+      { label: t('library.bulk.download'), title: t('library.bulk.download.title'), onClick: _onDownload, disabled: !hasSelection },
+      { label: t('library.bulk.scan'), title: t('library.bulk.scan.title'), onClick: _onScan, disabled: !hasSelection },
+      { label: t('library.bulk.mark_read'), onClick: _onMarkRead, disabled: !hasSelection },
+      { label: t('library.bulk.mark_unread'), onClick: _onMarkUnread, disabled: !hasSelection },
+      { label: t('library.bulk.categories'), onClick: _onCategories, disabled: !hasSelection },
+      { label: t('library.bulk.delete'), kind: 'danger', onClick: _onDelete, disabled: !hasSelection },
+    ]}
+    onCancel=${_exitSelectMode}
+  />`, _bulkBarEl);
 }
 
 /**
@@ -1111,7 +1069,7 @@ function _showMangaContextMenu(manga, x, y, cardEl) {
     { label: t('library.menu.set_categories'), action: () => _showBulkCategoryModal([manga.id]) },
     { divider: true },
     { label: t('library.menu.remove'), danger: true, action: async () => {
-      const ok = await confirmDialog({ title: t('library.remove.title'), message: t('library.remove.message', { title: manga.title }), confirmLabel: t('library.remove.confirm'), danger: true });
+      const ok = await showConfirm(t('library.remove.message', { title: manga.title }), { title: t('library.remove.title'), confirmLabel: t('library.remove.confirm'), danger: true });
       if (!ok) return;
       try {
         await api.deleteManga(manga.id);
@@ -1122,87 +1080,22 @@ function _showMangaContextMenu(manga, x, y, cardEl) {
     }},
   ];
 
-  const container = document.createElement('div');
-  document.body.appendChild(container);
-  _contextMenuEl = container;
-
-  render(html`<${ContextMenu} items=${items} trigger=${{ x, y }} onClose=${_closeContextMenu} />`, container);
+  _closeCtxMenu = showContextMenu(items, { x, y });
 }
 
 function _closeContextMenu() {
-  if (!_contextMenuEl) return;
-  render(null, _contextMenuEl);
-  _contextMenuEl.remove();
-  _contextMenuEl = null;
+  _closeCtxMenu?.();
+  _closeCtxMenu = null;
 }
 
 /** @param {number[]} mangaIds */
-async function _showBulkCategoryModal(mangaIds) {
-  let allCats = [];
-  try { allCats = await api.getCategories(); } catch { return; }
-
-  const overlay = document.createElement('div');
-  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-bg/70 backdrop-blur-sm p-4';
-
-  const dialog = document.createElement('div');
-  dialog.className = 'bg-surface rounded-2xl shadow-xl w-full max-w-sm flex flex-col overflow-hidden';
-  dialog.setAttribute('role', 'dialog');
-  dialog.setAttribute('aria-label', t('library.categories.title'));
-
-  if (allCats.length === 0) {
-    dialog.innerHTML = `
-      <div class="px-6 py-4 border-b border-border-subtle flex items-center justify-between gap-4">
-        <h2 class="text-base font-semibold text-text">${t('library.categories.title')}</h2>
-        <button type="button" class="btn-icon js-close" aria-label="${t('common.close')}">✕</button>
-      </div>
-      <div class="px-6 py-5">
-        <p class="text-sm text-text-muted">${t('library.categories.empty')}</p>
-      </div>
-    `;
-  } else {
-    const checkboxes = allCats.map(c =>
-      `<label class="flex items-center gap-3 text-sm text-text cursor-pointer py-1">
-        <input type="checkbox" value="${c.id}" class="js-cat-check">
-        ${c.name}
-      </label>`
-    ).join('');
-
-    dialog.innerHTML = `
-      <div class="px-6 py-4 border-b border-border-subtle flex items-center justify-between gap-4">
-        <h2 class="text-base font-semibold text-text">${t('library.categories.title')}</h2>
-        <button type="button" class="btn-icon js-close" aria-label="${t('common.close')}">✕</button>
-      </div>
-      <div class="px-6 py-5 flex flex-col gap-2">
-        <p class="text-xs text-text-muted mb-2">${t('library.categories.applies_to', { count: mangaIds.length })}</p>
-        ${checkboxes}
-      </div>
-      <div class="px-6 py-4 border-t border-border-subtle flex items-center justify-end gap-3">
-        <button type="button" class="btn-secondary btn-sm js-cancel">${t('common.cancel')}</button>
-        <button type="button" class="btn-primary btn-sm js-apply">${t('library.categories.apply')}</button>
-      </div>
-    `;
-  }
-
-  overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
-
-  const closeModal = () => { if (overlay.parentNode) document.body.removeChild(overlay); };
-  dialog.querySelector('.js-close')?.addEventListener('click', closeModal);
-  dialog.querySelector('.js-cancel')?.addEventListener('click', closeModal);
-  overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
-
-  dialog.querySelector('.js-apply')?.addEventListener('click', async () => {
-    const selectedCatIds = [...dialog.querySelectorAll('.js-cat-check:checked')]
-      .map(el => parseInt(/** @type {HTMLInputElement} */ (el).value, 10));
-    closeModal();
-    let done = 0;
-    for (const id of mangaIds) {
-      try { await api.setMangaCategories(id, selectedCatIds); done++; } catch { /* ignore */ }
-    }
-    showToast(t('library.categories.toast', { count: done }));
-    _exitSelectMode();
-    _page = 1;
-    _fetchLibrary();
+function _showBulkCategoryModal(mangaIds) {
+  showCategoryAssignModal(mangaIds, {
+    onApplied: () => {
+      _exitSelectMode();
+      _page = 1;
+      _fetchLibrary();
+    },
   });
 }
 
@@ -1215,6 +1108,8 @@ export function destroy(container) {
   _abort = null;
   _removePullToRefresh?.();
   _removePullToRefresh = null;
+  _shelfHandle?.destroy();
+  _shelfHandle = null;
   _unsubRefresh?.();
   _unsubRefresh = null;
   _unsubInvalidation?.();
@@ -1234,66 +1129,39 @@ export function destroy(container) {
   if (_tagsContainer)   render(null, _tagsContainer);
   if (_authorContainer) render(null, _authorContainer);
   if (_artistContainer) render(null, _artistContainer);
+  for (const el of _sortMountEls) render(null, el);
+  if (_statusMountEl)        render(null, _statusMountEl);
+  if (_readingStatusMountEl) render(null, _readingStatusMountEl);
+  for (const el of _displayMountEls) render(null, el);
+  if (_savedSearchesEl)      render(null, _savedSearchesEl);
+  _savedSearchesEl = null;
   _tagsContainer   = null;
   _authorContainer = null;
   _artistContainer = null;
+  _sortMountEls = [];
+  _statusMountEl = null;
+  _readingStatusMountEl = null;
+  _displayMountEls = [];
   _gridEl = null;
   _paginEl = null;
+  _searchEls = null;
   _container = null;
   _mountComboboxesFn = null;
+  _renderFilterControlsFn = null;
   _updateFilterCountFn = null;
   _cancelInitSkeleton?.();
   _cancelInitSkeleton = null;
+  if (_bulkBarEl) render(null, _bulkBarEl);
   _bulkBarEl?.remove();
   _bulkBarEl = null;
   _closeContextMenu();
+  if (_escHandler) { document.removeEventListener('keydown', _escHandler); _escHandler = null; }
   _selectMode = false;
   _selected.clear();
   container.innerHTML = '';
 }
 
 // ── Saved searches ────────────────────────────────────────────────────────────
-
-/** @param {HTMLElement} el */
-async function _mountSavedSearches(el) {
-  el.innerHTML = '';
-
-  let searches = [];
-  try { searches = await api.listSavedSearches(); } catch { return; }
-
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'button';
-  saveBtn.className = 'btn-secondary btn-sm whitespace-nowrap';
-  saveBtn.textContent = t('saved_searches.save');
-  saveBtn.addEventListener('click', () => _showSaveSearchDialog(el));
-
-  el.appendChild(saveBtn);
-
-  if (searches.length > 0) {
-    const select = document.createElement('select');
-    select.className = 'input text-sm w-36';
-    select.innerHTML = `<option value="">${t('saved_searches.label')}</option>` +
-      searches.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-    select.addEventListener('change', () => {
-      const id = Number(select.value);
-      if (!id) return;
-      const search = searches.find(s => s.id === id);
-      if (!search) return;
-      _applySearchQuery(search.query_json);
-      select.value = '';
-    });
-    el.appendChild(select);
-
-    const manageBtn = document.createElement('button');
-    manageBtn.type = 'button';
-    manageBtn.className = 'btn-icon text-text-muted shrink-0';
-    manageBtn.setAttribute('aria-label', t('saved_searches.manage'));
-    manageBtn.setAttribute('data-tooltip', t('saved_searches.manage'));
-    manageBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
-    manageBtn.addEventListener('click', () => _showManageSearchesDialog(el, searches));
-    el.appendChild(manageBtn);
-  }
-}
 
 /** @param {string} queryJson */
 function _applySearchQuery(queryJson) {
@@ -1310,143 +1178,25 @@ function _applySearchQuery(queryJson) {
     _catFilter        = q.category_filter ?? null;
     _collectionFilter = null;
     _page = 1;
+    if (_searchEls) for (const el of _searchEls) el.value = _search;
     _mountComboboxesFn?.();
+    _renderFilterControlsFn?.();
     _updateFilterCountFn?.();
     _updateUrl(true);
     _fetchLibrary();
   } catch { /* ignore invalid JSON */ }
 }
 
-/** @param {HTMLElement} parentEl */
-function _showSaveSearchDialog(parentEl) {
-  const overlay = document.createElement('div');
-  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-bg/70 backdrop-blur-sm p-4';
-
-  const card = document.createElement('div');
-  card.className = 'bg-surface rounded-2xl shadow-xl w-full max-w-xs flex flex-col overflow-hidden';
-  card.innerHTML = `
-    <div class="px-6 py-4 border-b border-border-subtle flex items-center justify-between gap-4">
-      <h2 class="text-base font-semibold text-text">${t('saved_searches.save')}</h2>
-      <button type="button" class="btn-icon js-close">✕</button>
-    </div>
-    <div class="px-6 py-4 flex flex-col gap-3">
-      <input type="text" class="input text-sm js-name" placeholder="${t('saved_searches.name.placeholder')}" />
-      <div class="flex justify-end gap-2">
-        <button type="button" class="btn-ghost btn-sm js-cancel">${t('common.cancel')}</button>
-        <button type="button" class="btn-primary btn-sm js-save">${t('common.save')}</button>
-      </div>
-    </div>
-  `;
-
-  const dismiss = () => overlay.remove();
-  card.querySelector('.js-close')?.addEventListener('click', dismiss);
-  card.querySelector('.js-cancel')?.addEventListener('click', dismiss);
-
-  const nameInput = /** @type {HTMLInputElement} */ (card.querySelector('.js-name'));
-  const saveBtn2 = /** @type {HTMLButtonElement} */ (card.querySelector('.js-save'));
-
-  saveBtn2?.addEventListener('click', async () => {
-    const name = nameInput.value.trim();
-    if (!name) { nameInput.focus(); return; }
-    const queryJson = JSON.stringify({
-      search: _search || undefined,
-      status_filter: _statusFilter ? ({ ongoing: 0, completed: 1, hiatus: 2, cancelled: 3, unknown: 4 }[_statusFilter]) : undefined,
-      reading_status_filter: _readingStatusFilter ?? undefined,
-      hide_no_unread: _hideNoUnread || undefined,
-      hide_completed_status: _hideCompletedStatus || undefined,
-      tag_filter: _tagFilter ?? undefined,
-      author_filter: _authorFilter ?? undefined,
-      artist_filter: _artistFilter ?? undefined,
-      category_filter: _catFilter ?? undefined,
-    });
-    saveBtn2.disabled = true;
-    try {
-      await api.createSavedSearch({ name, query_json: queryJson });
-      showToast(t('saved_searches.toast.saved'), { type: 'success' });
-      dismiss();
-      _mountSavedSearches(parentEl);
-    } catch (e) {
-      showApiError(e);
-      saveBtn2.disabled = false;
-    }
-  });
-
-  overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
-  overlay.appendChild(card);
-  document.body.appendChild(overlay);
-  nameInput?.focus();
-}
-
-/**
- * @param {HTMLElement} parentEl
- * @param {any[]} searches
- */
-function _showManageSearchesDialog(parentEl, searches) {
-  const overlay = document.createElement('div');
-  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-bg/70 backdrop-blur-sm p-4';
-
-  const card = document.createElement('div');
-  card.className = 'bg-surface rounded-2xl shadow-xl w-full max-w-xs flex flex-col overflow-hidden';
-
-  const header = document.createElement('div');
-  header.className = 'px-6 py-4 border-b border-border-subtle flex items-center justify-between gap-4';
-  const title = document.createElement('h2');
-  title.className = 'text-base font-semibold text-text';
-  title.textContent = t('saved_searches.manage.title');
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.className = 'btn-icon';
-  closeBtn.textContent = '✕';
-  header.append(title, closeBtn);
-
-  const list = document.createElement('div');
-  list.className = 'divide-y divide-border-subtle overflow-y-auto max-h-64';
-
-  const dismiss = () => overlay.remove();
-  closeBtn.addEventListener('click', dismiss);
-
-  function _rebuildList(items) {
-    list.innerHTML = '';
-    if (items.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'px-6 py-4 text-sm text-text-muted text-center';
-      empty.textContent = t('saved_searches.empty.title');
-      list.appendChild(empty);
-      return;
-    }
-    for (const s of items) {
-      const row = document.createElement('div');
-      row.className = 'flex items-center gap-3 px-6 py-3';
-      const name = document.createElement('span');
-      name.className = 'flex-1 text-sm text-text truncate';
-      name.textContent = s.name;
-      const delBtn = document.createElement('button');
-      delBtn.type = 'button';
-      delBtn.className = 'btn-icon text-danger shrink-0';
-      delBtn.setAttribute('aria-label', t('common.delete'));
-      delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
-      delBtn.addEventListener('click', async () => {
-        const ok = await confirmDialog({ title: t('common.delete'), message: t('saved_searches.delete.confirm', { name: s.name }), confirmLabel: t('common.delete') });
-        if (!ok) return;
-        delBtn.disabled = true;
-        try {
-          await api.deleteSavedSearch(s.id);
-          showToast(t('saved_searches.toast.deleted'), { type: 'success' });
-          row.remove();
-          _mountSavedSearches(parentEl);
-        } catch (e) {
-          showApiError(e);
-          delBtn.disabled = false;
-        }
-      });
-      row.append(name, delBtn);
-      list.appendChild(row);
-    }
-  }
-
-  _rebuildList(searches);
-  card.append(header, list);
-  overlay.appendChild(card);
-  overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
-  document.body.appendChild(overlay);
+function _currentFiltersForSavedSearch() {
+  return {
+    search: _search || undefined,
+    status_filter: _statusFilter ? ({ ongoing: 0, completed: 1, hiatus: 2, cancelled: 3, unknown: 4 }[_statusFilter]) : undefined,
+    reading_status_filter: _readingStatusFilter ?? undefined,
+    hide_no_unread: _hideNoUnread || undefined,
+    hide_completed_status: _hideCompletedStatus || undefined,
+    tag_filter: _tagFilter ?? undefined,
+    author_filter: _authorFilter ?? undefined,
+    artist_filter: _artistFilter ?? undefined,
+    category_filter: _catFilter ?? undefined,
+  };
 }

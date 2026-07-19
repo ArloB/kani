@@ -13,7 +13,7 @@
  *   onToggle: (id: string | number, selected: boolean) => void,
  *   multi?: boolean,
  * }} props
- * @returns {{ update: (selected: Set<string | number>) => void, destroy: () => void }}
+ * @returns {{ selected: () => Set<string | number>, update: (selected: Set<string | number>) => void, destroy: () => void }}
  */
 export function renderChipGroup(container, { items, selected, onToggle, multi = true }) {
   let _selected = new Set(selected);
@@ -80,6 +80,9 @@ export function renderChipGroup(container, { items, selected, onToggle, multi = 
   _render();
 
   return {
+    selected() {
+      return new Set(_selected);
+    },
     update(newSelected) {
       _selected = new Set(newSelected);
       _render();

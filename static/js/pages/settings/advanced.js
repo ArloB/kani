@@ -161,10 +161,6 @@ export function mount(el, settings, bootId) {
     onChange: (v) => { registrationEnabled = v; },
   }));
 
-  const saveRow = document.createElement('div');
-  saveRow.className = 'flex items-center gap-3 px-4 py-3';
-  saveRow.innerHTML = `<button type="button" class="btn-primary btn-sm js-adv-save">${t('common.save')}</button>`;
-  advCard.appendChild(saveRow);
   el.appendChild(advGroup);
 
   // ── Credential Encryption ──────────────────────────────────────────────────
@@ -239,7 +235,6 @@ export function mount(el, settings, bootId) {
     }
   });
 
-  const saveBtn = /** @type {HTMLButtonElement} */ (el.querySelector('.js-adv-save'));
 
   let lastSaved = {
     flaresolverr_url: settings?.flaresolverr_url ?? '',
@@ -300,14 +295,9 @@ export function mount(el, settings, bootId) {
     });
   }
 
-  saveBtn.addEventListener('click', async () => {
-    saveBtn.disabled = true;
+  async function _save() {
     const payload = buildAdvPayload();
-
-    if (JSON.stringify(payload) === JSON.stringify(lastSaved)) {
-      saveBtn.disabled = false;
-      return;
-    }
+    if (JSON.stringify(payload) === JSON.stringify(lastSaved)) return;
 
     const libChanged = payload.library_path !== lastSaved.library_path;
     const wasmChanged = payload.wasm_storage_path !== lastSaved.wasm_storage_path;
@@ -321,22 +311,16 @@ export function mount(el, settings, bootId) {
     }
 
     // Save all settings (including any updated paths) via the normal endpoint
-    try {
-      const freshPayload = buildAdvPayload();
-      await api.updateSettings({ Advanced: freshPayload });
-      lastSaved = { ...freshPayload };
-      showToast(t('common.saved'), { type: 'success' });
-      if ((freshPayload.max_wasm_instances ?? null) !== (settings?.max_wasm_instances ?? null)) {
-        setLocal('kani_restart_boot_id', bootId);
-        addPendingFields(['max_wasm_instances']);
-        window.dispatchEvent(new StorageEvent('storage', { key: 'kani_restart_needed' }));
-      }
-    } catch (e) {
-      showApiError(e);
-    } finally {
-      saveBtn.disabled = false;
+    const freshPayload = buildAdvPayload();
+    await api.updateSettings({ Advanced: freshPayload });
+    lastSaved = { ...freshPayload };
+    showToast(t('common.saved'), { type: 'success' });
+    if ((freshPayload.max_wasm_instances ?? null) !== (settings?.max_wasm_instances ?? null)) {
+      setLocal('kani_restart_boot_id', bootId);
+      addPendingFields(['max_wasm_instances']);
+      window.dispatchEvent(new StorageEvent('storage', { key: 'kani_restart_needed' }));
     }
-  });
+  }
 
   // ── Maintenance ────────────────────────────────────────────────────────────
 
@@ -410,6 +394,7 @@ export function mount(el, settings, bootId) {
       el.innerHTML = '';
     },
     isDirty() { return JSON.stringify(buildAdvPayload()) !== JSON.stringify(lastSaved); },
+    save: _save,
   };
 }
 
