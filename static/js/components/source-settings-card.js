@@ -25,6 +25,7 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
 
   const [enabled, setEnabled] = useState(source.enabled ?? false);
   const [starred, setStarred] = useState(source.favourited ?? false);
+  const [browserEnabled, setBrowserEnabled] = useState(source.browser_enabled ?? true);
   const [confirming, setConfirming] = useState(false);       // unsafe enable confirm
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -94,6 +95,16 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
     }
   }
 
+  async function toggleBrowserEnabled(val) {
+    setBrowserEnabled(val);
+    try {
+      await api.setSourceBrowserEnabled(sid, val);
+    } catch (e) {
+      setBrowserEnabled(!val);
+      showApiError(e);
+    }
+  }
+
   const isActive = activeIds.has(sid);
 
   // Group schema by group name
@@ -111,6 +122,22 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
       onClose=${() => setModalOpen(false)}
       title=${t('source.card.prefs.title', { name: source.name })}
     >
+      <div class="flex items-center justify-between gap-3 py-2 border-b border-border">
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <span class="text-sm text-text">${t('source.card.browser.label')}</span>
+          <span class="text-xs text-text-muted">${t('source.card.browser.desc')}</span>
+        </div>
+        <label class="kani-toggle">
+          <input
+            type="checkbox"
+            class="kani-toggle__input"
+            checked=${browserEnabled}
+            aria-label=${t('source.card.browser.label')}
+            onChange=${(e) => toggleBrowserEnabled(/** @type {HTMLInputElement} */ (e.target).checked)}
+          />
+          <span class="kani-toggle__track"></span>
+        </label>
+      </div>
       ${prefsLoading
         ? html`<p class="text-sm text-text-muted py-2">${t('source.card.prefs.loading')}</p>`
         : schema.length === 0

@@ -19,6 +19,8 @@ pub struct YamlSource {
     semaphore: Arc<tokio::sync::Semaphore>,
     hook_registry: Option<Arc<kani_core::scripting::HookRegistry>>,
     pure_fn_registry: Option<Arc<kani_core::scripting::PureFunctionRegistry>>,
+    browser_scripts: Arc<kani_core::scripting::BrowserScriptRegistry>,
+    browser_enabled: Arc<std::sync::atomic::AtomicBool>,
     max_hook_requests: u32,
 }
 
@@ -29,6 +31,7 @@ impl YamlSource {
         cache: Arc<dyn kani_core::cache::CacheBackend>,
         cache_namespace: String,
         preferences: HashMap<String, String>,
+        browser_enabled: bool,
     ) -> Self {
         let max_concurrent = config
             .metadata
@@ -69,6 +72,10 @@ impl YamlSource {
             None
         };
 
+        let browser_scripts = Arc::new(kani_core::scripting::BrowserScriptRegistry::from_map(
+            &config.browser_scripts,
+        ));
+
         Self {
             config,
             http,
@@ -79,6 +86,8 @@ impl YamlSource {
             semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
             hook_registry,
             pure_fn_registry,
+            browser_scripts,
+            browser_enabled: Arc::new(std::sync::atomic::AtomicBool::new(browser_enabled)),
             max_hook_requests,
         }
     }
@@ -87,6 +96,15 @@ impl YamlSource {
         if let Ok(mut lock) = self.prefs.write() {
             *lock = prefs;
         }
+    }
+
+    pub async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
+        kani_core::v8_process::reap_if_idle(&self.v8_process, idle_for).await
+    }
+
+    pub fn set_browser_enabled(&self, enabled: bool) {
+        self.browser_enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn make_host_state(&self) -> Result<kani_core::wasm::HostState> {
@@ -105,6 +123,7 @@ impl YamlSource {
         state.preferences = self.prefs.read().unwrap_or_else(|e| e.into_inner()).clone();
         state.hook_registry = self.hook_registry.clone();
         state.pure_fn_registry = self.pure_fn_registry.clone();
+        state.browser_scripts = Some(Arc::clone(&self.browser_scripts));
         state.max_hook_requests = self.max_hook_requests;
         Ok(state)
     }
@@ -170,6 +189,13 @@ impl YamlSource {
     ) -> std::result::Result<serde_json::Value, String> {
         use kani_core::evaluator::json_eval;
 
+        if !self
+            .browser_enabled
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err("Browser capability is disabled for this source".to_string());
+        }
+
         let page_url_template = ep
             .page_url
             .as_deref()
@@ -179,7 +205,6 @@ impl YamlSource {
             .as_deref()
             .ok_or_else(|| "browser_payload endpoint missing script".to_string())?;
         let init_script = self
-            .config
             .browser_scripts
             .get(script_name)
             .ok_or_else(|| format!("browser script '{script_name}' not declared"))?;
@@ -188,17 +213,30 @@ impl YamlSource {
         kani_yaml::resolve_composite_ids(ep, &mut resolved);
         let page_url = kani_yaml::build_url_with_args("", page_url_template, &resolved);
 
+        let mut state = self.make_host_state().map_err(|e| e.to_string())?;
+        let profile_key = state.browser_profile_key.clone();
+
+        // Enforce the source's AllowedHost policy on the browser target before any
+        // V8 dispatch, mirroring the HTTP path — a restricted source must not be
+        // able to point the browser at an arbitrary host.
+        let host = page_url
+            .parse::<rquest::Url>()
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .ok_or_else(|| format!("browser_payload page_url has no host: {page_url}"))?;
+        state.allowed_host.allows_host(&host)?;
+
         let payload = kani_core::v8_process::capture_page_payload(
             &self.v8_process,
             &page_url,
             init_script,
             ep.timeout_ms,
+            Some(&profile_key),
         )
         .await?;
 
         let req = Self::make_request(ep, &self.config, args, endpoint_name);
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
-        let mut state = self.make_host_state().map_err(|e| e.to_string())?;
         json_eval::extract_json_str(&mut state, &payload, &bp).await
     }
 
@@ -768,6 +806,8 @@ impl YamlSource {
             semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
             hook_registry: None,
             pure_fn_registry: None,
+            browser_scripts: Arc::new(kani_core::scripting::BrowserScriptRegistry::default()),
+            browser_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             max_hook_requests: 3,
         }
     }

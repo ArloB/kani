@@ -52,6 +52,9 @@ impl AppService {
             db_vacuum_interval_hours: s.db_vacuum_interval_hours,
             audit_prune_interval_hours: s.audit_prune_interval_hours,
             trash_purge_interval_hours: s.trash_purge_interval_hours,
+            browser_max_memory_mb: s.browser_max_memory_mb,
+            browser_max_instances: s.browser_max_instances,
+            browser_idle_timeout_s: s.browser_idle_timeout_s,
         }
     }
 
@@ -173,10 +176,26 @@ impl AppService {
                     .await;
             }
             SettingsUpdate::Advanced(s) => {
+                if s.browser_max_memory_mb < 64 || s.browser_max_memory_mb > 8192 {
+                    return Err(ServiceError::Validation(
+                        "browser_max_memory_mb must be 64-8192".into(),
+                    ));
+                }
+                if s.browser_max_instances < 1 || s.browser_max_instances > 16 {
+                    return Err(ServiceError::Validation(
+                        "browser_max_instances must be 1-16".into(),
+                    ));
+                }
+                if s.browser_idle_timeout_s < 10 || s.browser_idle_timeout_s > 3600 {
+                    return Err(ServiceError::Validation(
+                        "browser_idle_timeout_s must be 10-3600".into(),
+                    ));
+                }
                 sqlx::query!(
                     "UPDATE settings SET flaresolverr_url=?, library_path=?, wasm_storage_path=?, \
                      max_wasm_instances=?, http_request_logging=?, browser_debug_logging=?, \
-                     registration_enabled=?, cover_max_dimension=? WHERE id='singleton'",
+                     registration_enabled=?, cover_max_dimension=?, browser_max_memory_mb=?, \
+                     browser_max_instances=?, browser_idle_timeout_s=? WHERE id='singleton'",
                     s.flaresolverr_url,
                     s.library_path,
                     s.wasm_storage_path,
@@ -185,6 +204,9 @@ impl AppService {
                     s.browser_debug_logging,
                     s.registration_enabled,
                     s.cover_max_dimension,
+                    s.browser_max_memory_mb,
+                    s.browser_max_instances,
+                    s.browser_idle_timeout_s,
                 )
                 .execute(&self.db)
                 .await?;
@@ -198,8 +220,16 @@ impl AppService {
                     settings.browser_debug_logging = s.browser_debug_logging;
                     settings.registration_enabled = s.registration_enabled;
                     settings.cover_max_dimension = s.cover_max_dimension;
+                    settings.browser_max_memory_mb = s.browser_max_memory_mb;
+                    settings.browser_max_instances = s.browser_max_instances;
+                    settings.browser_idle_timeout_s = s.browser_idle_timeout_s;
                 }
                 kani_core::v8_process::set_v8_debug_logging(s.browser_debug_logging);
+                kani_core::v8_process::set_v8_config(kani_core::v8_process::V8Config {
+                    max_memory_mb: s.browser_max_memory_mb as u32,
+                    max_instances: s.browser_max_instances as u32,
+                    idle_timeout_s: s.browser_idle_timeout_s as u32,
+                });
                 let new_solver = if s.flaresolverr_url.is_empty() {
                     None
                 } else {

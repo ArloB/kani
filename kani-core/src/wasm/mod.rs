@@ -83,6 +83,30 @@ pub enum AllowedHost {
     MetadataOnly,
 }
 
+impl AllowedHost {
+    /// Enforces this policy for a resolved request host. Shared by the HTTP path
+    /// (`HostState::check_allowed_host`) and the browser `page_url` check so both
+    /// apply identical matching rules.
+    pub fn allows_host(&self, host: &str) -> std::result::Result<(), String> {
+        match self {
+            AllowedHost::Restricted(allowed) => {
+                if host != allowed {
+                    Err(format!(
+                        "Request blocked: extension may only contact '{}', got '{}'",
+                        allowed, host
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            AllowedHost::Unrestricted => Ok(()),
+            AllowedHost::MetadataOnly => {
+                Err("HTTP requests are not permitted on metadata-only instances.".into())
+            }
+        }
+    }
+}
+
 use crate::http::SmartClient;
 
 pub const MAX_HANDLES: usize = 10_000;
@@ -104,8 +128,18 @@ pub struct HostState {
     /// (`{extension_id}:{version}:{scope}:`) is resolved at construction time.
     pub ext_cache: std::sync::Arc<dyn crate::cache::CacheBackend>,
     pub ext_cache_namespace: String,
+    /// Stable per-source key (the extension id) used to derive a dedicated
+    /// Chromium `userDataDir`, so browser session state never leaks between
+    /// sources. Derived from `ext_cache_namespace` at construction.
+    pub browser_profile_key: String,
     /// Handle to the shared Node.js V8 subprocess. Lazy-spawned on first use.
     pub v8_process: crate::v8_process::V8ProcessHandle,
+    /// Named `passPayload` init scripts, for the Rhai `capture_page_payload`
+    /// hook binding. `None` when the source declares no browser scripts.
+    pub browser_scripts: Option<std::sync::Arc<crate::scripting::BrowserScriptRegistry>>,
+    /// Operator gate for this source's browser capability. When `false`, browser
+    /// capture calls are rejected before any V8 dispatch. Defaults to `true`.
+    pub browser_enabled: bool,
     /// Compiled Rhai pure-function registry for `.user.<name>()` DSL calls.
     /// `None` when the source has no `scripts.pure` block.
     pub pure_fn_registry: Option<std::sync::Arc<crate::scripting::PureFunctionRegistry>>,
@@ -180,6 +214,12 @@ impl HostState {
             other => other,
         };
 
+        let browser_profile_key = ext_cache_namespace
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+
         Ok(Self {
             http_client,
             allowed_host,
@@ -195,7 +235,10 @@ impl HostState {
             last_io_at: None,
             ext_cache,
             ext_cache_namespace,
+            browser_profile_key,
             v8_process,
+            browser_scripts: None,
+            browser_enabled: true,
             pure_fn_registry: None,
             hook_registry: None,
             max_hook_requests: 3,
@@ -236,22 +279,7 @@ impl HostState {
 
     /// Enforces the `AllowedHost` policy for a given request host string.
     pub fn check_allowed_host(&self, host: &str) -> std::result::Result<(), String> {
-        match &self.allowed_host {
-            AllowedHost::Restricted(allowed) => {
-                if host != allowed {
-                    Err(format!(
-                        "Request blocked: extension may only contact '{}', got '{}'",
-                        allowed, host
-                    ))
-                } else {
-                    Ok(())
-                }
-            }
-            AllowedHost::Unrestricted => Ok(()),
-            AllowedHost::MetadataOnly => {
-                Err("HTTP requests are not permitted on metadata-only instances.".into())
-            }
-        }
+        self.allowed_host.allows_host(host)
     }
 
     /// Returns a reference to the JSON document for `handle`, or an error string.

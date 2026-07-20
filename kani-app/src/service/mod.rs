@@ -246,11 +246,16 @@ impl AppService {
 
         let enc = load_or_provision_credential_cipher(data_dir);
 
-        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours FROM settings")
+        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours, browser_max_memory_mb, browser_max_instances, browser_idle_timeout_s FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
         kani_core::v8_process::set_v8_debug_logging(settings.browser_debug_logging);
+        kani_core::v8_process::set_v8_config(kani_core::v8_process::V8Config {
+            max_memory_mb: settings.browser_max_memory_mb as u32,
+            max_instances: settings.browser_max_instances as u32,
+            idle_timeout_s: settings.browser_idle_timeout_s as u32,
+        });
 
         // Decrypt email_provider_config so in-memory value is always plaintext.
         if let Some(ref cipher) = enc {
@@ -453,7 +458,7 @@ impl AppService {
         let sources = sqlx::query_as!(
             Source,
             "SELECT id, name, version, base_url, enabled, favourited, unrestricted_http, \
-             download_concurrency, icon, description, languages, schema_version, \
+             browser_enabled, download_concurrency, icon, description, languages, schema_version, \
              CAST(NULL AS TEXT) as circuit_state \
              FROM sources WHERE enabled = 1 AND deleted_at IS NULL"
         )
@@ -489,6 +494,7 @@ impl AppService {
                             std::sync::Arc::clone(&ext_cache),
                             ns,
                             prefs,
+                            source.browser_enabled,
                         )
                     }
                     Err(errs) => {
@@ -560,6 +566,7 @@ impl AppService {
                     global_smart_client.clone(),
                     Some(source.base_url),
                     source.unrestricted_http,
+                    source.browser_enabled,
                     prefs,
                     std::sync::Arc::clone(&ext_cache),
                     ns,
@@ -649,6 +656,7 @@ impl AppService {
         job_registry.register::<crate::jobs::import_dedup::ImportDedupJob>();
         job_registry.register::<crate::jobs::webhook_delivery::WebhookDeliveryJob>();
         job_registry.register::<crate::jobs::tracker_sync::TrackerSyncJob>();
+        job_registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),
@@ -784,6 +792,9 @@ impl AppService {
             db_vacuum_interval_hours: 168,
             audit_prune_interval_hours: 168,
             trash_purge_interval_hours: 168,
+            browser_max_memory_mb: 512,
+            browser_max_instances: 2,
+            browser_idle_timeout_s: 300,
         };
 
         let smart_client =
@@ -826,6 +837,7 @@ impl AppService {
         registry.register::<crate::jobs::backup::ScheduledBackupJob>();
         registry.register::<crate::jobs::storage::StorageMonitorJob>();
         registry.register::<crate::jobs::integrity::IntegrityCheckJob>();
+        registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),
@@ -938,6 +950,7 @@ impl AppService {
                         std::sync::Arc::clone(&self.ext_cache),
                         format!("{source_name}:"),
                         prefs,
+                        true,
                     );
                     self.sources.insert(source_id, backend);
                 }
@@ -984,6 +997,7 @@ impl AppService {
                         std::sync::Arc::clone(&self.ext_cache),
                         format!("{source_name}:"),
                         prefs,
+                        true,
                     );
                     self.sources.insert(source_id, backend);
                 }

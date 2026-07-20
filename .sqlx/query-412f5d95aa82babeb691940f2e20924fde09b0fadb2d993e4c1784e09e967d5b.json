@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours FROM settings",
+  "query": "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours, browser_max_memory_mb, browser_max_instances, browser_idle_timeout_s FROM settings",
   "describe": {
     "columns": [
       {
@@ -237,6 +237,21 @@
         "name": "trash_purge_interval_hours",
         "ordinal": 46,
         "type_info": "Integer"
+      },
+      {
+        "name": "browser_max_memory_mb",
+        "ordinal": 47,
+        "type_info": "Integer"
+      },
+      {
+        "name": "browser_max_instances",
+        "ordinal": 48,
+        "type_info": "Integer"
+      },
+      {
+        "name": "browser_idle_timeout_s",
+        "ordinal": 49,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -289,8 +304,11 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "062933c82c4c79e8f51f7c233a88fcd948ec840102c46d9a7920468e7bdc7d6e"
+  "hash": "412f5d95aa82babeb691940f2e20924fde09b0fadb2d993e4c1784e09e967d5b"
 }

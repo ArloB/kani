@@ -5,6 +5,7 @@ use common::{insert_chapter, insert_manga, insert_source, start_mock_page_server
 use kani_app::jobs::BackgroundJob;
 use kani_app::jobs::JobId;
 use kani_app::jobs::audit_prune::AuditPruneJob;
+use kani_app::jobs::browser_reap::BrowserReapJob;
 use kani_app::jobs::download::MangaDownloadAllJob;
 use kani_app::jobs::import_dedup::ImportDedupJob;
 use kani_app::jobs::pending_delete_retry::PendingDeleteRetryJob;
@@ -440,6 +441,13 @@ async fn await_terminal(svc: &AppService, job_id: JobId) -> String {
 async fn audit_prune_job_runs_to_completion() {
     let svc = test_service().await;
     let job_id = svc.job_manager.submit(AuditPruneJob::new()).await.unwrap();
+    assert_eq!(await_terminal(&svc, job_id).await, "completed");
+}
+
+#[tokio::test]
+async fn browser_reap_job_runs_to_completion() {
+    let svc = test_service().await;
+    let job_id = svc.job_manager.submit(BrowserReapJob::new()).await.unwrap();
     assert_eq!(await_terminal(&svc, job_id).await, "completed");
 }
 

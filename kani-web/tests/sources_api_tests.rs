@@ -6,9 +6,24 @@ mod common;
 use axum::http::StatusCode;
 use common::{
     authed_get, authed_post, body_array, body_json, build_test_app, create_admin,
-    create_regular_user, get_req, login, post_json, test_state,
+    create_regular_user, get_req, login, post_json, put_json, test_state,
 };
 use tower::ServiceExt;
+
+/// Creates a source as admin and returns its id.
+async fn create_source(app: &axum::Router, cookie: &str, name: &str) -> i64 {
+    let res = app
+        .clone()
+        .oneshot(authed_post(
+            "/rest/sources",
+            cookie,
+            serde_json::json!({ "name": name }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    body_json(res).await["id"].as_i64().expect("numeric id")
+}
 
 #[tokio::test]
 async fn list_sources_returns_empty_list_on_fresh_db() {
@@ -182,4 +197,90 @@ async fn get_source_returns_200_for_authed_user() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = body_json(res).await;
     assert_eq!(body["name"], serde_json::json!("fetch-me"));
+}
+
+#[tokio::test]
+async fn set_browser_enabled_returns_200_and_persists_for_admin() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let id = create_source(&app, &cookie, "browser-src").await;
+
+    let res = app
+        .clone()
+        .oneshot(put_json(
+            &format!("/rest/sources/{id}/browser-enabled"),
+            &cookie,
+            serde_json::json!({ "enabled": false }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let get_res = app
+        .oneshot(authed_get(&format!("/rest/sources/{id}"), &cookie))
+        .await
+        .unwrap();
+    let body = body_json(get_res).await;
+    assert_eq!(body["browser_enabled"], serde_json::json!(false));
+}
+
+#[tokio::test]
+async fn set_browser_enabled_returns_401_without_auth() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+
+    let req = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/rest/sources/1/browser-enabled")
+        .header("Content-Type", "application/json")
+        .body(axum::body::Body::from(r#"{"enabled":false}"#))
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn set_browser_enabled_requires_source_install_permission() {
+    let state = test_state().await;
+    let (username, password) = create_regular_user(&state, "carol").await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(put_json(
+            "/rest/sources/1/browser-enabled",
+            &cookie,
+            serde_json::json!({ "enabled": false }),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn set_browser_enabled_rejects_invalid_body() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(put_json(
+            "/rest/sources/1/browser-enabled",
+            &cookie,
+            serde_json::json!({ "wrong_field": true }),
+        ))
+        .await
+        .unwrap();
+
+    assert!(
+        res.status().is_client_error(),
+        "missing `enabled` field should be a 4xx, got {}",
+        res.status()
+    );
 }

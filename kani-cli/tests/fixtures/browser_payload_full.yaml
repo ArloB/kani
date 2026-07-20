@@ -1,0 +1,106 @@
+id: browser-full
+name: BrowserFull
+version: "0.1.0"
+base_url: "https://example.com"
+language: en
+
+browser_scripts:
+  fetch_list: |
+    fetch('/api/list')
+      .then(r => r.json())
+      .then(data => passPayload(JSON.stringify(data)));
+  fetch_details: |
+    fetch('/api/details')
+      .then(r => r.json())
+      .then(data => passPayload(JSON.stringify(data)));
+  fetch_chapters: |
+    fetch('/api/chapters')
+      .then(r => r.json())
+      .then(data => passPayload(JSON.stringify(data)));
+  fetch_pages: |
+    fetch('/api/pages')
+      .then(r => r.json())
+      .then(data => passPayload(JSON.stringify(data)));
+
+endpoints:
+  popular:
+    via: browser_payload
+    page_url: "https://example.com/popular"
+    script: fetch_list
+    timeout_ms: 15000
+    container: "/results"
+    fields:
+      id:
+        expr: 'self.ptr("/id").text()'
+      title:
+        expr: 'self.ptr("/title").text()'
+      cover_url:
+        expr: 'self.ptr("/cover").text()'
+        optional: true
+
+  search:
+    via: browser_payload
+    page_url: "https://example.com/search?q=$query$"
+    script: fetch_list
+    timeout_ms: 15000
+    container: "/results"
+    fields:
+      id:
+        expr: 'self.ptr("/id").text()'
+      title:
+        expr: 'self.ptr("/title").text()'
+      cover_url:
+        expr: 'self.ptr("/cover").text()'
+        optional: true
+
+  manga_details:
+    via: browser_payload
+    page_url: "https://example.com/manga/$manga_id$"
+    script: fetch_details
+    timeout_ms: 15000
+    container: ":root"
+    fields:
+      id:
+        expr: 'json("/id").text()'
+      title:
+        expr: 'json("/title").text()'
+      status:
+        expr: 'json("/status").text()'
+
+  chapter_list:
+    via: browser_payload
+    page_url: "https://example.com/manga/$manga_id$/chapters"
+    script: fetch_chapters
+    timeout_ms: 15000
+    container: "/chapters"
+    has_next_page: false
+    fields:
+      id:
+        expr: 'self.ptr("/id").text()'
+      number:
+        expr: 'self.ptr("/number").text().parse_float().fallback(0.0)'
+        optional: true
+      title:
+        expr: 'self.ptr("/title").text()'
+        optional: true
+      scanlator:
+        expr: 'self.ptr("/scanlator").text()'
+        optional: true
+      volume:
+        expr: 'self.ptr("/volume").text()'
+        optional: true
+      date_uploaded:
+        expr: 'self.ptr("/date").text()'
+        optional: true
+      language: '"en"'
+
+  pages:
+    via: browser_payload
+    page_url: "https://example.com/chapter/$chapter_id$"
+    script: fetch_pages
+    timeout_ms: 15000
+    container: "/pages"
+    fields:
+      index: "index()"
+      url:
+        expr: 'self.ptr("/url").text()'

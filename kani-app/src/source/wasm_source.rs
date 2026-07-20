@@ -17,6 +17,7 @@ pub struct WasmSource {
     smart_client: kani_core::http::SmartClient,
     base_url: Option<String>,
     unrestricted_http: bool,
+    browser_enabled: Arc<AtomicBool>,
     preferences: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
     v8_process: kani_core::v8_process::V8ProcessHandle,
     ext_cache: Arc<dyn kani_core::cache::CacheBackend>,
@@ -36,6 +37,7 @@ impl WasmSource {
         smart_client: kani_core::http::SmartClient,
         base_url: Option<String>,
         unrestricted_http: bool,
+        browser_enabled: bool,
         max_concurrent: usize,
         preferences: std::collections::HashMap<String, String>,
         ext_cache: Arc<dyn kani_core::cache::CacheBackend>,
@@ -51,6 +53,7 @@ impl WasmSource {
             smart_client,
             base_url,
             unrestricted_http,
+            browser_enabled: Arc::new(AtomicBool::new(browser_enabled)),
             preferences: Arc::new(std::sync::RwLock::new(preferences)),
             v8_process: kani_core::v8_process::new_handle(),
             ext_cache,
@@ -67,6 +70,14 @@ impl WasmSource {
         if let Ok(mut lock) = self.preferences.write() {
             *lock = prefs;
         }
+    }
+
+    pub async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
+        kani_core::v8_process::reap_if_idle(&self.v8_process, idle_for).await
+    }
+
+    pub fn set_browser_enabled(&self, enabled: bool) {
+        self.browser_enabled.store(enabled, Ordering::Relaxed);
     }
 
     pub async fn lease_instance(&self) -> Result<OwnedSourceInstance> {
@@ -104,6 +115,7 @@ impl WasmSource {
         host_state.pure_fn_registry = self.pure_fn_registry.clone();
         host_state.hook_registry = self.hook_registry.clone();
         host_state.max_hook_requests = self.max_hook_requests;
+        host_state.browser_enabled = self.browser_enabled.load(Ordering::Relaxed);
         let mut store = Store::new(&self.engine, host_state);
 
         store.set_epoch_deadline(kani_core::sources::EPOCH_DEADLINE_TICKS);

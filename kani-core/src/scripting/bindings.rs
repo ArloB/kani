@@ -24,6 +24,9 @@ pub struct ScriptableCtx {
     pub cache_backend: Arc<dyn crate::cache::CacheBackend>,
     pub cache_namespace: String,
     pub prefs: HashMap<String, String>,
+    pub v8_process: Option<crate::v8_process::V8ProcessHandle>,
+    pub browser_scripts: Option<Arc<crate::scripting::BrowserScriptRegistry>>,
+    pub browser_profile_key: Option<String>,
 }
 
 impl std::fmt::Debug for dyn crate::cache::CacheBackend {
@@ -132,6 +135,38 @@ fn ctx_cache_delete(ctx: &mut ScriptableCtx, namespace: String, key: String) {
     });
 }
 
+fn ctx_capture_page_payload(
+    ctx: &mut ScriptableCtx,
+    page_url: String,
+    script_name: String,
+    timeout_ms: i64,
+) -> Result<Dynamic, Box<rhai::EvalAltResult>> {
+    let handle = ctx.v8_process.as_ref().ok_or_else(|| {
+        Box::<rhai::EvalAltResult>::from("browser runtime unavailable in this context")
+    })?;
+    let init_script = ctx
+        .browser_scripts
+        .as_ref()
+        .and_then(|reg| reg.get(&script_name))
+        .ok_or_else(|| {
+            Box::<rhai::EvalAltResult>::from(format!("browser script '{script_name}' not declared"))
+        })?;
+    let profile_key = ctx.browser_profile_key.clone();
+    let timeout = timeout_ms.max(0) as u32;
+    let result = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(crate::v8_process::capture_page_payload(
+            handle,
+            &page_url,
+            init_script,
+            timeout,
+            profile_key.as_deref(),
+        ))
+    });
+    result
+        .map(Dynamic::from)
+        .map_err(Box::<rhai::EvalAltResult>::from)
+}
+
 pub fn register_hook_bindings(engine: &mut Engine) {
     engine
         .register_type_with_name::<ScriptableRequest>("Request")
@@ -153,7 +188,8 @@ pub fn register_hook_bindings(engine: &mut Engine) {
         .register_fn("pref", ctx_pref)
         .register_fn("cache_get", ctx_cache_get)
         .register_fn("cache_put", ctx_cache_put)
-        .register_fn("cache_delete", ctx_cache_delete);
+        .register_fn("cache_delete", ctx_cache_delete)
+        .register_fn("capture_page_payload", ctx_capture_page_payload);
 
     engine.register_type_with_name::<HookAction>("HookAction");
 
@@ -178,4 +214,54 @@ pub fn make_hook_sandbox() -> Engine {
     let mut engine = crate::scripting::engine::make_pure_sandbox();
     register_hook_bindings(&mut engine);
     engine
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn ctx(
+        v8_process: Option<crate::v8_process::V8ProcessHandle>,
+        scripts: &[(&str, &str)],
+    ) -> ScriptableCtx {
+        let mut map = std::collections::BTreeMap::new();
+        for (k, v) in scripts {
+            map.insert((*k).to_string(), (*v).to_string());
+        }
+        ScriptableCtx {
+            cache_backend: Arc::new(crate::cache::InMemoryCache::new()),
+            cache_namespace: "test".to_string(),
+            prefs: HashMap::new(),
+            v8_process,
+            browser_scripts: Some(Arc::new(crate::scripting::BrowserScriptRegistry::from_map(
+                &map,
+            ))),
+            browser_profile_key: Some("test-source".to_string()),
+        }
+    }
+
+    #[test]
+    fn capture_page_payload_errors_without_handle() {
+        let mut c = ctx(None, &[("fetch", "passPayload('{}')")]);
+        let err =
+            ctx_capture_page_payload(&mut c, "https://example.com".into(), "fetch".into(), 1000)
+                .unwrap_err();
+        assert!(
+            err.to_string().contains("unavailable"),
+            "expected browser-unavailable error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn capture_page_payload_errors_on_undeclared_script() {
+        let mut c = ctx(Some(crate::v8_process::new_handle()), &[]);
+        let err =
+            ctx_capture_page_payload(&mut c, "https://example.com".into(), "missing".into(), 1000)
+                .unwrap_err();
+        assert!(
+            err.to_string().contains("missing") && err.to_string().contains("not declared"),
+            "expected not-declared error naming the script, got: {err}"
+        );
+    }
 }

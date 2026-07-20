@@ -101,9 +101,20 @@ fn list_endpoint(route: &str, container: &str) -> ValidatedEndpoint {
 }
 
 fn yaml_source(_base_url: &str, ext: ValidatedExtension) -> YamlSource {
+    yaml_source_with_browser(ext, true)
+}
+
+fn yaml_source_with_browser(ext: ValidatedExtension, browser_enabled: bool) -> YamlSource {
     let cache = Arc::new(kani_core::cache::InMemoryCache::new());
     let http = kani_core::http::SmartClient::new(None).unwrap();
-    YamlSource::new(Arc::new(ext), http, cache, "test:".into(), HashMap::new())
+    YamlSource::new(
+        Arc::new(ext),
+        http,
+        cache,
+        "test:".into(),
+        HashMap::new(),
+        browser_enabled,
+    )
 }
 
 #[tokio::test]
@@ -316,6 +327,7 @@ async fn metadata_serialises_from_config() {
         cache,
         String::new(),
         HashMap::new(),
+        true,
     );
     let meta_json = src.get_metadata().await.unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&meta_json).unwrap();
@@ -958,6 +970,81 @@ async fn browser_payload_endpoint_reaches_capture_page_payload() {
     assert!(
         err_str.contains("KANI_BROWSER_ENABLED") || err_str.contains("disabled"),
         "expected the deterministic browser-disabled error, got: {err_str}"
+    );
+}
+
+#[tokio::test]
+async fn browser_payload_restricted_host_rejected_before_dispatch() {
+    use kani_yaml::yaml::schema::EndpointVia;
+
+    // A restricted source (unrestricted_http = false) must not be able to point
+    // the browser at an arbitrary host. The AllowedHost check fires before any V8
+    // dispatch, so the error is host-specific rather than a browser-runtime error.
+    let mut ep = list_endpoint("/popular", ".item");
+    ep.via = Some(EndpointVia::BrowserPayload);
+    ep.page_url = Some("https://evil.example.com/manga/$manga_id$".into());
+    ep.script_name = Some("fetch_manga".into());
+
+    let mut browser_scripts = std::collections::BTreeMap::new();
+    browser_scripts.insert("fetch_manga".to_string(), "passPayload('{}');".to_string());
+
+    let src = yaml_source(
+        "http://127.0.0.1:1",
+        ValidatedExtension {
+            id: "bp-test".into(),
+            name: "bp-test".into(),
+            version: "1.0.0".into(),
+            base_url: "http://127.0.0.1:1".into(),
+            language: "en".into(),
+            unrestricted_http: false,
+            manga_details: Some(ep),
+            browser_scripts,
+            ..Default::default()
+        },
+    );
+
+    let result = src.get_manga_details("manga-1").await;
+    assert!(result.is_err());
+    let err_str = result.unwrap_err().to_string();
+    assert!(
+        err_str.contains("blocked")
+            || err_str.contains("only contact")
+            || err_str.contains("evil.example.com"),
+        "restricted source should reject off-host browser target: {err_str}"
+    );
+}
+
+#[tokio::test]
+async fn browser_payload_rejected_when_browser_disabled_for_source() {
+    use kani_yaml::yaml::schema::EndpointVia;
+
+    let mut ep = list_endpoint("/popular", ".item");
+    ep.via = Some(EndpointVia::BrowserPayload);
+    ep.page_url = Some("https://example.com/manga/$manga_id$".into());
+    ep.script_name = Some("fetch_manga".into());
+
+    let mut browser_scripts = std::collections::BTreeMap::new();
+    browser_scripts.insert("fetch_manga".to_string(), "passPayload('{}');".to_string());
+
+    let ext = ValidatedExtension {
+        id: "bp-test".into(),
+        name: "bp-test".into(),
+        version: "1.0.0".into(),
+        base_url: "http://127.0.0.1:1".into(),
+        language: "en".into(),
+        unrestricted_http: true,
+        manga_details: Some(ep),
+        browser_scripts,
+        ..Default::default()
+    };
+    let src = yaml_source_with_browser(ext, false);
+
+    let result = src.get_manga_details("manga-1").await;
+    assert!(result.is_err());
+    let err_str = result.unwrap_err().to_string();
+    assert!(
+        err_str.contains("disabled"),
+        "source with browser disabled should reject before dispatch: {err_str}"
     );
 }
 

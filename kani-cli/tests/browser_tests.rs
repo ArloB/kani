@@ -58,6 +58,46 @@ fn browser_payload_codegen_emits_capture_page_payload() {
 }
 
 #[test]
+fn browser_payload_full_covers_all_endpoint_kinds() {
+    // Every endpoint kind declared `via: browser_payload` must emit a real browser
+    // fetch — the guest `v8_context::capture_page_payload` + `JsonHandle::parse` +
+    // `extract::json` — and never the old `unimplemented!()` stub. This fixture is the
+    // one that gets wasm-compiled in the plan's compiled-tier smoke.
+    let validated = load_and_validate("browser_payload_full.yaml");
+    let generated = codegen::generate(&validated, false);
+    let src = &generated.lib_rs;
+
+    assert!(
+        !src.contains("unimplemented"),
+        "browser codegen must not emit unimplemented!(): {src}"
+    );
+    // One capture per browser endpoint (popular, search, details, chapters, pages).
+    assert_eq!(
+        src.matches("capture_page_payload").count(),
+        5,
+        "expected 5 capture_page_payload calls: {src}"
+    );
+    assert!(
+        src.contains("v8_context"),
+        "must call the guest v8_context::capture_page_payload wrapper: {src}"
+    );
+    assert_eq!(
+        src.matches("JsonHandle").count(),
+        5,
+        "each browser endpoint must parse its payload via JsonHandle::parse: {src}"
+    );
+    for method in [
+        "get_popular_manga",
+        "search_manga",
+        "get_manga_details",
+        "get_chapter_list",
+        "get_pages",
+    ] {
+        assert!(src.contains(method), "missing method {method}: {src}");
+    }
+}
+
+#[test]
 fn browser_payload_codegen_emits_script_static() {
     let validated = load_and_validate("browser_payload.yaml");
     let generated = codegen::generate(&validated, false);

@@ -1,6 +1,8 @@
 //! Emit per-endpoint MangaExtension trait method bodies.
 
-use super::blueprint::{emit_blueprint_bytes, emit_blueprint_chain};
+use super::blueprint::{
+    emit_blueprint_bytes, emit_blueprint_chain, emit_blueprint_chain_no_request,
+};
 use super::request::emit_request_block;
 use crate::yaml::model::{
     FieldSource, ValidatedEndpoint, ValidatedExtension, ValidatedHnp, ValidatedPopular,
@@ -49,9 +51,8 @@ fn emit_composite_id_decode_prologue(ep: &ValidatedEndpoint) -> String {
 }
 
 /// Returns `Some(code)` when `ep.via` is `BrowserPayload`, where `code`
-/// emits a `capture_page_payload` call. The extraction step is a stub:
-/// the browser *runtime* (Chromium lifecycle + payload injection) is
-/// deferred and tracked in EXT_BROWSER_PAYLOAD_FEATURE_OVERVIEW.md.
+/// captures the page payload via the browser runtime, parses it as JSON, and
+/// extracts rows through the same Blueprint (`bp`) the caller has in scope.
 fn try_emit_browser_fetch(ep: &ValidatedEndpoint) -> Option<String> {
     let EndpointVia::BrowserPayload = ep.via?;
     let page_url = ep.page_url.as_deref().unwrap_or("");
@@ -70,9 +71,9 @@ fn try_emit_browser_fetch(ep: &ValidatedEndpoint) -> Option<String> {
     };
     let timeout = ep.timeout_ms;
     Some(format!(
-        "let _payload = kani_shared::host_abi::capture_page_payload({page_url_expr}, {const_name}, {timeout})?;\n\
-         #[allow(unused_variables)]\n\
-         let rows = unimplemented!(\"browser_payload extraction requires the browser runtime (deferred)\");"
+        "let _payload = kani_shared::host_abi::v8_context::capture_page_payload({page_url_expr}, {const_name}, {timeout})?;\n\
+         let _json = kani_shared::host_abi::JsonHandle::parse(_payload.as_bytes())?;\n\
+         let rows = extract::json(Some(_json.raw_handle()), &bp)?;"
     ))
 }
 
@@ -149,6 +150,7 @@ pub fn emit_manga_details(
     let bp_chain = emit_blueprint_chain(ep, ext, "manga_details");
 
     if let Some(browser_fetch) = try_emit_browser_fetch(ep) {
+        let bp_chain = emit_blueprint_chain_no_request(ep, ext, "manga_details");
         return format!(
             "fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {{\n\
              {decode_prologue}\
@@ -228,6 +230,25 @@ pub fn emit_chapter_list(
     let tp = emit_total_pages_static(&ep.total_pages);
     let row_assembly = emit_chapter_info_assembly(ep);
 
+    if let Some(browser_fetch) = try_emit_browser_fetch(ep) {
+        let bp_chain = emit_blueprint_chain_no_request(ep, ext, "chapter_list");
+        return format!(
+            "fn get_chapter_list(&self, manga_id: &str, _page: i32, _page_size: Option<i32>, _sort: Option<String>) -> ExtensionResult<ChapterList> {{\n\
+             {decode_prologue}\
+             {bp_chain}\n\
+             {browser_fetch}\n\
+             let count = rows.rows_len();\n\
+             let chapters = (0..count).filter_map(|i| {{\n\
+                 let row = rows.rows_get(i).ok()?;\n\
+                 {row_assembly}\n\
+             }}).collect();\n\
+             let has_next_page = {hnp};\n\
+             let total_pages = {tp};\n\
+             Ok(ChapterList {{ chapters, has_next_page, total_pages }})\n\
+             }}"
+        );
+    }
+
     if embedded_bytes {
         let bp_bytes = emit_blueprint_bytes(ep, ext, "chapter_list");
         let fetch = match ep.response_type {
@@ -303,6 +324,24 @@ pub fn emit_pages(
         "_manga_id"
     };
 
+    if let Some(browser_fetch) = try_emit_browser_fetch(ep) {
+        let bp_chain = emit_blueprint_chain_no_request(ep, ext, "pages");
+        return format!(
+            "fn get_pages(&self, {manga_param}: &str, chapter_id: &str) -> ExtensionResult<Chapter> {{\n\
+             {decode_prologue}\
+             {bp_chain}\n\
+             {browser_fetch}\n\
+             let count = rows.rows_len();\n\
+             Ok(Chapter {{\n\
+                 pages: (0..count).filter_map(|i| {{\n\
+                     let row = rows.rows_get(i).ok()?;\n\
+                     {row_assembly}\n\
+                 }}).collect(),\n\
+             }})\n\
+             }}"
+        );
+    }
+
     if embedded_bytes {
         let bp_bytes = emit_blueprint_bytes(ep, ext, "pages");
         let fetch = match ep.response_type {
@@ -372,6 +411,24 @@ fn emit_manga_list_method(
         Some(endpoint_id),
     );
     let row_assembly = emit_manga_list_item_assembly(ep);
+
+    if let Some(browser_fetch) = try_emit_browser_fetch(ep) {
+        let bp_chain = emit_blueprint_chain_no_request(ep, ext, endpoint_id);
+        let hnp_line = emit_hnp_expr_static(&ep.has_next_page);
+        let tp_line = emit_total_pages_static(&ep.total_pages);
+        return format!(
+            "fn {method_name}(&self, {params}) -> ExtensionResult<MangaList> {{\n\
+             {bp_chain}\n\
+             {browser_fetch}\n\
+             let has_next_page = {hnp_line};\n\
+             let total_pages = {tp_line};\n\
+             let manga = rows.rows_iter().filter_map(|row| {{\n\
+                 {row_assembly}\n\
+             }}).collect();\n\
+             Ok(MangaList {{ manga, has_next_page, total_pages }})\n\
+             }}"
+        );
+    }
 
     if embedded_bytes {
         let bp_bytes = emit_blueprint_bytes(ep, ext, endpoint_id);

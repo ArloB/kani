@@ -157,15 +157,17 @@ function TrackerSetup({ tracker, onChanged }) {
       <div class="px-4 py-4 flex flex-col gap-3">
         ${isAniList &&
         html`<p class="text-xs text-text-muted leading-relaxed mb-2">
-          Register a free OAuth application at
-          <strong>anilist.co → Settings → Developer → Create New Client</strong>. Set the redirect
-          URL to <code class="font-mono bg-surface-alt px-1 rounded">${redirect}</code>.
+          ${t('trackers.setup.anilist.register')}
+          <strong>anilist.co → Settings → Developer → Create New Client${/* i18n-ignore */ ''}</strong>.
+          ${t('trackers.setup.anilist.redirect')}
+          <code class="font-mono bg-surface-alt px-1 rounded">${redirect}</code>.
         </p>`}
         ${isMAL &&
         html`<p class="text-xs text-text-muted leading-relaxed mb-2">
-          Register a free API client at
-          <strong>myanimelist.net → Account Settings → API → Create ID</strong>. Set App Type to
-          <strong>web</strong> and redirect URL to
+          ${t('trackers.setup.mal.register')}
+          <strong>myanimelist.net → Account Settings → API → Create ID${/* i18n-ignore */ ''}</strong>.
+          ${t('trackers.setup.mal.app_type')}
+          <strong>web${/* i18n-ignore */ ''}</strong> ${t('trackers.setup.mal.redirect')}
           <code class="font-mono bg-surface-alt px-1 rounded">${redirect}</code>.
         </p>`}
         <div class="flex flex-col gap-1">

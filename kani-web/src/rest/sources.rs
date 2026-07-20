@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
             "/sources/{id}/download-concurrency",
             put(set_download_concurrency),
         )
+        .route("/sources/{id}/browser-enabled", put(set_browser_enabled))
         .route(
             "/sources/{id}/popular/{page}/{page_size}",
             get(get_popular_manga),
@@ -267,6 +268,33 @@ pub(crate) async fn set_download_concurrency(
     Json(body): Json<SetDownloadConcurrencyRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     svc.set_source_download_concurrency(id, body.value).await?;
+    Ok(Json(json!({})))
+}
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub(crate) struct SetBrowserEnabledRequest {
+    pub enabled: bool,
+}
+
+#[utoipa::path(
+    put, path = "/rest/sources/{id}/browser-enabled",
+    params(("id" = i64, Path, description = "Source ID")),
+    request_body = SetBrowserEnabledRequest,
+    responses(
+        (status = 200, description = "Browser capability gate updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn set_browser_enabled(
+    _: AuthGuard<crate::permissions::guards::SourceInstall>,
+    State(svc): State<Arc<dyn SourceDomain>>,
+    Path(id): Path<i64>,
+    Json(body): Json<SetBrowserEnabledRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    svc.set_source_browser_enabled(id, body.enabled).await?;
     Ok(Json(json!({})))
 }
 
@@ -1220,6 +1248,7 @@ mod tests {
                 enabled: true,
                 favourited: false,
                 unrestricted_http: false,
+                browser_enabled: true,
                 download_concurrency: None,
                 circuit_state: None,
                 icon: None,
@@ -1315,6 +1344,9 @@ mod tests {
             _: i64,
             _: Option<i64>,
         ) -> kani_app::error::Result<()> {
+            unimplemented!()
+        }
+        async fn set_source_browser_enabled(&self, _: i64, _: bool) -> kani_app::error::Result<()> {
             unimplemented!()
         }
         async fn delete_source(&self, _: i64, _: UserId) -> kani_app::error::Result<()> {

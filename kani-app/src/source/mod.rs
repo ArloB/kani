@@ -28,6 +28,24 @@ impl SourceBackend {
         }
     }
 
+    /// Kills this source's browser subprocess if it has been idle for at least
+    /// `idle_for`. Returns `true` when a process was reaped.
+    pub async fn reap_idle_v8(&self, idle_for: std::time::Duration) -> bool {
+        match self {
+            Self::Wasm(w) => w.reap_idle_v8(idle_for).await,
+            Self::Yaml(y) => y.reap_idle_v8(idle_for).await,
+        }
+    }
+
+    /// Flips the operator gate for this source's browser capability. Takes effect
+    /// on the next browser call (WASM) or the next browser endpoint eval (YAML).
+    pub fn set_browser_enabled(&self, enabled: bool) {
+        match self {
+            Self::Wasm(w) => w.set_browser_enabled(enabled),
+            Self::Yaml(y) => y.set_browser_enabled(enabled),
+        }
+    }
+
     pub async fn get_metadata(&self) -> kani_core::error::Result<String> {
         match self {
             Self::Wasm(w) => w.lease_instance().await?.get_metadata().await,

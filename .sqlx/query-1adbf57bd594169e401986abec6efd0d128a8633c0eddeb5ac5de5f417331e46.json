@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, s.unrestricted_http, s.download_concurrency, s.icon, s.description, s.languages, s.schema_version, scb.state as circuit_state FROM sources s LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id WHERE s.id = ? AND s.deleted_at IS NULL",
+  "query": "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, s.unrestricted_http, s.browser_enabled, s.download_concurrency, s.icon, s.description, s.languages, s.schema_version, scb.state as circuit_state FROM sources s LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id WHERE s.id = ? AND s.deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -39,33 +39,38 @@
         "type_info": "Bool"
       },
       {
-        "name": "download_concurrency",
+        "name": "browser_enabled",
         "ordinal": 7,
+        "type_info": "Bool"
+      },
+      {
+        "name": "download_concurrency",
+        "ordinal": 8,
         "type_info": "Integer"
       },
       {
         "name": "icon",
-        "ordinal": 8,
-        "type_info": "Text"
-      },
-      {
-        "name": "description",
         "ordinal": 9,
         "type_info": "Text"
       },
       {
-        "name": "languages",
+        "name": "description",
         "ordinal": 10,
         "type_info": "Text"
       },
       {
-        "name": "schema_version",
+        "name": "languages",
         "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "schema_version",
+        "ordinal": 12,
         "type_info": "Integer"
       },
       {
         "name": "circuit_state",
-        "ordinal": 12,
+        "ordinal": 13,
         "type_info": "Text"
       }
     ],
@@ -73,6 +78,7 @@
       "Right": 1
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -88,5 +94,5 @@
       true
     ]
   },
-  "hash": "b850cd1e56f59ff898d544d9ecfa1236c8e0014261536f038c799b77a9de2c47"
+  "hash": "1adbf57bd594169e401986abec6efd0d128a8633c0eddeb5ac5de5f417331e46"
 }

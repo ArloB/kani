@@ -63,6 +63,9 @@ pub struct Settings {
     pub db_vacuum_interval_hours: i64,
     pub audit_prune_interval_hours: i64,
     pub trash_purge_interval_hours: i64,
+    pub browser_max_memory_mb: i64,
+    pub browser_max_instances: i64,
+    pub browser_idle_timeout_s: i64,
 }
 
 #[derive(sqlx::FromRow)]

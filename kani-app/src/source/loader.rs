@@ -9,6 +9,7 @@ pub fn build_wasm_source(
     smart_client: kani_core::http::SmartClient,
     base_url: Option<String>,
     unrestricted_http: bool,
+    browser_enabled: bool,
     preferences: std::collections::HashMap<String, String>,
     ext_cache: Arc<dyn kani_core::cache::CacheBackend>,
     ext_cache_namespace: String,
@@ -22,6 +23,7 @@ pub fn build_wasm_source(
         smart_client,
         base_url,
         unrestricted_http,
+        browser_enabled,
         25,
         preferences,
         ext_cache,
@@ -38,6 +40,7 @@ pub fn build_yaml_source(
     cache: Arc<dyn kani_core::cache::CacheBackend>,
     cache_namespace: String,
     preferences: std::collections::HashMap<String, String>,
+    browser_enabled: bool,
 ) -> SourceBackend {
     SourceBackend::Yaml(Box::new(YamlSource::new(
         config,
@@ -45,5 +48,6 @@ pub fn build_yaml_source(
         cache,
         cache_namespace,
         preferences,
+        browser_enabled,
     )))
 }

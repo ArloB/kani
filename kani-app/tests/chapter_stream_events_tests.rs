@@ -111,7 +111,14 @@ fn yaml_source(base_url: &str, chapter_ep: ValidatedEndpoint) -> YamlSource {
         chapter_list: Some(chapter_ep),
         ..Default::default()
     };
-    YamlSource::new(Arc::new(ext), http, cache, "test:".into(), HashMap::new())
+    YamlSource::new(
+        Arc::new(ext),
+        http,
+        cache,
+        "test:".into(),
+        HashMap::new(),
+        true,
+    )
 }
 
 #[tokio::test]

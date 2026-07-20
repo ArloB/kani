@@ -907,6 +907,9 @@ pub async fn fetch_body(
                 cache_backend: Arc::clone(&state.ext_cache),
                 cache_namespace: state.ext_cache_namespace.clone(),
                 prefs: state.preferences.clone(),
+                v8_process: Some(state.v8_process.clone()),
+                browser_scripts: state.browser_scripts.clone(),
+                browser_profile_key: Some(state.browser_profile_key.clone()),
             };
             let action = registry
                 .run_pre_request(&mut working, ctx)
@@ -978,6 +981,9 @@ pub async fn fetch_body(
                 cache_backend: Arc::clone(&state.ext_cache),
                 cache_namespace: state.ext_cache_namespace.clone(),
                 prefs: state.preferences.clone(),
+                v8_process: Some(state.v8_process.clone()),
+                browser_scripts: state.browser_scripts.clone(),
+                browser_profile_key: Some(state.browser_profile_key.clone()),
             };
             let action = registry
                 .run_on_status(&working, &scriptable_resp, ctx)

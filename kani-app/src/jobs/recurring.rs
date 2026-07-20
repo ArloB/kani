@@ -16,6 +16,7 @@ pub enum RecurringJobKind {
     PendingDeleteRetry,
     ScheduledBackup,
     TrackerSync,
+    BrowserProcessReap,
 }
 
 impl RecurringJobKind {
@@ -30,6 +31,7 @@ impl RecurringJobKind {
             Self::PendingDeleteRetry => "pending_delete_retry",
             Self::ScheduledBackup => "scheduled_backup",
             Self::TrackerSync => "tracker_sync",
+            Self::BrowserProcessReap => "browser_process_reap",
         }
     }
 
@@ -44,6 +46,7 @@ impl RecurringJobKind {
             Self::PendingDeleteRetry => 60 * 60,
             Self::ScheduledBackup => 60 * 60,
             Self::TrackerSync => 60 * 60,
+            Self::BrowserProcessReap => 5 * 60,
         }
     }
 
@@ -58,6 +61,7 @@ impl RecurringJobKind {
             Self::PendingDeleteRetry,
             Self::ScheduledBackup,
             Self::TrackerSync,
+            Self::BrowserProcessReap,
         ]
     }
 
@@ -220,6 +224,7 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
                     RecurringJobKind::DbVacuum => Some(s.db_vacuum_interval_hours * 60 * 60),
                     RecurringJobKind::AuditPrune => Some(s.audit_prune_interval_hours * 60 * 60),
                     RecurringJobKind::TrashPurge => Some(s.trash_purge_interval_hours * 60 * 60),
+                    RecurringJobKind::BrowserProcessReap => Some(s.browser_idle_timeout_s.max(60)),
                     _ => None,
                 }
             };
@@ -281,6 +286,11 @@ async fn submit_kind_job(svc: &AppService, kind: RecurringJobKind) -> Result<cra
                 .submit(crate::jobs::tracker_sync::TrackerSyncJob::new())
                 .await
         }
+        RecurringJobKind::BrowserProcessReap => {
+            svc.job_manager
+                .submit(crate::jobs::browser_reap::BrowserReapJob::new())
+                .await
+        }
     }
 }
 
@@ -322,4 +332,23 @@ pub fn spawn_recurring_scheduler(svc: &AppService) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn browser_process_reap_is_registered() {
+        assert!(RecurringJobKind::all().contains(&RecurringJobKind::BrowserProcessReap));
+        assert_eq!(
+            RecurringJobKind::parse("browser_process_reap"),
+            Some(RecurringJobKind::BrowserProcessReap)
+        );
+        assert_eq!(
+            RecurringJobKind::BrowserProcessReap.as_str(),
+            "browser_process_reap"
+        );
+    }
 }

@@ -347,7 +347,7 @@ function PayloadReference() {
         >${EXAMPLE_PAYLOAD}</pre>
         <p class="mt-3 text-xs text-text-muted">
           ${t('settings.webhooks.payload.hmac_prefix')}${' '}
-          <code class="bg-surface px-1 rounded">X-Kani-Signature: sha256=&lt;hex&gt;</code>${' '}
+          <code class="bg-surface px-1 rounded">X-Kani-Signature: sha256=&lt;hex&gt;${/* i18n-ignore */ ''}</code>${' '}
           ${t('settings.webhooks.payload.hmac_suffix')}
         </p>
         <pre

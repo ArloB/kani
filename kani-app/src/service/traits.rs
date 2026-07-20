@@ -59,6 +59,7 @@ pub trait SourceDomain: Send + Sync {
         id: i64,
         concurrency: Option<i64>,
     ) -> Result<()>;
+    async fn set_source_browser_enabled(&self, id: i64, enabled: bool) -> Result<()>;
     async fn delete_source(&self, id: i64, user_id: UserId) -> Result<()>;
     async fn list_active_source_ids(&self) -> Result<Vec<i64>>;
     async fn get_source_pref_schema(
@@ -163,6 +164,10 @@ impl SourceDomain for AppService {
         concurrency: Option<i64>,
     ) -> Result<()> {
         self.set_source_download_concurrency(id, concurrency).await
+    }
+
+    async fn set_source_browser_enabled(&self, id: i64, enabled: bool) -> Result<()> {
+        self.set_source_browser_enabled(id, enabled).await
     }
 
     async fn delete_source(&self, id: i64, user_id: UserId) -> Result<()> {
@@ -1317,6 +1322,9 @@ mod tests {
         ) -> Result<()> {
             unimplemented!()
         }
+        async fn set_source_browser_enabled(&self, _id: i64, _enabled: bool) -> Result<()> {
+            unimplemented!()
+        }
         async fn delete_source(&self, _id: i64, _user_id: UserId) -> Result<()> {
             unimplemented!()
         }
@@ -1341,6 +1349,7 @@ mod tests {
             enabled: true,
             favourited: false,
             unrestricted_http: false,
+            browser_enabled: true,
             download_concurrency: None,
             circuit_state: None,
             icon: None,

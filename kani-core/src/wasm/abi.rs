@@ -592,6 +592,9 @@ impl scripting::Host for HostState {
         page_url: String,
         opts: scripting::CaptureUrlParamOpts,
     ) -> Result<String, String> {
+        if !self.browser_enabled {
+            return Err("Browser capability is disabled for this source".to_string());
+        }
         self.charge_io()?;
         let result = crate::v8_process::capture_url_param(
             &self.v8_process,
@@ -605,6 +608,7 @@ impl scripting::Host for HostState {
                 cache_ttl_ms: opts.cache_ttl_ms,
                 extra_headers: &opts.extra_headers,
             },
+            Some(&self.browser_profile_key),
         )
         .await;
         // Reset the epoch deadline reference point so the post-browser-wait WASM
@@ -619,12 +623,16 @@ impl scripting::Host for HostState {
         init_script: String,
         timeout_ms: u32,
     ) -> Result<String, String> {
+        if !self.browser_enabled {
+            return Err("Browser capability is disabled for this source".to_string());
+        }
         self.charge_io()?;
         let result = crate::v8_process::capture_page_payload(
             &self.v8_process,
             &page_url,
             &init_script,
             timeout_ms,
+            Some(&self.browser_profile_key),
         )
         .await;
         self.last_io_at = Some(std::time::Instant::now());

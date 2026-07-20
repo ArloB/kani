@@ -1,5 +1,5 @@
 // @ts-check
-import catalog from '../../locales/en.js';
+import catalog from '../locales/en.js';
 
 /**
  * Returns the localised string for key, falling back to the key itself.

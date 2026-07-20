@@ -29,11 +29,10 @@ function makeContext() {
     return ctx;
 }
 
-let puppeteerBrowser = null;
-let activePagesCount = 0;
-let browserIdleTimer = null;
+const browsers = new Map();
 
 const BROWSER_IDLE_MS = parseInt(process.env.BROWSER_IDLE_TIMEOUT_MS || '300000', 10);
+const MAX_INSTANCES = Math.max(1, parseInt(process.env.BROWSER_MAX_INSTANCES || '2', 10));
 
 const tokenCache = new Map();
 
@@ -81,15 +80,42 @@ function findChromium() {
     return '/usr/bin/chromium';
 }
 
-async function getPuppeteerBrowser() {
-    if (puppeteerBrowser) {
+function browserKey(profileDir) { return profileDir || '__default__'; }
+
+// Evicts the least-recently-used browser with no active pages so a new one can
+// launch under the instance cap. The global serial queue guarantees at most one
+// entry has activePages > 0, so an idle victim always exists when size >= 1.
+async function evictLruIdle() {
+    let victimKey = null;
+    let victimUsed = Infinity;
+    for (const [k, e] of browsers) {
+        if (e.activePages === 0 && e.lastUsed < victimUsed) {
+            victimUsed = e.lastUsed;
+            victimKey = k;
+        }
+    }
+    if (victimKey === null) return;
+    const victim = browsers.get(victimKey);
+    browsers.delete(victimKey);
+    if (victim.idleTimer) clearTimeout(victim.idleTimer);
+    if (victim.browser) await victim.browser.close().catch(() => {});
+}
+
+async function getPuppeteerBrowser(profileDir) {
+    const key = browserKey(profileDir);
+    let entry = browsers.get(key);
+    if (entry && entry.browser) {
         try {
-            if (puppeteerBrowser.isConnected()) return puppeteerBrowser;
+            if (entry.browser.isConnected()) {
+                if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = null; }
+                entry.lastUsed = Date.now();
+                return entry;
+            }
         } catch (_) {}
-        puppeteerBrowser = null;
+        browsers.delete(key);
     }
 
-    if (browserIdleTimer) { clearTimeout(browserIdleTimer); browserIdleTimer = null; }
+    if (browsers.size >= MAX_INSTANCES) await evictLruIdle();
 
     const puppeteer = loadPuppeteer();
     if (!puppeteer) throw new Error(
@@ -97,7 +123,7 @@ async function getPuppeteerBrowser() {
         'On Windows, also set CHROMIUM_PATH to your Chrome executable.'
     );
 
-    puppeteerBrowser = await puppeteer.launch({
+    const launchOpts = {
         executablePath: findChromium(),
         args: [
             '--no-sandbox',
@@ -117,24 +143,32 @@ async function getPuppeteerBrowser() {
             '--js-flags=--max-old-space-size=64',
         ],
         headless: true,
-    });
-    return puppeteerBrowser;
+    };
+    if (profileDir) launchOpts.userDataDir = profileDir;
+
+    const browser = await puppeteer.launch(launchOpts);
+    entry = { browser, idleTimer: null, activePages: 0, lastUsed: Date.now() };
+    browsers.set(key, entry);
+    return entry;
 }
 
-async function openPage(browser) {
-    activePagesCount++;
-    if (browserIdleTimer) { clearTimeout(browserIdleTimer); browserIdleTimer = null; }
-    return browser.newPage();
+async function openPage(entry) {
+    entry.activePages++;
+    if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = null; }
+    return entry.browser.newPage();
 }
 
-async function closePage(page) {
+async function closePage(entry, page) {
     await page.close().catch(() => {});
-    activePagesCount = Math.max(0, activePagesCount - 1);
-    if (activePagesCount === 0 && puppeteerBrowser && BROWSER_IDLE_MS > 0) {
-        browserIdleTimer = setTimeout(async () => {
-            if (puppeteerBrowser) {
-                await puppeteerBrowser.close().catch(() => {});
-                puppeteerBrowser = null;
+    entry.activePages = Math.max(0, entry.activePages - 1);
+    if (entry.activePages === 0 && entry.browser && BROWSER_IDLE_MS > 0) {
+        entry.idleTimer = setTimeout(async () => {
+            for (const [k, e] of browsers) {
+                if (e === entry) { browsers.delete(k); break; }
+            }
+            if (entry.browser) {
+                await entry.browser.close().catch(() => {});
+                entry.browser = null;
                 process.stderr.write('v8_shim: browser closed after idle timeout\n');
             }
         }, BROWSER_IDLE_MS);
@@ -213,8 +247,8 @@ rl.on('line', (line) => {
                 if (headerName) dbg(`extracting header: ${headerName}`);
                 else dbg(`extracting param: ${paramName}`);
 
-                const browser = await getPuppeteerBrowser();
-                const page = await openPage(browser);
+                const entry = await getPuppeteerBrowser(params.profileDir);
+                const page = await openPage(entry);
 
                 try {
                     page.on('console', msg => dbg(`page console [${msg.type()}]: ${msg.text()}`));
@@ -296,7 +330,7 @@ rl.on('line', (line) => {
                     setCachedToken(cacheKey, token, cacheTtlMs);
                     process.stdout.write(JSON.stringify({ id, ok: true, value: token }) + '\n');
                 } finally {
-                    await closePage(page);
+                    await closePage(entry, page);
                 }
 
             } else if (action === 'capture_page_payload') {
@@ -311,8 +345,8 @@ rl.on('line', (line) => {
                 dbg(`timeout: ${timeoutMs}ms`);
                 dbg(`init script length: ${initScript.length} chars`);
 
-                const browser = await getPuppeteerBrowser();
-                const page = await openPage(browser);
+                const entry = await getPuppeteerBrowser(params.profileDir);
+                const page = await openPage(entry);
                 let scrollInterval = null;
 
                 try {
@@ -378,7 +412,7 @@ rl.on('line', (line) => {
                     process.stdout.write(JSON.stringify({ id, ok: true, value: payload }) + '\n');
                 } finally {
                     if (scrollInterval) clearInterval(scrollInterval);
-                    await closePage(page);
+                    await closePage(entry, page);
                 }
 
             } else {

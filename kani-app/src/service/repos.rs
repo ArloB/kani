@@ -600,12 +600,14 @@ impl AppService {
 
         let prefs = self.load_pref_map(sid).await.unwrap_or_default();
         let ns = format!("{}:", validated.id);
+        let browser_enabled = self.browser_enabled_flag(sid).await;
         let backend = loader::build_yaml_source(
             Arc::new(validated),
             self.smart_client.clone(),
             Arc::clone(&self.ext_cache),
             ns,
             prefs,
+            browser_enabled,
         );
         if existing_id.is_some() {
             self.sources.hot_swap(sid, backend).await;
@@ -675,6 +677,7 @@ impl AppService {
             self.smart_client.clone(),
             Some(metadata.base_url),
             metadata.unrestricted_http,
+            self.browser_enabled_flag(sid).await,
             prefs,
             Arc::clone(&self.ext_cache),
             ns,

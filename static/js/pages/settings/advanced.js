@@ -157,6 +157,9 @@ export function AdvancedSection({ settings, bootId }) {
     wasm_storage_path: settings?.wasm_storage_path ?? '',
     max_wasm_instances: settings?.max_wasm_instances ?? null,
     cover_max_dimension: settings?.cover_max_dimension ?? null,
+    browser_max_memory_mb: settings?.browser_max_memory_mb ?? null,
+    browser_max_instances: settings?.browser_max_instances ?? null,
+    browser_idle_timeout_s: settings?.browser_idle_timeout_s ?? null,
     http_request_logging: settings?.http_request_logging ?? false,
     browser_debug_logging: settings?.browser_debug_logging ?? false,
     registration_enabled: settings?.registration_enabled ?? false,
@@ -260,6 +263,27 @@ export function AdvancedSection({ settings, bootId }) {
         description=${t('settings.advanced.cover_dim.desc')}
       >
         ${numInput('cover_max_dimension', { min: 100, max: 2000, placeholder: '800' })}
+      <//>
+      <${SettingsRow}
+        label=${t('settings.advanced.browser_max_memory.label')}
+        description=${t('settings.advanced.browser_max_memory.desc')}
+        tooltip=${t('settings.advanced.browser_caps.tooltip')}
+      >
+        ${numInput('browser_max_memory_mb', { min: 64, max: 8192, placeholder: '512' })}
+      <//>
+      <${SettingsRow}
+        label=${t('settings.advanced.browser_max_instances.label')}
+        description=${t('settings.advanced.browser_max_instances.desc')}
+        tooltip=${t('settings.advanced.browser_caps.tooltip')}
+      >
+        ${numInput('browser_max_instances', { min: 1, max: 16, placeholder: '2' })}
+      <//>
+      <${SettingsRow}
+        label=${t('settings.advanced.browser_idle_timeout.label')}
+        description=${t('settings.advanced.browser_idle_timeout.desc')}
+        tooltip=${t('settings.advanced.browser_caps.tooltip')}
+      >
+        ${numInput('browser_idle_timeout_s', { min: 10, max: 3600, placeholder: '300' })}
       <//>
       <${ToggleRow}
         label=${t('settings.advanced.http_logging.label')}

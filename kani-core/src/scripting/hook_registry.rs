@@ -186,6 +186,9 @@ mod tests {
             cache_backend: Arc::new(crate::cache::InMemoryCache::new()),
             cache_namespace: "test".to_string(),
             prefs: HashMap::new(),
+            v8_process: None,
+            browser_scripts: None,
+            browser_profile_key: None,
         }
     }
 

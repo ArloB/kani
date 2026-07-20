@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, s.unrestricted_http, s.download_concurrency, s.icon, s.description, s.languages, s.schema_version, scb.state as circuit_state FROM sources s LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id WHERE s.deleted_at IS NULL LIMIT 1000",
+  "query": "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, s.unrestricted_http, s.browser_enabled, s.download_concurrency, s.icon, s.description, s.languages, s.schema_version, scb.state as circuit_state FROM sources s LEFT JOIN source_circuit_breakers scb ON scb.source_id = s.id WHERE s.id = ?",
   "describe": {
     "columns": [
       {
@@ -39,40 +39,46 @@
         "type_info": "Bool"
       },
       {
-        "name": "download_concurrency",
+        "name": "browser_enabled",
         "ordinal": 7,
+        "type_info": "Bool"
+      },
+      {
+        "name": "download_concurrency",
+        "ordinal": 8,
         "type_info": "Integer"
       },
       {
         "name": "icon",
-        "ordinal": 8,
-        "type_info": "Text"
-      },
-      {
-        "name": "description",
         "ordinal": 9,
         "type_info": "Text"
       },
       {
-        "name": "languages",
+        "name": "description",
         "ordinal": 10,
         "type_info": "Text"
       },
       {
-        "name": "schema_version",
+        "name": "languages",
         "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "schema_version",
+        "ordinal": 12,
         "type_info": "Integer"
       },
       {
         "name": "circuit_state",
-        "ordinal": 12,
+        "ordinal": 13,
         "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -88,5 +94,5 @@
       true
     ]
   },
-  "hash": "52c928c71c8cc5a27f437cd3318d3231c80122ce9efe09eec9d166e74cf06a6f"
+  "hash": "01012e076bfbe3ea91ef8891f733460b882c89abc003f494053bcf93e55a3832"
 }

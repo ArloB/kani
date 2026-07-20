@@ -1,0 +1,3 @@
+ALTER TABLE settings ADD COLUMN browser_max_memory_mb INTEGER NOT NULL DEFAULT 512;
+ALTER TABLE settings ADD COLUMN browser_max_instances INTEGER NOT NULL DEFAULT 2;
+ALTER TABLE settings ADD COLUMN browser_idle_timeout_s INTEGER NOT NULL DEFAULT 300;

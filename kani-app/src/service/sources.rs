@@ -78,7 +78,7 @@ impl AppService {
         let source = sqlx::query_as!(
             Source,
             "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, \
-             s.unrestricted_http, s.download_concurrency, \
+             s.unrestricted_http, s.browser_enabled, s.download_concurrency, \
              s.icon, s.description, s.languages, s.schema_version, \
              scb.state as circuit_state \
              FROM sources s \
@@ -97,7 +97,7 @@ impl AppService {
         sqlx::query_as!(
             Source,
             "SELECT s.id, s.name, s.version, s.base_url, s.enabled, s.favourited, \
-             s.unrestricted_http, s.download_concurrency, \
+             s.unrestricted_http, s.browser_enabled, s.download_concurrency, \
              s.icon, s.description, s.languages, s.schema_version, \
              scb.state as circuit_state \
              FROM sources s \
@@ -139,6 +139,33 @@ impl AppService {
         )
         .execute(&self.db)
         .await?;
+        Ok(())
+    }
+
+    /// Reads the persisted browser-capability gate for a source, defaulting to
+    /// enabled when the row is missing (e.g. during install before the row lands).
+    pub(crate) async fn browser_enabled_flag(&self, id: i64) -> bool {
+        sqlx::query_scalar!("SELECT browser_enabled FROM sources WHERE id = ?", id)
+            .fetch_optional(&self.db_read)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(true)
+    }
+
+    /// Flips the operator gate for a source's browser capability, persisting it
+    /// and applying it to the loaded source immediately.
+    pub async fn set_source_browser_enabled(&self, id: i64, enabled: bool) -> Result<()> {
+        sqlx::query!(
+            "UPDATE sources SET browser_enabled = ? WHERE id = ? AND deleted_at IS NULL",
+            enabled,
+            id
+        )
+        .execute(&self.db)
+        .await?;
+        if let Some(backend) = self.sources.get_backend(id) {
+            backend.set_browser_enabled(enabled);
+        }
         Ok(())
     }
 
@@ -201,6 +228,9 @@ impl AppService {
             kani_core::file_storage::delete_wasm_file(&storage, &row.name)
                 .await
                 .map_err(ServiceError::Core)?;
+
+            let profile_dir = kani_core::v8_process::profile_dir_for(&row.name);
+            let _ = tokio::fs::remove_dir_all(&profile_dir).await;
 
             self.sources.remove(id);
             self.cache.invalidate_source(id);
@@ -290,12 +320,14 @@ impl AppService {
             };
 
             let ns = format!("{}:", source.name);
+            let browser_enabled = self.browser_enabled_flag(id).await;
             let backend = loader::build_wasm_source(
                 self.wasm_runtime.engine().clone(),
                 instance_pre,
                 self.smart_client.clone(),
                 Some(source.base_url),
                 source.unrestricted_http,
+                browser_enabled,
                 prefs,
                 std::sync::Arc::clone(&self.ext_cache),
                 ns,
@@ -1184,6 +1216,7 @@ impl AppService {
             self.smart_client.clone(),
             Some(metadata.base_url.clone()),
             metadata.unrestricted_http,
+            self.browser_enabled_flag(id).await,
             self.load_pref_map(id).await.unwrap_or_default(),
             std::sync::Arc::clone(&self.ext_cache),
             format!("{}:", metadata.id),
@@ -1274,6 +1307,7 @@ impl AppService {
             self.smart_client.clone(),
             Some(metadata.base_url.clone()),
             metadata.unrestricted_http,
+            self.browser_enabled_flag(id).await,
             self.load_pref_map(id).await.unwrap_or_default(),
             std::sync::Arc::clone(&self.ext_cache),
             format!("{}:", metadata.id),

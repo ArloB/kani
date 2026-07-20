@@ -1,5 +1,6 @@
 pub mod audit_prune;
 pub mod backup;
+pub mod browser_reap;
 pub mod circuit_breaker;
 pub mod download;
 pub mod error;

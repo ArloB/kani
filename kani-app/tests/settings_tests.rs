@@ -3,7 +3,7 @@
 mod common;
 use common::test_service;
 use kani_app::ids::UserId;
-use kani_shared::types::{DownloadSettings, ScanSettings, SettingsUpdate};
+use kani_shared::types::{AdvancedSettings, DownloadSettings, ScanSettings, SettingsUpdate};
 
 #[tokio::test]
 async fn get_settings_reflects_initial_values() {
@@ -41,6 +41,60 @@ async fn update_download_settings_round_trips() {
     assert_eq!(s.chapter_queue_size, 64);
     assert_eq!(s.max_retries, 5);
     assert_eq!(s.initial_retry_delay_ms, 200);
+}
+
+fn advanced_settings() -> AdvancedSettings {
+    AdvancedSettings {
+        flaresolverr_url: String::new(),
+        library_path: "/data/library".into(),
+        wasm_storage_path: "/data/wasm".into(),
+        max_wasm_instances: 4,
+        http_request_logging: false,
+        browser_debug_logging: false,
+        registration_enabled: true,
+        cover_max_dimension: Some(512),
+        browser_max_memory_mb: 512,
+        browser_max_instances: 2,
+        browser_idle_timeout_s: 300,
+    }
+}
+
+#[tokio::test]
+async fn update_advanced_settings_round_trips_browser_caps() {
+    let svc = test_service().await;
+
+    svc.update_settings(
+        SettingsUpdate::Advanced(AdvancedSettings {
+            browser_max_memory_mb: 1024,
+            browser_max_instances: 4,
+            browser_idle_timeout_s: 120,
+            ..advanced_settings()
+        }),
+        UserId(1),
+    )
+    .await
+    .unwrap();
+
+    let s = svc.get_settings().await;
+    assert_eq!(s.browser_max_memory_mb, 1024);
+    assert_eq!(s.browser_max_instances, 4);
+    assert_eq!(s.browser_idle_timeout_s, 120);
+}
+
+#[tokio::test]
+async fn update_advanced_settings_rejects_invalid_browser_caps() {
+    let svc = test_service().await;
+
+    let result = svc
+        .update_settings(
+            SettingsUpdate::Advanced(AdvancedSettings {
+                browser_max_instances: 0,
+                ..advanced_settings()
+            }),
+            UserId(1),
+        )
+        .await;
+    assert!(result.is_err());
 }
 
 #[tokio::test]

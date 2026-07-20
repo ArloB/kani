@@ -420,6 +420,11 @@ export async function setSourceDownloadConcurrency(sid, value) {
   return _req('PUT', `/sources/${sid}/download-concurrency`, { body: { value } });
 }
 
+/** @param {number} sid @param {boolean} enabled */
+export async function setSourceBrowserEnabled(sid, enabled) {
+  return _req('PUT', `/sources/${sid}/browser-enabled`, { body: { enabled } });
+}
+
 /** @returns {Promise<number[]>} */
 export async function getActiveSourceIds() {
   return _req('GET', '/sources/active_ids');

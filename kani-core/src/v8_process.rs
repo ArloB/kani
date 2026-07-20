@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -10,6 +10,55 @@ static V8_DEBUG_LOGGING: AtomicBool = AtomicBool::new(false);
 
 pub fn set_v8_debug_logging(enabled: bool) {
     V8_DEBUG_LOGGING.store(enabled, Ordering::Relaxed);
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct V8Config {
+    pub max_memory_mb: u32,
+    pub max_instances: u32,
+    pub idle_timeout_s: u32,
+}
+
+impl Default for V8Config {
+    fn default() -> Self {
+        Self {
+            max_memory_mb: 512,
+            max_instances: 2,
+            idle_timeout_s: 300,
+        }
+    }
+}
+
+static V8_CONFIG: RwLock<V8Config> = RwLock::new(V8Config {
+    max_memory_mb: 512,
+    max_instances: 2,
+    idle_timeout_s: 300,
+});
+
+pub fn set_v8_config(cfg: V8Config) {
+    if let Ok(mut guard) = V8_CONFIG.write() {
+        *guard = cfg;
+    }
+}
+
+pub fn v8_config() -> V8Config {
+    V8_CONFIG.read().map(|g| *g).unwrap_or_default()
+}
+
+static V8_CALLS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static V8_RESTARTS_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+/// Snapshot of browser-runtime counters plus the active resource caps, for the
+/// diagnostics surface. Lives in kani-shared so kani-web can serialize it.
+pub fn browser_stats() -> kani_shared::types::BrowserStats {
+    let cfg = v8_config();
+    kani_shared::types::BrowserStats {
+        calls_total: V8_CALLS_TOTAL.load(Ordering::Relaxed),
+        restarts: V8_RESTARTS_TOTAL.load(Ordering::Relaxed),
+        max_memory_mb: cfg.max_memory_mb,
+        max_instances: cfg.max_instances,
+        idle_timeout_s: cfg.idle_timeout_s,
+    }
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -23,7 +72,7 @@ const V8_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// timeout enforcement itself fails to fire.
 const V8_TIMEOUT_BUFFER: Duration = Duration::from_secs(5);
 
-pub type V8ProcessHandle = Arc<Mutex<Option<V8Process>>>;
+pub type V8ProcessHandle = Arc<Mutex<Option<(V8Process, Instant)>>>;
 
 /// Constructs a fresh, empty V8 process handle; the process itself is
 /// spawned lazily on first use.
@@ -31,6 +80,7 @@ pub fn new_handle() -> V8ProcessHandle {
     Arc::new(Mutex::new(None))
 }
 
+#[derive(Debug)]
 pub struct V8Process {
     child: Child,
     stdin: ChildStdin,
@@ -43,8 +93,15 @@ impl V8Process {
         std::fs::write(&shim_path, include_str!("v8_shim.js"))
             .map_err(|e| format!("Failed to write v8 shim: {e}"))?;
 
+        let cfg = v8_config();
         let mut child = Command::new("node")
+            .arg(format!("--max-old-space-size={}", cfg.max_memory_mb))
             .arg(&shim_path)
+            .env(
+                "BROWSER_IDLE_TIMEOUT_MS",
+                (cfg.idle_timeout_s * 1000).to_string(),
+            )
+            .env("BROWSER_MAX_INSTANCES", cfg.max_instances.to_string())
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
@@ -116,9 +173,28 @@ impl V8Process {
 async fn ensure_running(handle: &V8ProcessHandle) -> Result<(), String> {
     let mut guard = handle.lock().await;
     if guard.is_none() {
-        *guard = Some(V8Process::spawn().await?);
+        *guard = Some((V8Process::spawn().await?, Instant::now()));
     }
     Ok(())
+}
+
+/// Kills and clears the subprocess if it has been idle for at least `idle_for`.
+/// Returns `true` when a process was reaped. Safe to call on a never-spawned or
+/// already-cleared handle (returns `false`).
+pub async fn reap_if_idle(handle: &V8ProcessHandle, idle_for: Duration) -> bool {
+    let mut guard = handle.lock().await;
+    let idle = match guard.as_ref() {
+        Some((_, last_used)) => last_used.elapsed() >= idle_for,
+        None => return false,
+    };
+    if idle {
+        if let Some((mut proc, _)) = guard.take() {
+            proc.kill().await;
+        }
+        true
+    } else {
+        false
+    }
 }
 
 /// Sends one request to the live V8 process, bounded by `timeout`.
@@ -141,21 +217,27 @@ async fn with_process(
 
     let outcome = tokio::time::timeout(timeout, async {
         let mut guard = handle.lock().await;
-        let proc = guard.as_mut().ok_or("V8 process not running")?;
+        let (proc, last_used) = guard.as_mut().ok_or("V8 process not running")?;
+        *last_used = Instant::now();
         proc.request(action, name, script).await
     })
     .await;
 
     match outcome {
-        Ok(Ok(v)) => Ok(v),
+        Ok(Ok(v)) => {
+            V8_CALLS_TOTAL.fetch_add(1, Ordering::Relaxed);
+            Ok(v)
+        }
         Ok(Err(e)) => {
+            V8_RESTARTS_TOTAL.fetch_add(1, Ordering::Relaxed);
             let mut guard = handle.lock().await;
             *guard = None;
             Err(e)
         }
         Err(_elapsed) => {
+            V8_RESTARTS_TOTAL.fetch_add(1, Ordering::Relaxed);
             let mut guard = handle.lock().await;
-            if let Some(mut proc) = guard.take() {
+            if let Some((mut proc, _)) = guard.take() {
                 proc.kill().await;
             }
             Err(format!("V8 request timed out after {timeout:?}"))
@@ -192,6 +274,45 @@ pub async fn v8_context_drop(handle: &V8ProcessHandle, name: &str) {
     let _ = with_process(handle, V8_REQUEST_TIMEOUT, "drop", name, "").await;
 }
 
+/// Root directory under which per-source Chromium profiles are stored. Prefers
+/// the explicit `KANI_BROWSER_PROFILES_DIR`, then `$KANI_DATA_DIR/.browser-profiles`,
+/// falling back to a temp-dir subfolder.
+fn profiles_root() -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("KANI_BROWSER_PROFILES_DIR")
+        && !p.is_empty()
+    {
+        return std::path::PathBuf::from(p);
+    }
+    if let Ok(d) = std::env::var("KANI_DATA_DIR")
+        && !d.is_empty()
+    {
+        return std::path::PathBuf::from(d).join(".browser-profiles");
+    }
+    std::env::temp_dir().join("kani-browser-profiles")
+}
+
+/// Maps a source key to a dedicated Chromium `userDataDir`, sanitizing the key
+/// to a single safe path component so login/cookie state never leaks between
+/// sources and no key can escape the profiles root.
+pub fn profile_dir_for(source_key: &str) -> std::path::PathBuf {
+    let mut sanitized: String = source_key
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() || sanitized.chars().all(|c| c == '.') {
+        sanitized = "__default__".to_string();
+    }
+    let dir = profiles_root().join(sanitized);
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
 pub struct CaptureUrlParamOpts<'a> {
     pub url_pattern: &'a str,
     pub param_name: Option<&'a str>,
@@ -206,6 +327,7 @@ pub async fn capture_url_param(
     handle: &V8ProcessHandle,
     page_url: &str,
     opts: &CaptureUrlParamOpts<'_>,
+    source_key: Option<&str>,
 ) -> Result<String, String> {
     let enabled = std::env::var("KANI_BROWSER_ENABLED")
         .map(|v| v != "false" && v != "0")
@@ -223,7 +345,7 @@ pub async fn capture_url_param(
         .iter()
         .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
         .collect();
-    let script = serde_json::json!({
+    let mut params = serde_json::json!({
         "urlPattern": opts.url_pattern,
         "paramName": opts.param_name,
         "headerName": opts.header_name,
@@ -232,8 +354,12 @@ pub async fn capture_url_param(
         "cacheTtlMs": opts.cache_ttl_ms,
         "verbose": verbose,
         "extraHeaders": extra_headers_obj,
-    })
-    .to_string();
+    });
+    if let Some(key) = source_key {
+        params["profileDir"] =
+            serde_json::Value::String(profile_dir_for(key).to_string_lossy().into_owned());
+    }
+    let script = params.to_string();
     let timeout = Duration::from_millis(u64::from(opts.timeout_ms)) + V8_TIMEOUT_BUFFER;
     with_process(handle, timeout, "capture_token", page_url, &script).await
 }
@@ -243,6 +369,7 @@ pub async fn capture_page_payload(
     page_url: &str,
     init_script: &str,
     timeout_ms: u32,
+    source_key: Option<&str>,
 ) -> Result<String, String> {
     let enabled = std::env::var("KANI_BROWSER_ENABLED")
         .map(|v| v != "false" && v != "0")
@@ -255,12 +382,16 @@ pub async fn capture_page_payload(
         );
     }
     let verbose = V8_DEBUG_LOGGING.load(Ordering::Relaxed);
-    let script = serde_json::json!({
+    let mut params = serde_json::json!({
         "initScript": init_script,
         "timeoutMs": timeout_ms,
         "verbose": verbose,
-    })
-    .to_string();
+    });
+    if let Some(key) = source_key {
+        params["profileDir"] =
+            serde_json::Value::String(profile_dir_for(key).to_string_lossy().into_owned());
+    }
+    let script = params.to_string();
     let timeout = Duration::from_millis(u64::from(timeout_ms)) + V8_TIMEOUT_BUFFER;
     with_process(handle, timeout, "capture_page_payload", page_url, &script).await
 }
@@ -301,6 +432,7 @@ mod tests {
                     cache_ttl_ms: None,
                     extra_headers: &[],
                 },
+                None,
             )
             .await;
             let err = result.unwrap_err();
@@ -318,6 +450,63 @@ mod tests {
         assert!(V8_DEBUG_LOGGING.load(Ordering::Relaxed));
         set_v8_debug_logging(false);
         assert!(!V8_DEBUG_LOGGING.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn profile_dir_for_sanitizes_path_traversal() {
+        let root = profiles_root();
+        for key in ["../evil", "..", ".", "a/b/c", "..\\..\\x"] {
+            let dir = profile_dir_for(key);
+            assert_eq!(
+                dir.parent(),
+                Some(root.as_path()),
+                "key {key:?} escaped the profiles root: {dir:?}"
+            );
+            let last = dir.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(
+                !last.contains('/') && !last.contains('\\') && last != ".." && last != ".",
+                "key {key:?} produced unsafe component {last:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn reap_if_idle_returns_false_on_empty_handle() {
+        let handle = null_handle();
+        assert!(!reap_if_idle(&handle, Duration::from_secs(0)).await);
+    }
+
+    #[test]
+    fn profile_dir_for_is_stable_and_distinct() {
+        assert_eq!(profile_dir_for("source-a"), profile_dir_for("source-a"));
+        assert_ne!(profile_dir_for("source-a"), profile_dir_for("source-b"));
+    }
+
+    #[test]
+    fn v8_config_default_values() {
+        let cfg = V8Config::default();
+        assert_eq!(cfg.max_memory_mb, 512);
+        assert_eq!(cfg.max_instances, 2);
+        assert_eq!(cfg.idle_timeout_s, 300);
+    }
+
+    #[test]
+    fn set_v8_config_roundtrips() {
+        let restore = v8_config();
+        set_v8_config(V8Config {
+            max_memory_mb: 1024,
+            max_instances: 4,
+            idle_timeout_s: 120,
+        });
+        let cfg = v8_config();
+        assert_eq!(cfg.max_memory_mb, 1024);
+        assert_eq!(cfg.max_instances, 4);
+        assert_eq!(cfg.idle_timeout_s, 120);
+        let stats = browser_stats();
+        assert_eq!(stats.max_memory_mb, 1024);
+        assert_eq!(stats.max_instances, 4);
+        assert_eq!(stats.idle_timeout_s, 120);
+        set_v8_config(restore);
     }
 
     #[tokio::test]

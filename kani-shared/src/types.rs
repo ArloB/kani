@@ -969,6 +969,11 @@ pub struct LibraryPage {
 }
 
 #[cfg(feature = "host")]
+fn default_true() -> bool {
+    true
+}
+
+#[cfg(feature = "host")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct Source {
@@ -979,6 +984,9 @@ pub struct Source {
     pub enabled: bool,
     pub favourited: bool,
     pub unrestricted_http: bool,
+    #[serde(default = "default_true")]
+    #[cfg_attr(feature = "ssr", sqlx(default))]
+    pub browser_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ssr", sqlx(default))]
     pub download_concurrency: Option<i64>,
@@ -1143,6 +1151,16 @@ pub struct Category {
 }
 
 #[cfg(feature = "host")]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrowserStats {
+    pub calls_total: u64,
+    pub restarts: u64,
+    pub max_memory_mb: u32,
+    pub max_instances: u32,
+    pub idle_timeout_s: u32,
+}
+
+#[cfg(feature = "host")]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct AppSettings {
     pub flaresolverr_url: String,
@@ -1190,6 +1208,9 @@ pub struct AppSettings {
     pub db_vacuum_interval_hours: i64,
     pub audit_prune_interval_hours: i64,
     pub trash_purge_interval_hours: i64,
+    pub browser_max_memory_mb: i64,
+    pub browser_max_instances: i64,
+    pub browser_idle_timeout_s: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1304,6 +1325,9 @@ pub struct AdvancedSettings {
     pub browser_debug_logging: bool,
     pub registration_enabled: bool,
     pub cover_max_dimension: Option<i64>,
+    pub browser_max_memory_mb: i64,
+    pub browser_max_instances: i64,
+    pub browser_idle_timeout_s: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1856,6 +1880,7 @@ mod tests {
             enabled: true,
             favourited: false,
             unrestricted_http: false,
+            browser_enabled: true,
             download_concurrency: None,
             circuit_state: None,
             icon: Some("aWNvbg==".into()),
@@ -1964,6 +1989,9 @@ mod tests {
             browser_debug_logging: false,
             registration_enabled: true,
             cover_max_dimension: Some(512),
+            browser_max_memory_mb: 512,
+            browser_max_instances: 2,
+            browser_idle_timeout_s: 300,
         }));
         json_rt(&SettingsUpdate::Tracking(TrackingSettings {
             default_tracking_enabled: true,
