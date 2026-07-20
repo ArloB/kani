@@ -24,6 +24,7 @@ use kani_shared::types::{
 };
 use trackers::TrackerRegistry;
 
+pub mod api_tokens;
 mod audit;
 pub mod backup;
 pub mod backup_scheduler;

@@ -3,7 +3,7 @@
 // Native spinners are hidden globally (app.css); this provides the
 // hold-to-repeat steppers the design system uses instead.
 
-import { h, render } from 'preact';
+import { h } from 'preact';
 import { useRef } from 'preact/hooks';
 import htm from 'htm';
 import { t } from '../../i18n.js';
@@ -92,27 +92,4 @@ export function NumberInput({ value, onChange, min, max, step = 1, disabled = fa
       ${stepBtn(1, '+', t('form.number.increment'))}
     </div>
   `;
-}
-
-/**
- * Imperative mount for vanilla call sites (settings rows). Returns the host
- * element; `update(v)` re-renders with a new value, `destroy()` unmounts.
- * @param {{
- *   value: number,
- *   onChange: (value: number) => void,
- *   min?: number, max?: number, step?: number,
- *   ariaLabel?: string,
- * }} opts
- */
-export function mountNumberInput(opts) {
-  const host = document.createElement('div');
-  host.className = 'shrink-0';
-  let current = { ...opts };
-  const _render = () => render(html`<${NumberInput} ...${current} />`, host);
-  _render();
-  return {
-    el: host,
-    update(/** @type {number} */ v) { current = { ...current, value: v }; _render(); },
-    destroy() { render(null, host); },
-  };
 }

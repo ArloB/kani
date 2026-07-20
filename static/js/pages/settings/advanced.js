@@ -1,242 +1,157 @@
 // @ts-check
 // Settings — Advanced section (FlareSolverr, library path, WASM instances).
 
-import { h, render } from 'preact';
+import { h } from 'preact';
+import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
 import { setLocal } from '../../utils.js';
 import { addPendingFields } from '../../components/restart-tray.js';
 import { showToast, showApiError } from '../../components/toast.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow, mkToggleRow } from './_shared.js';
+import { SettingsGroup, SettingsRow, ToggleRow } from './_shared.js';
+import { useSettingsForm } from './form-bus.js';
+import { useBusy } from '../../hooks/use-busy.js';
 import { FolderPicker } from '../../components/folder-picker.js';
 import { PathMigrationDialog } from '../../components/path-migration-dialog.js';
 import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
 
-/**
- * @param {HTMLElement} el
- * @param {any} settings
- * @param {string} bootId
- */
-export function mount(el, settings, bootId) {
-  // Preact roots for dialogs (appended first so they stack above everything)
-  const pickerRoot = document.createElement('div');
-  const migRoot    = document.createElement('div');
-  el.appendChild(pickerRoot);
-  el.appendChild(migRoot);
+function EncryptionGroup() {
+  const [status, setStatus] = useState(/** @type {any} */ (null));
+  const [failed, setFailed] = useState(false);
+  const [result, setResult] = useState(/** @type {{ ok: boolean, text: string } | null} */ (null));
+  const { busy, run } = useBusy();
 
-  // ── Picker state ──────────────────────────────────────────────────────────
-  let pickerOpen = false;
-  let pickerInitial = '/';
-  let pickerOnSelect = /** @type {((p: string) => void)|null} */ (null);
-
-  function openPicker(initialPath, onSelect) {
-    pickerInitial = initialPath || '/';
-    pickerOnSelect = onSelect;
-    pickerOpen = true;
-    renderDialogs();
-  }
-
-  // ── Migration dialog state ─────────────────────────────────────────────────
-  let migOpen = false;
-  let migField = '';
-  let migCurrentPath = '';
-  let migNewPath = '';
-  let migOnDone = /** @type {((moved: boolean) => void)|null} */ (null);
-  let migOnCancel = /** @type {(() => void)|null} */ (null);
-
-  function renderDialogs() {
-    render(html`
-      <${FolderPicker}
-        open=${pickerOpen}
-        initialPath=${pickerInitial}
-        onClose=${() => { pickerOpen = false; renderDialogs(); }}
-        onSelect=${(/** @type {string} */ path) => {
-          pickerOpen = false;
-          renderDialogs();
-          pickerOnSelect?.(path);
-        }}
-      />
-      <${PathMigrationDialog}
-        open=${migOpen}
-        field=${migField}
-        currentPath=${migCurrentPath}
-        newPath=${migNewPath}
-        onDone=${(/** @type {boolean} */ moved) => {
-          migOpen = false;
-          renderDialogs();
-          migOnDone?.(moved);
-        }}
-        onCancel=${() => {
-          migOpen = false;
-          renderDialogs();
-          migOnCancel?.();
-        }}
-      />
-    `, migRoot);
-  }
-
-  // Initial render (both closed)
-  renderDialogs();
-
-  const advGroup = mkSettingsGroup(t('settings.advanced.server.group'));
-  const advCard  = mkSettingsGroupCard(advGroup);
-
-  const flareInput = document.createElement('input');
-  flareInput.type = 'url';
-  flareInput.id = 'flaresolverr-url';
-  flareInput.className = 'input w-56 text-sm js-adv-field';
-  flareInput.dataset.key = 'flaresolverr_url';
-  flareInput.placeholder = 'http://localhost:8191';
-  flareInput.value = settings?.flaresolverr_url ?? '';
-  advCard.appendChild(mkSettingsRow({ label: t('settings.advanced.flaresolverr.label'), description: t('settings.advanced.flaresolverr.desc'), control: flareInput }));
-
-  // ── Library path control ──────────────────────────────────────────────────
-  const { el: libEl, hidden: libHidden, setPath: setLibPath } = makePathControl('library_path', settings?.library_path ?? '');
-  advCard.appendChild(mkSettingsRow({
-    label: t('settings.advanced.library_path.label'),
-    description: t('settings.advanced.library_path.desc'),
-    control: libEl,
-  }));
-
-  libEl.querySelector('button')?.addEventListener('click', () => {
-    openPicker(libHidden.value || '/', (path) => setLibPath(path));
-  });
-
-  // ── WASM storage path control ─────────────────────────────────────────────
-  const { el: wasmPathEl, hidden: wasmPathHidden, setPath: setWasmPath } = makePathControl('wasm_storage_path', settings?.wasm_storage_path ?? '');
-  advCard.appendChild(mkSettingsRow({
-    label: t('settings.advanced.wasm_path.label'),
-    description: t('settings.advanced.wasm_path.desc'),
-    control: wasmPathEl,
-  }));
-
-  wasmPathEl.querySelector('button')?.addEventListener('click', () => {
-    openPicker(wasmPathHidden.value || '/', (path) => setWasmPath(path));
-  });
-
-  // ── Other numeric / toggle fields ─────────────────────────────────────────
-  const wasmInput = document.createElement('input');
-  wasmInput.type = 'number';
-  wasmInput.id = 'max-wasm-instances';
-  wasmInput.className = 'input w-24 text-sm js-adv-num';
-  wasmInput.dataset.key = 'max_wasm_instances';
-  wasmInput.min = '1';
-  wasmInput.value = String(settings?.max_wasm_instances ?? '');
-  advCard.appendChild(mkSettingsRow({ label: t('settings.advanced.wasm_instances.label'), description: t('settings.advanced.wasm_instances.desc'), badge: t('settings.badge.restart_required'), control: wasmInput }));
-
-  const coverDimInput = document.createElement('input');
-  coverDimInput.type = 'number';
-  coverDimInput.id = 'cover-max-dimension';
-  coverDimInput.className = 'input w-24 text-sm js-adv-num';
-  coverDimInput.dataset.key = 'cover_max_dimension';
-  coverDimInput.min = '100';
-  coverDimInput.max = '2000';
-  coverDimInput.placeholder = '800';
-  coverDimInput.value = settings?.cover_max_dimension != null ? String(settings.cover_max_dimension) : '';
-  advCard.appendChild(mkSettingsRow({ label: t('settings.advanced.cover_dim.label'), description: t('settings.advanced.cover_dim.desc'), control: coverDimInput }));
-
-  let httpLogging = settings?.http_request_logging ?? false;
-  advCard.appendChild(mkToggleRow({
-    label: t('settings.advanced.http_logging.label'),
-    description: t('settings.advanced.http_logging.desc'),
-    checked: httpLogging,
-    onChange: (v) => { httpLogging = v; },
-  }));
-
-  let browserDebugLogging = settings?.browser_debug_logging ?? false;
-  advCard.appendChild(mkToggleRow({
-    label: t('settings.advanced.browser_logging.label'),
-    description: t('settings.advanced.browser_logging.desc'),
-    checked: browserDebugLogging,
-    onChange: (v) => { browserDebugLogging = v; },
-  }));
-
-  let registrationEnabled = settings?.registration_enabled ?? false;
-  advCard.appendChild(mkToggleRow({
-    label: t('settings.advanced.registration.label'),
-    description: t('settings.advanced.registration.desc'),
-    checked: registrationEnabled,
-    onChange: (v) => { registrationEnabled = v; },
-  }));
-
-  el.appendChild(advGroup);
-
-  // ── Credential Encryption ──────────────────────────────────────────────────
-  const encGroup = mkSettingsGroup(t('settings.advanced.encryption.group'));
-  const encCard  = mkSettingsGroupCard(encGroup);
-
-  const encStatusEl = document.createElement('p');
-  encStatusEl.className = 'text-sm text-text-muted px-1';
-  encStatusEl.textContent = t('common.loading');
-
-  const encMigrateBtn = document.createElement('button');
-  encMigrateBtn.type = 'button';
-  encMigrateBtn.className = 'btn-primary btn-sm hidden';
-  encMigrateBtn.textContent = t('settings.advanced.encryption.btn');
-
-  const encResultEl = document.createElement('span');
-  encResultEl.className = 'text-xs hidden';
-
-  const encCtrl = document.createElement('div');
-  encCtrl.className = 'flex flex-col gap-2';
-  encCtrl.appendChild(encStatusEl);
-
-  const encBtnRow = document.createElement('div');
-  encBtnRow.className = 'flex items-center gap-3';
-  encBtnRow.appendChild(encMigrateBtn);
-  encBtnRow.appendChild(encResultEl);
-  encCtrl.appendChild(encBtnRow);
-
-  encCard.appendChild(mkSettingsRow({
-    label: t('settings.advanced.encryption.label'),
-    description: t('settings.advanced.encryption.desc'),
-    tooltip: t('settings.advanced.encryption.tooltip'),
-    control: encCtrl,
-  }));
-  el.appendChild(encGroup);
-
-  async function refreshEncStatus() {
+  const refresh = useCallback(async () => {
     try {
-      const s = await api.getCredentialEncryptionStatus();
-      if (!s.encryption_enabled) {
-        encStatusEl.textContent = t('settings.advanced.encryption.disabled');
-        encMigrateBtn.classList.add('hidden');
-      } else if (s.plaintext_count > 0) {
-        encStatusEl.textContent = t('settings.advanced.encryption.partial', { count: s.plaintext_count, s: s.plaintext_count === 1 ? '' : 's' });
-        encMigrateBtn.classList.remove('hidden');
-      } else {
-        encStatusEl.textContent = t('settings.advanced.encryption.all_done');
-        encMigrateBtn.classList.add('hidden');
-      }
+      setStatus(await api.getCredentialEncryptionStatus());
     } catch {
-      encStatusEl.textContent = t('settings.advanced.encryption.load_failed');
+      setFailed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const migrate = () =>
+    run(async () => {
+      setResult(null);
+      try {
+        await api.migrateCredentialsToEncrypted();
+        setResult({ ok: true, text: t('settings.advanced.encryption.result_done') });
+        await refresh();
+      } catch (/** @type {any} */ e) {
+        setResult({ ok: false, text: e?.message ?? 'Failed' });
+      }
+    });
+
+  let text = t('common.loading');
+  let showBtn = false;
+  if (failed) {
+    text = t('settings.advanced.encryption.load_failed');
+  } else if (status) {
+    if (!status.encryption_enabled) {
+      text = t('settings.advanced.encryption.disabled');
+    } else if (status.plaintext_count > 0) {
+      text = t('settings.advanced.encryption.partial', {
+        count: status.plaintext_count,
+        s: status.plaintext_count === 1 ? '' : 's',
+      });
+      showBtn = true;
+    } else {
+      text = t('settings.advanced.encryption.all_done');
     }
   }
 
-  refreshEncStatus();
+  return html`
+    <${SettingsGroup} label=${t('settings.advanced.encryption.group')}>
+      <${SettingsRow}
+        label=${t('settings.advanced.encryption.label')}
+        description=${t('settings.advanced.encryption.desc')}
+        tooltip=${t('settings.advanced.encryption.tooltip')}
+      >
+        <div class="flex flex-col gap-2">
+          <p class="text-sm text-text-muted px-1">${text}</p>
+          <div class="flex items-center gap-3">
+            ${showBtn &&
+            html`<button type="button" class="btn-primary btn-sm" disabled=${busy} onClick=${migrate}>
+              ${busy ? t('settings.advanced.encryption.encrypting') : t('settings.advanced.encryption.btn')}
+            </button>`}
+            ${result &&
+            html`<span class=${`text-xs ${result.ok ? 'text-success' : 'text-danger'}`}
+              >${result.text}</span
+            >`}
+          </div>
+        </div>
+      <//>
+    <//>
+  `;
+}
 
-  encMigrateBtn.addEventListener('click', async () => {
-    encMigrateBtn.disabled = true;
-    encMigrateBtn.textContent = t('settings.advanced.encryption.encrypting');
-    encResultEl.className = 'text-xs hidden';
-    try {
-      await api.migrateCredentialsToEncrypted();
-      encResultEl.textContent = t('settings.advanced.encryption.result_done');
-      encResultEl.className = 'text-xs text-success';
-      await refreshEncStatus();
-    } catch (/** @type {any} */ e) {
-      encResultEl.textContent = e?.message ?? 'Failed';
-      encResultEl.className = 'text-xs text-error';
-    } finally {
-      encMigrateBtn.disabled = false;
-      encMigrateBtn.textContent = t('settings.advanced.encryption.btn');
-    }
-  });
+function MaintenanceActions() {
+  const maint = useBusy();
+  const dedup = useBusy();
 
+  const runMaint = () =>
+    maint.run(async () => {
+      try {
+        const res = await api.runMaintenance();
+        const freed = (res?.before_bytes ?? 0) - (res?.after_bytes ?? 0);
+        const mb = (freed / 1024 / 1024).toFixed(1);
+        showToast(
+          freed > 0
+            ? t('settings.advanced.maintenance.freed', { mb })
+            : t('settings.advanced.maintenance.no_freed'),
+          { type: 'success' },
+        );
+      } catch (e) {
+        showApiError(e);
+      }
+    });
 
-  let lastSaved = {
+  const runDedup = () =>
+    dedup.run(async () => {
+      try {
+        const res = await api.rescanDuplicates();
+        const n = res?.new_pairs ?? 0;
+        showToast(
+          n === 0
+            ? t('settings.advanced.dedup.no_pairs')
+            : t('settings.advanced.dedup.pairs', { count: n, s: n === 1 ? '' : 's' }),
+          { type: 'success' },
+        );
+      } catch (e) {
+        showApiError(e);
+      }
+    });
+
+  return html`
+    <${SettingsGroup} label=${t('settings.advanced.maintenance.group')}>
+      <${SettingsRow}
+        label=${t('settings.advanced.maintenance.label')}
+        description=${t('settings.advanced.maintenance.desc')}
+      >
+        <button type="button" class="btn-ghost btn-sm" disabled=${maint.busy} onClick=${runMaint}>
+          ${maint.busy ? t('settings.advanced.maintenance.running') : t('settings.advanced.maintenance.btn')}
+        </button>
+      <//>
+      <${SettingsRow}
+        label=${t('settings.advanced.dedup.label')}
+        description=${t('settings.advanced.dedup.desc')}
+      >
+        <button type="button" class="btn-ghost btn-sm" disabled=${dedup.busy} onClick=${runDedup}>
+          ${dedup.busy ? t('settings.advanced.dedup.scanning') : t('settings.advanced.dedup.btn')}
+        </button>
+      <//>
+    <//>
+  `;
+}
+
+/** @param {{ settings: any, bootId: string }} props */
+export function AdvancedSection({ settings, bootId }) {
+  const initial = {
     flaresolverr_url: settings?.flaresolverr_url ?? '',
     library_path: settings?.library_path ?? '',
     wasm_storage_path: settings?.wasm_storage_path ?? '',
@@ -246,194 +161,151 @@ export function mount(el, settings, bootId) {
     browser_debug_logging: settings?.browser_debug_logging ?? false,
     registration_enabled: settings?.registration_enabled ?? false,
   };
+  const [form, setForm] = useState(initial);
+  const [saved, setSaved] = useState(initial);
+  const set = (/** @type {string} */ k, /** @type {any} */ v) => setForm((f) => ({ ...f, [k]: v }));
 
-  /** @returns {Record<string, any>} */
-  function buildAdvPayload() {
-    /** @type {Record<string, any>} */
-    const payload = {};
-    for (const input of /** @type {NodeListOf<HTMLInputElement>} */ (el.querySelectorAll('.js-adv-field'))) {
-      const key = input.dataset.key;
-      if (key) payload[key] = input.value;
-    }
-    for (const input of /** @type {NodeListOf<HTMLInputElement>} */ (el.querySelectorAll('.js-adv-num'))) {
-      const key = input.dataset.key;
-      if (key && input.value !== '') payload[key] = Number(input.value);
-      else if (key) payload[key] = null;
-    }
-    payload['http_request_logging'] = httpLogging;
-    payload['browser_debug_logging'] = browserDebugLogging;
-    payload['registration_enabled'] = registrationEnabled;
-    return payload;
-  }
+  const [picker, setPicker] = useState({ open: false, initial: '/', target: '' });
+  const [mig, setMig] = useState({ open: false, field: '', current: '', next: '' });
+  const migResolve = useRef(/** @type {null | ((moved: boolean) => void)} */ (null));
 
-  /**
-   * Prompts the migration dialog for a field if its value changed.
-   * Resolves immediately if unchanged.
-   * @param {string} field
-   * @param {string} oldPath
-   * @param {string} newPath
-   * @returns {Promise<boolean>} true if files were moved
-   */
-  function promptMigration(field, oldPath, newPath) {
+  const promptMigration = (/** @type {string} */ field, /** @type {string} */ oldPath, /** @type {string} */ newPath) => {
     if (!newPath || newPath === oldPath) return Promise.resolve(false);
     return new Promise((resolve) => {
-      migField = field;
-      migCurrentPath = oldPath;
-      migNewPath = newPath;
-      migOpen = true;
-      migOnDone = (moved) => {
-        if (moved) {
-          // Update lastSaved for this field; the backend already persisted it
-          lastSaved[field] = newPath;
-          if (field === 'library_path') setLibPath(newPath);
-          else if (field === 'wasm_storage_path') setWasmPath(newPath);
-        }
-        resolve(moved);
-      };
-      migOnCancel = () => resolve(false);
-      renderDialogs();
+      migResolve.current = resolve;
+      setMig({ open: true, field, current: oldPath, next: newPath });
     });
-  }
+  };
 
-  async function _save() {
-    const payload = buildAdvPayload();
-    if (JSON.stringify(payload) === JSON.stringify(lastSaved)) return;
-
-    const libChanged = payload.library_path !== lastSaved.library_path;
-    const wasmChanged = payload.wasm_storage_path !== lastSaved.wasm_storage_path;
-
-    // Handle path migrations sequentially before the normal settings save
-    if (libChanged) {
-      await promptMigration('library_path', lastSaved.library_path, payload.library_path);
-    }
+  const save = useCallback(async () => {
+    const libChanged = form.library_path !== saved.library_path;
+    const wasmChanged = form.wasm_storage_path !== saved.wasm_storage_path;
+    if (libChanged) await promptMigration('library_path', saved.library_path, form.library_path);
     if (wasmChanged) {
-      await promptMigration('wasm_storage_path', lastSaved.wasm_storage_path, payload.wasm_storage_path);
+      await promptMigration('wasm_storage_path', saved.wasm_storage_path, form.wasm_storage_path);
     }
-
-    // Save all settings (including any updated paths) via the normal endpoint
-    const freshPayload = buildAdvPayload();
-    await api.updateSettings({ Advanced: freshPayload });
-    lastSaved = { ...freshPayload };
+    await api.updateSettings({ Advanced: form });
+    setSaved(form);
     showToast(t('common.saved'), { type: 'success' });
-    if ((freshPayload.max_wasm_instances ?? null) !== (settings?.max_wasm_instances ?? null)) {
+    if ((form.max_wasm_instances ?? null) !== (settings?.max_wasm_instances ?? null)) {
       setLocal('kani_restart_boot_id', bootId);
       addPendingFields(['max_wasm_instances']);
       window.dispatchEvent(new StorageEvent('storage', { key: 'kani_restart_needed' }));
     }
-  }
+  }, [form, saved]);
 
-  // ── Maintenance ────────────────────────────────────────────────────────────
+  useSettingsForm({ current: form, saved, save, reset: () => setForm(saved) });
 
-  const maintGroup = mkSettingsGroup(t('settings.advanced.maintenance.group'));
-  const maintCard  = mkSettingsGroupCard(maintGroup);
+  const numInput = (/** @type {string} */ key, /** @type {any} */ opts) => html`<input
+    type="number"
+    class="input w-24 text-sm"
+    min=${opts.min}
+    max=${opts.max}
+    placeholder=${opts.placeholder}
+    value=${form[key] != null ? String(form[key]) : ''}
+    onInput=${(/** @type {Event} */ e) => {
+      const val = /** @type {HTMLInputElement} */ (e.target).value;
+      set(key, val === '' ? null : Number(val));
+    }}
+  />`;
 
-  const maintRow = document.createElement('div');
-  maintRow.className = 'flex items-center gap-3 px-4 py-3';
-  const maintBtn = document.createElement('button');
-  maintBtn.type = 'button';
-  maintBtn.className = 'btn-ghost btn-sm';
-  maintBtn.textContent = t('settings.advanced.maintenance.btn');
-  maintRow.appendChild(maintBtn);
-  maintCard.appendChild(mkSettingsRow({
-    label: t('settings.advanced.maintenance.label'),
-    description: t('settings.advanced.maintenance.desc'),
-    control: maintRow,
-  }));
-  el.appendChild(maintGroup);
+  const pathControl = (/** @type {string} */ key) => html`<div class="flex items-center gap-2">
+    <span class="text-sm font-mono text-text truncate max-w-xs" title=${form[key]}
+      >${form[key] || t('settings.advanced.path.not_set')}</span
+    >
+    <button
+      type="button"
+      class="btn-ghost btn-sm"
+      onClick=${() => setPicker({ open: true, initial: form[key] || '/', target: key })}
+    >
+      ${t('settings.advanced.path.browse')}
+    </button>
+  </div>`;
 
-  maintBtn.addEventListener('click', async () => {
-    maintBtn.disabled = true;
-    maintBtn.textContent = t('settings.advanced.maintenance.running');
-    try {
-      const res = await api.runMaintenance();
-      const freed = (res?.before_bytes ?? 0) - (res?.after_bytes ?? 0);
-      const mb = (freed / 1024 / 1024).toFixed(1);
-      const msg = freed > 0 ? t('settings.advanced.maintenance.freed', { mb }) : t('settings.advanced.maintenance.no_freed');
-      showToast(msg, { type: 'success' });
-    } catch (e) {
-      showApiError(e);
-    } finally {
-      maintBtn.disabled = false;
-      maintBtn.textContent = t('settings.advanced.maintenance.btn');
-    }
-  });
+  return html`
+    <${SettingsGroup} label=${t('settings.advanced.server.group')}>
+      <${SettingsRow}
+        label=${t('settings.advanced.flaresolverr.label')}
+        description=${t('settings.advanced.flaresolverr.desc')}
+      >
+        <input
+          type="url"
+          class="input w-56 text-sm"
+          placeholder="http://localhost:8191"
+          value=${form.flaresolverr_url}
+          onInput=${(e) => set('flaresolverr_url', e.target.value)}
+        />
+      <//>
+      <${SettingsRow}
+        label=${t('settings.advanced.library_path.label')}
+        description=${t('settings.advanced.library_path.desc')}
+      >
+        ${pathControl('library_path')}
+      <//>
+      <${SettingsRow}
+        label=${t('settings.advanced.wasm_path.label')}
+        description=${t('settings.advanced.wasm_path.desc')}
+      >
+        ${pathControl('wasm_storage_path')}
+      <//>
+      <${SettingsRow}
+        label=${t('settings.advanced.wasm_instances.label')}
+        description=${t('settings.advanced.wasm_instances.desc')}
+        badge=${t('settings.badge.restart_required')}
+      >
+        ${numInput('max_wasm_instances', { min: 1 })}
+      <//>
+      <${SettingsRow}
+        label=${t('settings.advanced.cover_dim.label')}
+        description=${t('settings.advanced.cover_dim.desc')}
+      >
+        ${numInput('cover_max_dimension', { min: 100, max: 2000, placeholder: '800' })}
+      <//>
+      <${ToggleRow}
+        label=${t('settings.advanced.http_logging.label')}
+        description=${t('settings.advanced.http_logging.desc')}
+        checked=${form.http_request_logging}
+        onChange=${(v) => set('http_request_logging', v)}
+      />
+      <${ToggleRow}
+        label=${t('settings.advanced.browser_logging.label')}
+        description=${t('settings.advanced.browser_logging.desc')}
+        checked=${form.browser_debug_logging}
+        onChange=${(v) => set('browser_debug_logging', v)}
+      />
+      <${ToggleRow}
+        label=${t('settings.advanced.registration.label')}
+        description=${t('settings.advanced.registration.desc')}
+        checked=${form.registration_enabled}
+        onChange=${(v) => set('registration_enabled', v)}
+      />
+    <//>
 
-  // ── Duplicate rescan ───────────────────────────────────────────────────────
+    <${EncryptionGroup} />
+    <${MaintenanceActions} />
 
-  const dupRescanRow = document.createElement('div');
-  dupRescanRow.className = 'flex items-center gap-3 px-4 py-3';
-  const dupRescanBtn = document.createElement('button');
-  dupRescanBtn.type = 'button';
-  dupRescanBtn.className = 'btn-ghost btn-sm';
-  dupRescanBtn.textContent = t('settings.advanced.dedup.btn');
-  dupRescanRow.appendChild(dupRescanBtn);
-  maintCard.appendChild(mkSettingsRow({
-    label: t('settings.advanced.dedup.label'),
-    description: t('settings.advanced.dedup.desc'),
-    control: dupRescanRow,
-  }));
-
-  dupRescanBtn.addEventListener('click', async () => {
-    dupRescanBtn.disabled = true;
-    dupRescanBtn.textContent = t('settings.advanced.dedup.scanning');
-    try {
-      const res = await api.rescanDuplicates();
-      const n = res?.new_pairs ?? 0;
-      showToast(n === 0 ? t('settings.advanced.dedup.no_pairs') : t('settings.advanced.dedup.pairs', { count: n, s: n === 1 ? '' : 's' }), { type: 'success' });
-    } catch (e) {
-      showApiError(e);
-    } finally {
-      dupRescanBtn.disabled = false;
-      dupRescanBtn.textContent = t('settings.advanced.dedup.btn');
-    }
-  });
-
-  return {
-    destroy() {
-      render(null, migRoot);
-      el.innerHTML = '';
-    },
-    isDirty() { return JSON.stringify(buildAdvPayload()) !== JSON.stringify(lastSaved); },
-    save: _save,
-  };
-}
-
-// ── Path control builder ───────────────────────────────────────────────────────
-
-/**
- * @param {string} field
- * @param {string} initial
- * @returns {{ el: HTMLElement, hidden: HTMLInputElement, setPath: (p: string) => void }}
- */
-function makePathControl(field, initial) {
-  const container = document.createElement('div');
-  container.className = 'flex items-center gap-2';
-
-  const display = document.createElement('span');
-  display.className = 'text-sm font-mono text-text truncate max-w-xs';
-  display.title = initial;
-  display.textContent = initial || t('settings.advanced.path.not_set');
-
-  const hidden = document.createElement('input');
-  hidden.type = 'hidden';
-  hidden.className = 'js-adv-field';
-  hidden.dataset.key = field;
-  hidden.value = initial;
-
-  const browseBtn = document.createElement('button');
-  browseBtn.type = 'button';
-  browseBtn.className = 'btn-ghost btn-sm';
-  browseBtn.textContent = t('settings.advanced.path.browse');
-
-  container.appendChild(display);
-  container.appendChild(hidden);
-  container.appendChild(browseBtn);
-
-  function setPath(path) {
-    display.textContent = path;
-    display.title = path;
-    hidden.value = path;
-  }
-
-  return { el: container, hidden, setPath };
+    <${FolderPicker}
+      open=${picker.open}
+      initialPath=${picker.initial}
+      onClose=${() => setPicker((p) => ({ ...p, open: false }))}
+      onSelect=${(/** @type {string} */ path) => {
+        if (picker.target) set(picker.target, path);
+        setPicker((p) => ({ ...p, open: false }));
+      }}
+    />
+    <${PathMigrationDialog}
+      open=${mig.open}
+      field=${mig.field}
+      currentPath=${mig.current}
+      newPath=${mig.next}
+      onDone=${(/** @type {boolean} */ moved) => {
+        setMig((m) => ({ ...m, open: false }));
+        migResolve.current?.(moved);
+      }}
+      onCancel=${() => {
+        setMig((m) => ({ ...m, open: false }));
+        migResolve.current?.(false);
+      }}
+    />
+  `;
 }

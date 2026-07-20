@@ -13,7 +13,7 @@ import { renderPagination } from '../../components/pagination.js';
 import { renderChipGroup } from '../../components/chip-group.js';
 import { renderTabs } from '../../components/tabs.js';
 import { Pill } from '../../components/pill.js';
-import { mountNumberInput } from '../../components/form/number-input.js';
+import { NumberInput } from '../../components/form/number-input.js';
 import { createCallout } from '../../components/form/callout.js';
 import { Select } from '../../components/form/select.js';
 import { DateInput } from '../../components/form/date-input.js';
@@ -275,10 +275,9 @@ export function init(container) {
     },
     {
       title: 'NumberInput (steppers)',
-      usage: "mountNumberInput({ value, min, max, onChange })",
+      usage: "html`<${NumberInput} value min max onChange />`",
       mount: (el) => {
-        const { el: numEl } = mountNumberInput({ value: 5, min: 0, max: 23, onChange: () => {} });
-        el.appendChild(numEl);
+        render(html`<${NumberInput} value=${5} min=${0} max=${23} onChange=${() => {}} />`, el);
       },
     },
     {

@@ -1,14 +1,19 @@
 // @ts-check
 // Settings — Storage: disk usage and library integrity check (admin only).
 
+import { h } from 'preact';
+import { useState, useEffect } from 'preact/hooks';
+import htm from 'htm';
 import * as api from '../../api.js';
-import { createEmptyState } from '../../components/empty-state.js';
+import { EmptyState } from '../../components/empty-state.js';
 import { t } from '../../i18n.js';
 import { showApiError } from '../../components/toast.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
+import { SettingsGroup, SettingsRow } from './_shared.js';
+
+const html = htm.bind(h);
 
 /** @param {number} bytes */
-function _fmt(bytes) {
+function fmt(bytes) {
   if (bytes == null) return '—';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -16,212 +21,194 @@ function _fmt(bytes) {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
-/** @param {HTMLElement} el */
-export function mount(el) {
-  el.innerHTML = '';
-  _mountUsage(el);
-  _mountIntegrity(el);
-  _mountHistory(el);
-  return { destroy() { el.innerHTML = ''; } };
+function UsageGroup() {
+  const [state, setState] = useState(
+    /** @type {{ status: string, stats: any, error: string }} */ ({
+      status: 'loading',
+      stats: null,
+      error: '',
+    }),
+  );
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const stats = await api.getAdminStorageStats();
+        setState({ status: 'ready', stats, error: '' });
+      } catch (e) {
+        setState({ status: 'error', stats: null, error: e?.message ?? t('storage.error.load_failed') });
+      }
+    })();
+  }, []);
+
+  const s = state.stats;
+  /** @type {[string, any, boolean][]} */
+  const rows = s
+    ? [
+        [t('storage.stat.library'), s.library_used_bytes, true],
+        [t('storage.stat.chapters'), s.chapter_used_bytes, true],
+        [t('storage.stat.covers'), s.cover_used_bytes, true],
+        [t('storage.stat.data'), s.data_used_bytes, true],
+        [t('storage.stat.free'), s.library_free_bytes, true],
+        [t('storage.stat.manga'), s.total_manga, false],
+        [t('storage.stat.chapters_count'), s.total_chapters, false],
+      ]
+    : [];
+
+  return html`
+    <${SettingsGroup} label=${t('storage.group.usage')}>
+      ${state.status === 'loading'
+        ? html`<div class="px-4 py-3 text-sm text-text-muted">${t('common.loading')}</div>`
+        : state.status === 'error'
+        ? html`<div class="px-4 py-3 text-sm text-danger">${state.error}</div>`
+        : rows.map(
+            ([label, value, isBytes]) => html`
+              <${SettingsRow} key=${label} label=${label}>
+                <span class="text-sm font-medium text-text"
+                  >${isBytes ? fmt(value) : (value ?? '—').toString()}</span
+                >
+              <//>
+            `,
+          )}
+    <//>
+  `;
 }
 
-/** @param {HTMLElement} el */
-async function _mountUsage(el) {
-  const group = mkSettingsGroup(t('storage.group.usage'));
-  const card = mkSettingsGroupCard(group);
-  el.appendChild(group);
-
-  const placeholder = document.createElement('div');
-  placeholder.className = 'px-4 py-3 text-sm text-text-muted';
-  placeholder.textContent = t('common.loading');
-  card.appendChild(placeholder);
-
-  try {
-    const stats = await api.getAdminStorageStats();
-    placeholder.remove();
-
-    /** @type {[string, any, boolean][]} */
-    const rows = [
-      [t('storage.stat.library'),        stats.library_used_bytes, true],
-      [t('storage.stat.chapters'),       stats.chapter_used_bytes, true],
-      [t('storage.stat.covers'),         stats.cover_used_bytes,   true],
-      [t('storage.stat.data'),           stats.data_used_bytes,    true],
-      [t('storage.stat.free'),           stats.library_free_bytes, true],
-      [t('storage.stat.manga'),          stats.total_manga,        false],
-      [t('storage.stat.chapters_count'), stats.total_chapters,     false],
-    ];
-
-    for (const [label, value, isBytes] of rows) {
-      const valueEl = document.createElement('span');
-      valueEl.className = 'text-sm font-medium text-text';
-      valueEl.textContent = isBytes ? _fmt(value) : (value ?? '—').toString();
-      card.appendChild(mkSettingsRow({ label, control: valueEl }));
-    }
-  } catch (e) {
-    placeholder.textContent = e.message ?? t('storage.error.load_failed');
-    placeholder.className = 'px-4 py-3 text-sm text-danger';
-  }
+function Stat({ label, value }) {
+  return html`
+    <div class="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+      <span class="text-text-muted">${label}</span>
+      <span class="font-medium text-text">${String(value)}</span>
+    </div>
+  `;
 }
 
-/** @param {HTMLElement} el */
-function _mountIntegrity(el) {
-  const group = mkSettingsGroup(t('storage.group.integrity'));
-  const card = mkSettingsGroupCard(group);
-  el.appendChild(group);
+function IntegrityGroup() {
+  const [running, setRunning] = useState(false);
+  const [results, setResults] = useState(/** @type {{ fix: boolean, res: any } | null} */ (null));
 
-  const desc = document.createElement('p');
-  desc.className = 'text-xs text-text-muted px-4 py-2';
-  desc.textContent = t('storage.integrity.desc');
-  card.appendChild(desc);
-
-  const btnRow = document.createElement('div');
-  btnRow.className = 'flex items-center gap-2 px-4 py-3 border-t border-border-subtle';
-
-  const runBtn = document.createElement('button');
-  runBtn.type = 'button';
-  runBtn.className = 'btn-secondary btn-sm';
-  runBtn.textContent = t('storage.integrity.run');
-
-  const fixBtn = document.createElement('button');
-  fixBtn.type = 'button';
-  fixBtn.className = 'btn-danger btn-sm';
-  fixBtn.textContent = t('storage.integrity.fix');
-
-  btnRow.appendChild(runBtn);
-  btnRow.appendChild(fixBtn);
-  card.appendChild(btnRow);
-
-  const resultsEl = document.createElement('div');
-  resultsEl.className = 'hidden flex-col gap-0 divide-y divide-border-subtle';
-  card.appendChild(resultsEl);
-
-  async function _run(fix) {
-    runBtn.disabled = true;
-    fixBtn.disabled = true;
-    runBtn.textContent = t('storage.integrity.running');
-    fixBtn.textContent = t('storage.integrity.running');
-    resultsEl.innerHTML = '';
-    resultsEl.classList.add('hidden');
-    resultsEl.classList.remove('flex');
+  const run = async (/** @type {boolean} */ fix) => {
+    setRunning(true);
+    setResults(null);
     try {
       const res = await api.runIntegrityCheck(fix);
-      _renderResults(resultsEl, res, fix);
+      setResults({ fix, res });
     } catch (e) {
       showApiError(e);
     } finally {
-      runBtn.disabled = false;
-      fixBtn.disabled = false;
-      runBtn.textContent = t('storage.integrity.run');
-      fixBtn.textContent = t('storage.integrity.fix');
+      setRunning(false);
+    }
+  };
+
+  const label = running ? t('storage.integrity.running') : null;
+
+  let body = null;
+  if (results) {
+    const { fix, res } = results;
+    if (fix) {
+      body = [
+        html`<${Stat} label=${t('storage.integrity.removed')} value=${res.removed_count ?? 0} />`,
+        html`<${Stat} label=${t('storage.integrity.failed')} value=${res.failed_count ?? 0} />`,
+      ];
+    } else {
+      const orphaned = res.orphaned_files?.length ?? 0;
+      const missing = res.missing_files?.length ?? 0;
+      const covers = res.cover_mismatches?.length ?? 0;
+      if (orphaned === 0 && missing === 0 && covers === 0) {
+        body = html`<p class="px-4 py-3 text-sm text-success">${t('storage.integrity.ok')}</p>`;
+      } else {
+        body = [
+          html`<${Stat} label=${t('storage.integrity.orphaned')} value=${orphaned} />`,
+          html`<${Stat} label=${t('storage.integrity.missing')} value=${missing} />`,
+          html`<${Stat} label=${t('storage.integrity.cover_mismatches')} value=${covers} />`,
+          html`<${Stat} label=${t('storage.integrity.chapter_count')} value=${res.db_chapter_count ?? '—'} />`,
+          html`<${Stat} label=${t('storage.integrity.disk_count')} value=${res.disk_file_count ?? '—'} />`,
+        ];
+      }
     }
   }
 
-  runBtn.addEventListener('click', () => _run(false));
-  fixBtn.addEventListener('click', () => _run(true));
+  return html`
+    <${SettingsGroup} label=${t('storage.group.integrity')}>
+      <p class="text-xs text-text-muted px-4 py-2">${t('storage.integrity.desc')}</p>
+      <div class="flex items-center gap-2 px-4 py-3 border-t border-border-subtle">
+        <button type="button" class="btn-secondary btn-sm" disabled=${running} onClick=${() => run(false)}>
+          ${label ?? t('storage.integrity.run')}
+        </button>
+        <button type="button" class="btn-danger btn-sm" disabled=${running} onClick=${() => run(true)}>
+          ${label ?? t('storage.integrity.fix')}
+        </button>
+      </div>
+      ${body &&
+      html`<div class="flex flex-col gap-0 divide-y divide-border-subtle">${body}</div>`}
+    <//>
+  `;
 }
 
-/**
- * @param {HTMLElement} el
- * @param {any} res
- * @param {boolean} fix
- */
-function _renderResults(el, res, fix) {
-  el.innerHTML = '';
-  el.classList.remove('hidden');
-  el.classList.add('flex');
+function HistoryGroup() {
+  const [state, setState] = useState(
+    /** @type {{ status: string, rows: any[], error: string }} */ ({
+      status: 'loading',
+      rows: [],
+      error: '',
+    }),
+  );
 
-  if (fix) {
-    _addStat(el, t('storage.integrity.removed'), res.removed_count ?? 0);
-    _addStat(el, t('storage.integrity.failed'),  res.failed_count ?? 0);
-    return;
-  }
+  useEffect(() => {
+    (async () => {
+      try {
+        const rows = await api.getAdminStorageStatsHistory();
+        setState({ status: 'ready', rows: Array.isArray(rows) ? rows : [], error: '' });
+      } catch (e) {
+        setState({ status: 'error', rows: [], error: e?.message ?? t('storage.error.history_failed') });
+      }
+    })();
+  }, []);
 
-  const orphaned = res.orphaned_files?.length ?? 0;
-  const missing  = res.missing_files?.length ?? 0;
-  const covers   = res.cover_mismatches?.length ?? 0;
-
-  if (orphaned === 0 && missing === 0 && covers === 0) {
-    const ok = document.createElement('p');
-    ok.className = 'px-4 py-3 text-sm text-success';
-    ok.textContent = t('storage.integrity.ok');
-    el.appendChild(ok);
-    return;
-  }
-
-  _addStat(el, t('storage.integrity.orphaned'),       orphaned);
-  _addStat(el, t('storage.integrity.missing'),        missing);
-  _addStat(el, t('storage.integrity.cover_mismatches'), covers);
-  _addStat(el, t('storage.integrity.chapter_count'),  res.db_chapter_count ?? '—');
-  _addStat(el, t('storage.integrity.disk_count'),     res.disk_file_count ?? '—');
+  return html`
+    <${SettingsGroup} label=${t('storage.history.group')}>
+      ${state.status === 'loading'
+        ? html`<p class="px-4 py-3 text-sm text-text-muted">${t('common.loading')}</p>`
+        : state.status === 'error'
+        ? html`<p class="px-4 py-3 text-sm text-danger">${state.error}</p>`
+        : state.rows.length === 0
+        ? html`<${EmptyState} title=${t('storage.history.empty')} compact=${true} />`
+        : html`
+            <div class="overflow-x-auto">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>${t('storage.history.date')}</th>
+                    <th class="num">${t('storage.history.chapters')}</th>
+                    <th class="num">${t('storage.history.covers')}</th>
+                    <th class="num">${t('storage.history.free')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${state.rows.slice(0, 30).map(
+                    (r, i) => html`
+                      <tr key=${i}>
+                        <td class="muted">
+                          ${r.captured_at ? new Date(r.captured_at).toLocaleDateString() : '—'}
+                        </td>
+                        <td class="num font-medium">${fmt(r.chapter_used_bytes)}</td>
+                        <td class="num">${fmt(r.cover_used_bytes)}</td>
+                        <td class="num">${fmt(r.free_bytes)}</td>
+                      </tr>
+                    `,
+                  )}
+                </tbody>
+              </table>
+            </div>
+          `}
+    <//>
+  `;
 }
 
-/** @param {HTMLElement} el */
-async function _mountHistory(el) {
-  const group = mkSettingsGroup(t('storage.history.group'));
-  const card = mkSettingsGroupCard(group);
-  el.appendChild(group);
-
-  const placeholder = document.createElement('p');
-  placeholder.className = 'px-4 py-3 text-sm text-text-muted';
-  placeholder.textContent = t('common.loading');
-  card.appendChild(placeholder);
-
-  try {
-    const rows = await api.getAdminStorageStatsHistory();
-    placeholder.remove();
-
-    if (!Array.isArray(rows) || rows.length === 0) {
-      card.appendChild(createEmptyState({ title: t('storage.history.empty'), compact: true }));
-      return;
-    }
-
-    const table = document.createElement('table');
-    table.className = 'data-table';
-
-    const thead = document.createElement('thead');
-    thead.innerHTML = `<tr>
-      <th>${t('storage.history.date')}</th>
-      <th class="num">${t('storage.history.chapters')}</th>
-      <th class="num">${t('storage.history.covers')}</th>
-      <th class="num">${t('storage.history.free')}</th>
-    </tr>`;
-
-    const tbody = document.createElement('tbody');
-    for (const r of rows.slice(0, 30)) {
-      const tr = document.createElement('tr');
-      const date = r.captured_at ? new Date(r.captured_at).toLocaleDateString() : '—';
-      tr.innerHTML = `
-        <td class="muted">${date}</td>
-        <td class="num font-medium">${_fmt(r.chapter_used_bytes)}</td>
-        <td class="num">${_fmt(r.cover_used_bytes)}</td>
-        <td class="num">${_fmt(r.free_bytes)}</td>
-      `;
-      tbody.appendChild(tr);
-    }
-
-    table.appendChild(thead);
-    table.appendChild(tbody);
-    const wrap = document.createElement('div');
-    wrap.className = 'overflow-x-auto';
-    wrap.appendChild(table);
-    card.appendChild(wrap);
-  } catch (e) {
-    placeholder.textContent = e.message ?? t('storage.error.history_failed');
-    placeholder.className = 'px-4 py-3 text-sm text-danger';
-  }
-}
-
-/** @param {HTMLElement} el @param {string} label @param {string|number} value */
-function _addStat(el, label, value) {
-  const row = document.createElement('div');
-  row.className = 'flex items-center justify-between gap-4 px-4 py-2.5 text-sm';
-  const lbl = document.createElement('span');
-  lbl.className = 'text-text-muted';
-  lbl.textContent = label;
-  const val = document.createElement('span');
-  val.className = 'font-medium text-text';
-  val.textContent = String(value);
-  row.appendChild(lbl);
-  row.appendChild(val);
-  el.appendChild(row);
+export function StorageSection() {
+  return html`
+    <${UsageGroup} />
+    <${IntegrityGroup} />
+    <${HistoryGroup} />
+  `;
 }

@@ -20,6 +20,9 @@ pub struct RequestCache {
     pub preference_schema: DashMap<i64, Vec<kani_core::PreferenceSpec>>,
     /// Reading stats keyed by (user_id, period_days). 10-minute TTL.
     pub stats: Cache<(i64, i32), Arc<ReadingStats>>,
+    /// CBZ page-index lists keyed by (chapter_id, file_mtime_unix). A changed file
+    /// changes the key, so no invalidation hook is needed.
+    cbz_pages: Cache<(i64, i64), Arc<Vec<String>>>,
     library_listing: Option<LibraryListingCache>,
 }
 
@@ -77,8 +80,20 @@ impl RequestCache {
                 .time_to_live(Duration::from_secs(10 * 60))
                 .support_invalidation_closures()
                 .build(),
+            cbz_pages: Cache::builder()
+                .max_capacity(crate::tuning::OPDS_PAGE_INDEX_CACHE_ENTRIES)
+                .time_to_live(Duration::from_secs(10 * 60))
+                .build(),
             library_listing,
         }
+    }
+
+    pub async fn cbz_pages_get(&self, key: (i64, i64)) -> Option<Arc<Vec<String>>> {
+        self.cbz_pages.get(&key).await
+    }
+
+    pub async fn cbz_pages_put(&self, key: (i64, i64), value: Arc<Vec<String>>) {
+        self.cbz_pages.insert(key, value).await;
     }
 
     pub async fn get_or_fetch_manga_details<F, E>(

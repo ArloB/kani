@@ -38,3 +38,11 @@ pub const DEFAULT_JOB_MAX_HISTORY: usize = 1000;
 
 /// Seconds to wait for running jobs to drain on graceful shutdown.
 pub const DEFAULT_JOB_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
+
+/// Upper bound on the `width` an OPDS-PSE page request may transcode to. Requests
+/// above this are clamped, bounding decode/resize cost from untrusted query params.
+pub const OPDS_MAX_TRANSCODE_WIDTH: u32 = 2400;
+
+/// Number of chapter page-index lists (CBZ central-directory scans) held in the
+/// request cache. PSE clients prefetch aggressively; caching avoids re-scanning.
+pub const OPDS_PAGE_INDEX_CACHE_ENTRIES: u64 = 512;

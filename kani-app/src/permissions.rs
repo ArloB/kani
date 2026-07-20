@@ -148,6 +148,10 @@ permissions! {
         Trust   => "trust",
         Refresh => "refresh",
     },
+    Opds => "opds" {
+        Read     => "read",
+        Progress => "progress",
+    },
 }
 
 impl serde::Serialize for Permission {
@@ -226,6 +230,8 @@ mod tests {
             "repo:remove",
             "repo:trust",
             "repo:refresh",
+            "opds:read",
+            "opds:progress",
         ];
         for raw in &perms {
             let parsed: Permission = raw.parse().expect(raw);
@@ -260,6 +266,8 @@ mod tests {
             Permission::Repo(Repo::Remove),
             Permission::Repo(Repo::Trust),
             Permission::Repo(Repo::Refresh),
+            Permission::Opds(Opds::Read),
+            Permission::Opds(Opds::Progress),
         ];
         let mut seen = std::collections::HashSet::new();
         for p in &perms {

@@ -165,6 +165,24 @@ export async function getPasswordResetEnabled() {
   return _req('GET', '/auth/password-reset-enabled');
 }
 
+// ── API tokens (OPDS / third-party clients) ──────────────────────────────────
+
+export async function listApiTokens() {
+  return _req('GET', '/me/api-tokens');
+}
+
+/** @param {string} name @param {number|null} [expiresInDays] */
+export async function createApiToken(name, expiresInDays) {
+  return _req('POST', '/me/api-tokens', {
+    body: { name, expires_in_days: expiresInDays ?? null },
+  });
+}
+
+/** @param {string} id */
+export async function revokeApiToken(id) {
+  return _req('DELETE', `/me/api-tokens/${id}`);
+}
+
 export async function getRegistrationEnabled() {
   return _req('GET', '/auth/registration-enabled');
 }

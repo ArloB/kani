@@ -49,6 +49,7 @@ use std::{convert::Infallible, sync::Arc};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 pub(crate) mod admin;
+pub(crate) mod api_tokens;
 pub(crate) mod auth;
 pub(crate) mod categories;
 pub(crate) mod chapters;
@@ -198,6 +199,7 @@ pub fn routes(state: AppState) -> Router {
         .merge(export::router())
         .merge(webhooks::router())
         .merge(system::router())
+        .merge(api_tokens::router())
         .with_state(state)
         .layer(DefaultBodyLimit::max(MAX_WASM_BYTES))
 }

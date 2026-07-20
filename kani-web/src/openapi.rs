@@ -132,6 +132,10 @@ use utoipa::OpenApi;
         crate::rest::export::export_epub,
         crate::rest::export::export_kepub,
         crate::rest::export::export_kcc,
+        // api tokens
+        crate::rest::api_tokens::list_tokens,
+        crate::rest::api_tokens::create_token,
+        crate::rest::api_tokens::revoke_token,
         // stats
         crate::rest::stats::reading_stats,
         crate::rest::stats::reading_pace_handler,
@@ -231,6 +235,9 @@ use utoipa::OpenApi;
     ),
     components(
         schemas(
+            crate::rest::api_tokens::TokenResponse,
+            crate::rest::api_tokens::CreatedTokenResponse,
+            crate::rest::api_tokens::CreateTokenBody,
             crate::models::LoginRequest,
             crate::models::SetChapterProgressRequest,
             crate::models::ChangePasswordRequest,

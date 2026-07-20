@@ -189,6 +189,30 @@ impl AppService {
         Ok(row.map(|r| (r.last_page_read, r.is_read)))
     }
 
+    /// Like [`get_chapter_progress`] but also returns the last-read timestamp
+    /// formatted as RFC 3339 (for the OPDS-PSE `pse:lastReadDate` attribute).
+    pub async fn get_chapter_progress_full(
+        &self,
+        user_id: UserId,
+        chapter_id: ChapterId,
+    ) -> Result<Option<(i64, bool, Option<String>)>> {
+        let row = sqlx::query!(
+            r#"
+            SELECT last_page_read,
+                   is_read as "is_read: bool",
+                   strftime('%Y-%m-%dT%H:%M:%SZ', last_read_at) as "last_read_rfc3339?: String"
+            FROM user_chapter_tracking
+            WHERE user_id = ? AND chapter_id = ?
+            "#,
+            user_id,
+            chapter_id
+        )
+        .fetch_optional(&self.db_read)
+        .await?;
+
+        Ok(row.map(|r| (r.last_page_read, r.is_read, r.last_read_rfc3339)))
+    }
+
     pub async fn set_manga_tracking_enabled(
         &self,
         user_id: UserId,

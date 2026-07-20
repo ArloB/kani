@@ -17,30 +17,43 @@ fn is_image_entry(name: &str) -> bool {
         || lower.ends_with(".avif")
 }
 
+fn open_archive(path: &Path) -> Result<zip::ZipArchive<std::fs::File>> {
+    let file = std::fs::File::open(path)
+        .map_err(|_| Error::NotFound(format!("CBZ not found: {}", path.display())))?;
+    zip::ZipArchive::new(file).map_err(|e| Error::Internal(format!("Failed to open CBZ: {e}")))
+}
+
+fn sorted_image_names(archive: &mut zip::ZipArchive<std::fs::File>) -> Vec<String> {
+    let mut names: Vec<String> = (0..archive.len())
+        .filter_map(|i| {
+            let entry = archive.by_index(i).ok()?;
+            let name = entry.name().to_owned();
+            is_image_entry(&name).then_some(name)
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+/// Maps a lowercase file extension (without dot) to its image content type.
+pub fn content_type_for_ext(ext: &str) -> &'static str {
+    match ext {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "avif" => "image/avif",
+        _ => "application/octet-stream",
+    }
+}
+
 /// Returns a sorted list of image entry names from a CBZ archive.
 ///
 /// Entries are sorted lexicographically, which matches the `0001.jpg` naming
 /// convention used by the downloader.
 pub fn list_cbz_pages(path: &Path) -> Result<Vec<String>> {
-    let file = std::fs::File::open(path)
-        .map_err(|_| Error::NotFound(format!("CBZ not found: {}", path.display())))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| Error::Internal(format!("Failed to open CBZ: {e}")))?;
-
-    let mut names: Vec<String> = (0..archive.len())
-        .filter_map(|i| {
-            let entry = archive.by_index(i).ok()?;
-            let name = entry.name().to_owned();
-            if is_image_entry(&name) {
-                Some(name)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    names.sort();
-    Ok(names)
+    let mut archive = open_archive(path)?;
+    Ok(sorted_image_names(&mut archive))
 }
 
 /// Reads a specific page by sorted index from a CBZ archive.
@@ -48,23 +61,8 @@ pub fn list_cbz_pages(path: &Path) -> Result<Vec<String>> {
 /// Returns the raw image bytes and the lowercase file extension (without dot).
 /// Opens the archive once, builds the sorted page list, then reads the entry.
 pub fn read_cbz_page(path: &Path, page_num: usize) -> Result<(Vec<u8>, String)> {
-    let file = std::fs::File::open(path)
-        .map_err(|_| Error::NotFound(format!("CBZ not found: {}", path.display())))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| Error::Internal(format!("Failed to open CBZ: {e}")))?;
-
-    let mut names: Vec<String> = (0..archive.len())
-        .filter_map(|i| {
-            let entry = archive.by_index(i).ok()?;
-            let name = entry.name().to_owned();
-            if is_image_entry(&name) {
-                Some(name)
-            } else {
-                None
-            }
-        })
-        .collect();
-    names.sort();
+    let mut archive = open_archive(path)?;
+    let names = sorted_image_names(&mut archive);
 
     let name = names
         .get(page_num)
@@ -91,6 +89,61 @@ pub fn read_cbz_page(path: &Path, page_num: usize) -> Result<(Vec<u8>, String)> 
         .map_err(|e| Error::Internal(format!("CBZ read error: {e}")))?;
 
     Ok((buf, ext))
+}
+
+/// Reads a CBZ page, optionally downscaling to `max_width` and/or re-encoding to `format`.
+///
+/// When `max_width == 0` and `format` is `None`, returns the stored bytes verbatim
+/// (zero decode cost). Otherwise decodes with dimension limits (defusing decode bombs),
+/// downscales with Lanczos3 only when wider than `max_width`, and re-encodes as JPEG
+/// (quality 85) or WebP. Any other target format is rejected.
+pub fn read_cbz_page_transcoded(
+    path: &Path,
+    page_num: usize,
+    max_width: u32,
+    format: Option<image::ImageFormat>,
+) -> Result<(Vec<u8>, &'static str)> {
+    if max_width == 0 && format.is_none() {
+        let (bytes, ext) = read_cbz_page(path, page_num)?;
+        return Ok((bytes, content_type_for_ext(&ext)));
+    }
+
+    let (bytes, _ext) = read_cbz_page(path, page_num)?;
+
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16384);
+    limits.max_image_height = Some(16384);
+
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .map_err(|e| Error::Internal(format!("image format guess failed: {e}")))?;
+    reader.limits(limits);
+    let mut img = reader
+        .decode()
+        .map_err(|e| Error::Internal(format!("image decode failed: {e}")))?;
+
+    if max_width > 0 && img.width() > max_width {
+        img = img.resize(max_width, u32::MAX, image::imageops::FilterType::Lanczos3);
+    }
+
+    let out_format = format.unwrap_or(image::ImageFormat::Jpeg);
+    let mut out = std::io::Cursor::new(Vec::new());
+    match out_format {
+        image::ImageFormat::Jpeg => {
+            let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85);
+            img.write_with_encoder(enc)
+                .map_err(|e| Error::Internal(format!("jpeg encode failed: {e}")))?;
+            Ok((out.into_inner(), "image/jpeg"))
+        }
+        image::ImageFormat::WebP => {
+            img.write_to(&mut out, image::ImageFormat::WebP)
+                .map_err(|e| Error::Internal(format!("webp encode failed: {e}")))?;
+            Ok((out.into_inner(), "image/webp"))
+        }
+        other => Err(Error::Internal(format!(
+            "unsupported transcode format: {other:?}"
+        ))),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -454,6 +507,85 @@ mod tests {
         );
         let pages = list_cbz_pages(&cbz).unwrap();
         assert_eq!(pages.len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // read_cbz_page_transcoded / content_type_for_ext
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn transcode_passthrough_matches_raw_read() {
+        let dir = TempDir::new().unwrap();
+        let png = make_png(120, 80, 10, 20, 30);
+        let cbz = make_cbz(&dir, "pass.cbz", &[("0001.png", &png)]);
+
+        let (raw, ext) = read_cbz_page(&cbz, 0).unwrap();
+        let (bytes, ct) = read_cbz_page_transcoded(&cbz, 0, 0, None).unwrap();
+        assert_eq!(bytes, raw);
+        assert_eq!(ext, "png");
+        assert_eq!(ct, "image/png");
+    }
+
+    #[test]
+    fn transcode_downscales_wide_page() {
+        let dir = TempDir::new().unwrap();
+        let png = make_png(400, 300, 200, 100, 50);
+        let cbz = make_cbz(&dir, "wide.cbz", &[("0001.png", &png)]);
+
+        let (bytes, ct) = read_cbz_page_transcoded(&cbz, 0, 200, None).unwrap();
+        assert_eq!(ct, "image/jpeg");
+        let out = image::load_from_memory(&bytes).unwrap();
+        assert!(
+            out.width() <= 200,
+            "width should be clamped: {}",
+            out.width()
+        );
+        // 400x300 → 200x150, aspect preserved.
+        assert_eq!(out.height(), 150);
+    }
+
+    #[test]
+    fn transcode_does_not_upscale() {
+        let dir = TempDir::new().unwrap();
+        let png = make_png(100, 100, 5, 5, 5);
+        let cbz = make_cbz(&dir, "small.cbz", &[("0001.png", &png)]);
+
+        let (bytes, _) = read_cbz_page_transcoded(&cbz, 0, 500, None).unwrap();
+        let out = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((out.width(), out.height()), (100, 100));
+    }
+
+    #[test]
+    fn transcode_to_webp() {
+        let dir = TempDir::new().unwrap();
+        let png = make_png(64, 64, 90, 90, 90);
+        let cbz = make_cbz(&dir, "webp.cbz", &[("0001.png", &png)]);
+
+        let (bytes, ct) =
+            read_cbz_page_transcoded(&cbz, 0, 0, Some(image::ImageFormat::WebP)).unwrap();
+        assert_eq!(ct, "image/webp");
+        let out = image::load_from_memory(&bytes).unwrap();
+        assert_eq!((out.width(), out.height()), (64, 64));
+    }
+
+    #[test]
+    fn transcode_out_of_range_page_is_not_found() {
+        let dir = TempDir::new().unwrap();
+        let png = make_png(32, 32, 1, 1, 1);
+        let cbz = make_cbz(&dir, "oob.cbz", &[("0001.png", &png)]);
+        let err = read_cbz_page_transcoded(&cbz, 9, 100, None).unwrap_err();
+        assert!(matches!(err, Error::NotFound(_)));
+    }
+
+    #[test]
+    fn content_type_table() {
+        assert_eq!(content_type_for_ext("jpg"), "image/jpeg");
+        assert_eq!(content_type_for_ext("jpeg"), "image/jpeg");
+        assert_eq!(content_type_for_ext("png"), "image/png");
+        assert_eq!(content_type_for_ext("webp"), "image/webp");
+        assert_eq!(content_type_for_ext("gif"), "image/gif");
+        assert_eq!(content_type_for_ext("avif"), "image/avif");
+        assert_eq!(content_type_for_ext("bin"), "application/octet-stream");
     }
 
     // -----------------------------------------------------------------------

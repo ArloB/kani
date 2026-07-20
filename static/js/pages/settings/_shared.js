@@ -1,184 +1,166 @@
 // @ts-check
-// Shared layout helpers for settings section modules.
+// Preact/htm row primitives for settings sections. The canonical building
+// blocks every settings section is composed from.
 
-import { mountNumberInput } from '../../components/form/number-input.js';
+import { h } from 'preact';
+import { useState } from 'preact/hooks';
+import htm from 'htm';
+import { NumberInput } from '../../components/form/number-input.js';
 
-/**
- * Creates a titled card group.
- * @param {string} [groupLabel]
- * @returns {HTMLElement}
- */
-export function mkSettingsGroup(groupLabel) {
-  const wrap = document.createElement('div');
-  wrap.className = 'flex flex-col gap-2';
-  if (groupLabel) {
-    const lbl = document.createElement('h3');
-    lbl.className = 'font-display text-base font-bold text-text px-1';
-    lbl.textContent = groupLabel;
-    wrap.appendChild(lbl);
-  }
-  const card = document.createElement('div');
-  card.className = 'bg-surface border border-border-subtle rounded-xl divide-y divide-border-subtle overflow-hidden';
-  wrap.appendChild(card);
-  return wrap;
-}
-
-/** Returns the inner card from a group created with `mkSettingsGroup`. */
-export function mkSettingsGroupCard(groupEl) {
-  return /** @type {HTMLElement} */ (groupEl.lastElementChild);
-}
+const html = htm.bind(h);
 
 /**
- * Creates a row: label + optional description left, control right.
- * @param {{ label: string, description?: string, badge?: string, tooltip?: string, control?: HTMLElement }} opts
- * @returns {HTMLElement}
+ * Titled card group.
+ * @param {{ label?: string, cardClass?: string, children?: any }} props
  */
-export function mkSettingsRow({ label, description, badge, tooltip, control }) {
-  const row = document.createElement('div');
-  row.className = 'flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 px-4';
-  row.setAttribute('data-settings-row', '');
-  if (tooltip) row.setAttribute('data-tooltip', tooltip);
-  const left = document.createElement('div');
-  left.className = 'flex flex-col gap-0.5 min-w-0';
-  const labelEl = document.createElement('div');
-  labelEl.className = 'flex items-center gap-2';
-  const labelText = document.createElement('span');
-  labelText.className = 'text-sm font-medium text-text';
-  labelText.textContent = label;
-  labelEl.appendChild(labelText);
-  if (badge) {
-    const badgeEl = document.createElement('span');
-    badgeEl.className = 'text-xs px-1.5 py-0.5 rounded bg-warn/20 text-warn font-medium';
-    badgeEl.textContent = badge;
-    labelEl.appendChild(badgeEl);
-  }
-  left.appendChild(labelEl);
-  if (description) {
-    const desc = document.createElement('span');
-    desc.className = 'text-xs text-text-muted';
-    desc.textContent = description;
-    left.appendChild(desc);
-  }
-  row.appendChild(left);
-  if (control) {
-    control.classList.add('shrink-0', 'self-start', 'sm:self-center');
-    row.appendChild(control);
-  }
-  return row;
+export function SettingsGroup({ label, cardClass = '', children }) {
+  return html`
+    <div class="flex flex-col gap-2">
+      ${label
+        ? html`<h3 class="font-display text-base font-bold text-text px-1">${label}</h3>`
+        : null}
+      <div
+        class=${'bg-surface border border-border-subtle rounded-xl divide-y divide-border-subtle overflow-hidden ' +
+        cardClass}
+      >
+        ${children}
+      </div>
+    </div>
+  `;
 }
 
 /**
- * Creates a toggle row.
- * @param {{ label: string, description?: string, tooltip?: string, checked: boolean, onChange: (v: boolean) => void }} opts
- * @returns {HTMLElement}
+ * Row: label + optional description on the left, control (children) on the right.
+ * @param {{ label: string, description?: string, badge?: string, tooltip?: string, children?: any }} props
  */
-export function mkToggleRow({ label, description, tooltip, checked, onChange }) {
-  const toggleLabel = document.createElement('label');
-  toggleLabel.className = 'kani-toggle';
-  const input = document.createElement('input');
-  input.type = 'checkbox';
-  input.className = 'kani-toggle__input';
-  input.checked = checked;
-  input.addEventListener('change', () => onChange(input.checked));
-  const track = document.createElement('span');
-  track.className = 'kani-toggle__track';
-  toggleLabel.appendChild(input);
-  toggleLabel.appendChild(track);
-  return mkSettingsRow({ label, description, tooltip, control: toggleLabel });
+export function SettingsRow({ label, description, badge, tooltip, children }) {
+  return html`
+    <div
+      class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4 px-4"
+      data-settings-row
+      ...${tooltip ? { 'data-tooltip': tooltip } : {}}
+    >
+      <div class="flex flex-col gap-0.5 min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-medium text-text">${label}</span>
+          ${badge
+            ? html`<span
+                class="text-xs px-1.5 py-0.5 rounded bg-warn/20 text-warn font-medium"
+                >${badge}</span
+              >`
+            : null}
+        </div>
+        ${description
+          ? html`<span class="text-xs text-text-muted">${description}</span>`
+          : null}
+      </div>
+      ${children
+        ? html`<div class="shrink-0 self-start sm:self-center">${children}</div>`
+        : null}
+    </div>
+  `;
 }
 
 /**
- * Creates a single-select row rendered as an accessible segmented control
- * (`role="radiogroup"` with roving tabindex, arrow-key navigation, and
- * selection-follows-focus). Visually matches the `chip`/`chip-active` styling.
- * @param {{ label: string, description?: string, tooltip?: string, options: { value: string, label: string }[], value: string, onChange: (v: string) => void }} opts
- * @returns {HTMLElement}
+ * Toggle row.
+ * @param {{ label: string, description?: string, tooltip?: string, checked: boolean, onChange: (v: boolean) => void }} props
  */
-export function mkSelectRow({ label, description, tooltip, options, value, onChange }) {
-  const group = document.createElement('div');
-  group.className = 'flex gap-1.5 shrink-0 flex-wrap';
-  group.setAttribute('role', 'radiogroup');
-  group.setAttribute('aria-label', label);
+export function ToggleRow({ label, description, tooltip, checked, onChange }) {
+  return html`
+    <${SettingsRow} label=${label} description=${description} tooltip=${tooltip}>
+      <label class="kani-toggle">
+        <input
+          type="checkbox"
+          class="kani-toggle__input"
+          checked=${checked}
+          onChange=${(/** @type {Event} */ e) =>
+            onChange(/** @type {HTMLInputElement} */ (e.target).checked)}
+        />
+        <span class="kani-toggle__track"></span>
+      </label>
+    <//>
+  `;
+}
 
-  /** @type {HTMLButtonElement[]} */
-  const buttons = [];
-  let current = value;
+/**
+ * Number input row. Renders hold-to-repeat stepper buttons (the `NumberInput`
+ * component) when the range is small and bounded, or `stepper` forces it;
+ * otherwise a plain numeric field (nobody holds a button to reach 2592000).
+ * @param {{ label: string, description?: string, badge?: string, tooltip?: string, id?: string, value: any, min?: number, max?: number, stepper?: boolean, onChange: (v: number) => void }} props
+ */
+export function NumberRow({ label, description, badge, tooltip, id, value, min, max, stepper, onChange }) {
+  const useStepper = stepper ?? (max != null && max - (min ?? 0) <= 100);
+  const control = useStepper
+    ? html`<${NumberInput}
+        value=${value ?? 0}
+        min=${min}
+        max=${max}
+        ariaLabel=${label}
+        onChange=${onChange}
+      />`
+    : html`<input
+        type="number"
+        inputMode="numeric"
+        id=${id}
+        class="input w-24 text-sm"
+        value=${value ?? ''}
+        min=${min ?? undefined}
+        max=${max ?? undefined}
+        onChange=${(/** @type {Event} */ e) =>
+          onChange(Number(/** @type {HTMLInputElement} */ (e.target).value))}
+      />`;
+  return html`
+    <${SettingsRow} label=${label} description=${description} badge=${badge} tooltip=${tooltip}>
+      ${control}
+    <//>
+  `;
+}
 
-  const select = (/** @type {string} */ val, /** @type {boolean} */ focus) => {
-    current = val;
-    for (const b of buttons) {
-      const on = b.dataset.value === val;
-      b.className = on ? 'chip chip-active' : 'chip';
-      b.setAttribute('aria-checked', String(on));
-      b.tabIndex = on ? 0 : -1;
-      if (on && focus) b.focus();
-    }
+/**
+ * Single-select row rendered as an accessible segmented control (radiogroup
+ * with roving tabindex + arrow-key navigation).
+ * @param {{ label: string, description?: string, tooltip?: string, options: { value: string, label: string }[], value: string, onChange: (v: string) => void }} props
+ */
+export function SelectRow({ label, description, tooltip, options, value, onChange }) {
+  const [current, setCurrent] = useState(value);
+
+  const pick = (/** @type {string} */ val) => {
+    if (val === current) return;
+    setCurrent(val);
+    onChange(val);
   };
 
-  options.forEach((opt, i) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.dataset.value = opt.value;
-    btn.setAttribute('role', 'radio');
-    const on = opt.value === value;
-    btn.className = on ? 'chip chip-active' : 'chip';
-    btn.setAttribute('aria-checked', String(on));
-    btn.tabIndex = on ? 0 : -1;
-    btn.textContent = opt.label;
-    btn.addEventListener('click', () => {
-      if (btn.dataset.value === current) return;
-      select(opt.value, false);
-      onChange(opt.value);
-    });
-    btn.addEventListener('keydown', (e) => {
-      let idx = -1;
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') idx = (i + 1) % options.length;
-      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') idx = (i - 1 + options.length) % options.length;
-      else if (e.key === 'Home') idx = 0;
-      else if (e.key === 'End') idx = options.length - 1;
-      else return;
-      e.preventDefault();
-      const next = options[idx].value;
-      if (next === current) return;
-      select(next, true);
-      onChange(next);
-    });
-    buttons.push(btn);
-    group.appendChild(btn);
-  });
+  const onKeyDown = (/** @type {KeyboardEvent} */ e, /** @type {number} */ i) => {
+    let idx = -1;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') idx = (i + 1) % options.length;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') idx = (i - 1 + options.length) % options.length;
+    else if (e.key === 'Home') idx = 0;
+    else if (e.key === 'End') idx = options.length - 1;
+    else return;
+    e.preventDefault();
+    pick(options[idx].value);
+  };
 
-  return mkSettingsRow({ label, description, tooltip, control: group });
+  return html`
+    <${SettingsRow} label=${label} description=${description} tooltip=${tooltip}>
+      <div class="flex gap-1.5 shrink-0 flex-wrap" role="radiogroup" aria-label=${label}>
+        ${options.map((opt, i) => {
+          const on = opt.value === current;
+          return html`
+            <button
+              type="button"
+              role="radio"
+              class=${on ? 'chip chip-active' : 'chip'}
+              aria-checked=${String(on)}
+              tabindex=${on ? 0 : -1}
+              onClick=${() => pick(opt.value)}
+              onKeyDown=${(/** @type {KeyboardEvent} */ e) => onKeyDown(e, i)}
+            >
+              ${opt.label}
+            </button>
+          `;
+        })}
+      </div>
+    <//>
+  `;
 }
-
-/**
- * Creates a number input row. Stepper buttons appear only where nudging makes
- * sense — a small bounded range — or when explicitly requested; large or
- * unbounded values get a plain field (nobody holds a button to reach 2592000).
- * @param {{ label: string, description?: string, badge?: string, tooltip?: string, id: string, value: any, min?: number, max?: number, stepper?: boolean, onChange: (v: number) => void }} opts
- * @returns {HTMLElement}
- */
-export function mkNumberRow({ label, description, badge, tooltip, id, value, min, max, stepper, onChange }) {
-  const useStepper = stepper ?? (max != null && max - (min ?? 0) <= 100);
-  if (useStepper) {
-    const { el } = mountNumberInput({
-      value: value ?? 0,
-      min,
-      max,
-      onChange,
-      ariaLabel: label,
-    });
-    el.id = id;
-    return mkSettingsRow({ label, description, badge, tooltip, control: el });
-  }
-  const input = document.createElement('input');
-  input.type = 'number';
-  input.inputMode = 'numeric';
-  input.id = id;
-  input.className = 'input w-24 text-sm';
-  if (value != null) input.value = String(value);
-  if (min != null) input.min = String(min);
-  if (max != null) input.max = String(max);
-  input.addEventListener('change', () => onChange(Number(input.value)));
-  return mkSettingsRow({ label, description, badge, tooltip, control: input });
-}
-

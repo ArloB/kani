@@ -1,90 +1,60 @@
 // @ts-check
 // Settings — Scan section.
 
+import { h } from 'preact';
+import { useState, useCallback } from 'preact/hooks';
+import htm from 'htm';
 import * as api from '../../api.js';
 import { showToast } from '../../components/toast.js';
-import { mkSettingsGroup, mkSettingsGroupCard, mkSettingsRow } from './_shared.js';
+import { SettingsGroup, ToggleRow, NumberRow } from './_shared.js';
+import { useSettingsForm } from './form-bus.js';
 import { t } from '../../i18n.js';
 
-/**
- * @param {HTMLElement} el
- * @param {any} settings
- */
-export function mount(el, settings) {
-  let autoScan = !!settings?.auto_scan;
-  let interval = settings?.scan_interval_minutes ?? 60;
+const html = htm.bind(h);
 
-  const scanGroup = mkSettingsGroup(t('settings.scan.group'));
-  const scanCard  = mkSettingsGroupCard(scanGroup);
-
-  const autoToggleLabel = document.createElement('label');
-  autoToggleLabel.className = 'kani-toggle';
-  const autoEl = document.createElement('input');
-  autoEl.type = 'checkbox';
-  autoEl.id = 'auto-scan-toggle';
-  autoEl.className = 'kani-toggle__input';
-  autoEl.checked = autoScan;
-  const autoTrack = document.createElement('span');
-  autoTrack.className = 'kani-toggle__track';
-  autoToggleLabel.appendChild(autoEl);
-  autoToggleLabel.appendChild(autoTrack);
-  scanCard.appendChild(mkSettingsRow({ label: t('settings.scan.auto.label'), description: t('settings.scan.auto.desc'), control: autoToggleLabel }));
-
-  const intervalInput = document.createElement('input');
-  intervalInput.type = 'number';
-  intervalInput.id = 'scan-interval';
-  intervalInput.className = 'input w-24 text-sm';
-  intervalInput.min = '1';
-  intervalInput.value = String(interval);
-  const intervalRow = mkSettingsRow({ label: t('settings.scan.interval.label'), description: t('settings.scan.interval.desc'), control: intervalInput });
-  intervalRow.style.display = autoScan ? '' : 'none';
-  scanCard.appendChild(intervalRow);
-
-  const excludeToggleLabel = document.createElement('label');
-  excludeToggleLabel.className = 'kani-toggle';
-  const excludeEl = document.createElement('input');
-  excludeEl.type = 'checkbox';
-  excludeEl.id = 'scan-exclude-completed';
-  excludeEl.className = 'kani-toggle__input';
-  excludeEl.checked = !!settings?.scan_exclude_completed;
-  const excludeTrack = document.createElement('span');
-  excludeTrack.className = 'kani-toggle__track';
-  excludeToggleLabel.appendChild(excludeEl);
-  excludeToggleLabel.appendChild(excludeTrack);
-  scanCard.appendChild(mkSettingsRow({ label: t('settings.scan.exclude.label'), description: t('settings.scan.exclude.desc'), control: excludeToggleLabel }));
-
-  el.appendChild(scanGroup);
-
-  let lastSaved = {
+/** @param {{ settings: any }} props */
+export function ScanSection({ settings }) {
+  const initial = {
     auto_scan: !!settings?.auto_scan,
     scan_interval_minutes: settings?.scan_interval_minutes ?? 60,
     scan_exclude_completed: !!settings?.scan_exclude_completed,
   };
+  const [form, setForm] = useState(initial);
+  const [saved, setSaved] = useState(initial);
 
-  autoEl.addEventListener('change', () => {
-    autoScan = autoEl.checked;
-    intervalRow.style.display = autoScan ? '' : 'none';
-  });
-
-  function buildPayload() {
-    return {
-      auto_scan: autoEl.checked,
-      scan_interval_minutes: Number(intervalInput.value) || 60,
-      scan_exclude_completed: excludeEl.checked,
-    };
-  }
-
-  async function _save() {
-    const payload = buildPayload();
-    if (JSON.stringify(payload) === JSON.stringify(lastSaved)) return;
-    await api.updateSettings({ Scan: payload });
-    lastSaved = { ...payload };
+  const save = useCallback(async () => {
+    await api.updateSettings({ Scan: form });
+    setSaved(form);
     showToast(t('common.saved'), { type: 'success' });
-  }
+  }, [form]);
 
-  return {
-    destroy() { el.innerHTML = ''; },
-    isDirty() { return JSON.stringify(buildPayload()) !== JSON.stringify(lastSaved); },
-    save: _save,
-  };
+  useSettingsForm({ current: form, saved, save, reset: () => setForm(saved) });
+
+  const set = (/** @type {string} */ k, /** @type {any} */ v) =>
+    setForm((f) => ({ ...f, [k]: v }));
+
+  return html`
+    <${SettingsGroup} label=${t('settings.scan.group')}>
+      <${ToggleRow}
+        label=${t('settings.scan.auto.label')}
+        description=${t('settings.scan.auto.desc')}
+        checked=${form.auto_scan}
+        onChange=${(v) => set('auto_scan', v)}
+      />
+      ${form.auto_scan &&
+      html`<${NumberRow}
+        label=${t('settings.scan.interval.label')}
+        description=${t('settings.scan.interval.desc')}
+        value=${form.scan_interval_minutes}
+        min=${1}
+        onChange=${(v) => set('scan_interval_minutes', v)}
+      />`}
+      <${ToggleRow}
+        label=${t('settings.scan.exclude.label')}
+        description=${t('settings.scan.exclude.desc')}
+        checked=${form.scan_exclude_completed}
+        onChange=${(v) => set('scan_exclude_completed', v)}
+      />
+    <//>
+  `;
 }

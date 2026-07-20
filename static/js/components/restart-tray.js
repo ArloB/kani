@@ -48,7 +48,7 @@ export function clearPendingFields() {
  *   onRestart?: () => void,
  * }} props
  */
-function RestartTray({ currentBootId, onRestart }) {
+export function RestartTray({ currentBootId, onRestart }) {
   const [fields, setFields] = useState(/** @type {string[]} */ ([]));
   const [visible, setVisible] = useState(false);
 

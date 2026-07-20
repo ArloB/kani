@@ -6,8 +6,8 @@ use std::io::Cursor;
 use time::OffsetDateTime;
 
 use super::AppService;
-use crate::error::Result;
-use crate::ids::MangaId;
+use crate::error::{Result, ServiceError};
+use crate::ids::{ChapterId, MangaId, UserId};
 use kani_shared::types::ChapterSortOrder;
 
 impl AppService {
@@ -68,11 +68,12 @@ impl AppService {
         page: i32,
         page_size: i32,
         search: Option<String>,
+        user_id: UserId,
         base_url: &str,
     ) -> Result<String> {
         let (manga_list, has_next, _) = self
             .get_library_filtered(
-                crate::ids::UserId(0),
+                user_id,
                 &crate::service::library::LibraryFilter {
                     page,
                     page_size,
@@ -170,7 +171,12 @@ impl AppService {
     }
 
     /// Acquisition feed of downloaded chapters for one manga.
-    pub async fn opds_manga_feed(&self, manga_id: MangaId, base_url: &str) -> Result<String> {
+    pub async fn opds_manga_feed(
+        &self,
+        manga_id: MangaId,
+        user_id: UserId,
+        base_url: &str,
+    ) -> Result<String> {
         let manga = self.get_manga_by_id(manga_id).await?;
 
         let (chapters, _, _, _) = self
@@ -179,7 +185,7 @@ impl AppService {
                 1,
                 500,
                 ChapterSortOrder::default(),
-                crate::ids::UserId(0),
+                user_id,
                 Some(true),
                 None,
                 None,
@@ -194,6 +200,7 @@ impl AppService {
             &[
                 ("xmlns", "http://www.w3.org/2005/Atom"),
                 ("xmlns:opds", "http://opds-spec.org/2010/catalog"),
+                ("xmlns:pse", "http://vaemendis.net/opds-pse/2017"),
             ],
         );
         w.leaf("id", &[], &format!("urn:kani:manga:{manga_id}"));
@@ -234,11 +241,35 @@ impl AppService {
                 "link",
                 &[
                     ("rel", "http://opds-spec.org/acquisition"),
-                    ("href", &format!("{base_url}/rest/chapters/{}/cbz", ch.id)),
-                    ("type", "application/x-cbz"),
+                    ("href", &format!("{base_url}/opds/chapters/{}/file", ch.id)),
+                    ("type", "application/vnd.comicbook+zip"),
                     ("title", &title),
                 ],
             );
+            w.self_close(
+                "link",
+                &[
+                    ("rel", "subsection"),
+                    ("href", &format!("{base_url}/opds/chapters/{}", ch.id)),
+                    ("type", ATOM_PROFILE),
+                ],
+            );
+            if let Some(count) = ch.page_count {
+                let count_str = count.to_string();
+                let stream_href = format!(
+                    "{base_url}/opds/chapters/{}/page?page={{pageNumber}}",
+                    ch.id
+                );
+                w.self_close(
+                    "link",
+                    &[
+                        ("rel", "http://vaemendis.net/opds-pse/stream"),
+                        ("href", &stream_href),
+                        ("type", "image/jpeg"),
+                        ("pse:count", &count_str),
+                    ],
+                );
+            }
             w.close("entry");
         }
 
@@ -247,8 +278,14 @@ impl AppService {
     }
 
     /// Search results feed.
-    pub async fn opds_search_feed(&self, query: &str, page: i32, base_url: &str) -> Result<String> {
-        self.opds_catalogue_feed(page, 20, Some(query.to_owned()), base_url)
+    pub async fn opds_search_feed(
+        &self,
+        query: &str,
+        page: i32,
+        user_id: UserId,
+        base_url: &str,
+    ) -> Result<String> {
+        self.opds_catalogue_feed(page, 20, Some(query.to_owned()), user_id, base_url)
             .await
     }
 
@@ -263,6 +300,164 @@ impl AppService {
        template="{base_url}/opds/search?q={{searchTerms}}&amp;page={{startPage}}"/>
 </OpenSearchDescription>"#
         )
+    }
+
+    /// Returns the cached (or freshly scanned) sorted CBZ page-name list for a chapter.
+    /// Keyed on the file's mtime so a rewritten archive invalidates the entry naturally.
+    pub async fn cbz_page_index(
+        &self,
+        chapter_id: ChapterId,
+        path: &std::path::Path,
+    ) -> Result<std::sync::Arc<Vec<String>>> {
+        let mtime = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let key = (chapter_id.0, mtime);
+
+        if let Some(cached) = self.cache.cbz_pages_get(key).await {
+            return Ok(cached);
+        }
+
+        let path_buf = path.to_path_buf();
+        let pages = tokio::task::spawn_blocking(move || kani_core::cbz::list_cbz_pages(&path_buf))
+            .await
+            .map_err(|e| ServiceError::Internal(format!("cbz index join error: {e}")))??;
+        let arc = std::sync::Arc::new(pages);
+        self.cache.cbz_pages_put(key, arc.clone()).await;
+        Ok(arc)
+    }
+
+    /// Single-entry OPDS-PSE acquisition feed for one downloaded chapter.
+    pub async fn opds_chapter_feed(
+        &self,
+        chapter_id: ChapterId,
+        user_id: UserId,
+        base_url: &str,
+    ) -> Result<String> {
+        let info = self.chapter_cbz_path(chapter_id).await?;
+
+        let existing_count =
+            sqlx::query_scalar!("SELECT page_count FROM chapters WHERE id = ?", chapter_id)
+                .fetch_one(&self.db_read)
+                .await?;
+
+        let count: i64 = match existing_count {
+            Some(pc) => pc,
+            None => {
+                let pages = self.cbz_page_index(chapter_id, &info.path).await?;
+                let n = pages.len() as i64;
+                sqlx::query!(
+                    "UPDATE chapters SET page_count = ? WHERE id = ? AND page_count IS NULL",
+                    n,
+                    chapter_id
+                )
+                .execute(&self.db)
+                .await?;
+                n
+            }
+        };
+
+        let progress = self.get_chapter_progress_full(user_id, chapter_id).await?;
+        let last_read_str = progress.as_ref().map(|(lp, _, _)| lp.to_string());
+        let last_read_date = progress.as_ref().and_then(|(_, _, d)| d.clone());
+
+        let updated = now_rfc3339();
+        let mut w = Utf8Writer::new();
+        w.decl();
+        w.open(
+            "feed",
+            &[
+                ("xmlns", "http://www.w3.org/2005/Atom"),
+                ("xmlns:opds", "http://opds-spec.org/2010/catalog"),
+                ("xmlns:pse", "http://vaemendis.net/opds-pse/2017"),
+            ],
+        );
+        w.leaf("id", &[], &format!("urn:kani:chapter:{chapter_id}"));
+        w.leaf("title", &[], &info.chapter_title);
+        w.leaf("updated", &[], &updated);
+        w.self_close(
+            "link",
+            &[
+                ("rel", "self"),
+                ("href", &format!("{base_url}/opds/chapters/{chapter_id}")),
+                ("type", ATOM_PROFILE),
+            ],
+        );
+        w.self_close(
+            "link",
+            &[
+                ("rel", "start"),
+                ("href", &format!("{base_url}/opds")),
+                ("type", ATOM_PROFILE),
+            ],
+        );
+
+        w.open("entry", &[]);
+        w.leaf("id", &[], &format!("urn:kani:chapter:{chapter_id}"));
+        w.leaf("title", &[], &info.chapter_title);
+        w.leaf("updated", &[], &updated);
+        w.self_close(
+            "link",
+            &[
+                ("rel", "http://opds-spec.org/acquisition"),
+                (
+                    "href",
+                    &format!("{base_url}/opds/chapters/{chapter_id}/file"),
+                ),
+                ("type", "application/vnd.comicbook+zip"),
+                ("title", &info.chapter_title),
+            ],
+        );
+
+        let count_str = count.to_string();
+        let stream_href = format!("{base_url}/opds/chapters/{chapter_id}/page?page={{pageNumber}}");
+        let mut stream_attrs: Vec<(&str, &str)> = vec![
+            ("rel", "http://vaemendis.net/opds-pse/stream"),
+            ("href", &stream_href),
+            ("type", "image/jpeg"),
+            ("pse:count", &count_str),
+        ];
+        if let Some(lr) = &last_read_str {
+            stream_attrs.push(("pse:lastRead", lr));
+        }
+        if let Some(d) = &last_read_date {
+            stream_attrs.push(("pse:lastReadDate", d));
+        }
+        w.self_close("link", &stream_attrs);
+
+        w.close("entry");
+        w.close("feed");
+        Ok(w.finish())
+    }
+
+    /// Resolves and (optionally) transcodes a single chapter page for OPDS-PSE.
+    pub async fn opds_chapter_page(
+        &self,
+        chapter_id: ChapterId,
+        page_index: usize,
+        max_width: u32,
+        format: Option<image::ImageFormat>,
+    ) -> Result<(Vec<u8>, &'static str)> {
+        let info = self.chapter_cbz_path(chapter_id).await?;
+        let pages = self.cbz_page_index(chapter_id, &info.path).await?;
+        if page_index >= pages.len() {
+            return Err(ServiceError::NotFound(format!(
+                "Page {page_index} out of range ({} pages)",
+                pages.len()
+            )));
+        }
+
+        let width = max_width.min(crate::tuning::OPDS_MAX_TRANSCODE_WIDTH);
+        let path = info.path.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            kani_core::cbz::read_cbz_page_transcoded(&path, page_index, width, format)
+        })
+        .await
+        .map_err(|e| ServiceError::Internal(format!("page transcode join error: {e}")))??;
+        Ok(result)
     }
 }
 

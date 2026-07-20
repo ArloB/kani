@@ -1,147 +1,140 @@
 // @ts-check
 // Settings — Trash: list trashed manga, restore, or permanently purge.
 
+import { h } from 'preact';
+import { useState, useEffect, useCallback } from 'preact/hooks';
+import htm from 'htm';
 import * as api from '../../api.js';
 import { iconTrash } from '../../icons.js';
 import { t } from '../../i18n.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { showConfirm } from '../../components/modal.js';
-import { createEmptyState } from '../../components/empty-state.js';
-import { createErrorState } from '../../components/error-state.js';
-import { mkSettingsGroup, mkSettingsGroupCard } from './_shared.js';
+import { EmptyState } from '../../components/empty-state.js';
+import { ErrorState } from '../../components/error-state.js';
+import { SettingsGroup } from './_shared.js';
+import { useBusy } from '../../hooks/use-busy.js';
 
-/** @param {HTMLElement} el */
-export function mount(el) {
-  el.innerHTML = '';
-  _load(el);
-  return { destroy() { el.innerHTML = ''; } };
-}
+const html = htm.bind(h);
 
-/** @param {HTMLElement} el */
-async function _load(el) {
-  el.innerHTML = `<div class="text-sm text-text-muted px-1 py-4">${t('common.loading')}</div>`;
-  try {
-    const items = await api.listTrash();
-    _render(el, Array.isArray(items) ? items : []);
-  } catch (e) {
-    el.innerHTML = '';
-    el.appendChild(createErrorState({ message: e.message ?? t('trash.error.load') }));
-  }
-}
+export function TrashSection() {
+  const [state, setState] = useState(
+    /** @type {{ status: string, items: any[], error: string }} */ ({
+      status: 'loading',
+      items: [],
+      error: '',
+    }),
+  );
+  const emptyBusy = useBusy();
 
-/** @param {HTMLElement} el @param {any[]} items */
-function _render(el, items) {
-  el.innerHTML = '';
-
-  if (items.length === 0) {
-    el.appendChild(createEmptyState({
-      title: t('trash.empty.title'),
-      subtitle: t('trash.empty.desc'),
-    }));
-    return;
-  }
-
-  const group = mkSettingsGroup();
-  const card = mkSettingsGroupCard(group);
-
-  const head = document.createElement('div');
-  head.className = 'detail-card-head';
-  head.innerHTML = `<span class="js-trash-count"></span>`;
-
-  const emptyBtn = document.createElement('button');
-  emptyBtn.type = 'button';
-  emptyBtn.className = 'btn-danger btn-sm';
-  emptyBtn.textContent = t('trash.action.empty');
-  emptyBtn.addEventListener('click', async () => {
-    if (!(await showConfirm(t('trash.confirm.empty'), { title: t('trash.action.empty'), confirmLabel: t('trash.action.purge') }))) return;
-    emptyBtn.disabled = true;
+  const load = useCallback(async () => {
+    setState((s) => ({ ...s, status: 'loading' }));
     try {
-      const res = await api.purgeTrashAll();
-      showToast(t('trash.toast.emptied', { count: res?.purged ?? 0 }), { type: 'success' });
-      await _load(el);
+      const items = await api.listTrash();
+      setState({ status: 'ready', items: Array.isArray(items) ? items : [], error: '' });
+    } catch (e) {
+      setState({ status: 'error', items: [], error: e?.message ?? t('trash.error.load') });
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const onEmptyAll = () =>
+    emptyBusy.run(async () => {
+      if (
+        !(await showConfirm(t('trash.confirm.empty'), {
+          title: t('trash.action.empty'),
+          confirmLabel: t('trash.action.purge'),
+        }))
+      )
+        return;
+      try {
+        const res = await api.purgeTrashAll();
+        showToast(t('trash.toast.emptied', { count: res?.purged ?? 0 }), { type: 'success' });
+        await load();
+      } catch (e) {
+        showApiError(e);
+      }
+    });
+
+  const onRestore = async (/** @type {any} */ m) => {
+    try {
+      await api.untrashManga(m.id);
+      showToast(t('trash.toast.restored', { title: m.name ?? '' }), { type: 'success' });
+      await load();
     } catch (e) {
       showApiError(e);
-      emptyBtn.disabled = false;
     }
-  });
-  head.appendChild(emptyBtn);
-  card.appendChild(head);
+  };
 
-  const list = document.createElement('div');
-  list.className = 'divide-y divide-border-subtle';
-  for (const item of items) {
-    list.appendChild(_mkRow(item, el));
+  const onPurge = async (/** @type {any} */ m) => {
+    if (
+      !(await showConfirm(t('trash.confirm.purge', { title: m.name ?? '' }), {
+        confirmLabel: t('trash.action.purge'),
+      }))
+    )
+      return;
+    try {
+      await api.purgeTrashOne(m.id);
+      showToast(t('trash.toast.purged', { title: m.name ?? '' }), { type: 'success' });
+      await load();
+    } catch (e) {
+      showApiError(e);
+    }
+  };
+
+  if (state.status === 'loading') {
+    return html`<div class="text-sm text-text-muted px-1 py-4">${t('common.loading')}</div>`;
   }
-  card.appendChild(list);
-  el.appendChild(group);
-  _updateCount(el);
-}
+  if (state.status === 'error') {
+    return html`<${ErrorState} message=${state.error} onRetry=${load} />`;
+  }
+  if (state.items.length === 0) {
+    return html`<${EmptyState} title=${t('trash.empty.title')} subtitle=${t('trash.empty.desc')} />`;
+  }
 
-/** Reconcile the trash count header with the number of remaining rows. */
-function _updateCount(/** @type {HTMLElement} */ el) {
-  const countEl = /** @type {HTMLElement|null} */ (el.querySelector('.js-trash-count'));
-  const n = /** @type {HTMLElement|null} */ (el.querySelector('.divide-y'))?.children.length ?? 0;
-  if (countEl) countEl.textContent = n === 1 ? t('trash.count.one', { n }) : t('trash.count.other', { n });
-}
-
-/** @param {any} manga @param {HTMLElement} el */
-function _mkRow(manga, el) {
-  const row = document.createElement('div');
-  row.className = 'flex items-center gap-3 px-4 py-3';
-
-  const title = document.createElement('span');
-  title.className = 'flex-1 text-sm text-text truncate';
-  title.textContent = manga.name ?? 'Unknown';
-
-  const deletedAt = manga.deleted_at
-    ? new Date(manga.deleted_at).toLocaleDateString()
-    : '';
-  const meta = document.createElement('span');
-  meta.className = 'text-xs text-text-muted shrink-0';
-  meta.textContent = deletedAt;
-
-  const restoreBtn = document.createElement('button');
-  restoreBtn.type = 'button';
-  restoreBtn.className = 'btn-secondary btn-sm shrink-0';
-  restoreBtn.textContent = t('trash.action.restore');
-  restoreBtn.addEventListener('click', async () => {
-    restoreBtn.disabled = true;
-    try {
-      await api.untrashManga(manga.id);
-      showToast(t('trash.toast.restored', { title: manga.name ?? '' }), { type: 'success' });
-      row.remove();
-      _updateCount(el);
-      if ((el.querySelector('.divide-y')?.children.length ?? 0) === 0) _load(el);
-    } catch (e) {
-      showApiError(e);
-      restoreBtn.disabled = false;
-    }
-  });
-
-  const purgeBtn = document.createElement('button');
-  purgeBtn.type = 'button';
-  purgeBtn.className = 'btn-icon text-danger shrink-0';
-  purgeBtn.setAttribute('aria-label', t('trash.action.purge'));
-  purgeBtn.innerHTML = iconTrash;
-  purgeBtn.addEventListener('click', async () => {
-    if (!(await showConfirm(t('trash.confirm.purge', { title: manga.name ?? '' }), { confirmLabel: t('trash.action.purge') }))) return;
-    purgeBtn.disabled = true;
-    try {
-      await api.purgeTrashOne(manga.id);
-      showToast(t('trash.toast.purged', { title: manga.name ?? '' }), { type: 'success' });
-      row.remove();
-      _updateCount(el);
-      const remaining = /** @type {HTMLElement|null} */ (el.querySelector('.divide-y'))?.children.length ?? 0;
-      if (remaining === 0) _load(el);
-    } catch (e) {
-      showApiError(e);
-      purgeBtn.disabled = false;
-    }
-  });
-
-  row.appendChild(title);
-  row.appendChild(meta);
-  row.appendChild(restoreBtn);
-  row.appendChild(purgeBtn);
-  return row;
+  const n = state.items.length;
+  return html`
+    <${SettingsGroup}>
+      <div class="detail-card-head">
+        <span>${n === 1 ? t('trash.count.one', { n }) : t('trash.count.other', { n })}</span>
+        <button
+          type="button"
+          class="btn-danger btn-sm"
+          disabled=${emptyBusy.busy}
+          onClick=${onEmptyAll}
+        >
+          ${t('trash.action.empty')}
+        </button>
+      </div>
+      <div class="divide-y divide-border-subtle">
+        ${state.items.map(
+          (m) => html`
+            <div class="flex items-center gap-3 px-4 py-3" key=${m.id}>
+              <span class="flex-1 text-sm text-text truncate">${m.name ?? 'Unknown'}</span>
+              <span class="text-xs text-text-muted shrink-0"
+                >${m.deleted_at ? new Date(m.deleted_at).toLocaleDateString() : ''}</span
+              >
+              <button
+                type="button"
+                class="btn-secondary btn-sm shrink-0"
+                onClick=${() => onRestore(m)}
+              >
+                ${t('trash.action.restore')}
+              </button>
+              <button
+                type="button"
+                class="btn-icon text-danger shrink-0"
+                aria-label=${t('trash.action.purge')}
+                onClick=${() => onPurge(m)}
+              >
+                ${html([iconTrash])}
+              </button>
+            </div>
+          `,
+        )}
+      </div>
+    <//>
+  `;
 }
