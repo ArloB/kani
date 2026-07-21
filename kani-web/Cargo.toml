@@ -27,13 +27,14 @@ tower-http = { version = "0.6", features = [
   "fs",
   "set-header",
   "trace",
+  "request-id",
 ] }
 sqlx.workspace = true
 rquest = { version = "5.1", features = ["json"] }
 rquest-util = "2.2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 kani-core = { path = "../kani-core" }
 kani-app  = { path = "../kani-app" }

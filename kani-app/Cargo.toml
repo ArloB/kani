@@ -20,6 +20,7 @@ urlencoding.workspace = true
 tokio         = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "process"] }
 tokio-util.workspace = true
 sqlx.workspace = true
+log = "0.4"
 rquest        = { version = "5.1", features = ["json"] }
 tracing.workspace = true
 futures.workspace = true

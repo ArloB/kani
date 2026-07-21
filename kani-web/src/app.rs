@@ -64,4 +64,8 @@ pub async fn build_app(state: AppState) -> Router {
             crate::session_touch::session_touch_middleware,
         ))
         .layer(auth_layer)
+        .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
+        .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
+            crate::middleware::trace_id::UuidRequestId,
+        ))
 }

@@ -73,6 +73,7 @@ async function _req(method, path, opts = {}) {
       code: body?.code ?? null,
       hint: body?.hint ?? null,
       suggestions: body?.suggestions ?? null,
+      traceId: res.headers.get('x-request-id'),
       body,
     });
   }
@@ -309,6 +310,7 @@ export async function uploadWasm(id, file) {
       code: body?.code ?? null,
       hint: body?.hint ?? null,
       suggestions: body?.suggestions ?? null,
+      traceId: res.headers.get('x-request-id'),
       body,
     });
   }

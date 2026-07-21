@@ -1671,6 +1671,7 @@ export default {
 
   'common.no_cover': 'No Cover',
   'common.error_occurred': 'An error occurred',
+  'error.trace_id': 'trace {id}',
   'common.something_wrong': 'Something went wrong.',
   'common.dismiss': 'Dismiss',
   'common.clear': 'Clear',

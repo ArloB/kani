@@ -64,13 +64,26 @@ async fn main() {
     };
 
     use tracing_subscriber::prelude::*;
+
+    let json_logs = std::env::var("KANI_LOG_FORMAT").is_ok_and(|v| v.eq_ignore_ascii_case("json"));
+
+    let fmt_layer = if json_logs {
+        tracing_subscriber::fmt::layer()
+            .json()
+            .flatten_event(true)
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+            .with_filter(make_filter())
+            .boxed()
+    } else {
+        tracing_subscriber::fmt::layer()
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+            .with_filter(make_filter())
+            .boxed()
+    };
+
     tracing_subscriber::registry()
         .with(ring_layer.with_filter(make_filter()))
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
-                .with_filter(make_filter()),
-        )
+        .with(fmt_layer)
         .init();
 
     tracing::info!("Starting Kani Web Server");
@@ -504,11 +517,17 @@ async fn main() {
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
                 if kani_web::HTTP_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                    let request_id = request
+                        .extensions()
+                        .get::<tower_http::request_id::RequestId>()
+                        .and_then(|id| id.header_value().to_str().ok())
+                        .unwrap_or_default();
                     tracing::info_span!(
                         "http",
                         method = %request.method(),
                         uri = %request.uri(),
                         status = tracing::field::Empty,
+                        request_id = %request_id,
                     )
                 } else {
                     tracing::Span::none()
@@ -517,7 +536,12 @@ async fn main() {
         );
 
     // Cache-Control for static assets: immutable in release, no-cache in debug.
-    let app = app.layer(axum::middleware::from_fn(cache_control_middleware));
+    let app = app
+        .layer(axum::middleware::from_fn(cache_control_middleware))
+        .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
+        .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
+            kani_web::middleware::trace_id::UuidRequestId,
+        ));
 
     let bind_addr = std::env::var("KANI_BIND").unwrap_or_else(|_| "0.0.0.0:8242".into());
     let listener = tokio::net::TcpListener::bind(&bind_addr)

@@ -39,6 +39,12 @@ services:
       # Override the log level (error, warn, info, debug, trace).
       # RUST_LOG: "info"
 
+      # Emit structured JSON logs instead of human-readable text ("text" | "json").
+      # KANI_LOG_FORMAT: "json"
+
+      # Warn-log any SQL statement slower than this many milliseconds.
+      # KANI_SLOW_QUERY_THRESHOLD_MS: "100"
+
       # Set to "false" to disable browser-based extension features at runtime,
       # even if Chromium is installed (e.g. to reclaim memory on idle servers).
       # KANI_BROWSER_ENABLED: "false"

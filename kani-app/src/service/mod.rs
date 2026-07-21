@@ -177,7 +177,22 @@ fn parse_cipher_hex(hex: &str) -> Option<encryption::CredentialCipher> {
     }
 }
 
-async fn make_write_pool(url: &str) -> sqlx::Result<SqlitePool> {
+fn connect_options(
+    url: &str,
+    slow_query_threshold_ms: u64,
+) -> sqlx::Result<sqlx::sqlite::SqliteConnectOptions> {
+    use sqlx::ConnectOptions;
+    use std::str::FromStr;
+
+    Ok(sqlx::sqlite::SqliteConnectOptions::from_str(url)?
+        .log_statements(log::LevelFilter::Debug)
+        .log_slow_statements(
+            log::LevelFilter::Warn,
+            std::time::Duration::from_millis(slow_query_threshold_ms),
+        ))
+}
+
+async fn make_write_pool(url: &str, slow_query_threshold_ms: u64) -> sqlx::Result<SqlitePool> {
     SqlitePoolOptions::new()
         .max_connections(1)
         .after_connect(|conn, _| {
@@ -186,11 +201,15 @@ async fn make_write_pool(url: &str) -> sqlx::Result<SqlitePool> {
                 Ok(())
             })
         })
-        .connect(url)
+        .connect_with(connect_options(url, slow_query_threshold_ms)?)
         .await
 }
 
-async fn make_read_pool(url: &str, size: u32) -> sqlx::Result<SqlitePool> {
+async fn make_read_pool(
+    url: &str,
+    size: u32,
+    slow_query_threshold_ms: u64,
+) -> sqlx::Result<SqlitePool> {
     SqlitePoolOptions::new()
         .max_connections(size)
         .after_connect(|conn, _| {
@@ -199,7 +218,7 @@ async fn make_read_pool(url: &str, size: u32) -> sqlx::Result<SqlitePool> {
                 Ok(())
             })
         })
-        .connect(url)
+        .connect_with(connect_options(url, slow_query_threshold_ms)?)
         .await
 }
 
@@ -235,8 +254,12 @@ impl AppService {
             .ok()
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(8);
-        let pool = make_write_pool(db_url).await?;
-        let read_pool = make_read_pool(db_url, read_pool_size).await?;
+        let slow_query_threshold_ms: u64 = std::env::var("KANI_SLOW_QUERY_THRESHOLD_MS")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(100);
+        let pool = make_write_pool(db_url, slow_query_threshold_ms).await?;
+        let read_pool = make_read_pool(db_url, read_pool_size, slow_query_threshold_ms).await?;
 
         tracing::info!("SQL Pool Created");
 
