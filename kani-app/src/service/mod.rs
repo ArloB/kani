@@ -45,6 +45,7 @@ pub mod fs_browse;
 pub mod import;
 pub mod integrity;
 pub mod library;
+pub mod manifest_capture;
 pub mod metadata_provider;
 mod migration;
 pub mod opds;
@@ -685,6 +686,7 @@ impl AppService {
         job_registry.register::<crate::jobs::tracker_sync::TrackerSyncJob>();
         job_registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
         job_registry.register::<crate::jobs::update_check::UpdateCheckJob>();
+        job_registry.register::<crate::jobs::manifest_backfill::ManifestBackfillJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),
@@ -870,6 +872,7 @@ impl AppService {
         registry.register::<crate::jobs::integrity::IntegrityCheckJob>();
         registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
         registry.register::<crate::jobs::update_check::UpdateCheckJob>();
+        registry.register::<crate::jobs::manifest_backfill::ManifestBackfillJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),

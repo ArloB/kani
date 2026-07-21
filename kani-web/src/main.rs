@@ -183,6 +183,13 @@ async fn main() {
     state.spawn_cache_prune();
     state.spawn_progress_flush();
 
+    {
+        let backfill_state = state.clone();
+        tokio::spawn(async move {
+            backfill_state.submit_manifest_backfill_if_needed().await;
+        });
+    }
+
     if let Err(e) = kani_app::jobs::recurring::ensure_recurring_rows(&state.db).await {
         tracing::warn!("Failed to initialise recurring job rows: {e}");
     }

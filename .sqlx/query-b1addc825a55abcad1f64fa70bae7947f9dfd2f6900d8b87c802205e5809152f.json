@@ -112,6 +112,11 @@
         "name": "deleted_at",
         "ordinal": 21,
         "type_info": "Datetime"
+      },
+      {
+        "name": "upgrade_auto_replace",
+        "ordinal": 22,
+        "type_info": "Bool"
       }
     ],
     "parameters": {
@@ -139,7 +144,8 @@
       false,
       false,
       true,
-      true
+      true,
+      false
     ]
   },
   "hash": "b1addc825a55abcad1f64fa70bae7947f9dfd2f6900d8b87c802205e5809152f"

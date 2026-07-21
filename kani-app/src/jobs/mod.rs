@@ -9,6 +9,7 @@ pub mod import_dedup;
 pub mod integrity;
 pub mod maintenance;
 pub mod manager;
+pub mod manifest_backfill;
 pub mod pending_delete_retry;
 pub mod recurring;
 pub mod refresh;

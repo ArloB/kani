@@ -11,7 +11,7 @@
       {
         "name": "page_count!: i64",
         "ordinal": 1,
-        "type_info": "Null"
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -19,7 +19,7 @@
     },
     "nullable": [
       false,
-      null
+      false
     ]
   },
   "hash": "d6b66667a9e356ed67325c94f6cfaafe30395136804fa6adaff40df0e2ea6ff6"

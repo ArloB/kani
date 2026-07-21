@@ -150,6 +150,7 @@ pub struct Manga {
     pub cover_hash: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub deleted_at: Option<time::OffsetDateTime>,
+    pub upgrade_auto_replace: bool,
 }
 
 /// DB row fetched when listing chapters for a manga.
@@ -482,6 +483,7 @@ mod tests {
             is_orphaned: false,
             cover_hash: None,
             deleted_at: Some(time::macros::datetime!(2026-07-13 05:00:00 UTC)),
+            upgrade_auto_replace: false,
         }
     }
 

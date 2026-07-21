@@ -113,6 +113,10 @@ pub(crate) async fn run_chapter_download(
             )
             .execute(&svc.db)
             .await?;
+
+            if let Ok(info) = svc.chapter_cbz_path(chapter_id).await {
+                svc.record_chapter_manifest(chapter_id, info.path).await;
+            }
             Ok(())
         }
         Err(DownloadError::Cancelled) => {

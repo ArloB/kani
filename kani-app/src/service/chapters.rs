@@ -192,6 +192,7 @@ impl AppService {
     pub async fn chapter_cbz_path(&self, chapter_id: ChapterId) -> Result<ChapterCbzInfo> {
         let rec = sqlx::query!(
             "SELECT c.download_status, c.volume, c.chapter_number, c.name, c.scanlator,
+                    c.file_path,
                     m.id as manga_id, m.name as manga_name,
                     s.name as source_name
              FROM chapters c
@@ -212,6 +213,25 @@ impl AppService {
 
         let chapter_title = chapter_name(rec.volume, rec.chapter_number, rec.name);
         let library_path = self.settings.read().await.library_path.clone();
+
+        // A stored path wins over title derivation: renaming a manga must not
+        // orphan its files. Rows predating the backfill fall through below.
+        if let Some(rel) = rec.file_path.as_deref().filter(|p| !p.is_empty()) {
+            let resolved =
+                kani_core::utilities::assert_within_root(&library_path, &library_path.join(rel))
+                    .map_err(|e| ServiceError::Internal(format!("Path traversal blocked: {e}")))?;
+
+            return Ok(ChapterCbzInfo {
+                path: resolved,
+                chapter_title,
+                manga_id: MangaId(rec.manga_id),
+                manga_name: rec.manga_name,
+                chapter_number: rec.chapter_number,
+                scanlator: rec.scanlator,
+                source_name: rec.source_name,
+            });
+        }
+
         let safe_manga_dir = format!(
             "{} - {}",
             kani_core::utilities::sanitize_filename(&rec.manga_name),
