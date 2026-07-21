@@ -1,6 +1,7 @@
 // @ts-check
 // API tokens ("Clients") settings section — Preact/htm. Lets a user mint and
-// revoke long-lived tokens for OPDS-capable reading apps.
+// revoke long-lived tokens, either for OPDS reading apps or for integrations
+// that drive the REST API.
 
 import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
@@ -45,17 +46,217 @@ function scopeSummary(tok) {
   </span>`;
 }
 
-export function ClientsSection() {
-  const [tokens, setTokens] = useState(/** @type {any[] | null} */ (null));
-  const [reveal, setReveal] = useState(/** @type {any} */ (null));
+/**
+ * A GET the token can actually reach, chosen from the scopes it was granted.
+ * A generic example would 403 for most tokens, which reads as "the token is
+ * broken" rather than "that endpoint needs a scope you did not grant".
+ * The fallback needs no permission beyond being authenticated.
+ * @param {string} scopes
+ */
+function exampleUrl(scopes) {
+  const held = new Set((scopes || '').split(' ').filter(Boolean));
+  if (held.has('metrics:read')) return `${location.origin}/metrics`;
+  if (held.has('library:view')) return `${location.origin}/rest/library?page=1&page_size=20`;
+  if (held.has('source:browse')) return `${location.origin}/rest/sources`;
+  return `${location.origin}/rest/me/api-tokens`;
+}
+
+/**
+ * @param {{ label: string, value: string, description?: any }} props
+ */
+function CopyableRow({ label, value, description }) {
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast(t('common.copied'), { type: 'success' });
+    } catch {
+      /* clipboard blocked — the field is selectable as a fallback */
+    }
+  };
+  return html`
+    <${SettingsRow} label=${label} description=${description}>
+      <div class="flex items-center gap-2">
+        <input
+          readonly
+          class="input text-sm font-mono w-64"
+          value=${value}
+          onClick=${(/** @type {Event} */ e) => /** @type {HTMLInputElement} */ (e.target).select()}
+        />
+        <button type="button" class="btn-ghost btn-sm" onClick=${copy}>${t('common.copy')}</button>
+      </div>
+    <//>
+  `;
+}
+
+/**
+ * @param {{ open: boolean, canCreateOpds: boolean, canCreateApi: boolean,
+ *           held: string[], onCreated: (tok: any) => void, onClose: () => void }} props
+ */
+function CreateTokenModal({ open, canCreateOpds, canCreateApi, held, onCreated, onClose }) {
   const [name, setName] = useState('');
   const [expiry, setExpiry] = useState('');
+  const [kind, setKind] = useState(canCreateOpds ? 'opds' : 'api');
   const [scopes, setScopes] = useState(/** @type {Set<string>} */ (new Set()));
   const { busy, run } = useBusy();
 
+  const reset = () => {
+    setName('');
+    setExpiry('');
+    setKind(canCreateOpds ? 'opds' : 'api');
+    setScopes(new Set());
+  };
+
+  const close = () => {
+    reset();
+    onClose();
+  };
+
+  const canSubmit = !busy && !!name.trim() && !(kind === 'api' && scopes.size === 0);
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    await run(async () => {
+      try {
+        const created = await api.createApiToken(
+          name.trim(),
+          expiry ? Number(expiry) : null,
+          kind,
+          kind === 'api' ? [...scopes] : [],
+        );
+        reset();
+        onCreated(created);
+      } catch (err) {
+        showApiError(err);
+      }
+    });
+  };
+
+  const toggleScope = (/** @type {string} */ perm, /** @type {boolean} */ on) => {
+    const next = new Set(scopes);
+    if (on) next.add(perm);
+    else next.delete(perm);
+    setScopes(next);
+  };
+
+  return html`
+    <${Modal}
+      open=${open}
+      title=${t('clients.create.title')}
+      onClose=${close}
+      footer=${html`
+        <button type="button" class="btn-ghost btn-sm" onClick=${close}>
+          ${t('common.cancel')}
+        </button>
+        <button
+          type="button"
+          class="btn-primary btn-sm"
+          onClick=${submit}
+          disabled=${!canSubmit}
+        >
+          ${t('clients.create')}
+        </button>
+      `}
+    >
+      <div class="flex flex-col gap-4 px-1">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-sm font-medium text-text" for="token-name">
+            ${t('clients.name.label')}
+          </label>
+          <input
+            type="text"
+            id="token-name"
+            class="input"
+            autoFocus
+            placeholder=${kind === 'api'
+              ? t('clients.name.placeholder.api')
+              : t('clients.name.placeholder.opds')}
+            value=${name}
+            maxLength="100"
+            onInput=${(/** @type {any} */ e) => setName(e.target.value)}
+            onKeyDown=${(/** @type {KeyboardEvent} */ e) => e.key === 'Enter' && submit()}
+          />
+        </div>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-sm font-medium text-text" for="token-kind">
+            ${t('clients.kind.label')}
+          </label>
+          ${canCreateOpds && canCreateApi
+            ? html`<select
+                id="token-kind"
+                class="input"
+                value=${kind}
+                onChange=${(/** @type {any} */ e) => setKind(e.target.value)}
+              >
+                <option value="opds">${t('clients.kind.opds')}</option>
+                <option value="api">${t('clients.kind.api')}</option>
+              </select>`
+            : html`<span class="text-sm text-text">${t(`clients.kind.${kind}`)}</span>`}
+          <span class="text-xs text-text-muted">
+            ${kind === 'api' ? t('clients.kind.api.desc') : t('clients.kind.opds.desc')}
+          </span>
+        </div>
+
+        ${kind === 'api'
+          ? html`<div class="flex flex-col gap-1.5">
+              <div class="flex items-baseline justify-between gap-2">
+                <span class="text-sm font-medium text-text">${t('clients.scopes.label')}</span>
+                <span class="text-xs text-text-muted tabular-nums"
+                  >${t('clients.scopes.count', { n: scopes.size, total: held.length })}</span
+                >
+              </div>
+              <span class="text-xs text-text-muted">${t('clients.scopes.desc')}</span>
+              <div
+                class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 max-h-56 overflow-y-auto"
+              >
+                ${held.map(
+                  (/** @type {string} */ perm) => html`
+                    <label key=${perm} class="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        class="accent-accent cursor-pointer"
+                        checked=${scopes.has(perm)}
+                        onChange=${(/** @type {any} */ e) => toggleScope(perm, e.target.checked)}
+                      />
+                      <code class="font-mono text-xs">${perm}</code>
+                    </label>
+                  `,
+                )}
+              </div>
+              ${scopes.size === 0
+                ? html`<p class="text-xs text-text-muted">${t('clients.scopes.required')}</p>`
+                : null}
+            </div>`
+          : null}
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-sm font-medium text-text" for="token-expiry">
+            ${t('clients.expiry.label')}
+          </label>
+          <select
+            id="token-expiry"
+            class="input"
+            value=${expiry}
+            onChange=${(/** @type {any} */ e) => setExpiry(e.target.value)}
+          >
+            <option value="">${t('clients.expiry.never')}</option>
+            <option value="30">${t('clients.expiry.30')}</option>
+            <option value="90">${t('clients.expiry.90')}</option>
+            <option value="365">${t('clients.expiry.365')}</option>
+          </select>
+        </div>
+      </div>
+    <//>
+  `;
+}
+
+export function ClientsSection() {
+  const [tokens, setTokens] = useState(/** @type {any[] | null} */ (null));
+  const [reveal, setReveal] = useState(/** @type {any} */ (null));
+  const [addOpen, setAddOpen] = useState(false);
+
   const canCreateOpds = hasPermission('token:create_opds');
   const canCreateApi = hasPermission('token:create_api');
-  const [kind, setKind] = useState(canCreateOpds ? 'opds' : 'api');
   const held = [...(getState('permissions') || [])].sort();
 
   const load = useCallback(async () => {
@@ -70,29 +271,6 @@ export function ClientsSection() {
   useEffect(() => {
     load();
   }, [load]);
-
-  const onCreate = async (/** @type {Event} */ e) => {
-    e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    await run(async () => {
-      try {
-        const created = await api.createApiToken(
-          trimmed,
-          expiry ? Number(expiry) : null,
-          kind,
-          kind === 'api' ? [...scopes] : [],
-        );
-        setReveal(created);
-        setName('');
-        setExpiry('');
-        setScopes(new Set());
-        await load();
-      } catch (err) {
-        showApiError(err);
-      }
-    });
-  };
 
   const onRevoke = async (/** @type {any} */ tok) => {
     const ok = await showConfirm(t('clients.revoke.confirm'), {
@@ -109,179 +287,90 @@ export function ClientsSection() {
     }
   };
 
-  const copyToken = async () => {
-    if (!reveal) return;
-    try {
-      await navigator.clipboard.writeText(reveal.raw_token);
-      showToast(t('clients.copied'), { type: 'success' });
-    } catch {
-      /* clipboard blocked — the field is selectable as a fallback */
-    }
-  };
-
   const opdsUrl = `${location.origin}/opds`;
-  const copyUrl = async () => {
-    try {
-      await navigator.clipboard.writeText(opdsUrl);
-      showToast(t('common.copied'), { type: 'success' });
-    } catch {
-      /* clipboard blocked — the field is selectable as a fallback */
-    }
-  };
+  const apiUrl = `${location.origin}/rest`;
+  const canCreate = canCreateOpds || canCreateApi;
+
+  const listBody =
+    tokens === null
+      ? null
+      : tokens.length === 0
+        ? html`<div class="p-2">
+            <${EmptyState} title=${t('clients.empty')} subtitle=${t('clients.empty.subtitle')} />
+          </div>`
+        : tokens.map(
+            (tok) => html`
+              <${SettingsRow}
+                key=${tok.id}
+                label=${html`<span class="inline-flex items-baseline gap-2">
+                  <span>${tok.name}</span>
+                  <span class="text-xs text-text-muted font-normal"
+                    >${t(`clients.kind.${tok.kind}`)}</span
+                  >
+                </span>`}
+                badge=${tok.stale_scopes?.length ? t('clients.scopes.stale.badge') : null}
+                description=${html`${tokenMeta(tok)}
+                  <span class="block mt-0.5">${scopeSummary(tok)}</span>
+                  ${tok.stale_scopes?.length
+                    ? html`<span class="block mt-0.5 text-warn"
+                        >${t('clients.scopes.stale.desc')}</span
+                      >`
+                    : null}`}
+              >
+                <button
+                  type="button"
+                  class="btn-ghost btn-sm text-danger"
+                  onClick=${() => onRevoke(tok)}
+                >
+                  ${t('clients.revoke')}
+                </button>
+              <//>
+            `,
+          );
 
   return html`
     <div class="flex flex-col gap-6">
-      <${SettingsGroup} label=${t('clients.opds.group')}>
-        <${SettingsRow} label=${t('clients.opds.url.label')} description=${t('clients.opds.url.desc')}>
-          <div class="flex items-center gap-2">
-            <input
-              readonly
-              class="input text-sm font-mono w-64"
-              value=${opdsUrl}
-              onClick=${(/** @type {Event} */ e) =>
-                /** @type {HTMLInputElement} */ (e.target).select()}
-            />
-            <button type="button" class="btn-ghost btn-sm" onClick=${copyUrl}>
-              ${t('common.copy')}
-            </button>
-          </div>
-        <//>
+      <${SettingsGroup} label=${t('clients.list.title')}>
+        ${listBody}
+        ${canCreate
+          ? html`<${SettingsRow} label=${t('clients.add.label')} description=${t('clients.add.desc')}>
+              <button type="button" class="btn-secondary btn-sm" onClick=${() => setAddOpen(true)}>
+                ${t('clients.add_btn')}
+              </button>
+            <//>`
+          : null}
       <//>
 
-      ${tokens === null
-        ? null
-        : tokens.length === 0
-        ? html`<${EmptyState}
-            title=${t('clients.empty')}
-            subtitle=${t('clients.empty.subtitle')}
-          />`
-        : html`<${SettingsGroup} label=${t('clients.list.title')}>
-            ${tokens.map(
-              (tok) => html`
-                <${SettingsRow}
-                  key=${tok.id}
-                  label=${html`<span class="inline-flex items-baseline gap-2">
-                    <span>${tok.name}</span>
-                    <span class="text-xs text-text-muted font-normal"
-                      >${t(`clients.kind.${tok.kind}`)}</span
-                    >
-                  </span>`}
-                  badge=${tok.stale_scopes?.length ? t('clients.scopes.stale.badge') : null}
-                  description=${html`${tokenMeta(tok)}
-                    <span class="block mt-0.5">${scopeSummary(tok)}</span>
-                    ${tok.stale_scopes?.length
-                      ? html`<span class="block mt-0.5 text-warn"
-                          >${t('clients.scopes.stale.desc')}</span
-                        >`
-                      : null}`}
-                >
-                  <button
-                    type="button"
-                    class="btn-ghost btn-sm text-danger"
-                    onClick=${() => onRevoke(tok)}
-                  >
-                    ${t('clients.revoke')}
-                  </button>
-                <//>
-              `,
-            )}
-          <//>`}
+      <${CreateTokenModal}
+        open=${addOpen}
+        canCreateOpds=${canCreateOpds}
+        canCreateApi=${canCreateApi}
+        held=${held}
+        onClose=${() => setAddOpen(false)}
+        onCreated=${async (/** @type {any} */ created) => {
+          setAddOpen(false);
+          setReveal(created);
+          await load();
+        }}
+      />
 
-      ${!canCreateOpds && !canCreateApi
-        ? null
-        : html`<${SettingsGroup} label=${t('clients.create.title')}>
-        <form class="flex flex-col gap-3 p-4" onSubmit=${onCreate}>
-          <label class="flex flex-col gap-1">
-            <span class="text-sm font-medium text-text">${t('clients.name.label')}</span>
-            <input
-              type="text"
-              class="input text-sm"
-              placeholder=${t('clients.name.placeholder')}
-              value=${name}
-              maxLength="100"
-              onInput=${(/** @type {Event} */ e) =>
-                setName(/** @type {HTMLInputElement} */ (e.target).value)}
-            />
-          </label>
-          <label class="flex flex-col gap-1">
-            <span class="text-sm font-medium text-text">${t('clients.kind.label')}</span>
-            ${canCreateOpds && canCreateApi
-              ? html`<select
-                  class="input text-sm"
-                  value=${kind}
-                  onChange=${(/** @type {Event} */ e) =>
-                    setKind(/** @type {HTMLSelectElement} */ (e.target).value)}
-                >
-                  <option value="opds">${t('clients.kind.opds')}</option>
-                  <option value="api">${t('clients.kind.api')}</option>
-                </select>`
-              : html`<span class="text-sm text-text">${t(`clients.kind.${kind}`)}</span>`}
-            <span class="text-xs text-text-muted">
-              ${kind === 'api' ? t('clients.kind.api.desc') : t('clients.kind.opds.desc')}
-            </span>
-          </label>
+      <${SettingsGroup} label=${t('clients.readers.group')}>
+        <${CopyableRow}
+          label=${t('clients.opds.url.label')}
+          description=${t('clients.opds.url.desc')}
+          value=${opdsUrl}
+        />
+        <p class="text-xs text-text-muted px-4 pb-1">${t('clients.apps.note')}</p>
+      <//>
 
-          ${kind === 'api'
-            ? html`<fieldset class="flex flex-col gap-1">
-                <legend class="text-sm font-medium text-text">${t('clients.scopes.label')}</legend>
-                <span class="text-xs text-text-muted mb-1">${t('clients.scopes.desc')}</span>
-                <div
-                  class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 max-h-64 overflow-y-auto"
-                >
-                  ${held.map(
-                    (/** @type {string} */ perm) => html`
-                      <label key=${perm} class="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          class="accent-accent cursor-pointer"
-                          checked=${scopes.has(perm)}
-                          onChange=${(/** @type {Event} */ e) => {
-                            const next = new Set(scopes);
-                            if (/** @type {HTMLInputElement} */ (e.target).checked) next.add(perm);
-                            else next.delete(perm);
-                            setScopes(next);
-                          }}
-                        />
-                        <code class="font-mono text-xs">${perm}</code>
-                      </label>
-                    `,
-                  )}
-                </div>
-              </fieldset>`
-            : null}
-
-          <label class="flex flex-col gap-1">
-            <span class="text-sm font-medium text-text">${t('clients.expiry.label')}</span>
-            <select
-              class="input text-sm"
-              value=${expiry}
-              onChange=${(/** @type {Event} */ e) =>
-                setExpiry(/** @type {HTMLSelectElement} */ (e.target).value)}
-            >
-              <option value="">${t('clients.expiry.never')}</option>
-              <option value="30">${t('clients.expiry.30')}</option>
-              <option value="90">${t('clients.expiry.90')}</option>
-              <option value="365">${t('clients.expiry.365')}</option>
-            </select>
-          </label>
-          <div>
-            <button
-              type="submit"
-              class="btn-primary btn-sm"
-              disabled=${busy || !name.trim() || (kind === 'api' && scopes.size === 0)}
-            >
-              ${t('clients.create')}
-            </button>
-            ${kind === 'api' && scopes.size === 0
-              ? html`<span class="ml-2 text-xs text-text-muted"
-                  >${t('clients.scopes.required')}</span
-                >`
-              : null}
-          </div>
-        </form>
-      <//>`}
-
-      <p class="text-xs text-text-muted px-1">${t('clients.apps.note')}</p>
+      <${SettingsGroup} label=${t('clients.integrations.group')}>
+        <${CopyableRow}
+          label=${t('clients.api.url.label')}
+          description=${t('clients.api.url.desc')}
+          value=${apiUrl}
+        />
+        <p class="text-xs text-text-muted px-4 pb-1">${t('clients.api.note')}</p>
+      <//>
 
       <${Modal}
         open=${!!reveal}
@@ -300,24 +389,58 @@ export function ClientsSection() {
                 onClick=${(/** @type {Event} */ e) =>
                   /** @type {HTMLInputElement} */ (e.target).select()}
               />
-              <button type="button" class="btn-secondary btn-sm" onClick=${copyToken}>
+              <button
+                type="button"
+                class="btn-secondary btn-sm"
+                onClick=${async () => {
+                  try {
+                    await navigator.clipboard.writeText(reveal.raw_token);
+                    showToast(t('clients.copied'), { type: 'success' });
+                  } catch {
+                    /* clipboard blocked — the field is selectable as a fallback */
+                  }
+                }}
+              >
                 ${t('clients.copy')}
               </button>
             </div>
-            <label class="flex flex-col gap-1">
-              <span class="text-xs text-text-muted">
-                ${reveal.kind === 'api' ? t('clients.api.usage.label') : t('clients.opds.url.label')}
-              </span>
-              <input
-                readonly
-                class="input text-sm font-mono"
-                value=${reveal.kind === 'api'
-                  ? `Authorization: Bearer <token>  →  ${location.origin}/rest/...`
-                  : opdsUrl}
-                onClick=${(/** @type {Event} */ e) =>
-                  /** @type {HTMLInputElement} */ (e.target).select()}
-              />
-            </label>
+            ${(() => {
+              const isApi = reveal.kind === 'api';
+              const snippet = isApi
+                ? `curl -H "Authorization: Bearer ${reveal.raw_token}" \\\n  "${exampleUrl(reveal.scopes)}"`
+                : opdsUrl;
+              return html`
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-xs text-text-muted">
+                      ${isApi ? t('clients.token.reveal.try') : t('clients.opds.url.label')}
+                    </span>
+                    <button
+                      type="button"
+                      class="btn-ghost btn-sm"
+                      onClick=${async () => {
+                        try {
+                          await navigator.clipboard.writeText(snippet);
+                          showToast(t('common.copied'), { type: 'success' });
+                        } catch {
+                          /* clipboard blocked — the field is selectable as a fallback */
+                        }
+                      }}
+                    >
+                      ${t('common.copy')}
+                    </button>
+                  </div>
+                  <textarea
+                    readonly
+                    rows=${isApi ? '4' : '1'}
+                    class="input text-sm font-mono resize-none w-full"
+                    onClick=${(/** @type {Event} */ e) =>
+                      /** @type {HTMLTextAreaElement} */ (e.target).select()}
+                    value=${snippet}
+                  ></textarea>
+                </div>
+              `;
+            })()}
           </div>
         `}
       <//>

@@ -468,6 +468,13 @@
     }
   }
 
+  /* .input fixes a one-line height, which silently clips any textarea that
+     asks for more via `rows`. Let the row count decide instead. */
+  textarea.input {
+    height: auto;
+    padding-block: 0.5rem;
+  }
+
   select.input {
     appearance: none;
     padding-right: 2rem;
