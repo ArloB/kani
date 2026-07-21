@@ -17,7 +17,11 @@ pub fn router() -> Router<AppState> {
             post(upload_manga_cover_handler).delete(clear_manga_cover_handler),
         )
         .route("/manga/{id}/details", get(get_local_manga_details))
-        .route("/manga/{id}/chapters", get(get_local_chapters))
+        .route(
+            "/manga/{id}/chapters",
+            get(get_local_chapters)
+                .route_layer(axum::middleware::from_fn(crate::etag::etag_middleware)),
+        )
         .route("/manga/{id}/chapter_ids", get(get_chapter_ids))
         .route("/manga/{id}/download_all", post(download_all))
         .route("/manga/{id}/cancel_all", post(cancel_all_downloads))

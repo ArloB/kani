@@ -187,6 +187,12 @@ pub fn put_json(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Bod
         .unwrap()
 }
 
+/// Drain the response body as raw bytes.
+#[allow(dead_code)]
+pub async fn body_bytes(res: axum::response::Response) -> axum::body::Bytes {
+    res.into_body().collect().await.unwrap().to_bytes()
+}
+
 /// Drain the response body and parse as JSON.
 pub async fn body_json(res: axum::response::Response) -> serde_json::Value {
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
