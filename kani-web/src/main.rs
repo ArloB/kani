@@ -208,6 +208,12 @@ async fn main() {
         GovernorConfigBuilder::default()
             .per_second(API_RATE_PER_SECOND)
             .burst_size(API_BURST_SIZE)
+            // Bucket bearer traffic per token, so a busy integration cannot
+            // spend its owner's browsing budget.
+            .key_extractor(kani_web::rate_limit_key::TokenOrPeerIp)
+            // Emit x-ratelimit-* and retry-after: a client that cannot see its
+            // budget can only retry blindly, which makes congestion worse.
+            .use_headers()
             .finish()
             .expect("API_RATE_PER_SECOND/API_BURST_SIZE constants are valid"),
     );

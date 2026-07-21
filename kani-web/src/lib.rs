@@ -16,6 +16,7 @@ pub mod openapi;
 pub mod permissions;
 pub mod proxy;
 pub mod rate_limit;
+pub mod rate_limit_key;
 pub mod repo_keys;
 pub mod rest;
 pub mod session_touch;
