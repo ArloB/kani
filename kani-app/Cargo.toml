@@ -59,6 +59,7 @@ which         = "6"
 tempfile      = "3"
 fs2           = "0.4"
 dunce         = "1"
+metrics = "0.24"
 
 [features]
 test-util = ["kani-core/test-util"]

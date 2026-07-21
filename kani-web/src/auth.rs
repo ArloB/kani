@@ -647,6 +647,7 @@ fn is_public_path(path: &str) -> bool {
         || path == "/favicon.ico"
         || path == "/health"
         || path == "/ready"
+        || path == "/metrics"
         || path == "/manifest.webmanifest"
         || path == "/sw.js"
         || path.starts_with("/icons/")
@@ -805,6 +806,11 @@ mod tests {
     fn health_is_public() {
         assert!(is_public_path("/health"));
         assert!(is_public_path("/ready"));
+    }
+
+    #[test]
+    fn metrics_is_public_for_scrapers() {
+        assert!(is_public_path("/metrics"));
     }
 
     #[test]

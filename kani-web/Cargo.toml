@@ -66,6 +66,8 @@ tower = { version = "0.5", features = ["util"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 semver = "1"
+axum-prometheus = "0.10.0"
+metrics = "0.24"
 
 [dev-dependencies]
 tempfile = "3.27.0"

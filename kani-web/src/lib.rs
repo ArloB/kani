@@ -8,6 +8,7 @@ pub mod error;
 pub mod i18n;
 pub mod install_gating;
 pub mod logging;
+pub mod metrics;
 pub mod middleware;
 pub mod models;
 pub mod opds;

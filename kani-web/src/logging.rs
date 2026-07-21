@@ -166,6 +166,10 @@ impl tracing::field::Visit for MessageVisitor {
 
 impl<S: Subscriber> Layer<S> for RingBufferLayer {
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        if *event.metadata().level() == tracing::Level::ERROR {
+            metrics::counter!("kani_log_errors_total").increment(1);
+        }
+
         let mut visitor = MessageVisitor(String::new());
         event.record(&mut visitor);
 

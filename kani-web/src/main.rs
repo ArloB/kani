@@ -229,6 +229,9 @@ async fn main() {
         .route("/health", axum::routing::get(rest::health))
         .route("/ready", axum::routing::get(rest::ready))
         .with_state(state.clone());
+    let (prometheus_layer, _) = kani_web::metrics::prometheus();
+    kani_web::metrics::describe();
+    let metrics_router = kani_web::metrics::router();
 
     {
         let db = state.db.clone();
@@ -449,6 +452,7 @@ async fn main() {
                 }),
         )
         .merge(health_router)
+        .merge(metrics_router)
         .nest_service("/js", ServeDir::new(format!("{static_dir}/js")))
         .nest_service("/css", ServeDir::new(format!("{static_dir}/css")))
         .nest_service("/locales", ServeDir::new(format!("{static_dir}/locales")))
@@ -538,6 +542,7 @@ async fn main() {
     // Cache-Control for static assets: immutable in release, no-cache in debug.
     let app = app
         .layer(axum::middleware::from_fn(cache_control_middleware))
+        .layer(prometheus_layer.clone())
         .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
         .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
             kani_web::middleware::trace_id::UuidRequestId,

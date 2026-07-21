@@ -61,6 +61,35 @@ async fn inbound_x_request_id_is_echoed_back() {
 }
 
 #[tokio::test]
+async fn metrics_endpoint_renders_registered_kani_metrics_without_auth() {
+    kani_web::metrics::describe();
+    let app = kani_web::metrics::router();
+
+    let res = app.oneshot(get_req("/metrics")).await.unwrap();
+
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+
+    for metric in [
+        "kani_log_errors_total",
+        "kani_sse_clients",
+        "kani_jobs_running",
+    ] {
+        assert!(
+            text.contains(metric),
+            "{metric} should be pre-registered so it is scrapeable before first use"
+        );
+    }
+    assert!(
+        text.contains("# TYPE"),
+        "expected prometheus exposition format"
+    );
+}
+
+#[tokio::test]
 async fn each_request_gets_a_distinct_generated_id() {
     let state = test_state().await;
     let app = build_test_app(state).await;

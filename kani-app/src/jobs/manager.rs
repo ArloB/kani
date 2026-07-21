@@ -612,6 +612,7 @@ impl JobManager {
             )
             .execute(pool)
             .await;
+            metrics::gauge!("kani_jobs_running").set(active.len() as f64);
 
             let _ = sse_tx.send(AppEvent::JobStarted {
                 job_id,
@@ -809,6 +810,8 @@ impl JobManager {
                             false
                         };
 
+                        metrics::counter!("kani_jobs_failed_total", "kind" => job_type)
+                            .increment(1);
                         let error_json = serde_json::to_string(&e).ok();
                         let _ = sqlx::query!(
                             "UPDATE jobs SET status = 'failed', completed_at = ?, \
@@ -829,6 +832,7 @@ impl JobManager {
                 }
 
                 active_t.remove(&job_id);
+                metrics::gauge!("kani_jobs_running").set(active_t.len() as f64);
                 let _ = completion_t.send(job_id);
                 notify_t.notify_one();
 

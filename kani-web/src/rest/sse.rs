@@ -53,9 +53,30 @@ pub async fn combined_sse(
         }
     });
 
+    let guard = SseClientGuard::connected();
     let live_stream = download_stream.merge(refresh_stream);
-    let stream = tokio_stream::once(snapshot_event).chain(live_stream);
+    let stream = tokio_stream::once(snapshot_event)
+        .chain(live_stream)
+        .map(move |event| {
+            let _connected = &guard;
+            event
+        });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+struct SseClientGuard;
+
+impl SseClientGuard {
+    fn connected() -> Self {
+        metrics::gauge!("kani_sse_clients").increment(1.0);
+        Self
+    }
+}
+
+impl Drop for SseClientGuard {
+    fn drop(&mut self) {
+        metrics::gauge!("kani_sse_clients").decrement(1.0);
+    }
 }
 
 async fn get_boot_id(
