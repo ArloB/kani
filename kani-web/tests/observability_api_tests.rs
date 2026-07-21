@@ -61,18 +61,33 @@ async fn inbound_x_request_id_is_echoed_back() {
 }
 
 #[tokio::test]
-async fn metrics_endpoint_renders_registered_kani_metrics_without_auth() {
+async fn metrics_endpoint_is_denied_when_no_token_is_configured() {
     kani_web::metrics::describe();
     let app = kani_web::metrics::router();
 
     let res = app.oneshot(get_req("/metrics")).await.unwrap();
 
-    assert_eq!(res.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+        res.status(),
+        axum::http::StatusCode::UNAUTHORIZED,
+        "metrics disclose extension and upstream host names; they must not be \
+         readable until an operator configures a token"
+    );
     let body = axum::body::to_bytes(res.into_body(), usize::MAX)
         .await
         .unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        text.contains("KANI_METRICS_TOKEN"),
+        "the refusal should say how to enable scraping, got: {text}"
+    );
+}
 
+#[tokio::test]
+async fn registered_kani_metrics_are_present_in_the_exposition() {
+    kani_web::metrics::describe();
+    let handle = &kani_web::metrics::prometheus().1;
+    let text = handle.render();
     for metric in [
         "kani_log_errors_total",
         "kani_sse_clients",

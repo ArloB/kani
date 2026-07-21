@@ -49,8 +49,9 @@ services:
       # Warn-log any SQL statement slower than this many milliseconds.
       # KANI_SLOW_QUERY_THRESHOLD_MS: "100"
 
-      # Prometheus metrics are exposed unauthenticated at /metrics. Set a token to
-      # require "Authorization: Bearer <token>" on that endpoint.
+      # Prometheus metrics at /metrics are disabled until a token is set, because
+      # they disclose extension names, upstream hosts and error counts. Set this
+      # and scrape with "Authorization: Bearer <token>".
       # KANI_METRICS_TOKEN: "change-me"
 
       # Set to "false" to disable browser-based extension features at runtime,

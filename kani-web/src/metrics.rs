@@ -97,9 +97,12 @@ fn token_matches(supplied: &str, expected: &str) -> bool {
         == 0
 }
 
+/// Scraping requires KANI_METRICS_TOKEN. Unlike /health, this endpoint discloses
+/// extension names, upstream host names via the circuit gauge, version and error
+/// counts — so an unset token denies rather than allows.
 fn authorized_with(headers: &HeaderMap, expected: &str) -> bool {
     if expected.is_empty() {
-        return true;
+        return false;
     }
     headers
         .get(AUTHORIZATION)
@@ -117,7 +120,13 @@ pub fn sync_runtime_counters() {
 async fn render(State(handle): State<PrometheusHandle>, headers: HeaderMap) -> impl IntoResponse {
     let expected = std::env::var("KANI_METRICS_TOKEN").unwrap_or_default();
     if !authorized_with(&headers, &expected) {
-        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+        let body = if expected.is_empty() {
+            "metrics are disabled: set KANI_METRICS_TOKEN and scrape with \
+             `Authorization: Bearer <token>`"
+        } else {
+            "unauthorized"
+        };
+        return (StatusCode::UNAUTHORIZED, body).into_response();
     }
     sync_runtime_counters();
     (StatusCode::OK, handle.render()).into_response()
@@ -169,9 +178,12 @@ mod tests {
     }
 
     #[test]
-    fn unset_token_leaves_metrics_unauthenticated() {
-        assert!(authorized_with(&HeaderMap::new(), ""));
-        assert!(authorized_with(&bearer("Bearer anything"), ""));
+    fn an_unset_token_denies_rather_than_exposing_metrics() {
+        assert!(!authorized_with(&HeaderMap::new(), ""));
+        assert!(
+            !authorized_with(&bearer("Bearer anything"), ""),
+            "no configured token means no scraping, whatever the caller sends"
+        );
     }
 
     #[test]
