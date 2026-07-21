@@ -9,6 +9,7 @@ pub mod lint;
 pub mod new;
 pub mod publish;
 pub mod repo;
+pub mod rollback;
 pub mod setup;
 pub mod validate;
 
@@ -151,6 +152,12 @@ pub enum Command {
         /// With --check, tolerate up to N existing violations; fail only when exceeded
         #[arg(long, default_value_t = 0)]
         max: usize,
+    },
+    /// Verify a backup archive can be restored onto this build
+    Rollback {
+        /// Path to a backup .zip produced by Kani
+        #[arg(value_name = "BACKUP_ZIP")]
+        path: std::path::PathBuf,
     },
 }
 
@@ -339,6 +346,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             }
         },
         Command::AuditTokens { dir, check, max } => audit_tokens::run(&dir, check, max),
+        Command::Rollback { path } => rollback::run(&path),
         Command::Repl(repl_cmd) => match repl_cmd {
             ReplCommand::Inspect { file } => crate::repl::inspect::run(&file),
             ReplCommand::Explain { expression } => crate::repl::explain::run(&expression),

@@ -2,6 +2,7 @@
 name = "kani-cli"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/ArloB/kani"
 
 [lints.clippy]
 unwrap_used = { level = "deny", priority = 1 }
@@ -41,3 +42,4 @@ regex     = "1"
 resvg     = "0.44"
 tiny-skia = "0.11"
 rhai      = { version = "1.19", features = ["sync"] }
+zip = "2"

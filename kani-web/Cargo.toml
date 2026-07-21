@@ -2,6 +2,7 @@
 name = "kani-web"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/ArloB/kani"
 build = "build.rs"
 
 [lints.clippy]

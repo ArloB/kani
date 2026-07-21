@@ -1,0 +1,6 @@
+- name: Install node (kani-web build.rs runs esbuild + tailwind)
+  uses: actions/setup-node@v4
+  with:
+    node-version: "22"
+- name: Fetch JS vendors and CSS toolchain
+  run: cargo run --release -p kani-cli -- setup
