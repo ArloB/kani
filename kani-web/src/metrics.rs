@@ -25,10 +25,21 @@ pub fn describe() {
         "kani_jobs_failed_total",
         "Background jobs that terminated in failure"
     );
+    metrics::describe_gauge!(
+        "kani_downloads_active",
+        "Chapter downloads currently in flight"
+    );
+    metrics::describe_counter!("kani_v8_calls_total", "Total calls into the V8 subprocess");
+    metrics::describe_counter!(
+        "kani_v8_process_restarts_total",
+        "Times the V8 subprocess has been restarted"
+    );
 
     metrics::counter!("kani_log_errors_total").increment(0);
     metrics::gauge!("kani_sse_clients").set(0.0);
     metrics::gauge!("kani_jobs_running").set(0.0);
+    metrics::gauge!("kani_downloads_active").set(0.0);
+    sync_runtime_counters();
 }
 
 pub fn router() -> Router {
@@ -59,11 +70,18 @@ fn authorized_with(headers: &HeaderMap, expected: &str) -> bool {
         .is_some_and(|t| token_matches(t, expected))
 }
 
+pub fn sync_runtime_counters() {
+    let stats = kani_core::v8_process::browser_stats();
+    metrics::counter!("kani_v8_calls_total").absolute(stats.calls_total);
+    metrics::counter!("kani_v8_process_restarts_total").absolute(stats.restarts);
+}
+
 async fn render(State(handle): State<PrometheusHandle>, headers: HeaderMap) -> impl IntoResponse {
     let expected = std::env::var("KANI_METRICS_TOKEN").unwrap_or_default();
     if !authorized_with(&headers, &expected) {
         return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
     }
+    sync_runtime_counters();
     (StatusCode::OK, handle.render()).into_response()
 }
 

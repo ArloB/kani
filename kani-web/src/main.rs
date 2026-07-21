@@ -86,6 +86,8 @@ async fn main() {
         .with(fmt_layer)
         .init();
 
+    kani_app::service::diagnostics::init(env!("CARGO_PKG_VERSION"), env!("GIT_SHA"));
+
     tracing::info!("Starting Kani Web Server");
 
     // Resolve the data directory. In Docker the working directory is /data, so the
@@ -227,7 +229,9 @@ async fn main() {
     let opds_router = kani_web::opds::routes(state.clone());
     let health_router = axum::Router::new()
         .route("/health", axum::routing::get(rest::health))
+        .route("/healthz", axum::routing::get(rest::health))
         .route("/ready", axum::routing::get(rest::ready))
+        .route("/readyz", axum::routing::get(rest::ready))
         .with_state(state.clone());
     let (prometheus_layer, _) = kani_web::metrics::prometheus();
     kani_web::metrics::describe();

@@ -64,6 +64,8 @@ pub fn router() -> Router<AppState> {
             "/admin/sources/blocked-repos/{id}",
             delete(delete_blocked_repo_handler),
         )
+        .route("/admin/diagnostics", get(admin_diagnostics))
+        .route("/admin/support-bundle", get(admin_support_bundle))
         .route("/admin/proxy/stats", get(proxy_bandwidth_stats))
         .route("/admin/sources/circuits", get(list_source_circuits))
         .route(
@@ -1442,4 +1444,43 @@ pub(crate) async fn admin_integrity_check(
             AppError::InternalServerError(e.to_string())
         })?))
     }
+}
+
+pub(crate) async fn admin_diagnostics(
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let mut payload = state.get_diagnostics().await?;
+    payload.recent_error_count = state
+        .log_handle
+        .query_all(&["ERROR".to_string()], &[], None, None, None)
+        .len() as u64;
+    Ok(Json(payload))
+}
+
+pub(crate) async fn admin_support_bundle(
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let entries = state.log_handle.query_all(&[], &[], None, None, None);
+    let mut logs_jsonl = Vec::new();
+    for entry in &entries {
+        if let Ok(line) = serde_json::to_vec(entry) {
+            logs_jsonl.extend_from_slice(&line);
+            logs_jsonl.push(b'\n');
+        }
+    }
+
+    let (bytes, filename) = state.generate_support_bundle(logs_jsonl).await?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        bytes,
+    ))
 }

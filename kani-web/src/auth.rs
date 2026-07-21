@@ -646,7 +646,9 @@ fn is_public_path(path: &str) -> bool {
         || path.starts_with("/fonts/")
         || path == "/favicon.ico"
         || path == "/health"
+        || path == "/healthz"
         || path == "/ready"
+        || path == "/readyz"
         || path == "/metrics"
         || path == "/manifest.webmanifest"
         || path == "/sw.js"
@@ -811,6 +813,12 @@ mod tests {
     #[test]
     fn metrics_is_public_for_scrapers() {
         assert!(is_public_path("/metrics"));
+    }
+
+    #[test]
+    fn healthz_aliases_are_public() {
+        assert!(is_public_path("/healthz"));
+        assert!(is_public_path("/readyz"));
     }
 
     #[test]

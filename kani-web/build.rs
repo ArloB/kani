@@ -3,6 +3,16 @@ use std::path::Path;
 fn main() {
     println!("cargo:rerun-if-changed=../migrations");
 
+    let git_sha = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    println!("cargo:rustc-env=GIT_SHA={git_sha}");
+
     let is_release = std::env::var("PROFILE").unwrap_or_default() == "release";
 
     copy_changelog();
