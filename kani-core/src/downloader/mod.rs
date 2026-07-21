@@ -22,7 +22,10 @@ use tokio_util::sync::CancellationToken;
 pub enum DownloadError {
     PageFetch(String),
     Io(std::io::Error),
-    Extension(String),
+    Extension {
+        kind: kani_shared::extension::ExtensionErrorKind,
+        message: String,
+    },
     Cancelled,
 }
 
@@ -31,13 +34,28 @@ impl std::fmt::Display for DownloadError {
         match self {
             Self::PageFetch(msg) => write!(f, "page fetch failed: {msg}"),
             Self::Io(e) => write!(f, "io error: {e}"),
-            Self::Extension(msg) => write!(f, "extension error: {msg}"),
+            Self::Extension { message, .. } => write!(f, "extension error: {message}"),
             Self::Cancelled => write!(f, "cancelled"),
         }
     }
 }
 
 impl std::error::Error for DownloadError {}
+
+impl DownloadError {
+    fn from_page_list_error(e: crate::error::Error) -> Self {
+        match e {
+            crate::error::Error::Extension(ext) => Self::Extension {
+                kind: ext.kind,
+                message: ext.message,
+            },
+            other => Self::Extension {
+                kind: kani_shared::extension::ExtensionErrorKind::Unknown,
+                message: other.to_string(),
+            },
+        }
+    }
+}
 
 /// Successful outcome of [`DownloaderManager::download_chapter_direct`].
 pub struct DownloadOutcome {
@@ -445,8 +463,7 @@ impl DownloaderManager {
                             error: format!("Failed to fetch pages: {e}"),
                         },
                     );
-                    let msg = e.to_string();
-                    return Err(DownloadError::Extension(msg));
+                    return Err(DownloadError::from_page_list_error(e));
                 }
             },
             _ = cancel.cancelled() => {
@@ -802,6 +819,35 @@ mod tests {
         assert_eq!(c.concurrent_pages, 4);
         assert_eq!(c.max_attempts, 3);
         assert_eq!(c.initial_retry_delay_ms, 1_000);
+    }
+
+    #[test]
+    fn from_page_list_error_preserves_extension_kind() {
+        use kani_shared::extension::{ExtensionError, ExtensionErrorKind};
+        let e = crate::error::Error::Extension(ExtensionError {
+            kind: ExtensionErrorKind::Updating,
+            message: "source updating".to_string(),
+            source_url: None,
+            retry_after_secs: None,
+        });
+        match DownloadError::from_page_list_error(e) {
+            DownloadError::Extension { kind, message } => {
+                assert_eq!(kind, ExtensionErrorKind::Updating);
+                assert_eq!(message, "source updating");
+            }
+            other => panic!("expected Extension, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_page_list_error_defaults_unknown_for_non_extension() {
+        let e = crate::error::Error::Other("weird".to_string());
+        match DownloadError::from_page_list_error(e) {
+            DownloadError::Extension { kind, .. } => {
+                assert_eq!(kind, kani_shared::extension::ExtensionErrorKind::Unknown);
+            }
+            other => panic!("expected Extension, got {other:?}"),
+        }
     }
 
     async fn make_manager() -> DownloaderManager {

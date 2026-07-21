@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use kani_core::downloader::DownloadError;
+use kani_shared::extension::ExtensionErrorKind;
 use kani_shared::types::DownloadStatus;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -17,7 +18,23 @@ use crate::jobs::framework::{BackgroundJob, JobContext, JobId, JobPriority};
 pub(crate) fn classify_download_error(err: DownloadError) -> DownloadErrorKind {
     match err {
         DownloadError::Cancelled => DownloadErrorKind::Cancelled,
-        DownloadError::Extension(msg) => DownloadErrorKind::ExtensionError { message: msg },
+        DownloadError::Extension { kind, message } => match kind {
+            ExtensionErrorKind::Network
+            | ExtensionErrorKind::Timeout
+            | ExtensionErrorKind::Updating => DownloadErrorKind::Network { retryable: true },
+            ExtensionErrorKind::RateLimited => DownloadErrorKind::RateLimited {
+                retry_after_secs: None,
+            },
+            ExtensionErrorKind::NotFound | ExtensionErrorKind::ContentUnavailable => {
+                DownloadErrorKind::NotFound
+            }
+            ExtensionErrorKind::Auth => DownloadErrorKind::AuthRequired,
+            ExtensionErrorKind::Parse | ExtensionErrorKind::InvalidInput => {
+                DownloadErrorKind::ParseError { message }
+            }
+            ExtensionErrorKind::Internal => DownloadErrorKind::ExtensionError { message },
+            ExtensionErrorKind::Unknown => DownloadErrorKind::Unknown { message },
+        },
         DownloadError::Io(e) => DownloadErrorKind::StorageError {
             path: String::new(),
             message: e.to_string(),
@@ -566,5 +583,108 @@ impl BackgroundJob for LibraryScanJob {
             }));
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use crate::jobs::circuit_breaker::{CircuitBreaker, CircuitState};
+
+    fn ext(kind: ExtensionErrorKind) -> DownloadError {
+        DownloadError::Extension {
+            kind,
+            message: "boom".to_string(),
+        }
+    }
+
+    #[test]
+    fn transient_extension_kinds_map_to_retryable_network() {
+        for kind in [
+            ExtensionErrorKind::Network,
+            ExtensionErrorKind::Timeout,
+            ExtensionErrorKind::Updating,
+        ] {
+            let mapped = classify_download_error(ext(kind));
+            assert!(
+                matches!(mapped, DownloadErrorKind::Network { retryable: true }),
+                "{kind:?} should map to retryable Network, got {mapped:?}"
+            );
+            assert!(mapped.is_retryable());
+        }
+    }
+
+    #[test]
+    fn rate_limited_extension_maps_to_rate_limited() {
+        let mapped = classify_download_error(ext(ExtensionErrorKind::RateLimited));
+        assert!(matches!(
+            mapped,
+            DownloadErrorKind::RateLimited {
+                retry_after_secs: None
+            }
+        ));
+        assert!(mapped.is_retryable());
+    }
+
+    #[test]
+    fn permanent_extension_kinds_are_not_retryable() {
+        for kind in [
+            ExtensionErrorKind::NotFound,
+            ExtensionErrorKind::ContentUnavailable,
+            ExtensionErrorKind::Auth,
+        ] {
+            let mapped = classify_download_error(ext(kind));
+            assert!(
+                !mapped.is_retryable(),
+                "{kind:?} should not be retryable, got {mapped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_and_invalid_input_map_to_parse_error() {
+        for kind in [ExtensionErrorKind::Parse, ExtensionErrorKind::InvalidInput] {
+            assert!(matches!(
+                classify_download_error(ext(kind)),
+                DownloadErrorKind::ParseError { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn internal_and_unknown_map_to_soft_errors() {
+        assert!(matches!(
+            classify_download_error(ext(ExtensionErrorKind::Internal)),
+            DownloadErrorKind::ExtensionError { .. }
+        ));
+        assert!(matches!(
+            classify_download_error(ext(ExtensionErrorKind::Unknown)),
+            DownloadErrorKind::Unknown { .. }
+        ));
+    }
+
+    #[test]
+    fn transient_extension_error_trips_circuit_but_not_found_does_not() {
+        let mut cb = CircuitBreaker::new(1);
+        let transient = classify_download_error(ext(ExtensionErrorKind::Updating));
+        for _ in 0..5 {
+            cb.record_failure(&transient, 0);
+        }
+        assert!(
+            cb.is_open_at(0),
+            "repeated transient extension failures should open the circuit"
+        );
+
+        let mut cb2 = CircuitBreaker::new(2);
+        let permanent = classify_download_error(ext(ExtensionErrorKind::NotFound));
+        for _ in 0..10 {
+            cb2.record_failure(&permanent, 0);
+        }
+        assert!(
+            !cb2.is_open_at(0),
+            "not-found should never count toward the circuit"
+        );
+        assert_eq!(cb2.state, CircuitState::Closed);
     }
 }
