@@ -3,14 +3,24 @@ use std::path::Path;
 fn main() {
     println!("cargo:rerun-if-changed=../migrations");
 
-    let git_sha = std::process::Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .output()
+    // Prefer an injected GIT_SHA: Docker builds exclude .git/ (and ship no git
+    // binary), so shelling out there would silently yield an empty SHA and make
+    // support bundles from the primary deployment mode unattributable.
+    println!("cargo:rerun-if-env-changed=GIT_SHA");
+    let git_sha = std::env::var("GIT_SHA")
         .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string())
-        .unwrap_or_default();
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            std::process::Command::new("git")
+                .args(["rev-parse", "--short", "HEAD"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default()
+        });
     println!("cargo:rustc-env=GIT_SHA={git_sha}");
 
     let is_release = std::env::var("PROFILE").unwrap_or_default() == "release";

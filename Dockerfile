@@ -13,6 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy the full workspace
 COPY . .
 
+# .dockerignore excludes .git/, so the build cannot derive the commit itself.
+# Pass it in (docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD))
+# or diagnostics and support bundles report an empty build id.
+ARG GIT_SHA=""
+ENV GIT_SHA=$GIT_SHA
+
 # Use SQLx offline mode — the committed .sqlx/ directory contains pre-generated
 # query metadata so the build does not need a live database.
 # Run `cargo sqlx prepare --workspace` locally to regenerate after schema changes.

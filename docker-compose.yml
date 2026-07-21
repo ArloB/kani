@@ -2,13 +2,17 @@ services:
   kani:
     build:
       context: .
-      # args:
-      #   Uncomment to include Chromium + puppeteer-core (~250 MB extra).
-      #   Required for browser-based extensions such as kani-comix.
-      #   INSTALL_BROWSER: "true"
+      args:
+        # Stamps the image with its commit; .dockerignore excludes .git/, so the
+        # build cannot derive it. Export GIT_SHA=$(git rev-parse --short HEAD).
+        GIT_SHA: "${GIT_SHA:-}"
 
-      #   Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
-      #   INSTALL_KCC: "true"
+        #   Uncomment to include Chromium + puppeteer-core (~250 MB extra).
+        #   Required for browser-based extensions such as kani-comix.
+        #   INSTALL_BROWSER: "true"
+
+        #   Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
+        #   INSTALL_KCC: "true"
     image: kani:latest
     ports:
       - "8242:8242"
