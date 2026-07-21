@@ -607,6 +607,19 @@ pub async fn auth_guard(auth: AuthSession, request: Request, next: Next) -> Resp
         return next.run(request).await;
     }
 
+    // Bearer-authenticated callers have no session, so this guard cannot judge
+    // them. Let them through and leave the decision to the AuthGuard extractor,
+    // which validates the token, its kind and its scopes. A bogus bearer is
+    // refused there, not here — it never reaches a handler either way.
+    if request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("Bearer "))
+    {
+        return next.run(request).await;
+    }
+
     match &auth.user {
         None => {
             if path.starts_with("/rest/") || path.starts_with("/api/") {

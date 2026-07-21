@@ -8,6 +8,13 @@ use kani_app::permissions::{Opds, Permission};
 async fn create_then_authenticate_succeeds() {
     let svc = test_service().await;
     let user_id = insert_user(&svc.db, "alice").await;
+    // Scopes are intersected with what the owner holds, so a token is only
+    // useful to a user who actually has the underlying permissions.
+    sqlx::query("INSERT OR IGNORE INTO user_roles (user_id, role_slug) VALUES (?, 'user')")
+        .bind(user_id)
+        .execute(&svc.db)
+        .await
+        .unwrap();
 
     let created = svc
         .create_api_token(user_id, "my reader", None)
@@ -162,6 +169,7 @@ async fn revoke_role(pool: &sqlx::SqlitePool, user_id: i64, role: &str) {
 async fn opds_tokens_keep_their_fixed_scopes_and_kind() {
     let svc = test_service().await;
     let user = insert_user(&svc.db, &format!("u{}", rand_suffix())).await;
+    grant_role(&svc.db, user.0, "user").await;
 
     let created = svc
         .create_api_token(user, "reader app", None)
@@ -260,4 +268,37 @@ async fn token_count_and_lifetime_are_bounded() {
     }
     let over = svc.create_api_token(user, "one too many", None).await;
     assert!(over.is_err(), "per-user token cap should be enforced");
+}
+
+/// opds_allowed checks only the token's scopes and never re-checks the owner, so
+/// before the intersection a reader token kept working after its owner lost
+/// library:view. Closing that is the whole point of intersecting at use time.
+#[tokio::test]
+async fn an_opds_token_stops_working_once_its_owner_loses_the_permission() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, &format!("u{}", rand_suffix())).await;
+    grant_role(&svc.db, user.0, "user").await;
+
+    let created = svc.create_api_token(user, "kindle", None).await.unwrap();
+    let before = svc
+        .authenticate_api_token(&created.raw_token)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        !before.scopes.is_empty(),
+        "precondition: the reader token works while the role holds"
+    );
+
+    revoke_role(&svc.db, user.0, "user").await;
+
+    let after = svc
+        .authenticate_api_token(&created.raw_token)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        after.scopes.is_empty(),
+        "a reader token must not outlive its owner's access to the library"
+    );
 }

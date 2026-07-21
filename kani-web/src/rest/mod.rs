@@ -136,6 +136,49 @@ where
         parts: &mut axum::http::request::Parts,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
+        // A programmatic caller presents a bearer token and has no session. An
+        // explicit bearer that fails to authenticate is refused outright rather
+        // than falling through to session auth: silently downgrading would make
+        // a broken integration look like a working one.
+        if let Some(raw) = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+        {
+            let app_state = AppState::from_ref(state);
+            let auth = app_state
+                .service
+                .authenticate_api_token(raw)
+                .await
+                .map_err(|e| AppError::InternalServerError(e.to_string()))?
+                .ok_or_else(|| AppError::Unauthorized("Invalid API token".into()))?;
+
+            // Acceptance keys on kind, never on scope contents: a reader token
+            // must not reach the REST API even if its scopes were widened.
+            if auth.kind != kani_app::service::api_tokens::TokenKind::Api {
+                return Err(AppError::Forbidden(
+                    "This token is only valid for OPDS endpoints".into(),
+                ));
+            }
+
+            if let Some(perm) = P::required_permission()
+                && !auth.scopes.contains(&perm)
+            {
+                return Err(AppError::Forbidden(format!(
+                    "Token lacks permission: {perm}"
+                )));
+            }
+
+            let backend = crate::auth::AuthBackend::new(app_state.service.db.clone());
+            let user = backend
+                .fetch_user_by_id(auth.user_id)
+                .await?
+                .ok_or_else(|| AppError::Unauthorized("Token owner no longer exists".into()))?;
+
+            return Ok(Self(user, PhantomData));
+        }
+
         let auth_session = crate::auth::AuthSession::from_request_parts(parts, state)
             .await
             .map_err(|_| AppError::InternalServerError("Session error".into()))?;

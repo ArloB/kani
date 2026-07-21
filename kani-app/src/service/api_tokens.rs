@@ -313,18 +313,14 @@ impl AppService {
         let kind = TokenKind::parse(&row.kind).unwrap_or(TokenKind::Opds);
         let declared = parse_scopes(&row.scopes);
 
-        // API tokens are intersected with what the owner holds *now*. Validating
-        // at creation is not enough: they are long-lived, so a role downgrade
+        // Both kinds are intersected with what the owner holds *now*. Validating
+        // at creation is not enough: tokens are long-lived, so a role downgrade
         // afterwards would otherwise leave a token more privileged than its
-        // owner. OPDS tokens keep their fixed scopes, which is their existing
-        // contract — changing that here would silently alter reader-app auth.
-        let scopes = match kind {
-            TokenKind::Opds => declared,
-            TokenKind::Api => {
-                let held = self.user_permissions(owner).await?;
-                declared.into_iter().filter(|p| held.contains(p)).collect()
-            }
-        };
+        // owner. This matters for OPDS too — opds_allowed checks only the
+        // token's scopes and never re-checks the owner, so without this a reader
+        // token kept working after its owner lost library:view.
+        let held = self.user_permissions(owner).await?;
+        let scopes: Vec<Permission> = declared.into_iter().filter(|p| held.contains(p)).collect();
 
         Ok(Some(ApiTokenAuth {
             user_id: owner,
