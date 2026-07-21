@@ -17,8 +17,7 @@ before 1.0 makes its compatibility promises.
 - Structured JSON logging via `KANI_LOG_FORMAT=json`, and an `x-request-id` trace ID on every
   response (echoed back when supplied) that also appears in log lines and error toasts.
 - Slow SQL statement logging, tunable with `KANI_SLOW_QUERY_THRESHOLD_MS`.
-- Prometheus metrics at `/metrics`, requiring either an API token scoped to
-  `metrics:read` or the shared `KANI_METRICS_TOKEN`.
+- Prometheus metrics at `/metrics`, requiring an API token scoped to `metrics:read`.
 - Diagnostics admin page: version, uptime, database and disk usage, jobs, extension load state,
   browser runtime, circuit breakers and proxy bandwidth.
 - Downloadable support bundle with redacted settings, schema and recent logs.

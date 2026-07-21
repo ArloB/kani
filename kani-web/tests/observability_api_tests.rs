@@ -61,7 +61,7 @@ async fn inbound_x_request_id_is_echoed_back() {
 }
 
 #[tokio::test]
-async fn metrics_endpoint_is_denied_when_no_token_is_configured() {
+async fn metrics_endpoint_is_denied_without_a_credential() {
     kani_web::metrics::describe();
     let app = kani_web::metrics::router(test_state().await);
 
@@ -71,15 +71,15 @@ async fn metrics_endpoint_is_denied_when_no_token_is_configured() {
         res.status(),
         axum::http::StatusCode::UNAUTHORIZED,
         "metrics disclose extension and upstream host names; they must not be \
-         readable until an operator configures a token"
+         readable without a credential"
     );
     let body = axum::body::to_bytes(res.into_body(), usize::MAX)
         .await
         .unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(
-        text.contains("KANI_METRICS_TOKEN") && text.contains("metrics:read"),
-        "the refusal should name both ways to enable scraping, got: {text}"
+        text.contains("metrics:read"),
+        "the refusal should say how to enable scraping, got: {text}"
     );
 }
 

@@ -95,17 +95,6 @@ pub struct MetricsState {
     app: crate::state::AppState,
 }
 
-fn token_matches(supplied: &str, expected: &str) -> bool {
-    if supplied.len() != expected.len() {
-        return false;
-    }
-    supplied
-        .bytes()
-        .zip(expected.bytes())
-        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-        == 0
-}
-
 fn bearer(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(AUTHORIZATION)
@@ -114,22 +103,14 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .filter(|v| !v.is_empty())
 }
 
-/// Unlike /health, this endpoint discloses extension names, upstream host names
-/// via the circuit gauge, version and error counts — so an unset shared token
-/// denies rather than allows.
-fn authorized_with(headers: &HeaderMap, expected: &str) -> bool {
-    if expected.is_empty() {
-        return false;
-    }
-    bearer(headers).is_some_and(|t| token_matches(t, expected))
-}
-
-/// A `metrics:read`-scoped API token is the preferred credential: it is
-/// revocable per scraper and auditable via `last_used_at`, neither of which the
-/// shared env-var token offers. `KANI_METRICS_TOKEN` stays supported because a
-/// token belongs to a user account, and monitoring should not go dark because
-/// that account was disabled.
-async fn authorized_by_scoped_token(app: &crate::state::AppState, headers: &HeaderMap) -> bool {
+/// Scraping requires an API token scoped to `metrics:read` — the sole
+/// credential. Unlike /health, this endpoint discloses extension names, upstream
+/// host names via the circuit gauge, version and error counts, so no
+/// credential means no access.
+///
+/// A scoped token is revocable per scraper and audited via `last_used_at`,
+/// neither of which a shared env-var secret offered.
+async fn authorized(app: &crate::state::AppState, headers: &HeaderMap) -> bool {
     let Some(raw) = bearer(headers) else {
         return false;
     };
@@ -153,18 +134,13 @@ pub fn sync_runtime_counters() {
 }
 
 async fn render(State(state): State<MetricsState>, headers: HeaderMap) -> impl IntoResponse {
-    let expected = std::env::var("KANI_METRICS_TOKEN").unwrap_or_default();
-    if !authorized_with(&headers, &expected)
-        && !authorized_by_scoped_token(&state.app, &headers).await
-    {
-        let body = if expected.is_empty() {
-            "metrics require a credential: mint an API token scoped to \
-             `metrics:read`, or set KANI_METRICS_TOKEN, and scrape with \
-             `Authorization: Bearer <token>`"
-        } else {
-            "unauthorized"
-        };
-        return (StatusCode::UNAUTHORIZED, body).into_response();
+    if !authorized(&state.app, &headers).await {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "metrics require an API token scoped to `metrics:read` \
+             (Settings -> Clients), sent as `Authorization: Bearer <token>`",
+        )
+            .into_response();
     }
     sync_runtime_counters();
     (StatusCode::OK, state.handle.render()).into_response()
@@ -196,44 +172,32 @@ mod tests {
         assert_eq!(collapse_unmatched_path("/wp-admin.php"), "/other");
     }
 
-    #[test]
-    fn token_matches_accepts_identical_tokens() {
-        assert!(token_matches("s3cret", "s3cret"));
-    }
-
-    #[test]
-    fn token_matches_rejects_wrong_or_truncated_tokens() {
-        assert!(!token_matches("s3cret", "s3creT"));
-        assert!(!token_matches("s3cre", "s3cret"));
-        assert!(!token_matches("", "s3cret"));
-        assert!(!token_matches("s3cretlonger", "s3cret"));
-    }
-
-    fn bearer(value: &str) -> HeaderMap {
+    fn auth_header(value: &str) -> HeaderMap {
         let mut h = HeaderMap::new();
         h.insert(AUTHORIZATION, value.parse().unwrap());
         h
     }
 
     #[test]
-    fn an_unset_token_denies_rather_than_exposing_metrics() {
-        assert!(!authorized_with(&HeaderMap::new(), ""));
+    fn no_credential_is_not_a_credential() {
         assert!(
-            !authorized_with(&bearer("Bearer anything"), ""),
-            "no configured token means no scraping, whatever the caller sends"
+            bearer(&HeaderMap::new()).is_none(),
+            "no header means no scraping; /metrics discloses extension and \
+             upstream host names"
+        );
+        assert!(
+            bearer(&auth_header("Bearer ")).is_none(),
+            "an empty bearer must not be treated as a token"
         );
     }
 
     #[test]
-    fn configured_token_requires_matching_bearer() {
-        assert!(authorized_with(&bearer("Bearer s3cret"), "s3cret"));
-    }
-
-    #[test]
-    fn configured_token_rejects_missing_or_wrong_credentials() {
-        assert!(!authorized_with(&HeaderMap::new(), "s3cret"));
-        assert!(!authorized_with(&bearer("Bearer nope"), "s3cret"));
-        assert!(!authorized_with(&bearer("s3cret"), "s3cret"));
-        assert!(!authorized_with(&bearer("Basic s3cret"), "s3cret"));
+    fn only_a_bearer_is_read_as_a_token() {
+        assert_eq!(bearer(&auth_header("Bearer kani_abc")), Some("kani_abc"));
+        assert!(bearer(&auth_header("Basic kani_abc")).is_none());
+        assert!(
+            bearer(&auth_header("kani_abc")).is_none(),
+            "a bare value is not a bearer credential"
+        );
     }
 }
