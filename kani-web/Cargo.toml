@@ -9,6 +9,7 @@ unwrap_used = { level = "deny", priority = 1 }
 
 [features]
 test-util = ["kani-app/test-util"]
+error-reporting = ["dep:sentry"]
 
 [dependencies]
 serde.workspace = true
@@ -68,6 +69,7 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 semver = "1"
 axum-prometheus = "0.10.0"
 metrics = "0.24"
+sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "tracing", "reqwest", "rustls"], optional = true }
 
 [dev-dependencies]
 tempfile = "3.27.0"

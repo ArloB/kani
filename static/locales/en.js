@@ -1361,6 +1361,8 @@ export default {
   'settings.section.server.label': 'Lifecycle',
   'settings.advanced.update_check.label': 'Check for updates',
   'settings.advanced.update_check.desc': 'Periodically check GitHub for a newer Kani release and show a banner when one is available.',
+  'settings.advanced.error_reporting.label': 'Send error reports',
+  'settings.advanced.error_reporting.desc': 'Send ERROR-level events (message, stack trace and Kani version) to the configured reporting endpoint. Never includes library contents, file paths of your manga, account details or credentials. Requires KANI_GLITCHTIP_DSN to be set; has no effect otherwise.',
   'update_banner.label': 'Update available',
   'update_banner.message': 'Kani {version} has been released.',
   'update_banner.action': 'View release',

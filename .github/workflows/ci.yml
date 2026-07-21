@@ -83,6 +83,11 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --no-deps -- -D warnings
 
+      - name: Check optional error-reporting feature
+        run: cargo check --locked -p kani-web --features error-reporting
+        env:
+          SQLX_OFFLINE: "true"
+
   test:
     name: Test
     needs: changes

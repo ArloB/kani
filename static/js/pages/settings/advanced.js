@@ -162,6 +162,7 @@ export function AdvancedSection({ settings, bootId }) {
     browser_idle_timeout_s: settings?.browser_idle_timeout_s ?? null,
     http_request_logging: settings?.http_request_logging ?? false,
     update_check_enabled: settings?.update_check_enabled ?? true,
+    error_reporting_enabled: settings?.error_reporting_enabled ?? false,
     browser_debug_logging: settings?.browser_debug_logging ?? false,
     registration_enabled: settings?.registration_enabled ?? false,
   };
@@ -297,6 +298,12 @@ export function AdvancedSection({ settings, bootId }) {
         description=${t('settings.advanced.update_check.desc')}
         checked=${form.update_check_enabled}
         onChange=${(v) => set('update_check_enabled', v)}
+      />
+      <${ToggleRow}
+        label=${t('settings.advanced.error_reporting.label')}
+        description=${t('settings.advanced.error_reporting.desc')}
+        checked=${form.error_reporting_enabled}
+        onChange=${(v) => set('error_reporting_enabled', v)}
       />
       <${ToggleRow}
         label=${t('settings.advanced.browser_logging.label')}
