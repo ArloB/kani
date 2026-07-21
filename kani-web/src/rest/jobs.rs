@@ -48,33 +48,6 @@ pub(crate) async fn list_jobs(
     Ok(Json(page))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::parse_statuses;
-
-    #[test]
-    fn parse_statuses_splits_comma_list() {
-        assert_eq!(
-            parse_statuses(Some("pending,running")),
-            vec!["pending".to_string(), "running".to_string()]
-        );
-    }
-
-    #[test]
-    fn parse_statuses_trims_and_drops_empties() {
-        assert_eq!(
-            parse_statuses(Some("failed, ,cancelled,")),
-            vec!["failed".to_string(), "cancelled".to_string()]
-        );
-    }
-
-    #[test]
-    fn parse_statuses_none_is_empty() {
-        assert!(parse_statuses(None).is_empty());
-        assert!(parse_statuses(Some("")).is_empty());
-    }
-}
-
 pub(crate) async fn get_job(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,
@@ -120,4 +93,31 @@ pub(crate) async fn resume_job(
         Json(json!({ "error": "resume_not_supported" })),
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_statuses;
+
+    #[test]
+    fn parse_statuses_splits_comma_list() {
+        assert_eq!(
+            parse_statuses(Some("pending,running")),
+            vec!["pending".to_string(), "running".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_statuses_trims_and_drops_empties() {
+        assert_eq!(
+            parse_statuses(Some("failed, ,cancelled,")),
+            vec!["failed".to_string(), "cancelled".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_statuses_none_is_empty() {
+        assert!(parse_statuses(None).is_empty());
+        assert!(parse_statuses(Some("")).is_empty());
+    }
 }

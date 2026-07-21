@@ -20,12 +20,15 @@ const LOCALE_FILE = join(ROOT, 'static', 'locales', 'en.js');
 /**
  * @param {string} dir
  */
+const SKIP_DIRS = new Set(['dist', 'vendor']);
+
 function walk(dir) {
   /** @type {string[]} */
   const files = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
+      if (SKIP_DIRS.has(entry)) continue;
       files.push(...walk(full));
     } else if (extname(full) === '.js') {
       files.push(full);
