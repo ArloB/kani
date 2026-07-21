@@ -387,22 +387,17 @@ export function ClientsSection() {
         }}
       />
 
-      <${SettingsGroup} label=${t('clients.readers.group')}>
+      <${SettingsGroup} label=${t('clients.endpoints.group')}>
         <${CopyableRow}
           label=${t('clients.opds.url.label')}
           description=${t('clients.opds.url.desc')}
           value=${opdsUrl}
         />
-        <p class="text-xs text-text-muted px-4 pb-1">${t('clients.apps.note')}</p>
-      <//>
-
-      <${SettingsGroup} label=${t('clients.integrations.group')}>
         <${CopyableRow}
           label=${t('clients.api.url.label')}
           description=${t('clients.api.url.desc')}
           value=${apiUrl}
         />
-        <p class="text-xs text-text-muted px-4 pb-1">${t('clients.api.note')}</p>
       <//>
 
       <${Modal}
@@ -419,7 +414,7 @@ export function ClientsSection() {
         (() => {
           const isApi = reveal.kind === 'api';
           const snippet = isApi
-            ? `curl -H "Authorization: Bearer ${reveal.raw_token}" \\\n  "${exampleUrl(reveal.scopes)}"`
+            ? `curl -H "Authorization: Bearer ${reveal.raw_token}" \\\n  "${exampleUrl(reveal.scopes)}"` // i18n-ignore — shell line continuation
             : opdsUrl;
           return html`
             <div class="flex flex-col gap-4">

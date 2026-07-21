@@ -1428,13 +1428,10 @@ export default {
   'clients.add.label': 'Add',
   'clients.add.desc': 'Mint a credential for a reading app or an integration.',
   'clients.add_btn': '+ New token',
-  'clients.readers.group': 'Reader apps (OPDS)',
-  'clients.integrations.group': 'Integrations (REST API)',
+  'clients.endpoints.group': 'Endpoints',
   'clients.api.url.label': 'API base URL',
   'clients.api.url.desc':
-    'Send the token as an Authorization: Bearer header with every request.',
-  'clients.api.note':
-    'Requests are limited to the permissions granted to the token, further narrowed to whatever its owner still holds. Writes accept an Idempotency-Key header so a retried request is not applied twice, and list endpoints support ETag / If-None-Match.',
+    "Send an integration token as an Authorization: Bearer header. Requests are limited to the token's permissions, narrowed to whatever its owner still holds; writes accept an Idempotency-Key header and list endpoints support ETag / If-None-Match.",
   'clients.scopes.count': '{n} of {total} selected',
   'clients.token.label': 'Token',
   'clients.token.reveal.try': 'Try it',
@@ -1454,7 +1451,8 @@ export default {
   'clients.token.reveal.title': 'Your new token',
   'clients.token.reveal.warning': "Copy this token now — you won't be able to see it again.",
   'clients.opds.url.label': 'OPDS catalogue URL',
-  'clients.opds.url.desc': 'Point your reading app at this catalogue URL, then authenticate with a reader-app token.',
+  'clients.opds.url.desc':
+    'Point a PSE-capable reader (Panels, Chunky, KyBook, Cantook, KOReader) here and authenticate with a reader-app token — as a Bearer credential, or as the password with any username for Basic auth.',
   'clients.kind.label': 'Token type',
   'clients.kind.opds': 'Reader app (OPDS)',
   'clients.kind.api': 'Integration (REST API)',
@@ -1471,7 +1469,6 @@ export default {
   'clients.scopes.stale.desc':
     'The struck-through permissions are no longer held by your account, so this token no longer has them. Requests relying on them will be refused.',
   'clients.api.usage.label': 'Send as a bearer credential',
-  'clients.apps.note': 'Works with PSE-capable readers (Panels, Chunky, KyBook, Cantook, KOReader). Point the app at the OPDS URL above and use the token as a Bearer credential, or paste it as the password with any username for Basic auth.',
 
   'settings.account.password.group': 'Password',
   'settings.account.password.btn': 'Change password',
