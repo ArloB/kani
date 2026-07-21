@@ -56,6 +56,7 @@ fn advanced_settings() -> AdvancedSettings {
         browser_max_memory_mb: 512,
         browser_max_instances: 2,
         browser_idle_timeout_s: 300,
+        update_check_enabled: true,
     }
 }
 
@@ -196,5 +197,26 @@ async fn update_settings_does_not_affect_unrelated_fields() {
     assert_eq!(
         s.concurrent_page_downloads, 8,
         "download setting should be updated"
+    );
+}
+
+#[tokio::test]
+async fn update_check_enabled_round_trips_and_defaults_on() {
+    let svc = test_service().await;
+
+    assert!(
+        svc.get_settings().await.update_check_enabled,
+        "update checking should be on by default"
+    );
+
+    let mut advanced = advanced_settings();
+    advanced.update_check_enabled = false;
+    svc.update_settings(SettingsUpdate::Advanced(advanced), UserId(1))
+        .await
+        .unwrap();
+
+    assert!(
+        !svc.get_settings().await.update_check_enabled,
+        "the toggle must persist through update_settings"
     );
 }

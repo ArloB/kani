@@ -9,6 +9,7 @@ import { getBootId, logout, getFeatures, getSystemInfo, getChangelog, getCurrent
 import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs, iconRefresh, iconEllipsisHorizontal } from './icons.js';
 import { mountNotificationsPanel } from './components/notifications-panel.js';
 import { mountAppHeader } from './components/app-header.js';
+import { maybeShowUpdateBanner } from './components/update-banner.js';
 import { initTooltip } from './components/tooltip.js';
 import { showAlert } from './components/modal.js';
 import { showWhatsNew } from './components/whats-new.js';
@@ -56,6 +57,7 @@ import { openCommandPalette } from './components/command-palette.js';
     const { notificationsMount } = mountAppHeader(appEl);
     // Async: show security banner if admin and TOTP not enabled on public instance.
     _maybeShowSecurityBanner(appEl);
+    maybeShowUpdateBanner(appEl);
     mountNotificationsPanel(notificationsMount);
 
     const pageContent = document.createElement('div');

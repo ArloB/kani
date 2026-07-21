@@ -27,6 +27,10 @@ fn build_info() -> BuildInfo {
     })
 }
 
+pub fn current_version() -> String {
+    build_info().version
+}
+
 pub fn uptime_secs() -> u64 {
     START.elapsed().as_secs()
 }

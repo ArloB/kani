@@ -17,6 +17,7 @@ pub mod storage;
 pub mod thumbnail;
 pub mod tracker_sync;
 pub mod trash_purge;
+pub mod update_check;
 pub mod webhook_delivery;
 
 pub use error::{DownloadErrorKind, JobError, RetryPolicy};

@@ -242,6 +242,10 @@ export async function getSourcesHealth() {
   return _req('GET', '/sources/health');
 }
 
+export async function getSystemUpdate() {
+  return _req('GET', '/system/update');
+}
+
 export async function getDiagnostics() {
   return _req('GET', '/admin/diagnostics');
 }

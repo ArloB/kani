@@ -17,6 +17,7 @@ pub enum RecurringJobKind {
     ScheduledBackup,
     TrackerSync,
     BrowserProcessReap,
+    UpdateCheck,
 }
 
 impl RecurringJobKind {
@@ -32,6 +33,7 @@ impl RecurringJobKind {
             Self::ScheduledBackup => "scheduled_backup",
             Self::TrackerSync => "tracker_sync",
             Self::BrowserProcessReap => "browser_process_reap",
+            Self::UpdateCheck => "update_check",
         }
     }
 
@@ -47,6 +49,7 @@ impl RecurringJobKind {
             Self::ScheduledBackup => 60 * 60,
             Self::TrackerSync => 60 * 60,
             Self::BrowserProcessReap => 5 * 60,
+            Self::UpdateCheck => 24 * 60 * 60,
         }
     }
 
@@ -62,6 +65,7 @@ impl RecurringJobKind {
             Self::ScheduledBackup,
             Self::TrackerSync,
             Self::BrowserProcessReap,
+            Self::UpdateCheck,
         ]
     }
 
@@ -291,6 +295,11 @@ async fn submit_kind_job(svc: &AppService, kind: RecurringJobKind) -> Result<cra
                 .submit(crate::jobs::browser_reap::BrowserReapJob::new())
                 .await
         }
+        RecurringJobKind::UpdateCheck => {
+            svc.job_manager
+                .submit(crate::jobs::update_check::UpdateCheckJob::new())
+                .await
+        }
     }
 }
 
@@ -349,6 +358,19 @@ mod tests {
         assert_eq!(
             RecurringJobKind::BrowserProcessReap.as_str(),
             "browser_process_reap"
+        );
+    }
+
+    #[test]
+    fn update_check_is_registered_and_runs_daily() {
+        assert!(RecurringJobKind::all().contains(&RecurringJobKind::UpdateCheck));
+        assert_eq!(
+            RecurringJobKind::parse("update_check"),
+            Some(RecurringJobKind::UpdateCheck)
+        );
+        assert_eq!(
+            RecurringJobKind::UpdateCheck.default_interval_secs(),
+            24 * 60 * 60
         );
     }
 }

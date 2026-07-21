@@ -5,6 +5,7 @@ pub fn router() -> Router<AppState> {
         .route("/system/info", get(system_info))
         .route("/system/changelog", get(system_changelog))
         .route("/system/first-run-complete", post(complete_first_run))
+        .route("/system/update", get(system_update))
 }
 
 /// The changelog is compiled in rather than read from disk: it ships with the
@@ -126,4 +127,28 @@ pub(crate) async fn complete_first_run(
         .id;
     state.mark_first_run_complete(user_id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    get, path = "/rest/system/update",
+    responses(
+        (status = 200, description = "Current version and any available update"),
+        (status = 401, description = "Not authenticated"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn system_update(
+    _: AuthGuard<crate::permissions::guards::Authenticated>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let current = kani_app::service::diagnostics::current_version();
+    let latest = state.latest_version.read().await.clone();
+
+    Ok(Json(json!({
+        "current": current,
+        "latest": latest.as_ref().map(|u| u.latest.clone()),
+        "url": latest.as_ref().map(|u| u.url.clone()),
+        "update_available": latest.is_some(),
+    })))
 }

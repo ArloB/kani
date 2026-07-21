@@ -54,6 +54,7 @@ impl AppService {
             trash_purge_interval_hours: s.trash_purge_interval_hours,
             browser_max_memory_mb: s.browser_max_memory_mb,
             browser_max_instances: s.browser_max_instances,
+            update_check_enabled: s.update_check_enabled,
             browser_idle_timeout_s: s.browser_idle_timeout_s,
         }
     }
@@ -195,7 +196,8 @@ impl AppService {
                     "UPDATE settings SET flaresolverr_url=?, library_path=?, wasm_storage_path=?, \
                      max_wasm_instances=?, http_request_logging=?, browser_debug_logging=?, \
                      registration_enabled=?, cover_max_dimension=?, browser_max_memory_mb=?, \
-                     browser_max_instances=?, browser_idle_timeout_s=? WHERE id='singleton'",
+                     browser_max_instances=?, browser_idle_timeout_s=?, \
+                     update_check_enabled=? WHERE id='singleton'",
                     s.flaresolverr_url,
                     s.library_path,
                     s.wasm_storage_path,
@@ -207,6 +209,7 @@ impl AppService {
                     s.browser_max_memory_mb,
                     s.browser_max_instances,
                     s.browser_idle_timeout_s,
+                    s.update_check_enabled,
                 )
                 .execute(&self.db)
                 .await?;
@@ -223,6 +226,7 @@ impl AppService {
                     settings.browser_max_memory_mb = s.browser_max_memory_mb;
                     settings.browser_max_instances = s.browser_max_instances;
                     settings.browser_idle_timeout_s = s.browser_idle_timeout_s;
+                    settings.update_check_enabled = s.update_check_enabled;
                 }
                 kani_core::v8_process::set_v8_debug_logging(s.browser_debug_logging);
                 kani_core::v8_process::set_v8_config(kani_core::v8_process::V8Config {

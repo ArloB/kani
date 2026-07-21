@@ -212,3 +212,38 @@ async fn support_bundle_requires_authentication() {
 
     assert_eq!(res.status(), axum::http::StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn system_update_reports_current_version_for_authed_user() {
+    let state = test_state().await;
+    let (username, password) = common::create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, username, password).await;
+
+    let res = app
+        .oneshot(common::authed_get("/rest/system/update", &cookie))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), axum::http::StatusCode::OK);
+    let body = common::body_json(res).await;
+    assert_eq!(
+        body["current"].as_str().unwrap(),
+        env!("CARGO_PKG_VERSION"),
+        "should report the running version"
+    );
+    assert_eq!(
+        body["update_available"], false,
+        "no check has run, so no update should be claimed"
+    );
+}
+
+#[tokio::test]
+async fn system_update_requires_authentication() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+
+    let res = app.oneshot(get_req("/rest/system/update")).await.unwrap();
+
+    assert_eq!(res.status(), axum::http::StatusCode::UNAUTHORIZED);
+}

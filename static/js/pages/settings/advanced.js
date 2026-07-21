@@ -161,6 +161,7 @@ export function AdvancedSection({ settings, bootId }) {
     browser_max_instances: settings?.browser_max_instances ?? null,
     browser_idle_timeout_s: settings?.browser_idle_timeout_s ?? null,
     http_request_logging: settings?.http_request_logging ?? false,
+    update_check_enabled: settings?.update_check_enabled ?? true,
     browser_debug_logging: settings?.browser_debug_logging ?? false,
     registration_enabled: settings?.registration_enabled ?? false,
   };
@@ -290,6 +291,12 @@ export function AdvancedSection({ settings, bootId }) {
         description=${t('settings.advanced.http_logging.desc')}
         checked=${form.http_request_logging}
         onChange=${(v) => set('http_request_logging', v)}
+      />
+      <${ToggleRow}
+        label=${t('settings.advanced.update_check.label')}
+        description=${t('settings.advanced.update_check.desc')}
+        checked=${form.update_check_enabled}
+        onChange=${(v) => set('update_check_enabled', v)}
       />
       <${ToggleRow}
         label=${t('settings.advanced.browser_logging.label')}
