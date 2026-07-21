@@ -260,7 +260,7 @@ async fn main() {
         .with_state(state.clone());
     let (prometheus_layer, _) = kani_web::metrics::prometheus();
     kani_web::metrics::describe();
-    let metrics_router = kani_web::metrics::router();
+    let metrics_router = kani_web::metrics::router(state.clone());
 
     {
         let db = state.db.clone();

@@ -80,10 +80,19 @@ pub fn describe() {
     sync_runtime_counters();
 }
 
-pub fn router() -> Router {
+pub fn router(state: crate::state::AppState) -> Router {
     Router::new()
         .route("/metrics", get(render))
-        .with_state(prometheus().1.clone())
+        .with_state(MetricsState {
+            handle: prometheus().1.clone(),
+            app: state,
+        })
+}
+
+#[derive(Clone)]
+pub struct MetricsState {
+    handle: PrometheusHandle,
+    app: crate::state::AppState,
 }
 
 fn token_matches(supplied: &str, expected: &str) -> bool {
@@ -97,18 +106,44 @@ fn token_matches(supplied: &str, expected: &str) -> bool {
         == 0
 }
 
-/// Scraping requires KANI_METRICS_TOKEN. Unlike /health, this endpoint discloses
-/// extension names, upstream host names via the circuit gauge, version and error
-/// counts — so an unset token denies rather than allows.
-fn authorized_with(headers: &HeaderMap, expected: &str) -> bool {
-    if expected.is_empty() {
-        return false;
-    }
+fn bearer(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .is_some_and(|t| token_matches(t, expected))
+        .filter(|v| !v.is_empty())
+}
+
+/// Unlike /health, this endpoint discloses extension names, upstream host names
+/// via the circuit gauge, version and error counts — so an unset shared token
+/// denies rather than allows.
+fn authorized_with(headers: &HeaderMap, expected: &str) -> bool {
+    if expected.is_empty() {
+        return false;
+    }
+    bearer(headers).is_some_and(|t| token_matches(t, expected))
+}
+
+/// A `metrics:read`-scoped API token is the preferred credential: it is
+/// revocable per scraper and auditable via `last_used_at`, neither of which the
+/// shared env-var token offers. `KANI_METRICS_TOKEN` stays supported because a
+/// token belongs to a user account, and monitoring should not go dark because
+/// that account was disabled.
+async fn authorized_by_scoped_token(app: &crate::state::AppState, headers: &HeaderMap) -> bool {
+    let Some(raw) = bearer(headers) else {
+        return false;
+    };
+    match app.service.authenticate_api_token(raw).await {
+        Ok(Some(auth)) => {
+            auth.kind == kani_app::service::api_tokens::TokenKind::Api
+                && auth
+                    .scopes
+                    .contains(&kani_app::permissions::Permission::Metrics(
+                        kani_app::permissions::Metrics::Read,
+                    ))
+        }
+        _ => false,
+    }
 }
 
 pub fn sync_runtime_counters() {
@@ -117,11 +152,14 @@ pub fn sync_runtime_counters() {
     metrics::counter!("kani_v8_process_restarts_total").absolute(stats.restarts);
 }
 
-async fn render(State(handle): State<PrometheusHandle>, headers: HeaderMap) -> impl IntoResponse {
+async fn render(State(state): State<MetricsState>, headers: HeaderMap) -> impl IntoResponse {
     let expected = std::env::var("KANI_METRICS_TOKEN").unwrap_or_default();
-    if !authorized_with(&headers, &expected) {
+    if !authorized_with(&headers, &expected)
+        && !authorized_by_scoped_token(&state.app, &headers).await
+    {
         let body = if expected.is_empty() {
-            "metrics are disabled: set KANI_METRICS_TOKEN and scrape with \
+            "metrics require a credential: mint an API token scoped to \
+             `metrics:read`, or set KANI_METRICS_TOKEN, and scrape with \
              `Authorization: Bearer <token>`"
         } else {
             "unauthorized"
@@ -129,7 +167,7 @@ async fn render(State(handle): State<PrometheusHandle>, headers: HeaderMap) -> i
         return (StatusCode::UNAUTHORIZED, body).into_response();
     }
     sync_runtime_counters();
-    (StatusCode::OK, handle.render()).into_response()
+    (StatusCode::OK, state.handle.render()).into_response()
 }
 
 #[cfg(test)]

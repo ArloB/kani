@@ -63,7 +63,7 @@ async fn inbound_x_request_id_is_echoed_back() {
 #[tokio::test]
 async fn metrics_endpoint_is_denied_when_no_token_is_configured() {
     kani_web::metrics::describe();
-    let app = kani_web::metrics::router();
+    let app = kani_web::metrics::router(test_state().await);
 
     let res = app.oneshot(get_req("/metrics")).await.unwrap();
 
@@ -78,8 +78,142 @@ async fn metrics_endpoint_is_denied_when_no_token_is_configured() {
         .unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(
-        text.contains("KANI_METRICS_TOKEN"),
-        "the refusal should say how to enable scraping, got: {text}"
+        text.contains("KANI_METRICS_TOKEN") && text.contains("metrics:read"),
+        "the refusal should name both ways to enable scraping, got: {text}"
+    );
+}
+
+#[tokio::test]
+async fn a_metrics_scoped_api_token_can_scrape() {
+    use kani_app::service::api_tokens::TokenKind;
+
+    let state = test_state().await;
+    common::create_admin(&state).await;
+    let uid: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'admin'")
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    let scope: kani_app::permissions::Permission = "metrics:read".parse().unwrap();
+    let created = state
+        .service
+        .create_token(
+            kani_app::ids::UserId(uid),
+            "scraper",
+            None,
+            TokenKind::Api,
+            Some(&[scope]),
+        )
+        .await
+        .unwrap();
+
+    kani_web::metrics::describe();
+    let app = kani_web::metrics::router(state);
+    let res = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/metrics")
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", created.raw_token),
+                )
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        axum::http::StatusCode::OK,
+        "a revocable per-scraper credential must work without the shared env token"
+    );
+}
+
+#[tokio::test]
+async fn an_api_token_without_the_metrics_scope_cannot_scrape() {
+    use kani_app::service::api_tokens::TokenKind;
+
+    let state = test_state().await;
+    common::create_admin(&state).await;
+    let uid: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'admin'")
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    let scope: kani_app::permissions::Permission = "library:view".parse().unwrap();
+    let created = state
+        .service
+        .create_token(
+            kani_app::ids::UserId(uid),
+            "bot",
+            None,
+            TokenKind::Api,
+            Some(&[scope]),
+        )
+        .await
+        .unwrap();
+
+    kani_web::metrics::describe();
+    let app = kani_web::metrics::router(state);
+    let res = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/metrics")
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", created.raw_token),
+                )
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        axum::http::StatusCode::UNAUTHORIZED,
+        "any API token must not be a metrics credential; the scope is the gate"
+    );
+}
+
+#[tokio::test]
+async fn an_opds_token_cannot_scrape_metrics() {
+    use kani_app::service::api_tokens::TokenKind;
+
+    let state = test_state().await;
+    common::create_admin(&state).await;
+    let uid: i64 = sqlx::query_scalar("SELECT id FROM users WHERE username = 'admin'")
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    let created = state
+        .service
+        .create_token(
+            kani_app::ids::UserId(uid),
+            "kindle",
+            None,
+            TokenKind::Opds,
+            None,
+        )
+        .await
+        .unwrap();
+
+    kani_web::metrics::describe();
+    let app = kani_web::metrics::router(state);
+    let res = app
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/metrics")
+                .header(
+                    axum::http::header::AUTHORIZATION,
+                    format!("Bearer {}", created.raw_token),
+                )
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        axum::http::StatusCode::UNAUTHORIZED,
+        "a reader-app credential must never reach an operator endpoint"
     );
 }
 

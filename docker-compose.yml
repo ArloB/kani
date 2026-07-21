@@ -52,6 +52,8 @@ services:
       # Prometheus metrics at /metrics are disabled until a token is set, because
       # they disclose extension names, upstream hosts and error counts. Set this
       # and scrape with "Authorization: Bearer <token>".
+      # Shared fallback for /metrics. Prefer an API token scoped to
+      # metrics:read (Settings -> Clients): revocable per scraper and audited.
       # KANI_METRICS_TOKEN: "change-me"
 
       # Set to "false" to disable browser-based extension features at runtime,
