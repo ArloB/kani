@@ -1307,6 +1307,7 @@ export default {
   'accounts.modal.role.created': 'Role "{slug}" created.',
   'accounts.modal.role.error.slug': 'Slug is required.',
 
+  'common.done': 'Done',
   'common.copy': 'Copy',
   'common.copied': 'Copied!',
   'common.saved': 'Saved.',
@@ -1435,6 +1436,7 @@ export default {
   'clients.api.note':
     'Requests are limited to the permissions granted to the token, further narrowed to whatever its owner still holds. Writes accept an Idempotency-Key header so a retried request is not applied twice, and list endpoints support ETag / If-None-Match.',
   'clients.scopes.count': '{n} of {total} selected',
+  'clients.token.label': 'Token',
   'clients.token.reveal.try': 'Try it',
   'clients.expiry.label': 'Expires',
   'clients.expiry.never': 'Never',
@@ -1449,8 +1451,6 @@ export default {
   'clients.expires': 'Expires',
   'clients.empty': 'No API tokens yet',
   'clients.empty.subtitle': 'Create a token to connect a reading app or an integration.',
-  'clients.copy': 'Copy',
-  'clients.copied': 'Token copied to clipboard',
   'clients.token.reveal.title': 'Your new token',
   'clients.token.reveal.warning': "Copy this token now — you won't be able to see it again.",
   'clients.opds.url.label': 'OPDS catalogue URL',

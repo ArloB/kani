@@ -62,6 +62,39 @@ function exampleUrl(scopes) {
 }
 
 /**
+ * A labelled, read-only field with its copy affordance in a fixed place.
+ * Both fields in the reveal modal use it so their labels, edges and buttons
+ * line up; a single-line value and a multi-line snippet only differ by `rows`.
+ * @param {{ label: string, value: string, rows?: number }} props
+ */
+function RevealField({ label, value, rows = 1 }) {
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast(t('common.copied'), { type: 'success' });
+    } catch {
+      /* clipboard blocked — the field is selectable as a fallback */
+    }
+  };
+  return html`
+    <div class="flex flex-col gap-1.5">
+      <div class="flex items-center justify-between gap-2 min-h-7">
+        <span class="text-sm font-medium text-text">${label}</span>
+        <button type="button" class="btn-ghost btn-sm" onClick=${copy}>${t('common.copy')}</button>
+      </div>
+      <textarea
+        readonly
+        rows=${String(rows)}
+        class="input w-full text-sm font-mono resize-none"
+        onClick=${(/** @type {Event} */ e) =>
+          /** @type {HTMLTextAreaElement} */ (e.target).select()}
+        value=${value}
+      ></textarea>
+    </div>
+  `;
+}
+
+/**
  * @param {{ label: string, value: string, description?: any }} props
  */
 function CopyableRow({ label, value, description }) {
@@ -376,73 +409,34 @@ export function ClientsSection() {
         open=${!!reveal}
         onClose=${() => setReveal(null)}
         title=${t('clients.token.reveal.title')}
+        footer=${html`
+          <button type="button" class="btn-secondary btn-sm" onClick=${() => setReveal(null)}>
+            ${t('common.done')}
+          </button>
+        `}
       >
         ${reveal &&
-        html`
-          <div class="flex flex-col gap-3">
-            <p class="text-sm text-warn">${t('clients.token.reveal.warning')}</p>
-            <div class="flex gap-2">
-              <input
-                readonly
-                class="input text-sm font-mono flex-1"
+        (() => {
+          const isApi = reveal.kind === 'api';
+          const snippet = isApi
+            ? `curl -H "Authorization: Bearer ${reveal.raw_token}" \\\n  "${exampleUrl(reveal.scopes)}"`
+            : opdsUrl;
+          return html`
+            <div class="flex flex-col gap-4">
+              <p class="text-sm text-warn">${t('clients.token.reveal.warning')}</p>
+              <${RevealField}
+                label=${t('clients.token.label')}
                 value=${reveal.raw_token}
-                onClick=${(/** @type {Event} */ e) =>
-                  /** @type {HTMLInputElement} */ (e.target).select()}
+                rows=${2}
               />
-              <button
-                type="button"
-                class="btn-secondary btn-sm"
-                onClick=${async () => {
-                  try {
-                    await navigator.clipboard.writeText(reveal.raw_token);
-                    showToast(t('clients.copied'), { type: 'success' });
-                  } catch {
-                    /* clipboard blocked — the field is selectable as a fallback */
-                  }
-                }}
-              >
-                ${t('clients.copy')}
-              </button>
+              <${RevealField}
+                label=${isApi ? t('clients.token.reveal.try') : t('clients.opds.url.label')}
+                value=${snippet}
+                rows=${isApi ? 4 : 2}
+              />
             </div>
-            ${(() => {
-              const isApi = reveal.kind === 'api';
-              const snippet = isApi
-                ? `curl -H "Authorization: Bearer ${reveal.raw_token}" \\\n  "${exampleUrl(reveal.scopes)}"`
-                : opdsUrl;
-              return html`
-                <div class="flex flex-col gap-1">
-                  <div class="flex items-center justify-between gap-2">
-                    <span class="text-xs text-text-muted">
-                      ${isApi ? t('clients.token.reveal.try') : t('clients.opds.url.label')}
-                    </span>
-                    <button
-                      type="button"
-                      class="btn-ghost btn-sm"
-                      onClick=${async () => {
-                        try {
-                          await navigator.clipboard.writeText(snippet);
-                          showToast(t('common.copied'), { type: 'success' });
-                        } catch {
-                          /* clipboard blocked — the field is selectable as a fallback */
-                        }
-                      }}
-                    >
-                      ${t('common.copy')}
-                    </button>
-                  </div>
-                  <textarea
-                    readonly
-                    rows=${isApi ? '4' : '1'}
-                    class="input text-sm font-mono resize-none w-full"
-                    onClick=${(/** @type {Event} */ e) =>
-                      /** @type {HTMLTextAreaElement} */ (e.target).select()}
-                    value=${snippet}
-                  ></textarea>
-                </div>
-              `;
-            })()}
-          </div>
-        `}
+          `;
+        })()}
       <//>
     </div>
   `;
