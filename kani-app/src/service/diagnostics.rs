@@ -99,6 +99,20 @@ impl AppService {
         metrics::gauge!("kani_downloads_active").set(active_downloads as f64);
         metrics::gauge!("kani_jobs_running").set(jobs_running as f64);
 
+        for circuit in self.smart_client.list_circuits() {
+            if let Some(host) = circuit.get("host").and_then(|h| h.as_str()) {
+                let is_open = circuit
+                    .get("is_open")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                metrics::gauge!("kani_circuit_open", "host" => host.to_string()).set(if is_open {
+                    1.0
+                } else {
+                    0.0
+                });
+            }
+        }
+
         let rows = sqlx::query!("SELECT id, name, version, enabled FROM sources ORDER BY name")
             .fetch_all(&self.db_read)
             .await?;

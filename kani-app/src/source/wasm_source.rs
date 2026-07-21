@@ -66,6 +66,10 @@ impl WasmSource {
         }
     }
 
+    pub fn extension_id(&self) -> &str {
+        self.ext_cache_namespace.trim_end_matches(':')
+    }
+
     pub fn update_preferences(&self, prefs: std::collections::HashMap<String, String>) {
         if let Ok(mut lock) = self.preferences.write() {
             *lock = prefs;

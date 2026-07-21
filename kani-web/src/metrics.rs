@@ -29,6 +29,22 @@ pub fn describe() {
         "kani_downloads_active",
         "Chapter downloads currently in flight"
     );
+    metrics::describe_counter!(
+        "kani_wasm_calls_total",
+        "Extension backend calls, by extension and method"
+    );
+    metrics::describe_histogram!(
+        "kani_wasm_call_duration_seconds",
+        "Extension backend call latency, by extension and method"
+    );
+    metrics::describe_counter!(
+        "kani_wasm_call_errors_total",
+        "Extension backend calls that returned an error"
+    );
+    metrics::describe_gauge!(
+        "kani_circuit_open",
+        "1 when the per-host circuit breaker is open, 0 otherwise"
+    );
     metrics::describe_counter!("kani_v8_calls_total", "Total calls into the V8 subprocess");
     metrics::describe_counter!(
         "kani_v8_process_restarts_total",

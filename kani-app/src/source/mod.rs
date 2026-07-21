@@ -46,11 +46,24 @@ impl SourceBackend {
         }
     }
 
-    pub async fn get_metadata(&self) -> kani_core::error::Result<String> {
+    pub fn extension_id(&self) -> &str {
         match self {
-            Self::Wasm(w) => w.lease_instance().await?.get_metadata().await,
-            Self::Yaml(y) => y.get_metadata().await,
+            Self::Wasm(w) => w.extension_id(),
+            Self::Yaml(y) => y.config.id.as_str(),
         }
+    }
+
+    pub async fn get_metadata(&self) -> kani_core::error::Result<String> {
+        let start = std::time::Instant::now();
+        let result = async {
+            match self {
+                Self::Wasm(w) => w.lease_instance().await?.get_metadata().await,
+                Self::Yaml(y) => y.get_metadata().await,
+            }
+        }
+        .await;
+        record_call(self.extension_id(), "get_metadata", start, &result);
+        result
     }
 
     pub async fn get_popular_manga(
@@ -59,15 +72,21 @@ impl SourceBackend {
         page_size: i32,
         filters: &[kani_shared::types::ActiveFilter],
     ) -> kani_core::error::Result<kani_core::wasm::kani::extension::types::MangaList> {
-        match self {
-            Self::Wasm(w) => {
-                w.lease_instance()
-                    .await?
-                    .get_popular_manga(page, page_size, filters)
-                    .await
+        let start = std::time::Instant::now();
+        let result = async {
+            match self {
+                Self::Wasm(w) => {
+                    w.lease_instance()
+                        .await?
+                        .get_popular_manga(page, page_size, filters)
+                        .await
+                }
+                Self::Yaml(y) => y.get_popular_manga(page, page_size, filters).await,
             }
-            Self::Yaml(y) => y.get_popular_manga(page, page_size, filters).await,
         }
+        .await;
+        record_call(self.extension_id(), "get_popular_manga", start, &result);
+        result
     }
 
     pub async fn search_manga(
@@ -77,56 +96,80 @@ impl SourceBackend {
         page_size: i32,
         filters: &[kani_shared::types::ActiveFilter],
     ) -> kani_core::error::Result<kani_core::wasm::kani::extension::types::MangaList> {
-        match self {
-            Self::Wasm(w) => {
-                w.lease_instance()
-                    .await?
-                    .search_manga(query, page, page_size, filters)
-                    .await
+        let start = std::time::Instant::now();
+        let result = async {
+            match self {
+                Self::Wasm(w) => {
+                    w.lease_instance()
+                        .await?
+                        .search_manga(query, page, page_size, filters)
+                        .await
+                }
+                Self::Yaml(y) => y.search_manga(query, page, page_size, filters).await,
             }
-            Self::Yaml(y) => y.search_manga(query, page, page_size, filters).await,
         }
+        .await;
+        record_call(self.extension_id(), "search_manga", start, &result);
+        result
     }
 
     pub async fn get_filter_list_with_options(
         &self,
     ) -> kani_core::error::Result<(kani_core::WitFilterList, String)> {
-        match self {
-            Self::Wasm(w) => {
-                let mut instance = w.lease_instance().await?;
-                let filter_list = instance.get_filter_list().await?;
-                let fetched = instance
-                    .get_fetched_option_sets()
-                    .await
-                    .unwrap_or_else(|_| "[]".to_string());
-                Ok((filter_list, fetched))
-            }
-            Self::Yaml(y) => {
-                let filter_list = y.get_filter_list().await?;
-                let fetched = y
-                    .get_fetched_option_sets()
-                    .await
-                    .unwrap_or_else(|_| "[]".to_string());
-                Ok((filter_list, fetched))
+        let start = std::time::Instant::now();
+        let result = async {
+            match self {
+                Self::Wasm(w) => {
+                    let mut instance = w.lease_instance().await?;
+                    let filter_list = instance.get_filter_list().await?;
+                    let fetched = instance
+                        .get_fetched_option_sets()
+                        .await
+                        .unwrap_or_else(|_| "[]".to_string());
+                    Ok((filter_list, fetched))
+                }
+                Self::Yaml(y) => {
+                    let filter_list = y.get_filter_list().await?;
+                    let fetched = y
+                        .get_fetched_option_sets()
+                        .await
+                        .unwrap_or_else(|_| "[]".to_string());
+                    Ok((filter_list, fetched))
+                }
             }
         }
+        .await;
+        record_call(self.extension_id(), "get_filter_list", start, &result);
+        result
     }
 
     pub async fn get_source_url(&self, manga_id: &str) -> kani_core::error::Result<String> {
-        match self {
-            Self::Wasm(w) => w.lease_instance().await?.get_url(manga_id).await,
-            Self::Yaml(y) => y.get_source_url(manga_id).await,
+        let start = std::time::Instant::now();
+        let result = async {
+            match self {
+                Self::Wasm(w) => w.lease_instance().await?.get_url(manga_id).await,
+                Self::Yaml(y) => y.get_source_url(manga_id).await,
+            }
         }
+        .await;
+        record_call(self.extension_id(), "get_source_url", start, &result);
+        result
     }
 
     pub async fn get_manga_details(
         &self,
         manga_id: &str,
     ) -> kani_core::error::Result<kani_core::wasm::kani::extension::types::MangaInfo> {
-        match self {
-            Self::Wasm(w) => w.lease_instance().await?.get_manga_details(manga_id).await,
-            Self::Yaml(y) => y.get_manga_details(manga_id).await,
+        let start = std::time::Instant::now();
+        let result = async {
+            match self {
+                Self::Wasm(w) => w.lease_instance().await?.get_manga_details(manga_id).await,
+                Self::Yaml(y) => y.get_manga_details(manga_id).await,
+            }
         }
+        .await;
+        record_call(self.extension_id(), "get_manga_details", start, &result);
+        result
     }
 
     pub async fn get_pages(
@@ -134,15 +177,21 @@ impl SourceBackend {
         manga_id: &str,
         chapter_id: &str,
     ) -> kani_core::error::Result<kani_core::wasm::kani::extension::types::Chapter> {
-        match self {
-            Self::Wasm(w) => {
-                w.lease_instance()
-                    .await?
-                    .get_pages(manga_id, chapter_id)
-                    .await
+        let start = std::time::Instant::now();
+        let result = async {
+            match self {
+                Self::Wasm(w) => {
+                    w.lease_instance()
+                        .await?
+                        .get_pages(manga_id, chapter_id)
+                        .await
+                }
+                Self::Yaml(y) => y.get_pages(manga_id, chapter_id).await,
             }
-            Self::Yaml(y) => y.get_pages(manga_id, chapter_id).await,
         }
+        .await;
+        record_call(self.extension_id(), "get_pages", start, &result);
+        result
     }
 
     pub async fn get_chapter_list(
@@ -152,34 +201,69 @@ impl SourceBackend {
         page_size: Option<i32>,
         sort: Option<String>,
     ) -> kani_core::error::Result<kani_core::wasm::kani::extension::types::ChapterList> {
-        match self {
-            Self::Wasm(w) => {
-                w.lease_instance()
-                    .await?
-                    .get_chapter_list(manga_id, page, page_size, sort)
-                    .await
+        let start = std::time::Instant::now();
+        let result = async {
+            match self {
+                Self::Wasm(w) => {
+                    w.lease_instance()
+                        .await?
+                        .get_chapter_list(manga_id, page, page_size, sort)
+                        .await
+                }
+                Self::Yaml(y) => y.get_chapter_list(manga_id, page, page_size, sort).await,
             }
-            Self::Yaml(y) => y.get_chapter_list(manga_id, page, page_size, sort).await,
         }
+        .await;
+        record_call(self.extension_id(), "get_chapter_list", start, &result);
+        result
     }
 
     pub async fn get_chapter_sort_list(
         &self,
     ) -> kani_core::error::Result<Vec<kani_core::wasm::kani::extension::types::SortOption>> {
-        match self {
-            Self::Wasm(w) => w.lease_instance().await?.get_chapter_sort_list().await,
-            Self::Yaml(y) => y.get_chapter_sort_list().await,
+        let start = std::time::Instant::now();
+        let result = async {
+            match self {
+                Self::Wasm(w) => w.lease_instance().await?.get_chapter_sort_list().await,
+                Self::Yaml(y) => y.get_chapter_sort_list().await,
+            }
         }
+        .await;
+        record_call(self.extension_id(), "get_chapter_sort_list", start, &result);
+        result
     }
 
     pub async fn get_preferences(
         &self,
     ) -> kani_core::error::Result<Vec<kani_core::wasm::kani::extension::types::PreferenceSpec>>
     {
-        match self {
-            Self::Wasm(w) => w.lease_instance().await?.get_preferences().await,
-            Self::Yaml(y) => y.get_preferences().await,
+        let start = std::time::Instant::now();
+        let result = async {
+            match self {
+                Self::Wasm(w) => w.lease_instance().await?.get_preferences().await,
+                Self::Yaml(y) => y.get_preferences().await,
+            }
         }
+        .await;
+        record_call(self.extension_id(), "get_preferences", start, &result);
+        result
+    }
+}
+
+fn record_call<T>(
+    extension: &str,
+    method: &'static str,
+    start: std::time::Instant,
+    result: &kani_core::error::Result<T>,
+) {
+    let ext = extension.to_string();
+    metrics::counter!("kani_wasm_calls_total", "extension" => ext.clone(), "method" => method)
+        .increment(1);
+    metrics::histogram!("kani_wasm_call_duration_seconds", "extension" => ext.clone(), "method" => method)
+        .record(start.elapsed().as_secs_f64());
+    if result.is_err() {
+        metrics::counter!("kani_wasm_call_errors_total", "extension" => ext, "method" => method)
+            .increment(1);
     }
 }
 
