@@ -38,6 +38,10 @@ debug = true
 strip = "none"
 debug-assertions = true
 
+[profile.bench]
+inherits = "release"
+debug = 1
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"

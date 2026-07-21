@@ -88,6 +88,13 @@ jobs:
         env:
           SQLX_OFFLINE: "true"
 
+      # Benches are not run in CI (a shared runner gives meaningless numbers), but
+      # they must keep compiling. No --workspace: kani-extensions/* are WASM-only.
+      - name: Check benchmarks compile
+        run: cargo bench --locked --no-run
+        env:
+          SQLX_OFFLINE: "true"
+
       # The release workflow is generated from dist-workspace.toml. Regenerate it
       # (`dist generate`) whenever that config changes, or releases silently drift.
       - name: Check release workflow is in sync with dist config
