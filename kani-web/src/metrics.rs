@@ -3,13 +3,35 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header::AUTHORIZATION};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum_prometheus::PrometheusMetricLayer;
 use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
+use axum_prometheus::{EndpointLabel, PrometheusMetricLayer, PrometheusMetricLayerBuilder};
 use std::sync::OnceLock;
+
+/// Collapses paths that axum could not match to a route. Without this every
+/// content-hashed asset filename becomes its own Prometheus time series, and
+/// every rebuild mints a fresh set — an unbounded cardinality leak. Real routes
+/// are unaffected: they carry a MatchedPath and never reach this.
+fn collapse_unmatched_path(path: &str) -> String {
+    for prefix in ["/js/", "/css/", "/fonts/", "/icons/", "/locales/"] {
+        if path.starts_with(prefix) {
+            return format!("{prefix}*");
+        }
+    }
+    // Everything else is the SPA fallback or a 404 — one server-side operation,
+    // and an open door for cardinality if a crawler walks random URLs.
+    "/other".to_string()
+}
 
 pub fn prometheus() -> &'static (PrometheusMetricLayer<'static>, PrometheusHandle) {
     static PROM: OnceLock<(PrometheusMetricLayer<'static>, PrometheusHandle)> = OnceLock::new();
-    PROM.get_or_init(PrometheusMetricLayer::pair)
+    PROM.get_or_init(|| {
+        PrometheusMetricLayerBuilder::new()
+            .with_endpoint_label_type(EndpointLabel::MatchedPathWithFallbackFn(
+                collapse_unmatched_path,
+            ))
+            .with_default_metrics()
+            .build_pair()
+    })
 }
 
 pub fn describe() {
@@ -105,6 +127,27 @@ async fn render(State(handle): State<PrometheusHandle>, headers: HeaderMap) -> i
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn unmatched_static_paths_collapse_to_one_label_each() {
+        assert_eq!(
+            collapse_unmatched_path("/js/dist/chunk-GAAGDHTX.js"),
+            "/js/*"
+        );
+        assert_eq!(
+            collapse_unmatched_path("/js/dist/settings-4Y7Q3MMA.js"),
+            "/js/*"
+        );
+        assert_eq!(collapse_unmatched_path("/css/main.css"), "/css/*");
+        assert_eq!(collapse_unmatched_path("/fonts/x.woff2"), "/fonts/*");
+    }
+
+    #[test]
+    fn arbitrary_paths_share_a_single_bucket() {
+        assert_eq!(collapse_unmatched_path("/library"), "/other");
+        assert_eq!(collapse_unmatched_path("/settings"), "/other");
+        assert_eq!(collapse_unmatched_path("/wp-admin.php"), "/other");
+    }
 
     #[test]
     fn token_matches_accepts_identical_tokens() {

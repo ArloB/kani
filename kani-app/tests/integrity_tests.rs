@@ -278,3 +278,81 @@ async fn migrating_a_manga_repoints_stored_chapter_paths() {
     );
     assert!(resolved.exists(), "repointed path must exist on disk");
 }
+
+/// Deleting a chapter must drop its content columns. A surviving hash makes the
+/// chapter look present to the scrub and lets exact-duplicate detection match a
+/// file that no longer exists.
+#[tokio::test]
+async fn deleting_a_chapter_clears_its_content_columns() {
+    let svc = test_service().await;
+    let (chapter, cbz) = seed_downloaded_chapter(&svc, "Delete Me").await;
+    let path = svc.chapter_cbz_path(chapter).await.unwrap().path;
+    svc.record_chapter_manifest(chapter, path).await;
+
+    let before: Option<String> =
+        sqlx::query_scalar("SELECT content_hash FROM chapters WHERE id = ?")
+            .bind(chapter)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert!(before.is_some(), "precondition: hash was recorded");
+
+    svc.delete_downloaded(chapter).await.unwrap();
+
+    let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>, Option<i64>)>(
+        "SELECT file_path, content_hash, manifest_json, file_verified_at \
+         FROM chapters WHERE id = ?",
+    )
+    .bind(chapter)
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        (row.0, row.1, row.2, row.3),
+        (None, None, None, None),
+        "delete must not leave content addressing behind"
+    );
+    assert!(!cbz.exists(), "the file itself should be gone");
+}
+
+/// A chapter re-downloaded after its manga was renamed lands at the new
+/// title-derived location. The stored path must describe where the file
+/// actually is, not where a previous download left one.
+#[tokio::test]
+async fn stale_stored_path_does_not_survive_a_redownload() {
+    let svc = test_service().await;
+    let (chapter, old_cbz) = seed_downloaded_chapter(&svc, "Before Rename").await;
+    let path = svc.chapter_cbz_path(chapter).await.unwrap().path;
+    svc.record_chapter_manifest(chapter, path).await;
+
+    let manga_id: i64 = sqlx::query_scalar("SELECT manga_id FROM chapters WHERE id = ?")
+        .bind(chapter)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE manga SET name = 'After Rename' WHERE id = ?")
+        .bind(manga_id)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    // Stand in for the download commit: clear, then record where the downloader
+    // actually wrote (the title-derived path for the *current* name).
+    let library = { svc.settings.read().await.library_path.clone() };
+    let new_dir = library.join(format!("After Rename - {manga_id}"));
+    std::fs::create_dir_all(&new_dir).unwrap();
+    svc.clear_chapter_manifest(chapter).await.unwrap();
+    let fresh = svc.chapter_cbz_path(chapter).await.unwrap().path;
+    write_cbz(&fresh, &[7, 7]);
+    svc.record_chapter_manifest(chapter, fresh.clone()).await;
+
+    assert!(
+        fresh.starts_with(&new_dir),
+        "a re-download resolves to the current title, got {fresh:?}"
+    );
+    assert_ne!(fresh, old_cbz);
+
+    let resolved = svc.chapter_cbz_path(chapter).await.unwrap().path;
+    assert_eq!(resolved, fresh, "stored path must describe the new file");
+}

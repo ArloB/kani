@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT c.id, c.manga_id, m.name AS manga_name, c.name AS chapter_name, c.chapter_number, c.volume FROM chapters c JOIN manga m ON m.id = c.manga_id WHERE c.delete_status = 'pending_delete' AND m.deleted_at IS NULL",
+  "query": "SELECT c.id, c.manga_id, m.name AS manga_name, c.name AS chapter_name, c.chapter_number, c.volume, c.file_path FROM chapters c JOIN manga m ON m.id = c.manga_id WHERE c.delete_status = 'pending_delete' AND m.deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -32,6 +32,11 @@
         "name": "volume",
         "ordinal": 5,
         "type_info": "Integer"
+      },
+      {
+        "name": "file_path",
+        "ordinal": 6,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -43,8 +48,9 @@
       false,
       true,
       false,
+      true,
       true
     ]
   },
-  "hash": "b40888b1313f6f2fb7b2f798e3f446601554134470d9ac48fc87e7abc27a36a9"
+  "hash": "26623e2e7465affd170b64eb5630b5bfc4e1a46d5c3c47663e876acbf65326e3"
 }

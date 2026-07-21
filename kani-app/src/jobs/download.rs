@@ -114,6 +114,11 @@ pub(crate) async fn run_chapter_download(
             .execute(&svc.db)
             .await?;
 
+            // The downloader always writes to the title-derived location, so any
+            // stored path from before a rename is stale here. Drop it first and
+            // let resolution fall back to derivation, otherwise the manifest
+            // would be recorded against a file the download did not write.
+            let _ = svc.clear_chapter_manifest(chapter_id).await;
             if let Ok(info) = svc.chapter_cbz_path(chapter_id).await {
                 svc.record_chapter_manifest(chapter_id, info.path).await;
             }

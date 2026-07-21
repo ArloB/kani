@@ -172,6 +172,9 @@ impl AppService {
             )
             .execute(&self.db)
             .await;
+            // The file is gone: a surviving hash would make the chapter look
+            // present to the scrub and to duplicate detection.
+            let _ = self.clear_chapter_manifest(chapter_id).await;
         } else {
             let _ = sqlx::query!(
                 "UPDATE chapters SET delete_status = 'pending_delete' WHERE id = ?",
@@ -490,7 +493,7 @@ impl AppService {
     pub async fn retry_pending_deletes(&self) -> Result<()> {
         let pending = sqlx::query!(
             "SELECT c.id, c.manga_id, m.name AS manga_name, c.name AS chapter_name, \
-             c.chapter_number, c.volume \
+             c.chapter_number, c.volume, c.file_path \
              FROM chapters c JOIN manga m ON m.id = c.manga_id \
              WHERE c.delete_status = 'pending_delete' AND m.deleted_at IS NULL",
         )
@@ -507,10 +510,15 @@ impl AppService {
             );
             let chapter_title =
                 super::chapter_name(row.volume, row.chapter_number, row.chapter_name);
-            let cbz_path = library_path.join(&safe_manga).join(format!(
-                "{}.cbz",
-                kani_core::utilities::sanitize_filename(&chapter_title)
-            ));
+            // Same rule as chapter_cbz_path: a stored path wins, because the
+            // title derivation goes stale the moment a manga is renamed.
+            let cbz_path = match row.file_path.as_deref().filter(|p| !p.is_empty()) {
+                Some(rel) => library_path.join(rel),
+                None => library_path.join(&safe_manga).join(format!(
+                    "{}.cbz",
+                    kani_core::utilities::sanitize_filename(&chapter_title)
+                )),
+            };
 
             match tokio::fs::remove_file(&cbz_path).await {
                 Ok(_) => {
@@ -520,6 +528,7 @@ impl AppService {
                     )
                     .execute(&self.db)
                     .await;
+                    let _ = self.clear_chapter_manifest(ChapterId(row.id)).await;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     let _ = sqlx::query!(
@@ -528,6 +537,7 @@ impl AppService {
                     )
                     .execute(&self.db)
                     .await;
+                    let _ = self.clear_chapter_manifest(ChapterId(row.id)).await;
                 }
                 Err(e) => {
                     tracing::warn!("retry_pending_deletes: {:?}: {e}", cbz_path);
