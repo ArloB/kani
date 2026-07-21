@@ -6,6 +6,12 @@ Kani uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-21
+
+Pre-1.0 stabilisation release. The runtime and feature set are mature; this
+series exists to prove the release, observability and data-safety machinery
+before 1.0 makes its compatibility promises.
+
 ### Added
 
 - Structured JSON logging via `KANI_LOG_FORMAT=json`, and an `x-request-id` trace ID on every
