@@ -356,3 +356,290 @@ async fn stale_stored_path_does_not_survive_a_redownload() {
     let resolved = svc.chapter_cbz_path(chapter).await.unwrap().path;
     assert_eq!(resolved, fresh, "stored path must describe the new file");
 }
+
+// ── Scrub ────────────────────────────────────────────────────────────────────
+
+use kani_app::service::integrity::ScrubDepth;
+
+async fn seed_and_record(
+    svc: &kani_app::service::AppService,
+    manga_name: &str,
+) -> (ChapterId, std::path::PathBuf) {
+    let (chapter, cbz) = seed_downloaded_chapter(svc, manga_name).await;
+    svc.record_chapter_manifest(chapter, cbz.clone()).await;
+    (chapter, cbz)
+}
+
+#[tokio::test]
+async fn scrub_reports_a_missing_file() {
+    let svc = test_service().await;
+    let (chapter, cbz) = seed_and_record(&svc, "Gone").await;
+    std::fs::remove_file(&cbz).unwrap();
+
+    let report = svc
+        .scrub_library(ScrubDepth::Quick, false, None)
+        .await
+        .unwrap();
+
+    assert_eq!(report.missing_files, vec![chapter.0]);
+    assert_eq!(report.ok, 0);
+}
+
+#[tokio::test]
+async fn scrub_reports_corruption_and_deep_names_the_page() {
+    let svc = test_service().await;
+    let (chapter, cbz) = seed_and_record(&svc, "Rotten").await;
+
+    // Flip a byte inside the archive without changing its length, so only a
+    // hash can tell.
+    let mut bytes = std::fs::read(&cbz).unwrap();
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0xFF;
+    std::fs::write(&cbz, &bytes).unwrap();
+
+    let quick = svc
+        .scrub_library(ScrubDepth::Quick, false, None)
+        .await
+        .unwrap();
+    assert_eq!(quick.corrupt.len(), 1, "quick must notice the file changed");
+    assert_eq!(quick.corrupt[0].0, chapter.0);
+    assert_eq!(quick.corrupt[0].1, "ArchiveHashMismatch");
+
+    let deep = svc
+        .scrub_library(ScrubDepth::Deep, false, None)
+        .await
+        .unwrap();
+    assert_eq!(deep.corrupt.len(), 1);
+    assert!(
+        deep.corrupt[0].1.contains("Page") || deep.corrupt[0].1.contains("Unreadable"),
+        "deep must localise the damage rather than just repeating the archive \
+         hash verdict; got {}",
+        deep.corrupt[0].1
+    );
+}
+
+#[tokio::test]
+async fn scrub_marks_verified_chapters() {
+    let svc = test_service().await;
+    let (chapter, _) = seed_and_record(&svc, "Healthy").await;
+    sqlx::query("UPDATE chapters SET file_verified_at = NULL WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let report = svc
+        .scrub_library(ScrubDepth::Quick, false, None)
+        .await
+        .unwrap();
+    assert_eq!(report.ok, 1);
+    assert!(report.corrupt.is_empty());
+
+    let verified: Option<i64> =
+        sqlx::query_scalar("SELECT file_verified_at FROM chapters WHERE id = ?")
+            .bind(chapter.0)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert!(
+        verified.is_some(),
+        "a passing check must record when it passed"
+    );
+}
+
+#[tokio::test]
+async fn scrub_fix_repoints_path_drift() {
+    let svc = test_service().await;
+    let (chapter, cbz) = seed_and_record(&svc, "Drifter").await;
+
+    // Simulate a stored path that no longer matches where the file is: the row
+    // points somewhere gone, but the title-derived location still has it.
+    sqlx::query("UPDATE chapters SET file_path = ? WHERE id = ?")
+        .bind(
+            cbz.with_file_name("moved-away.cbz")
+                .to_string_lossy()
+                .to_string(),
+        )
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let report = svc
+        .scrub_library(ScrubDepth::Quick, true, None)
+        .await
+        .unwrap();
+    assert_eq!(report.path_drift.len(), 1, "drift should be detected");
+    assert!(
+        report.missing_files.is_empty(),
+        "a findable file is drift, not loss"
+    );
+
+    let stored: Option<String> = sqlx::query_scalar("SELECT file_path FROM chapters WHERE id = ?")
+        .bind(chapter.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(stored.unwrap(), cbz.to_string_lossy());
+}
+
+#[tokio::test]
+async fn scrub_fix_makes_a_missing_chapter_redownloadable() {
+    let svc = test_service().await;
+    let (chapter, cbz) = seed_and_record(&svc, "Vanished").await;
+    std::fs::remove_file(&cbz).unwrap();
+
+    svc.scrub_library(ScrubDepth::Quick, true, None)
+        .await
+        .unwrap();
+
+    let (status, hash): (i64, Option<String>) =
+        sqlx::query_as("SELECT download_status, content_hash FROM chapters WHERE id = ?")
+            .bind(chapter.0)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert_eq!(status, 0, "a gone file must not still read as downloaded");
+    assert!(hash.is_none(), "a stale hash would fail every later scrub");
+}
+
+#[tokio::test]
+async fn scrub_never_deletes_orphans_even_when_fixing() {
+    let svc = test_service().await;
+    let (_, cbz) = seed_and_record(&svc, "Keeper").await;
+    let orphan = cbz.with_file_name("not-in-the-db.cbz");
+    std::fs::copy(&cbz, &orphan).unwrap();
+
+    let report = svc
+        .scrub_library(ScrubDepth::Quick, true, None)
+        .await
+        .unwrap();
+
+    assert_eq!(report.orphaned_files.len(), 1);
+    assert!(
+        orphan.exists(),
+        "fix must never remove a file — a scheduled scrub runs unattended, and \
+         an orphan may be the only copy of something"
+    );
+}
+
+#[tokio::test]
+async fn scrub_groups_byte_identical_chapters() {
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "dupes").await;
+    let library = { svc.settings.read().await.library_path.clone() };
+
+    let mut ids = Vec::new();
+    let mut paths = Vec::new();
+    for (slug, title) in [("m1", "Twin A"), ("m2", "Twin B")] {
+        let manga = insert_manga(&svc.db, src, slug, title).await;
+        let chapter = insert_chapter(&svc.db, manga, "c1", 1.0).await;
+        sqlx::query("UPDATE chapters SET download_status = 2 WHERE id = ?")
+            .bind(chapter)
+            .execute(&svc.db)
+            .await
+            .unwrap();
+        std::fs::create_dir_all(library.join(format!(
+            "{} - {}",
+            kani_core::utilities::sanitize_filename(title),
+            manga.0
+        )))
+        .unwrap();
+        paths.push(svc.chapter_cbz_path(chapter).await.unwrap().path);
+        ids.push(chapter.0);
+    }
+
+    // Copy rather than re-zip: the case this catches is the same file listed
+    // twice, and copying makes the archives byte-identical regardless of
+    // whatever the zip writer stamps into a fresh archive.
+    write_cbz(&paths[0], &[10, 90]);
+    std::fs::copy(&paths[0], &paths[1]).unwrap();
+    for (chapter, path) in ids.iter().zip(paths.iter()) {
+        svc.record_chapter_manifest(ChapterId(*chapter), path.clone())
+            .await;
+    }
+
+    let report = svc
+        .scrub_library(ScrubDepth::Quick, false, None)
+        .await
+        .unwrap();
+
+    assert_eq!(report.exact_duplicates.len(), 1, "same bytes, one group");
+    let mut group = report.exact_duplicates[0].clone();
+    group.sort();
+    let mut want = ids.clone();
+    want.sort();
+    assert_eq!(group, want);
+}
+
+#[tokio::test]
+async fn a_chapter_without_a_hash_is_counted_not_condemned() {
+    let svc = test_service().await;
+    let (chapter, _) = seed_downloaded_chapter(&svc, "Unhashed").await;
+
+    let report = svc
+        .scrub_library(ScrubDepth::Quick, true, None)
+        .await
+        .unwrap();
+
+    assert_eq!(report.unhashed, 1);
+    assert!(
+        report.corrupt.is_empty(),
+        "a pre-backfill chapter has nothing to compare against; calling it \
+         corrupt would delete a healthy download's status"
+    );
+    let status: i64 = sqlx::query_scalar("SELECT download_status FROM chapters WHERE id = ?")
+        .bind(chapter.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        status, 2,
+        "fix must leave an unhashed-but-present file alone"
+    );
+}
+
+#[tokio::test]
+async fn the_last_report_survives_for_later_reading() {
+    let svc = test_service().await;
+    seed_and_record(&svc, "Persisted").await;
+
+    svc.scrub_library(ScrubDepth::Quick, false, None)
+        .await
+        .unwrap();
+    let (depth, report, created_at) = svc.last_scrub_report().await.unwrap().unwrap();
+
+    assert_eq!(depth, "quick");
+    assert_eq!(report.checked, 1);
+    assert!(created_at > 0);
+}
+
+#[tokio::test]
+async fn delete_orphans_honours_dry_run_and_stays_inside_the_library() {
+    let svc = test_service().await;
+    let (_, cbz) = seed_and_record(&svc, "Bounded").await;
+    let orphan = cbz.with_file_name("orphan.cbz");
+    std::fs::copy(&cbz, &orphan).unwrap();
+    let orphan_s = orphan.to_string_lossy().to_string();
+
+    let dry = svc
+        .delete_orphans(std::slice::from_ref(&orphan_s), true)
+        .await
+        .unwrap();
+    assert_eq!(dry.removed_count, 1);
+    assert!(orphan.exists(), "a dry run must not touch the disk");
+
+    let outside = svc
+        .delete_orphans(&["/etc/passwd".to_string()], false)
+        .await
+        .unwrap();
+    assert_eq!(outside.removed_count, 0);
+    assert_eq!(
+        outside.failed_count, 1,
+        "a path outside the library must be refused, not obeyed"
+    );
+
+    let real = svc.delete_orphans(&[orphan_s], false).await.unwrap();
+    assert_eq!(real.removed_count, 1);
+    assert!(!orphan.exists());
+}

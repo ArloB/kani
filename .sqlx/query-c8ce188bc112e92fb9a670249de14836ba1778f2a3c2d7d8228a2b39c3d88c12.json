@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT c.id, c.manga_id, m.name AS manga_name, c.name AS chapter_name, c.chapter_number, c.volume FROM chapters c JOIN manga m ON m.id = c.manga_id WHERE c.download_status = 2 AND m.deleted_at IS NULL",
+  "query": "SELECT c.id, c.manga_id, m.name AS manga_name, c.name AS chapter_name, c.chapter_number, c.volume, c.file_path, c.content_hash, c.manifest_json FROM chapters c JOIN manga m ON m.id = c.manga_id WHERE c.download_status = 2 AND m.deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -32,6 +32,21 @@
         "name": "volume",
         "ordinal": 5,
         "type_info": "Integer"
+      },
+      {
+        "name": "file_path",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_hash",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "manifest_json",
+        "ordinal": 8,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -43,8 +58,11 @@
       false,
       true,
       false,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "10c5affa852cdfb47c7ea2d4278c53d1c77954785a33aedca51edb94c7a5211b"
+  "hash": "c8ce188bc112e92fb9a670249de14836ba1778f2a3c2d7d8228a2b39c3d88c12"
 }

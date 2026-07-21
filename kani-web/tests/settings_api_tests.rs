@@ -156,7 +156,10 @@ async fn patch_settings_maintenance_updates() {
                     "audit_retention_days": 180,
                     "audit_security_retention_days": 90,
                     "disk_warn_threshold": 0.25,
-                    "thumbnail_formats": "jpeg"
+                    "thumbnail_formats": "jpeg",
+                    "integrity_quick_scrub_interval_hours": 12,
+                    "integrity_deep_scrub_interval_hours": 336,
+                    "scrub_on_startup": true
                 }
             }),
         ))
@@ -172,6 +175,15 @@ async fn patch_settings_maintenance_updates() {
     assert_eq!(body["trash_retention_days"], serde_json::json!(14));
     assert_eq!(body["audit_retention_days"], serde_json::json!(180));
     assert_eq!(body["audit_security_retention_days"], serde_json::json!(90));
+    assert_eq!(
+        body["integrity_quick_scrub_interval_hours"],
+        serde_json::json!(12)
+    );
+    assert_eq!(
+        body["integrity_deep_scrub_interval_hours"],
+        serde_json::json!(336)
+    );
+    assert_eq!(body["scrub_on_startup"], serde_json::json!(true));
     assert_eq!(body["disk_warn_threshold"], serde_json::json!(0.25));
 }
 
@@ -358,5 +370,39 @@ async fn patch_settings_performance_invalid_returns_4xx() {
         res.status().is_client_error(),
         "max_concurrent_jobs=0 should return 4xx, got {}",
         res.status()
+    );
+}
+
+#[tokio::test]
+async fn patch_settings_rejects_a_zero_scrub_interval() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_patch(
+            "/rest/settings",
+            &cookie,
+            serde_json::json!({
+                "Maintenance": {
+                    "trash_retention_days": 14,
+                    "audit_retention_days": 180,
+                    "audit_security_retention_days": 90,
+                    "disk_warn_threshold": 0.25,
+                    "thumbnail_formats": "jpeg",
+                    "integrity_quick_scrub_interval_hours": 0,
+                    "integrity_deep_scrub_interval_hours": 168,
+                    "scrub_on_startup": false
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert!(
+        res.status().is_client_error(),
+        "a zero interval would reschedule the scrub continuously and hash the \
+         whole library in a loop"
     );
 }

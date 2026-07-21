@@ -6,7 +6,7 @@ import { useState, useCallback } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
 import { showToast } from '../../components/toast.js';
-import { SettingsGroup, NumberRow, SelectRow } from './_shared.js';
+import { SettingsGroup, NumberRow, SelectRow, ToggleRow } from './_shared.js';
 import { useSettingsForm } from './form-bus.js';
 import { t } from '../../i18n.js';
 
@@ -20,6 +20,13 @@ export function MaintenanceSection({ settings }) {
     audit_security_retention_days: Number(settings?.audit_security_retention_days ?? 0),
     disk_warn_pct: Math.round(Number(settings?.disk_warn_threshold ?? 0.1) * 100),
     thumbnail_formats: String(settings?.thumbnail_formats ?? 'jpeg'),
+    integrity_quick_scrub_interval_hours: Number(
+      settings?.integrity_quick_scrub_interval_hours ?? 24,
+    ),
+    integrity_deep_scrub_interval_hours: Number(
+      settings?.integrity_deep_scrub_interval_hours ?? 168,
+    ),
+    scrub_on_startup: Boolean(settings?.scrub_on_startup ?? false),
   };
   const initSec = {
     max_login_attempts: Number(settings?.max_login_attempts ?? 5),
@@ -50,6 +57,9 @@ export function MaintenanceSection({ settings }) {
         audit_security_retention_days: Number(maint.audit_security_retention_days),
         disk_warn_threshold: Math.max(0, Math.min(100, Number(maint.disk_warn_pct))) / 100,
         thumbnail_formats: String(maint.thumbnail_formats),
+        integrity_quick_scrub_interval_hours: Number(maint.integrity_quick_scrub_interval_hours),
+        integrity_deep_scrub_interval_hours: Number(maint.integrity_deep_scrub_interval_hours),
+        scrub_on_startup: Boolean(maint.scrub_on_startup),
       },
     });
     await api.updateSettings({
@@ -125,6 +135,28 @@ export function MaintenanceSection({ settings }) {
         options=${[{ value: 'jpeg', label: 'JPEG' }]}
         value=${maint.thumbnail_formats}
         onChange=${(v) => setM('thumbnail_formats', v)}
+      />
+      <${NumberRow}
+        label=${t('settings.maintenance.quick_scrub_hours')}
+        description=${t('settings.maintenance.quick_scrub_hours.desc')}
+        value=${maint.integrity_quick_scrub_interval_hours}
+        min=${1}
+        stepper=${true}
+        onChange=${(v) => setM('integrity_quick_scrub_interval_hours', v)}
+      />
+      <${NumberRow}
+        label=${t('settings.maintenance.deep_scrub_hours')}
+        description=${t('settings.maintenance.deep_scrub_hours.desc')}
+        value=${maint.integrity_deep_scrub_interval_hours}
+        min=${1}
+        stepper=${true}
+        onChange=${(v) => setM('integrity_deep_scrub_interval_hours', v)}
+      />
+      <${ToggleRow}
+        label=${t('settings.maintenance.scrub_on_startup')}
+        description=${t('settings.maintenance.scrub_on_startup.desc')}
+        checked=${maint.scrub_on_startup}
+        onChange=${(v) => setM('scrub_on_startup', v)}
       />
     <//>
 

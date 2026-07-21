@@ -52,6 +52,9 @@ impl AppService {
             db_vacuum_interval_hours: s.db_vacuum_interval_hours,
             audit_prune_interval_hours: s.audit_prune_interval_hours,
             trash_purge_interval_hours: s.trash_purge_interval_hours,
+            integrity_quick_scrub_interval_hours: s.integrity_quick_scrub_interval_hours,
+            integrity_deep_scrub_interval_hours: s.integrity_deep_scrub_interval_hours,
+            scrub_on_startup: s.scrub_on_startup,
             browser_max_memory_mb: s.browser_max_memory_mb,
             browser_max_instances: s.browser_max_instances,
             update_check_enabled: s.update_check_enabled,
@@ -305,15 +308,27 @@ impl AppService {
                         "disk_warn_threshold must be between 0.0 and 1.0".into(),
                     ));
                 }
+                if s.integrity_quick_scrub_interval_hours < 1
+                    || s.integrity_deep_scrub_interval_hours < 1
+                {
+                    return Err(ServiceError::Validation(
+                        "scrub interval hours must be >= 1".into(),
+                    ));
+                }
                 sqlx::query!(
                     "UPDATE settings SET trash_retention_days=?, audit_retention_days=?, \
-                     audit_security_retention_days=?, disk_warn_threshold=?, thumbnail_formats=? \
+                     audit_security_retention_days=?, disk_warn_threshold=?, thumbnail_formats=?, \
+                     integrity_quick_scrub_interval_hours=?, \
+                     integrity_deep_scrub_interval_hours=?, scrub_on_startup=? \
                      WHERE id='singleton'",
                     s.trash_retention_days,
                     s.audit_retention_days,
                     s.audit_security_retention_days,
                     s.disk_warn_threshold,
                     s.thumbnail_formats,
+                    s.integrity_quick_scrub_interval_hours,
+                    s.integrity_deep_scrub_interval_hours,
+                    s.scrub_on_startup,
                 )
                 .execute(&self.db)
                 .await?;
@@ -324,6 +339,11 @@ impl AppService {
                     settings.audit_security_retention_days = s.audit_security_retention_days;
                     settings.disk_warn_threshold = s.disk_warn_threshold;
                     settings.thumbnail_formats = s.thumbnail_formats;
+                    settings.integrity_quick_scrub_interval_hours =
+                        s.integrity_quick_scrub_interval_hours;
+                    settings.integrity_deep_scrub_interval_hours =
+                        s.integrity_deep_scrub_interval_hours;
+                    settings.scrub_on_startup = s.scrub_on_startup;
                 }
                 self.audit(Some(user_id), "settings.update.maintenance", None, None)
                     .await;

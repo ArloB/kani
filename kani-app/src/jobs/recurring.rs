@@ -18,6 +18,8 @@ pub enum RecurringJobKind {
     TrackerSync,
     BrowserProcessReap,
     UpdateCheck,
+    IntegrityScrubQuick,
+    IntegrityScrubDeep,
 }
 
 impl RecurringJobKind {
@@ -34,6 +36,8 @@ impl RecurringJobKind {
             Self::TrackerSync => "tracker_sync",
             Self::BrowserProcessReap => "browser_process_reap",
             Self::UpdateCheck => "update_check",
+            Self::IntegrityScrubQuick => "integrity_scrub_quick",
+            Self::IntegrityScrubDeep => "integrity_scrub_deep",
         }
     }
 
@@ -50,6 +54,8 @@ impl RecurringJobKind {
             Self::TrackerSync => 60 * 60,
             Self::BrowserProcessReap => 5 * 60,
             Self::UpdateCheck => 24 * 60 * 60,
+            Self::IntegrityScrubQuick => 24 * 60 * 60,
+            Self::IntegrityScrubDeep => 7 * 24 * 60 * 60,
         }
     }
 
@@ -66,6 +72,8 @@ impl RecurringJobKind {
             Self::TrackerSync,
             Self::BrowserProcessReap,
             Self::UpdateCheck,
+            Self::IntegrityScrubQuick,
+            Self::IntegrityScrubDeep,
         ]
     }
 
@@ -136,6 +144,16 @@ async fn auto_scan_job_active(pool: &sqlx::SqlitePool) -> bool {
     .unwrap_or(false)
 }
 
+async fn integrity_scrub_job_active(pool: &sqlx::SqlitePool) -> bool {
+    sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'integrity_scrub' AND status IN ('pending', 'running')"
+    )
+    .fetch_one(pool)
+    .await
+    .map(|c| c > 0)
+    .unwrap_or(false)
+}
+
 async fn scheduled_backup_job_active(pool: &sqlx::SqlitePool) -> bool {
     sqlx::query_scalar!(
         "SELECT COUNT(*) FROM jobs WHERE job_type = 'scheduled_backup' AND status IN ('pending', 'running')"
@@ -176,6 +194,16 @@ async fn scheduled_backup_time_matches(svc: &AppService) -> bool {
 
 async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
     if kind == RecurringJobKind::AutoScan && auto_scan_job_active(&svc.db).await {
+        return;
+    }
+
+    // Quick and deep share one job type, so this also stops the two scrub kinds
+    // from overlapping each other.
+    if matches!(
+        kind,
+        RecurringJobKind::IntegrityScrubQuick | RecurringJobKind::IntegrityScrubDeep
+    ) && integrity_scrub_job_active(&svc.db).await
+    {
         return;
     }
 
@@ -229,6 +257,12 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
                     RecurringJobKind::AuditPrune => Some(s.audit_prune_interval_hours * 60 * 60),
                     RecurringJobKind::TrashPurge => Some(s.trash_purge_interval_hours * 60 * 60),
                     RecurringJobKind::BrowserProcessReap => Some(s.browser_idle_timeout_s.max(60)),
+                    RecurringJobKind::IntegrityScrubQuick => {
+                        Some(s.integrity_quick_scrub_interval_hours * 60 * 60)
+                    }
+                    RecurringJobKind::IntegrityScrubDeep => {
+                        Some(s.integrity_deep_scrub_interval_hours * 60 * 60)
+                    }
                     _ => None,
                 }
             };
@@ -244,6 +278,22 @@ async fn run_kind(svc: &AppService, kind: RecurringJobKind) {
 /// Shared by the scheduler and the manual trigger path.
 async fn submit_kind_job(svc: &AppService, kind: RecurringJobKind) -> Result<crate::jobs::JobId> {
     match kind {
+        RecurringJobKind::IntegrityScrubQuick => {
+            svc.job_manager
+                .submit(crate::jobs::scrub::ScrubJob::new(
+                    crate::service::integrity::ScrubDepth::Quick,
+                    false,
+                ))
+                .await
+        }
+        RecurringJobKind::IntegrityScrubDeep => {
+            svc.job_manager
+                .submit(crate::jobs::scrub::ScrubJob::new(
+                    crate::service::integrity::ScrubDepth::Deep,
+                    false,
+                ))
+                .await
+        }
         RecurringJobKind::DbMaintenance => {
             svc.job_manager
                 .submit(crate::jobs::maintenance::AnalyzeJob::new())

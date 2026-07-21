@@ -1664,11 +1664,26 @@ export async function getAdminStorageStatsHistory() {
   return _req('GET', '/admin/storage/stats/history');
 }
 
-// ── Admin — integrity check ───────────────────────────────────────────────────
+// ── Admin — integrity scrub ───────────────────────────────────────────────────
 
-/** @param {boolean} [fix] */
-export async function runIntegrityCheck(fix = false) {
-  return _req('POST', `/admin/library/integrity-check${fix ? '?fix=true' : ''}`);
+/**
+ * @param {'quick'|'deep'} depth
+ * @param {boolean} [fix]
+ */
+export async function runScrub(depth, fix = false) {
+  return _req('POST', '/admin/library/scrub', { body: { depth, fix } });
+}
+
+export async function getLastScrub() {
+  return _req('GET', '/admin/library/scrub/last');
+}
+
+/**
+ * @param {string[]} paths
+ * @param {boolean} dryRun
+ */
+export async function deleteOrphans(paths, dryRun) {
+  return _req('POST', '/admin/library/orphans/delete', { body: { paths, dry_run: dryRun } });
 }
 
 // ── Admin — backup schedule ───────────────────────────────────────────────────

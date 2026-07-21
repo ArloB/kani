@@ -1208,6 +1208,9 @@ pub struct AppSettings {
     pub db_vacuum_interval_hours: i64,
     pub audit_prune_interval_hours: i64,
     pub trash_purge_interval_hours: i64,
+    pub integrity_quick_scrub_interval_hours: i64,
+    pub integrity_deep_scrub_interval_hours: i64,
+    pub scrub_on_startup: bool,
     pub browser_max_memory_mb: i64,
     pub browser_max_instances: i64,
     pub browser_idle_timeout_s: i64,
@@ -1364,6 +1367,9 @@ pub struct MaintenanceSettings {
     pub audit_security_retention_days: i64,
     pub disk_warn_threshold: f64,
     pub thumbnail_formats: String,
+    pub integrity_quick_scrub_interval_hours: i64,
+    pub integrity_deep_scrub_interval_hours: i64,
+    pub scrub_on_startup: bool,
 }
 
 #[cfg(feature = "host")]

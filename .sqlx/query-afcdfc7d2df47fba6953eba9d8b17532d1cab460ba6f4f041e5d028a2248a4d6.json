@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT content_hash, id FROM chapters WHERE content_hash IS NOT NULL AND download_status = 2 ORDER BY content_hash, id",
+  "describe": {
+    "columns": [
+      {
+        "name": "content_hash",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "afcdfc7d2df47fba6953eba9d8b17532d1cab460ba6f4f041e5d028a2248a4d6"
+}

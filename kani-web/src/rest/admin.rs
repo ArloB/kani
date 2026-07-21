@@ -82,10 +82,9 @@ pub fn router() -> Router<AppState> {
             "/admin/storage/stats/history",
             get(admin_storage_stats_history),
         )
-        .route(
-            "/admin/library/integrity-check",
-            post(admin_integrity_check),
-        )
+        .route("/admin/library/scrub", post(admin_library_scrub))
+        .route("/admin/library/scrub/last", get(admin_library_scrub_last))
+        .route("/admin/library/orphans/delete", post(admin_delete_orphans))
 }
 
 #[utoipa::path(
@@ -1423,27 +1422,77 @@ pub(crate) async fn admin_storage_stats_history(
 }
 
 #[derive(serde::Deserialize)]
-pub(crate) struct IntegrityCheckQuery {
-    pub fix: Option<bool>,
+pub(crate) struct ScrubBody {
+    #[serde(default)]
+    pub depth: Option<String>,
+    #[serde(default)]
+    pub fix: bool,
 }
 
-pub(crate) async fn admin_integrity_check(
+pub(crate) async fn admin_library_scrub(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
-    Query(q): Query<IntegrityCheckQuery>,
+    Json(body): Json<ScrubBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let fix = q.fix.unwrap_or(false);
-    if fix {
-        let result = state.service.cleanup_orphans(false).await?;
-        Ok(Json(serde_json::to_value(result).map_err(|e| {
-            AppError::InternalServerError(e.to_string())
-        })?))
-    } else {
-        let report = state.service.check_library().await?;
-        Ok(Json(serde_json::to_value(report).map_err(|e| {
-            AppError::InternalServerError(e.to_string())
-        })?))
-    }
+    let depth: kani_app::service::integrity::ScrubDepth = body
+        .depth
+        .as_deref()
+        .unwrap_or("quick")
+        .parse()
+        .map_err(|_| AppError::ValidationError("depth must be 'quick' or 'deep'".into()))?;
+
+    let job_id = state
+        .service
+        .job_manager
+        .submit(kani_app::jobs::scrub::ScrubJob::new(depth, body.fix))
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "job_id": job_id })),
+    ))
+}
+
+pub(crate) async fn admin_library_scrub_last(
+    _: AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(match state.service.last_scrub_report().await? {
+        Some((depth, report, created_at)) => serde_json::json!({
+            "depth": depth,
+            "created_at": created_at,
+            "report": report,
+        }),
+        None => serde_json::Value::Null,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct OrphanDeleteBody {
+    pub paths: Vec<String>,
+    #[serde(default = "default_true")]
+    pub dry_run: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Deletion is its own endpoint, never a mode of the scrub: a scheduled scrub
+/// must not be able to remove files, and the caller must name what goes.
+pub(crate) async fn admin_delete_orphans(
+    _: AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+    Json(body): Json<OrphanDeleteBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let result = state
+        .service
+        .delete_orphans(&body.paths, body.dry_run)
+        .await?;
+    Ok(Json(serde_json::to_value(result).map_err(|e| {
+        AppError::InternalServerError(e.to_string())
+    })?))
 }
 
 pub(crate) async fn admin_diagnostics(

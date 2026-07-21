@@ -187,6 +187,18 @@ async fn main() {
         let backfill_state = state.clone();
         tokio::spawn(async move {
             backfill_state.submit_manifest_backfill_if_needed().await;
+
+            // After the backfill, so a startup scrub judges the paths and
+            // hashes the backfill just wrote rather than the gaps it filled.
+            if backfill_state.get_settings().await.scrub_on_startup {
+                let job = kani_app::jobs::scrub::ScrubJob::new(
+                    kani_app::service::integrity::ScrubDepth::Quick,
+                    false,
+                );
+                if let Err(e) = backfill_state.service.job_manager.submit(job).await {
+                    tracing::warn!("Failed to submit startup integrity scrub: {e}");
+                }
+            }
         });
     }
 
