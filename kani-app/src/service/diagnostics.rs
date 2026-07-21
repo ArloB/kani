@@ -57,8 +57,8 @@ pub struct DiagnosticsPayload {
     pub uptime_secs: u64,
     pub db_size_bytes: u64,
     pub db_wal_size_bytes: u64,
-    pub disk_free_data_bytes: u64,
-    pub disk_free_library_bytes: u64,
+    pub disk_free_data_bytes: Option<u64>,
+    pub disk_free_library_bytes: Option<u64>,
     pub active_downloads: usize,
     pub jobs_running: usize,
     pub extensions: Vec<ExtensionStatus>,
@@ -85,14 +85,14 @@ impl AppService {
         let data_path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
         let disk_free_data_bytes =
-            tokio::task::spawn_blocking(move || fs2::available_space(&data_path).unwrap_or(0))
+            tokio::task::spawn_blocking(move || fs2::available_space(&data_path).ok())
                 .await
-                .unwrap_or(0);
+                .unwrap_or(None);
         let lib_for_free = library_path.clone();
         let disk_free_library_bytes =
-            tokio::task::spawn_blocking(move || fs2::available_space(&lib_for_free).unwrap_or(0))
+            tokio::task::spawn_blocking(move || fs2::available_space(&lib_for_free).ok())
                 .await
-                .unwrap_or(0);
+                .unwrap_or(None);
 
         let active_downloads = self.downloader.snapshot().await.len();
         let jobs_running = self.job_manager.active_count();

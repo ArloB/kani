@@ -17,7 +17,7 @@ pub fn redact(value: &serde_json::Value) -> serde_json::Value {
         serde_json::Value::Object(map) => serde_json::Value::Object(
             map.iter()
                 .map(|(k, v)| {
-                    if is_secret_field(k) {
+                    if is_secret_field(k) && v.is_string() {
                         (k.clone(), serde_json::Value::String(REDACTED.to_string()))
                     } else {
                         (k.clone(), redact(v))
@@ -165,6 +165,24 @@ mod tests {
         let serialised = out.to_string();
         assert!(!serialised.contains("hunter2"));
         assert!(!serialised.contains("xyz"));
+    }
+
+    #[test]
+    fn non_string_values_are_never_redacted() {
+        let input = serde_json::json!({
+            "password_reset_enabled": false,
+            "max_login_attempts": 5,
+            "email_password": "hunter2",
+        });
+
+        let out = redact(&input);
+
+        assert_eq!(
+            out["password_reset_enabled"], false,
+            "a boolean feature flag whose name merely contains 'password' is not a credential"
+        );
+        assert_eq!(out["max_login_attempts"], 5);
+        assert_eq!(out["email_password"], REDACTED);
     }
 
     #[test]
