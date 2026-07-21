@@ -222,3 +222,59 @@ async fn identical_chapters_share_a_content_hash() {
          this is what exact-duplicate detection keys on"
     );
 }
+
+/// Source migration is the one flow that physically moves files, so a stored
+/// path must follow the rename. Without the repoint this resolves to the old
+/// directory, which no longer exists — the regression that preferring
+/// file_path over title derivation would otherwise introduce.
+#[tokio::test]
+async fn migrating_a_manga_repoints_stored_chapter_paths() {
+    let svc = test_service().await;
+    let (chapter, cbz) = seed_downloaded_chapter(&svc, "Old Source Title").await;
+
+    let path = svc.chapter_cbz_path(chapter).await.unwrap().path;
+    svc.record_chapter_manifest(chapter, path).await;
+
+    let manga_id: i64 = sqlx::query_scalar("SELECT manga_id FROM chapters WHERE id = ?")
+        .bind(chapter)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    let library = { svc.settings.read().await.library_path.clone() };
+    let old_dir = library.join(format!("Old Source Title - {manga_id}"));
+    let new_dir = library.join(format!("New Source Title - {manga_id}"));
+
+    // Simulate what migrate_manga does: rename the row and move the directory.
+    std::fs::rename(&old_dir, &new_dir).unwrap();
+    sqlx::query("UPDATE manga SET name = 'New Source Title' WHERE id = ?")
+        .bind(manga_id)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let old_prefix = format!("Old Source Title - {manga_id}/");
+    let new_prefix = format!("New Source Title - {manga_id}/");
+    sqlx::query(
+        "UPDATE chapters SET file_path = ? || substr(file_path, length(?) + 1) \
+         WHERE manga_id = ? AND substr(file_path, 1, length(?)) = ?",
+    )
+    .bind(&new_prefix)
+    .bind(&old_prefix)
+    .bind(manga_id)
+    .bind(&old_prefix)
+    .bind(&old_prefix)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    let resolved = svc.chapter_cbz_path(chapter).await.unwrap().path;
+    assert_ne!(
+        resolved, cbz,
+        "the file moved, so the path must have changed"
+    );
+    assert!(
+        resolved.starts_with(&new_dir),
+        "stored path should follow the directory rename, got {resolved:?}"
+    );
+    assert!(resolved.exists(), "repointed path must exist on disk");
+}

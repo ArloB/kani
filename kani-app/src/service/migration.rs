@@ -256,15 +256,43 @@ impl AppService {
         if old_dir_name != new_dir_name {
             let old_path = library_path.join(&old_dir_name);
             let new_path = library_path.join(&new_dir_name);
-            if old_path.exists()
-                && let Err(e) = tokio::fs::rename(&old_path, &new_path).await
-            {
-                tracing::warn!(
-                    "Failed to rename library directory {:?} → {:?}: {}",
-                    old_path,
-                    new_path,
-                    e
-                );
+            if old_path.exists() {
+                match tokio::fs::rename(&old_path, &new_path).await {
+                    Ok(()) => {
+                        // Migration is the one flow that actually moves files on
+                        // disk, so stored paths have to follow. Exact-prefix
+                        // matching rather than LIKE: a manga name can contain
+                        // % or _, which LIKE would treat as wildcards.
+                        let old_prefix = format!("{old_dir_name}/");
+                        let new_prefix = format!("{new_dir_name}/");
+                        if let Err(e) = sqlx::query!(
+                            "UPDATE chapters \
+                             SET file_path = ? || substr(file_path, length(?) + 1) \
+                             WHERE manga_id = ? AND substr(file_path, 1, length(?)) = ?",
+                            new_prefix,
+                            old_prefix,
+                            manga_db_id,
+                            old_prefix,
+                            old_prefix,
+                        )
+                        .execute(&self.db)
+                        .await
+                        {
+                            tracing::warn!(
+                                "Renamed {:?} → {:?} but failed to repoint stored chapter paths: {}",
+                                old_path,
+                                new_path,
+                                e
+                            );
+                        }
+                    }
+                    Err(e) => tracing::warn!(
+                        "Failed to rename library directory {:?} → {:?}: {}",
+                        old_path,
+                        new_path,
+                        e
+                    ),
+                }
             }
         }
 
