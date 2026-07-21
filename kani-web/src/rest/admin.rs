@@ -85,6 +85,11 @@ pub fn router() -> Router<AppState> {
         .route("/admin/library/scrub", post(admin_library_scrub))
         .route("/admin/library/scrub/last", get(admin_library_scrub_last))
         .route("/admin/library/orphans/delete", post(admin_delete_orphans))
+        .route("/admin/library/archive", post(admin_archive_export))
+        .route(
+            "/admin/library/archive/{job_id}/download",
+            get(admin_archive_download),
+        )
 }
 
 #[utoipa::path(
@@ -1493,6 +1498,84 @@ pub(crate) async fn admin_delete_orphans(
     Ok(Json(serde_json::to_value(result).map_err(|e| {
         AppError::InternalServerError(e.to_string())
     })?))
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct ArchiveBody {
+    #[serde(default)]
+    pub manga_ids: Option<Vec<i64>>,
+    #[serde(default)]
+    pub zip: bool,
+    #[serde(default = "default_true")]
+    pub include_viewer: bool,
+}
+
+pub(crate) async fn admin_archive_export(
+    _: AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+    Json(body): Json<ArchiveBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let spec = kani_app::service::archive::ArchiveSpec {
+        manga_ids: body
+            .manga_ids
+            .map(|ids| ids.into_iter().map(kani_app::ids::MangaId).collect()),
+        zip: body.zip,
+        include_viewer: body.include_viewer,
+    };
+    let job_id = state
+        .service
+        .job_manager
+        .submit(kani_app::jobs::archive_export::ArchiveExportJob::new(spec))
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "job_id": job_id })),
+    ))
+}
+
+/// Streams the zip a completed export produced. The path comes from the job's
+/// own result, never from the caller, and is re-checked against `_archives`
+/// before anything is read.
+pub(crate) async fn admin_archive_download(
+    _: AuthGuard<crate::permissions::guards::AdminManage>,
+    State(state): State<AppState>,
+    Path(job_id): Path<uuid::Uuid>,
+) -> Result<impl IntoResponse, AppError> {
+    let status = state.service.get_job_status(job_id).await?;
+    let root = status
+        .result
+        .as_ref()
+        .and_then(|r| r.get("root"))
+        .and_then(|r| r.as_str())
+        .ok_or_else(|| AppError::NotFound("archive not ready".into()))?;
+    let zipped = status
+        .result
+        .as_ref()
+        .and_then(|r| r.get("zipped"))
+        .and_then(|z| z.as_bool())
+        .unwrap_or(false);
+    if !zipped {
+        return Err(AppError::ValidationError(
+            "this export was not zipped; read it from disk".into(),
+        ));
+    }
+
+    let path = state.service.archive_zip_path(root).await?;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+    axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/zip")
+        .header(
+            header::CONTENT_DISPOSITION,
+            "attachment; filename=\"kani-archive.zip\"",
+        )
+        .body(axum::body::Body::from(bytes))
+        .map_err(|e| AppError::InternalServerError(e.to_string()))
 }
 
 pub(crate) async fn admin_diagnostics(

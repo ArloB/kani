@@ -1,3 +1,4 @@
+pub mod archive;
 pub mod audit_tokens;
 pub mod build;
 pub mod css;
@@ -153,6 +154,18 @@ pub enum Command {
         #[arg(long, default_value_t = 0)]
         max: usize,
     },
+    /// Re-hash every file a Kani archive export claims, without needing Kani
+    ArchiveVerify {
+        /// Path to the exported `kani-archive` directory
+        #[arg(value_name = "ARCHIVE_DIR")]
+        path: std::path::PathBuf,
+    },
+    /// Print the manifest computed from a CBZ on disk
+    Manifest {
+        /// Path to a .cbz file
+        #[arg(value_name = "CBZ")]
+        path: std::path::PathBuf,
+    },
     /// Verify a backup archive can be restored onto this build
     Rollback {
         /// Path to a backup .zip produced by Kani
@@ -296,6 +309,8 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             tailwind,
             esbuild,
         } => setup::run(vendors, tailwind, esbuild),
+        Command::ArchiveVerify { path } => archive::verify(&path),
+        Command::Manifest { path } => archive::manifest(&path),
         Command::Icons => icons::run(),
         Command::Dsl {
             expression,

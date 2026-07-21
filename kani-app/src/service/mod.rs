@@ -25,6 +25,7 @@ use kani_shared::types::{
 use trackers::TrackerRegistry;
 
 pub mod api_tokens;
+pub mod archive;
 mod audit;
 pub mod backup;
 pub mod backup_scheduler;
@@ -677,6 +678,7 @@ impl AppService {
         job_registry.register::<crate::jobs::backup::ScheduledBackupJob>();
         job_registry.register::<crate::jobs::storage::StorageMonitorJob>();
         job_registry.register::<crate::jobs::scrub::ScrubJob>();
+        job_registry.register::<crate::jobs::archive_export::ArchiveExportJob>();
         job_registry.register::<crate::jobs::audit_prune::AuditPruneJob>();
         job_registry.register::<crate::jobs::trash_purge::TrashPurgeJob>();
         job_registry.register::<crate::jobs::pending_delete_retry::PendingDeleteRetryJob>();
@@ -873,6 +875,7 @@ impl AppService {
         registry.register::<crate::jobs::backup::ScheduledBackupJob>();
         registry.register::<crate::jobs::storage::StorageMonitorJob>();
         registry.register::<crate::jobs::scrub::ScrubJob>();
+        registry.register::<crate::jobs::archive_export::ArchiveExportJob>();
         registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
         registry.register::<crate::jobs::update_check::UpdateCheckJob>();
         registry.register::<crate::jobs::manifest_backfill::ManifestBackfillJob>();

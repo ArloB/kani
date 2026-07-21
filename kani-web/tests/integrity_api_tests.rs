@@ -187,3 +187,70 @@ async fn orphan_delete_removes_only_what_it_is_given() {
         "deletion must be scoped to the listed paths"
     );
 }
+
+// ── POST /rest/admin/library/archive ─────────────────────────────────────────
+
+#[tokio::test]
+async fn archive_export_returns_202_for_admin() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(post(
+            "/rest/admin/library/archive",
+            Some(&cookie),
+            json!({ "zip": true }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    assert!(common::body_json(res).await.get("job_id").is_some());
+}
+
+#[tokio::test]
+async fn archive_export_requires_admin() {
+    let state = test_state().await;
+    let (u, p) = create_regular_user(&state, "faye").await;
+    let app = build_test_app(state).await;
+
+    let anon = app
+        .clone()
+        .oneshot(post("/rest/admin/library/archive", None, json!({})))
+        .await
+        .unwrap();
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    let cookie = common::login(&app, u, p).await;
+    let plain = app
+        .oneshot(post(
+            "/rest/admin/library/archive",
+            Some(&cookie),
+            json!({}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(plain.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn archive_download_rejects_an_unknown_job() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(authed_get(
+            "/rest/admin/library/archive/00000000-0000-0000-0000-000000000000/download",
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert!(
+        res.status().is_client_error() || res.status().is_server_error(),
+        "a download for a job that never ran must not stream anything, got {}",
+        res.status()
+    );
+}

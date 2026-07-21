@@ -3284,6 +3284,7 @@ dependencies = [
  "flate2",
  "hex",
  "insta",
+ "kani-core",
  "kani-shared",
  "kani-yaml",
  "postcard",

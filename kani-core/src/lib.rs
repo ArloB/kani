@@ -3,6 +3,7 @@
 //! This crate provides the core business logic for the Kani manga downloader,
 //! including WASM extension hosting, download management, and source handling.
 
+pub mod archive;
 pub mod cache;
 pub mod cbz;
 pub mod comic_info;

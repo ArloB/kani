@@ -1,3 +1,4 @@
+pub mod archive_export;
 pub mod audit_prune;
 pub mod backup;
 pub mod browser_reap;
