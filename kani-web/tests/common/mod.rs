@@ -45,6 +45,7 @@ pub async fn test_state() -> AppState {
         boot_id: "test".to_string(),
         restart_requested: Arc::new(AtomicBool::new(false)),
         log_handle,
+        idempotency: kani_web::idempotency::IdempotencyStore::new(),
     }
 }
 

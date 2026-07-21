@@ -43,6 +43,9 @@ pub struct AppState {
     pub csrf_secret: Arc<[u8; 32]>,
     /// Whether `KANI_PUBLIC_INSTANCE=true` is set; enables hardened runtime profile.
     pub public_instance: bool,
+    /// Records responses to writes carrying an `Idempotency-Key`, so a client's
+    /// retry replays the original result instead of repeating the write.
+    pub idempotency: crate::idempotency::IdempotencyStore,
 }
 
 impl AppState {
@@ -81,6 +84,7 @@ impl AppState {
             )),
             csrf_secret: Arc::new(random_secret()),
             public_instance,
+            idempotency: crate::idempotency::IdempotencyStore::new(),
             service,
         })
     }
@@ -190,6 +194,7 @@ impl AppState {
             boot_id: "test-boot-id".to_string(),
             restart_requested: Arc::new(AtomicBool::new(false)),
             log_handle,
+            idempotency: crate::idempotency::IdempotencyStore::new(),
         }
     }
 }
