@@ -127,3 +127,137 @@ async fn garbage_token_returns_ok_none() {
             .is_none()
     );
 }
+
+// ── API-token kind, scoping and the use-time intersection ────────────────────
+
+use kani_app::service::api_tokens::TokenKind;
+
+fn rand_suffix() -> u32 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0)
+}
+
+async fn grant_role(pool: &sqlx::SqlitePool, user_id: i64, role: &str) {
+    sqlx::query("INSERT OR IGNORE INTO user_roles (user_id, role_slug) VALUES (?, ?)")
+        .bind(user_id)
+        .bind(role)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn revoke_role(pool: &sqlx::SqlitePool, user_id: i64, role: &str) {
+    sqlx::query("DELETE FROM user_roles WHERE user_id = ? AND role_slug = ?")
+        .bind(user_id)
+        .bind(role)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn opds_tokens_keep_their_fixed_scopes_and_kind() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, &format!("u{}", rand_suffix())).await;
+
+    let created = svc
+        .create_api_token(user, "reader app", None)
+        .await
+        .unwrap();
+    let auth = svc
+        .authenticate_api_token(&created.raw_token)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(auth.kind, TokenKind::Opds, "default kind stays opds");
+    assert!(auth.scopes.iter().any(|p| p.to_string() == "opds:read"));
+}
+
+#[tokio::test]
+async fn an_api_token_cannot_be_granted_permissions_the_creator_lacks() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, &format!("u{}", rand_suffix())).await;
+    grant_role(&svc.db, user.0, "user").await;
+
+    let elevated: kani_app::permissions::Permission = "user:manage".parse().unwrap();
+    let held = svc.user_permissions(user).await.unwrap();
+    assert!(
+        !held.contains(&elevated),
+        "precondition: a plain user cannot manage users"
+    );
+
+    let err = svc
+        .create_token(
+            user,
+            "over-privileged",
+            None,
+            TokenKind::Api,
+            Some(&[elevated]),
+        )
+        .await;
+
+    assert!(
+        err.is_err(),
+        "minting a token more capable than its creator must be refused"
+    );
+}
+
+#[tokio::test]
+async fn losing_a_role_after_minting_strips_the_scope_from_the_token() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, &format!("u{}", rand_suffix())).await;
+    grant_role(&svc.db, user.0, "admin").await;
+
+    let scope: kani_app::permissions::Permission = "user:manage".parse().unwrap();
+    assert!(svc.user_permissions(user).await.unwrap().contains(&scope));
+
+    let created = svc
+        .create_token(user, "bot", None, TokenKind::Api, Some(&[scope]))
+        .await
+        .unwrap();
+
+    let before = svc
+        .authenticate_api_token(&created.raw_token)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        before.scopes.contains(&scope),
+        "granted while the role held"
+    );
+
+    // The owner is downgraded after the token was minted.
+    revoke_role(&svc.db, user.0, "admin").await;
+
+    let after = svc
+        .authenticate_api_token(&created.raw_token)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        !after.scopes.contains(&scope),
+        "a token must never outlive the permission it was granted from — \
+         creation-time validation alone cannot provide this"
+    );
+}
+
+#[tokio::test]
+async fn token_count_and_lifetime_are_bounded() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, &format!("u{}", rand_suffix())).await;
+
+    let too_long = svc.create_api_token(user, "forever", Some(10_000)).await;
+    assert!(too_long.is_err(), "lifetime cap should reject 10000 days");
+
+    for i in 0..25 {
+        svc.create_api_token(user, &format!("t{i}"), None)
+            .await
+            .unwrap();
+    }
+    let over = svc.create_api_token(user, "one too many", None).await;
+    assert!(over.is_err(), "per-user token cap should be enforced");
+}
