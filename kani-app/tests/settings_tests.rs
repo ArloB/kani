@@ -108,6 +108,9 @@ async fn update_scan_settings_round_trips() {
             auto_scan: true,
             scan_interval_minutes: 30,
             scan_exclude_completed: true,
+            upgrade_detection_enabled: true,
+            upgrade_min_res_gain: 1.2,
+            upgrade_confirm_fetches: 3,
         }),
         UserId(1),
     )
@@ -129,6 +132,9 @@ async fn update_scan_settings_rejects_short_interval() {
                 auto_scan: false,
                 scan_interval_minutes: 4, // below minimum of 5
                 scan_exclude_completed: false,
+                upgrade_detection_enabled: true,
+                upgrade_min_res_gain: 1.2,
+                upgrade_confirm_fetches: 3,
             }),
             UserId(1),
         )
@@ -166,6 +172,9 @@ async fn update_settings_does_not_affect_unrelated_fields() {
             auto_scan: true,
             scan_interval_minutes: 30,
             scan_exclude_completed: false,
+            upgrade_detection_enabled: true,
+            upgrade_min_res_gain: 1.2,
+            upgrade_confirm_fetches: 3,
         }),
         UserId(1),
     )

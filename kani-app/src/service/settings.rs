@@ -55,6 +55,9 @@ impl AppService {
             integrity_quick_scrub_interval_hours: s.integrity_quick_scrub_interval_hours,
             integrity_deep_scrub_interval_hours: s.integrity_deep_scrub_interval_hours,
             scrub_on_startup: s.scrub_on_startup,
+            upgrade_detection_enabled: s.upgrade_detection_enabled,
+            upgrade_min_res_gain: s.upgrade_min_res_gain,
+            upgrade_confirm_fetches: s.upgrade_confirm_fetches,
             browser_max_memory_mb: s.browser_max_memory_mb,
             browser_max_instances: s.browser_max_instances,
             update_check_enabled: s.update_check_enabled,
@@ -141,11 +144,26 @@ impl AppService {
                         "scan_interval_minutes must be >= 5".into(),
                     ));
                 }
+                if !(1.0..=5.0).contains(&s.upgrade_min_res_gain) {
+                    return Err(ServiceError::Validation(
+                        "upgrade_min_res_gain must be between 1.0 and 5.0".into(),
+                    ));
+                }
+                if s.upgrade_confirm_fetches < 0 {
+                    return Err(ServiceError::Validation(
+                        "upgrade_confirm_fetches must be >= 0".into(),
+                    ));
+                }
                 sqlx::query!(
-                    "UPDATE settings SET auto_scan=?, scan_interval_minutes=?, scan_exclude_completed=? WHERE id='singleton'",
+                    "UPDATE settings SET auto_scan=?, scan_interval_minutes=?, \
+                     scan_exclude_completed=?, upgrade_detection_enabled=?, \
+                     upgrade_min_res_gain=?, upgrade_confirm_fetches=? WHERE id='singleton'",
                     s.auto_scan,
                     s.scan_interval_minutes,
-                    s.scan_exclude_completed
+                    s.scan_exclude_completed,
+                    s.upgrade_detection_enabled,
+                    s.upgrade_min_res_gain,
+                    s.upgrade_confirm_fetches
                 )
                 .execute(&self.db)
                 .await?;
@@ -153,6 +171,9 @@ impl AppService {
                 settings.auto_scan = s.auto_scan;
                 settings.scan_interval_minutes = s.scan_interval_minutes;
                 settings.scan_exclude_completed = s.scan_exclude_completed;
+                settings.upgrade_detection_enabled = s.upgrade_detection_enabled;
+                settings.upgrade_min_res_gain = s.upgrade_min_res_gain;
+                settings.upgrade_confirm_fetches = s.upgrade_confirm_fetches;
                 self.audit(Some(user_id), "settings.update.scan", None, None)
                     .await;
             }

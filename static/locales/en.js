@@ -1528,6 +1528,16 @@ export default {
   'settings.scan.auto.desc': 'Automatically scan for new chapters on an interval.',
   'settings.scan.interval.label': 'Interval (minutes)',
   'settings.scan.interval.desc': 'How often to scan for new chapters.',
+  'settings.upgrades.group': 'Upgrade detection',
+  'settings.upgrades.enabled.label': 'Detect better versions',
+  'settings.upgrades.enabled.desc':
+    'While scanning, notice when a source lists a longer version of a chapter you hold, or one from a scanlator you rank higher. Nothing is downloaded or replaced without asking.',
+  'settings.upgrades.min_gain.label': 'Minimum resolution gain',
+  'settings.upgrades.min_gain.desc':
+    'How much sharper a replacement must be before it counts as an upgrade, as a multiple of the current resolution.',
+  'settings.upgrades.confirm_fetches.label': 'Confirmation requests per scan',
+  'settings.upgrades.confirm_fetches.desc':
+    'How many extra requests a single series may spend confirming a candidate. Zero relies on listing data alone.',
   'settings.scan.exclude.label': 'Exclude completed',
   'settings.scan.exclude.desc': 'Skip manga marked as Completed during automatic scans.',
 

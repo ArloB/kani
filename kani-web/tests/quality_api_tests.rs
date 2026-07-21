@@ -1,0 +1,194 @@
+#![allow(clippy::unwrap_used)]
+// The upgrade endpoints. Reads are library:view; anything that moves a file is
+// library:manage.
+
+mod common;
+use axum::http::StatusCode;
+use common::{authed_get, build_test_app, create_admin, create_regular_user, test_state};
+use serde_json::json;
+use tower::ServiceExt;
+
+fn req(
+    method: &str,
+    path: &str,
+    cookie: Option<&str>,
+    body: Option<serde_json::Value>,
+) -> axum::http::Request<axum::body::Body> {
+    let mut b = axum::http::Request::builder().method(method).uri(path);
+    if let Some(c) = cookie {
+        b = b.header(axum::http::header::COOKIE, c);
+    }
+    match body {
+        Some(v) => {
+            b = b.header(axum::http::header::CONTENT_TYPE, "application/json");
+            b.body(axum::body::Body::from(v.to_string())).unwrap()
+        }
+        None => b.body(axum::body::Body::empty()).unwrap(),
+    }
+}
+
+#[tokio::test]
+async fn library_wide_upgrades_list_is_readable_by_a_viewer() {
+    let state = test_state().await;
+    let (u, p) = create_regular_user(&state, "gail").await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(authed_get("/rest/me/upgrades", &cookie))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(common::body_json(res).await.is_array());
+}
+
+#[tokio::test]
+async fn upgrades_require_authentication() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+
+    for path in ["/rest/me/upgrades", "/rest/manga/1/upgrades"] {
+        let res = app
+            .clone()
+            .oneshot(req("GET", path, None, None))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn applying_an_upgrade_is_a_library_manage_action() {
+    // `library:manage` is seeded to the default user role in this app — the
+    // same role that already holds chapter:delete — so replacing a chapter is
+    // deliberately a user-level action, not an admin one. What must hold is
+    // that it is gated at all.
+    let state = test_state().await;
+    let (u, p) = create_regular_user(&state, "hank").await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let anon = app
+        .clone()
+        .oneshot(req("POST", "/rest/chapters/1/upgrade", None, None))
+        .await
+        .unwrap();
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    let authed = app
+        .oneshot(req("POST", "/rest/chapters/1/upgrade", Some(&cookie), None))
+        .await
+        .unwrap();
+    assert_ne!(
+        authed.status(),
+        StatusCode::FORBIDDEN,
+        "a user holding library:manage must not be refused"
+    );
+}
+
+#[tokio::test]
+async fn applying_an_upgrade_to_a_missing_chapter_is_a_404() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(req(
+            "POST",
+            "/rest/chapters/9999/upgrade",
+            Some(&cookie),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn dismiss_reports_a_missing_chapter_rather_than_succeeding() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let anon = app
+        .clone()
+        .oneshot(req("POST", "/rest/chapters/1/upgrade/dismiss", None, None))
+        .await
+        .unwrap();
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    let res = app
+        .oneshot(req(
+            "POST",
+            "/rest/chapters/9999/upgrade/dismiss",
+            Some(&cookie),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "silently succeeding would tell the UI a candidate was dismissed when \
+         nothing was recorded"
+    );
+}
+
+#[tokio::test]
+async fn auto_replace_toggle_round_trips() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let db = state.db.clone();
+    let src: i64 =
+        sqlx::query_scalar("INSERT INTO sources (name, version) VALUES ('s', '1') RETURNING id")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    let manga: i64 = sqlx::query_scalar(
+        "INSERT INTO manga (source_id, source_manga_id, name, status) \
+         VALUES (?, 'm', 'M', 0) RETURNING id",
+    )
+    .bind(src)
+    .fetch_one(&db)
+    .await
+    .unwrap();
+
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let anon = app
+        .clone()
+        .oneshot(req(
+            "PUT",
+            &format!("/rest/manga/{manga}/upgrade-auto-replace"),
+            None,
+            Some(json!({ "enabled": true })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        anon.status(),
+        StatusCode::UNAUTHORIZED,
+        "auto-replace rewrites files on every scan; it must never be anonymous"
+    );
+
+    let res = app
+        .oneshot(req(
+            "PUT",
+            &format!("/rest/manga/{manga}/upgrade-auto-replace"),
+            Some(&cookie),
+            Some(json!({ "enabled": true })),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let stored: i64 = sqlx::query_scalar("SELECT upgrade_auto_replace FROM manga WHERE id = ?")
+        .bind(manga)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(stored, 1, "the toggle must actually persist");
+}

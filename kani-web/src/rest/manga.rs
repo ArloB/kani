@@ -23,6 +23,17 @@ pub fn router() -> Router<AppState> {
                 .route_layer(axum::middleware::from_fn(crate::etag::etag_middleware)),
         )
         .route("/manga/{id}/chapter_ids", get(get_chapter_ids))
+        .route("/manga/{id}/upgrades", get(get_manga_upgrades))
+        .route(
+            "/manga/{id}/upgrade-auto-replace",
+            put(set_upgrade_auto_replace),
+        )
+        .route("/me/upgrades", get(get_all_upgrades))
+        .route("/chapters/{id}/upgrade", post(apply_chapter_upgrade))
+        .route(
+            "/chapters/{id}/upgrade/dismiss",
+            post(dismiss_chapter_upgrade),
+        )
         .route("/manga/{id}/download_all", post(download_all))
         .route("/manga/{id}/cancel_all", post(cancel_all_downloads))
         .route("/manga/{id}/refresh", post(refresh_manga))
@@ -1116,4 +1127,62 @@ mod tests {
         let body = axum::response::IntoResponse::into_response(response);
         assert_eq!(body.status(), axum::http::StatusCode::OK);
     }
+}
+
+// ── Upgrade detection ────────────────────────────────────────────────────────
+
+pub(crate) async fn get_manga_upgrades(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
+    State(state): State<AppState>,
+    Path(manga_id): Path<MangaId>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(state.service.get_upgrades(manga_id).await?))
+}
+
+pub(crate) async fn get_all_upgrades(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(state.service.all_upgrades().await?))
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct AutoReplaceBody {
+    pub enabled: bool,
+}
+
+pub(crate) async fn set_upgrade_auto_replace(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(state): State<AppState>,
+    Path(manga_id): Path<MangaId>,
+    Json(body): Json<AutoReplaceBody>,
+) -> Result<impl IntoResponse, AppError> {
+    state
+        .service
+        .set_upgrade_auto_replace(manga_id, body.enabled)
+        .await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Replacing a held chapter moves the old file aside and re-queues the
+/// download, so this returns the download job id rather than a finished result.
+pub(crate) async fn apply_chapter_upgrade(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(state): State<AppState>,
+    Path(chapter_id): Path<ChapterId>,
+) -> Result<impl IntoResponse, AppError> {
+    let job_id = state.service.apply_upgrade(chapter_id, user.id).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "job_id": job_id })),
+    ))
+}
+
+pub(crate) async fn dismiss_chapter_upgrade(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(state): State<AppState>,
+    Path(chapter_id): Path<ChapterId>,
+) -> Result<impl IntoResponse, AppError> {
+    state.service.dismiss_upgrade(chapter_id).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }

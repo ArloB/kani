@@ -1211,6 +1211,9 @@ pub struct AppSettings {
     pub integrity_quick_scrub_interval_hours: i64,
     pub integrity_deep_scrub_interval_hours: i64,
     pub scrub_on_startup: bool,
+    pub upgrade_detection_enabled: bool,
+    pub upgrade_min_res_gain: f64,
+    pub upgrade_confirm_fetches: i64,
     pub browser_max_memory_mb: i64,
     pub browser_max_instances: i64,
     pub browser_idle_timeout_s: i64,
@@ -1317,6 +1320,9 @@ pub struct ScanSettings {
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
     pub scan_exclude_completed: bool,
+    pub upgrade_detection_enabled: bool,
+    pub upgrade_min_res_gain: f64,
+    pub upgrade_confirm_fetches: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1989,6 +1995,9 @@ mod tests {
             auto_scan: true,
             scan_interval_minutes: 60,
             scan_exclude_completed: false,
+            upgrade_detection_enabled: true,
+            upgrade_min_res_gain: 1.2,
+            upgrade_confirm_fetches: 3,
         }));
         json_rt(&SettingsUpdate::Advanced(AdvancedSettings {
             flaresolverr_url: String::new(),

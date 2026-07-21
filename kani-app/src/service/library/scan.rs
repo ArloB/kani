@@ -400,6 +400,22 @@ impl AppService {
             }
         }
 
+        // Upgrade detection runs on freshly-upserted chapters. It is
+        // metadata-only and must never fail a refresh, so a problem here is
+        // logged rather than propagated.
+        match self.evaluate_upgrades(manga_row_id).await {
+            Ok(found) if !found.is_empty() => {
+                let _ = self
+                    .refresh_tx
+                    .send(crate::events::AppEvent::UpgradesFound {
+                        manga_id: manga_row_id.0,
+                        count: found.len() as u64,
+                    });
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Upgrade evaluation failed for {manga_row_id}: {e}"),
+        }
+
         Ok(())
     }
 

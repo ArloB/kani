@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT c.upgrade_available FROM chapters c JOIN manga m ON m.id = c.manga_id WHERE c.upgrade_available IS NOT NULL AND m.deleted_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "upgrade_available",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "b97c7cc76c6acd955bcbf27a01d39a82ca287689d03236161f274ca8ab3094ce"
+}

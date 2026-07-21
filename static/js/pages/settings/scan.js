@@ -18,6 +18,9 @@ export function ScanSection({ settings }) {
     auto_scan: !!settings?.auto_scan,
     scan_interval_minutes: settings?.scan_interval_minutes ?? 60,
     scan_exclude_completed: !!settings?.scan_exclude_completed,
+    upgrade_detection_enabled: settings?.upgrade_detection_enabled ?? true,
+    upgrade_min_res_gain: Number(settings?.upgrade_min_res_gain ?? 1.2),
+    upgrade_confirm_fetches: Number(settings?.upgrade_confirm_fetches ?? 3),
   };
   const [form, setForm] = useState(initial);
   const [saved, setSaved] = useState(initial);
@@ -55,6 +58,33 @@ export function ScanSection({ settings }) {
         checked=${form.scan_exclude_completed}
         onChange=${(v) => set('scan_exclude_completed', v)}
       />
+    <//>
+
+    <${SettingsGroup} label=${t('settings.upgrades.group')}>
+      <${ToggleRow}
+        label=${t('settings.upgrades.enabled.label')}
+        description=${t('settings.upgrades.enabled.desc')}
+        checked=${form.upgrade_detection_enabled}
+        onChange=${(v) => set('upgrade_detection_enabled', v)}
+      />
+      ${form.upgrade_detection_enabled &&
+      html`<${NumberRow}
+          label=${t('settings.upgrades.min_gain.label')}
+          description=${t('settings.upgrades.min_gain.desc')}
+          value=${form.upgrade_min_res_gain}
+          min=${1}
+          max=${5}
+          step=${0.1}
+          onChange=${(v) => set('upgrade_min_res_gain', v)}
+        />
+        <${NumberRow}
+          label=${t('settings.upgrades.confirm_fetches.label')}
+          description=${t('settings.upgrades.confirm_fetches.desc')}
+          value=${form.upgrade_confirm_fetches}
+          min=${0}
+          stepper=${true}
+          onChange=${(v) => set('upgrade_confirm_fetches', v)}
+        />`}
     <//>
   `;
 }

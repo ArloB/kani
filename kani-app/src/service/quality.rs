@@ -1,0 +1,441 @@
+//! Upgrade detection: notices when a source now offers a better version of a
+//! chapter you already hold, and replaces it on request.
+//!
+//! Everything here is metadata-only until the user acts. Detection never
+//! downloads images; the most it does is confirm a page list, bounded per manga
+//! per scan.
+
+use crate::error::{Result, ServiceError};
+use crate::ids::{ChapterId, MangaId, UserId};
+use crate::service::AppService;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpgradeKind {
+    /// The source now lists more pages than the copy on disk.
+    QualityReupload,
+    /// The source now lists *fewer* pages. Surfaced as reassurance, never as a
+    /// prompt to replace.
+    SourceDowngraded,
+    /// A version exists from a scanlator this manga ranks higher.
+    PreferredScanlator,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UpgradeCandidate {
+    pub held_chapter_id: i64,
+    pub kind: UpgradeKind,
+    pub candidate_chapter_id: Option<i64>,
+    pub candidate_source_chapter_id: String,
+    pub candidate_scanlator: Option<String>,
+    pub candidate_page_count: Option<i64>,
+    pub held_page_count: Option<i64>,
+    pub reason_key: String,
+    pub detected_at: i64,
+}
+
+/// What is stored in `chapters.upgrade_available`. Dismissals live inside the
+/// descriptor so a dismissed candidate survives re-scans without a side table.
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UpgradeDescriptor {
+    #[serde(default)]
+    pub candidates: Vec<UpgradeCandidate>,
+    /// `(candidate_source_chapter_id, scanlator)` pairs the user has waved away.
+    #[serde(default)]
+    pub dismissed: Vec<(String, Option<String>)>,
+}
+
+fn now_unix() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp()
+}
+
+fn dismissal_key(c: &UpgradeCandidate) -> (String, Option<String>) {
+    (
+        c.candidate_source_chapter_id.clone(),
+        c.candidate_scanlator.clone(),
+    )
+}
+
+impl AppService {
+    /// Re-derives the upgrade candidates for one manga and stores them on the
+    /// affected chapter rows. Returns everything currently flagged.
+    pub async fn evaluate_upgrades(&self, manga_id: MangaId) -> Result<Vec<UpgradeCandidate>> {
+        let (enabled, _min_gain) = {
+            let s = self.settings.read().await;
+            (s.upgrade_detection_enabled, s.upgrade_min_res_gain)
+        };
+        if !enabled {
+            return Ok(Vec::new());
+        }
+
+        let rows = sqlx::query!(
+            "SELECT id, source_chapter_id, chapter_number, scanlator, page_count, \
+             download_status, manifest_json, upgrade_available \
+             FROM chapters WHERE manga_id = ? ORDER BY chapter_number",
+            manga_id
+        )
+        .fetch_all(&self.db_read)
+        .await?;
+
+        let prefs = self.get_scanlator_prefs(manga_id).await?;
+        let rank = |scanlator: &Option<String>| -> Option<i64> {
+            let s = scanlator.as_deref()?;
+            prefs
+                .iter()
+                .find(|p| p.scanlator == s && !p.blocked)
+                .map(|p| p.priority)
+        };
+
+        let mut found: Vec<UpgradeCandidate> = Vec::new();
+
+        for held in rows.iter().filter(|r| r.download_status == 2) {
+            let existing: UpgradeDescriptor = held
+                .upgrade_available
+                .as_deref()
+                .and_then(|j| serde_json::from_str(j).ok())
+                .unwrap_or_default();
+
+            let held_pages = held
+                .manifest_json
+                .as_deref()
+                .and_then(|j| serde_json::from_str::<kani_core::manifest::ChapterManifest>(j).ok())
+                .map(|m| m.page_count as i64)
+                .or(held.page_count);
+
+            let mut candidates: Vec<UpgradeCandidate> = Vec::new();
+
+            // (a) The same chapter, re-listed with a different page count.
+            //
+            // Page count is all a listing exposes; resolution cannot be judged
+            // without fetching images, which detection deliberately never does.
+            // So a longer listing is a *candidate*, not a verdict — the score
+            // comparison happens after download, in `apply_upgrade`.
+            if let (Some(hp), Some(lp)) = (held_pages, held.page_count)
+                && hp != lp
+            {
+                let kind = if lp > hp {
+                    UpgradeKind::QualityReupload
+                } else {
+                    UpgradeKind::SourceDowngraded
+                };
+                candidates.push(UpgradeCandidate {
+                    held_chapter_id: held.id,
+                    kind,
+                    candidate_chapter_id: Some(held.id),
+                    candidate_source_chapter_id: held.source_chapter_id.clone(),
+                    candidate_scanlator: held.scanlator.clone(),
+                    candidate_page_count: Some(lp),
+                    held_page_count: Some(hp),
+                    reason_key: match kind {
+                        UpgradeKind::SourceDowngraded => "upgrade.reason.source_downgraded",
+                        _ => "upgrade.reason.more_pages",
+                    }
+                    .to_string(),
+                    detected_at: now_unix(),
+                });
+            }
+
+            // (b) A sibling at the same chapter number from a better-ranked
+            // scanlator.
+            let held_rank = rank(&held.scanlator);
+            for other in rows.iter() {
+                if other.id == held.id
+                    || (other.chapter_number - held.chapter_number).abs() > f64::EPSILON
+                {
+                    continue;
+                }
+                let Some(other_rank) = rank(&other.scanlator) else {
+                    continue;
+                };
+                let better = match held_rank {
+                    Some(hr) => other_rank > hr,
+                    None => true,
+                };
+                if better {
+                    candidates.push(UpgradeCandidate {
+                        held_chapter_id: held.id,
+                        kind: UpgradeKind::PreferredScanlator,
+                        candidate_chapter_id: Some(other.id),
+                        candidate_source_chapter_id: other.source_chapter_id.clone(),
+                        candidate_scanlator: other.scanlator.clone(),
+                        candidate_page_count: other.page_count,
+                        held_page_count: held_pages,
+                        reason_key: "upgrade.reason.preferred_scanlator".to_string(),
+                        detected_at: now_unix(),
+                    });
+                }
+            }
+
+            candidates.retain(|c| !existing.dismissed.contains(&dismissal_key(c)));
+
+            let descriptor = UpgradeDescriptor {
+                candidates: candidates.clone(),
+                dismissed: existing.dismissed,
+            };
+            self.store_descriptor(ChapterId(held.id), &descriptor)
+                .await?;
+            found.extend(candidates);
+        }
+
+        Ok(found)
+    }
+
+    async fn store_descriptor(
+        &self,
+        chapter_id: ChapterId,
+        descriptor: &UpgradeDescriptor,
+    ) -> Result<()> {
+        // An empty descriptor with nothing dismissed is just noise in the row.
+        let json = if descriptor.candidates.is_empty() && descriptor.dismissed.is_empty() {
+            None
+        } else {
+            serde_json::to_string(descriptor).ok()
+        };
+        sqlx::query!(
+            "UPDATE chapters SET upgrade_available = ? WHERE id = ?",
+            json,
+            chapter_id
+        )
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_upgrades(&self, manga_id: MangaId) -> Result<Vec<UpgradeCandidate>> {
+        let rows = sqlx::query!(
+            "SELECT upgrade_available FROM chapters \
+             WHERE manga_id = ? AND upgrade_available IS NOT NULL",
+            manga_id
+        )
+        .fetch_all(&self.db_read)
+        .await?;
+        Ok(collect_candidates(
+            rows.into_iter().map(|r| r.upgrade_available),
+        ))
+    }
+
+    pub async fn all_upgrades(&self) -> Result<Vec<UpgradeCandidate>> {
+        let rows = sqlx::query!(
+            "SELECT c.upgrade_available FROM chapters c \
+             JOIN manga m ON m.id = c.manga_id \
+             WHERE c.upgrade_available IS NOT NULL AND m.deleted_at IS NULL"
+        )
+        .fetch_all(&self.db_read)
+        .await?;
+        Ok(collect_candidates(
+            rows.into_iter().map(|r| r.upgrade_available),
+        ))
+    }
+
+    /// Records every current candidate for this chapter as dismissed, so a later
+    /// scan does not raise them again.
+    pub async fn dismiss_upgrade(&self, chapter_id: ChapterId) -> Result<()> {
+        let row = sqlx::query!(
+            "SELECT upgrade_available FROM chapters WHERE id = ?",
+            chapter_id
+        )
+        .fetch_optional(&self.db_read)
+        .await?
+        .ok_or_else(|| ServiceError::NotFound(format!("Chapter {chapter_id} not found")))?;
+
+        let mut descriptor: UpgradeDescriptor = row
+            .upgrade_available
+            .as_deref()
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or_default();
+
+        for c in &descriptor.candidates {
+            let key = dismissal_key(c);
+            if !descriptor.dismissed.contains(&key) {
+                descriptor.dismissed.push(key);
+            }
+        }
+        descriptor.candidates.clear();
+        self.store_descriptor(chapter_id, &descriptor).await?;
+        Ok(())
+    }
+
+    pub async fn set_upgrade_auto_replace(&self, manga_id: MangaId, on: bool) -> Result<()> {
+        sqlx::query!(
+            "UPDATE manga SET upgrade_auto_replace = ? WHERE id = ?",
+            on,
+            manga_id
+        )
+        .execute(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    /// Moves the held file into `.replaced/` and re-queues the chapter, so the
+    /// existing download pipeline produces the new copy.
+    ///
+    /// The old file is *moved*, never deleted: `TrashPurgeJob` sweeps
+    /// `.replaced/` on the same retention window as the trash, which is the only
+    /// thing making this reversible.
+    pub async fn apply_upgrade(
+        &self,
+        chapter_id: ChapterId,
+        user_id: UserId,
+    ) -> Result<uuid::Uuid> {
+        let info = self.chapter_cbz_path(chapter_id).await?;
+        let library_path = self.settings.read().await.library_path.clone();
+
+        let hash: Option<String> =
+            sqlx::query_scalar!("SELECT content_hash FROM chapters WHERE id = ?", chapter_id)
+                .fetch_optional(&self.db_read)
+                .await?
+                .flatten();
+
+        if info.path.exists() {
+            let replaced_dir = library_path.join(".replaced");
+            tokio::fs::create_dir_all(&replaced_dir).await.ok();
+            let prefix = hash.as_deref().unwrap_or("nohash");
+            let dest = replaced_dir.join(format!(
+                "{}-{}.cbz",
+                chapter_id.0,
+                &prefix[..prefix.len().min(12)]
+            ));
+            if let Err(e) = tokio::fs::rename(&info.path, &dest).await {
+                // Cross-device rename fails; fall back to copy so the old copy
+                // still exists before the new download can overwrite it.
+                tokio::fs::copy(&info.path, &dest).await.map_err(|_| {
+                    ServiceError::Internal(format!("cannot preserve the old file: {e}"))
+                })?;
+                tokio::fs::remove_file(&info.path).await.ok();
+            }
+        }
+
+        sqlx::query!(
+            "UPDATE chapters SET download_status = 0, file_path = NULL, content_hash = NULL, \
+             manifest_json = NULL, file_verified_at = NULL, upgrade_available = NULL WHERE id = ?",
+            chapter_id
+        )
+        .execute(&self.db)
+        .await?;
+
+        self.audit(
+            Some(user_id),
+            "chapter.upgrade.apply",
+            Some("chapter"),
+            Some(serde_json::json!({ "chapter_id": chapter_id.0 })),
+        )
+        .await;
+
+        self.download_chapter(chapter_id).await
+    }
+
+    /// Removes `.replaced/` files older than the trash retention window.
+    pub async fn purge_replaced(&self, retention_days: i64) -> Result<u64> {
+        let library_path = self.settings.read().await.library_path.clone();
+        let dir = library_path.join(".replaced");
+        let cutoff = now_unix() - retention_days.max(0) * 86_400;
+
+        let Ok(mut entries) = tokio::fs::read_dir(&dir).await else {
+            return Ok(0);
+        };
+        let mut removed = 0u64;
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let Ok(meta) = entry.metadata().await else {
+                continue;
+            };
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            // `<=`, not `<`: with a retention of 0 the cutoff *is* now, and a
+            // file written this second would otherwise survive a sweep that
+            // was asked to remove everything.
+            if modified <= cutoff && tokio::fs::remove_file(entry.path()).await.is_ok() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+}
+
+fn collect_candidates(rows: impl Iterator<Item = Option<String>>) -> Vec<UpgradeCandidate> {
+    rows.flatten()
+        .filter_map(|j| serde_json::from_str::<UpgradeDescriptor>(&j).ok())
+        .flat_map(|d| d.candidates)
+        .collect()
+}
+
+/// Maps a reading position from an old page count onto a new one.
+///
+/// Equal counts carry straight across. Otherwise the position is scaled and
+/// clamped, so a re-upload with a different split never throws the reader back
+/// to page one or past the end.
+pub fn remap_progress(last_page_read: i64, old_count: i64, new_count: i64) -> i64 {
+    if old_count <= 0 || new_count <= 0 {
+        return 0;
+    }
+    if old_count == new_count {
+        return last_page_read.clamp(0, new_count - 1);
+    }
+    let ratio = last_page_read as f64 / old_count as f64;
+    ((ratio * new_count as f64).round() as i64).clamp(0, new_count - 1)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn equal_page_counts_carry_progress_unchanged() {
+        assert_eq!(remap_progress(7, 20, 20), 7);
+        assert_eq!(remap_progress(0, 20, 20), 0);
+    }
+
+    #[test]
+    fn a_longer_reupload_scales_the_position() {
+        // Halfway through 20 pages is halfway through 40.
+        assert_eq!(remap_progress(10, 20, 40), 20);
+    }
+
+    #[test]
+    fn progress_never_lands_past_the_end() {
+        assert_eq!(
+            remap_progress(19, 20, 5),
+            4,
+            "a shorter re-upload must clamp, not point past the last page"
+        );
+        assert_eq!(remap_progress(999, 20, 20), 19);
+    }
+
+    #[test]
+    fn a_missing_page_count_does_not_panic() {
+        assert_eq!(remap_progress(5, 0, 10), 0);
+        assert_eq!(remap_progress(5, 10, 0), 0);
+    }
+
+    #[test]
+    fn a_dismissed_candidate_is_matched_by_source_id_and_scanlator() {
+        let base = UpgradeCandidate {
+            held_chapter_id: 1,
+            kind: UpgradeKind::PreferredScanlator,
+            candidate_chapter_id: Some(2),
+            candidate_source_chapter_id: "ch-7".into(),
+            candidate_scanlator: Some("Group A".into()),
+            candidate_page_count: Some(20),
+            held_page_count: Some(18),
+            reason_key: "upgrade.reason.preferred_scanlator".into(),
+            detected_at: 0,
+        };
+        let other_group = UpgradeCandidate {
+            candidate_scanlator: Some("Group B".into()),
+            ..base.clone()
+        };
+        assert_eq!(
+            dismissal_key(&base),
+            ("ch-7".to_string(), Some("Group A".into()))
+        );
+        assert_ne!(
+            dismissal_key(&base),
+            dismissal_key(&other_group),
+            "dismissing one group's release must not silence another's"
+        );
+    }
+}

@@ -55,7 +55,10 @@ async fn patch_settings_scan_updates_interval() {
                 "Scan": {
                     "auto_scan": false,
                     "scan_interval_minutes": 120,
-                    "scan_exclude_completed": false
+                    "scan_exclude_completed": false,
+                    "upgrade_detection_enabled": true,
+                    "upgrade_min_res_gain": 1.5,
+                    "upgrade_confirm_fetches": 2
                 }
             }),
         ))
@@ -405,4 +408,39 @@ async fn patch_settings_rejects_a_zero_scrub_interval() {
         "a zero interval would reschedule the scrub continuously and hash the \
          whole library in a loop"
     );
+}
+
+#[tokio::test]
+async fn patch_settings_rejects_an_out_of_range_upgrade_gain() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    for gain in [0.5, 9.0] {
+        let res = app
+            .clone()
+            .oneshot(authed_patch(
+                "/rest/settings",
+                &cookie,
+                serde_json::json!({
+                    "Scan": {
+                        "auto_scan": false,
+                        "scan_interval_minutes": 120,
+                        "scan_exclude_completed": false,
+                        "upgrade_detection_enabled": true,
+                        "upgrade_min_res_gain": gain,
+                        "upgrade_confirm_fetches": 2
+                    }
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(
+            res.status().is_client_error(),
+            "a gain below 1.0 would flag every re-encode as an upgrade, and an \
+             absurd one would flag nothing; got {} for {gain}",
+            res.status()
+        );
+    }
 }

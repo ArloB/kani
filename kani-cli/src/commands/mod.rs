@@ -9,6 +9,7 @@ pub mod keygen;
 pub mod lint;
 pub mod new;
 pub mod publish;
+pub mod quality;
 pub mod repo;
 pub mod rollback;
 pub mod setup;
@@ -160,6 +161,21 @@ pub enum Command {
         #[arg(value_name = "ARCHIVE_DIR")]
         path: std::path::PathBuf,
     },
+    /// Print the quality score and per-page dimensions for a CBZ
+    Quality {
+        /// Path to a .cbz file
+        #[arg(value_name = "CBZ")]
+        path: std::path::PathBuf,
+    },
+    /// Compare two CBZs page by page with perceptual hashes
+    PhashCompare {
+        /// First .cbz
+        #[arg(value_name = "A")]
+        a: std::path::PathBuf,
+        /// Second .cbz
+        #[arg(value_name = "B")]
+        b: std::path::PathBuf,
+    },
     /// Print the manifest computed from a CBZ on disk
     Manifest {
         /// Path to a .cbz file
@@ -310,6 +326,8 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             esbuild,
         } => setup::run(vendors, tailwind, esbuild),
         Command::ArchiveVerify { path } => archive::verify(&path),
+        Command::Quality { path } => quality::score(&path),
+        Command::PhashCompare { a, b } => quality::phash_compare(&a, &b),
         Command::Manifest { path } => archive::manifest(&path),
         Command::Icons => icons::run(),
         Command::Dsl {
