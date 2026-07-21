@@ -41,6 +41,7 @@ import { ServerSection } from './server.js';
 import { AccountSection } from './account.js';
 import { ClientsSection } from './clients.js';
 import { SecuritySection } from './security.js';
+import { DiagnosticsSection } from './diagnostics.js';
 
 const html = htm.bind(h);
 
@@ -72,6 +73,13 @@ function buildSections(settings, categories, bootId) {
     { id: 'storage', perm: 'admin:manage', group: g.server, C: StorageSection, props: {} },
     { id: 'maintenance', perm: 'settings:edit_advanced', group: g.server, C: MaintenanceSection, props: { settings } },
     { id: 'server', perm: 'server:manage', group: g.server, C: ServerSection, props: {} },
+    {
+      id: 'diagnostics',
+      perm: 'server:manage',
+      group: g.server,
+      C: DiagnosticsSection,
+      props: {},
+    },
     { id: 'account', perm: null, group: g.account, C: AccountSection, props: {} },
     { id: 'clients', perm: null, group: g.account, C: ClientsSection, props: {} },
     { id: 'security', perm: null, group: g.account, C: SecuritySection, props: {} },

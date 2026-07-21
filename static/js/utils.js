@@ -410,3 +410,24 @@ export function announce(message) {
   requestAnimationFrame(() => { if (_liveRegion) _liveRegion.textContent = message; });
 }
 
+
+/** @param {number} bytes */
+export function formatBytes(bytes) {
+  if (bytes == null) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+
+/** @param {number} secs */
+export function formatDuration(secs) {
+  if (secs == null) return '—';
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m`;
+  return `${Math.floor(secs)}s`;
+}

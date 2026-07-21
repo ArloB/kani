@@ -242,6 +242,43 @@ export async function getSourcesHealth() {
   return _req('GET', '/sources/health');
 }
 
+export async function getDiagnostics() {
+  return _req('GET', '/admin/diagnostics');
+}
+
+export async function getSourceCircuits() {
+  return _req('GET', '/admin/sources/circuits');
+}
+
+export async function resetSourceCircuit(host) {
+  return _req('POST', `/admin/sources/circuits/${encodeURIComponent(host)}/reset`);
+}
+
+export async function getProxyStats() {
+  return _req('GET', '/admin/proxy/stats');
+}
+
+export async function downloadSupportBundle() {
+  const res = await fetch('/rest/admin/support-bundle', {
+    method: 'GET',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    throw Object.assign(new Error(`HTTP ${res.status}`), {
+      status: res.status,
+      traceId: res.headers.get('x-request-id'),
+    });
+  }
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const disp = res.headers.get('Content-Disposition') ?? '';
+  const match = disp.match(/filename="?([^"]+)"?/);
+  a.download = match?.[1] ?? 'kani-support.zip';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 /** @param {string} name */
 export async function createSource(name) {
   return _req('POST', '/sources', { body: { name } });

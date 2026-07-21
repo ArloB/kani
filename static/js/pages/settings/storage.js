@@ -9,17 +9,10 @@ import { EmptyState } from '../../components/empty-state.js';
 import { t } from '../../i18n.js';
 import { showApiError } from '../../components/toast.js';
 import { SettingsGroup, SettingsRow } from './_shared.js';
+import { formatBytes } from '../../utils.js';
 
 const html = htm.bind(h);
-
-/** @param {number} bytes */
-function fmt(bytes) {
-  if (bytes == null) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
-}
+const fmt = formatBytes;
 
 function UsageGroup() {
   const [state, setState] = useState(
