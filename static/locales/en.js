@@ -1415,7 +1415,8 @@ export default {
   'settings.section.security.label': 'Security',
   'settings.section.security.desc': 'Two-factor authentication, session management, and security status.',
   'settings.section.clients.label': 'Clients & API tokens',
-  'settings.section.clients.desc': 'Connect OPDS reading apps with long-lived, revocable tokens.',
+  'settings.section.clients.desc':
+    'Long-lived, revocable tokens for reading apps and for integrations that drive the REST API.',
 
   'clients.list.title': 'Active tokens',
   'clients.create.title': 'Create a token',

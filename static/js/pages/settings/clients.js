@@ -160,10 +160,12 @@ export function ClientsSection() {
               (tok) => html`
                 <${SettingsRow}
                   key=${tok.id}
-                  label=${html`${tok.name}
+                  label=${html`<span class="inline-flex items-baseline gap-2">
+                    <span>${tok.name}</span>
                     <span class="text-xs text-text-muted font-normal"
                       >${t(`clients.kind.${tok.kind}`)}</span
-                    >`}
+                    >
+                  </span>`}
                   badge=${tok.stale_scopes?.length ? t('clients.scopes.stale.badge') : null}
                   description=${html`${tokenMeta(tok)}
                     <span class="block mt-0.5">${scopeSummary(tok)}</span>
