@@ -12,7 +12,12 @@ pub fn router() -> Router<AppState> {
 pub(crate) struct TokenResponse {
     id: String,
     name: String,
+    kind: String,
     scopes: String,
+    /// Scopes the token carries that its owner no longer holds. These are
+    /// silently dropped at authentication time, so surfacing them is the only
+    /// way a user can tell why their integration started returning 403.
+    stale_scopes: Vec<String>,
     created_at: i64,
     last_used_at: Option<i64>,
     expires_at: Option<i64>,
@@ -22,6 +27,7 @@ pub(crate) struct TokenResponse {
 pub(crate) struct CreatedTokenResponse {
     id: String,
     name: String,
+    kind: String,
     scopes: String,
     created_at: i64,
     last_used_at: Option<i64>,
@@ -34,13 +40,36 @@ pub(crate) struct CreatedTokenResponse {
 pub(crate) struct CreateTokenBody {
     name: String,
     expires_in_days: Option<u32>,
+    /// "opds" (default) or "api".
+    #[serde(default)]
+    kind: Option<String>,
+    /// Required for an API token; ignored for an OPDS token, whose scopes are
+    /// fixed.
+    #[serde(default)]
+    scopes: Vec<String>,
 }
 
-fn to_response(t: kani_app::service::api_tokens::ApiToken) -> TokenResponse {
+fn to_response(
+    t: kani_app::service::api_tokens::ApiToken,
+    held: &[kani_app::permissions::Permission],
+) -> TokenResponse {
+    let stale_scopes = t
+        .scopes
+        .split_whitespace()
+        .filter(|raw| {
+            raw.parse::<kani_app::permissions::Permission>()
+                .map(|p| !held.contains(&p))
+                .unwrap_or(true)
+        })
+        .map(str::to_string)
+        .collect();
+
     TokenResponse {
         id: t.id,
         name: t.name,
+        kind: t.kind,
         scopes: t.scopes,
+        stale_scopes,
         created_at: t.created_at,
         last_used_at: t.last_used_at,
         expires_at: t.expires_at,
@@ -61,7 +90,8 @@ pub(crate) async fn list_tokens(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let tokens = state.list_api_tokens(user.id).await?;
-    let resp: Vec<TokenResponse> = tokens.into_iter().map(to_response).collect();
+    let held = state.service.user_permissions(user.id).await?;
+    let resp: Vec<TokenResponse> = tokens.into_iter().map(|t| to_response(t, &held)).collect();
     Ok(Json(resp))
 }
 
@@ -81,14 +111,58 @@ pub(crate) async fn create_token(
     State(state): State<AppState>,
     Json(body): Json<CreateTokenBody>,
 ) -> Result<impl IntoResponse, AppError> {
+    use kani_app::permissions::Permission;
+    use kani_app::service::api_tokens::TokenKind;
+
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 100 {
         return Err(AppError::ValidationError(
             "Token name must be 1–100 characters".into(),
         ));
     }
+
+    let kind = match body.kind.as_deref().unwrap_or("opds") {
+        "opds" => TokenKind::Opds,
+        "api" => TokenKind::Api,
+        other => {
+            return Err(AppError::ValidationError(format!(
+                "Unknown token kind: {other}"
+            )));
+        }
+    };
+
+    // Each kind has its own creation permission: pairing a reader app is a much
+    // lighter act than minting something that can drive the REST API.
+    let required = match kind {
+        TokenKind::Opds => "token:create_opds",
+        TokenKind::Api => "token:create_api",
+    };
+    let required: Permission = required
+        .parse()
+        .map_err(|_| AppError::InternalServerError("bad permission literal".into()))?;
+    let held = state.service.user_permissions(user.id).await?;
+    if !held.contains(&required) {
+        return Err(AppError::Forbidden(format!(
+            "User lacks permission: {required}"
+        )));
+    }
+
+    let scopes: Vec<Permission> = body.scopes.iter().filter_map(|s| s.parse().ok()).collect();
+    if kind == TokenKind::Api && scopes.len() != body.scopes.len() {
+        return Err(AppError::ValidationError(
+            "One or more requested scopes are not valid permissions".into(),
+        ));
+    }
+
     let created = state
-        .create_api_token(user.id, name, body.expires_in_days)
+        .service
+        .create_token(
+            user.id,
+            name,
+            body.expires_in_days,
+            kind,
+            Some(scopes.as_slice()),
+        )
         .await?;
     state
         .audit(
@@ -101,6 +175,7 @@ pub(crate) async fn create_token(
     let resp = CreatedTokenResponse {
         id: created.token.id,
         name: created.token.name,
+        kind: created.token.kind,
         scopes: created.token.scopes,
         created_at: created.token.created_at,
         last_used_at: created.token.last_used_at,

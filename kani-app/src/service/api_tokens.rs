@@ -10,6 +10,7 @@ pub struct ApiToken {
     pub id: String,
     pub user_id: UserId,
     pub name: String,
+    pub kind: String,
     pub scopes: String,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
@@ -202,7 +203,7 @@ impl AppService {
 
         let row = sqlx::query!(
             r#"
-            SELECT id AS "id!", user_id, name, scopes, created_at,
+            SELECT id AS "id!", user_id, name, kind, scopes, created_at,
                    last_used_at, expires_at, revoked_at
             FROM api_tokens WHERE token_hash = ?
             "#,
@@ -216,6 +217,7 @@ impl AppService {
                 id: row.id,
                 user_id: UserId(row.user_id),
                 name: row.name,
+                kind: row.kind,
                 scopes: row.scopes,
                 created_at: row.created_at,
                 last_used_at: row.last_used_at,
@@ -230,7 +232,7 @@ impl AppService {
         let uid = user_id.0;
         let rows = sqlx::query!(
             r#"
-            SELECT id AS "id!", user_id, name, scopes, created_at,
+            SELECT id AS "id!", user_id, name, kind, scopes, created_at,
                    last_used_at, expires_at, revoked_at
             FROM api_tokens
             WHERE user_id = ? AND revoked_at IS NULL
@@ -247,6 +249,7 @@ impl AppService {
                 id: row.id,
                 user_id: UserId(row.user_id),
                 name: row.name,
+                kind: row.kind,
                 scopes: row.scopes,
                 created_at: row.created_at,
                 last_used_at: row.last_used_at,

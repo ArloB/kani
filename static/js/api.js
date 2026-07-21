@@ -173,9 +173,9 @@ export async function listApiTokens() {
 }
 
 /** @param {string} name @param {number|null} [expiresInDays] */
-export async function createApiToken(name, expiresInDays) {
+export async function createApiToken(name, expiresInDays, kind = 'opds', scopes = []) {
   return _req('POST', '/me/api-tokens', {
-    body: { name, expires_in_days: expiresInDays ?? null },
+    body: { name, expires_in_days: expiresInDays ?? null, kind, scopes },
   });
 }
 

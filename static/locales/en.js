@@ -1442,6 +1442,22 @@ export default {
   'clients.opds.url.label': 'OPDS catalogue URL',
   'clients.opds.group': 'OPDS access',
   'clients.opds.url.desc': 'Point your reading app at this catalogue URL, then authenticate with a token below.',
+  'clients.kind.label': 'Token type',
+  'clients.kind.opds': 'Reader app (OPDS)',
+  'clients.kind.api': 'Integration (REST API)',
+  'clients.kind.opds.desc':
+    'Fixed scope: browsing and reading progress over the OPDS catalogue. Cannot reach the REST API.',
+  'clients.kind.api.desc':
+    'Acts on the REST API with the permissions you grant below. Choose the fewest that get the job done.',
+  'clients.kind.opds.scopes': 'OPDS catalogue only',
+  'clients.scopes.label': 'Permissions',
+  'clients.scopes.desc': 'Only permissions you hold yourself can be granted.',
+  'clients.scopes.none': 'No permissions',
+  'clients.scopes.required': 'Select at least one permission.',
+  'clients.scopes.stale.badge': 'Reduced',
+  'clients.scopes.stale.desc':
+    'The struck-through permissions are no longer held by your account, so this token no longer has them. Requests relying on them will be refused.',
+  'clients.api.usage.label': 'Send as a bearer credential',
   'clients.apps.note': 'Works with PSE-capable readers (Panels, Chunky, KyBook, Cantook, KOReader). Point the app at the OPDS URL above and use the token as a Bearer credential, or paste it as the password with any username for Basic auth.',
 
   'settings.account.password.group': 'Password',
