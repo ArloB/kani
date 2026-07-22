@@ -124,7 +124,8 @@ impl AppService {
 
         let rows = sqlx::query!(
             "SELECT id, source_chapter_id, chapter_number, scanlator, page_count, \
-             source_page_count, download_status, manifest_json, upgrade_available \
+             source_page_count, download_status, manifest_json, upgrade_available, \
+             quality_long_edge, quality_bytes_per_mp, quality_encoder, quality_colour \
              FROM chapters WHERE manga_id = ? ORDER BY chapter_number",
             manga_id
         )
@@ -149,17 +150,30 @@ impl AppService {
                 .and_then(|j| serde_json::from_str(j).ok())
                 .unwrap_or_default();
 
-            let held_manifest = held
-                .manifest_json
-                .as_deref()
-                .and_then(|j| serde_json::from_str::<kani_core::manifest::ChapterManifest>(j).ok());
-            let held_score = held_manifest
-                .as_ref()
-                .map(kani_core::quality::score_from_manifest);
-            let held_pages = held_manifest
-                .as_ref()
-                .map(|m| m.page_count as i64)
-                .or(held.page_count);
+            // The score is pre-computed at download time, so the common path
+            // reads four columns rather than parsing the whole manifest. On a
+            // large library that is one avoided JSON parse per downloaded
+            // chapter per scan. Rows written before the columns existed fall
+            // back to the manifest, which is also what backfills them.
+            let held_score = stored_score(
+                held.quality_long_edge,
+                held.quality_bytes_per_mp,
+                held.page_count,
+                held.quality_encoder,
+                held.quality_colour.as_deref(),
+            );
+            let (held_score, held_pages) = match held_score {
+                Some(score) => (Some(score), held.page_count),
+                None => {
+                    let m = held.manifest_json.as_deref().and_then(|j| {
+                        serde_json::from_str::<kani_core::manifest::ChapterManifest>(j).ok()
+                    });
+                    (
+                        m.as_ref().map(kani_core::quality::score_from_manifest),
+                        m.as_ref().map(|m| m.page_count as i64).or(held.page_count),
+                    )
+                }
+            };
 
             let mut candidates: Vec<UpgradeCandidate> = Vec::new();
 
@@ -259,12 +273,23 @@ impl AppService {
                     // the ranking alone already justifies offering it. If it is
                     // already downloaded its manifest is free; otherwise spend a
                     // probe where the budget allows.
-                    let other_manifest = other.manifest_json.as_deref().and_then(|j| {
-                        serde_json::from_str::<kani_core::manifest::ChapterManifest>(j).ok()
+                    let mut candidate_score = stored_score(
+                        other.quality_long_edge,
+                        other.quality_bytes_per_mp,
+                        other.page_count,
+                        other.quality_encoder,
+                        other.quality_colour.as_deref(),
+                    )
+                    .or_else(|| {
+                        other
+                            .manifest_json
+                            .as_deref()
+                            .and_then(|j| {
+                                serde_json::from_str::<kani_core::manifest::ChapterManifest>(j).ok()
+                            })
+                            .as_ref()
+                            .map(kani_core::quality::score_from_manifest)
                     });
-                    let mut candidate_score = other_manifest
-                        .as_ref()
-                        .map(kani_core::quality::score_from_manifest);
 
                     if candidate_score.is_none()
                         && confirm_budget > 0
@@ -839,4 +864,33 @@ mod tests {
             "dismissing one group's release must not silence another's"
         );
     }
+}
+
+/// Rebuilds a `QualityScore` from the columns `manifest_capture` writes.
+///
+/// `None` when the row predates the columns, which sends the caller back to the
+/// manifest JSON. Resolution and page count are the two that must be present:
+/// a score without them cannot be compared, whereas a missing encoder estimate
+/// or colour profile is an ordinary "not known" that the comparator handles.
+fn stored_score(
+    long_edge: Option<i64>,
+    bytes_per_mp: Option<f64>,
+    page_count: Option<i64>,
+    encoder: Option<i64>,
+    colour: Option<&str>,
+) -> Option<kani_core::quality::QualityScore> {
+    let long_edge = long_edge?;
+    let page_count = page_count?;
+    if long_edge <= 0 {
+        return None;
+    }
+    Some(kani_core::quality::QualityScore {
+        median_long_edge_px: long_edge as u32,
+        bytes_per_megapixel: bytes_per_mp.unwrap_or(0.0) as f32,
+        page_count: page_count as u32,
+        median_encoder_quality: encoder.map(|q| q.clamp(1, 100) as u8),
+        colour: colour
+            .map(crate::service::manifest_capture::colour_from_column)
+            .unwrap_or_default(),
+    })
 }

@@ -670,3 +670,106 @@ async fn the_library_wide_list_hides_reassurance_by_default() {
         "and it comes back when asked for"
     );
 }
+
+// ── The pre-computed quality columns ────────────────────────────────────────
+
+#[tokio::test]
+async fn the_stored_quality_columns_are_populated_by_a_download() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "Stored").await;
+    let chapter = held_chapter(&svc, manga, "Stored", 1.0, 3).await;
+
+    struct Row {
+        quality_long_edge: Option<i64>,
+        quality_bytes_per_mp: Option<f64>,
+        quality_encoder: Option<i64>,
+        quality_colour: Option<String>,
+        page_count: Option<i64>,
+    }
+    let row: Row = sqlx::query_as!(
+        Row,
+        "SELECT quality_long_edge, quality_bytes_per_mp, quality_encoder, quality_colour, \
+         page_count FROM chapters WHERE id = ?",
+        chapter
+    )
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        row.quality_long_edge,
+        Some(24),
+        "the fixture pages are 16x24"
+    );
+    assert_eq!(row.page_count, Some(3));
+    assert!(row.quality_bytes_per_mp.is_some());
+    assert_eq!(
+        row.quality_colour.as_deref(),
+        Some("monochrome"),
+        "colour must be stored, not just computed — the comparator needs it and \
+         cannot get it from the older columns"
+    );
+    // PNG fixtures carry no JPEG quantisation table, so this is legitimately null.
+    assert!(row.quality_encoder.is_none());
+}
+
+#[tokio::test]
+async fn detection_reads_the_columns_rather_than_the_manifest() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "FastPath").await;
+    let chapter = held_chapter(&svc, manga, "FastPath", 1.0, 3).await;
+    sqlx::query("UPDATE chapters SET source_page_count = 9 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    // Corrupt the manifest JSON. If detection still produces a score, it did
+    // not parse it — which is the whole point of the columns.
+    sqlx::query("UPDATE chapters SET manifest_json = 'not json at all' WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(found.len(), 1);
+    let held = found[0]
+        .held_score
+        .expect("the stored columns must answer without the manifest");
+    assert_eq!(held.median_long_edge_px, 24);
+    assert_eq!(held.colour, kani_core::quality::ColourProfile::Monochrome);
+}
+
+#[tokio::test]
+async fn a_row_without_the_columns_falls_back_to_the_manifest() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "Legacy").await;
+    let chapter = held_chapter(&svc, manga, "Legacy", 1.0, 3).await;
+    sqlx::query("UPDATE chapters SET source_page_count = 9 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    // A row written before the columns existed.
+    sqlx::query(
+        "UPDATE chapters SET quality_long_edge = NULL, quality_bytes_per_mp = NULL, \
+         quality_encoder = NULL, quality_colour = NULL WHERE id = ?",
+    )
+    .bind(chapter.0)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0]
+            .held_score
+            .expect("the manifest is still there and must be used")
+            .median_long_edge_px,
+        24,
+        "a library that predates the columns must keep working"
+    );
+}

@@ -10,6 +10,31 @@ pub struct CapturedManifest {
     pub rel_path: Option<String>,
     pub quality_long_edge: i64,
     pub quality_bytes_per_mp: f64,
+    pub quality_encoder: Option<i64>,
+    pub quality_colour: String,
+}
+
+/// The stored form of a `ColourProfile`. Matches its serde representation so
+/// the two cannot drift apart silently.
+pub fn colour_to_column(c: kani_core::quality::ColourProfile) -> String {
+    use kani_core::quality::ColourProfile::*;
+    match c {
+        Monochrome => "monochrome",
+        ColourAccent => "colour_accent",
+        FullColour => "full_colour",
+        Unknown => "unknown",
+    }
+    .to_string()
+}
+
+pub fn colour_from_column(s: &str) -> kani_core::quality::ColourProfile {
+    use kani_core::quality::ColourProfile::*;
+    match s {
+        "monochrome" => Monochrome,
+        "colour_accent" => ColourAccent,
+        "full_colour" => FullColour,
+        _ => Unknown,
+    }
 }
 
 /// Computes a chapter's manifest off the runtime. Hashing and decoding every
@@ -36,6 +61,8 @@ pub async fn capture(cbz_path: PathBuf, library_path: &Path) -> Option<CapturedM
         rel_path,
         quality_long_edge: i64::from(score.median_long_edge_px),
         quality_bytes_per_mp: f64::from(score.bytes_per_megapixel),
+        quality_encoder: score.median_encoder_quality.map(i64::from),
+        quality_colour: colour_to_column(score.colour),
     })
 }
 
@@ -65,6 +92,7 @@ impl AppService {
         if let Err(e) = sqlx::query!(
             "UPDATE chapters SET file_path = ?, content_hash = ?, manifest_json = ?, \
              file_verified_at = ?, quality_long_edge = ?, quality_bytes_per_mp = ?, \
+             quality_encoder = ?, quality_colour = ?, \
              page_count = ? WHERE id = ?",
             captured.rel_path,
             archive_hash,
@@ -72,6 +100,8 @@ impl AppService {
             now,
             captured.quality_long_edge,
             captured.quality_bytes_per_mp,
+            captured.quality_encoder,
+            captured.quality_colour,
             page_count,
             chapter_id,
         )
