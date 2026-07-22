@@ -20,6 +20,19 @@ impl AppService {
         let library_path = self.settings.read().await.library_path.clone();
         let full_path = library_path.join(&relative);
 
+        // A cover whose file — or whose whole directory — is gone is *not
+        // found*, not a server error. This happens after a library-path change
+        // or a partial restore: the row still points at a path that no longer
+        // exists, and `assert_within_root` cannot canonicalise a missing parent,
+        // so it used to surface as a 500 that also spammed the logs. The
+        // traversal guard still runs for paths that do exist, which is the case
+        // it was written to catch (a symlink resolving out of root).
+        if !full_path.exists() {
+            return Err(ServiceError::NotFound(
+                "Cover file not found on disk".into(),
+            ));
+        }
+
         kani_core::utilities::assert_within_root(&library_path, &full_path)
             .map_err(|e| ServiceError::Internal(format!("Cover path traversal blocked: {e}")))
     }

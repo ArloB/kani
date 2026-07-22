@@ -104,3 +104,25 @@ async fn delete_manga_returns_not_found_for_missing_id() {
     let result = svc.delete_manga(MangaId(99999), UserId(1)).await;
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn a_cover_whose_directory_is_missing_is_not_found_not_a_server_error() {
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "src").await;
+    let manga_id = insert_manga(&svc.db, src, "m1", "Gone Cover").await;
+
+    // A row pointing at a cover under a directory that does not exist — the
+    // shape left behind by a library-path change or a partial restore.
+    sqlx::query("UPDATE manga SET local_cover_path = 'no-such-dir/cover.jpg' WHERE id = ?")
+        .bind(manga_id)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let err = svc.get_manga_cover_path(manga_id).await.unwrap_err();
+    assert!(
+        matches!(err, kani_app::ServiceError::NotFound(_)),
+        "a missing cover directory must be NotFound (404), not Internal (500) — \
+         got {err:?}"
+    );
+}
