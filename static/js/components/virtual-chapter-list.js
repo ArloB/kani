@@ -675,6 +675,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
                 onToggleSelect=${onToggleSelect}
                 onEnterSelectWithChapter=${onEnterSelectWithChapter}
                 onDelete=${onDelete}
+                onUpgradeClick=${openUpgrade}
                 hasNote=${notedChapterIds ? notedChapterIds.has(ch.id) : false}
               />
             </div>

@@ -28,6 +28,9 @@ pub struct UpgradeCandidate {
     pub candidate_chapter_id: Option<i64>,
     pub candidate_source_chapter_id: String,
     pub candidate_scanlator: Option<String>,
+    /// The group whose release is on disk — without it the comparison has only
+    /// one side.
+    pub held_scanlator: Option<String>,
     pub candidate_page_count: Option<i64>,
     pub held_page_count: Option<i64>,
     pub reason_key: String,
@@ -176,6 +179,7 @@ impl AppService {
                     candidate_chapter_id: Some(held.id),
                     candidate_source_chapter_id: held.source_chapter_id.clone(),
                     candidate_scanlator: held.scanlator.clone(),
+                    held_scanlator: held.scanlator.clone(),
                     candidate_page_count: Some(lp),
                     held_page_count: Some(hp),
                     reason_key: match kind {
@@ -210,6 +214,7 @@ impl AppService {
                         candidate_chapter_id: Some(other.id),
                         candidate_source_chapter_id: other.source_chapter_id.clone(),
                         candidate_scanlator: other.scanlator.clone(),
+                        held_scanlator: held.scanlator.clone(),
                         candidate_page_count: other.page_count,
                         held_page_count: held_pages,
                         reason_key: "upgrade.reason.preferred_scanlator".to_string(),
@@ -593,6 +598,7 @@ mod tests {
             candidate_chapter_id: Some(2),
             candidate_source_chapter_id: "ch-7".into(),
             candidate_scanlator: Some("Group A".into()),
+            held_scanlator: Some("Group Z".into()),
             candidate_page_count: Some(20),
             held_page_count: Some(18),
             reason_key: "upgrade.reason.preferred_scanlator".into(),

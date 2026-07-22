@@ -390,3 +390,39 @@ async fn a_confirmation_that_cannot_reach_the_source_keeps_the_count_verdict() {
     );
     assert_eq!(found[0].kind, UpgradeKind::QualityReupload);
 }
+
+#[tokio::test]
+async fn a_candidate_names_both_sides_of_the_comparison() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "BothSides").await;
+    let held = held_chapter(&svc, manga, "BothSides", 1.0, 3).await;
+    sqlx::query("UPDATE chapters SET scanlator = 'Held Group', page_count = 3 WHERE id = ?")
+        .bind(held.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    let rival = insert_chapter(&svc.db, manga, "rival", 1.0).await;
+    sqlx::query("UPDATE chapters SET scanlator = 'Rival Group', page_count = 3 WHERE id = ?")
+        .bind(rival)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    svc.set_global_scanlator_pref("Held Group", 1, false)
+        .await
+        .unwrap();
+    svc.set_global_scanlator_pref("Rival Group", 9, false)
+        .await
+        .unwrap();
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    let c = found
+        .iter()
+        .find(|c| c.kind == UpgradeKind::PreferredScanlator)
+        .expect("expected a scanlator candidate");
+    assert_eq!(
+        c.held_scanlator.as_deref(),
+        Some("Held Group"),
+        "a comparison that cannot name what you already hold is not a comparison"
+    );
+    assert_eq!(c.candidate_scanlator.as_deref(), Some("Rival Group"));
+}
