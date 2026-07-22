@@ -103,16 +103,6 @@ impl AppService {
         Ok(rows.into_iter().filter_map(|s| s.parse().ok()).collect())
     }
 
-    pub async fn create_api_token(
-        &self,
-        user_id: UserId,
-        name: &str,
-        expires_in_days: Option<u32>,
-    ) -> Result<CreatedApiToken> {
-        self.create_token(user_id, name, expires_in_days, TokenKind::Opds, None)
-            .await
-    }
-
     /// Mints a token of the given kind.
     ///
     /// For `TokenKind::Api`, `scopes` must be a subset of what the creator holds:

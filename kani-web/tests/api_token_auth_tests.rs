@@ -81,7 +81,13 @@ async fn an_opds_token_is_rejected_on_the_rest_api() {
     let uid = admin_user_id(&state).await;
     let created = state
         .service
-        .create_api_token(uid, "kindle", None)
+        .create_token(
+            uid,
+            "kindle",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
     let app = build_test_app(state).await;

@@ -30,14 +30,18 @@ Swept 2026-07-22 across `kani-app`, `kani-web`, `kani-core`, `static/js` and
 | 17 | `Settings.auto_download_category_id` (singular) | Superseded by the plural; still SELECTed and shipped to every client, read by nothing | **OPEN** — removal is an API shape change |
 | 18 | `JobContext.sse_tx` | Populated for every job, used by none (`#[allow(dead_code)]`) | **OPEN** |
 | 19 | `FilterMappingEntry::{SortPair,TupleSplit}.kind` | Deserialised from extension YAML, validated by serde, discarded | **OPEN** |
-| 20 | `pause_job` / `resume_job` | Permanent `422` stubs with OpenAPI docs; `resumeJob`/`pauseJob` in `api.js` have no callers | **OPEN** — decide: implement or remove |
+| 20 | `pause_job` / `resume_job` | Permanent `422` stubs with OpenAPI docs | **FIXED** — implemented for queued jobs; running jobs refuse with a reason. Still no UI caller (#22) |
 | 21 | `progress::get_noted_chapter_ids` | Chapter notes exist; "which chapters have notes" is never surfaced | **OPEN** — wiring it is a UI feature (note indicator), not a deletion |
 | 22 | 25 `api.js` exports with zero callers | Each is a shipped backend capability with no way to reach it | **OPEN** — see below |
 | 23 | 6 REST routes with no frontend caller | `/admin/db/{analyze,stats,vacuum}`, `/admin/recurring/{kind}/run`, `/chapters/{id}/cbz`, `/scan/toggle_auto` | **OPEN** |
 
 **Corrected during the sweep:** `create_api_token` was reported as having zero
-callers. It has test callers the grep missed and is still in place — worth
-remembering that "no production callers" and "dead" are different claims.
+callers. It in fact had *test* callers only — which is not a production call
+site, so it was still dead by the standard that matters. It has been removed and
+those tests now call `create_token(.., TokenKind::Opds, None)`, the same entry
+point the REST handler uses. Worth keeping the distinction in mind: "no
+production callers" and "no callers" are different claims, and only the first
+one decides whether something is dead.
 
 ### #22 — the uncalled `api.js` exports
 

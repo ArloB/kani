@@ -17,7 +17,13 @@ async fn create_then_authenticate_succeeds() {
         .unwrap();
 
     let created = svc
-        .create_api_token(user_id, "my reader", None)
+        .create_token(
+            user_id,
+            "my reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
     assert!(created.raw_token.starts_with("kani_"));
@@ -43,7 +49,16 @@ async fn list_never_exposes_raw_token_or_hash() {
     let svc = test_service().await;
     let user_id = insert_user(&svc.db, "bob").await;
 
-    let created = svc.create_api_token(user_id, "reader", None).await.unwrap();
+    let created = svc
+        .create_token(
+            user_id,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
+        .await
+        .unwrap();
 
     let tokens = svc.list_api_tokens(user_id).await.unwrap();
     assert_eq!(tokens.len(), 1);
@@ -57,7 +72,16 @@ async fn revoke_then_authenticate_fails() {
     let svc = test_service().await;
     let user_id = insert_user(&svc.db, "carol").await;
 
-    let created = svc.create_api_token(user_id, "reader", None).await.unwrap();
+    let created = svc
+        .create_token(
+            user_id,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
+        .await
+        .unwrap();
     svc.revoke_api_token(user_id, &created.token.id)
         .await
         .unwrap();
@@ -78,7 +102,13 @@ async fn expired_token_fails() {
     let user_id = insert_user(&svc.db, "dave").await;
 
     let created = svc
-        .create_api_token(user_id, "reader", Some(30))
+        .create_token(
+            user_id,
+            "reader",
+            Some(30),
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
 
@@ -101,7 +131,16 @@ async fn wrong_user_revoke_is_not_found() {
     let owner = insert_user(&svc.db, "erin").await;
     let other = insert_user(&svc.db, "frank").await;
 
-    let created = svc.create_api_token(owner, "reader", None).await.unwrap();
+    let created = svc
+        .create_token(
+            owner,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
+        .await
+        .unwrap();
 
     let err = svc
         .revoke_api_token(other, &created.token.id)
@@ -172,7 +211,13 @@ async fn opds_tokens_keep_their_fixed_scopes_and_kind() {
     grant_role(&svc.db, user.0, "user").await;
 
     let created = svc
-        .create_api_token(user, "reader app", None)
+        .create_token(
+            user,
+            "reader app",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
     let auth = svc
@@ -258,15 +303,37 @@ async fn token_count_and_lifetime_are_bounded() {
     let svc = test_service().await;
     let user = insert_user(&svc.db, &format!("u{}", rand_suffix())).await;
 
-    let too_long = svc.create_api_token(user, "forever", Some(10_000)).await;
+    let too_long = svc
+        .create_token(
+            user,
+            "forever",
+            Some(10_000),
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
+        .await;
     assert!(too_long.is_err(), "lifetime cap should reject 10000 days");
 
     for i in 0..25 {
-        svc.create_api_token(user, &format!("t{i}"), None)
-            .await
-            .unwrap();
+        svc.create_token(
+            user,
+            &format!("t{i}"),
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
+        .await
+        .unwrap();
     }
-    let over = svc.create_api_token(user, "one too many", None).await;
+    let over = svc
+        .create_token(
+            user,
+            "one too many",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
+        .await;
     assert!(over.is_err(), "per-user token cap should be enforced");
 }
 
@@ -279,7 +346,16 @@ async fn an_opds_token_stops_working_once_its_owner_loses_the_permission() {
     let user = insert_user(&svc.db, &format!("u{}", rand_suffix())).await;
     grant_role(&svc.db, user.0, "user").await;
 
-    let created = svc.create_api_token(user, "kindle", None).await.unwrap();
+    let created = svc
+        .create_token(
+            user,
+            "kindle",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
+        .await
+        .unwrap();
     let before = svc
         .authenticate_api_token(&created.raw_token)
         .await

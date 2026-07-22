@@ -936,6 +936,93 @@ impl JobManager {
         Ok(job_id)
     }
 
+    /// Holds a queued job so the scheduler stops considering it.
+    ///
+    /// Pending only. A running job cannot be paused: stopping it means
+    /// cancelling it, and `cancel` deliberately nulls `params_json`, so there
+    /// would be nothing left to resume from. Refusing is honest — the caller
+    /// can cancel and re-submit if that is what they meant.
+    ///
+    /// `'paused'` has been permitted by the `jobs.status` CHECK constraint
+    /// since the table was created; it was simply never written.
+    pub async fn pause(&self, job_id: JobId) -> Result<()> {
+        if self.active.contains_key(&job_id) {
+            return Err(ServiceError::Conflict(format!(
+                "Job {job_id} is already running and cannot be paused; cancel it instead"
+            )));
+        }
+
+        let mut q = self.queue.lock().await;
+        let heap = std::mem::take(&mut *q);
+        let mut found = false;
+        for item in heap {
+            if item.job.id() == job_id {
+                found = true;
+            } else {
+                q.push(item);
+            }
+        }
+        drop(q);
+
+        let job_id_str = job_id.to_string();
+        let row = sqlx::query!("SELECT status FROM jobs WHERE id = ?", job_id_str)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound(format!("Job {job_id} not found")))?;
+        if row.status != "pending" {
+            return Err(ServiceError::Conflict(format!(
+                "Job {job_id} is '{}', not pending",
+                row.status
+            )));
+        }
+
+        sqlx::query!("UPDATE jobs SET status = 'paused' WHERE id = ?", job_id_str)
+            .execute(&self.pool)
+            .await?;
+        tracing::info!("Paused job {job_id} (was queued: {found})");
+        Ok(())
+    }
+
+    /// Returns a paused job to the queue, rebuilt from its stored params by the
+    /// same registry path that restores jobs after a restart.
+    pub async fn resume(&self, job_id: JobId) -> Result<()> {
+        let job_id_str = job_id.to_string();
+        let row = sqlx::query!(
+            "SELECT job_type, priority, params_json FROM jobs WHERE id = ? AND status = 'paused'",
+            job_id_str
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| ServiceError::NotFound(format!("Job {job_id} is not paused")))?;
+
+        let params = row.params_json.ok_or_else(|| {
+            ServiceError::Conflict(format!(
+                "Job {job_id} has no stored parameters to resume from"
+            ))
+        })?;
+        let job = self
+            .registry
+            .deserialise(&row.job_type, &params)
+            .map_err(|e| ServiceError::Internal(format!("Cannot rebuild job {job_id}: {e}")))?;
+
+        sqlx::query!(
+            "UPDATE jobs SET status = 'pending' WHERE id = ?",
+            job_id_str
+        )
+        .execute(&self.pool)
+        .await?;
+
+        let source_id = job.source_id();
+        self.queue.lock().await.push(QueuedJob {
+            priority: JobPriority::from_i64(row.priority),
+            created_at: Instant::now(),
+            source_id,
+            job,
+        });
+        self.new_job_notify.notify_one();
+        Ok(())
+    }
+
     pub async fn cancel(&self, job_id: JobId) -> Result<()> {
         // Cancel if currently running.
         if let Some(handle) = self.active.get(&job_id) {

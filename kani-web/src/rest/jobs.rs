@@ -71,15 +71,8 @@ pub(crate) async fn pause_job(
     State(svc): State<Arc<dyn JobDomain>>,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    let status = svc.get_job_status(id).await?;
-    if status.status == "running" || status.status == "pending" {
-        return Ok((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": "pause_not_supported_for_job_type" })),
-        )
-            .into_response());
-    }
-    Ok(Json(json!({ "ok": true })).into_response())
+    svc.pause_job(id).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 pub(crate) async fn resume_job(
@@ -87,12 +80,8 @@ pub(crate) async fn resume_job(
     State(svc): State<Arc<dyn JobDomain>>,
     Path(id): Path<uuid::Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    let _status = svc.get_job_status(id).await?;
-    Ok((
-        StatusCode::UNPROCESSABLE_ENTITY,
-        Json(json!({ "error": "resume_not_supported" })),
-    )
-        .into_response())
+    svc.resume_job(id).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 #[cfg(test)]

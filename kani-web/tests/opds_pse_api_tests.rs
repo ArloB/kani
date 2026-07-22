@@ -88,7 +88,13 @@ async fn chapter_feed_auth_matrix() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -150,7 +156,13 @@ async fn page_endpoint_validation() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -206,7 +218,13 @@ async fn file_endpoint_supports_range() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -261,7 +279,13 @@ async fn file_endpoint_streams_full_download() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -306,7 +330,13 @@ async fn progress_push_updates_last_read() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -349,7 +379,13 @@ async fn progress_post_with_bad_body_is_rejected() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -381,7 +417,13 @@ async fn token_semantics() {
     // A token we will revoke.
     let revoked = state
         .service
-        .create_api_token(uid, "revoked", None)
+        .create_token(
+            uid,
+            "revoked",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
     state
@@ -393,7 +435,13 @@ async fn token_semantics() {
     // An expired token.
     let expired = state
         .service
-        .create_api_token(uid, "expired", Some(1))
+        .create_token(
+            uid,
+            "expired",
+            Some(1),
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
     sqlx::query("UPDATE api_tokens SET expires_at = unixepoch() - 10 WHERE id = ?")
@@ -405,7 +453,13 @@ async fn token_semantics() {
     // A read-only token (no opds:progress).
     let readonly = state
         .service
-        .create_api_token(uid, "readonly", None)
+        .create_token(
+            uid,
+            "readonly",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
     sqlx::query("UPDATE api_tokens SET scopes = 'opds:read' WHERE id = ?")
@@ -417,7 +471,13 @@ async fn token_semantics() {
     // A valid token used for the wrong-username Basic check.
     let good = state
         .service
-        .create_api_token(uid, "basic", None)
+        .create_token(
+            uid,
+            "basic",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
 

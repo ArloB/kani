@@ -239,6 +239,8 @@ pub trait JobDomain: Send + Sync {
     async fn list_jobs(&self, filter: JobListFilter) -> Result<JobListPage>;
     async fn get_job_status(&self, id: uuid::Uuid) -> Result<JobStatus>;
     async fn cancel_job(&self, id: uuid::Uuid) -> Result<()>;
+    async fn pause_job(&self, id: uuid::Uuid) -> Result<()>;
+    async fn resume_job(&self, id: uuid::Uuid) -> Result<()>;
     fn active_job_summaries(&self) -> Vec<serde_json::Value>;
 }
 
@@ -254,6 +256,14 @@ impl JobDomain for AppService {
 
     async fn cancel_job(&self, id: uuid::Uuid) -> Result<()> {
         self.job_manager.cancel(id).await
+    }
+
+    async fn pause_job(&self, id: uuid::Uuid) -> Result<()> {
+        self.job_manager.pause(id).await
+    }
+
+    async fn resume_job(&self, id: uuid::Uuid) -> Result<()> {
+        self.job_manager.resume(id).await
     }
 
     fn active_job_summaries(&self) -> Vec<serde_json::Value> {
