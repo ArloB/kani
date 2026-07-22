@@ -38,6 +38,7 @@ pub fn phash_compare(a: &Path, b: &Path) -> Result<(), CliError> {
     println!();
 
     let n = ma.pages.len().min(mb.pages.len());
+
     let mut total = 0u32;
     for i in 0..n {
         let d = kani_core::quality::phash_distance(

@@ -373,7 +373,10 @@ impl AppService {
         &self,
         page_urls: &[String],
         samples: usize,
-    ) -> Option<kani_core::quality::QualityScore> {
+    ) -> Option<(
+        kani_core::quality::QualityScore,
+        kani_core::probe::ColourProfile,
+    )> {
         use kani_core::probe::{PROBE_PREFIX_BYTES, probe_header, sample_indices};
 
         let mut probes = Vec::new();
@@ -402,7 +405,9 @@ impl AppService {
             probes.push(probe_header(&bytes, total));
         }
 
+        let colour = kani_core::probe::colour_profile(&probes);
         kani_core::probe::score_from_probes(&probes, page_urls.len() as u32)
+            .map(|score| (score, colour))
     }
 }
 

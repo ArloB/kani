@@ -198,6 +198,46 @@ fn jpeg_segments(b: &[u8]) -> Vec<(u8, &[u8])> {
     out
 }
 
+/// How colour is distributed across a chapter.
+///
+/// A single colour page is the norm, not the exception: scanlators routinely
+/// open (or close) a monochrome chapter with a colour page, and colour spreads
+/// appear mid-chapter. Treating any colour page as "this is a colour release"
+/// would mislabel most of a library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColourProfile {
+    Monochrome,
+    /// Some colour pages — an opener, a closer, or a spread — in an otherwise
+    /// monochrome chapter.
+    ColourAccent,
+    FullColour,
+    /// Nothing conclusive was readable. Ordinary for JPEG chapters, whose
+    /// three-component encoding says nothing about the content.
+    Unknown,
+}
+
+/// Classifies a chapter from the colour flags of the pages actually probed.
+///
+/// `FullColour` requires *every* readable page to be colour. With the usual
+/// three-page sample of first/middle/last, a colour opener and a colour closer
+/// give two of three — which is an accented chapter, not a colour release, and
+/// a majority threshold would get it wrong.
+pub fn colour_profile(probes: &[PageProbe]) -> ColourProfile {
+    let known: Vec<bool> = probes.iter().filter_map(|p| p.colour).collect();
+    if known.is_empty() {
+        return ColourProfile::Unknown;
+    }
+    let colour = known.iter().filter(|c| **c).count();
+    if colour == 0 {
+        ColourProfile::Monochrome
+    } else if colour == known.len() && known.len() > 1 {
+        ColourProfile::FullColour
+    } else {
+        ColourProfile::ColourAccent
+    }
+}
+
 /// Builds a comparable score from a sample of probed pages.
 ///
 /// `page_count` comes from the listing rather than the sample, since only a few
@@ -380,6 +420,101 @@ mod tests {
     #[test]
     fn a_png_has_no_jpeg_quality() {
         assert_eq!(probe_header(&png_grey(), None).jpeg_quality, None);
+    }
+
+    fn grey() -> PageProbe {
+        PageProbe {
+            colour: Some(false),
+            ..Default::default()
+        }
+    }
+    fn coloured() -> PageProbe {
+        PageProbe {
+            colour: Some(true),
+            ..Default::default()
+        }
+    }
+    fn unknown() -> PageProbe {
+        PageProbe {
+            colour: None,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_all_monochrome_chapter_is_monochrome() {
+        assert_eq!(
+            colour_profile(&[grey(), grey(), grey()]),
+            ColourProfile::Monochrome
+        );
+    }
+
+    #[test]
+    fn a_colour_opener_does_not_make_a_colour_release() {
+        // The sample is first/middle/last, so the colour opener lands in it
+        // every time. This is the case that would otherwise mislabel most of a
+        // library.
+        assert_eq!(
+            colour_profile(&[coloured(), grey(), grey()]),
+            ColourProfile::ColourAccent
+        );
+    }
+
+    #[test]
+    fn a_mid_chapter_colour_spread_is_an_accent() {
+        assert_eq!(
+            colour_profile(&[grey(), coloured(), grey()]),
+            ColourProfile::ColourAccent
+        );
+    }
+
+    #[test]
+    fn a_colour_opener_and_closer_together_are_still_accents() {
+        assert_eq!(
+            colour_profile(&[coloured(), grey(), coloured()]),
+            ColourProfile::ColourAccent,
+            "two of three is a majority, and a majority threshold would call \
+             this a colour release; it is a monochrome chapter with bookends"
+        );
+    }
+
+    #[test]
+    fn every_page_colour_is_a_colour_release() {
+        assert_eq!(
+            colour_profile(&[coloured(), coloured(), coloured()]),
+            ColourProfile::FullColour
+        );
+    }
+
+    #[test]
+    fn a_single_probed_page_never_claims_a_full_colour_release() {
+        assert_eq!(
+            colour_profile(&[coloured()]),
+            ColourProfile::ColourAccent,
+            "one page is not evidence about the rest of the chapter"
+        );
+    }
+
+    #[test]
+    fn an_all_jpeg_chapter_is_unknown_rather_than_monochrome() {
+        assert_eq!(
+            colour_profile(&[unknown(), unknown(), unknown()]),
+            ColourProfile::Unknown,
+            "guessing monochrome here would be a confident wrong answer for \
+             every JPEG chapter in the library"
+        );
+    }
+
+    #[test]
+    fn unreadable_pages_do_not_dilute_the_readable_ones() {
+        assert_eq!(
+            colour_profile(&[coloured(), unknown(), coloured()]),
+            ColourProfile::FullColour
+        );
+        assert_eq!(
+            colour_profile(&[grey(), unknown(), grey()]),
+            ColourProfile::Monochrome
+        );
     }
 
     #[test]
