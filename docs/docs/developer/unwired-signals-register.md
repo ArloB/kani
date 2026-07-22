@@ -32,7 +32,7 @@ Swept 2026-07-22 across `kani-app`, `kani-web`, `kani-core`, `static/js` and
 | 19 | `FilterMappingEntry::{SortPair,TupleSplit}.kind` | ~~Deserialised then discarded~~ | **NOT A FINDING** — required discriminator on an `untagged` enum; it is what makes the variants parse deterministically |
 | 20 | `pause_job` / `resume_job` | Permanent `422` stubs with OpenAPI docs | **FIXED** — implemented for queued jobs, running jobs refuse with a reason, and wired to buttons on the jobs page |
 | 21 | `progress::get_noted_chapter_ids` | ~~Notes never surfaced~~ | **NOT A FINDING, then REMOVED** — the ✎ indicator *is* rendered, via `_chapterNotes`. This was a redundant second path (its `api.js` twin was already `@deprecated` and derived client-side); both removed |
-| 22 | 23 `api.js` exports with zero callers | Each is a shipped backend capability with no way to reach it | **OPEN** — see below |
+| 22 | 24 uncalled `api.js` exports | Shipped backend capability with no way to reach it | **PARTIAL** — 11 removed, 3 built, 7 to build, 2 internal helpers not findings |
 | 23 | 6 REST routes with no frontend caller | `/admin/db/{analyze,stats,vacuum}`, `/admin/recurring/{kind}/run`, `/chapters/{id}/cbz`, `/scan/toggle_auto` | **FIXED** — DB card + recurring triggers in Maintenance settings, CBZ in the chapter menu; `/scan/toggle_auto` **removed** as a redundant second way to set `auto_scan` |
 
 **Three false positives.** A caller-count grep cannot tell "capability missing"
@@ -52,20 +52,39 @@ one decides whether something is dead.
 
 ### #22 — the uncalled `api.js` exports
 
-`getMe` · `adminTriggerPasswordReset` · `getSourceMetadata` · `getPages` ·
-`getRepo` · `getManga` · `scanAllLibrary` · `getRefreshStatus` ·
-`syncAllTrackers` · `downloadBackup` · `previewBackup` · `restoreBackup` ·
-`resolvePendingImport` · `getNotedChapterIds` · `getReadingPace` · `stepUpTotp` ·
-`regenerateBackupCodes` · `purgeAdminLogs` ·
-`getMangaDownloadStatus` · `assignChapterVolume` · `getCollectionManga` ·
-`updateSavedSearch` · `getMangaUpgrades`
+Recomputed against the tree (not the original sweep list): 24 uncalled, of which
+`fetchSWR`/`clearSWRCache` are internal infrastructure.
 
-These are not one problem. `pauseJob`/`resumeJob` have since been implemented
-and wired to the jobs page, so 23 remain. Some are **missing UI for a working
-backend**
-(`restoreBackup`, `previewBackup`, `regenerateBackupCodes`, `stepUpTotp`) and
-deleting them would discard a shipped capability. Each needs a wire-or-remove
-decision; they should not be batch-processed.
+**Removed (11).** `previewBackup`, `restoreBackup` — superseded by their
+`Encrypted` siblings, which are full reimplementations rather than delegates.
+Nine unused reads: `getMe`, `getManga`, `getPages`, `getRepo`,
+`getSourceMetadata`, `getRefreshStatus`, `getMangaDownloadStatus`,
+`getMangaUpgrades`, `getReadingPace`. Every REST endpoint remains — these were
+frontend wrappers only.
+
+`downloadBackup` was flagged with the backup pair and is **live**:
+`downloadBackupEncrypted` calls it when no passphrase is given.
+
+**Built (3).** `regenerateBackupCodes` + `stepUpTotp` (backup-code regeneration
+behind step-up re-auth), `purgeAdminLogs` (logs page), `syncAllTrackers`
+(tracker settings).
+
+**Still to build (7).**
+
+| Export | Where it belongs | Note |
+|---|---|---|
+| `resolvePendingImport` | Library settings, pending-imports list | A pending import currently has no resolution path |
+| `adminTriggerPasswordReset` | Accounts page, per-user action | |
+| `scanAllLibrary` | Library settings | Scheduled auto-scan covers the routine case |
+| `assignChapterVolume` | Chapter context menu | create/delete/list/update volume are all wired |
+| `updateSavedSearch` | Saved-search list, rename | create/delete/list wired |
+| `getCollectionManga` | Collection detail view | create/delete/list/update wired |
+
+**Two endpoints now redundant** and candidates for removal, though that is an
+API-surface decision rather than a client cleanup: `/stats/pace` (the chart
+renders from `reading_pace` bundled into `GET /stats`) and
+`/manga/{id}/upgrades` (the badge is fed by `chapter.upgrade_available` on the
+chapter listing).
 
 ## How to avoid adding to this list
 
