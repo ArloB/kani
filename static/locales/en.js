@@ -540,6 +540,11 @@ export default {
   'settings.trackers.auto_sync_desc': 'Automatically sync progress with linked trackers in the background. Rate-limited per account.',
   'settings.trackers.sync_interval': 'Sync interval (hours)',
   'settings.trackers.sync_interval_desc': 'How often each tracked manga is re-synced when background sync is enabled.',
+  'settings.trackers.sync_now': 'Sync now',
+  'settings.trackers.sync_now_desc':
+    'Pushes progress for every linked series to its tracker immediately, without waiting for the next scheduled sync.',
+  'settings.trackers.sync_now.action': 'Sync all',
+  'settings.trackers.sync_now.started': 'Tracker sync started.',
 
   'common.cancel': 'Cancel',
   'common.yes': 'Yes',
@@ -1723,6 +1728,16 @@ export default {
   'settings.health.col.avg_ms': 'Avg ms',
 
   'settings.security.totp.group': 'Two-Factor Authentication',
+  'settings.security.backup_codes': 'Backup codes',
+  'settings.security.backup_codes.desc':
+    'Single-use codes for signing in when your authenticator is unavailable. Regenerating invalidates the previous set.',
+  'settings.security.backup_codes.regenerate': 'Regenerate',
+  'settings.security.backup_codes.confirm':
+    'Generating a new set invalidates every existing backup code immediately. Continue?',
+  'settings.security.backup_codes.verify_prompt':
+    'Enter a code from your authenticator, or one of your existing backup codes:',
+  'settings.security.backup_codes.new': 'Store these somewhere safe \u2014 they are shown once:\n\n{codes}',
+  'settings.security.backup_codes.done': 'New backup codes issued.',
   'settings.security.sessions.group': 'Active Sessions',
   'settings.security.status.group': 'Security Status',
   'settings.security.status.public_instance': 'Public instance mode is active — hardened security profile enabled.',
@@ -2215,6 +2230,10 @@ export default {
   'logs.access_denied': 'Access denied',
   'logs.access_denied.desc': 'You do not have permission to view logs.',
   'logs.download': 'Download',
+  'logs.purge': 'Purge logs',
+  'logs.purge.confirm':
+    'Delete stored application logs older than the retention window? This cannot be undone.',
+  'logs.purge.done': 'Logs purged.',
   'logs.tab.app': 'Application Logs',
   'logs.tab.audit': 'Audit Log',
   'logs.filter.search_placeholder': 'Search messages…',

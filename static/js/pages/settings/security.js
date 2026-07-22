@@ -9,6 +9,9 @@ import { SettingsGroup, SettingsRow } from './_shared.js';
 import { SessionList } from '../../components/session-list.js';
 import { ErrorState } from '../../components/error-state.js';
 import { TotpWizard } from '../../components/totp-wizard.js';
+import { showConfirm, showAlert } from '../../components/modal.js';
+import { showApiError, showToast } from '../../components/toast.js';
+import { useBusy } from '../../hooks/use-busy.js';
 import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
@@ -38,6 +41,68 @@ async function _showDisableTotpModal(onDone) {
   } catch (/** @type {any} */ e) {
     alert(t('settings.security.totp.disable_error', { msg: e?.message ?? '' }));
   }
+}
+
+/**
+ * Issues a fresh set of backup codes.
+ *
+ * Re-authenticates first: `/auth/totp/step-up` accepts either a TOTP code or an
+ * existing backup code, and without it a stolen session could silently mint
+ * itself a new set. Both endpoints existed and had no caller, which meant a user
+ * who lost their codes had no recovery path at all.
+ */
+function BackupCodesRow() {
+  const { busy, run } = useBusy();
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    api.getFeatures().then((f) => setEnabled(!!f?.totp_enabled)).catch(() => {});
+  }, []);
+
+  const regenerate = () =>
+    run(async () => {
+      const ok = await showConfirm(t('settings.security.backup_codes.confirm'), {
+        title: t('settings.security.backup_codes.regenerate'),
+        confirmLabel: t('settings.security.backup_codes.regenerate'),
+      });
+      if (!ok) return;
+
+      const code = prompt(t('settings.security.backup_codes.verify_prompt'));
+      if (!code) return;
+
+      try {
+        await api.stepUpTotp(code.trim());
+      } catch (e) {
+        showApiError(e);
+        return;
+      }
+
+      try {
+        const res = await api.regenerateBackupCodes();
+        const codes = res?.backup_codes ?? [];
+        await showAlert(
+          t('settings.security.backup_codes.new', { codes: codes.join('\n') }),
+          { title: t('settings.security.backup_codes.regenerate') },
+        );
+        showToast(t('settings.security.backup_codes.done'), { type: 'success' });
+      } catch (e) {
+        showApiError(e);
+      }
+    });
+
+  // Only meaningful once 2FA is on.
+  if (!enabled) return null;
+
+  return html`
+    <${SettingsRow}
+      label=${t('settings.security.backup_codes')}
+      description=${t('settings.security.backup_codes.desc')}
+    >
+      <button type="button" class="btn-secondary btn-sm" disabled=${busy} onClick=${regenerate}>
+        ${t('settings.security.backup_codes.regenerate')}
+      </button>
+    <//>
+  `;
 }
 
 function TotpStatusRow() {
@@ -138,6 +203,7 @@ export function SecuritySection() {
   return html`
     <${SettingsGroup} label=${t('settings.security.totp.group')}>
       <${TotpStatusRow} />
+      <${BackupCodesRow} />
     <//>
     <${SettingsGroup} label=${t('settings.security.sessions.group')}>
       <${SessionList} />

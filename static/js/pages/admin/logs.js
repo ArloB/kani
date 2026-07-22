@@ -10,7 +10,8 @@ import { renderTabs } from '../../components/tabs.js';
 import { renderChipGroup } from '../../components/chip-group.js';
 import { DateRange } from '../../components/form/date-range.js';
 import { renderPagination } from '../../components/pagination.js';
-import { showToast } from '../../components/toast.js';
+import { showConfirm } from '../../components/modal.js';
+import { showToast, showApiError } from '../../components/toast.js';
 import { setPageHeader, clearPageHeader } from '../../components/app-header.js';
 import { startLoading, finishLoading } from '../../components/page-loading-bar.js';
 import { createErrorState } from '../../components/error-state.js';
@@ -66,9 +67,18 @@ export async function init(container) {
   downloadBtn.innerHTML = `<span class="icon-xs">${iconDownload}</span>${escapeHtml(t('logs.download'))}`;
   downloadBtn.addEventListener('click', _handleDownload);
 
+  const purgeBtn = document.createElement('button');
+  purgeBtn.className = 'btn-secondary btn-sm text-danger';
+  purgeBtn.textContent = t('logs.purge');
+  purgeBtn.addEventListener('click', _handlePurge);
+
+  const actions = document.createElement('div');
+  actions.className = 'flex items-center gap-2';
+  actions.append(downloadBtn, purgeBtn);
+
   setPageHeader({
     crumbs: [{ label: t('admin.crumb') }, { label: t('logs.crumb') }],
-    actions: downloadBtn,
+    actions,
   });
 
   const wrap = document.createElement('div');
@@ -435,6 +445,22 @@ function _buildAuditRow(entry) {
 }
 
 // ── Download handler ──────────────────────────────────────────────────────────
+
+async function _handlePurge() {
+  const ok = await showConfirm(t('logs.purge.confirm'), {
+    title: t('logs.purge'),
+    confirmLabel: t('logs.purge'),
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api.purgeAdminLogs();
+    showToast(t('logs.purge.done'), { type: 'success' });
+    window.location.reload();
+  } catch (e) {
+    showApiError(e);
+  }
+}
 
 function _handleDownload() {
   const qs = new URLSearchParams();

@@ -61,6 +61,20 @@ function BehaviourGroup({ settings }) {
     tracker_sync_interval_hours: settings?.tracker_sync_interval_hours ?? 24,
   });
 
+  const [syncing, setSyncing] = useState(false);
+
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      await api.syncAllTrackers();
+      showToast(t('settings.trackers.sync_now.started'), { type: 'success' });
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const patch = async (/** @type {any} */ next) => {
     const prev = tracking;
     setTracking(next);
@@ -94,6 +108,19 @@ function BehaviourGroup({ settings }) {
         max=${168}
         onChange=${(v) => patch({ ...tracking, tracker_sync_interval_hours: v })}
       />
+      <${SettingsRow}
+        label=${t('settings.trackers.sync_now')}
+        description=${t('settings.trackers.sync_now_desc')}
+      >
+        <button
+          type="button"
+          class="btn-secondary btn-sm"
+          disabled=${syncing}
+          onClick=${syncNow}
+        >
+          ${t('settings.trackers.sync_now.action')}
+        </button>
+      <//>
     <//>
   `;
 }
