@@ -49,6 +49,17 @@ pub struct UpgradeCandidate {
     pub detected_at: i64,
 }
 
+/// A candidate plus the series and chapter it belongs to, for views that span
+/// the whole library.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LibraryUpgrade {
+    pub manga_id: i64,
+    pub manga_title: String,
+    pub chapter_number: f64,
+    pub chapter_name: Option<String>,
+    pub candidate: UpgradeCandidate,
+}
+
 /// What is stored in `chapters.upgrade_available`. Dismissals live inside the
 /// descriptor so a dismissed candidate survives re-scans without a side table.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -332,17 +343,43 @@ impl AppService {
         ))
     }
 
-    pub async fn all_upgrades(&self) -> Result<Vec<UpgradeCandidate>> {
+    /// Every pending candidate in the library, attributed to its series and
+    /// chapter.
+    ///
+    /// A bare `UpgradeCandidate` names neither, so a library-wide list of them
+    /// could only render a column of unlabelled Replace buttons. Anything
+    /// listing upgrades across series needs this shape, not that one.
+    pub async fn all_upgrades(&self) -> Result<Vec<LibraryUpgrade>> {
         let rows = sqlx::query!(
-            "SELECT c.upgrade_available FROM chapters c \
+            "SELECT c.upgrade_available, c.chapter_number, c.name AS chapter_name, \
+             m.id AS manga_id, COALESCE(m.local_name, m.name) AS manga_title \
+             FROM chapters c \
              JOIN manga m ON m.id = c.manga_id \
-             WHERE c.upgrade_available IS NOT NULL AND m.deleted_at IS NULL"
+             WHERE c.upgrade_available IS NOT NULL AND m.deleted_at IS NULL \
+             ORDER BY manga_title, c.chapter_number"
         )
         .fetch_all(&self.db_read)
         .await?;
-        Ok(collect_candidates(
-            rows.into_iter().map(|r| r.upgrade_available),
-        ))
+
+        let mut out = Vec::new();
+        for row in rows {
+            let Some(json) = row.upgrade_available else {
+                continue;
+            };
+            let Ok(descriptor) = serde_json::from_str::<UpgradeDescriptor>(&json) else {
+                continue;
+            };
+            for candidate in descriptor.candidates {
+                out.push(LibraryUpgrade {
+                    manga_id: row.manga_id,
+                    manga_title: row.manga_title.clone(),
+                    chapter_number: row.chapter_number,
+                    chapter_name: row.chapter_name.clone(),
+                    candidate,
+                });
+            }
+        }
+        Ok(out)
     }
 
     /// Records every current candidate for this chapter as dismissed, so a later

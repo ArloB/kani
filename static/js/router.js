@@ -27,6 +27,7 @@ const _routes = [
   { path: '/settings',                  load: () => import('./pages/settings/index.js') },
   { path: '/accounts',                  load: () => import('./pages/accounts.js') },
   { path: '/updates',                   load: () => import('./pages/recent-updates.js') },
+  { path: '/upgrades',                  load: () => import('./pages/upgrades.js') },
   { path: '/stats',                     load: () => import('./pages/stats.js') },
   { path: '/admin/logs',                load: () => import('./pages/admin/logs.js') },
   { path: '/admin/ui-showcase',         load: () => import('./pages/admin/ui-showcase.js') },

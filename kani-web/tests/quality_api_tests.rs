@@ -43,6 +43,72 @@ async fn library_wide_upgrades_list_is_readable_by_a_viewer() {
 }
 
 #[tokio::test]
+async fn a_library_wide_upgrade_names_its_series_and_chapter() {
+    let state = test_state().await;
+    let db = state.service.db.clone();
+
+    let source_id: i64 =
+        sqlx::query_scalar("INSERT INTO sources (name, version) VALUES ('s', '0.1') RETURNING id")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    let manga_id: i64 = sqlx::query_scalar(
+        "INSERT INTO manga (source_id, source_manga_id, name, status) \
+         VALUES (?, 'm1', 'Blade of the Immortal', 0) RETURNING id",
+    )
+    .bind(source_id)
+    .fetch_one(&db)
+    .await
+    .unwrap();
+
+    let descriptor = json!({
+        "candidates": [{
+            "held_chapter_id": 1,
+            "kind": "preferred_scanlator",
+            "candidate_chapter_id": 2,
+            "candidate_source_chapter_id": "ch-7",
+            "candidate_scanlator": "Group A",
+            "held_scanlator": "Group Z",
+            "candidate_page_count": 20,
+            "held_page_count": 18,
+            "reason_key": "upgrade.reason.preferred_scanlator",
+            "detected_at": 0
+        }],
+        "dismissed": []
+    });
+    sqlx::query(
+        "INSERT INTO chapters (manga_id, source_chapter_id, chapter_number, language, name, upgrade_available) \
+         VALUES (?, 'ch-7', 7.0, 'en', 'Cricket', ?)",
+    )
+    .bind(manga_id)
+    .bind(descriptor.to_string())
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let (u, p) = create_regular_user(&state, "gail").await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(authed_get("/rest/me/upgrades", &cookie))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = common::body_json(res).await;
+    let row = &body.as_array().unwrap()[0];
+
+    // Without these three the listing is a column of unlabelled Replace
+    // buttons — the reason nothing consumed this endpoint before.
+    assert_eq!(row["manga_id"], manga_id);
+    assert_eq!(row["manga_title"], "Blade of the Immortal");
+    assert_eq!(row["chapter_number"], 7.0);
+    assert_eq!(row["chapter_name"], "Cricket");
+    assert_eq!(row["candidate"]["candidate_scanlator"], "Group A");
+}
+
+#[tokio::test]
 async fn upgrades_require_authentication() {
     let state = test_state().await;
     let app = build_test_app(state).await;

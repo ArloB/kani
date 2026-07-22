@@ -222,6 +222,17 @@ export default {
   'storage.scrub.unhashed_n': '{n} not yet hashed',
   'storage.scrub.clean': 'Library is clean',
   'storage.scrub.clean.subtitle': 'Every downloaded chapter matched the hash recorded for it.',
+  'upgrades.crumb': 'Upgrades',
+  'upgrades.count': '{n} pending',
+  'upgrades.empty': 'Nothing to upgrade',
+  'upgrades.empty.subtitle':
+    'Every downloaded chapter is the best version its source currently offers.',
+  'upgrades.error': 'Could not load upgrades',
+  'upgrades.bulk': 'Replace preferred-scanlator upgrades',
+  'upgrades.bulk.action': 'Replace {n} from preferred groups',
+  'upgrades.bulk.confirm':
+    'Replace {n} chapters with the version from the group you rank higher? Each old file is kept until the trash is purged.',
+  'upgrades.bulk.done': '{n} replacements queued.',
   'upgrade.title': 'A different version is available',
   'upgrade.yours': 'Yours',
   'upgrade.theirs': 'Available',
@@ -638,6 +649,7 @@ export default {
   'nav.sources': 'Sources',
   'nav.search': 'Search',
   'nav.updates': 'Updates',
+  'nav.upgrades': 'Upgrades',
   'nav.settings': 'Settings',
   'nav.downloads': 'Downloads',
   'nav.statistics': 'Statistics',
@@ -1078,6 +1090,10 @@ export default {
 
   'manga.scanlator.select_placeholder': 'Select scanlator…',
   'manga.scanlator.mode': 'Mode:',
+  'manga.scanlator.auto_replace': 'Replace automatically when a preferred group posts',
+  'manga.scanlator.auto_replace.desc':
+    'When a group you rank higher releases a chapter you already hold, swap it without asking. The old file is kept until the trash is purged.',
+  'manga.scanlator.auto_replace.failed': 'Could not change the automatic-replacement setting.',
   'manga.scanlator.mode.priority': 'Priority',
   'manga.scanlator.mode.whitelist': 'Whitelist',
   'manga.scanlator.mode.priority.desc': 'All scanlators accepted. Use priority to prefer, and block to exclude.',

@@ -6,7 +6,7 @@ import { initTheme } from './theme.js';
 import { connectSSE } from './sse.js';
 import { initRouter, navigate, onNavigate } from './router.js';
 import { getBootId, logout, getFeatures, getSystemInfo, getChangelog, getCurrentUser } from './api.js';
-import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs, iconRefresh, iconEllipsisHorizontal } from './icons.js';
+import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs, iconRefresh, iconEllipsisHorizontal, iconArrowUp } from './icons.js';
 import { mountNotificationsPanel } from './components/notifications-panel.js';
 import { mountAppHeader } from './components/app-header.js';
 import { maybeShowUpdateBanner } from './components/update-banner.js';
@@ -177,6 +177,7 @@ function _buildNavLinks() {
     { href: '/sources',   label: 'Sources',   icon: iconSources,   perm: 'source:browse', matchPrefix: '/source' },
     { href: '/search',    label: 'Search',    icon: iconSearch,    perm: 'source:browse' },
     { href: '/updates',   label: 'Updates',   icon: iconUpdates,   perm: 'library:view' },
+    { href: '/upgrades',  label: 'Upgrades',  icon: iconArrowUp,   perm: 'library:view' },
     { href: '/downloads', label: 'Downloads', icon: iconDownloads, perm: 'chapter:download' },
     { href: '/stats',     label: 'Statistics', icon: iconStats,     perm: 'library:view' },
     { href: '/settings',  label: 'Settings',  icon: iconSettings,  perm: 'settings:view',  section: 'Admin' },
@@ -241,6 +242,7 @@ function _renderBottomNav(el) {
     { href: '/settings',   icon: iconSettings,  label: t('nav.settings'),   perm: 'settings:view' },
     { href: '/downloads',  icon: iconDownloads, label: t('nav.downloads'),  perm: 'chapter:download' },
     { href: '/stats',      icon: iconStats,     label: t('nav.statistics'), perm: 'library:view' },
+    { href: '/upgrades',   icon: iconArrowUp,   label: t('nav.upgrades'),   perm: 'library:view' },
     { href: '/accounts',   icon: iconAccounts,  label: t('nav.accounts'),   perm: 'user:manage' },
     { href: '/admin/logs', icon: iconLogs,      label: t('nav.logs'),       perm: 'admin:view_logs' },
     { href: '/jobs',       icon: iconRefresh,   label: t('nav.jobs'),       perm: 'admin:jobs' },

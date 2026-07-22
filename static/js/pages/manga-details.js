@@ -67,6 +67,7 @@ let _autoScan = false;
 let _mangaData = /** @type {any} */ (null);
 let _scanlatorMode = 'priority';
 let _downloadAllPreferredOnly = true;
+let _upgradeAutoReplace = false;
 let _filterDownloaded = false;
 let _filterUnread = false;
 let _filterCached = false;
@@ -181,6 +182,7 @@ export async function init(container, params) {
       _autoScan = res.auto_scan ?? false;
       _scanlatorMode = res.scanlator_mode ?? 'priority';
       _downloadAllPreferredOnly = res.download_all_preferred_only ?? true;
+      _upgradeAutoReplace = res.upgrade_auto_replace ?? false;
       if (info) {
         if (res.notes !== undefined) info.notes = res.notes;
         info.cover_overridden   = res.cover_overridden ?? false;
@@ -701,6 +703,8 @@ async function _renderManageTab(contentEl) {
     const prefsCard = mkTitledCard(t('manga.details.scanlator_prefs.title'), t('manga.details.scanlator_prefs.desc'));
     mountScanlatorPrefsPanel(prefsCard, _scanlatorPrefs, _scanlatorMode, _dbId, (updated) => {
       _scanlatorPrefs = updated;
+    }, _upgradeAutoReplace, (on) => {
+      _upgradeAutoReplace = on;
     });
     dlSection.appendChild(prefsCard);
 
