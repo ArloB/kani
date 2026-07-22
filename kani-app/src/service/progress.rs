@@ -624,25 +624,6 @@ impl AppService {
         Ok(note)
     }
 
-    /// Returns chapter IDs that have a non-empty note for this user + manga.
-    pub async fn get_noted_chapter_ids(
-        &self,
-        user_id: UserId,
-        manga_id: MangaId,
-    ) -> Result<Vec<ChapterId>> {
-        let ids: Vec<i64> = sqlx::query_scalar!(
-            r#"SELECT ucn.chapter_id as "id: i64"
-               FROM user_chapter_notes ucn
-               JOIN chapters c ON c.id = ucn.chapter_id
-               WHERE ucn.user_id = ? AND c.manga_id = ? AND ucn.note != ''"#,
-            user_id,
-            manga_id,
-        )
-        .fetch_all(&self.db_read)
-        .await?;
-        Ok(ids.into_iter().map(ChapterId).collect())
-    }
-
     /// Returns chapter notes with text for a given user + manga, ordered by chapter number.
     pub async fn get_manga_chapter_notes_with_text(
         &self,

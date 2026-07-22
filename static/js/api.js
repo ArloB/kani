@@ -1389,12 +1389,6 @@ export async function getMangaChapterNotes(mangaId) {
   return _req('GET', `/manga/${mangaId}/chapter-notes`);
 }
 
-/** @deprecated Use getMangaChapterNotes instead; kept for callers that only need IDs.
- * @param {number} mangaId @returns {Promise<number[]>} */
-export async function getNotedChapterIds(mangaId) {
-  const res = await getMangaChapterNotes(mangaId);
-  return (res?.notes ?? []).map((/** @type {{chapter_id:number}} */ n) => n.chapter_id);
-}
 
 /** @param {number} chapterId @returns {Promise<{note:string|null}>} */
 export async function getChapterNote(chapterId) {

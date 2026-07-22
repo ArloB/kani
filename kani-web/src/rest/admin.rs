@@ -596,7 +596,7 @@ pub(crate) async fn db_stats(
         .await
         .map_err(kani_app::error::ServiceError::Db)?;
     let db_size_bytes = page_count * page_size;
-    let wal_size_bytes = std::fs::metadata("kani.db-wal")
+    let wal_size_bytes = std::fs::metadata(state.service.db_path.with_extension("db-wal"))
         .map(|m| m.len() as i64)
         .unwrap_or(0);
     Ok(Json(json!({

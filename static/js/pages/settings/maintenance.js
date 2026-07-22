@@ -6,11 +6,140 @@ import { useState, useCallback } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
 import { showToast } from '../../components/toast.js';
-import { SettingsGroup, NumberRow, SelectRow, ToggleRow } from './_shared.js';
+import { SettingsGroup, SettingsRow, NumberRow, SelectRow, ToggleRow } from './_shared.js';
 import { useSettingsForm } from './form-bus.js';
+import { showApiError } from '../../components/toast.js';
+import { useBusy } from '../../hooks/use-busy.js';
+import { showConfirm } from '../../components/modal.js';
+import { formatBytes } from '../../utils.js';
+import { useEffect } from 'preact/hooks';
 import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
+
+/** Recurring jobs an operator may plausibly want to run early. */
+const TRIGGERABLE = [
+  'db_maintenance',
+  'db_vacuum',
+  'audit_prune',
+  'trash_purge',
+  'storage_monitor',
+  'update_check',
+  'integrity_scrub_quick',
+  'integrity_scrub_deep',
+];
+
+/**
+ * Database size and the two reclaim operations.
+ *
+ * The endpoints have existed and worked since the jobs framework landed; there
+ * was simply no way to reach them from the app.
+ */
+function DatabaseCard() {
+  const [stats, setStats] = useState(/** @type {any} */ (null));
+  const { busy, run } = useBusy();
+
+  const load = useCallback(() => {
+    api.getDbStats().then(setStats).catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  const analyze = () =>
+    run(async () => {
+      try {
+        await api.analyzeDb();
+        showToast(t('settings.db.analyzed'), { type: 'success' });
+        load();
+      } catch (e) {
+        showApiError(e);
+      }
+    });
+
+  const vacuum = () =>
+    run(async () => {
+      const ok = await showConfirm(t('settings.db.vacuum.confirm'), {
+        title: t('settings.db.vacuum'),
+        confirmLabel: t('settings.db.vacuum'),
+      });
+      if (!ok) return;
+      try {
+        await api.vacuumDb();
+        showToast(t('settings.db.vacuumed'), { type: 'success' });
+        load();
+      } catch (e) {
+        showApiError(e);
+      }
+    });
+
+  return html`
+    <${SettingsGroup} label=${t('settings.db.group')}>
+      <${SettingsRow}
+        label=${t('settings.db.size')}
+        description=${t('settings.db.size.desc')}
+      >
+        <span class="text-sm text-text-muted">
+          ${stats ? formatBytes(stats.db_size_bytes) : '—'}
+          ${stats && stats.wal_size_bytes > 0
+            ? html` <span class="text-xs">(+${formatBytes(stats.wal_size_bytes)} WAL)</span>`
+            : null}
+        </span>
+      <//>
+      <${SettingsRow}
+        label=${t('settings.db.actions')}
+        description=${t('settings.db.actions.desc')}
+      >
+        <span class="flex gap-2">
+          <button type="button" class="btn-secondary btn-sm" disabled=${busy} onClick=${analyze}>
+            ${t('settings.db.analyze')}
+          </button>
+          <button type="button" class="btn-secondary btn-sm" disabled=${busy} onClick=${vacuum}>
+            ${t('settings.db.vacuum')}
+          </button>
+        </span>
+      <//>
+    <//>
+  `;
+}
+
+/** Runs a scheduled job now instead of waiting for its next due time. */
+function RecurringCard() {
+  const { busy, run } = useBusy();
+  const [last, setLast] = useState('');
+
+  const trigger = (/** @type {string} */ kind) =>
+    run(async () => {
+      try {
+        await api.triggerRecurring(kind);
+        setLast(kind);
+        showToast(t('settings.recurring.triggered', { kind: t(`settings.recurring.${kind}`) }), {
+          type: 'success',
+        });
+      } catch (e) {
+        showApiError(e);
+      }
+    });
+
+  return html`
+    <${SettingsGroup} label=${t('settings.recurring.group')}>
+      <p class="text-xs text-text-muted px-1 pb-1">${t('settings.recurring.desc')}</p>
+      <div class="flex flex-wrap gap-2 px-1 pb-2">
+        ${TRIGGERABLE.map(
+          (kind) => html`
+            <button
+              type="button"
+              key=${kind}
+              class=${last === kind ? 'chip chip-active' : 'chip'}
+              disabled=${busy}
+              onClick=${() => trigger(kind)}
+            >
+              ${t(`settings.recurring.${kind}`)}
+            </button>
+          `,
+        )}
+      </div>
+    <//>
+  `;
+}
 
 /** @param {{ settings: any }} props */
 export function MaintenanceSection({ settings }) {
@@ -168,6 +297,9 @@ export function MaintenanceSection({ settings }) {
         onChange=${(v) => setM('integrity_revalidate_after_days', v)}
       />
     <//>
+
+    <${DatabaseCard} />
+    <${RecurringCard} />
 
     <${SettingsGroup} label=${t('settings.security.group')}>
       <${NumberRow}

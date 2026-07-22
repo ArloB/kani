@@ -1209,7 +1209,6 @@ impl ScanlatorDomain for AppService {
 pub trait SettingsDomain: Send + Sync {
     async fn get_settings(&self) -> AppSettings;
     async fn update_settings(&self, update: SettingsUpdate, user_id: UserId) -> Result<()>;
-    async fn toggle_auto_scan(&self) -> Result<bool>;
     async fn start_refresh_all(&self) -> Result<()>;
     async fn is_refreshing(&self) -> bool;
 }
@@ -1221,9 +1220,6 @@ impl SettingsDomain for AppService {
     }
     async fn update_settings(&self, update: SettingsUpdate, user_id: UserId) -> Result<()> {
         self.update_settings(update, user_id).await
-    }
-    async fn toggle_auto_scan(&self) -> Result<bool> {
-        self.toggle_auto_scan().await
     }
     async fn start_refresh_all(&self) -> Result<()> {
         self.start_refresh_all().await
@@ -2025,9 +2021,6 @@ mod tests {
         async fn update_settings(&self, _update: SettingsUpdate, _user_id: UserId) -> Result<()> {
             unimplemented!()
         }
-        async fn toggle_auto_scan(&self) -> Result<bool> {
-            Ok(true)
-        }
         async fn start_refresh_all(&self) -> Result<()> {
             unimplemented!()
         }
@@ -2039,7 +2032,6 @@ mod tests {
     #[tokio::test]
     async fn settings_via_mock_no_appservice() {
         let svc: Arc<dyn SettingsDomain> = Arc::new(FixedSettings);
-        let result = svc.toggle_auto_scan().await.unwrap();
-        assert!(result);
+        assert!(!svc.is_refreshing().await);
     }
 }

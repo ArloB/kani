@@ -81,12 +81,15 @@ impl AppService {
     pub async fn get_diagnostics(&self) -> crate::error::Result<DiagnosticsPayload> {
         let info = build_info();
 
-        let db_path = std::path::PathBuf::from("kani.db");
+        let db_path = self.db_path.clone();
         let db_size_bytes = file_len(db_path.clone()).await;
-        let db_wal_size_bytes = file_len(std::path::PathBuf::from("kani.db-wal")).await;
+        let db_wal_size_bytes = file_len(db_path.with_extension("db-wal")).await;
 
         let library_path = { self.settings.read().await.library_path.clone() };
-        let data_path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let data_path = db_path
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
 
         let disk_free_data_bytes =
             tokio::task::spawn_blocking(move || fs2::available_space(&data_path).ok())

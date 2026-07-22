@@ -43,7 +43,6 @@ use utoipa::OpenApi;
         crate::rest::auth::resend_verification,
         // settings
         crate::rest::settings::get_settings,
-        crate::rest::settings::toggle_auto_scan,
         crate::rest::settings::start_refresh_all_rest,
         crate::rest::settings::get_refresh_status,
         // library
@@ -88,7 +87,6 @@ use utoipa::OpenApi;
         crate::rest::manga::refresh_manga,
         crate::rest::manga::scan_manga,
         crate::rest::manga::toggle_auto_download,
-        crate::rest::manga::toggle_auto_scan_manga,
         crate::rest::manga::toggle_download_all_preferred,
         crate::rest::manga::update_manga_notes,
         crate::rest::manga::update_local_metadata_handler,

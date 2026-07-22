@@ -77,6 +77,9 @@ pub mod webhooks;
 #[derive(Clone)]
 pub struct AppService {
     pub db: SqlitePool,
+    /// Where the database actually lives. Several callers need the sidecar
+    /// files (`-wal`, `-shm`) and must not assume the working directory.
+    pub db_path: std::path::PathBuf,
     pub db_read: SqlitePool,
     pub wasm_runtime: Arc<WasmRuntime>,
     pub sources: Arc<SourceRegistry>,
@@ -742,6 +745,7 @@ impl AppService {
 
         let svc = Self {
             db: pool,
+            db_path,
             db_read: read_pool,
             wasm_runtime,
             sources: Arc::new(sources_registry),
@@ -929,6 +933,7 @@ impl AppService {
 
         let svc = Self {
             db: pool.clone(),
+            db_path: std::path::PathBuf::from("kani.db"),
             db_read: pool.clone(),
             wasm_runtime,
             sources: Arc::new(SourceRegistry::new()),

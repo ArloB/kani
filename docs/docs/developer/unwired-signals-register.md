@@ -7,7 +7,7 @@ nothing — so the register is kept rather than the findings being closed and
 forgotten.
 
 Swept 2026-07-22 across `kani-app`, `kani-web`, `kani-core`, `static/js` and
-`migrations/`. Statuses are accurate as of commit `ddda1a8`.
+`migrations/`. Statuses are accurate as of commit `62a1d3f` and later.
 
 | # | Signal | Consequence when unwired | Status |
 |---|---|---|---|
@@ -25,15 +25,22 @@ Swept 2026-07-22 across `kani-app`, `kani-web`, `kani-core`, `static/js` and
 | 12 | `user_manga_tracking.reading_layout` | Zero references in Rust or JS; the per-manga layout override was never implemented | **REMOVED** |
 | 13 | `repos::unblock_repo` | No callers; `delete_blocked_repo` is the wired path | **REMOVED** |
 | 14 | SSE type `scan_complete` | Handled in `manga-details.js`, never emitted — not an `AppEvent` variant | **REMOVED** |
-| 15 | `AppEvent::SourceUpdating` | Emitted by `repos.rs`, unhandled in JS — no in-progress indicator while a source updates | **OPEN** |
-| 16 | `AppEvent::ImportStarted` | Emitted, unhandled — import UI stays blank until the first item, so a slow import looks hung | **OPEN** |
-| 17 | `Settings.auto_download_category_id` (singular) | Superseded by the plural; still SELECTed and shipped to every client, read by nothing | **OPEN** — removal is an API shape change |
-| 18 | `JobContext.sse_tx` | Populated for every job, used by none (`#[allow(dead_code)]`) | **OPEN** |
-| 19 | `FilterMappingEntry::{SortPair,TupleSplit}.kind` | Deserialised from extension YAML, validated by serde, discarded | **OPEN** |
+| 15 | `AppEvent::SourceUpdating` | Emitted by `repos.rs`, unhandled in JS — no in-progress indicator while a source updates | **FIXED** — toast naming the source |
+| 16 | `AppEvent::ImportStarted` | Emitted, unhandled — import UI stays blank until the first item, so a slow import looks hung | **FIXED** — seeds the progress bar at 0/total |
+| 17 | `Settings.auto_download_category_id` (singular) | Superseded by the plural; still SELECTed and shipped to every client, read by nothing | **REMOVED** |
+| 18 | `JobContext.sse_tx` | Populated for every job, used by none (`#[allow(dead_code)]`) | **REMOVED** |
+| 19 | `FilterMappingEntry::{SortPair,TupleSplit}.kind` | ~~Deserialised then discarded~~ | **NOT A FINDING** — required discriminator on an `untagged` enum; it is what makes the variants parse deterministically |
 | 20 | `pause_job` / `resume_job` | Permanent `422` stubs with OpenAPI docs | **FIXED** — implemented for queued jobs, running jobs refuse with a reason, and wired to buttons on the jobs page |
-| 21 | `progress::get_noted_chapter_ids` | Chapter notes exist; "which chapters have notes" is never surfaced | **OPEN** — wiring it is a UI feature (note indicator), not a deletion |
+| 21 | `progress::get_noted_chapter_ids` | ~~Notes never surfaced~~ | **NOT A FINDING, then REMOVED** — the ✎ indicator *is* rendered, via `_chapterNotes`. This was a redundant second path (its `api.js` twin was already `@deprecated` and derived client-side); both removed |
 | 22 | 23 `api.js` exports with zero callers | Each is a shipped backend capability with no way to reach it | **OPEN** — see below |
-| 23 | 6 REST routes with no frontend caller | `/admin/db/{analyze,stats,vacuum}`, `/admin/recurring/{kind}/run`, `/chapters/{id}/cbz`, `/scan/toggle_auto` | **OPEN** |
+| 23 | 6 REST routes with no frontend caller | `/admin/db/{analyze,stats,vacuum}`, `/admin/recurring/{kind}/run`, `/chapters/{id}/cbz`, `/scan/toggle_auto` | **FIXED** — DB card + recurring triggers in Maintenance settings, CBZ in the chapter menu; `/scan/toggle_auto` **removed** as a redundant second way to set `auto_scan` |
+
+**Three false positives.** A caller-count grep cannot tell "capability missing"
+from "capability delivered another way", and three findings were the latter:
+`FilterMappingEntry::kind` (#19) does real work at parse time; the note
+indicator (#21) was already rendered by a different path; and `create_api_token`
+looked alive because of test callers. Treat every finding as a lead, not a
+verdict.
 
 **Corrected during the sweep:** `create_api_token` was reported as having zero
 callers. It in fact had *test* callers only — which is not a production call

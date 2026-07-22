@@ -518,7 +518,7 @@ impl AppService {
 
     /// Runs WAL checkpoint + VACUUM and returns (before_bytes, after_bytes).
     pub async fn run_maintenance(&self) -> Result<(u64, u64)> {
-        let db_path = std::path::Path::new("kani.db");
+        let db_path = self.db_path.as_path();
         let before = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
         sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
             .execute(&self.db)

@@ -246,6 +246,7 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, 
     ] : []),
     ...(!isActive && downloaded && !isCancelled ? [
       { divider: /** @type {true} */ (true) },
+      { label: t('chapter.menu.download_cbz'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/cbz`) },
       { label: t('chapter.menu.export_epub'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/epub`) },
       { label: t('chapter.menu.export_epub_kindle'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/epub?profile=kindle-pw`) },
       { label: t('chapter.menu.export_kepub_kobo'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/kepub?profile=kobo-libra`) },
