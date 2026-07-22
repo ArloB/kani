@@ -337,14 +337,6 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn unblock_repo(&self, url: &str, user_id: Option<crate::ids::UserId>) -> Result<()> {
-        sqlx::query!("DELETE FROM blocked_repos WHERE url = ?", url)
-            .execute(&self.db)
-            .await?;
-        self.audit(user_id, "repo.unblock", Some(url), None).await;
-        Ok(())
-    }
-
     pub async fn delete_blocked_repo(
         &self,
         id: i64,

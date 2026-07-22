@@ -428,7 +428,7 @@ export async function init(container, params) {
     const data = /** @type {CustomEvent} */ (e).detail;
     if (!data) return;
     if (
-      (data.type === 'manga_refreshed' || data.type === 'scan_complete') &&
+      data.type === 'manga_refreshed' &&
       (data.manga_id === _dbId || data.db_id === _dbId)
     ) {
       if (_activeTab === 'chapters' && _contentSection) _fetchChapters(_contentSection);

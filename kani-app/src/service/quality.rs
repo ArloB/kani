@@ -765,6 +765,35 @@ pub fn remap_progress(last_page_read: i64, old_count: i64, new_count: i64) -> i6
     ((ratio * new_count as f64).round() as i64).clamp(0, new_count - 1)
 }
 
+/// Rebuilds a `QualityScore` from the columns `manifest_capture` writes.
+///
+/// `None` when the row predates the columns, which sends the caller back to the
+/// manifest JSON. Resolution and page count are the two that must be present:
+/// a score without them cannot be compared, whereas a missing encoder estimate
+/// or colour profile is an ordinary "not known" that the comparator handles.
+fn stored_score(
+    long_edge: Option<i64>,
+    bytes_per_mp: Option<f64>,
+    page_count: Option<i64>,
+    encoder: Option<i64>,
+    colour: Option<&str>,
+) -> Option<kani_core::quality::QualityScore> {
+    let long_edge = long_edge?;
+    let page_count = page_count?;
+    if long_edge <= 0 {
+        return None;
+    }
+    Some(kani_core::quality::QualityScore {
+        median_long_edge_px: long_edge as u32,
+        bytes_per_megapixel: bytes_per_mp.unwrap_or(0.0) as f32,
+        page_count: page_count as u32,
+        median_encoder_quality: encoder.map(|q| q.clamp(1, 100) as u8),
+        colour: colour
+            .map(crate::service::manifest_capture::colour_from_column)
+            .unwrap_or_default(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -864,33 +893,4 @@ mod tests {
             "dismissing one group's release must not silence another's"
         );
     }
-}
-
-/// Rebuilds a `QualityScore` from the columns `manifest_capture` writes.
-///
-/// `None` when the row predates the columns, which sends the caller back to the
-/// manifest JSON. Resolution and page count are the two that must be present:
-/// a score without them cannot be compared, whereas a missing encoder estimate
-/// or colour profile is an ordinary "not known" that the comparator handles.
-fn stored_score(
-    long_edge: Option<i64>,
-    bytes_per_mp: Option<f64>,
-    page_count: Option<i64>,
-    encoder: Option<i64>,
-    colour: Option<&str>,
-) -> Option<kani_core::quality::QualityScore> {
-    let long_edge = long_edge?;
-    let page_count = page_count?;
-    if long_edge <= 0 {
-        return None;
-    }
-    Some(kani_core::quality::QualityScore {
-        median_long_edge_px: long_edge as u32,
-        bytes_per_megapixel: bytes_per_mp.unwrap_or(0.0) as f32,
-        page_count: page_count as u32,
-        median_encoder_quality: encoder.map(|q| q.clamp(1, 100) as u8),
-        colour: colour
-            .map(crate::service::manifest_capture::colour_from_column)
-            .unwrap_or_default(),
-    })
 }
