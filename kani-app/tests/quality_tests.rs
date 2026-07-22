@@ -274,7 +274,9 @@ async fn applying_an_upgrade_keeps_the_old_file() {
 
     // The download will fail (no real source), but the file must already be
     // preserved by then.
-    let _ = svc.apply_upgrade(chapter, kani_app::ids::UserId(1)).await;
+    let _ = svc
+        .apply_upgrade(chapter, Some(kani_app::ids::UserId(1)))
+        .await;
 
     assert!(!old_path.exists(), "the held file is moved out of the way");
     let replaced: Vec<_> = std::fs::read_dir(library.join(".replaced"))
@@ -302,7 +304,9 @@ async fn applying_an_upgrade_clears_the_stale_hashes() {
     let manga = seed_manga(&svc, "Cleared").await;
     let chapter = held_chapter(&svc, manga, "Cleared", 1.0, 3).await;
 
-    let _ = svc.apply_upgrade(chapter, kani_app::ids::UserId(1)).await;
+    let _ = svc
+        .apply_upgrade(chapter, Some(kani_app::ids::UserId(1)))
+        .await;
 
     let (status, hash, flag): (i64, Option<String>, Option<String>) = sqlx::query_as(
         "SELECT download_status, content_hash, upgrade_available FROM chapters WHERE id = ?",
@@ -479,4 +483,190 @@ async fn a_candidate_names_both_sides_of_the_comparison() {
         "a comparison that cannot name what you already hold is not a comparison"
     );
     assert_eq!(c.candidate_scanlator.as_deref(), Some("Rival Group"));
+}
+
+// ── Auto-replace, and hiding reassurance from the library-wide list ──────────
+
+async fn set_auto_replace_reasons(svc: &kani_app::service::AppService, reasons: &str) {
+    let mut s = svc.settings.write().await;
+    s.upgrade_auto_replace_reasons = reasons.to_string();
+}
+
+#[tokio::test]
+async fn auto_replace_does_nothing_unless_the_series_opts_in() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "Manual").await;
+    let held = held_chapter(&svc, manga, "Manual", 1.0, 3).await;
+    let rival = insert_chapter(&svc.db, manga, "rival-1", 1.0).await;
+    sqlx::query("UPDATE chapters SET scanlator = 'Held Group' WHERE id = ?")
+        .bind(held.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE chapters SET scanlator = 'Rival Group' WHERE id = ?")
+        .bind(rival.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    svc.set_scanlator_pref(manga, "Rival Group", 10, false)
+        .await
+        .unwrap();
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert!(
+        !found.is_empty(),
+        "the candidate itself must still be raised"
+    );
+
+    let status: i64 = sqlx::query_scalar("SELECT download_status FROM chapters WHERE id = ?")
+        .bind(held.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        status, 2,
+        "with auto-replace off the held chapter must be left alone"
+    );
+}
+
+#[tokio::test]
+async fn auto_replace_acts_on_a_preferred_scanlator_when_the_series_opts_in() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "Auto").await;
+    let held = held_chapter(&svc, manga, "Auto", 1.0, 3).await;
+    let rival = insert_chapter(&svc.db, manga, "rival-1", 1.0).await;
+    sqlx::query("UPDATE chapters SET scanlator = 'Held Group' WHERE id = ?")
+        .bind(held.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE chapters SET scanlator = 'Rival Group' WHERE id = ?")
+        .bind(rival.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    svc.set_scanlator_pref(manga, "Rival Group", 10, false)
+        .await
+        .unwrap();
+    svc.set_upgrade_auto_replace(manga, true).await.unwrap();
+    set_auto_replace_reasons(&svc, "preferred_scanlator").await;
+
+    svc.evaluate_upgrades(manga).await.unwrap();
+
+    let status: i64 = sqlx::query_scalar("SELECT download_status FROM chapters WHERE id = ?")
+        .bind(held.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_ne!(
+        status, 2,
+        "the held chapter should no longer count as downloaded — apply_upgrade \
+         clears it and re-queues, so this is 0 (pending) or 1 (queued)"
+    );
+
+    let library = { svc.settings.read().await.library_path.clone() };
+    let replaced = library.join(".replaced");
+    let kept = std::fs::read_dir(&replaced).map(|d| d.count()).unwrap_or(0);
+    assert_eq!(
+        kept, 1,
+        "the old file must be preserved, or automatic replacement is destructive"
+    );
+}
+
+#[tokio::test]
+async fn auto_replace_ignores_a_reason_that_is_not_configured() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "NotConfigured").await;
+    let held = held_chapter(&svc, manga, "NotConfigured", 1.0, 3).await;
+    let rival = insert_chapter(&svc.db, manga, "rival-1", 1.0).await;
+    sqlx::query("UPDATE chapters SET scanlator = 'Held Group' WHERE id = ?")
+        .bind(held.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE chapters SET scanlator = 'Rival Group' WHERE id = ?")
+        .bind(rival.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    svc.set_scanlator_pref(manga, "Rival Group", 10, false)
+        .await
+        .unwrap();
+    svc.set_upgrade_auto_replace(manga, true).await.unwrap();
+    // Everything except the kind this candidate actually is.
+    set_auto_replace_reasons(&svc, "resolution,colour").await;
+
+    svc.evaluate_upgrades(manga).await.unwrap();
+
+    let status: i64 = sqlx::query_scalar("SELECT download_status FROM chapters WHERE id = ?")
+        .bind(held.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(status, 2, "an unconfigured reason must not rewrite a file");
+}
+
+#[tokio::test]
+async fn auto_replace_never_acts_on_a_reassurance_entry() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "Reassure").await;
+    let chapter = held_chapter(&svc, manga, "Reassure", 1.0, 5).await;
+    sqlx::query("UPDATE chapters SET source_page_count = 2 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    svc.set_upgrade_auto_replace(manga, true).await.unwrap();
+    set_auto_replace_reasons(
+        &svc,
+        "preferred_scanlator,resolution,colour,encoder,bitrate",
+    )
+    .await;
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(found[0].kind, UpgradeKind::SourceDowngraded);
+
+    let status: i64 = sqlx::query_scalar("SELECT download_status FROM chapters WHERE id = ?")
+        .bind(chapter.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        status, 2,
+        "replacing a better copy with a worse one is the one thing this must never do"
+    );
+}
+
+#[tokio::test]
+async fn the_library_wide_list_hides_reassurance_by_default() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "Hidden").await;
+    let chapter = held_chapter(&svc, manga, "Hidden", 1.0, 5).await;
+    sqlx::query("UPDATE chapters SET source_page_count = 2 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(
+        svc.get_upgrades(manga).await.unwrap().len(),
+        1,
+        "the per-manga view keeps it — the chapter badge is where it belongs"
+    );
+    assert!(
+        svc.all_upgrades().await.unwrap().is_empty(),
+        "the library-wide list is for deciding what to replace, and there is \
+         nothing to decide here"
+    );
+
+    {
+        let mut s = svc.settings.write().await;
+        s.upgrade_show_downgrades = true;
+    }
+    assert_eq!(
+        svc.all_upgrades().await.unwrap().len(),
+        1,
+        "and it comes back when asked for"
+    );
 }

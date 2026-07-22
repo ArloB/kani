@@ -204,6 +204,73 @@ pub enum QualityVerdict {
     Same,
 }
 
+/// How much authority one axis has over a comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisRule {
+    /// This axis never decides anything, in either direction.
+    Off,
+    /// An improvement is an upgrade; a regression is ignored.
+    Gain,
+    /// An improvement is an upgrade; a regression blocks the candidate.
+    #[default]
+    Both,
+}
+
+impl AxisRule {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "off" => Self::Off,
+            "gain" => Self::Gain,
+            _ => Self::Both,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Gain => "gain",
+            Self::Both => "both",
+        }
+    }
+
+    fn counts_gain(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+
+    fn blocks_loss(self) -> bool {
+        matches!(self, Self::Both)
+    }
+}
+
+/// Which axes may decide an upgrade, and which may veto one.
+///
+/// None of this is universal taste. A colour release is not automatically the
+/// better artefact — plenty of readers prefer the original monochrome scan —
+/// and a reader who only cares about pixel count wants the encoder axis to stay
+/// out of it entirely. The defaults reproduce the behaviour these rules
+/// replaced.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct QualityPolicy {
+    pub min_res_gain: f32,
+    pub resolution: AxisRule,
+    pub colour: AxisRule,
+    pub encoder: AxisRule,
+    pub bitrate: AxisRule,
+}
+
+impl Default for QualityPolicy {
+    fn default() -> Self {
+        Self {
+            min_res_gain: 1.2,
+            resolution: AxisRule::Both,
+            colour: AxisRule::Both,
+            encoder: AxisRule::Both,
+            bitrate: AxisRule::Gain,
+        }
+    }
+}
+
 /// Encoder-quality points that count as a real difference. Below this the
 /// estimate's own error (~8 points, see `probe::jpeg_quality`) dominates.
 const ENCODER_MARGIN: u8 = 12;
@@ -222,7 +289,7 @@ const BYTES_MARGIN: f32 = 1.5;
 pub fn compare_quality(
     candidate: &QualityScore,
     current: &QualityScore,
-    min_res_gain: f32,
+    policy: &QualityPolicy,
 ) -> QualityVerdict {
     use ColourProfile::{FullColour, Monochrome};
 
@@ -236,18 +303,20 @@ pub fn compare_quality(
     // A monochrome re-upload of a colour release is a downgrade whatever the
     // pixel count says — checked before resolution, since a higher-resolution
     // greyscale rip would otherwise read as an upgrade.
-    if current.colour == FullColour && candidate.colour == Monochrome {
+    if policy.colour.blocks_loss() && current.colour == FullColour && candidate.colour == Monochrome
+    {
         return QualityVerdict::Worse;
     }
 
     let res_ratio = candidate.median_long_edge_px as f32 / current.median_long_edge_px as f32;
-    if res_ratio < 1.0 {
+    if policy.resolution.blocks_loss() && res_ratio < 1.0 {
         return QualityVerdict::Worse;
     }
-    if candidate.colour == FullColour && current.colour == Monochrome {
+    if policy.colour.counts_gain() && candidate.colour == FullColour && current.colour == Monochrome
+    {
         return QualityVerdict::Better(QualityReason::Colour);
     }
-    if res_ratio >= min_res_gain {
+    if policy.resolution.counts_gain() && res_ratio >= policy.min_res_gain {
         return QualityVerdict::Better(QualityReason::Resolution);
     }
 
@@ -255,15 +324,25 @@ pub fn compare_quality(
         candidate.median_encoder_quality,
         current.median_encoder_quality,
     ) {
-        if cand_q >= cur_q.saturating_add(ENCODER_MARGIN) {
+        if policy.encoder.counts_gain() && cand_q >= cur_q.saturating_add(ENCODER_MARGIN) {
             return QualityVerdict::Better(QualityReason::Encoder);
         }
-        if cand_q.saturating_add(ENCODER_MARGIN) <= cur_q {
+        if policy.encoder.blocks_loss() && cand_q.saturating_add(ENCODER_MARGIN) <= cur_q {
             return QualityVerdict::Worse;
         }
     }
 
-    if current.bytes_per_megapixel > 0.0
+    // A large bytes-per-megapixel *drop* at the same resolution is the mirror of
+    // the gain below, and only blocks when the axis is set to police both
+    // directions — bitrate is the noisiest signal, so it does not by default.
+    if policy.bitrate.blocks_loss()
+        && candidate.bytes_per_megapixel > 0.0
+        && current.bytes_per_megapixel >= candidate.bytes_per_megapixel * BYTES_MARGIN
+    {
+        return QualityVerdict::Worse;
+    }
+    if policy.bitrate.counts_gain()
+        && current.bytes_per_megapixel > 0.0
         && candidate.bytes_per_megapixel >= current.bytes_per_megapixel * BYTES_MARGIN
     {
         return QualityVerdict::Better(QualityReason::Bitrate);
@@ -275,10 +354,10 @@ pub fn compare_quality(
 pub fn is_meaningfully_better(
     candidate: &QualityScore,
     current: &QualityScore,
-    min_res_gain: f32,
+    policy: &QualityPolicy,
 ) -> bool {
     matches!(
-        compare_quality(candidate, current, min_res_gain),
+        compare_quality(candidate, current, policy),
         QualityVerdict::Better(_)
     )
 }
@@ -370,14 +449,22 @@ mod tests {
         let unknown = score_from_manifest(&manifest(vec![(None, None)], 100));
         assert_eq!(unknown.median_long_edge_px, 0);
         let known = score_from_manifest(&manifest(vec![(Some(800), Some(1200))], 100));
-        assert!(!is_meaningfully_better(&unknown, &known, 1.2));
+        assert!(!is_meaningfully_better(
+            &unknown,
+            &known,
+            &QualityPolicy::default()
+        ));
     }
 
     #[test]
     fn higher_resolution_wins() {
         let current = score_from_manifest(&manifest(vec![(Some(800), Some(1200))], 1_000_000));
         let better = score_from_manifest(&manifest(vec![(Some(1600), Some(2400))], 2_000_000));
-        assert!(is_meaningfully_better(&better, &current, 1.2));
+        assert!(is_meaningfully_better(
+            &better,
+            &current,
+            &QualityPolicy::default()
+        ));
     }
 
     #[test]
@@ -385,7 +472,7 @@ mod tests {
         let current = score_from_manifest(&manifest(vec![(Some(800), Some(1200))], 1_000_000));
         let barely = score_from_manifest(&manifest(vec![(Some(800), Some(1200))], 1_100_000));
         assert!(
-            !is_meaningfully_better(&barely, &current, 1.2),
+            !is_meaningfully_better(&barely, &current, &QualityPolicy::default()),
             "a 10% larger re-encode is not an upgrade"
         );
     }
@@ -394,7 +481,11 @@ mod tests {
     fn equal_resolution_much_larger_file_wins() {
         let current = score_from_manifest(&manifest(vec![(Some(800), Some(1200))], 1_000_000));
         let much = score_from_manifest(&manifest(vec![(Some(800), Some(1200))], 2_000_000));
-        assert!(is_meaningfully_better(&much, &current, 1.2));
+        assert!(is_meaningfully_better(
+            &much,
+            &current,
+            &QualityPolicy::default()
+        ));
     }
 
     fn score(long_edge: u32, bpm: f32, enc: Option<u8>, colour: ColourProfile) -> QualityScore {
@@ -412,7 +503,7 @@ mod tests {
         let held = score(1600, 1000.0, None, ColourProfile::Monochrome);
         let cand = score(1600, 1000.0, None, ColourProfile::FullColour);
         assert_eq!(
-            compare_quality(&cand, &held, 1.2),
+            compare_quality(&cand, &held, &QualityPolicy::default()),
             QualityVerdict::Better(QualityReason::Colour)
         );
     }
@@ -422,7 +513,7 @@ mod tests {
         let held = score(1600, 1000.0, None, ColourProfile::FullColour);
         let cand = score(3200, 9000.0, None, ColourProfile::Monochrome);
         assert_eq!(
-            compare_quality(&cand, &held, 1.2),
+            compare_quality(&cand, &held, &QualityPolicy::default()),
             QualityVerdict::Worse,
             "a higher-resolution greyscale rip of a colour chapter is a downgrade"
         );
@@ -439,7 +530,7 @@ mod tests {
         let held = score(1600, 1000.0, None, ColourProfile::Monochrome);
         let cand = score(1600, 1000.0, None, ColourProfile::ColourAccent);
         assert_eq!(
-            compare_quality(&cand, &held, 1.2),
+            compare_quality(&cand, &held, &QualityPolicy::default()),
             QualityVerdict::Same,
             "a colour opener is not a colour release"
         );
@@ -467,7 +558,7 @@ mod tests {
         let held = score(1600, 1000.0, Some(70), ColourProfile::Unknown);
         let cand = score(1600, 1000.0, Some(92), ColourProfile::Unknown);
         assert_eq!(
-            compare_quality(&cand, &held, 1.2),
+            compare_quality(&cand, &held, &QualityPolicy::default()),
             QualityVerdict::Better(QualityReason::Encoder)
         );
     }
@@ -477,7 +568,7 @@ mod tests {
         let held = score(1600, 1000.0, Some(80), ColourProfile::Unknown);
         let cand = score(1600, 1000.0, Some(88), ColourProfile::Unknown);
         assert_eq!(
-            compare_quality(&cand, &held, 1.2),
+            compare_quality(&cand, &held, &QualityPolicy::default()),
             QualityVerdict::Same,
             "8 points is within the estimator's own error, so it proves nothing"
         );
@@ -488,7 +579,7 @@ mod tests {
         let held = score(1600, 1000.0, Some(92), ColourProfile::Unknown);
         let cand = score(1600, 4000.0, Some(60), ColourProfile::Unknown);
         assert_eq!(
-            compare_quality(&cand, &held, 1.2),
+            compare_quality(&cand, &held, &QualityPolicy::default()),
             QualityVerdict::Worse,
             "a bloated low-quality re-encode must not win on bytes-per-megapixel"
         );
@@ -499,7 +590,7 @@ mod tests {
         let held = score(800, 1000.0, Some(95), ColourProfile::Unknown);
         let cand = score(1600, 1000.0, Some(60), ColourProfile::Unknown);
         assert_eq!(
-            compare_quality(&cand, &held, 1.2),
+            compare_quality(&cand, &held, &QualityPolicy::default()),
             QualityVerdict::Better(QualityReason::Resolution),
             "double the pixels is worth more than the encoder estimate"
         );
@@ -510,7 +601,7 @@ mod tests {
         let held = score(0, 0.0, None, ColourProfile::Unknown);
         let cand = score(1600, 1000.0, None, ColourProfile::Unknown);
         assert_eq!(
-            compare_quality(&cand, &held, 1.2),
+            compare_quality(&cand, &held, &QualityPolicy::default()),
             QualityVerdict::Better(QualityReason::Unmeasured)
         );
     }
@@ -519,7 +610,10 @@ mod tests {
     fn an_unmeasurable_candidate_is_never_offered() {
         let held = score(1600, 1000.0, None, ColourProfile::Unknown);
         let cand = score(0, 0.0, None, ColourProfile::Unknown);
-        assert_eq!(compare_quality(&cand, &held, 1.2), QualityVerdict::Same);
+        assert_eq!(
+            compare_quality(&cand, &held, &QualityPolicy::default()),
+            QualityVerdict::Same
+        );
     }
 
     #[test]
@@ -562,11 +656,103 @@ mod tests {
     }
 
     #[test]
+    fn colour_can_be_told_it_is_not_an_upgrade() {
+        // Some readers want the original monochrome scan, not a colourised
+        // re-release, so the axis has to be silenceable.
+        let held = score(1600, 1000.0, None, ColourProfile::Monochrome);
+        let cand = score(1600, 1000.0, None, ColourProfile::FullColour);
+        let policy = QualityPolicy {
+            colour: AxisRule::Off,
+            ..QualityPolicy::default()
+        };
+        assert_eq!(compare_quality(&cand, &held, &policy), QualityVerdict::Same);
+    }
+
+    #[test]
+    fn the_colour_guard_can_be_lifted_so_a_monochrome_rip_competes_on_pixels() {
+        let held = score(1600, 1000.0, None, ColourProfile::FullColour);
+        let cand = score(3200, 1000.0, None, ColourProfile::Monochrome);
+
+        assert_eq!(
+            compare_quality(&cand, &held, &QualityPolicy::default()),
+            QualityVerdict::Worse,
+            "by default losing colour vetoes the candidate"
+        );
+
+        let policy = QualityPolicy {
+            colour: AxisRule::Gain,
+            ..QualityPolicy::default()
+        };
+        assert_eq!(
+            compare_quality(&cand, &held, &policy),
+            QualityVerdict::Better(QualityReason::Resolution),
+            "with the guard lifted, resolution decides it"
+        );
+    }
+
+    #[test]
+    fn the_encoder_axis_can_be_silenced_without_affecting_the_others() {
+        let held = score(1600, 1000.0, Some(70), ColourProfile::Unknown);
+        let cand = score(1600, 1000.0, Some(95), ColourProfile::Unknown);
+        let policy = QualityPolicy {
+            encoder: AxisRule::Off,
+            ..QualityPolicy::default()
+        };
+        assert_eq!(compare_quality(&cand, &held, &policy), QualityVerdict::Same);
+    }
+
+    #[test]
+    fn bitrate_can_be_asked_to_police_regressions_too() {
+        let held = score(1600, 3000.0, None, ColourProfile::Unknown);
+        let cand = score(1600, 1000.0, None, ColourProfile::Unknown);
+
+        assert_eq!(
+            compare_quality(&cand, &held, &QualityPolicy::default()),
+            QualityVerdict::Same,
+            "bitrate is noisy, so by default a drop is not a veto"
+        );
+
+        let policy = QualityPolicy {
+            bitrate: AxisRule::Both,
+            ..QualityPolicy::default()
+        };
+        assert_eq!(
+            compare_quality(&cand, &held, &policy),
+            QualityVerdict::Worse
+        );
+    }
+
+    #[test]
+    fn the_default_policy_reproduces_the_behaviour_it_replaced() {
+        let p = QualityPolicy::default();
+        assert_eq!(p.resolution, AxisRule::Both);
+        assert_eq!(p.colour, AxisRule::Both);
+        assert_eq!(p.encoder, AxisRule::Both);
+        assert_eq!(
+            p.bitrate,
+            AxisRule::Gain,
+            "a bitrate drop never vetoed a candidate before this was configurable"
+        );
+    }
+
+    #[test]
+    fn axis_rules_round_trip_through_their_stored_form() {
+        for rule in [AxisRule::Off, AxisRule::Gain, AxisRule::Both] {
+            assert_eq!(AxisRule::parse(rule.as_str()), rule);
+        }
+        assert_eq!(
+            AxisRule::parse("nonsense"),
+            AxisRule::Both,
+            "an unreadable setting must fall back to the strictest rule, not the loosest"
+        );
+    }
+
+    #[test]
     fn lower_resolution_never_wins() {
         let current = score_from_manifest(&manifest(vec![(Some(1600), Some(2400))], 1_000_000));
         let worse = score_from_manifest(&manifest(vec![(Some(800), Some(1200))], 9_000_000));
         assert!(
-            !is_meaningfully_better(&worse, &current, 1.2),
+            !is_meaningfully_better(&worse, &current, &QualityPolicy::default()),
             "a downgrade cannot win on file size alone"
         );
     }

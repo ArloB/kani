@@ -1172,7 +1172,10 @@ pub(crate) async fn apply_chapter_upgrade(
     State(state): State<AppState>,
     Path(chapter_id): Path<ChapterId>,
 ) -> Result<impl IntoResponse, AppError> {
-    let job_id = state.service.apply_upgrade(chapter_id, user.id).await?;
+    let job_id = state
+        .service
+        .apply_upgrade(chapter_id, Some(user.id))
+        .await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(serde_json::json!({ "job_id": job_id })),

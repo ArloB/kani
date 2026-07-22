@@ -1,6 +1,18 @@
 use super::*;
 use crate::ids::{MangaId, UserId};
 
+/// What `upgrade_auto_replace_reasons` may name: the scanlator-ranking kind,
+/// plus any measured quality axis. `unmeasured` is deliberately absent —
+/// replacing a file precisely because nothing could be measured is not a
+/// decision anyone would opt into knowingly.
+const VALID_AUTO_REPLACE_REASONS: &[&str] = &[
+    "preferred_scanlator",
+    "resolution",
+    "colour",
+    "encoder",
+    "bitrate",
+];
+
 impl AppService {
     /// Returns the public-facing settings snapshot (omits internal paths).
     pub async fn get_settings(&self) -> kani_shared::types::AppSettings {
@@ -58,6 +70,12 @@ impl AppService {
             upgrade_detection_enabled: s.upgrade_detection_enabled,
             upgrade_min_res_gain: s.upgrade_min_res_gain,
             upgrade_confirm_fetches: s.upgrade_confirm_fetches,
+            upgrade_axis_resolution: s.upgrade_axis_resolution.clone(),
+            upgrade_axis_colour: s.upgrade_axis_colour.clone(),
+            upgrade_axis_encoder: s.upgrade_axis_encoder.clone(),
+            upgrade_axis_bitrate: s.upgrade_axis_bitrate.clone(),
+            upgrade_show_downgrades: s.upgrade_show_downgrades,
+            upgrade_auto_replace_reasons: s.upgrade_auto_replace_reasons.clone(),
             browser_max_memory_mb: s.browser_max_memory_mb,
             browser_max_instances: s.browser_max_instances,
             update_check_enabled: s.update_check_enabled,
@@ -154,16 +172,49 @@ impl AppService {
                         "upgrade_confirm_fetches must be >= 0".into(),
                     ));
                 }
+                for (name, value) in [
+                    ("upgrade_axis_resolution", &s.upgrade_axis_resolution),
+                    ("upgrade_axis_colour", &s.upgrade_axis_colour),
+                    ("upgrade_axis_encoder", &s.upgrade_axis_encoder),
+                    ("upgrade_axis_bitrate", &s.upgrade_axis_bitrate),
+                ] {
+                    if !matches!(value.as_str(), "off" | "gain" | "both") {
+                        return Err(ServiceError::Validation(format!(
+                            "{name} must be one of off, gain, both"
+                        )));
+                    }
+                }
+                if let Some(bad) = s
+                    .upgrade_auto_replace_reasons
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|r| !r.is_empty())
+                    .find(|r| !VALID_AUTO_REPLACE_REASONS.contains(r))
+                {
+                    return Err(ServiceError::Validation(format!(
+                        "unknown auto-replace reason '{bad}'"
+                    )));
+                }
                 sqlx::query!(
                     "UPDATE settings SET auto_scan=?, scan_interval_minutes=?, \
                      scan_exclude_completed=?, upgrade_detection_enabled=?, \
-                     upgrade_min_res_gain=?, upgrade_confirm_fetches=? WHERE id='singleton'",
+                     upgrade_min_res_gain=?, upgrade_confirm_fetches=?, \
+                     upgrade_axis_resolution=?, upgrade_axis_colour=?, \
+                     upgrade_axis_encoder=?, upgrade_axis_bitrate=?, \
+                     upgrade_show_downgrades=?, upgrade_auto_replace_reasons=? \
+                     WHERE id='singleton'",
                     s.auto_scan,
                     s.scan_interval_minutes,
                     s.scan_exclude_completed,
                     s.upgrade_detection_enabled,
                     s.upgrade_min_res_gain,
-                    s.upgrade_confirm_fetches
+                    s.upgrade_confirm_fetches,
+                    s.upgrade_axis_resolution,
+                    s.upgrade_axis_colour,
+                    s.upgrade_axis_encoder,
+                    s.upgrade_axis_bitrate,
+                    s.upgrade_show_downgrades,
+                    s.upgrade_auto_replace_reasons
                 )
                 .execute(&self.db)
                 .await?;
@@ -174,6 +225,12 @@ impl AppService {
                 settings.upgrade_detection_enabled = s.upgrade_detection_enabled;
                 settings.upgrade_min_res_gain = s.upgrade_min_res_gain;
                 settings.upgrade_confirm_fetches = s.upgrade_confirm_fetches;
+                settings.upgrade_axis_resolution = s.upgrade_axis_resolution.clone();
+                settings.upgrade_axis_colour = s.upgrade_axis_colour.clone();
+                settings.upgrade_axis_encoder = s.upgrade_axis_encoder.clone();
+                settings.upgrade_axis_bitrate = s.upgrade_axis_bitrate.clone();
+                settings.upgrade_show_downgrades = s.upgrade_show_downgrades;
+                settings.upgrade_auto_replace_reasons = s.upgrade_auto_replace_reasons.clone();
                 self.audit(Some(user_id), "settings.update.scan", None, None)
                     .await;
             }

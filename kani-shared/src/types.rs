@@ -1218,6 +1218,12 @@ pub struct AppSettings {
     pub upgrade_detection_enabled: bool,
     pub upgrade_min_res_gain: f64,
     pub upgrade_confirm_fetches: i64,
+    pub upgrade_axis_resolution: String,
+    pub upgrade_axis_colour: String,
+    pub upgrade_axis_encoder: String,
+    pub upgrade_axis_bitrate: String,
+    pub upgrade_show_downgrades: bool,
+    pub upgrade_auto_replace_reasons: String,
     pub browser_max_memory_mb: i64,
     pub browser_max_instances: i64,
     pub browser_idle_timeout_s: i64,
@@ -1327,6 +1333,36 @@ pub struct ScanSettings {
     pub upgrade_detection_enabled: bool,
     pub upgrade_min_res_gain: f64,
     pub upgrade_confirm_fetches: i64,
+    // Defaulted so a client that predates the per-axis policy can still PATCH
+    // the scan settings it does know about, rather than being rejected for
+    // omitting fields it has never heard of.
+    #[serde(default = "default_axis_both")]
+    pub upgrade_axis_resolution: String,
+    #[serde(default = "default_axis_both")]
+    pub upgrade_axis_colour: String,
+    #[serde(default = "default_axis_both")]
+    pub upgrade_axis_encoder: String,
+    #[serde(default = "default_axis_gain")]
+    pub upgrade_axis_bitrate: String,
+    #[serde(default)]
+    pub upgrade_show_downgrades: bool,
+    #[serde(default = "default_auto_replace_reasons")]
+    pub upgrade_auto_replace_reasons: String,
+}
+
+#[cfg(feature = "host")]
+fn default_axis_both() -> String {
+    "both".into()
+}
+
+#[cfg(feature = "host")]
+fn default_axis_gain() -> String {
+    "gain".into()
+}
+
+#[cfg(feature = "host")]
+fn default_auto_replace_reasons() -> String {
+    "preferred_scanlator,resolution,colour".into()
 }
 
 #[cfg(feature = "host")]
@@ -2003,6 +2039,12 @@ mod tests {
             upgrade_detection_enabled: true,
             upgrade_min_res_gain: 1.2,
             upgrade_confirm_fetches: 3,
+            upgrade_axis_resolution: "both".into(),
+            upgrade_axis_colour: "both".into(),
+            upgrade_axis_encoder: "both".into(),
+            upgrade_axis_bitrate: "gain".into(),
+            upgrade_show_downgrades: false,
+            upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
         }));
         json_rt(&SettingsUpdate::Advanced(AdvancedSettings {
             flaresolverr_url: String::new(),

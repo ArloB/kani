@@ -1637,6 +1637,41 @@ export default {
   'settings.upgrades.confirm_fetches.label': 'Confirmation requests per scan',
   'settings.upgrades.confirm_fetches.desc':
     'How many extra requests a single series may spend confirming a candidate. Zero relies on listing data alone.',
+  'settings.upgrades.show_downgrades.label': 'List chapters where your copy is better',
+  'settings.upgrades.show_downgrades.desc':
+    'Off by default. There is nothing to do about these, so they only pad the Upgrades list — the chapter itself still shows the note.',
+  'settings.upgrades.axes.group': 'What counts as an upgrade',
+  'settings.upgrades.rule.off': 'Ignore',
+  'settings.upgrades.rule.gain': 'Only improvements',
+  'settings.upgrades.rule.both': 'Improvements and regressions',
+  'settings.upgrades.axis.resolution.label': 'Resolution',
+  'settings.upgrades.axis.resolution.desc':
+    'Pixel dimensions. The only measure every source exposes, so it decides first.',
+  'settings.upgrades.axis.colour.label': 'Colour',
+  'settings.upgrades.axis.colour.desc':
+    'A colour release is not universally better — set to Ignore if you prefer the original monochrome scan, or to Only improvements to stop a greyscale re-rip being blocked.',
+  'settings.upgrades.axis.encoder.label': 'Encoder quality',
+  'settings.upgrades.axis.encoder.desc':
+    'Estimated JPEG quality. Approximate, so only sizeable differences count.',
+  'settings.upgrades.axis.bitrate.label': 'Data per megapixel',
+  'settings.upgrades.axis.bitrate.desc':
+    'The noisiest signal, and the last one consulted. A drop is ignored unless you say otherwise.',
+  'settings.upgrades.auto_replace.group': 'Automatic replacement',
+  'settings.upgrades.auto_replace.desc':
+    'Applies only to series where you have switched on automatic replacement. The old file is kept until the trash is purged.',
+  'settings.upgrades.auto_replace.preferred_scanlator.label': 'A group you rank higher',
+  'settings.upgrades.auto_replace.preferred_scanlator.desc':
+    'You already decided this ranking, so acting on it needs no second opinion.',
+  'settings.upgrades.auto_replace.resolution.label': 'Higher resolution',
+  'settings.upgrades.auto_replace.resolution.desc': 'Only when a probe confirmed it.',
+  'settings.upgrades.auto_replace.colour.label': 'Colour release',
+  'settings.upgrades.auto_replace.colour.desc': 'Only when a probe confirmed it.',
+  'settings.upgrades.auto_replace.encoder.label': 'Better encode',
+  'settings.upgrades.auto_replace.encoder.desc':
+    'Same dimensions, less aggressive compression.',
+  'settings.upgrades.auto_replace.bitrate.label': 'More image data',
+  'settings.upgrades.auto_replace.bitrate.desc':
+    'The weakest signal — leaving this off is the cautious choice.',
   'settings.scan.exclude.label': 'Exclude completed',
   'settings.scan.exclude.desc': 'Skip manga marked as Completed during automatic scans.',
 

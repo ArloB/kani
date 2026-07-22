@@ -87,20 +87,33 @@ fn dismissal_key(c: &UpgradeCandidate) -> (String, Option<String>) {
 }
 
 impl AppService {
+    /// The comparison rules as currently configured.
+    pub async fn quality_policy(&self) -> kani_core::quality::QualityPolicy {
+        use kani_core::quality::AxisRule;
+        let s = self.settings.read().await;
+        kani_core::quality::QualityPolicy {
+            min_res_gain: s.upgrade_min_res_gain as f32,
+            resolution: AxisRule::parse(&s.upgrade_axis_resolution),
+            colour: AxisRule::parse(&s.upgrade_axis_colour),
+            encoder: AxisRule::parse(&s.upgrade_axis_encoder),
+            bitrate: AxisRule::parse(&s.upgrade_axis_bitrate),
+        }
+    }
+
     /// Re-derives the upgrade candidates for one manga and stores them on the
     /// affected chapter rows. Returns everything currently flagged.
     pub async fn evaluate_upgrades(&self, manga_id: MangaId) -> Result<Vec<UpgradeCandidate>> {
-        let (enabled, min_gain, mut confirm_budget) = {
+        let (enabled, mut confirm_budget) = {
             let s = self.settings.read().await;
             (
                 s.upgrade_detection_enabled,
-                s.upgrade_min_res_gain as f32,
                 s.upgrade_confirm_fetches.max(0),
             )
         };
         if !enabled {
             return Ok(Vec::new());
         }
+        let policy = self.quality_policy().await;
 
         let source = sqlx::query!(
             "SELECT source_id, source_manga_id FROM manga WHERE id = ?",
@@ -193,7 +206,7 @@ impl AppService {
                             self.probe_page_quality(&urls, PROBE_SAMPLES).await
                     {
                         let v =
-                            kani_core::quality::compare_quality(&cand_score, &held_score, min_gain);
+                            kani_core::quality::compare_quality(&cand_score, &held_score, &policy);
                         kind = match v {
                             kani_core::quality::QualityVerdict::Better(_) => {
                                 UpgradeKind::QualityReupload
@@ -272,7 +285,7 @@ impl AppService {
 
                     let verdict = match (candidate_score, held_score) {
                         (Some(c), Some(h)) => {
-                            Some(kani_core::quality::compare_quality(&c, &h, min_gain))
+                            Some(kani_core::quality::compare_quality(&c, &h, &policy))
                         }
                         _ => None,
                     };
@@ -304,6 +317,14 @@ impl AppService {
             self.store_descriptor(ChapterId(held.id), &descriptor)
                 .await?;
             found.extend(candidates);
+        }
+
+        match self.run_auto_replace(manga_id, &found).await {
+            Ok(n) if n > 0 => {
+                tracing::info!("Auto-replaced {n} chapter(s) for manga {manga_id}");
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Auto-replace failed for {manga_id}: {e}"),
         }
 
         Ok(found)
@@ -361,6 +382,11 @@ impl AppService {
         .fetch_all(&self.db_read)
         .await?;
 
+        // Reassurance entries are noise in a list whose whole purpose is
+        // deciding what to replace: there is nothing to do about them, and they
+        // pad the count. The per-chapter badge still shows them in context.
+        let show_downgrades = self.settings.read().await.upgrade_show_downgrades;
+
         let mut out = Vec::new();
         for row in rows {
             let Some(json) = row.upgrade_available else {
@@ -370,6 +396,9 @@ impl AppService {
                 continue;
             };
             for candidate in descriptor.candidates {
+                if !show_downgrades && candidate.kind == UpgradeKind::SourceDowngraded {
+                    continue;
+                }
                 out.push(LibraryUpgrade {
                     manga_id: row.manga_id,
                     manga_title: row.manga_title.clone(),
@@ -380,6 +409,92 @@ impl AppService {
             }
         }
         Ok(out)
+    }
+
+    /// Whether `upgrade_auto_replace` should act on this candidate, given the
+    /// configured reason list.
+    fn auto_replace_matches(candidate: &UpgradeCandidate, allowed: &[String]) -> bool {
+        use kani_core::quality::{QualityReason, QualityVerdict};
+        match candidate.kind {
+            UpgradeKind::SourceDowngraded => false,
+            UpgradeKind::PreferredScanlator => allowed.iter().any(|r| r == "preferred_scanlator"),
+            UpgradeKind::QualityReupload => {
+                // A re-upload only auto-replaces on a reason we actually
+                // measured. An unconfirmed candidate — no probe, so no verdict —
+                // is a page-count difference and nothing more, which is not
+                // enough to rewrite a file unattended.
+                let Some(QualityVerdict::Better(reason)) = candidate.verdict else {
+                    return false;
+                };
+                let name = match reason {
+                    QualityReason::Resolution => "resolution",
+                    QualityReason::Colour => "colour",
+                    QualityReason::Encoder => "encoder",
+                    QualityReason::Bitrate => "bitrate",
+                    QualityReason::Unmeasured => return false,
+                };
+                allowed.iter().any(|r| r == name)
+            }
+        }
+    }
+
+    /// Applies every candidate the manga's auto-replace setting covers.
+    ///
+    /// Returns how many replacements were queued. Failures are logged rather
+    /// than propagated: this runs inside a scan, and a source that cannot be
+    /// reached must not fail the refresh.
+    async fn run_auto_replace(
+        &self,
+        manga_id: MangaId,
+        candidates: &[UpgradeCandidate],
+    ) -> Result<u64> {
+        let enabled: bool = sqlx::query_scalar!(
+            "SELECT upgrade_auto_replace FROM manga WHERE id = ?",
+            manga_id
+        )
+        .fetch_optional(&self.db_read)
+        .await?
+        .unwrap_or(false);
+        if !enabled {
+            return Ok(0);
+        }
+
+        let allowed: Vec<String> = {
+            let s = self.settings.read().await;
+            s.upgrade_auto_replace_reasons
+                .split(',')
+                .map(|r| r.trim().to_string())
+                .filter(|r| !r.is_empty())
+                .collect()
+        };
+        if allowed.is_empty() {
+            return Ok(0);
+        }
+
+        let mut queued = 0u64;
+        let mut seen: Vec<i64> = Vec::new();
+        for candidate in candidates {
+            if !Self::auto_replace_matches(candidate, &allowed) {
+                continue;
+            }
+            // One replacement per held chapter, however many candidates it
+            // attracted — the second would re-queue a chapter already mid-download.
+            if seen.contains(&candidate.held_chapter_id) {
+                continue;
+            }
+            seen.push(candidate.held_chapter_id);
+            match self
+                .apply_upgrade(ChapterId(candidate.held_chapter_id), None)
+                .await
+            {
+                Ok(_) => queued += 1,
+                Err(e) => tracing::warn!(
+                    "Auto-replace failed for chapter {}: {e}",
+                    candidate.held_chapter_id
+                ),
+            }
+        }
+        Ok(queued)
     }
 
     /// Records every current candidate for this chapter as dismissed, so a later
@@ -430,7 +545,7 @@ impl AppService {
     pub async fn apply_upgrade(
         &self,
         chapter_id: ChapterId,
-        user_id: UserId,
+        user_id: Option<UserId>,
     ) -> Result<uuid::Uuid> {
         let info = self.chapter_cbz_path(chapter_id).await?;
         let library_path = self.settings.read().await.library_path.clone();
@@ -469,7 +584,7 @@ impl AppService {
         .await?;
 
         self.audit(
-            Some(user_id),
+            user_id,
             "chapter.upgrade.apply",
             Some("chapter"),
             Some(serde_json::json!({ "chapter_id": chapter_id.0 })),

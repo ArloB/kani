@@ -544,11 +544,17 @@ mod tests {
         )
         .unwrap();
         assert!(
-            crate::quality::is_meaningfully_better(&candidate, &held, 1.2),
+            crate::quality::is_meaningfully_better(
+                &candidate,
+                &held,
+                &crate::quality::QualityPolicy::default()
+            ),
             "this is the comparison that was impossible before probing"
         );
         assert!(!crate::quality::is_meaningfully_better(
-            &held, &candidate, 1.2
+            &held,
+            &candidate,
+            &crate::quality::QualityPolicy::default()
         ));
     }
 
