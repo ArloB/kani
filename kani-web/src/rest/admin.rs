@@ -1449,7 +1449,7 @@ pub(crate) async fn admin_library_scrub(
     let job_id = state
         .service
         .job_manager
-        .submit(kani_app::jobs::scrub::ScrubJob::new(depth, body.fix))
+        .submit(kani_app::jobs::scrub::ScrubJob::full(depth, body.fix))
         .await
         .map_err(|e| AppError::InternalServerError(e.to_string()))?;
 

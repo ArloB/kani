@@ -64,6 +64,7 @@ pub struct Settings {
     pub integrity_quick_scrub_interval_hours: i64,
     pub integrity_deep_scrub_interval_hours: i64,
     pub scrub_on_startup: bool,
+    pub integrity_revalidate_after_days: i64,
     pub upgrade_detection_enabled: bool,
     pub upgrade_min_res_gain: f64,
     pub upgrade_confirm_fetches: i64,

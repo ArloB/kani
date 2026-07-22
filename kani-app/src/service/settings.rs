@@ -65,6 +65,7 @@ impl AppService {
             integrity_quick_scrub_interval_hours: s.integrity_quick_scrub_interval_hours,
             integrity_deep_scrub_interval_hours: s.integrity_deep_scrub_interval_hours,
             scrub_on_startup: s.scrub_on_startup,
+            integrity_revalidate_after_days: s.integrity_revalidate_after_days,
             upgrade_detection_enabled: s.upgrade_detection_enabled,
             upgrade_min_res_gain: s.upgrade_min_res_gain,
             upgrade_confirm_fetches: s.upgrade_confirm_fetches,
@@ -386,7 +387,8 @@ impl AppService {
                     "UPDATE settings SET trash_retention_days=?, audit_retention_days=?, \
                      audit_security_retention_days=?, disk_warn_threshold=?, thumbnail_formats=?, \
                      integrity_quick_scrub_interval_hours=?, \
-                     integrity_deep_scrub_interval_hours=?, scrub_on_startup=? \
+                     integrity_deep_scrub_interval_hours=?, scrub_on_startup=?, \
+                     integrity_revalidate_after_days=? \
                      WHERE id='singleton'",
                     s.trash_retention_days,
                     s.audit_retention_days,
@@ -396,6 +398,7 @@ impl AppService {
                     s.integrity_quick_scrub_interval_hours,
                     s.integrity_deep_scrub_interval_hours,
                     s.scrub_on_startup,
+                    s.integrity_revalidate_after_days,
                 )
                 .execute(&self.db)
                 .await?;
@@ -411,6 +414,7 @@ impl AppService {
                     settings.integrity_deep_scrub_interval_hours =
                         s.integrity_deep_scrub_interval_hours;
                     settings.scrub_on_startup = s.scrub_on_startup;
+                    settings.integrity_revalidate_after_days = s.integrity_revalidate_after_days;
                 }
                 self.audit(Some(user_id), "settings.update.maintenance", None, None)
                     .await;

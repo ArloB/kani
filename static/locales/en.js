@@ -469,6 +469,9 @@ export default {
   'settings.maintenance.scrub_on_startup': 'Scrub on startup',
   'settings.maintenance.scrub_on_startup.desc':
     'Run a quick scrub each time the server starts, after any pending backfill.',
+  'settings.maintenance.revalidate_days': 'Re-verify after (days)',
+  'settings.maintenance.revalidate_days.desc':
+    'A scheduled scrub skips chapters it verified more recently than this, so a nightly run checks a rolling slice rather than re-hashing everything. Scrubbing by hand always checks the whole library. 0 disables the skip.',
   'settings.maintenance.thumbnail_formats.desc': 'Image formats generated for cover thumbnails.',
   'settings.maintenance.save': 'Save',
   'settings.maintenance.saved': 'Maintenance settings saved.',

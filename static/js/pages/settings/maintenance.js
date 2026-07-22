@@ -27,6 +27,7 @@ export function MaintenanceSection({ settings }) {
       settings?.integrity_deep_scrub_interval_hours ?? 168,
     ),
     scrub_on_startup: Boolean(settings?.scrub_on_startup ?? false),
+    integrity_revalidate_after_days: Number(settings?.integrity_revalidate_after_days ?? 30),
   };
   const initSec = {
     max_login_attempts: Number(settings?.max_login_attempts ?? 5),
@@ -60,6 +61,7 @@ export function MaintenanceSection({ settings }) {
         integrity_quick_scrub_interval_hours: Number(maint.integrity_quick_scrub_interval_hours),
         integrity_deep_scrub_interval_hours: Number(maint.integrity_deep_scrub_interval_hours),
         scrub_on_startup: Boolean(maint.scrub_on_startup),
+        integrity_revalidate_after_days: Number(maint.integrity_revalidate_after_days),
       },
     });
     await api.updateSettings({
@@ -157,6 +159,13 @@ export function MaintenanceSection({ settings }) {
         description=${t('settings.maintenance.scrub_on_startup.desc')}
         checked=${maint.scrub_on_startup}
         onChange=${(v) => setM('scrub_on_startup', v)}
+      />
+      <${NumberRow}
+        label=${t('settings.maintenance.revalidate_days')}
+        description=${t('settings.maintenance.revalidate_days.desc')}
+        value=${maint.integrity_revalidate_after_days}
+        min=${0}
+        onChange=${(v) => setM('integrity_revalidate_after_days', v)}
       />
     <//>
 

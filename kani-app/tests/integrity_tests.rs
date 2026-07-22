@@ -397,8 +397,12 @@ async fn scrub_reports_corruption_and_deep_names_the_page() {
     bytes[mid] ^= 0xFF;
     std::fs::write(&cbz, &bytes).unwrap();
 
+    // `full`, because the download recorded a verification moments ago and a
+    // *scheduled* scrub deliberately skips re-hashing inside the revalidation
+    // window. This asserts the detection capability, which is what a scrub the
+    // user triggers by hand performs.
     let quick = svc
-        .scrub_library(ScrubDepth::Quick, false, None)
+        .scrub_library_inner(ScrubDepth::Quick, false, true, None)
         .await
         .unwrap();
     assert_eq!(quick.corrupt.len(), 1, "quick must notice the file changed");
@@ -406,7 +410,7 @@ async fn scrub_reports_corruption_and_deep_names_the_page() {
     assert_eq!(quick.corrupt[0].1, "ArchiveHashMismatch");
 
     let deep = svc
-        .scrub_library(ScrubDepth::Deep, false, None)
+        .scrub_library_inner(ScrubDepth::Deep, false, true, None)
         .await
         .unwrap();
     assert_eq!(deep.corrupt.len(), 1);
@@ -642,4 +646,72 @@ async fn delete_orphans_honours_dry_run_and_stays_inside_the_library() {
     let real = svc.delete_orphans(&[orphan_s], false).await.unwrap();
     assert_eq!(real.removed_count, 1);
     assert!(!orphan.exists());
+}
+
+#[tokio::test]
+async fn a_scheduled_scrub_skips_recently_verified_chapters() {
+    use kani_app::service::integrity::ScrubDepth;
+    let svc = test_service().await;
+    let (chapter, path) = seed_downloaded_chapter(&svc, "Verified").await;
+
+    // A download hashes the file and records the verification, exactly as
+    // `manifest_capture` does in production.
+    svc.record_chapter_manifest(chapter, path).await;
+    let verified: Option<i64> =
+        sqlx::query_scalar("SELECT file_verified_at FROM chapters WHERE id = ?")
+            .bind(chapter.0)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert!(
+        verified.is_some(),
+        "a download records the verification time"
+    );
+
+    // A scheduled scrub must not re-hash it — this is the whole point of the
+    // column, which was written and read by nothing.
+    let second = svc
+        .scrub_library(ScrubDepth::Quick, false, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        second.skipped_recently_verified, 1,
+        "a chapter verified moments ago must not be re-hashed on the next \
+         scheduled run"
+    );
+    assert_eq!(second.ok, 0, "nothing was hashed");
+    assert_eq!(
+        second.checked, 1,
+        "it is still examined — existence and drift checks are cheap and must \
+         not be skipped, or a file deleted after a scrub goes unnoticed"
+    );
+
+    // A scrub the user asked for ignores the window.
+    let manual = svc
+        .scrub_library_inner(ScrubDepth::Quick, false, true, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        manual.ok, 1,
+        "having clicked 'scrub now', hashing nothing would be a surprising answer"
+    );
+}
+
+#[tokio::test]
+async fn a_zero_revalidation_window_disables_the_skip() {
+    use kani_app::service::integrity::ScrubDepth;
+    let svc = test_service().await;
+    let (chapter, path) = seed_downloaded_chapter(&svc, "Always").await;
+    svc.record_chapter_manifest(chapter, path).await;
+    {
+        let mut s = svc.settings.write().await;
+        s.integrity_revalidate_after_days = 0;
+    }
+
+    let again = svc
+        .scrub_library(ScrubDepth::Quick, false, None)
+        .await
+        .unwrap();
+    assert_eq!(again.ok, 1, "0 means hash every time");
+    assert_eq!(again.skipped_recently_verified, 0);
 }

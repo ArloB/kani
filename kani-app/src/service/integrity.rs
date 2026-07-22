@@ -36,6 +36,9 @@ impl std::str::FromStr for ScrubDepth {
 pub struct ScrubReport {
     pub checked: u64,
     pub ok: u64,
+    /// Verified inside the revalidation window, so not re-hashed this run.
+    #[serde(default)]
+    pub skipped_recently_verified: u64,
     pub orphaned_files: Vec<String>,
     pub missing_files: Vec<i64>,
     pub corrupt: Vec<(i64, String)>,
@@ -71,6 +74,7 @@ struct ChapterRow {
     file_path: Option<String>,
     content_hash: Option<String>,
     manifest_json: Option<String>,
+    file_verified_at: Option<i64>,
 }
 
 /// Where a chapter's archive is expected, derived from its title. Only a
@@ -101,14 +105,47 @@ impl AppService {
         fix: bool,
         progress: Option<crate::jobs::framework::JobProgressReporter>,
     ) -> Result<ScrubReport> {
-        let library_path = self.settings.read().await.library_path.clone();
+        self.scrub_library_inner(depth, fix, false, progress).await
+    }
+
+    /// `full` re-checks every chapter regardless of when it was last verified.
+    ///
+    /// A scheduled scrub passes `false` and skips anything verified inside the
+    /// revalidation window, so a nightly run does real work on a rolling slice
+    /// rather than re-hashing the whole library every time. A scrub the user
+    /// asked for by hand passes `true` — having clicked "scrub now", checking
+    /// only a fraction would be a surprising answer.
+    pub async fn scrub_library_inner(
+        &self,
+        depth: ScrubDepth,
+        fix: bool,
+        full: bool,
+        progress: Option<crate::jobs::framework::JobProgressReporter>,
+    ) -> Result<ScrubReport> {
+        let (library_path, revalidate_days) = {
+            let s = self.settings.read().await;
+            (s.library_path.clone(), s.integrity_revalidate_after_days)
+        };
 
         let disk_files = collect_cbz_files(&library_path).await;
         let disk_set: HashSet<PathBuf> = disk_files.iter().cloned().collect();
 
+        // `file_verified_at` was written by every scrub and read by none, so
+        // each run re-hashed the entire library. The window skips only the
+        // *hashing*: existence, path drift and orphan detection are cheap stats
+        // and still run for every chapter, or a file deleted an hour after a
+        // successful scrub would go unnoticed for a month. Zero, or `full`,
+        // disables the skip.
+        let verified_cutoff = if full || revalidate_days <= 0 {
+            i64::MAX
+        } else {
+            time::OffsetDateTime::now_utc().unix_timestamp() - revalidate_days * 86_400
+        };
+
         let raw = sqlx::query!(
             "SELECT c.id, c.manga_id, m.name AS manga_name, c.name AS chapter_name, \
-             c.chapter_number, c.volume, c.file_path, c.content_hash, c.manifest_json \
+             c.chapter_number, c.volume, c.file_path, c.content_hash, c.manifest_json, \
+             c.file_verified_at \
              FROM chapters c \
              JOIN manga m ON m.id = c.manga_id \
              WHERE c.download_status = 2 AND m.deleted_at IS NULL"
@@ -128,6 +165,7 @@ impl AppService {
                 file_path: r.file_path,
                 content_hash: r.content_hash,
                 manifest_json: r.manifest_json,
+                file_verified_at: r.file_verified_at,
             })
             .collect();
 
@@ -163,7 +201,16 @@ impl AppService {
                             .push((r.id, path.to_string_lossy().into_owned()));
                     }
                     expected.insert(path.clone());
-                    verifiable.push((r.id, path, r.content_hash.clone(), r.manifest_json.clone()));
+                    if r.file_verified_at.is_some_and(|t| t > verified_cutoff) {
+                        report.skipped_recently_verified += 1;
+                    } else {
+                        verifiable.push((
+                            r.id,
+                            path,
+                            r.content_hash.clone(),
+                            r.manifest_json.clone(),
+                        ));
+                    }
                 }
             }
             expected.insert(derived);
