@@ -1664,6 +1664,23 @@ export async function getAdminStorageStatsHistory() {
   return _req('GET', '/admin/storage/stats/history');
 }
 
+// ── Scanlator preferences (library-wide defaults) ────────────────────────────
+
+export async function getGlobalScanlatorPrefs() {
+  return _req('GET', '/scanlator_preferences/global');
+}
+
+/** @param {string} scanlator @param {number} priority @param {boolean} blocked */
+export async function setGlobalScanlatorPref(scanlator, priority, blocked) {
+  return _req('POST', '/scanlator_preferences/global', {
+    body: { scanlator, priority, blocked },
+  });
+}
+
+export async function getKnownScanlators() {
+  return _req('GET', '/scanlator_preferences/known');
+}
+
 // ── Admin — integrity scrub ───────────────────────────────────────────────────
 
 /**

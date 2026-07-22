@@ -77,7 +77,7 @@ impl AppService {
         .fetch_all(&self.db_read)
         .await?;
 
-        let prefs = self.get_scanlator_prefs(manga_id).await?;
+        let prefs = self.effective_scanlator_prefs(manga_id).await?;
         let rank = |scanlator: &Option<String>| -> Option<i64> {
             let s = scanlator.as_deref()?;
             prefs

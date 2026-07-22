@@ -48,22 +48,23 @@ impl AppService {
                       c.page_count, c.download_error,
                       uct.is_read, uct.last_page_read
                FROM chapters c
-               LEFT JOIN scanlator_preferences sp
-                   ON sp.manga_id = c.manga_id AND sp.manga_id = ?
-                   AND (c.scanlator = sp.scanlator OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
                LEFT JOIN user_chapter_tracking uct
                    ON uct.chapter_id = c.id AND uct.user_id = ?
                WHERE c.manga_id = ?{extra}
                  AND c.is_orphaned = false
                  AND (? IS NULL OR c.scanlator = ?)
-               ORDER BY {}, COALESCE(sp.priority, -1) DESC
+               ORDER BY {}, COALESCE((
+                   SELECT sp.priority FROM scanlator_preferences sp
+                   WHERE (sp.manga_id = c.manga_id OR sp.manga_id IS NULL)
+                     AND (c.scanlator = sp.scanlator
+                          OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
+                   ORDER BY sp.manga_id IS NULL LIMIT 1), -1) DESC
                LIMIT ? OFFSET ?"#,
             sort_order.to_sql_order()
         );
 
         let scanlator_for_count = filter_scanlator.clone();
         let mut rows = sqlx::query_as::<_, crate::models::ChapterRow>(&sql)
-            .bind(manga_id)
             .bind(user_id)
             .bind(manga_id)
             .bind(filter_scanlator.clone())
@@ -155,15 +156,17 @@ impl AppService {
         let sql = format!(
             r#"SELECT c.id
                FROM chapters c
-               LEFT JOIN scanlator_preferences sp
-                   ON sp.manga_id = c.manga_id AND sp.manga_id = ?
-                   AND (c.scanlator = sp.scanlator OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
                LEFT JOIN user_chapter_tracking uct
                    ON uct.chapter_id = c.id AND uct.user_id = ?
                WHERE c.manga_id = ?{extra}
                  AND c.is_orphaned = false
                  AND (? IS NULL OR c.scanlator = ?)
-               ORDER BY {}, COALESCE(sp.priority, -1) DESC"#,
+               ORDER BY {}, COALESCE((
+                   SELECT sp.priority FROM scanlator_preferences sp
+                   WHERE (sp.manga_id = c.manga_id OR sp.manga_id IS NULL)
+                     AND (c.scanlator = sp.scanlator
+                          OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
+                   ORDER BY sp.manga_id IS NULL LIMIT 1), -1) DESC"#,
             sort_order.to_sql_order()
         );
 
@@ -384,15 +387,20 @@ impl AppService {
                 " AND EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator)"
             }
             _ => {
-                " AND NOT EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator AND sp.blocked = 1)"
+                " AND NOT EXISTS (SELECT 1 FROM scanlator_preferences sp \
+                   WHERE (sp.manga_id = c.manga_id OR sp.manga_id IS NULL) \
+                     AND sp.scanlator = c.scanlator AND sp.blocked = 1)"
             }
         };
         let (cmp, order) = if next { (">", "ASC") } else { ("<", "DESC") };
         let sql = format!(
             "SELECT c.id FROM chapters c
-             LEFT JOIN scanlator_preferences sp ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator
              WHERE c.manga_id = ? AND c.chapter_number {cmp} ?{scanlator_filter}
-             ORDER BY c.chapter_number {order}, COALESCE(sp.priority, -1) DESC LIMIT 1"
+             ORDER BY c.chapter_number {order}, COALESCE((
+                 SELECT sp.priority FROM scanlator_preferences sp
+                 WHERE (sp.manga_id = c.manga_id OR sp.manga_id IS NULL)
+                   AND sp.scanlator = c.scanlator
+                 ORDER BY sp.manga_id IS NULL LIMIT 1), -1) DESC LIMIT 1"
         );
         let id: Option<i64> = sqlx::query_scalar(&sql)
             .bind(manga_id)

@@ -430,7 +430,10 @@ impl AppService {
             JOIN manga m ON m.id = c.manga_id
             JOIN user_chapter_tracking uct ON uct.chapter_id = c.id
             LEFT JOIN scanlator_preferences sp
-                ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator
+                ON sp.id = (SELECT sp2.id FROM scanlator_preferences sp2
+                            WHERE (sp2.manga_id = c.manga_id OR sp2.manga_id IS NULL)
+                              AND sp2.scanlator = c.scanlator
+                            ORDER BY sp2.manga_id IS NULL LIMIT 1)
             WHERE c.manga_id = ? AND uct.user_id = ?
               AND uct.is_read = false AND uct.last_page_read > 0
               AND c.download_status = 2
@@ -464,7 +467,10 @@ impl AppService {
             FROM chapters c
             JOIN manga m ON m.id = c.manga_id
             LEFT JOIN scanlator_preferences sp 
-                ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator
+                ON sp.id = (SELECT sp2.id FROM scanlator_preferences sp2
+                            WHERE (sp2.manga_id = c.manga_id OR sp2.manga_id IS NULL)
+                              AND sp2.scanlator = c.scanlator
+                            ORDER BY sp2.manga_id IS NULL LIMIT 1)
             WHERE c.manga_id = ?
               AND c.download_status = 2
               AND (
@@ -497,7 +503,10 @@ impl AppService {
             FROM chapters c
             JOIN manga m ON m.id = c.manga_id
             LEFT JOIN scanlator_preferences sp
-                ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator
+                ON sp.id = (SELECT sp2.id FROM scanlator_preferences sp2
+                            WHERE (sp2.manga_id = c.manga_id OR sp2.manga_id IS NULL)
+                              AND sp2.scanlator = c.scanlator
+                            ORDER BY sp2.manga_id IS NULL LIMIT 1)
             WHERE c.manga_id = ? AND c.chapter_number = ?
               AND c.download_status = 2
               AND (

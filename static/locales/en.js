@@ -1331,6 +1331,7 @@ export default {
   'accounts.modal.role.error.slug': 'Slug is required.',
 
   'common.done': 'Done',
+  'common.remove': 'Remove',
   'common.copy': 'Copy',
   'common.copied': 'Copied!',
   'common.saved': 'Saved.',
@@ -1528,6 +1529,28 @@ export default {
   'settings.scan.auto.desc': 'Automatically scan for new chapters on an interval.',
   'settings.scan.interval.label': 'Interval (minutes)',
   'settings.scan.interval.desc': 'How often to scan for new chapters.',
+  'settings.section.scanlators.label': 'Scanlators',
+  'settings.section.scanlators.desc':
+    'Library-wide preferences for which groups to favour or avoid.',
+  'settings.scanlators.preferred.group': 'Preferred groups',
+  'settings.scanlators.desc':
+    'Applied to every series that has no preference of its own. A per-series setting always wins.',
+  'settings.scanlators.none': 'No preferred groups yet — every scanlator ranks equally.',
+  'settings.scanlators.rank': 'Rank {n}',
+  'settings.scanlators.add': 'Add',
+  'settings.scanlators.add.label': 'Add a group',
+  'settings.scanlators.add.desc': 'Chosen from the groups already in your library.',
+  'settings.scanlators.add.placeholder': 'Select a group…',
+  'settings.scanlators.up': 'Move up',
+  'settings.scanlators.down': 'Move down',
+  'settings.scanlators.block': 'Block',
+  'settings.scanlators.unblock': 'Unblock',
+  'settings.scanlators.remove': 'Remove preference',
+  'settings.scanlators.remove.confirm':
+    'Remove the library-wide preference for {name}? Per-series settings are unaffected.',
+  'settings.scanlators.blocked.group': 'Blocked groups',
+  'settings.scanlators.blocked.desc':
+    'Chapters from these groups are never chosen automatically.',
   'settings.upgrades.group': 'Upgrade detection',
   'settings.upgrades.enabled.label': 'Detect better versions',
   'settings.upgrades.enabled.desc':

@@ -127,24 +127,23 @@ impl AppService {
             blocked: bool,
         }
 
-        let prefs: HashMap<String, PrefEntry> = sqlx::query!(
-            "SELECT scanlator, priority, blocked FROM scanlator_preferences WHERE manga_id = ?",
-            manga_id
-        )
-        .fetch_all(&self.db_read)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| {
-            (
-                r.scanlator,
-                PrefEntry {
-                    priority: r.priority,
-                    blocked: r.blocked != 0,
-                },
-            )
-        })
-        .collect();
+        // Effective, not per-manga: a library-wide default that auto-download
+        // ignored would be a preference in name only.
+        let prefs: HashMap<String, PrefEntry> = self
+            .effective_scanlator_prefs(manga_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| {
+                (
+                    r.scanlator,
+                    PrefEntry {
+                        priority: r.priority,
+                        blocked: r.blocked,
+                    },
+                )
+            })
+            .collect();
 
         if prefs.is_empty() {
             return ids_after_rules

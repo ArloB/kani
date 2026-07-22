@@ -1134,7 +1134,8 @@ pub struct DownloadRule {
 #[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct ScanlatorPreference {
     pub id: i64,
-    pub manga_id: i64,
+    /// `None` for a library-wide default. A per-manga row always wins over it.
+    pub manga_id: Option<i64>,
     pub scanlator: String,
     pub priority: i64,
     /// In `priority` mode: if `true` this scanlator is completely blocked.

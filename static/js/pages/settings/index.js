@@ -25,6 +25,7 @@ import { formDirty, runSave, runReset } from './form-bus.js';
 
 import { GeneralSection } from './general.js';
 import { LibrarySection } from './library.js';
+import { ScanlatorsSection } from './scanlators.js';
 import { CollectionsSection } from './collections.js';
 import { MangaManagementSection } from './manga-management.js';
 import { TrashSection } from './trash.js';
@@ -62,6 +63,7 @@ function buildSections(settings, categories, bootId) {
     { id: 'library', perm: 'library:manage', C: LibrarySection, props: { categories } },
     { id: 'collections', perm: 'library:manage', C: CollectionsSection, props: {} },
     { id: 'manga-management', perm: 'library:manage', C: MangaManagementSection, props: {} },
+    { id: 'scanlators', perm: 'library:manage', C: ScanlatorsSection, props: {} },
     { id: 'trash', perm: 'library:view', C: TrashSection, props: {} },
     { id: 'downloads', perm: 'settings:edit_download', C: DownloadsSection, props: { settings } },
     { id: 'offline', perm: null, C: OfflineSection, props: {} },
