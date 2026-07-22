@@ -57,11 +57,20 @@ These are defects, not gaps. Verified by reading the code this session.
 | A10 | `a_source_supplied_id_cannot_rewrite_the_request_path` | Origin sees the id percent-encoded, not `../admin` | Echo route; manga id `../admin`, `x?y=1`, `a b` | SILENT-WRONG |
 | A11 | `an_unresolved_route_placeholder_is_an_error_not_a_literal` | No request is sent containing a literal `$page$` | Route referencing an arg never supplied | SILENT-WRONG |
 | A12 | `the_rule_preview_matches_what_auto_download_actually_queues` | `preview_download_rules` count == chapters `filter_chapters_by_rules` returns | Set scanlator prefs + rules; compare both paths | SILENT-WRONG |
+| A13 | `a_webhook_cannot_be_pointed_at_a_private_address` | Configuring `http://169.254.169.254/…` or `http://127.0.0.1:8242/…` is refused, or the request is blocked at send | Bind an origin on loopback and register it as a webhook target | **SSRF** |
+| A14 | `a_webhook_does_not_follow_a_redirect_to_a_private_address` | A public URL that `302`s inward is not followed | Origin A returns `302` → origin B on loopback (H4) | **SSRF** |
 
 > **A12 detail:** `filter_chapters_by_rules` (`rules.rs:130-185`) applies a second stage —
 > blocked scanlators and per-chapter-number priority selection — that
 > `preview_download_rules` skips entirely. The preview therefore overstates the result
 > whenever scanlator preferences exist.
+
+> **A13/A14 detail:** `WebhookService` holds a bare `rquest::Client::new()`
+> (`webhooks.rs:22,30`) — no `ValidatingResolver`, no timeout, and rquest's default
+> redirect following. `validate_url` (`:466`) checks only that the string starts with
+> `http://` or `https://`. The URL is user-configured *by design*, and Kani then POSTs a
+> signed JSON body to it. This is a broader exposure than the extension-side IP-literal
+> hole, because there is no resolver guard on this client at all.
 
 ---
 
@@ -275,18 +284,73 @@ covered today; no test anywhere sets a `solver_url`.
 
 ---
 
+---
+
+## Group L — Trackers (AniList, MyAnimeList)
+
+Both clients are bare `rquest::Client::new()` (`anilist.rs:21`, `mal.rs:19`) — no shared
+timeout policy, no retry, no rate-limit handling. Token refresh is **proactive only**,
+triggered by `expires_at` (`trackers/mod.rs:399`); nothing reacts to a 401.
+
+| ID | Test | Origin behaviour | Status |
+|---|---|---|---|
+| L1 | `an_expired_token_is_refreshed_before_the_call` | Token endpoint returns a new pair; assert the API call carries the new bearer | GAP |
+| L2 | `a_revoked_token_is_recovered_from_reactively` | API returns `401` while `expires_at` is still in the future | **likely BUG** |
+| L3 | `a_failed_refresh_marks_the_link_as_needing_reauth` | Refresh endpoint returns `400 invalid_grant`; today the `?` propagates and sync just fails forever | **likely BUG** |
+| L4 | `a_tracker_rate_limit_is_respected` | `429` + `Retry-After`; assert the wait | GAP |
+| L5 | `a_tracker_that_stalls_does_not_hang_the_sync_job` | `Body::Stall` (no timeout is configured on these clients) | GAP |
+| L6 | `a_malformed_tracker_response_does_not_corrupt_progress` | `{"data": null}`, wrong types | GAP |
+| L7 | `a_partial_sync_failure_does_not_abort_the_remaining_entries` | One entry `500`, the rest `200` | GAP |
+| L8 | `the_oauth_code_exchange_surfaces_a_provider_error` | `{"error":"invalid_grant"}` | GAP |
+| L9 | `tracker_tokens_are_never_written_to_logs_or_the_support_bundle` | Assert redaction | GAP |
+
+## Group M — Webhooks
+
+| ID | Test | Origin behaviour | Status |
+|---|---|---|---|
+| M1 | `a_webhook_delivery_records_its_status` | `200`, then `500`; assert `webhook_deliveries` rows | GAP |
+| M2 | `a_failing_webhook_does_not_block_the_triggering_action` | `Body::Stall`; the scan/download must still complete | GAP |
+| M3 | `a_webhook_times_out` | No timeout is set on this client today | **likely BUG** |
+| M4 | `the_hmac_signature_matches_the_delivered_body` | Verify `X-Kani-Signature` server-side | GAP |
+| M5 | `a_webhook_is_not_retried_into_a_duplicate_delivery` | Assert delivery-count semantics | GAP |
+| M6 | `an_oversized_webhook_response_is_not_buffered` | 100 MB response body | GAP |
+
+## Group N — Other external services
+
+| ID | Test | Origin behaviour | Status |
+|---|---|---|---|
+| N1 | `a_breach_check_failure_does_not_block_registration` | HIBP route `500` — documented as advisory, never tested | GAP |
+| N2 | `a_stalled_breach_check_does_not_hang_registration` | `Body::Stall`; currently inherits the 35 s client timeout | GAP |
+| N3 | `a_breached_password_is_rejected` | Serve a range response containing the suffix | GAP |
+| N4 | `a_hostile_breach_response_is_bounded` | 50 MB body from the range endpoint | GAP |
+| N5 | `an_update_check_failure_is_silent_and_harmless` | GitHub route `500`, then malformed JSON | GAP |
+| N6 | `an_update_check_does_not_run_more_often_than_configured` | Hit count across ticks | GAP |
+| N7 | `a_metadata_provider_enrichment_preserves_local_overrides` | Provider returns a title; assert `local_name` wins | GAP |
+| N8 | `a_metadata_provider_failure_leaves_the_manga_unchanged` | `500` mid-enrichment | GAP |
+
+> N1–N4 note: `check_password_breached` (`password_policy.rs:113`) is deliberately
+> fail-open — the module doc says "advisory — skipped on network failure". The *policy* is
+> fine; what is untested is whether a slow or hostile HIBP actually degrades cleanly rather
+> than stalling or memory-spiking a registration request.
+
+---
+
 ## Suggested order
 
-1. **Group A** — twelve confirmed defects, three of them data-loss or trust bypass. Test
-   red, then fix.
-2. **B3** — zero coverage on logic that decides what a user's library downloads, and most
+1. **A13/A14 first** — webhook SSRF is the widest exposure here and the target URL is
+   user-supplied by design.
+2. **The rest of Group A** — twelve more confirmed defects, three of them data-loss or
+   trust bypass. Test red, then fix.
+3. **B3** — zero coverage on logic that decides what a user's library downloads, and most
    of it is pure (no harness needed).
-3. **B4.1–B4.3** — the uploaded-cover guard is the only untested path here whose failure is
+4. **B4.1–B4.3** — the uploaded-cover guard is the only untested path here whose failure is
    unrecoverable.
-4. **B1/B2** — unlocks a whole branch CI has never entered.
-5. **Group C** — the largest untested subsystem in the request path.
-6. **F, G, H** — cheap once the harness additions exist.
-7. **D, E, J, K** — valuable, but each needs more setup.
+5. **B1/B2** — unlocks a whole branch CI has never entered.
+6. **Group C** — the largest untested subsystem in the request path.
+7. **L and M** — trackers and webhooks are the largest non-extension surface and
+   contain three suspected bugs of their own.
+8. **F, G, H** — cheap once the harness additions exist.
+9. **D, E, J, K, N** — valuable, but each needs more setup.
 
 ## Deliberately excluded
 
