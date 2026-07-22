@@ -403,10 +403,24 @@ impl DownloaderManager {
         let scramble_seed = transform
             .and_then(|hint| crate::image_transform::resolve_scramble_seed(hint, resp.headers()));
 
+        let announced = resp
+            .headers()
+            .get(rquest::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+
+        // The first chunk is read before the name is chosen, so a body whose
+        // Content-Type and URL both say nothing can still be identified from
+        // its magic bytes.
+        let first_chunk = resp.chunk().await?;
         let (extension, filename) = if scramble_seed.is_some() {
             ("jpg", format!("{:04}.jpg", page))
         } else {
-            let ext = Self::get_image_extension(&resp, url);
+            let ext = Self::get_image_extension_sniffed(
+                &resp,
+                url,
+                first_chunk.as_deref().unwrap_or(&[]),
+            );
             (ext, format!("{:04}.{}", page, ext))
         };
         let tmp_file_path = staging_dir.join(format!("{:04}.{}.tmp", page, extension));
@@ -418,14 +432,11 @@ impl DownloaderManager {
         // correct. Silent and permanent.
         let part_file_path = staging_dir.join(format!("{:04}.{}.part", page, extension));
 
-        let announced = resp
-            .headers()
-            .get(rquest::header::CONTENT_LENGTH)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok());
-
         if let Some(seed) = scramble_seed {
             let mut raw: Vec<u8> = Vec::new();
+            if let Some(ref c) = first_chunk {
+                raw.extend_from_slice(c);
+            }
             while let Some(chunk) = resp.chunk().await? {
                 raw.extend_from_slice(&chunk);
             }
@@ -442,6 +453,10 @@ impl DownloaderManager {
         } else {
             let mut file = tokio::fs::File::create(&part_file_path).await?;
             let mut bytes_written: u64 = 0;
+            if let Some(ref c) = first_chunk {
+                bytes_written += c.len() as u64;
+                file.write_all(c).await?;
+            }
             while let Some(chunk) = resp.chunk().await? {
                 bytes_written += chunk.len() as u64;
                 file.write_all(&chunk).await?;
@@ -472,6 +487,43 @@ impl DownloaderManager {
             ))),
             _ => Ok(()),
         }
+    }
+
+    /// Extension for a page, from the Content-Type, then the URL, then the
+    /// first bytes.
+    ///
+    /// The byte-sniff matters: a source serving
+    /// `Content-Type: application/octet-stream` from an extensionless URL used
+    /// to fall through to `jpg`, so a PNG was stored inside the CBZ as
+    /// `0001.jpg`. Readers mostly cope, but the manifest records a name that
+    /// contradicts the bytes.
+    fn get_image_extension_sniffed(resp: &SmartResponse, url: &str, prefix: &[u8]) -> &'static str {
+        let by_header_or_url = Self::get_image_extension(resp, url);
+        // Only second-guess the fallback, never a definite answer.
+        if by_header_or_url != "jpg" || Self::looks_like_jpeg(prefix) {
+            return by_header_or_url;
+        }
+        Self::sniff_extension(prefix).unwrap_or(by_header_or_url)
+    }
+
+    fn looks_like_jpeg(b: &[u8]) -> bool {
+        b.starts_with(&[0xFF, 0xD8])
+    }
+
+    fn sniff_extension(b: &[u8]) -> Option<&'static str> {
+        if b.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+            return Some("png");
+        }
+        if b.starts_with(b"GIF87a") || b.starts_with(b"GIF89a") {
+            return Some("gif");
+        }
+        if b.len() >= 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+            return Some("webp");
+        }
+        if b.len() >= 12 && &b[4..8] == b"ftyp" && (&b[8..12] == b"avif" || &b[8..12] == b"avis") {
+            return Some("avif");
+        }
+        None
     }
 
     fn get_image_extension(resp: &SmartResponse, url: &str) -> &'static str {

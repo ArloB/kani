@@ -971,3 +971,103 @@ async fn the_servers_retry_after_survives_into_the_error_classification() {
         other => panic!("expected a status error, got {other:?}"),
     }
 }
+
+// ── 9. Content-type guessing, health recording, aggregate search ─────────────
+
+#[tokio::test]
+async fn a_png_served_as_octet_stream_is_not_stored_as_jpg() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/img/mystery",
+        Response::ok(png_page(400, 600, false)).header("Content-Type", "application/octet-stream"),
+    );
+
+    let staging = tempfile::tempdir().unwrap();
+    let client = kani_core::http::SmartClient::new(None).unwrap();
+    let (_path, filename) = kani_core::downloader::DownloaderManager::download_page_for_test(
+        &client,
+        &origin.url("/img/mystery"),
+        1,
+        staging.path(),
+        &origin.base(),
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        filename, "0001.png",
+        "neither the Content-Type nor the URL identified this, but the magic \
+         bytes do — storing PNG data under a .jpg name makes the manifest \
+         contradict the file"
+    );
+}
+
+#[tokio::test]
+async fn a_jpeg_is_still_named_jpg_when_nothing_else_identifies_it() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/img/mystery",
+        Response::ok(jpeg_page(400, 600, false, 80))
+            .header("Content-Type", "application/octet-stream"),
+    );
+
+    let staging = tempfile::tempdir().unwrap();
+    let client = kani_core::http::SmartClient::new(None).unwrap();
+    let (_p, filename) = kani_core::downloader::DownloaderManager::download_page_for_test(
+        &client,
+        &origin.url("/img/mystery"),
+        1,
+        staging.path(),
+        &origin.base(),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(filename, "0001.jpg");
+}
+
+#[tokio::test]
+async fn a_failing_search_is_recorded_against_the_sources_health() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    wire_source(&svc, source_id, &origin.base());
+    origin.set("/chapters/whatever", Response::status(500));
+
+    // No search endpoint is configured, so the call fails inside the backend.
+    let _ = svc.search_manga(source_id, "anything", 1, 20, None).await;
+
+    let errors: Option<i64> =
+        sqlx::query_scalar("SELECT consecutive_error_count FROM source_health WHERE source_id = ?")
+            .bind(source_id)
+            .fetch_optional(&svc.db)
+            .await
+            .unwrap();
+
+    assert_eq!(
+        errors,
+        Some(1),
+        "health was only ever recorded for get_metadata and get_filter_list, \
+         so the panel was blind to the calls users actually make"
+    );
+}
+
+#[tokio::test]
+async fn a_successful_page_fetch_is_recorded_against_the_sources_health() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    wire_source(&svc, source_id, &origin.base());
+    serve_chapter(&origin, "ch-1", &[jpeg_page(400, 600, false, 80)]);
+
+    svc.get_pages(source_id, "m1", "ch-1").await.unwrap();
+
+    let ok: Option<String> =
+        sqlx::query_scalar("SELECT last_success_at FROM source_health WHERE source_id = ?")
+            .bind(source_id)
+            .fetch_optional(&svc.db)
+            .await
+            .unwrap();
+    assert!(ok.is_some(), "a successful page fetch must count as health");
+}

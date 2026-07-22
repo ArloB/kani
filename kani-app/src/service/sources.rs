@@ -4,6 +4,10 @@ use crate::models::SourceHealthRow;
 use crate::source::loader;
 use sqlx::Row as _;
 
+/// How long one source may take before a global search gives up on it and
+/// ships everyone else's results.
+const GLOBAL_SEARCH_PER_SOURCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+
 pub(crate) fn compile_pure_registry(
     metadata: &kani_shared::ExtensionMetadata,
 ) -> Option<std::sync::Arc<kani_core::scripting::PureFunctionRegistry>> {
@@ -414,17 +418,24 @@ impl AppService {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
         let sources = self.sources.clone();
+        let svc = self.clone();
 
         self.cache
             .get_or_fetch_popular_manga(id, page, page_size, filters_key, async move {
-                let backend = sources
-                    .get_backend(id)
-                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
-                let result = backend
-                    .get_popular_manga(page, page_size, &active_filters)
-                    .await?;
-                serde_json::to_string(&result)
-                    .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                let started = std::time::Instant::now();
+                let outcome = async {
+                    let backend = sources
+                        .get_backend(id)
+                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                    let result = backend
+                        .get_popular_manga(page, page_size, &active_filters)
+                        .await?;
+                    serde_json::to_string(&result)
+                        .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                }
+                .await;
+                svc.record_source_call(id, started, &outcome).await;
+                outcome
             })
             .await
             .map_err(unwrap_cache_err)
@@ -446,17 +457,24 @@ impl AppService {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
         let sources = self.sources.clone();
+        let svc = self.clone();
         let q = query.to_string();
         self.cache
             .get_or_fetch_search_results(id, query, page, page_size, filters_key, async move {
-                let backend = sources
-                    .get_backend(id)
-                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
-                let result = backend
-                    .search_manga(&q, page, page_size, &active_filters)
-                    .await?;
-                serde_json::to_string(&result)
-                    .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                let started = std::time::Instant::now();
+                let outcome = async {
+                    let backend = sources
+                        .get_backend(id)
+                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                    let result = backend
+                        .search_manga(&q, page, page_size, &active_filters)
+                        .await?;
+                    serde_json::to_string(&result)
+                        .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                }
+                .await;
+                svc.record_source_call(id, started, &outcome).await;
+                outcome
             })
             .await
             .map_err(unwrap_cache_err)
@@ -554,17 +572,24 @@ impl AppService {
     pub async fn get_pages(&self, id: i64, manga_id: &str, chapter_id: &str) -> Result<String> {
         self.require_source_active(id).await?;
         let sources = self.sources.clone();
+        let svc = self.clone();
         let manga_id_d = decode_manga_id(manga_id);
         let chapter_id_d = decode_manga_id(chapter_id);
 
         self.cache
             .get_or_fetch_pages(id, &manga_id_d.clone(), &chapter_id_d.clone(), async move {
-                let backend = sources
-                    .get_backend(id)
-                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
-                let result = backend.get_pages(&manga_id_d, &chapter_id_d).await?;
-                serde_json::to_string(&result)
-                    .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                let started = std::time::Instant::now();
+                let outcome = async {
+                    let backend = sources
+                        .get_backend(id)
+                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                    let result = backend.get_pages(&manga_id_d, &chapter_id_d).await?;
+                    serde_json::to_string(&result)
+                        .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                }
+                .await;
+                svc.record_source_call(id, started, &outcome).await;
+                outcome
             })
             .await
             .map_err(unwrap_cache_err)
@@ -580,6 +605,7 @@ impl AppService {
     ) -> Result<String> {
         self.require_source_active(id).await?;
         let sources = self.sources.clone();
+        let svc = self.clone();
         let manga_id_d = decode_manga_id(manga_id);
         let sort_key = sort.clone().unwrap_or_default();
 
@@ -591,14 +617,20 @@ impl AppService {
                 page_size,
                 &sort_key,
                 async move {
-                    let backend = sources
-                        .get_backend(id)
-                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
-                    let result = backend
-                        .get_chapter_list(&manga_id_d, page, Some(page_size), sort)
-                        .await?;
-                    serde_json::to_string(&result)
-                        .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                    let started = std::time::Instant::now();
+                    let outcome = async {
+                        let backend = sources.get_backend(id).ok_or_else(|| {
+                            ServiceError::NotFound(format!("Source {id} not found"))
+                        })?;
+                        let result = backend
+                            .get_chapter_list(&manga_id_d, page, Some(page_size), sort)
+                            .await?;
+                        serde_json::to_string(&result)
+                            .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                    }
+                    .await;
+                    svc.record_source_call(id, started, &outcome).await;
+                    outcome
                 },
             )
             .await
@@ -672,9 +704,25 @@ impl AppService {
                 let source_name = source_name.clone();
 
                 tokio::spawn(async move {
-                    let result = state
-                        .search_manga(source_id, &q, page, page_size, None)
-                        .await;
+                    // One unresponsive source must not hold the whole aggregate
+                    // hostage for the client's full timeout. Every other source
+                    // has already answered; this one reports as failed and the
+                    // results ship.
+                    let result = match tokio::time::timeout(
+                        GLOBAL_SEARCH_PER_SOURCE_TIMEOUT,
+                        state.search_manga(source_id, &q, page, page_size, None),
+                    )
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(_) => {
+                            state.record_source_error(source_id).await;
+                            Err(ServiceError::Internal(format!(
+                                "Source {source_id} did not answer within {}s",
+                                GLOBAL_SEARCH_PER_SOURCE_TIMEOUT.as_secs()
+                            )))
+                        }
+                    };
                     (source_id, source_name, result)
                 })
             })
@@ -737,6 +785,26 @@ impl AppService {
         .fetch_all(&self.db_read)
         .await?;
         Ok(rows)
+    }
+
+    /// Records health for a call whose result we already have.
+    ///
+    /// Only `get_metadata` and `get_filter_list` used to do this, so the health
+    /// panel was blind to search, page fetches and chapter listings — the paths
+    /// users actually exercise and the ones that actually break.
+    pub(crate) async fn record_source_call<T>(
+        &self,
+        source_id: i64,
+        started: std::time::Instant,
+        result: &Result<T>,
+    ) {
+        match result {
+            Ok(_) => {
+                self.record_source_success(source_id, started.elapsed().as_millis() as u64)
+                    .await
+            }
+            Err(_) => self.record_source_error(source_id).await,
+        }
     }
 
     pub async fn record_source_success(&self, source_id: i64, elapsed_ms: u64) {

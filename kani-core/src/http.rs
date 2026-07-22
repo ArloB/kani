@@ -7,6 +7,11 @@ use std::{collections::HashMap, num::NonZeroU32, sync::Arc};
 
 const MAX_RETRIES: u32 = 3;
 const BASE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+/// Ceiling on an HTML body buffered for challenge detection. Real catalogue
+/// pages are a few hundred kilobytes; anything past this is not a page we were
+/// going to parse anyway.
+const MAX_HTML_BODY_BYTES: usize = 16 * 1024 * 1024;
+
 const CREDENTIAL_TTL_SECS: u64 = 3600;
 const RETRY_AFTER_CAP_SECS: u64 = 60;
 const CIRCUIT_OPEN_THRESHOLD: u32 = 5;
@@ -531,7 +536,23 @@ impl SmartClient {
                     let status = resp.status();
                     let url = resp.url().clone();
                     let headers = resp.headers().clone();
-                    let bytes = resp.bytes().await?;
+                    // Capped: this buffers *before* the challenge sniff, so any
+                    // caller's own `bytes_limited` cap is applied far too late
+                    // to matter. An origin serving a huge `text/html` body — by
+                    // accident or otherwise — would otherwise be read entirely
+                    // into memory.
+                    let bytes = collect_bytes_limited(
+                        Box::pin(futures::stream::unfold(resp, |mut r| async move {
+                            match r.chunk().await {
+                                Ok(Some(b)) => Some((Ok(b), r)),
+                                Ok(None) => None,
+                                Err(e) => Some((Err(e), r)),
+                            }
+                        })),
+                        None,
+                        MAX_HTML_BODY_BYTES,
+                    )
+                    .await?;
                     let body_str = String::from_utf8_lossy(&bytes);
                     let body_lower = body_str.to_lowercase();
 
