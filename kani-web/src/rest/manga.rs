@@ -72,10 +72,6 @@ pub fn router() -> Router<AppState> {
             post(preview_download_rules),
         )
         .route("/manga/{id}/enrich-metadata", post(enrich_metadata_handler))
-        .route(
-            "/manga/{id}/chapters/stream/{source_id}",
-            post(trigger_chapter_stream),
-        )
 }
 
 #[utoipa::path(
@@ -820,51 +816,6 @@ pub(crate) async fn enrich_metadata_handler(
         .enrich_manga_metadata(manga_id, &body.provider, user.id)
         .await?;
     Ok(Json(result))
-}
-
-#[utoipa::path(
-    post, path = "/rest/manga/{id}/chapters/stream/{source_id}",
-    params(
-        ("id" = i64, Path, description = "Manga ID"),
-        ("source_id" = i64, Path, description = "Source ID"),
-    ),
-    responses(
-        (status = 202, description = "Streaming chapter fetch triggered"),
-        (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Insufficient permissions"),
-    ),
-    security(("session" = [])),
-    tag = "manga"
-)]
-pub(crate) async fn trigger_chapter_stream(
-    _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
-    State(state): State<AppState>,
-    Path((manga_id, source_id)): Path<(MangaId, i64)>,
-) -> Result<impl IntoResponse, AppError> {
-    use sqlx::Row;
-    let row =
-        sqlx::query("SELECT streaming_chapters FROM sources WHERE id = ? AND deleted_at IS NULL")
-            .bind(source_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| AppError::InternalServerError(e.to_string()))?
-            .ok_or_else(|| AppError::NotFound(format!("Source {source_id} not found")))?;
-
-    let streaming_ok: bool = row.get::<i64, _>(0) != 0;
-    if !streaming_ok {
-        return Err(AppError::Other(
-            "Source does not support streaming chapter lists".into(),
-        ));
-    }
-
-    let _ = state
-        .refresh_tx
-        .send(kani_app::events::AppEvent::ChapterListPartial {
-            manga_id,
-            received: 0,
-        });
-
-    Ok((StatusCode::ACCEPTED, Json(json!({}))))
 }
 
 #[cfg(test)]

@@ -1,7 +1,6 @@
 //! Extension source management & browsing routes.
 
 use super::*;
-use sqlx::Row;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -986,16 +985,17 @@ pub(crate) async fn get_capabilities(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let row =
-        sqlx::query("SELECT streaming_chapters FROM sources WHERE id = ? AND deleted_at IS NULL")
+    // Incremental chapter delivery is host-side page polling, so every
+    // installed source has it. The flag this used to read was never written.
+    let exists: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM sources WHERE id = ? AND deleted_at IS NULL")
             .bind(id)
             .fetch_optional(&state.db)
             .await
-            .map_err(|e| AppError::InternalServerError(e.to_string()))?
-            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
-    let streaming: bool = row.get::<i64, _>(0) != 0;
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+    exists.ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
     Ok(Json(SourceCapabilities {
-        streaming_chapters: streaming,
+        streaming_chapters: true,
     }))
 }
 

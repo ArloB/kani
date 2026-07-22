@@ -102,7 +102,6 @@ use utoipa::OpenApi;
         crate::rest::manga::reorder_download_rules,
         crate::rest::manga::preview_download_rules,
         crate::rest::manga::enrich_metadata_handler,
-        crate::rest::manga::trigger_chapter_stream,
         // scanlators
         crate::rest::scanlators::get_scanlator_prefs,
         crate::rest::scanlators::set_scanlator_pref,
