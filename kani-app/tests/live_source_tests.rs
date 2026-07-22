@@ -711,3 +711,155 @@ async fn credentials_are_not_carried_across_a_cross_host_redirect() {
         "the second host must have been reached"
     );
 }
+
+// ── 6. Resume must not seal a truncated page into the archive ────────────────
+
+#[tokio::test]
+async fn an_interrupted_page_is_not_treated_as_downloaded_on_the_next_run() {
+    let origin = TestOrigin::start().await;
+    let page = jpeg_page(800, 1200, false, 80);
+    let announced = page.len();
+
+    // First attempt dies mid-body; the retry serves the whole thing.
+    origin.script(
+        "/img/0001.jpg",
+        vec![
+            Response::image(page.clone()).body(Body::Truncated {
+                bytes: page.clone(),
+                announced,
+                sent: announced / 3,
+            }),
+            Response::image(page.clone()),
+        ],
+    );
+
+    let staging = tempfile::tempdir().unwrap();
+    let client = kani_core::http::SmartClient::new(None).unwrap();
+
+    // A truncated transfer must leave nothing a resume would trust.
+    let first = kani_core::downloader::DownloaderManager::download_page_for_test(
+        &client,
+        &origin.url("/img/0001.jpg"),
+        1,
+        staging.path(),
+        &origin.base(),
+        None,
+    )
+    .await;
+    assert!(first.is_err(), "a short body must be reported as an error");
+
+    let staged: Vec<_> = std::fs::read_dir(staging.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".tmp"))
+        .collect();
+    assert!(
+        staged.is_empty(),
+        "an interrupted page must not leave a .tmp behind — a resume treats \
+         those as complete and seals them into the CBZ, got {staged:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_complete_page_is_staged_and_reusable() {
+    let origin = TestOrigin::start().await;
+    let page = jpeg_page(800, 1200, false, 80);
+    origin.set("/img/0001.jpg", Response::image(page.clone()));
+
+    let staging = tempfile::tempdir().unwrap();
+    let client = kani_core::http::SmartClient::new(None).unwrap();
+    let (path, _name) = kani_core::downloader::DownloaderManager::download_page_for_test(
+        &client,
+        &origin.url("/img/0001.jpg"),
+        1,
+        staging.path(),
+        &origin.base(),
+        None,
+    )
+    .await
+    .expect("a whole body must succeed");
+
+    assert!(path.exists());
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().len() as usize,
+        page.len(),
+        "the staged file must hold the whole page"
+    );
+}
+
+// ── 7. Pagination must not stop at one page of already-known chapters ────────
+
+#[tokio::test]
+async fn a_scan_looks_past_a_page_of_chapters_it_already_has() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    let manga = insert_manga(&svc.db, source_id, "m1", "Interleaved").await;
+    wire_paginated_source(&svc, source_id, &origin.base());
+
+    // Page 2 is entirely chapters page 1 already introduced — the shape an
+    // oldest-first or upload-date-interleaved listing produces routinely.
+    origin.set(
+        "/paged/m1/1",
+        Response::json(r#"{"chapters":[{"id":"ch-1","number":1},{"id":"ch-2","number":2}]}"#),
+    );
+    origin.set(
+        "/paged/m1/2",
+        Response::json(r#"{"chapters":[{"id":"ch-1","number":1},{"id":"ch-2","number":2}]}"#),
+    );
+    origin.set(
+        "/paged/m1/3",
+        Response::json(r#"{"chapters":[{"id":"ch-9","number":9}]}"#),
+    );
+    origin.set("/paged/m1/4", Response::json(r#"{"chapters":[]}"#));
+
+    svc.fetch_and_store_chapters_silent(manga).await.unwrap();
+
+    let ids: Vec<String> =
+        sqlx::query_scalar("SELECT source_chapter_id FROM chapters WHERE manga_id = ?")
+            .bind(manga)
+            .fetch_all(&svc.db)
+            .await
+            .unwrap();
+    assert!(
+        ids.iter().any(|i| i == "ch-9"),
+        "a single page of already-known chapters must not end the scan — \
+         found {ids:?}"
+    );
+}
+
+/// Like `wire_source`, but the chapter listing is paginated through `$page$`
+/// and always claims another page — the loop stops when a page comes back empty.
+fn wire_paginated_source(svc: &kani_app::service::AppService, source_id: i64, base_url: &str) {
+    let mut ep = json_endpoint(
+        "/paged/$manga_id$/$page$",
+        "/chapters",
+        vec![
+            json_field("id", "/id", false),
+            json_field("number", "/number", false),
+        ],
+    );
+    ep.has_next_page = ValidatedHnp::Static(true);
+
+    let ext = ValidatedExtension {
+        id: "fixture-source".into(),
+        name: "Fixture Source".into(),
+        version: "1.0.0".into(),
+        base_url: base_url.to_string(),
+        language: "en".into(),
+        unrestricted_http: true,
+        chapter_list: Some(ep),
+        ..Default::default()
+    };
+    let source = YamlSource::new(
+        Arc::new(ext),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        format!("paged-{source_id}:"),
+        HashMap::new(),
+        true,
+    );
+    svc.sources
+        .insert(source_id, SourceBackend::Yaml(Box::new(source)));
+}

@@ -4,6 +4,11 @@ use futures::stream::{FuturesUnordered, StreamExt};
 
 // Library scanning, refresh, chapter fetch/store and metadata sync.
 
+/// Consecutive all-known listing pages tolerated before a scan concludes it has
+/// caught up. More than one, because hitting a page of already-held chapters is
+/// routine at a pagination boundary and says nothing about what follows.
+const MAX_BARREN_PAGES: usize = 3;
+
 impl AppService {
     /// `force` skips the fuzzy duplicate check (used after the user confirms "add anyway").
     pub async fn save_to_library(
@@ -509,6 +514,7 @@ impl AppService {
         let mut new_chapter_ids = Vec::new();
         let mut total_received = 0usize;
         let mut page = 1;
+        let mut barren_pages = 0usize;
 
         loop {
             let res = match backend
@@ -563,7 +569,23 @@ impl AppService {
                 });
             }
 
-            if new_on_page == 0 || !chapter_list.has_next_page {
+            // A page of entirely-known chapters is not proof that nothing new
+            // lies beyond it. That only holds for a strictly newest-first,
+            // strictly monotonic listing; oldest-first ordering, listings
+            // interleaved by upload date across scanlators, and sources that
+            // re-list a batch of old chapters all break it, and the scan then
+            // reports "no new chapters" on every subsequent run because the
+            // shape never changes.
+            //
+            // The guard still exists — an unbounded loop over a source that
+            // always claims another page would grow the DB forever — but it now
+            // takes a run of barren pages, not one.
+            if new_on_page == 0 {
+                barren_pages += 1;
+            } else {
+                barren_pages = 0;
+            }
+            if barren_pages >= MAX_BARREN_PAGES || !chapter_list.has_next_page {
                 break;
             }
 

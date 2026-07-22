@@ -295,6 +295,20 @@ impl DownloaderManager {
         }
     }
 
+    /// Test hook for `download_page`, which is otherwise reachable only through
+    /// a whole chapter download.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn download_page_for_test(
+        client: &SmartClient,
+        url: &str,
+        page: i32,
+        staging_dir: &std::path::Path,
+        referer: &str,
+        transform: Option<&str>,
+    ) -> Result<(PathBuf, String)> {
+        Self::download_page(client, url, page, staging_dir, referer, transform).await
+    }
+
     async fn download_page(
         client: &SmartClient,
         url: &str,
@@ -329,6 +343,19 @@ impl DownloaderManager {
             (ext, format!("{:04}.{}", page, ext))
         };
         let tmp_file_path = staging_dir.join(format!("{:04}.{}.tmp", page, extension));
+        // Written under `.part` and renamed only once the body is complete.
+        // `.tmp` is what a resumed download treats as "already fetched", so a
+        // file must never carry that name until it is whole — an interrupted
+        // transfer used to leave a truncated `.tmp` behind, and the next run
+        // sealed it into the CBZ without re-fetching, then recorded its hash as
+        // correct. Silent and permanent.
+        let part_file_path = staging_dir.join(format!("{:04}.{}.part", page, extension));
+
+        let announced = resp
+            .headers()
+            .get(rquest::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
 
         if let Some(seed) = scramble_seed {
             let mut raw: Vec<u8> = Vec::new();
@@ -340,12 +367,13 @@ impl DownloaderManager {
                     "Server returned empty body for page {page}"
                 )));
             }
+            Self::check_complete(announced, raw.len() as u64, page)?;
             let descrambled = crate::image_transform::lcg_tile_descramble(&raw, seed)?;
-            let mut file = tokio::fs::File::create(&tmp_file_path).await?;
+            let mut file = tokio::fs::File::create(&part_file_path).await?;
             file.write_all(&descrambled).await?;
             file.flush().await?;
         } else {
-            let mut file = tokio::fs::File::create(&tmp_file_path).await?;
+            let mut file = tokio::fs::File::create(&part_file_path).await?;
             let mut bytes_written: u64 = 0;
             while let Some(chunk) = resp.chunk().await? {
                 bytes_written += chunk.len() as u64;
@@ -357,9 +385,26 @@ impl DownloaderManager {
                     "Server returned empty body for page {page}"
                 )));
             }
+            Self::check_complete(announced, bytes_written, page)?;
         }
 
+        tokio::fs::rename(&part_file_path, &tmp_file_path).await?;
+
         Ok((tmp_file_path, filename))
+    }
+
+    /// Rejects a body that stopped short of the length the server announced.
+    ///
+    /// A silently truncated image still decodes to *something* often enough
+    /// that nothing downstream notices, so the mismatch has to be caught here
+    /// where the promise and the delivery are both in hand.
+    fn check_complete(announced: Option<u64>, received: u64, page: i32) -> Result<()> {
+        match announced {
+            Some(expected) if received < expected => Err(error::Error::Other(format!(
+                "Truncated body for page {page}: got {received} of {expected} bytes"
+            ))),
+            _ => Ok(()),
+        }
     }
 
     fn get_image_extension(resp: &SmartResponse, url: &str) -> &'static str {
@@ -698,6 +743,13 @@ impl DownloaderManager {
         while let Ok(Some(entry)) = dir.next_entry().await {
             let name = entry.file_name();
             let s = name.to_string_lossy();
+            // Leftovers from a transfer that died mid-body. They are never
+            // resumable — the next attempt rewrites them from scratch — so
+            // sweep them rather than letting them accumulate.
+            if s.ends_with(".part") {
+                let _ = tokio::fs::remove_file(entry.path()).await;
+                continue;
+            }
             let Some(rest) = s.strip_suffix(".tmp") else {
                 continue;
             };
