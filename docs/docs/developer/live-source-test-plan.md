@@ -39,6 +39,47 @@ Several groups below are blocked on these. Build them before starting.
 
 ---
 
+## Which backend runs which test
+
+There are two source backends and they share less than the architecture suggests.
+`YamlSource::eval_endpoint_once` builds a `Blueprint` and calls the **same**
+`html_eval`/`json_eval` the WASM host runs for `extract::html` — so extraction is one
+implementation. `YamlSource::make_host_state()` also builds the same
+`kani_core::wasm::HostState`, so the 32-request IO budget and `AllowedHost` are shared too.
+
+Everything *wrapping* the Blueprint is written twice:
+
+| Concern | Interpreted YAML | WASM guest |
+|---|---|---|
+| Request construction | `make_request` + `build_url_with_args` | guest builds `HttpRequest` |
+| **Filters** | **discarded** (A1) | guest handles them |
+| Preferences | `$pref:` in the eval env | `prefs` host import |
+| Pagination, `has_next_page`, `total_pages` | `ValidatedHnp` / `PaginationCfg` | guest logic |
+| Composite id encode/decode | `resolve_composite_ids` | guest |
+| Result unpacking | `unpack_*`, swallows every mismatch | guest constructs the structs |
+| Error kind | collapsed to `ExtensionError::parse` (A15) | real `ExtensionErrorKind` |
+| Instance lifecycle | `acquire()` semaphore | lease / pool / drain |
+
+**Every `SourceBackend` integration test in the repo today is `SourceBackend::Yaml`.** No
+test anywhere uses `SourceBackend::Wasm`, and `wasm_abi.rs` / `wasm_example.rs` make no HTTP
+calls at all — they feed fixture HTML across the ABI in-process. So the backend with *all*
+the coverage is the second one, while every shipped extension (MangaDex, WeebCentral,
+MangaPill, Comix, Cubari) is WASM.
+
+Classification:
+
+| Tests | Backend | Why |
+|---|---|---|
+| A2, A4, A5, A6, A9, A12, A13, A14, B1–B4, C, D5–D6, E, G, H, I3–I4, J, K, L, M, N | **shared** — run on either | Downstream of `ChapterList`/`Chapter`, or inside `SmartClient`/`HostState`, both of which are common |
+| A1, A7, A8, A10, A11, A15, F1–F10, I1–I2 | **yaml-only** | Live in `make_request` / `build_url_with_args` / `unpack_*` / the `$pref:` env — code the WASM path does not execute |
+| Group O (below) | **wasm-only** | The guest-side equivalents, plus lifecycle machinery YAML has no analogue for |
+
+Group F is worth calling out: it is entirely about `unpack_*` swallowing malformed data, so
+it is YAML-only. "What does a WASM guest do with the same garbage" is a different question
+with a different answer, and it is O5.
+
+---
+
 ## Group A — Confirmed bugs (write the test red, then fix)
 
 These are defects, not gaps. Verified by reading the code this session.
@@ -59,11 +100,24 @@ These are defects, not gaps. Verified by reading the code this session.
 | A12 | `the_rule_preview_matches_what_auto_download_actually_queues` | `preview_download_rules` count == chapters `filter_chapters_by_rules` returns | Set scanlator prefs + rules; compare both paths | SILENT-WRONG |
 | A13 | `a_webhook_cannot_be_pointed_at_a_private_address` | Configuring `http://169.254.169.254/…` or `http://127.0.0.1:8242/…` is refused, or the request is blocked at send | Bind an origin on loopback and register it as a webhook target | **SSRF** |
 | A14 | `a_webhook_does_not_follow_a_redirect_to_a_private_address` | A public URL that `302`s inward is not followed | Origin A returns `302` → origin B on loopback (H4) | **SSRF** |
+| A15 | `a_yaml_source_reports_a_usable_error_kind` | A `429` from a YAML source classifies as `RateLimited`, not `ParseError` | Listing route returns `429` + `Retry-After` | SILENT-WRONG |
 
 > **A12 detail:** `filter_chapters_by_rules` (`rules.rs:130-185`) applies a second stage —
 > blocked scanlators and per-chapter-number priority selection — that
 > `preview_download_rules` skips entirely. The preview therefore overstates the result
 > whenever scanlator preferences exist.
+
+> **A15 detail:** every failure path in `yaml_source.rs` wraps into
+> `ExtensionError::parse` (`:255, :264, :280, :365, :375`), so `ExtensionErrorKind` is
+> effectively constant for interpreted sources. `ParseError` does still retry, so this is
+> not fatal — but `RateLimited` (which honours `Retry-After`) and `NotFound` (which
+> correctly refuses to retry) can never be produced by a YAML source. A rate-limited YAML
+> source hammers on generic backoff; a 404 burns every attempt. Stage 0's work to preserve
+> the kind through the download pipeline is inert on this backend.
+
+> **A7 sharpening:** `AllowedHost` *is* enforced for YAML, via the shared `HostState`.
+> `fetch_option_set` bypasses it by calling `client.get()` directly rather than going
+> through the evaluator — so A7 is an escape from a guard that exists, not a missing guard.
 
 > **A13/A14 detail:** `WebhookService` holds a bare `rquest::Client::new()`
 > (`webhooks.rs:22,30`) — no `ValidatingResolver`, no timeout, and rquest's default
@@ -335,6 +389,42 @@ triggered by `expires_at` (`trackers/mod.rs:399`); nothing reacts to a 401.
 
 ---
 
+## Group O — The WASM path against a live origin
+
+Nothing here has ever run. Needs the fixture below.
+
+| ID | Test | Asserts | Status |
+|---|---|---|---|
+| O1 | `a_wasm_source_applies_selected_filters` | The WASM counterpart to A1 — the guest's filter handling reaches the wire | GAP |
+| O2 | `a_wasm_source_builds_the_request_it_declared` | Method, path, query, headers as the guest intended (echo route, H3) | GAP |
+| O3 | `a_preference_change_reaches_a_running_wasm_instance` | `set_preference`, then the next lease sends the new value | GAP |
+| O4 | `a_guest_error_kind_survives_to_the_download_classifier` | A `429` upstream produces `RateLimited`, not `Unknown` — the contrast case for A15 | GAP |
+| O5 | `a_guest_handling_malformed_upstream_data_fails_loudly` | The WASM counterpart to Group F: same garbage, assert the guest errors rather than returning an empty list | GAP |
+| O6 | `a_handle_is_not_leaked_when_a_live_fetch_fails` | `wasm_abi.rs` proves this for in-process calls only; assert it across a real `500`/reset | GAP |
+| O7 | `an_in_flight_wasm_call_completes_across_a_hot_swap` | The real D1 — needs a genuinely parked HTTP call, not a synthetic lease | GAP |
+| O8 | `the_io_budget_is_charged_identically_on_both_backends` | `HostState` is shared, so A9's result must match here | GAP |
+| O9 | `a_wasm_source_honours_its_declared_rate_limit` | Confirms the fix on the backend real extensions use | GAP |
+| O10 | `composite_id_encoding_round_trips_through_a_live_call` | Guest-side encode/decode vs YAML's `resolve_composite_ids` | GAP |
+
+### Fixture: `kani-fixture-source`
+
+`kani-test-abi` returns canned data and never fetches, so it cannot drive Group O. Needs a
+small WASM extension that makes real HTTP calls:
+
+- `base_url` supplied at install time so a test can point it at `TestOrigin`
+- `search_manga` / `get_chapter_list` / `get_pages` that fetch and `extract::json`
+- filters declared in `get_filter_list` and genuinely mapped into the request (so O1 can
+  fail if that mapping breaks)
+- one preference read via the `prefs` import and sent as a header (O3)
+- an endpoint that returns each `ExtensionErrorKind` on demand, keyed by `manga_id` — the
+  same trick `kani-test-abi` already uses for its `error-paths` mode (O4)
+- excluded from `--all` like `kani-test-abi`, built with `kani-cli build --dev`
+
+Once it exists, O1–O10 are ordinary integration tests and every "shared" test in the plan
+can optionally be parameterised over both backends.
+
+---
+
 ## Suggested order
 
 1. **A13/A14 first** — webhook SSRF is the widest exposure here and the target URL is
@@ -349,8 +439,10 @@ triggered by `expires_at` (`trackers/mod.rs:399`); nothing reacts to a 401.
 6. **Group C** — the largest untested subsystem in the request path.
 7. **L and M** — trackers and webhooks are the largest non-extension surface and
    contain three suspected bugs of their own.
-8. **F, G, H** — cheap once the harness additions exist.
-9. **D, E, J, K, N** — valuable, but each needs more setup.
+8. **The `kani-fixture-source` extension, then Group O** — the WASM path is what every
+   shipped extension is, and it currently has no live coverage at all.
+9. **F, G, H** — cheap once the harness additions exist.
+10. **D, E, J, K, N** — valuable, but each needs more setup.
 
 ## Deliberately excluded
 
