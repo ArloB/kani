@@ -1664,6 +1664,18 @@ export async function getAdminStorageStatsHistory() {
   return _req('GET', '/admin/storage/stats/history');
 }
 
+// ── Admin — archive export ───────────────────────────────────────────────────
+
+/** @param {{ manga_ids?: number[]|null, zip?: boolean, include_viewer?: boolean }} spec */
+export async function exportArchive(spec) {
+  return _req('POST', '/admin/library/archive', { body: spec });
+}
+
+/** @param {string} jobId */
+export function archiveDownloadUrl(jobId) {
+  return `/rest/admin/library/archive/${jobId}/download`;
+}
+
 // ── Scanlator preferences (library-wide defaults) ────────────────────────────
 
 export async function getGlobalScanlatorPrefs() {

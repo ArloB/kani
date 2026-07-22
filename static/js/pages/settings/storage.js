@@ -11,7 +11,8 @@ import { showApiError, showToast } from '../../components/toast.js';
 import { SettingsGroup, SettingsRow } from './_shared.js';
 import { formatBytes, formatRelativeTime } from '../../utils.js';
 import { useSSE } from '../../hooks/use-sse.js';
-import { showConfirm } from '../../components/modal.js';
+import { ScrubReport } from '../../components/scrub-report.js';
+import { ArchiveExportModal } from '../../components/archive-export.js';
 
 const html = htm.bind(h);
 const fmt = formatBytes;
@@ -82,6 +83,7 @@ function ScrubGroup() {
   const [running, setRunning] = useState(false);
   const [depth, setDepth] = useState('quick');
   const [fix, setFix] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [last, setLast] = useState(/** @type {any} */ (undefined));
 
   const load = async () => {
@@ -117,39 +119,6 @@ function ScrubGroup() {
     }
   };
 
-  const orphans = last?.report?.orphaned_files ?? [];
-
-  const removeOrphans = async () => {
-    const preview = await api.deleteOrphans(orphans, true);
-    const ok = await showConfirm(
-      t('storage.scrub.orphans.confirm', { n: preview.removed_count }),
-      { title: t('storage.scrub.orphans.delete'), confirmLabel: t('common.delete'), danger: true },
-    );
-    if (!ok) return;
-    try {
-      const res = await api.deleteOrphans(orphans, false);
-      showToast(t('storage.scrub.orphans.removed', { n: res.removed_count }), { type: 'success' });
-      await load();
-    } catch (e) {
-      showApiError(e);
-    }
-  };
-
-  const r = last?.report;
-  const rows = r
-    ? [
-        html`<${Stat} label=${t('storage.scrub.checked')} value=${r.checked} />`,
-        html`<${Stat} label=${t('storage.scrub.ok')} value=${r.ok} />`,
-        html`<${Stat} label=${t('storage.scrub.corrupt')} value=${r.corrupt.length} />`,
-        html`<${Stat} label=${t('storage.scrub.missing')} value=${r.missing_files.length} />`,
-        html`<${Stat} label=${t('storage.scrub.drift')} value=${r.path_drift.length} />`,
-        html`<${Stat} label=${t('storage.scrub.unhashed')} value=${r.unhashed} />`,
-        html`<${Stat} label=${t('storage.scrub.duplicates')} value=${r.exact_duplicates.length} />`,
-        html`<${Stat} label=${t('storage.integrity.cover_mismatches')} value=${r.cover_mismatches.length} />`,
-        html`<${Stat} label=${t('storage.scrub.orphaned')} value=${orphans.length} />`,
-      ]
-    : null;
-
   return html`
     <${SettingsGroup} label=${t('storage.group.integrity')}>
       <p class="text-xs text-text-muted px-4 py-2">${t('storage.scrub.desc')}</p>
@@ -177,37 +146,19 @@ function ScrubGroup() {
         <button type="button" class="btn-secondary btn-sm" disabled=${running} onClick=${run}>
           ${running ? t('storage.scrub.running') : t('storage.scrub.run')}
         </button>
+        <button type="button" class="btn-ghost btn-sm" onClick=${() => setExportOpen(true)}>
+          ${t('storage.archive.open')}
+        </button>
       </div>
 
       <p class="text-xs text-text-muted px-4 pb-2">${t('storage.scrub.repair.desc')}</p>
 
-      ${last === undefined
-        ? null
-        : last === null
-          ? html`<p class="px-4 py-3 text-sm text-text-muted">${t('storage.scrub.never')}</p>`
-          : html`
-              <div class="px-4 py-2 text-xs text-text-muted border-t border-border-subtle">
-                ${t('storage.scrub.last', {
-                  depth: t(`storage.scrub.depth.${last.depth}`),
-                  when: formatRelativeTime(new Date(last.created_at * 1000)),
-                })}
-              </div>
-              <div class="flex flex-col gap-0 divide-y divide-border-subtle">${rows}</div>
-              ${orphans.length > 0
-                ? html`<div
-                    class="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle"
-                  >
-                    <span class="text-xs text-text-muted">${t('storage.scrub.orphans.desc')}</span>
-                    <button type="button" class="btn-ghost btn-sm text-danger" onClick=${removeOrphans}>
-                      ${t('storage.scrub.orphans.delete')}
-                    </button>
-                  </div>`
-                : null}
-            `}
+      <${ScrubReport} last=${last} onChanged=${load} />
     <//>
+
+    <${ArchiveExportModal} open=${exportOpen} onClose=${() => setExportOpen(false)} />
   `;
 }
-
 function HistoryGroup() {
   const [state, setState] = useState(
     /** @type {{ status: string, rows: any[], error: string }} */ ({

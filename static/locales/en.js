@@ -218,6 +218,26 @@ export default {
   'storage.scrub.orphans.delete': 'Delete orphans',
   'storage.scrub.orphans.confirm':
     'Permanently delete {n} orphaned file(s)? This cannot be undone.',
+  'storage.scrub.verified': '{ok} of {checked} verified',
+  'storage.scrub.unhashed_n': '{n} not yet hashed',
+  'storage.scrub.clean': 'Library is clean',
+  'storage.scrub.clean.subtitle': 'Every downloaded chapter matched the hash recorded for it.',
+  'storage.archive.open': 'Export archive…',
+  'storage.archive.title': 'Export archive',
+  'storage.archive.desc':
+    'Writes a portable copy of the library — the chapters, their page hashes, series details and a viewer — that stays readable without Kani.',
+  'storage.archive.zip': 'Bundle into a single .zip',
+  'storage.archive.viewer': 'Include the offline viewer',
+  'storage.archive.viewer.desc':
+    'A single HTML page that lists the series and opens chapters in a browser, with no server and no network.',
+  'storage.archive.start': 'Start export',
+  'storage.archive.starting': 'Starting…',
+  'storage.archive.progress': 'Exported {done} of {total} chapters',
+  'storage.archive.complete': 'Exported {series} series, {chapters} chapters.',
+  'storage.archive.download': 'Download .zip',
+  'storage.archive.on_disk': 'The archive is on the server, under the library folder.',
+  'storage.archive.verify_hint':
+    'Verify it any time with: kani-cli archive-verify <folder>',
   'storage.scrub.orphans.removed': 'Deleted {n} file(s).',
 
   'backup.group.schedule': 'Scheduled Backups',
