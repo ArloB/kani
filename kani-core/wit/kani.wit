@@ -132,6 +132,9 @@ interface types {
         tags: list<string>,
     }
 
+    /// Pages as the *source listing* reports them, when it does. Distinct from
+    /// `chapters.page_count`, which is what a downloaded archive turned out to
+    /// hold — comparing the two is what makes re-upload detection possible.
     record chapter-info {
         id: string,
         number: f64,
@@ -140,6 +143,7 @@ interface types {
         scanlator: option<string>,
         date-uploaded: option<s64>,
         language: string,
+        page-count: option<u32>,
     }
 
     record chapter-list {

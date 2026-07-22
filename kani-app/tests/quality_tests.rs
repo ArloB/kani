@@ -72,7 +72,7 @@ async fn a_longer_relisting_is_flagged_as_a_reupload() {
     let chapter = held_chapter(&svc, manga, "Reupload", 1.0, 2).await;
 
     // The source now advertises more pages than the copy on disk.
-    sqlx::query("UPDATE chapters SET page_count = 5 WHERE id = ?")
+    sqlx::query("UPDATE chapters SET source_page_count = 5 WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
         .await
@@ -91,7 +91,7 @@ async fn a_shorter_relisting_is_reassurance_not_a_nag() {
     let manga = seed_manga(&svc, "Downgrade").await;
     let chapter = held_chapter(&svc, manga, "Downgrade", 1.0, 5).await;
 
-    sqlx::query("UPDATE chapters SET page_count = 2 WHERE id = ?")
+    sqlx::query("UPDATE chapters SET source_page_count = 2 WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
         .await
@@ -112,7 +112,7 @@ async fn a_matching_relisting_flags_nothing() {
     let svc = test_service().await;
     let manga = seed_manga(&svc, "Stable").await;
     let chapter = held_chapter(&svc, manga, "Stable", 1.0, 3).await;
-    sqlx::query("UPDATE chapters SET page_count = 3 WHERE id = ?")
+    sqlx::query("UPDATE chapters SET source_page_count = 3 WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
         .await
@@ -228,7 +228,7 @@ async fn dismissing_prevents_the_same_candidate_returning() {
     let svc = test_service().await;
     let manga = seed_manga(&svc, "Dismissed").await;
     let chapter = held_chapter(&svc, manga, "Dismissed", 1.0, 2).await;
-    sqlx::query("UPDATE chapters SET page_count = 6 WHERE id = ?")
+    sqlx::query("UPDATE chapters SET source_page_count = 6 WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
         .await
@@ -251,7 +251,7 @@ async fn detection_can_be_turned_off_entirely() {
     let svc = test_service().await;
     let manga = seed_manga(&svc, "Off").await;
     let chapter = held_chapter(&svc, manga, "Off", 1.0, 2).await;
-    sqlx::query("UPDATE chapters SET page_count = 9 WHERE id = ?")
+    sqlx::query("UPDATE chapters SET source_page_count = 9 WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
         .await
@@ -341,11 +341,65 @@ async fn the_replaced_sweep_respects_the_retention_window() {
 }
 
 #[tokio::test]
+async fn a_drifting_archive_count_alone_flags_nothing() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "ArchiveDrift").await;
+    let chapter = held_chapter(&svc, manga, "ArchiveDrift", 1.0, 2).await;
+
+    // `page_count` is what our own download produced; `manifest_capture` writes
+    // it from the same archive the manifest describes. Detection must never key
+    // off it, or it is comparing a value against itself.
+    sqlx::query("UPDATE chapters SET page_count = 5 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    assert!(
+        svc.evaluate_upgrades(manga).await.unwrap().is_empty(),
+        "only the source listing can testify that the source changed"
+    );
+}
+
+#[tokio::test]
+async fn a_candidate_carries_the_measurements_of_the_copy_on_disk() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "Measured").await;
+    let chapter = held_chapter(&svc, manga, "Measured", 1.0, 3).await;
+    sqlx::query("UPDATE chapters SET source_page_count = 7 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(found.len(), 1);
+    let held = found[0]
+        .held_score
+        .expect("the held side is measurable from its own manifest and must be carried");
+    assert_eq!(
+        held.median_long_edge_px, 24,
+        "the fixture pages are 16x24, so the long edge is 24"
+    );
+    assert_eq!(held.page_count, 3);
+    assert_eq!(
+        held.colour,
+        kani_core::quality::ColourProfile::Monochrome,
+        "the fixture pages are greyscale and the manifest now records that"
+    );
+
+    // Nothing probed the candidate — there is no reachable backend — so the
+    // dialogue must be able to tell "not measured" from "measured as zero".
+    assert!(found[0].candidate_score.is_none());
+    assert!(found[0].verdict.is_none());
+}
+
+#[tokio::test]
 async fn a_zero_confirmation_budget_falls_back_to_page_count() {
     let svc = test_service().await;
     let manga = seed_manga(&svc, "NoBudget").await;
     let chapter = held_chapter(&svc, manga, "NoBudget", 1.0, 2).await;
-    sqlx::query("UPDATE chapters SET page_count = 5 WHERE id = ?")
+    sqlx::query("UPDATE chapters SET source_page_count = 5 WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
         .await
@@ -370,7 +424,7 @@ async fn a_confirmation_that_cannot_reach_the_source_keeps_the_count_verdict() {
     let svc = test_service().await;
     let manga = seed_manga(&svc, "Unreachable").await;
     let chapter = held_chapter(&svc, manga, "Unreachable", 1.0, 2).await;
-    sqlx::query("UPDATE chapters SET page_count = 5 WHERE id = ?")
+    sqlx::query("UPDATE chapters SET source_page_count = 5 WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
         .await

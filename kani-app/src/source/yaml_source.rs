@@ -763,6 +763,10 @@ fn unpack_chapter_list(
                 scanlator: row["scanlator"].as_str().map(|s| s.to_string()),
                 date_uploaded: row["date_uploaded"].as_i64(),
                 language: row["language"].as_str().unwrap_or("en").to_string(),
+                page_count: row["page_count"]
+                    .as_u64()
+                    .or_else(|| row["page_count"].as_str().and_then(|s| s.parse().ok()))
+                    .map(|n| n as u32),
             })
         })
         .collect();

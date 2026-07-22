@@ -429,7 +429,7 @@ impl AppService {
         for chunk in chapters.chunks(100) {
             let mut qb = sqlx::QueryBuilder::new(
                 "INSERT OR IGNORE INTO chapters \
-                (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at, discovered_at) ",
+                (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at, source_page_count, discovered_at) ",
             );
             qb.push_values(chunk, |mut b, ch| {
                 b.push_bind(manga_row_id)
@@ -439,7 +439,8 @@ impl AppService {
                     .push_bind(ch.language.clone())
                     .push_bind(ch.volume)
                     .push_bind(ch.scanlator.clone())
-                    .push_bind(ch.date_uploaded);
+                    .push_bind(ch.date_uploaded)
+                    .push_bind(ch.page_count.map(i64::from));
                 b.push("CURRENT_TIMESTAMP");
             });
             qb.push(" RETURNING id");
@@ -447,6 +448,32 @@ impl AppService {
             ids.append(&mut rows);
         }
         Ok(ids)
+    }
+
+    async fn refresh_source_page_counts(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        manga_row_id: MangaId,
+        chapters: &[wit_types::ChapterInfo],
+    ) -> Result<()> {
+        for ch in chapters {
+            let Some(count) = ch.page_count.map(i64::from) else {
+                continue;
+            };
+            let source_chapter_id = decode_manga_id(&ch.id);
+            sqlx::query!(
+                "UPDATE chapters SET source_page_count = ? \
+                 WHERE manga_id = ? AND source_chapter_id = ? \
+                 AND (source_page_count IS NULL OR source_page_count != ?)",
+                count,
+                manga_row_id,
+                source_chapter_id,
+                count
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+        Ok(())
     }
 
     /// Fetches chapters from the source and stores them without broadcasting any SSE events.
@@ -517,6 +544,13 @@ impl AppService {
                     .await?;
                 page_new_ids.extend(chunk_ids);
             }
+
+            // `INSERT OR IGNORE` above leaves already-known rows untouched, so a
+            // re-listed chapter whose page count changed would keep the count it
+            // was first discovered with. Refreshing it here is what turns
+            // re-upload detection from theoretical into something that can fire.
+            self.refresh_source_page_counts(&mut tx, manga_row_id, &chapter_list.chapters)
+                .await?;
 
             total_received += chapter_list.chapters.len();
             let new_on_page = page_new_ids.len();

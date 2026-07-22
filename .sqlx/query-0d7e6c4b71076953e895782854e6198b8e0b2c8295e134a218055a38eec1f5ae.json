@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, source_chapter_id, chapter_number, scanlator, page_count, download_status, manifest_json, upgrade_available FROM chapters WHERE manga_id = ? ORDER BY chapter_number",
+  "query": "SELECT id, source_chapter_id, chapter_number, scanlator, page_count, source_page_count, download_status, manifest_json, upgrade_available FROM chapters WHERE manga_id = ? ORDER BY chapter_number",
   "describe": {
     "columns": [
       {
@@ -29,18 +29,23 @@
         "type_info": "Integer"
       },
       {
-        "name": "download_status",
+        "name": "source_page_count",
         "ordinal": 5,
         "type_info": "Integer"
       },
       {
-        "name": "manifest_json",
+        "name": "download_status",
         "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "manifest_json",
+        "ordinal": 7,
         "type_info": "Text"
       },
       {
         "name": "upgrade_available",
-        "ordinal": 7,
+        "ordinal": 8,
         "type_info": "Text"
       }
     ],
@@ -53,10 +58,11 @@
       false,
       true,
       true,
+      true,
       false,
       true,
       true
     ]
   },
-  "hash": "45954db6e27ff2b040c0775d00bd0b79c7b27429592eb62c3a3df3bf9e449362"
+  "hash": "0d7e6c4b71076953e895782854e6198b8e0b2c8295e134a218055a38eec1f5ae"
 }

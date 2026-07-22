@@ -16,6 +16,54 @@ function isReassurance(c) {
   return c.kind === 'source_downgraded';
 }
 
+/** @param {number|null|undefined} px */
+function fmtResolution(px) {
+  return px ? `${px} px` : null;
+}
+
+/** @param {string|null|undefined} profile */
+function fmtColour(profile) {
+  if (!profile || profile === 'unknown') return null;
+  return t(`upgrade.colour.${profile}`);
+}
+
+/** @param {number|null|undefined} q */
+function fmtEncoder(q) {
+  return q == null ? null : String(q);
+}
+
+/** @param {number|null|undefined} bpm */
+function fmtBitrate(bpm) {
+  if (!bpm) return null;
+  return bpm >= 1_000_000
+    ? `${(bpm / 1_000_000).toFixed(1)} MB/MP`
+    : `${Math.round(bpm / 1000)} kB/MP`;
+}
+
+/**
+ * Higher wins, but only when both sides are known — a missing measurement must
+ * never render as the other side losing.
+ * @param {number|null|undefined} held
+ * @param {number|null|undefined} cand
+ */
+function higherWins(held, cand) {
+  if (held == null || cand == null || held === cand) return null;
+  return cand > held ? 'candidate' : 'held';
+}
+
+const COLOUR_RANK = { monochrome: 0, colour_accent: 1, full_colour: 2 };
+
+/**
+ * @param {string|null|undefined} held
+ * @param {string|null|undefined} cand
+ */
+function colourWins(held, cand) {
+  const h = COLOUR_RANK[held];
+  const c = COLOUR_RANK[cand];
+  if (h == null || c == null || h === c) return null;
+  return c > h ? 'candidate' : 'held';
+}
+
 /**
  * @param {{ label: string, held: any, candidate: any, better?: 'held'|'candidate'|null }} props
  */
@@ -72,6 +120,38 @@ export function UpgradeCompare({ open, candidate, chapterTitle, onClose, onChang
       }
     });
 
+  const held = candidate.held_score ?? {};
+  const cand = candidate.candidate_score ?? {};
+
+  // Only rows where at least one side measured something. A comparison of two
+  // dashes tells the reader nothing and makes the panel look broken.
+  const measuredRows = [
+    {
+      label: t('upgrade.resolution'),
+      held: fmtResolution(held.median_long_edge_px),
+      candidate: fmtResolution(cand.median_long_edge_px),
+      better: higherWins(held.median_long_edge_px, cand.median_long_edge_px),
+    },
+    {
+      label: t('upgrade.colour'),
+      held: fmtColour(held.colour),
+      candidate: fmtColour(cand.colour),
+      better: colourWins(held.colour, cand.colour),
+    },
+    {
+      label: t('upgrade.encoder'),
+      held: fmtEncoder(held.median_encoder_quality),
+      candidate: fmtEncoder(cand.median_encoder_quality),
+      better: higherWins(held.median_encoder_quality, cand.median_encoder_quality),
+    },
+    {
+      label: t('upgrade.bitrate'),
+      held: fmtBitrate(held.bytes_per_megapixel),
+      candidate: fmtBitrate(cand.bytes_per_megapixel),
+      better: higherWins(held.bytes_per_megapixel, cand.bytes_per_megapixel),
+    },
+  ].filter((row) => row.held != null || row.candidate != null);
+
   const heldPages = candidate.held_page_count;
   const candPages = candidate.candidate_page_count;
   const pageWinner =
@@ -119,6 +199,17 @@ export function UpgradeCompare({ open, candidate, chapterTitle, onClose, onChang
             candidate=${candPages}
             better=${pageWinner}
           />
+          ${measuredRows.map(
+            (row) => html`
+              <${CompareRow}
+                key=${row.label}
+                label=${row.label}
+                held=${row.held}
+                candidate=${row.candidate}
+                better=${row.better}
+              />
+            `,
+          )}
           <${CompareRow}
             label=${t('upgrade.scanlator')}
             held=${candidate.held_scanlator ?? '—'}
@@ -126,6 +217,9 @@ export function UpgradeCompare({ open, candidate, chapterTitle, onClose, onChang
           />
         </div>
 
+        ${measuredRows.length > 0
+          ? html`<p class="text-xs text-text-muted">${t('upgrade.measured_note')}</p>`
+          : html`<p class="text-xs text-text-muted">${t('upgrade.unprobed')}</p>`}
         ${reassurance
           ? html`<p class="text-xs text-text-muted">${t('upgrade.downgrade.note')}</p>`
           : html`<p class="text-xs text-text-muted">${t('upgrade.replace.note')}</p>`}

@@ -34,6 +34,12 @@ pub struct PageDigest {
     pub perceptual_hash: u64,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// Whether the decoded pixels actually carry colour. Absent on manifests
+    /// written before this was captured; `ManifestBackfillJob` fills those in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoder_quality: Option<u8>,
 }
 
 pub const MANIFEST_SCHEMA: u32 = 1;
@@ -117,12 +123,17 @@ pub fn manifest_for_cbz(path: &Path) -> Result<ChapterManifest, ManifestError> {
             .map_err(|e| ManifestError::Archive(e.to_string()))?;
         total_bytes += bytes.len() as u64;
 
-        let (width, height, perceptual_hash) = match image::load_from_memory(&bytes) {
+        let (width, height, perceptual_hash, colour) = match image::load_from_memory(&bytes) {
             Ok(img) => {
                 let (w, h) = (img.width(), img.height());
-                (Some(w), Some(h), crate::quality::perceptual_hash_page(&img))
+                (
+                    Some(w),
+                    Some(h),
+                    crate::quality::perceptual_hash_page(&img),
+                    Some(crate::quality::is_colour_image(&img)),
+                )
             }
-            Err(_) => (None, None, 0),
+            Err(_) => (None, None, 0, None),
         };
 
         pages.push(PageDigest {
@@ -132,6 +143,8 @@ pub fn manifest_for_cbz(path: &Path) -> Result<ChapterManifest, ManifestError> {
             perceptual_hash,
             width,
             height,
+            colour,
+            encoder_quality: crate::probe::jpeg_quality(&bytes),
         });
     }
 
@@ -394,6 +407,8 @@ mod tests {
             perceptual_hash: 0xDEAD_BEEF_1234_5678,
             width: Some(1),
             height: Some(2),
+            colour: None,
+            encoder_quality: None,
         };
         let json = serde_json::to_string(&digest).unwrap();
         assert!(

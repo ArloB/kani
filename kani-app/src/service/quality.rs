@@ -33,6 +33,18 @@ pub struct UpgradeCandidate {
     pub held_scanlator: Option<String>,
     pub candidate_page_count: Option<i64>,
     pub held_page_count: Option<i64>,
+    /// What the held copy actually measures, from its manifest. `None` for a
+    /// chapter whose manifest predates dimension capture.
+    #[serde(default)]
+    pub held_score: Option<kani_core::quality::QualityScore>,
+    /// What the candidate measures, from header probes. `None` when the
+    /// confirmation budget was spent, the source refused range requests, or
+    /// nothing readable came back.
+    #[serde(default)]
+    pub candidate_score: Option<kani_core::quality::QualityScore>,
+    /// Which axis decided it, when a probe made a real comparison possible.
+    #[serde(default)]
+    pub verdict: Option<kani_core::quality::QualityVerdict>,
     pub reason_key: String,
     pub detected_at: i64,
 }
@@ -88,7 +100,7 @@ impl AppService {
 
         let rows = sqlx::query!(
             "SELECT id, source_chapter_id, chapter_number, scanlator, page_count, \
-             download_status, manifest_json, upgrade_available \
+             source_page_count, download_status, manifest_json, upgrade_available \
              FROM chapters WHERE manga_id = ? ORDER BY chapter_number",
             manga_id
         )
@@ -113,10 +125,15 @@ impl AppService {
                 .and_then(|j| serde_json::from_str(j).ok())
                 .unwrap_or_default();
 
-            let held_pages = held
+            let held_manifest = held
                 .manifest_json
                 .as_deref()
-                .and_then(|j| serde_json::from_str::<kani_core::manifest::ChapterManifest>(j).ok())
+                .and_then(|j| serde_json::from_str::<kani_core::manifest::ChapterManifest>(j).ok());
+            let held_score = held_manifest
+                .as_ref()
+                .map(kani_core::quality::score_from_manifest);
+            let held_pages = held_manifest
+                .as_ref()
                 .map(|m| m.page_count as i64)
                 .or(held.page_count);
 
@@ -124,11 +141,12 @@ impl AppService {
 
             // (a) The same chapter, re-listed with a different page count.
             //
-            // Page count is all a listing exposes; resolution cannot be judged
-            // without fetching images, which detection deliberately never does.
-            // So a longer listing is a *candidate*, not a verdict — the score
-            // comparison happens after download, in `apply_upgrade`.
-            if let (Some(hp), Some(lp)) = (held_pages, held.page_count)
+            // `source_page_count` is what the listing said at the last scan;
+            // `held_pages` is what our archive actually holds. Comparing those
+            // two is the whole point — comparing against `page_count` (which
+            // `manifest_capture` writes from that same archive) could only ever
+            // compare a value against itself.
+            if let (Some(hp), Some(lp)) = (held_pages, held.source_page_count)
                 && hp != lp
             {
                 // Page count alone cannot tell better from worse — a longer
@@ -140,16 +158,17 @@ impl AppService {
                 } else {
                     UpgradeKind::SourceDowngraded
                 };
+                let mut reason_key = match kind {
+                    UpgradeKind::SourceDowngraded => "upgrade.reason.source_downgraded",
+                    _ => "upgrade.reason.more_pages",
+                }
+                .to_string();
+                let mut candidate_score = None;
+                let mut verdict = None;
 
                 if confirm_budget > 0
                     && let Some(src) = &source
-                    && let Some(held_score) = held
-                        .manifest_json
-                        .as_deref()
-                        .and_then(|j| {
-                            serde_json::from_str::<kani_core::manifest::ChapterManifest>(j).ok()
-                        })
-                        .map(|m| kani_core::quality::score_from_manifest(&m))
+                    && let Some(held_score) = held_score
                 {
                     confirm_budget -= 1;
                     if let Some(urls) = self
@@ -159,18 +178,22 @@ impl AppService {
                             &held.source_chapter_id,
                         )
                         .await
-                        && let Some((cand_score, _colour)) =
+                        && let Some(cand_score) =
                             self.probe_page_quality(&urls, PROBE_SAMPLES).await
                     {
-                        kind = if kani_core::quality::is_meaningfully_better(
-                            &cand_score,
-                            &held_score,
-                            min_gain,
-                        ) {
-                            UpgradeKind::QualityReupload
-                        } else {
-                            UpgradeKind::SourceDowngraded
+                        let v =
+                            kani_core::quality::compare_quality(&cand_score, &held_score, min_gain);
+                        kind = match v {
+                            kani_core::quality::QualityVerdict::Better(_) => {
+                                UpgradeKind::QualityReupload
+                            }
+                            _ => UpgradeKind::SourceDowngraded,
                         };
+                        if let kani_core::quality::QualityVerdict::Better(reason) = v {
+                            reason_key = reason.i18n_key().to_string();
+                        }
+                        candidate_score = Some(cand_score);
+                        verdict = Some(v);
                     }
                 }
                 candidates.push(UpgradeCandidate {
@@ -182,11 +205,10 @@ impl AppService {
                     held_scanlator: held.scanlator.clone(),
                     candidate_page_count: Some(lp),
                     held_page_count: Some(hp),
-                    reason_key: match kind {
-                        UpgradeKind::SourceDowngraded => "upgrade.reason.source_downgraded",
-                        _ => "upgrade.reason.more_pages",
-                    }
-                    .to_string(),
+                    held_score,
+                    candidate_score,
+                    verdict,
+                    reason_key,
                     detected_at: now_unix(),
                 });
             }
@@ -208,6 +230,42 @@ impl AppService {
                     None => true,
                 };
                 if better {
+                    // A sibling from another group is a different release, not
+                    // a re-encode, so its quality is worth measuring even though
+                    // the ranking alone already justifies offering it. If it is
+                    // already downloaded its manifest is free; otherwise spend a
+                    // probe where the budget allows.
+                    let other_manifest = other.manifest_json.as_deref().and_then(|j| {
+                        serde_json::from_str::<kani_core::manifest::ChapterManifest>(j).ok()
+                    });
+                    let mut candidate_score = other_manifest
+                        .as_ref()
+                        .map(kani_core::quality::score_from_manifest);
+
+                    if candidate_score.is_none()
+                        && confirm_budget > 0
+                        && let Some(src) = &source
+                    {
+                        confirm_budget -= 1;
+                        if let Some(urls) = self
+                            .candidate_page_urls(
+                                src.source_id,
+                                &src.source_manga_id,
+                                &other.source_chapter_id,
+                            )
+                            .await
+                        {
+                            candidate_score = self.probe_page_quality(&urls, PROBE_SAMPLES).await;
+                        }
+                    }
+
+                    let verdict = match (candidate_score, held_score) {
+                        (Some(c), Some(h)) => {
+                            Some(kani_core::quality::compare_quality(&c, &h, min_gain))
+                        }
+                        _ => None,
+                    };
+
                     candidates.push(UpgradeCandidate {
                         held_chapter_id: held.id,
                         kind: UpgradeKind::PreferredScanlator,
@@ -215,8 +273,11 @@ impl AppService {
                         candidate_source_chapter_id: other.source_chapter_id.clone(),
                         candidate_scanlator: other.scanlator.clone(),
                         held_scanlator: held.scanlator.clone(),
-                        candidate_page_count: other.page_count,
+                        candidate_page_count: other.source_page_count.or(other.page_count),
                         held_page_count: held_pages,
+                        held_score,
+                        candidate_score,
+                        verdict,
                         reason_key: "upgrade.reason.preferred_scanlator".to_string(),
                         detected_at: now_unix(),
                     });
@@ -451,10 +512,7 @@ impl AppService {
         &self,
         page_urls: &[String],
         samples: usize,
-    ) -> Option<(
-        kani_core::quality::QualityScore,
-        kani_core::probe::ColourProfile,
-    )> {
+    ) -> Option<kani_core::quality::QualityScore> {
         use kani_core::probe::{PROBE_PREFIX_BYTES, probe_header, sample_indices};
 
         let mut probes = Vec::new();
@@ -483,9 +541,7 @@ impl AppService {
             probes.push(probe_header(&bytes, total));
         }
 
-        let colour = kani_core::probe::colour_profile(&probes);
         kani_core::probe::score_from_probes(&probes, page_urls.len() as u32)
-            .map(|score| (score, colour))
     }
 }
 
@@ -601,6 +657,9 @@ mod tests {
             held_scanlator: Some("Group Z".into()),
             candidate_page_count: Some(20),
             held_page_count: Some(18),
+            held_score: None,
+            candidate_score: None,
+            verdict: None,
             reason_key: "upgrade.reason.preferred_scanlator".into(),
             detected_at: 0,
         };

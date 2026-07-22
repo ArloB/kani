@@ -243,6 +243,25 @@ export default {
     'The source now lists fewer pages than the copy you hold — yours is the better copy.',
   'upgrade.reason.preferred_scanlator':
     'A version is available from a scanlator you rank higher.',
+  'upgrade.reason.resolution': 'The available version is scanned at a higher resolution.',
+  'upgrade.reason.colour': 'The available version is in colour; the copy you hold is not.',
+  'upgrade.reason.encoder':
+    'Both are the same size, but the available version is compressed less aggressively.',
+  'upgrade.reason.bitrate':
+    'Same dimensions, but the available version carries considerably more image data.',
+  'upgrade.reason.unmeasured':
+    'The copy you hold has no recorded dimensions, so it cannot be compared directly.',
+  'upgrade.resolution': 'Resolution',
+  'upgrade.colour': 'Colour',
+  'upgrade.encoder': 'Encoder quality',
+  'upgrade.bitrate': 'Data per megapixel',
+  'upgrade.colour.monochrome': 'Black and white',
+  'upgrade.colour.colour_accent': 'Colour pages',
+  'upgrade.colour.full_colour': 'Full colour',
+  'upgrade.colour.unknown': 'Unknown',
+  'upgrade.unprobed':
+    'The available version was not measured — comparison is limited to what the listing reports.',
+  'upgrade.measured_note': 'Measured from a sample of pages, without downloading the chapter.',
   'storage.archive.open': 'Export archive…',
   'storage.archive.title': 'Export archive',
   'storage.archive.desc':

@@ -198,44 +198,11 @@ fn jpeg_segments(b: &[u8]) -> Vec<(u8, &[u8])> {
     out
 }
 
-/// How colour is distributed across a chapter.
-///
-/// A single colour page is the norm, not the exception: scanlators routinely
-/// open (or close) a monochrome chapter with a colour page, and colour spreads
-/// appear mid-chapter. Treating any colour page as "this is a colour release"
-/// would mislabel most of a library.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ColourProfile {
-    Monochrome,
-    /// Some colour pages — an opener, a closer, or a spread — in an otherwise
-    /// monochrome chapter.
-    ColourAccent,
-    FullColour,
-    /// Nothing conclusive was readable. Ordinary for JPEG chapters, whose
-    /// three-component encoding says nothing about the content.
-    Unknown,
-}
+pub use crate::quality::ColourProfile;
 
 /// Classifies a chapter from the colour flags of the pages actually probed.
-///
-/// `FullColour` requires *every* readable page to be colour. With the usual
-/// three-page sample of first/middle/last, a colour opener and a colour closer
-/// give two of three — which is an accented chapter, not a colour release, and
-/// a majority threshold would get it wrong.
 pub fn colour_profile(probes: &[PageProbe]) -> ColourProfile {
-    let known: Vec<bool> = probes.iter().filter_map(|p| p.colour).collect();
-    if known.is_empty() {
-        return ColourProfile::Unknown;
-    }
-    let colour = known.iter().filter(|c| **c).count();
-    if colour == 0 {
-        ColourProfile::Monochrome
-    } else if colour == known.len() && known.len() > 1 {
-        ColourProfile::FullColour
-    } else {
-        ColourProfile::ColourAccent
-    }
+    crate::quality::colour_profile_from_flags(probes.iter().filter_map(|p| p.colour))
 }
 
 /// Builds a comparable score from a sample of probed pages.
@@ -247,6 +214,7 @@ pub fn score_from_probes(
     probes: &[PageProbe],
     page_count: u32,
 ) -> Option<crate::quality::QualityScore> {
+    let colour = colour_profile(probes);
     let mut long_edges: Vec<u32> = probes
         .iter()
         .filter_map(|p| match (p.width, p.height) {
@@ -283,6 +251,10 @@ pub fn score_from_probes(
         median_long_edge_px,
         bytes_per_megapixel,
         page_count,
+        median_encoder_quality: crate::quality::median_of(
+            probes.iter().filter_map(|p| p.jpeg_quality).collect(),
+        ),
+        colour,
     })
 }
 

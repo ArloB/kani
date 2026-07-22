@@ -621,6 +621,7 @@ fn chapter_info_field_accessor(name: &str) -> String {
         "title" | "scanlator" => format!("row.get_str(\"/{name}\")"),
         "volume" => "row.get_i64(\"/volume\").map(|v| v as i32)".into(),
         "date_uploaded" => "row.get_i64(\"/date_uploaded\")".into(),
+        "page_count" => "row.get_i64(\"/page_count\").map(|v| v as u32)".into(),
         "language" => "row.get_str(\"/language\").unwrap_or_else(|| \"en\".to_string())".into(),
         other => format!("row.get_str(\"/{other}\")"),
     }

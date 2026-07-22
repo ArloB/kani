@@ -30,11 +30,99 @@ pub fn phash_distance(a: u64, b: u64) -> u32 {
     (a ^ b).count_ones()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// How colour is distributed across a chapter.
+///
+/// A single colour page is the norm, not the exception: scanlators routinely
+/// open (or close) a monochrome chapter with a colour page, and colour spreads
+/// appear mid-chapter. Treating any colour page as "this is a colour release"
+/// would mislabel most of a library.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ColourProfile {
+    Monochrome,
+    /// Some colour pages — an opener, a closer, or a spread — in an otherwise
+    /// monochrome chapter.
+    ColourAccent,
+    FullColour,
+    /// Nothing conclusive was readable. Ordinary for JPEG chapters probed by
+    /// header alone, whose three-component encoding says nothing about content.
+    #[default]
+    Unknown,
+}
+
+/// Classifies a chapter from the colour flags of the pages actually sampled.
+///
+/// `FullColour` requires *every* readable page to be colour. With the usual
+/// three-page sample of first/middle/last, a colour opener and a colour closer
+/// give two of three — which is an accented chapter, not a colour release, and
+/// a majority threshold would get it wrong.
+pub fn colour_profile_from_flags(flags: impl IntoIterator<Item = bool>) -> ColourProfile {
+    let known: Vec<bool> = flags.into_iter().collect();
+    if known.is_empty() {
+        return ColourProfile::Unknown;
+    }
+    let colour = known.iter().filter(|c| **c).count();
+    if colour == 0 {
+        ColourProfile::Monochrome
+    } else if colour == known.len() && known.len() > 1 {
+        ColourProfile::FullColour
+    } else {
+        ColourProfile::ColourAccent
+    }
+}
+
+/// Whether a decoded page actually *carries* colour, rather than merely being
+/// stored in a colour-capable encoding.
+///
+/// Most manga pages are three-component JPEGs holding grey content, so the
+/// encoding alone says nothing — which is why the header probe can only ever
+/// answer `Unknown` for them. With the decoded pixels in hand the question is
+/// answerable: sample a bounded grid and count pixels whose channels diverge by
+/// more than chroma subsampling and ringing produce on grey input.
+pub fn is_colour_image(decoded: &image::DynamicImage) -> bool {
+    use image::imageops::FilterType;
+
+    const CHANNEL_SPREAD: u8 = 24;
+    const COLOUR_PIXEL_RATIO: f32 = 0.02;
+    const GRID: u32 = 64;
+
+    if decoded.color().channel_count() < 3 {
+        return false;
+    }
+
+    let small = decoded
+        .resize_exact(GRID, GRID, FilterType::Triangle)
+        .to_rgb8();
+    let mut coloured = 0u32;
+    for p in small.pixels() {
+        let [r, g, b] = p.0;
+        let spread = r.max(g).max(b) - r.min(g).min(b);
+        if spread > CHANNEL_SPREAD {
+            coloured += 1;
+        }
+    }
+    (coloured as f32 / (GRID * GRID) as f32) > COLOUR_PIXEL_RATIO
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct QualityScore {
     pub median_long_edge_px: u32,
     pub bytes_per_megapixel: f32,
     pub page_count: u32,
+    /// Median estimated encoder quality (1–100) across sampled pages, when the
+    /// pages are JPEGs and the estimate could be read at all.
+    #[serde(default)]
+    pub median_encoder_quality: Option<u8>,
+    #[serde(default)]
+    pub colour: ColourProfile,
+}
+
+pub fn median_of(mut values: Vec<u8>) -> Option<u8> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable();
+    Some(values[values.len() / 2])
 }
 
 pub fn score_from_manifest(m: &ChapterManifest) -> QualityScore {
@@ -73,35 +161,126 @@ pub fn score_from_manifest(m: &ChapterManifest) -> QualityScore {
         median_long_edge_px,
         bytes_per_megapixel,
         page_count: m.page_count,
+        median_encoder_quality: median_of(
+            m.pages.iter().filter_map(|p| p.encoder_quality).collect(),
+        ),
+        colour: colour_profile_from_flags(m.pages.iter().filter_map(|p| p.colour)),
     }
 }
 
-/// A candidate only wins on a clear resolution gain, or — at the same resolution
-/// tier — a large bytes-per-megapixel margin. The margin is the noise guard that
-/// stops a trivially larger re-encode from being announced as an upgrade.
+/// Which axis decided a comparison. Carried to the UI so the dialogue can say
+/// *why* something is offered, rather than only that it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityReason {
+    Resolution,
+    Colour,
+    Encoder,
+    Bitrate,
+    /// The held copy has no readable dimensions, so anything readable is an
+    /// improvement on knowing nothing.
+    Unmeasured,
+}
+
+impl QualityReason {
+    pub fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Resolution => "upgrade.reason.resolution",
+            Self::Colour => "upgrade.reason.colour",
+            Self::Encoder => "upgrade.reason.encoder",
+            Self::Bitrate => "upgrade.reason.bitrate",
+            Self::Unmeasured => "upgrade.reason.unmeasured",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case", tag = "verdict", content = "reason")]
+pub enum QualityVerdict {
+    Better(QualityReason),
+    /// Measurably worse on some axis — never offered as an upgrade.
+    Worse,
+    /// Nothing separates them beyond noise.
+    Same,
+}
+
+/// Encoder-quality points that count as a real difference. Below this the
+/// estimate's own error (~8 points, see `probe::jpeg_quality`) dominates.
+const ENCODER_MARGIN: u8 = 12;
+/// Bytes-per-megapixel ratio that counts as a real difference at the same
+/// resolution. The margin is the noise guard that stops a trivially larger
+/// re-encode from being announced as an upgrade.
+const BYTES_MARGIN: f32 = 1.5;
+
+/// Judges a candidate against what is on disk across every axis we can measure:
+/// resolution first, then colour, then encoder quality, then bitrate.
+///
+/// Order matters. Resolution is the only axis every source exposes, so it leads;
+/// a resolution *drop* short-circuits to `Worse` before the cheaper signals get
+/// a chance to argue for a downgrade. Colour outranks the encoder axes because a
+/// colour release is a different artefact, not a better encode of the same one.
+pub fn compare_quality(
+    candidate: &QualityScore,
+    current: &QualityScore,
+    min_res_gain: f32,
+) -> QualityVerdict {
+    use ColourProfile::{FullColour, Monochrome};
+
+    if candidate.median_long_edge_px == 0 {
+        return QualityVerdict::Same;
+    }
+    if current.median_long_edge_px == 0 {
+        return QualityVerdict::Better(QualityReason::Unmeasured);
+    }
+
+    // A monochrome re-upload of a colour release is a downgrade whatever the
+    // pixel count says — checked before resolution, since a higher-resolution
+    // greyscale rip would otherwise read as an upgrade.
+    if current.colour == FullColour && candidate.colour == Monochrome {
+        return QualityVerdict::Worse;
+    }
+
+    let res_ratio = candidate.median_long_edge_px as f32 / current.median_long_edge_px as f32;
+    if res_ratio < 1.0 {
+        return QualityVerdict::Worse;
+    }
+    if candidate.colour == FullColour && current.colour == Monochrome {
+        return QualityVerdict::Better(QualityReason::Colour);
+    }
+    if res_ratio >= min_res_gain {
+        return QualityVerdict::Better(QualityReason::Resolution);
+    }
+
+    if let (Some(cand_q), Some(cur_q)) = (
+        candidate.median_encoder_quality,
+        current.median_encoder_quality,
+    ) {
+        if cand_q >= cur_q.saturating_add(ENCODER_MARGIN) {
+            return QualityVerdict::Better(QualityReason::Encoder);
+        }
+        if cand_q.saturating_add(ENCODER_MARGIN) <= cur_q {
+            return QualityVerdict::Worse;
+        }
+    }
+
+    if current.bytes_per_megapixel > 0.0
+        && candidate.bytes_per_megapixel >= current.bytes_per_megapixel * BYTES_MARGIN
+    {
+        return QualityVerdict::Better(QualityReason::Bitrate);
+    }
+
+    QualityVerdict::Same
+}
+
 pub fn is_meaningfully_better(
     candidate: &QualityScore,
     current: &QualityScore,
     min_res_gain: f32,
 ) -> bool {
-    if candidate.median_long_edge_px == 0 {
-        return false;
-    }
-    if current.median_long_edge_px == 0 {
-        return true;
-    }
-
-    let res_ratio = candidate.median_long_edge_px as f32 / current.median_long_edge_px as f32;
-    if res_ratio >= min_res_gain {
-        return true;
-    }
-    if res_ratio < 1.0 {
-        return false;
-    }
-
-    const BYTES_MARGIN: f32 = 1.5;
-    current.bytes_per_megapixel > 0.0
-        && candidate.bytes_per_megapixel >= current.bytes_per_megapixel * BYTES_MARGIN
+    matches!(
+        compare_quality(candidate, current, min_res_gain),
+        QualityVerdict::Better(_)
+    )
 }
 
 #[cfg(test)]
@@ -127,6 +306,8 @@ mod tests {
                     perceptual_hash: 0,
                     width: w,
                     height: h,
+                    colour: None,
+                    encoder_quality: None,
                 })
                 .collect(),
         }
@@ -214,6 +395,170 @@ mod tests {
         let current = score_from_manifest(&manifest(vec![(Some(800), Some(1200))], 1_000_000));
         let much = score_from_manifest(&manifest(vec![(Some(800), Some(1200))], 2_000_000));
         assert!(is_meaningfully_better(&much, &current, 1.2));
+    }
+
+    fn score(long_edge: u32, bpm: f32, enc: Option<u8>, colour: ColourProfile) -> QualityScore {
+        QualityScore {
+            median_long_edge_px: long_edge,
+            bytes_per_megapixel: bpm,
+            page_count: 20,
+            median_encoder_quality: enc,
+            colour,
+        }
+    }
+
+    #[test]
+    fn a_colour_release_beats_a_monochrome_one_at_the_same_resolution() {
+        let held = score(1600, 1000.0, None, ColourProfile::Monochrome);
+        let cand = score(1600, 1000.0, None, ColourProfile::FullColour);
+        assert_eq!(
+            compare_quality(&cand, &held, 1.2),
+            QualityVerdict::Better(QualityReason::Colour)
+        );
+    }
+
+    #[test]
+    fn a_monochrome_rip_never_beats_a_colour_release_however_large() {
+        let held = score(1600, 1000.0, None, ColourProfile::FullColour);
+        let cand = score(3200, 9000.0, None, ColourProfile::Monochrome);
+        assert_eq!(
+            compare_quality(&cand, &held, 1.2),
+            QualityVerdict::Worse,
+            "a higher-resolution greyscale rip of a colour chapter is a downgrade"
+        );
+    }
+
+    #[test]
+    fn an_accented_chapter_is_not_treated_as_a_colour_release() {
+        // Two of three probed pages colour = an opener and a closer, which is
+        // the ordinary shape of a monochrome chapter.
+        assert_eq!(
+            colour_profile_from_flags([true, false, true]),
+            ColourProfile::ColourAccent
+        );
+        let held = score(1600, 1000.0, None, ColourProfile::Monochrome);
+        let cand = score(1600, 1000.0, None, ColourProfile::ColourAccent);
+        assert_eq!(
+            compare_quality(&cand, &held, 1.2),
+            QualityVerdict::Same,
+            "a colour opener is not a colour release"
+        );
+    }
+
+    #[test]
+    fn a_single_known_colour_page_cannot_be_a_full_colour_release() {
+        assert_eq!(
+            colour_profile_from_flags([true]),
+            ColourProfile::ColourAccent,
+            "one sample is too thin to call a whole chapter colour"
+        );
+        assert_eq!(
+            colour_profile_from_flags([false]),
+            ColourProfile::Monochrome
+        );
+        assert_eq!(
+            colour_profile_from_flags(std::iter::empty()),
+            ColourProfile::Unknown
+        );
+    }
+
+    #[test]
+    fn a_materially_better_encode_wins_at_the_same_resolution() {
+        let held = score(1600, 1000.0, Some(70), ColourProfile::Unknown);
+        let cand = score(1600, 1000.0, Some(92), ColourProfile::Unknown);
+        assert_eq!(
+            compare_quality(&cand, &held, 1.2),
+            QualityVerdict::Better(QualityReason::Encoder)
+        );
+    }
+
+    #[test]
+    fn an_encoder_difference_inside_the_estimates_error_does_not_win() {
+        let held = score(1600, 1000.0, Some(80), ColourProfile::Unknown);
+        let cand = score(1600, 1000.0, Some(88), ColourProfile::Unknown);
+        assert_eq!(
+            compare_quality(&cand, &held, 1.2),
+            QualityVerdict::Same,
+            "8 points is within the estimator's own error, so it proves nothing"
+        );
+    }
+
+    #[test]
+    fn a_worse_encode_at_the_same_resolution_is_a_downgrade() {
+        let held = score(1600, 1000.0, Some(92), ColourProfile::Unknown);
+        let cand = score(1600, 4000.0, Some(60), ColourProfile::Unknown);
+        assert_eq!(
+            compare_quality(&cand, &held, 1.2),
+            QualityVerdict::Worse,
+            "a bloated low-quality re-encode must not win on bytes-per-megapixel"
+        );
+    }
+
+    #[test]
+    fn resolution_outranks_a_worse_encode() {
+        let held = score(800, 1000.0, Some(95), ColourProfile::Unknown);
+        let cand = score(1600, 1000.0, Some(60), ColourProfile::Unknown);
+        assert_eq!(
+            compare_quality(&cand, &held, 1.2),
+            QualityVerdict::Better(QualityReason::Resolution),
+            "double the pixels is worth more than the encoder estimate"
+        );
+    }
+
+    #[test]
+    fn an_unmeasurable_held_copy_yields_the_unmeasured_reason() {
+        let held = score(0, 0.0, None, ColourProfile::Unknown);
+        let cand = score(1600, 1000.0, None, ColourProfile::Unknown);
+        assert_eq!(
+            compare_quality(&cand, &held, 1.2),
+            QualityVerdict::Better(QualityReason::Unmeasured)
+        );
+    }
+
+    #[test]
+    fn an_unmeasurable_candidate_is_never_offered() {
+        let held = score(1600, 1000.0, None, ColourProfile::Unknown);
+        let cand = score(0, 0.0, None, ColourProfile::Unknown);
+        assert_eq!(compare_quality(&cand, &held, 1.2), QualityVerdict::Same);
+    }
+
+    #[test]
+    fn a_grey_image_is_not_reported_as_colour() {
+        let grey = image::DynamicImage::ImageLuma8(image::GrayImage::from_pixel(
+            32,
+            32,
+            image::Luma([120]),
+        ));
+        assert!(!is_colour_image(&grey));
+
+        // A three-channel encoding of grey content — the case that makes the
+        // header probe useless and this function necessary.
+        let grey_rgb = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            32,
+            32,
+            image::Rgb([120, 120, 120]),
+        ));
+        assert!(!is_colour_image(&grey_rgb));
+    }
+
+    #[test]
+    fn a_saturated_image_is_reported_as_colour() {
+        let red = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            32,
+            32,
+            image::Rgb([200, 30, 30]),
+        ));
+        assert!(is_colour_image(&red));
+    }
+
+    #[test]
+    fn a_lone_colour_speck_does_not_make_a_page_colour() {
+        let mut img = image::RgbImage::from_pixel(64, 64, image::Rgb([128, 128, 128]));
+        img.put_pixel(0, 0, image::Rgb([255, 0, 0]));
+        assert!(
+            !is_colour_image(&image::DynamicImage::ImageRgb8(img)),
+            "one stray pixel is scanner noise, not a colour page"
+        );
     }
 
     #[test]
