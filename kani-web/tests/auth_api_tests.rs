@@ -197,3 +197,75 @@ async fn get_current_user_returns_full_user_for_authenticated_session() {
         "password hash must not be exposed"
     );
 }
+
+#[tokio::test]
+async fn a_revoked_session_cookie_stops_working() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+
+    // Two independent logins for the same user — one to revoke, one to revoke from.
+    let victim = login(&app, username.clone(), password.clone()).await;
+    let survivor = login(&app, username, password).await;
+
+    // The victim must be recorded before it can be named.
+    let ok = app
+        .clone()
+        .oneshot(authed_get("/rest/auth/sessions", &victim))
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
+
+    let listing = app
+        .clone()
+        .oneshot(authed_get("/rest/auth/sessions", &survivor))
+        .await
+        .unwrap();
+    let sessions = common::body_json(listing).await;
+    let ids: Vec<String> = sessions["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["id"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        ids.len() >= 2,
+        "both logins should be listed, got {}",
+        ids.len()
+    );
+
+    // Revoke every session except the surviving one.
+    let res = app
+        .clone()
+        .oneshot(
+            axum::http::Request::builder()
+                .method("DELETE")
+                .uri("/rest/auth/sessions")
+                .header(axum::http::header::COOKIE, &survivor)
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // The revoked cookie must now be refused. Writing `revoked_at` and hiding
+    // the row from the listing is not revocation if the cookie still works.
+    let replay = app
+        .clone()
+        .oneshot(authed_get("/rest/auth/sessions", &victim))
+        .await
+        .unwrap();
+    assert_eq!(
+        replay.status(),
+        StatusCode::UNAUTHORIZED,
+        "a revoked session must not be able to keep making requests"
+    );
+
+    // And the session doing the revoking must be unaffected.
+    let still_ok = app
+        .oneshot(authed_get("/rest/auth/sessions", &survivor))
+        .await
+        .unwrap();
+    assert_eq!(still_ok.status(), StatusCode::OK);
+}
