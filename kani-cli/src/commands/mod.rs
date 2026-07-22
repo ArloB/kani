@@ -167,6 +167,12 @@ pub enum Command {
         #[arg(value_name = "CBZ")]
         path: std::path::PathBuf,
     },
+    /// Show what a header probe learns from an image's first few kilobytes
+    Probe {
+        /// Path to an image file
+        #[arg(value_name = "IMAGE")]
+        path: std::path::PathBuf,
+    },
     /// Compare two CBZs page by page with perceptual hashes
     PhashCompare {
         /// First .cbz
@@ -327,6 +333,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         } => setup::run(vendors, tailwind, esbuild),
         Command::ArchiveVerify { path } => archive::verify(&path),
         Command::Quality { path } => quality::score(&path),
+        Command::Probe { path } => quality::probe(&path),
         Command::PhashCompare { a, b } => quality::phash_compare(&a, &b),
         Command::Manifest { path } => archive::manifest(&path),
         Command::Icons => icons::run(),

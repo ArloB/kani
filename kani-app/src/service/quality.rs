@@ -362,6 +362,67 @@ fn collect_candidates(rows: impl Iterator<Item = Option<String>>) -> Vec<Upgrade
         .collect()
 }
 
+impl AppService {
+    /// Reads dimensions, size and encoding of a few pages without downloading
+    /// them, by range-requesting each page's header.
+    ///
+    /// This is what makes a genuine pre-download comparison possible: a source
+    /// listing carries page counts and URLs, never dimensions, so before this
+    /// the only signal was "the count changed".
+    pub async fn probe_page_quality(
+        &self,
+        page_urls: &[String],
+        samples: usize,
+    ) -> Option<kani_core::quality::QualityScore> {
+        use kani_core::probe::{PROBE_PREFIX_BYTES, probe_header, sample_indices};
+
+        let mut probes = Vec::new();
+        for idx in sample_indices(page_urls.len(), samples) {
+            let Some(url) = page_urls.get(idx) else {
+                continue;
+            };
+            let mut headers = rquest::header::HeaderMap::new();
+            if let Ok(v) = rquest::header::HeaderValue::from_str(&format!(
+                "bytes=0-{}",
+                PROBE_PREFIX_BYTES - 1
+            )) {
+                headers.insert(rquest::header::RANGE, v);
+            }
+
+            let Ok(resp) = self.smart_client.safe_get(url, Some(headers)).await else {
+                continue;
+            };
+            // A server that ignores Range answers 200 with the whole file; the
+            // read is capped either way so an uncooperative host cannot make a
+            // probe cost as much as a download.
+            let total = content_range_total(resp.headers());
+            let Ok(bytes) = resp.bytes_limited(PROBE_PREFIX_BYTES).await else {
+                continue;
+            };
+            probes.push(probe_header(&bytes, total));
+        }
+
+        kani_core::probe::score_from_probes(&probes, page_urls.len() as u32)
+    }
+}
+
+/// Total size from `Content-Range: bytes 0-4095/123456`, falling back to
+/// `Content-Length` when the server served the whole file.
+fn content_range_total(headers: &rquest::header::HeaderMap) -> Option<u64> {
+    if let Some(cr) = headers
+        .get(rquest::header::CONTENT_RANGE)
+        .and_then(|v| v.to_str().ok())
+        && let Some((_, total)) = cr.rsplit_once('/')
+        && let Ok(n) = total.trim().parse::<u64>()
+    {
+        return Some(n);
+    }
+    headers
+        .get(rquest::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+}
+
 /// Maps a reading position from an old page count onto a new one.
 ///
 /// Equal counts carry straight across. Otherwise the position is scaled and
@@ -382,6 +443,41 @@ pub fn remap_progress(last_page_read: i64, old_count: i64, new_count: i64) -> i6
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    fn headers_with(pairs: &[(rquest::header::HeaderName, &str)]) -> rquest::header::HeaderMap {
+        let mut h = rquest::header::HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(k.clone(), rquest::header::HeaderValue::from_str(v).unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn total_size_comes_from_content_range_when_the_server_honours_it() {
+        let h = headers_with(&[
+            (rquest::header::CONTENT_RANGE, "bytes 0-4095/523118"),
+            (rquest::header::CONTENT_LENGTH, "4096"),
+        ]);
+        assert_eq!(
+            content_range_total(&h),
+            Some(523_118),
+            "Content-Length is the slice, not the page — using it would make \
+             every probed page look tiny"
+        );
+    }
+
+    #[test]
+    fn total_size_falls_back_when_range_was_ignored() {
+        let h = headers_with(&[(rquest::header::CONTENT_LENGTH, "523118")]);
+        assert_eq!(content_range_total(&h), Some(523_118));
+        assert_eq!(content_range_total(&rquest::header::HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn a_malformed_content_range_does_not_poison_the_size() {
+        let h = headers_with(&[(rquest::header::CONTENT_RANGE, "bytes */unknown")]);
+        assert_eq!(content_range_total(&h), None);
+    }
 
     #[test]
     fn equal_page_counts_carry_progress_unchanged() {

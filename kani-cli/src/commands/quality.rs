@@ -56,3 +56,33 @@ pub fn phash_compare(a: &Path, b: &Path) -> Result<(), CliError> {
     }
     Ok(())
 }
+
+/// Reports what a header probe can learn about a local image, mirroring exactly
+/// what upgrade detection reads from a remote page's first few kilobytes.
+pub fn probe(path: &Path) -> Result<(), CliError> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| CliError::Other(format!("cannot read {}: {e}", path.display())))?;
+    let prefix = &bytes[..bytes.len().min(kani_core::probe::PROBE_PREFIX_BYTES)];
+    let p = kani_core::probe::probe_header(prefix, Some(bytes.len() as u64));
+
+    println!("{}", path.display());
+    println!("  read {} of {} bytes", prefix.len(), bytes.len());
+    match (p.width, p.height) {
+        (Some(w), Some(h)) => println!("  dimensions      {w}x{h}"),
+        _ => println!("  dimensions      unreadable"),
+    }
+    println!("  bytes           {}", p.bytes.unwrap_or(0));
+    println!(
+        "  colour          {}",
+        match p.colour {
+            Some(true) => "yes",
+            Some(false) => "greyscale",
+            None => "unknown (three-component JPEG)",
+        }
+    );
+    match p.jpeg_quality {
+        Some(q) => println!("  jpeg quality    ~{q}"),
+        None => println!("  jpeg quality    n/a"),
+    }
+    Ok(())
+}

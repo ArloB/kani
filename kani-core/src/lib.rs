@@ -16,6 +16,7 @@ pub mod image_transform;
 pub mod manifest;
 pub mod network;
 pub mod option_set_fetcher;
+pub mod probe;
 pub mod quality;
 pub mod scripting;
 pub mod sources;
