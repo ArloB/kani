@@ -228,7 +228,11 @@ function useImportProgress(loading, origin) {
     function onSse(e) {
       const d = /** @type {any} */ (e).detail;
       if (d?.origin !== origin) return;
-      if (d.type === 'import_progress') {
+      if (d.type === 'import_started') {
+        // Without this the panel is blank until the first item lands, so a
+        // slow import is indistinguishable from a hung one.
+        setProgress({ completed: 0, total: d.total, title: null });
+      } else if (d.type === 'import_progress') {
         setProgress({ completed: d.completed, total: d.total, title: d.title });
       } else if (d.type === 'import_completed') {
         setProgress(null);

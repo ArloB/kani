@@ -28,7 +28,6 @@ impl AppService {
             auto_scan: s.auto_scan,
             scan_interval_minutes: s.scan_interval_minutes,
             scan_exclude_completed: s.scan_exclude_completed,
-            auto_download_category_id: s.auto_download_category_id,
             auto_download_category_ids: serde_json::from_str(&s.auto_download_category_ids)
                 .unwrap_or_default(),
             default_tracking_enabled: s.default_tracking_enabled,

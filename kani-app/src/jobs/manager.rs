@@ -592,7 +592,6 @@ impl JobManager {
             let progress = JobProgressReporter::new(job_id, job_type, sse_tx.clone());
             let ctx = JobContext {
                 pool: pool.clone(),
-                sse_tx: sse_tx.clone(),
                 cancel: job_cancel.clone(),
                 progress: progress.clone(),
                 concurrency: JobConcurrencySnapshot {

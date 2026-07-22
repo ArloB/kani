@@ -141,6 +141,7 @@ export default {
   'repo.list.extension_count': '{count} extension(s)',
   'repo.list.last_refreshed': 'Updated {date}',
   'repo.add.success': '{name} added.',
+  'repo.source_updating': 'Updating {name}\u2026',
   'repo.action.refresh': 'Refresh',
   'repo.action.remove': 'Remove',
   'repo.remove.confirm': 'Remove this repository? Installed sources from it will remain.',

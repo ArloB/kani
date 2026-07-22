@@ -67,8 +67,6 @@ pub(crate) type ServiceCell = Arc<std::sync::Mutex<Option<crate::service::AppSer
 #[derive(Clone)]
 pub struct JobContext {
     pub pool: sqlx::sqlite::SqlitePool,
-    #[allow(dead_code)]
-    pub(crate) sse_tx: tokio::sync::broadcast::Sender<AppEvent>,
     pub cancel: tokio_util::sync::CancellationToken,
     pub progress: JobProgressReporter,
     pub concurrency: JobConcurrencySnapshot,

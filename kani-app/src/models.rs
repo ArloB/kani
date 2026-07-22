@@ -26,7 +26,6 @@ pub struct Settings {
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
     pub scan_exclude_completed: bool,
-    pub auto_download_category_id: Option<i64>,
     pub auto_download_category_ids: String,
     pub default_tracking_enabled: bool,
     pub http_request_logging: bool,
