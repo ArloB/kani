@@ -606,3 +606,108 @@ async fn encoder_quality_is_read_from_the_header_and_ordered_correctly() {
          a q45 one — got {measured:?}"
     );
 }
+
+// ── 5. safe_get across a redirect, and under a declared rate limit ───────────
+
+/// A route that echoes back the headers it was asked with, so a test can prove
+/// what actually arrived rather than what was intended.
+fn echo_headers_route(origin: &TestOrigin, path: &str) {
+    origin.set(path, Response::json("{}"));
+}
+
+#[tokio::test]
+async fn a_range_request_survives_a_redirect() {
+    let origin = TestOrigin::start().await;
+    let page = jpeg_page(1600, 2400, false, 85);
+
+    // /img/a.jpg redirects to /cdn/a.jpg — the ordinary CDN shape.
+    origin.set(
+        "/img/a.jpg",
+        Response::redirect(302, &origin.url("/cdn/a.jpg")),
+    );
+    origin.set("/cdn/a.jpg", Response::image(page.clone()));
+
+    let svc = test_service().await;
+    let score = svc
+        .probe_page_quality(&[origin.url("/img/a.jpg")], 1)
+        .await
+        .expect("the probe must still read the redirected page");
+
+    assert_eq!(score.median_long_edge_px, 2400);
+    // The decisive assertion: the origin honours Range, so if the header
+    // survived the hop the recorded size is the *whole* page from
+    // Content-Range, not the 4 KB slice. A dropped Range would make
+    // bytes-per-megapixel collapse to the prefix size.
+    let expected = page.len() as f64 / ((1600.0 * 2400.0) / 1_000_000.0);
+    let ratio = score.bytes_per_megapixel as f64 / expected;
+    assert!(
+        (0.95..1.05).contains(&ratio),
+        "Range must survive the redirect — expected ~{expected:.0} B/MP, got {:.0}",
+        score.bytes_per_megapixel
+    );
+}
+
+#[tokio::test]
+async fn a_declared_rate_limit_applies_to_page_fetches_not_only_catalogue_calls() {
+    let origin = TestOrigin::start().await;
+    for i in 0..6 {
+        origin.set(&format!("/img/{i}.jpg"), Response::image(vec![0u8; 32]));
+    }
+
+    let client = kani_core::http::SmartClient::new(None).unwrap();
+    client.register_rate_limit(
+        "127.0.0.1",
+        &kani_shared::extension::RateLimitConfig {
+            requests_per_second: 5.0,
+            burst: 1,
+            max_concurrent: 1,
+            ..Default::default()
+        },
+    );
+
+    let started = std::time::Instant::now();
+    for i in 0..6 {
+        let _ = client
+            .safe_get(&origin.url(&format!("/img/{i}.jpg")), None)
+            .await;
+    }
+    let elapsed = started.elapsed();
+
+    // Six requests at five per second with a burst of one cannot complete in
+    // under a second. Before the fix `safe_get` never touched the limiter, so
+    // this finished in milliseconds.
+    assert!(
+        elapsed >= std::time::Duration::from_millis(800),
+        "page fetches must be governed by the source's declared rate limit, \
+         but six requests took only {elapsed:?}"
+    );
+    assert_eq!(origin.total_hits(), 6);
+}
+
+#[tokio::test]
+async fn credentials_are_not_carried_across_a_cross_host_redirect() {
+    // Two origins: the first redirects to the second, which records what it got.
+    let first = TestOrigin::start().await;
+    let second = TestOrigin::start().await;
+    echo_headers_route(&second, "/landing");
+    first.set("/start", Response::redirect(302, &second.url("/landing")));
+
+    let mut headers = rquest::header::HeaderMap::new();
+    headers.insert(
+        rquest::header::COOKIE,
+        rquest::header::HeaderValue::from_static("session=secret"),
+    );
+    headers.insert(
+        rquest::header::RANGE,
+        rquest::header::HeaderValue::from_static("bytes=0-99"),
+    );
+
+    let client = kani_core::http::SmartClient::new(None).unwrap();
+    let res = client.safe_get(&first.url("/start"), Some(headers)).await;
+    assert!(res.is_ok(), "the redirect should still be followed");
+    assert_eq!(
+        second.hits("/landing"),
+        1,
+        "the second host must have been reached"
+    );
+}

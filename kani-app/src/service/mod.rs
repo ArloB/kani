@@ -184,22 +184,29 @@ fn parse_cipher_hex(hex: &str) -> Option<encryption::CredentialCipher> {
     }
 }
 
+/// Takes a filesystem path rather than a URL: the database lives wherever
+/// `KANI_DATA_DIR` says, and a path with a space, a `?` or a `#` in it cannot be
+/// pasted into a `sqlite://…` string without corrupting the URL.
 fn connect_options(
-    url: &str,
+    path: &std::path::Path,
     slow_query_threshold_ms: u64,
-) -> sqlx::Result<sqlx::sqlite::SqliteConnectOptions> {
+) -> sqlx::sqlite::SqliteConnectOptions {
     use sqlx::ConnectOptions;
-    use std::str::FromStr;
 
-    Ok(sqlx::sqlite::SqliteConnectOptions::from_str(url)?
+    sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
         .log_statements(log::LevelFilter::Debug)
         .log_slow_statements(
             log::LevelFilter::Warn,
             std::time::Duration::from_millis(slow_query_threshold_ms),
-        ))
+        )
 }
 
-async fn make_write_pool(url: &str, slow_query_threshold_ms: u64) -> sqlx::Result<SqlitePool> {
+async fn make_write_pool(
+    path: &std::path::Path,
+    slow_query_threshold_ms: u64,
+) -> sqlx::Result<SqlitePool> {
     SqlitePoolOptions::new()
         .max_connections(1)
         .after_connect(|conn, _| {
@@ -208,12 +215,12 @@ async fn make_write_pool(url: &str, slow_query_threshold_ms: u64) -> sqlx::Resul
                 Ok(())
             })
         })
-        .connect_with(connect_options(url, slow_query_threshold_ms)?)
+        .connect_with(connect_options(path, slow_query_threshold_ms))
         .await
 }
 
 async fn make_read_pool(
-    url: &str,
+    path: &std::path::Path,
     size: u32,
     slow_query_threshold_ms: u64,
 ) -> sqlx::Result<SqlitePool> {
@@ -225,7 +232,7 @@ async fn make_read_pool(
                 Ok(())
             })
         })
-        .connect_with(connect_options(url, slow_query_threshold_ms)?)
+        .connect_with(connect_options(path, slow_query_threshold_ms))
         .await
 }
 
@@ -256,7 +263,15 @@ async fn apply_pragmas(
 
 impl AppService {
     pub async fn new(data_dir: &std::path::Path) -> Result<Self> {
-        let db_url = "sqlite://kani.db?mode=rwc";
+        // The database belongs in the data directory, alongside the keyfiles.
+        // It used to be opened as a bare `sqlite://kani.db`, resolved against
+        // the *working directory* — so `KANI_DATA_DIR` moved the keys and left
+        // the database behind, silently splitting an install across two places.
+        // Docker never noticed because its working directory is already /data.
+        let db_path = data_dir.join("kani.db");
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
         let read_pool_size: u32 = std::env::var("KANI_DB_READ_POOL_SIZE")
             .ok()
             .and_then(|v| v.trim().parse().ok())
@@ -265,8 +280,8 @@ impl AppService {
             .ok()
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(100);
-        let pool = make_write_pool(db_url, slow_query_threshold_ms).await?;
-        let read_pool = make_read_pool(db_url, read_pool_size, slow_query_threshold_ms).await?;
+        let pool = make_write_pool(&db_path, slow_query_threshold_ms).await?;
+        let read_pool = make_read_pool(&db_path, read_pool_size, slow_query_threshold_ms).await?;
 
         tracing::info!("SQL Pool Created");
 

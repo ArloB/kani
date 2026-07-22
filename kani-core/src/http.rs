@@ -17,6 +17,21 @@ pub struct RateState {
     semaphore: Arc<tokio::sync::Semaphore>,
 }
 
+fn host_of(url: &str) -> Option<String> {
+    url.parse::<rquest::Url>()
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
+}
+
+/// Everything the caller supplied except what authenticates them.
+fn without_credential_headers(h: &rquest::header::HeaderMap) -> rquest::header::HeaderMap {
+    let mut out = h.clone();
+    out.remove(rquest::header::AUTHORIZATION);
+    out.remove(rquest::header::COOKIE);
+    out.remove(rquest::header::PROXY_AUTHORIZATION);
+    out
+}
+
 pub struct HostCircuit {
     consecutive_failures: std::sync::atomic::AtomicU32,
     open_until: std::sync::Mutex<Option<std::time::Instant>>,
@@ -316,7 +331,15 @@ impl SmartClient {
     }
 
     /// Registers a per-domain rate limit config. Called at source load time.
+    /// Registers a per-host rate limit.
+    ///
+    /// The key is canonicalised through `base_domain`, because that is what
+    /// every lookup uses. Callers pass the host straight off a `base_url`, so
+    /// a source at `api.example.com` was registering under `api.example.com`
+    /// while every request looked up `example.com` — the limit existed and was
+    /// never consulted.
     pub fn register_rate_limit(&self, domain: &str, cfg: &kani_shared::extension::RateLimitConfig) {
+        let domain = &base_domain(domain);
         let period_ns = (1_000_000_000.0 / cfg.requests_per_second.max(0.001)) as u64;
         let burst = NonZeroU32::new(cfg.burst.max(1)).unwrap_or(NonZeroU32::MIN);
         let quota = Quota::with_period(std::time::Duration::from_nanos(period_ns))
@@ -333,7 +356,7 @@ impl SmartClient {
 
     /// Removes the rate limit state for a domain. Called when a source is removed or reloaded.
     pub fn deregister_rate_limit(&self, domain: &str) {
-        self.rate_states.remove(domain);
+        self.rate_states.remove(&base_domain(domain));
     }
 
     fn circuit_for(&self, domain: &str) -> Arc<HostCircuit> {
@@ -658,18 +681,51 @@ impl SmartClient {
             )));
         }
 
+        // A source declares a rate limit so that *all* of its traffic honours
+        // it. `send_request` has always waited here; `safe_get` never did, which
+        // exempted the highest-volume traffic a source generates — page images,
+        // covers, probes — from the one limit meant to keep it unbanned.
+        let rate_state = self
+            .rate_states
+            .get(&circuit_domain)
+            .map(|r| Arc::clone(&*r));
+        if let Some(ref state) = rate_state {
+            state.limiter.until_ready().await;
+        }
+        let _semaphore_permit = if let Some(ref state) = rate_state {
+            state.semaphore.clone().acquire_owned().await.ok()
+        } else {
+            None
+        };
+
+        let initial_host = host_of(initial_url);
+
         let mut redirect_count = 0usize;
         let mut retry_count = 0u32;
 
         loop {
             let mut req_builder = self.client.get(&current_url);
-            if current_url == initial_url {
-                if let Some(cache) = cond_cache {
-                    req_builder = cache.apply_to(initial_url, req_builder);
-                }
-                if let Some(ref h) = headers {
-                    req_builder = req_builder.headers(h.clone());
-                }
+            // Conditional-GET validators stay pinned to the URL they were
+            // stored for; an ETag means nothing to whatever the redirect lands
+            // on.
+            if current_url == initial_url
+                && let Some(cache) = cond_cache
+            {
+                req_builder = cache.apply_to(initial_url, req_builder);
+            }
+            if let Some(ref h) = headers {
+                // Caller headers must survive a redirect. CDN chains
+                // (origin → edge → signed URL) are the normal case, and a hop
+                // that drops `Range` turns a four-kilobyte probe into a full
+                // image download, while one that drops `Referer` collects a
+                // hotlink 403. Credentials are the exception: they are scoped
+                // to the host that issued them and must not follow the
+                // redirect off it.
+                req_builder = req_builder.headers(if host_of(&current_url) == initial_host {
+                    h.clone()
+                } else {
+                    without_credential_headers(h)
+                });
             }
             if !solver_headers.is_empty() {
                 req_builder = req_builder.headers(solver_headers.clone());
@@ -1301,6 +1357,27 @@ mod tests {
     }
 
     // ── base_domain ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn a_rate_limit_registered_on_a_subdomain_is_found_by_the_apex_lookup() {
+        let client = SmartClient::new_for_test().unwrap();
+        let cfg = kani_shared::extension::RateLimitConfig {
+            requests_per_second: 1.0,
+            burst: 1,
+            max_concurrent: 1,
+            ..Default::default()
+        };
+        // Sources register with the host straight off their base_url, which is
+        // routinely a subdomain; every request looks up the base domain.
+        client.register_rate_limit("api.example.com", &cfg);
+        assert!(
+            client.rate_states.get("example.com").is_some(),
+            "a limit registered on a subdomain must be findable under the key \
+             requests actually use, or it silently governs nothing"
+        );
+        client.deregister_rate_limit("api.example.com");
+        assert!(client.rate_states.get("example.com").is_none());
+    }
 
     #[test]
     fn base_domain_strips_subdomain() {
