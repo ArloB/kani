@@ -6,6 +6,8 @@ import { getState as getSession, setState as setSession } from './session.js';
 import { getState, setState, updateState } from './cache.js';
 import { getState as getUiState } from './ui-state.js';
 import { postToServiceWorker, cacheChapter } from './offline.js';
+import { showToast } from './components/toast.js';
+import { t } from './i18n.js';
 
 const SSE_URL = '/rest/events';
 const MAX_DELAY_MS = 30_000;
@@ -251,6 +253,27 @@ function _handleEvent(data) {
 
   if (type === 'library_invalidated') {
     updateState('libraryInvalidation', (n) => n + 1);
+    return;
+  }
+
+  // ── Upgrades found by a scan ─────────────────────────────────────────────
+  // Emitted since upgrade detection shipped and handled by nobody, so a scan
+  // that found replaceable chapters left no trace until the user happened to
+  // open the Upgrades page.
+  if (type === 'upgrades_found') {
+    updateState('upgradesPending', (n) => (Number(n) || 0) + (Number(data.count) || 0));
+    return;
+  }
+
+  // ── A source tripped its circuit breaker ─────────────────────────────────
+  // The event carries the host and failure count and was broadcast to nothing,
+  // so requests to a failing source simply started erroring with no
+  // explanation of why or for how long.
+  if (type === 'circuit_open') {
+    showToast(
+      t('sse.circuit_open', { host: data.host ?? '?', count: data.failure_count ?? 0 }),
+      { type: 'error' },
+    );
     return;
   }
 

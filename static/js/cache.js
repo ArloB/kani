@@ -26,6 +26,7 @@ const _store = createSignalStore({
 
   /** @type {ScanNotification[]} */
   scanNotifications: [],
+  upgradesPending: 0,
 
   /** @type {RefreshState} */
   refreshState: { type: 'idle' },

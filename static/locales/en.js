@@ -650,6 +650,8 @@ export default {
   'nav.search': 'Search',
   'nav.updates': 'Updates',
   'nav.upgrades': 'Upgrades',
+  'sse.circuit_open':
+    '{host} is failing repeatedly — pausing requests to it for a while ({count} consecutive errors).',
   'nav.settings': 'Settings',
   'nav.downloads': 'Downloads',
   'nav.statistics': 'Statistics',
@@ -907,6 +909,8 @@ export default {
   'notifications.btn.unread': 'Notifications: {count} unread',
   'notifications.active.text': 'chapter{s} downloading',
   'notifications.active.view': 'View →',
+  'notifications.upgrades.text': 'chapters have a better version available',
+  'notifications.upgrades.view': 'Review',
   'notifications.failed.text': 'download{s} failed',
   'notifications.empty': 'No new notifications.',
   'notifications.chapter_downloaded.header': 'Chapter Downloaded',

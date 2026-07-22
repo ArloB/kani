@@ -6,7 +6,7 @@ import { useState, useEffect, useRef } from 'preact/hooks';
 import htm from 'htm';
 import { getState, subscribe, setState, updateState } from '../cache.js';
 import { navigate } from '../router.js';
-import { iconBell, iconX, iconDownload, iconCheck } from '../icons.js';
+import { iconBell, iconX, iconDownload, iconCheck, iconArrowUp } from '../icons.js';
 import { Icon } from './icon.js';
 import { t } from '../i18n.js';
 import { useOutsideClose } from './popover.js';
@@ -21,11 +21,17 @@ function NotificationsPanel() {
   const [activeDownloads, setActiveDownloads] = useState(0);
   const [failedDownloads, setFailedDownloads] = useState(0);
   const [completedDownloads, setCompletedDownloads] = useState(/** @type {ChapterProgress[]} */ ([]));
+  const [upgrades, setUpgrades] = useState(0);
   const wrapRef = useRef(/** @type {HTMLDivElement | null} */ (null));
 
   useEffect(() => {
     setNotifications(getState('scanNotifications'));
     return subscribe('scanNotifications', (notifs) => setNotifications([...notifs]));
+  }, []);
+
+  useEffect(() => {
+    setUpgrades(Number(getState('upgradesPending')) || 0);
+    return subscribe('upgradesPending', (n) => setUpgrades(Number(n) || 0));
   }, []);
 
   useEffect(() => {
@@ -51,10 +57,11 @@ function NotificationsPanel() {
   useOutsideClose(open, [wrapRef], () => setOpen(false));
 
   const chapterCount = notifications.reduce((sum, n) => sum + n.count, 0);
-  const badgeCount = chapterCount + failedDownloads + completedDownloads.length;
+  const badgeCount = chapterCount + failedDownloads + completedDownloads.length + upgrades;
 
   function dismissAll() {
     setState('scanNotifications', []);
+    setState('upgradesPending', 0);
     updateState('chaptersProgress', (map) => {
       const next = new Map(map);
       for (const [k, v] of next) {
@@ -122,6 +129,21 @@ function NotificationsPanel() {
                 <strong>${activeDownloads}</strong> ${t('notifications.active.text', { s: activeDownloads !== 1 ? 's' : '' })}
               </span>
               <span class="text-xs text-accent shrink-0">${t('notifications.active.view')}</span>
+            </a>
+          `}
+
+          <!-- Upgrades found by a scan -->
+          ${upgrades > 0 && html`
+            <a
+              href="/upgrades"
+              class="flex items-center gap-3 px-4 py-3 border-b border-border hover:bg-surface-2 transition-colors shrink-0"
+              onClick=${() => { setState('upgradesPending', 0); setOpen(false); }}
+            >
+              <span class="shrink-0 icon-sm text-accent"><${Icon} svg=${iconArrowUp} /></span>
+              <span class="flex-1 text-sm text-text">
+                <strong>${upgrades}</strong> ${t('notifications.upgrades.text')}
+              </span>
+              <span class="text-xs text-accent shrink-0">${t('notifications.upgrades.view')}</span>
             </a>
           `}
 
