@@ -281,6 +281,7 @@ pub(crate) async fn get_local_manga_details(
         "auto_scan":                   d.auto_scan,
         "scanlator_mode":              d.manga.scanlator_mode,
         "download_all_preferred_only": d.manga.download_all_preferred_only,
+        "upgrade_auto_replace":        d.manga.upgrade_auto_replace,
         "notes":                       d.manga.notes,
         "cover_overridden":            d.manga.cover_overridden,
         "local_name":                  d.manga.local_name,

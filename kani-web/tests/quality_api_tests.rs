@@ -241,6 +241,7 @@ async fn auto_replace_toggle_round_trips() {
     );
 
     let res = app
+        .clone()
         .oneshot(req(
             "PUT",
             &format!("/rest/manga/{manga}/upgrade-auto-replace"),
@@ -257,4 +258,22 @@ async fn auto_replace_toggle_round_trips() {
         .await
         .unwrap();
     assert_eq!(stored, 1, "the toggle must actually persist");
+
+    // Persisting is only half of it. `/details` is a hand-built projection
+    // rather than the serialised model, so a field can be stored, returned by
+    // `/manga/{id}`, and still be invisible to the page that renders the
+    // control — which is exactly how this toggle shipped reading `false` on
+    // every load regardless of what was saved.
+    let details = app
+        .oneshot(authed_get(&format!("/rest/manga/{manga}/details"), &cookie))
+        .await
+        .unwrap();
+    assert_eq!(details.status(), StatusCode::OK);
+    let body = common::body_json(details).await;
+    assert_eq!(
+        body["upgrade_auto_replace"],
+        serde_json::Value::Bool(true),
+        "the details projection must carry the toggle, or the checkbox cannot \
+         initialise from it"
+    );
 }

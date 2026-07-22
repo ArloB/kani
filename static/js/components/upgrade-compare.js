@@ -122,6 +122,11 @@ export function UpgradeCompare({ open, candidate, chapterTitle, onClose, onChang
 
   const held = candidate.held_score ?? {};
   const cand = candidate.candidate_score ?? {};
+  // The footnote describes the *available* version, so it must key off whether
+  // the candidate was probed — not off whether any row has a value. The held
+  // side is measured from its own manifest and is almost always present, which
+  // would otherwise claim a measurement for a column that is entirely dashes.
+  const candidateMeasured = candidate.candidate_score != null;
 
   // Only rows where at least one side measured something. A comparison of two
   // dashes tells the reader nothing and makes the panel look broken.
@@ -217,7 +222,7 @@ export function UpgradeCompare({ open, candidate, chapterTitle, onClose, onChang
           />
         </div>
 
-        ${measuredRows.length > 0
+        ${candidateMeasured
           ? html`<p class="text-xs text-text-muted">${t('upgrade.measured_note')}</p>`
           : html`<p class="text-xs text-text-muted">${t('upgrade.unprobed')}</p>`}
         ${reassurance
