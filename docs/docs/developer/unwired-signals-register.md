@@ -103,8 +103,17 @@ action had ever been clicked:
    Also reproduced with Cancel. Preact-debug warning; harmless in production
    builds but it points at a real state-update-during-render path.
 
-Neither is caused by this session's work. Recorded rather than fixed, because
-the page needs its own look rather than a patch bolted onto a verification pass.
+**Both fixed 2026-07-23** — and both were one bug in the shared `Select`
+component, not the jobs page. `Select`'s popover effect re-ran on every parent
+render (the parent passes a fresh `options` array each time) and, while closed,
+called `renderPopover(null)` — a synchronous *nested* preact render into another
+root. When the parent re-render was triggered from an async continuation (a
+row-action handler's `await` → `setState`), that nested render corrupted
+preact's render context, so the next component's `useState` threw "Hook can only
+be invoked from render methods" and the paint aborted mid-render — which is why
+the list never refreshed. The fix: the effect does nothing while closed and
+clears the popover via cleanup on the open→closed transition only. Verified the
+popover still opens and picks apply.
 
 ## How to avoid adding to this list
 
