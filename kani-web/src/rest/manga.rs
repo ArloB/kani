@@ -29,6 +29,7 @@ pub fn router() -> Router<AppState> {
             put(set_upgrade_auto_replace),
         )
         .route("/me/upgrades", get(get_all_upgrades))
+        .route("/me/notify-prefs", get(get_notify_prefs))
         .route("/chapters/{id}/upgrade", post(apply_chapter_upgrade))
         .route(
             "/chapters/{id}/upgrade/dismiss",
@@ -1089,6 +1090,16 @@ pub(crate) async fn get_manga_upgrades(
     Path(manga_id): Path<MangaId>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(state.service.get_upgrades(manga_id).await?))
+}
+
+/// The manga this user has muted, so the client can honour the setting for
+/// every series rather than only those it happens to have loaded.
+pub(crate) async fn get_notify_prefs(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let muted = state.service.muted_manga_ids(user.id).await?;
+    Ok(Json(json!({ "muted": muted })))
 }
 
 pub(crate) async fn get_all_upgrades(

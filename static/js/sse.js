@@ -8,6 +8,7 @@ import { getState as getUiState } from './ui-state.js';
 import { postToServiceWorker, cacheChapter } from './offline.js';
 import { showToast } from './components/toast.js';
 import { t } from './i18n.js';
+import * as api from './api.js';
 
 const SSE_URL = '/rest/events';
 const MAX_DELAY_MS = 30_000;
@@ -50,6 +51,12 @@ export function subscribeJob(jobId, { onProgress, onComplete, onFailed, onCancel
  * @returns {{ disconnect: () => void }}
  */
 export function connectSSE() {
+  // Load the muted set before events start arriving, so the notification
+  // preference holds from the first chapter of the session rather than only
+  // for series the user has since opened.
+  api.getNotifyPrefs()
+    .then((res) => setState('mutedManga', new Set((res?.muted ?? []).map(Number))))
+    .catch(() => {});
   _connect();
   return { disconnect: _disconnect };
 }
@@ -304,10 +311,14 @@ function _handleEvent(data) {
 
     // Browser push notifications
     const mangaId = Number(data.manga_id);
+    // The muted set is loaded once per session, so this holds for every series
+    // rather than only those whose detail page happened to be opened. The
+    // per-page Map still wins when present, so a toggle applies immediately.
     const notifyPrefs = getUiState('mangaNotifyPrefs');
-    const notifyAllowed = notifyPrefs instanceof Map
-      ? (notifyPrefs.has(mangaId) ? notifyPrefs.get(mangaId) : true)
-      : true;
+    const muted = getState('mutedManga');
+    const notifyAllowed = notifyPrefs instanceof Map && notifyPrefs.has(mangaId)
+      ? notifyPrefs.get(mangaId)
+      : !(muted instanceof Set && muted.has(mangaId));
     if (
       notifyAllowed &&
       localStorage.getItem('kani_browser_notifications') === 'true' &&

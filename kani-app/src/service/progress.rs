@@ -23,6 +23,22 @@ impl ReadProgressBuffer {
 }
 
 impl AppService {
+    /// Manga this user has muted new-chapter notifications for.
+    ///
+    /// Only the muted ones: the default is to notify, so the exceptions are the
+    /// short list. The client previously learned this per-manga, and only for
+    /// manga whose detail page happened to be opened in the current session —
+    /// so the toggle silently stopped working after a reload.
+    pub async fn muted_manga_ids(&self, user_id: UserId) -> Result<Vec<i64>> {
+        Ok(sqlx::query_scalar!(
+            "SELECT manga_id FROM user_manga_tracking \
+             WHERE user_id = ? AND notify_new_chapters = FALSE",
+            user_id
+        )
+        .fetch_all(&self.db_read)
+        .await?)
+    }
+
     pub async fn set_chapter_progress(
         &self,
         user_id: UserId,

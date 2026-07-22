@@ -149,6 +149,16 @@ pub fn authed_post(uri: &str, cookie: &str, body: serde_json::Value) -> Request<
         .unwrap()
 }
 
+pub fn authed_put(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method("PUT")
+        .uri(uri)
+        .header("Content-Type", "application/json")
+        .header("Cookie", cookie)
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap()
+}
+
 pub fn authed_patch(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
     Request::builder()
         .method("PATCH")

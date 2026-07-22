@@ -1671,6 +1671,11 @@ export async function getMangaUpgrades(mangaId) {
   return _req('GET', `/manga/${mangaId}/upgrades`);
 }
 
+/** @returns {Promise<{muted:number[]}>} */
+export async function getNotifyPrefs() {
+  return _req('GET', '/me/notify-prefs');
+}
+
 export async function getAllUpgrades() {
   return _req('GET', '/me/upgrades');
 }

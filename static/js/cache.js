@@ -26,6 +26,8 @@ const _store = createSignalStore({
 
   /** @type {ScanNotification[]} */
   scanNotifications: [],
+  /** @type {Set<number>} */
+  mutedManga: new Set(),
   upgradesPending: 0,
 
   /** @type {RefreshState} */
