@@ -1,14 +1,14 @@
 // @ts-check
 // Settings — Collections: manage smart collections.
 
-import { h } from 'preact';
+import { h, Fragment } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
 import { t } from '../../i18n.js';
 import { iconTrash } from '../../icons.js';
 import { showToast, showApiError } from '../../components/toast.js';
-import { showConfirm } from '../../components/modal.js';
+import { showConfirm, Modal } from '../../components/modal.js';
 import { EmptyState } from '../../components/empty-state.js';
 import { ErrorState } from '../../components/error-state.js';
 import { SettingsGroup } from './_shared.js';
@@ -103,6 +103,7 @@ function RuleBuilder({ rule, setRule }) {
 function CollectionRow({ col, onChanged }) {
   const simple = parseSimpleRule(col.rule_json);
   const [editing, setEditing] = useState(false);
+  const [matches, setMatches] = useState(/** @type {any[]|null} */ (null));
   const [name, setName] = useState(col.name);
   const [rule, setRule] = useState(simple ?? { op: 'has_unread' });
   const { busy, run } = useBusy();
@@ -142,6 +143,20 @@ function CollectionRow({ col, onChanged }) {
     }
   };
 
+  // A smart collection's membership is derived from its rule, so the only way
+  // to know what it currently matches is to ask. `getCollectionManga` had no
+  // caller, which meant a rule could be written with no way to check it.
+  const preview = () =>
+    run(async () => {
+      try {
+        const res = await api.getCollectionManga(col.id);
+        const items = Array.isArray(res) ? res : (res?.manga ?? []);
+        setMatches(items);
+      } catch (e) {
+        showApiError(e);
+      }
+    });
+
   if (editing) {
     return html`
       <div class="px-4 py-3 flex flex-col gap-2" data-settings-row>
@@ -164,12 +179,15 @@ function CollectionRow({ col, onChanged }) {
     `;
   }
 
-  return html`
+  return html`<${Fragment}>
     <div class="flex items-center gap-3 px-4 py-3" data-settings-row>
       <span class="flex-1 text-sm font-medium text-text truncate">${col.name}</span>
       <span class="text-xs text-text-muted shrink-0 max-w-[10rem] truncate"
         >${describeRule(col.rule_json)}</span
       >
+      <button type="button" class="btn-ghost btn-sm shrink-0" disabled=${busy} onClick=${preview}>
+        ${t('collections.preview')}
+      </button>
       ${simple &&
       html`<button type="button" class="btn-ghost btn-sm shrink-0" onClick=${() => setEditing(true)}>
         ${t('common.edit')}
@@ -183,7 +201,30 @@ function CollectionRow({ col, onChanged }) {
         ${html([iconTrash])}
       </button>
     </div>
-  `;
+    ${matches !== null &&
+    html`<${Modal}
+      open=${true}
+      title=${t('collections.preview.title', { name: col.name })}
+      onClose=${() => setMatches(null)}
+    >
+      <div class="flex flex-col gap-1 px-1">
+        <p class="text-xs text-text-muted pb-1">
+          ${t('collections.preview.count', { n: matches.length })}
+        </p>
+        ${matches.length === 0
+          ? html`<p class="text-sm text-text-muted">${t('collections.preview.empty')}</p>`
+          : matches.map(
+              (m) => html`<a
+                key=${m.id}
+                href=${`/manga/${m.id}`}
+                class="text-sm text-text truncate px-1 py-1.5 border-b border-border-subtle hover:bg-surface-hover"
+                onClick=${() => setMatches(null)}
+                >${m.name ?? m.title}</a
+              >`,
+            )}
+      </div>
+    <//>`}
+  <//>`;
 }
 
 /** @param {{ onAdded: () => void }} props */

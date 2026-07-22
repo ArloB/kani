@@ -32,7 +32,7 @@ Swept 2026-07-22 across `kani-app`, `kani-web`, `kani-core`, `static/js` and
 | 19 | `FilterMappingEntry::{SortPair,TupleSplit}.kind` | ~~Deserialised then discarded~~ | **NOT A FINDING** — required discriminator on an `untagged` enum; it is what makes the variants parse deterministically |
 | 20 | `pause_job` / `resume_job` | Permanent `422` stubs with OpenAPI docs | **FIXED** — implemented for queued jobs, running jobs refuse with a reason, and wired to buttons on the jobs page |
 | 21 | `progress::get_noted_chapter_ids` | ~~Notes never surfaced~~ | **NOT A FINDING, then REMOVED** — the ✎ indicator *is* rendered, via `_chapterNotes`. This was a redundant second path (its `api.js` twin was already `@deprecated` and derived client-side); both removed |
-| 22 | 24 uncalled `api.js` exports | Shipped backend capability with no way to reach it | **PARTIAL** — 11 removed, 3 built, 7 to build, 2 internal helpers not findings |
+| 22 | 24 uncalled `api.js` exports | Shipped backend capability with no way to reach it | **DONE** — 11 removed, 9 built, 2 internal helpers, 1 was live, 1 redundant |
 | 23 | 6 REST routes with no frontend caller | `/admin/db/{analyze,stats,vacuum}`, `/admin/recurring/{kind}/run`, `/chapters/{id}/cbz`, `/scan/toggle_auto` | **FIXED** — DB card + recurring triggers in Maintenance settings, CBZ in the chapter menu; `/scan/toggle_auto` **removed** as a redundant second way to set `auto_scan` |
 
 **Three false positives.** A caller-count grep cannot tell "capability missing"
@@ -69,16 +69,18 @@ frontend wrappers only.
 behind step-up re-auth), `purgeAdminLogs` (logs page), `syncAllTrackers`
 (tracker settings).
 
-**Still to build (7).**
+**Built (6 more).** `resolvePendingImport` (a Link… dialog that searches installed
+sources and links the match — the panel could previously only *find* or
+*dismiss*), `adminTriggerPasswordReset` (accounts page, sends a reset link rather
+than setting a password), `scanAllLibrary` (Library settings),
+`assignChapterVolume` (chapter menu → volume picker; every sibling volume
+operation was already wired), `updateSavedSearch` (rename, resending
+`query_json` since the endpoint takes the whole body), `getCollectionManga`
+(Preview on a smart collection — the only way to see what a rule currently
+matches).
 
-| Export | Where it belongs | Note |
-|---|---|---|
-| `resolvePendingImport` | Library settings, pending-imports list | A pending import currently has no resolution path |
-| `adminTriggerPasswordReset` | Accounts page, per-user action | |
-| `scanAllLibrary` | Library settings | Scheduled auto-scan covers the routine case |
-| `assignChapterVolume` | Chapter context menu | create/delete/list/update volume are all wired |
-| `updateSavedSearch` | Saved-search list, rename | create/delete/list wired |
-| `getCollectionManga` | Collection detail view | create/delete/list/update wired |
+All 24 are now resolved: 11 removed, 9 built, 2 internal helpers, `downloadBackup`
+found to be live, and `getNotedChapterIds` removed as a redundant path.
 
 **Two endpoints now redundant** and candidates for removal, though that is an
 API-surface decision rather than a client cleanup: `/stats/pace` (the chart

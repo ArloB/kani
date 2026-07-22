@@ -12,12 +12,14 @@ import { formatDate, isChapterDownloaded } from '../utils.js';
 import { useBusy } from '../hooks/use-busy.js';
 import { navigate } from '../router.js';
 import { downloadChapter, deleteChapter, cancelDownload, setChapterReadStatus, markChaptersUpTo, retryChapterDownload } from '../api.js';
+import * as api from '../api.js';
+import { Modal } from './modal.js';
 import { iconCheck, iconDownload, iconCloud, iconCloudCheck } from '../icons.js';
 import { Icon } from './icon.js';
 import { ContextMenu } from './menu.js';
 import { BulkBar } from './bulk-bar.js';
 import { cacheChapter, evictChapter } from '../offline.js';
-import { showApiError } from './toast.js';
+import { showApiError, showToast } from './toast.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
@@ -69,7 +71,7 @@ const OVERSCAN = 5;
  *   onCacheChange?: (id: number, cached: boolean) => void,
  * }} props
  */
-function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, selected, isCached, kccAvailable, hasNote, showScanlator, isKeyboardActive, menuTick, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange, onUpgradeClick }) {
+function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, onAssignVolume, selectMode, selected, isCached, kccAvailable, hasNote, showScanlator, isKeyboardActive, menuTick, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange, onUpgradeClick }) {
   // The first candidate is enough for a badge; the dialogue shows the detail.
   const upgradeCandidate = chapter.upgrade_available?.candidates?.[0] ?? null;
   const upgradeIsReassurance = upgradeCandidate?.kind === 'source_downgraded';
@@ -244,6 +246,10 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, 
         ? [{ label: t('chapter.menu.remove_offline'), action: handleCacheToggle }]
         : [{ label: t('chapter.menu.save_offline'), action: handleCacheToggle }]),
     ] : []),
+    ...(mangaId ? [
+      { divider: /** @type {true} */ (true) },
+      { label: t('chapter.menu.assign_volume'), action: () => onAssignVolume?.(chapter) },
+    ] : []),
     ...(!isActive && downloaded && !isCancelled ? [
       { divider: /** @type {true} */ (true) },
       { label: t('chapter.menu.download_cbz'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/cbz`) },
@@ -416,8 +422,78 @@ const ChapterRow = memo(ChapterRowInner);
  *   onCacheChange?: (id: number, cached: boolean) => void,
  * }} props
  */
+/**
+ * Assigns a chapter to one of the manga's volumes, or clears the assignment.
+ *
+ * `assignChapterVolume` had no caller: volumes could be created, renamed,
+ * listed and deleted, but nothing could put a chapter in one.
+ */
+function VolumePicker({ chapter, mangaId, onClose, onAssigned }) {
+  const [volumes, setVolumes] = useState(/** @type {any[]|null} */ (null));
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!chapter || !mangaId) return;
+    setVolumes(null);
+    api.listVolumes(mangaId).then((v) => setVolumes(Array.isArray(v) ? v : [])).catch(() => setVolumes([]));
+  }, [chapter, mangaId]);
+
+  if (!chapter) return null;
+
+  const assign = async (/** @type {number|null} */ volumeId) => {
+    setBusy(true);
+    try {
+      await api.assignChapterVolume(mangaId, chapter.id, volumeId);
+      showToast(t('chapter.volume.assigned'), { type: 'success' });
+      onAssigned?.();
+      onClose();
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return html`
+    <${Modal} open=${true} title=${t('chapter.menu.assign_volume')} onClose=${onClose}>
+      <div class="flex flex-col gap-2 px-1">
+        <p class="text-xs text-text-muted">${t('chapter.volume.desc')}</p>
+        ${volumes === null
+          ? html`<p class="text-sm text-text-muted">${t('common.loading')}</p>`
+          : html`
+              <button
+                type="button"
+                class="text-left px-1 py-2 border-b border-border-subtle hover:bg-surface-hover text-sm"
+                disabled=${busy}
+                onClick=${() => assign(null)}
+              >
+                ${t('chapter.volume.none')}
+              </button>
+              ${volumes.length === 0
+                ? html`<p class="text-sm text-text-muted pt-2">${t('chapter.volume.empty')}</p>`
+                : volumes.map(
+                    (v) => html`
+                      <button
+                        type="button"
+                        key=${v.id}
+                        class="text-left px-1 py-2 border-b border-border-subtle hover:bg-surface-hover text-sm"
+                        disabled=${busy}
+                        onClick=${() => assign(v.id)}
+                      >
+                        ${v.name || t('chapter.volume.numbered', { n: v.volume_num })}
+                      </button>
+                    `,
+                  )}
+            `}
+      </div>
+    <//>
+  `;
+}
+
 export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId, height, hasMore, loading, selectMode, selected, canDownload, canDelete, allSelectedProp, onLoadMore, onToggleRead, onMarkUpTo, onToggleSelect, onSelectAll, onFlipSelection, onSelectUndownloaded, onSelectUnread, onBulkRead, onBulkDownload, onBulkDelete, onExitSelect, onEnterSelectWithChapter, onDelete, cachedChapterIds, kccAvailable, onCacheChange, notedChapterIds, onUpgradeApplied }) {
   const [upgrade, setUpgrade] = useState(/** @type {any} */ (null));
+  const [volumeFor, setVolumeFor] = useState(/** @type {any} */ (null));
+  const openAssignVolume = useCallback((/** @type {any} */ ch) => setVolumeFor(ch), []);
   const openUpgrade = useCallback((/** @type {any} */ candidate, /** @type {any} */ ch) => {
     setUpgrade({ candidate, title: ch.title });
   }, []);
@@ -615,6 +691,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
               kccAvailable=${!!kccAvailable}
               onCacheChange=${onCacheChange}
               onUpgradeClick=${openUpgrade}
+            onAssignVolume=${openAssignVolume}
               hasNote=${notedChapterIds ? notedChapterIds.has(ch.id) : false}
             />
           `)}
@@ -677,6 +754,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
                 onEnterSelectWithChapter=${onEnterSelectWithChapter}
                 onDelete=${onDelete}
                 onUpgradeClick=${openUpgrade}
+            onAssignVolume=${openAssignVolume}
                 hasNote=${notedChapterIds ? notedChapterIds.has(ch.id) : false}
               />
             </div>
@@ -686,6 +764,12 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
       </div>
       ${bulkBar}
     </div>
+    <${VolumePicker}
+      chapter=${volumeFor}
+      mangaId=${mangaId}
+      onClose=${() => setVolumeFor(null)}
+      onAssigned=${() => onUpgradeApplied?.()}
+    />
     <${UpgradeCompare}
       open=${!!upgrade}
       candidate=${upgrade?.candidate}

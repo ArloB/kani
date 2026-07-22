@@ -9,6 +9,7 @@ import { showToast, showApiError } from '../../components/toast.js';
 import { iconPencil, iconX } from '../../icons.js';
 import { Modal, showConfirm } from '../../components/modal.js';
 import { SettingsGroup, SettingsRow, ToggleRow, NumberRow } from './_shared.js';
+import { useBusy } from '../../hooks/use-busy.js';
 import { t } from '../../i18n.js';
 import { EmptyState } from '../../components/empty-state.js';
 import { FolderPicker } from '../../components/folder-picker.js';
@@ -690,9 +691,46 @@ function useBusyImport() {
 }
 
 /** @param {{ categories: any[] }} props */
+/**
+ * Kicks off a scan of every series now.
+ *
+ * `scanAllLibrary` had no caller: scanning was reachable only per-manga or on
+ * the auto-scan schedule, so there was no way to say "check everything now"
+ * after adding a source or changing scan settings.
+ */
+function ScanAllGroup() {
+  const { busy, run } = useBusy();
+
+  const scanAll = () =>
+    run(async () => {
+      const ok = await showConfirm(t('library.scan_all.confirm'), {
+        title: t('library.scan_all'),
+        confirmLabel: t('library.scan_all'),
+      });
+      if (!ok) return;
+      try {
+        await api.scanAllLibrary();
+        showToast(t('library.scan_all.started'), { type: 'success' });
+      } catch (e) {
+        showApiError(e);
+      }
+    });
+
+  return html`
+    <${SettingsGroup} label=${t('library.scan_all.group')}>
+      <${SettingsRow} label=${t('library.scan_all')} description=${t('library.scan_all.desc')}>
+        <button type="button" class="btn-secondary btn-sm" disabled=${busy} onClick=${scanAll}>
+          ${t('library.scan_all.action')}
+        </button>
+      <//>
+    <//>
+  `;
+}
+
 export function LibrarySection({ categories }) {
   return html`
     <${CategoriesGroup} initialCategories=${categories ?? []} />
+    <${ScanAllGroup} />
     <${ImportExport} />
     <${ScheduledBackup} />
   `;

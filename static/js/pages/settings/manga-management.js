@@ -6,7 +6,8 @@ import { useState, useEffect, useCallback } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
 import { showToast, showApiError } from '../../components/toast.js';
-import { showConfirm } from '../../components/modal.js';
+import { showConfirm, Modal } from '../../components/modal.js';
+import { useBusy } from '../../hooks/use-busy.js';
 import { navigate } from '../../router.js';
 import { skeletonSettingsCards } from '../../components/skeletons.js';
 import { EmptyState } from '../../components/empty-state.js';
@@ -56,8 +57,93 @@ function NavLink({ href, cls, label }) {
   >`;
 }
 
+/**
+ * Picks the real series a pending import refers to, and links them.
+ *
+ * The panel could previously only *find* (navigate away to a source search) or
+ * *dismiss*. `resolvePendingImport` had no caller, so an import that could not
+ * be matched automatically had no resolution path — it could only be thrown
+ * away.
+ */
+function ResolveDialog({ item, onClose, onResolved }) {
+  const [query, setQuery] = useState(item?.title ?? '');
+  const [results, setResults] = useState(/** @type {any[]|null} */ (null));
+  const { busy, run } = useBusy();
+
+  const search = () =>
+    run(async () => {
+      setResults(null);
+      try {
+        const res = await api.globalSearch(query, 'all', 1, 10);
+        const flat = [];
+        for (const group of res ?? []) {
+          for (const m of group.manga ?? []) {
+            flat.push({ ...m, source_id: group.source_id, source_name: group.source_name });
+          }
+        }
+        setResults(flat);
+      } catch (e) {
+        showApiError(e);
+        setResults([]);
+      }
+    });
+
+  const pick = (/** @type {any} */ m) =>
+    run(async () => {
+      try {
+        await api.resolvePendingImport(item.id, m.source_id, m.id);
+        showToast(t('settings.manga_mgmt.pending.resolved'), { type: 'success' });
+        onResolved();
+        onClose();
+      } catch (e) {
+        showApiError(e);
+      }
+    });
+
+  return html`
+    <${Modal} open=${!!item} title=${t('settings.manga_mgmt.pending.resolve')} onClose=${onClose}>
+      <div class="flex flex-col gap-3 px-1">
+        <p class="text-xs text-text-muted">${t('settings.manga_mgmt.pending.resolve.desc')}</p>
+        <div class="flex gap-2">
+          <input
+            class="input flex-1"
+            value=${query}
+            onInput=${(/** @type {any} */ e) => setQuery(e.currentTarget.value)}
+            onKeyDown=${(/** @type {any} */ e) => { if (e.key === 'Enter') search(); }}
+            aria-label=${t('settings.manga_mgmt.pending.resolve.search')}
+          />
+          <button type="button" class="btn-secondary btn-sm" disabled=${busy} onClick=${search}>
+            ${t('settings.manga_mgmt.pending.resolve.search')}
+          </button>
+        </div>
+        ${results === null
+          ? null
+          : results.length === 0
+            ? html`<p class="text-sm text-text-muted">${t('settings.manga_mgmt.pending.resolve.none')}</p>`
+            : html`<div class="flex flex-col">
+                ${results.map(
+                  (m) => html`
+                    <button
+                      type="button"
+                      key=${`${m.source_id}:${m.id}`}
+                      class="text-left px-1 py-2 border-b border-border-subtle hover:bg-surface-hover"
+                      disabled=${busy}
+                      onClick=${() => pick(m)}
+                    >
+                      <span class="block text-sm text-text truncate">${m.title}</span>
+                      <span class="block text-xs text-text-muted">${m.source_name}</span>
+                    </button>
+                  `,
+                )}
+              </div>`}
+      </div>
+    <//>
+  `;
+}
+
 function PendingPanel() {
   const [state, load] = useLoader(() => api.getPendingImports());
+  const [resolving, setResolving] = useState(/** @type {any} */ (null));
 
   const dismiss = async (/** @type {any} */ item) => {
     try {
@@ -119,6 +205,13 @@ function PendingPanel() {
                 <button
                   type="button"
                   class="btn-secondary btn-sm"
+                  onClick=${() => setResolving(item)}
+                >
+                  ${t('settings.manga_mgmt.pending.resolve')}
+                </button>
+                <button
+                  type="button"
+                  class="btn-secondary btn-sm"
                   onClick=${() => dismiss(item)}
                 >
                   ${t('settings.manga_mgmt.pending.dismiss_btn')}
@@ -128,6 +221,12 @@ function PendingPanel() {
           </div>
         `,
       )}
+      ${resolving &&
+      html`<${ResolveDialog}
+        item=${resolving}
+        onClose=${() => setResolving(null)}
+        onResolved=${load}
+      />`}
     </div>
   `;
 }
