@@ -30,9 +30,9 @@ Swept 2026-07-22 across `kani-app`, `kani-web`, `kani-core`, `static/js` and
 | 17 | `Settings.auto_download_category_id` (singular) | Superseded by the plural; still SELECTed and shipped to every client, read by nothing | **OPEN** — removal is an API shape change |
 | 18 | `JobContext.sse_tx` | Populated for every job, used by none (`#[allow(dead_code)]`) | **OPEN** |
 | 19 | `FilterMappingEntry::{SortPair,TupleSplit}.kind` | Deserialised from extension YAML, validated by serde, discarded | **OPEN** |
-| 20 | `pause_job` / `resume_job` | Permanent `422` stubs with OpenAPI docs | **FIXED** — implemented for queued jobs; running jobs refuse with a reason. Still no UI caller (#22) |
+| 20 | `pause_job` / `resume_job` | Permanent `422` stubs with OpenAPI docs | **FIXED** — implemented for queued jobs, running jobs refuse with a reason, and wired to buttons on the jobs page |
 | 21 | `progress::get_noted_chapter_ids` | Chapter notes exist; "which chapters have notes" is never surfaced | **OPEN** — wiring it is a UI feature (note indicator), not a deletion |
-| 22 | 25 `api.js` exports with zero callers | Each is a shipped backend capability with no way to reach it | **OPEN** — see below |
+| 22 | 23 `api.js` exports with zero callers | Each is a shipped backend capability with no way to reach it | **OPEN** — see below |
 | 23 | 6 REST routes with no frontend caller | `/admin/db/{analyze,stats,vacuum}`, `/admin/recurring/{kind}/run`, `/chapters/{id}/cbz`, `/scan/toggle_auto` | **OPEN** |
 
 **Corrected during the sweep:** `create_api_token` was reported as having zero
@@ -49,12 +49,13 @@ one decides whether something is dead.
 `getRepo` · `getManga` · `scanAllLibrary` · `getRefreshStatus` ·
 `syncAllTrackers` · `downloadBackup` · `previewBackup` · `restoreBackup` ·
 `resolvePendingImport` · `getNotedChapterIds` · `getReadingPace` · `stepUpTotp` ·
-`regenerateBackupCodes` · `purgeAdminLogs` · `pauseJob` · `resumeJob` ·
+`regenerateBackupCodes` · `purgeAdminLogs` ·
 `getMangaDownloadStatus` · `assignChapterVolume` · `getCollectionManga` ·
 `updateSavedSearch` · `getMangaUpgrades`
 
-These are not one problem. Some are genuinely dead (`pauseJob`, `resumeJob` —
-their endpoints are stubs). Some are **missing UI for a working backend**
+These are not one problem. `pauseJob`/`resumeJob` have since been implemented
+and wired to the jobs page, so 23 remain. Some are **missing UI for a working
+backend**
 (`restoreBackup`, `previewBackup`, `regenerateBackupCodes`, `stepUpTotp`) and
 deleting them would discard a shipped capability. Each needs a wire-or-remove
 decision; they should not be batch-processed.
