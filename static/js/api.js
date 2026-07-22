@@ -132,10 +132,6 @@ export async function getPermissions() {
   return _req('GET', '/auth/permissions');
 }
 
-export async function getMe() {
-  return _req('GET', '/auth/me');
-}
-
 export async function getCurrentUser() {
   return _req('GET', '/auth/current_user');
 }
@@ -299,11 +295,6 @@ export async function deleteSource(id) {
 }
 
 /** @param {number} id */
-export async function getSourceMetadata(id) {
-  return _req('GET', `/sources/${id}/metadata`);
-}
-
-/** @param {number} id */
 export async function reloadSource(id) {
   return _req('POST', `/sources/${id}/reload`);
 }
@@ -403,11 +394,6 @@ export async function getRemoteChapterSorts(sid, mangaId) {
   return _req('GET', `/sources/${sid}/chapter-sorts/${encodeURIComponent(mangaId)}`);
 }
 
-/** @param {number} sid @param {string} mangaId @param {string} chapterId */
-export async function getPages(sid, mangaId, chapterId) {
-  return _req('GET', `/sources/${sid}/pages/${encodeURIComponent(mangaId)}/${encodeURIComponent(chapterId)}`);
-}
-
 /**
  * Returns the page manifest for a locally downloaded chapter.
  * @param {number} chapterId
@@ -491,11 +477,6 @@ export async function addRepo(url, confirmFingerprint) {
       ? { url, confirm_fingerprint: confirmFingerprint }
       : { url },
   });
-}
-
-/** @param {number} id */
-export async function getRepo(id) {
-  return _req('GET', `/sources/repos/${id}`);
 }
 
 /** @param {number} id */
@@ -594,11 +575,6 @@ export async function globalSearch(query, scope, page, pageSize, signal) {
 }
 
 // ── Manga ─────────────────────────────────────────────────────────────────────
-
-/** @param {number} id */
-export async function getManga(id) {
-  return _req('GET', `/manga/${id}`);
-}
 
 /** @param {number} id */
 export async function deleteManga(id) {
@@ -967,10 +943,6 @@ export async function updateSettings(payload) {
   return _req('PATCH', '/settings', { body: payload });
 }
 
-export async function getRefreshStatus() {
-  return _req('GET', '/refresh/status');
-}
-
 export async function startRefreshAll() {
   return _req('POST', '/refresh/start');
 }
@@ -1211,30 +1183,6 @@ export function downloadBackup(includeChapterProgress = false) {
 }
 
 /** @param {File} file */
-export async function previewBackup(file) {
-  const body = new FormData();
-  body.append('file', file);
-  const res = await fetch('/rest/library/backup/preview', { method: 'POST', credentials: 'include', body });
-  if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
-  return res.json();
-}
-
-/**
- * @param {File} file
- * @param {{ merge?: boolean, import_manga?: boolean, import_categories?: boolean,
- *            import_download_rules?: boolean, import_tracking?: boolean,
- *            import_chapter_progress?: boolean, import_settings?: boolean }} [opts]
- */
-export async function restoreBackup(file, opts = {}) {
-  const body = new FormData();
-  body.append('file', file);
-  for (const [k, v] of Object.entries(opts)) body.append(k, String(v));
-  const res = await fetch('/rest/library/restore', { method: 'POST', credentials: 'include', body });
-  if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
-  return res.json();
-}
-
-/** @param {File} file */
 export async function previewTachiyomiImport(file) {
   const body = new FormData();
   body.append('file', file);
@@ -1402,11 +1350,6 @@ export async function setChapterNote(chapterId, note) {
 
 // ── Reading-pace history (#34) ────────────────────────────────────────────────
 
-/** @param {number} [period] */
-export async function getReadingPace(period = 90) {
-  return _req('GET', '/stats/pace', { params: { period } });
-}
-
 // ── Security — sessions ───────────────────────────────────────────────────────
 
 /** @returns {Promise<{sessions: Array<{id:string,created_at:number,last_seen_at:number,user_agent:string|null,ip_addr:string|null,is_current:boolean}>}>} */
@@ -1544,11 +1487,6 @@ export async function retryChapterDownload(id) {
   return _req('POST', `/chapter/${id}/download/retry`);
 }
 
-/** @param {number} mangaId */
-export async function getMangaDownloadStatus(mangaId) {
-  return _req('GET', `/manga/${mangaId}/download-status`);
-}
-
 // ── Trash ─────────────────────────────────────────────────────────────────────
 
 export async function listTrash() {
@@ -1659,11 +1597,6 @@ export async function getAdminStorageStatsHistory() {
 }
 
 // ── Chapter upgrades ─────────────────────────────────────────────────────────
-
-/** @param {number|string} mangaId */
-export async function getMangaUpgrades(mangaId) {
-  return _req('GET', `/manga/${mangaId}/upgrades`);
-}
 
 /** @returns {Promise<{muted:number[]}>} */
 export async function getNotifyPrefs() {
