@@ -4,6 +4,10 @@
 //! `AppService`, and minimal row inserters. Consumed via `[dev-dependencies]`.
 #![allow(clippy::unwrap_used)]
 
+pub mod origin;
+
+pub use origin::TestOrigin;
+
 use kani_app::ids::{ChapterId, MangaId, UserId};
 use kani_app::service::AppService;
 use sqlx::SqlitePool;

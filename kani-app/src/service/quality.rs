@@ -531,11 +531,13 @@ impl AppService {
             let Ok(resp) = self.smart_client.safe_get(url, Some(headers)).await else {
                 continue;
             };
-            // A server that ignores Range answers 200 with the whole file; the
-            // read is capped either way so an uncooperative host cannot make a
-            // probe cost as much as a download.
+            // A server that ignores Range answers 200 with the whole file, so
+            // this must take a prefix and walk away rather than demand the body
+            // fit the cap — `bytes_limited` rejects an oversized response
+            // outright, which silently reduced the probe to nothing against
+            // every such host.
             let total = content_range_total(resp.headers());
-            let Ok(bytes) = resp.bytes_limited(PROBE_PREFIX_BYTES).await else {
+            let Ok(bytes) = resp.bytes_prefix(PROBE_PREFIX_BYTES).await else {
                 continue;
             };
             probes.push(probe_header(&bytes, total));

@@ -10,3 +10,5 @@ unwrap_used = { level = "deny", priority = 1 }
 [dependencies]
 kani-app = { path = "../kani-app", features = ["test-util"] }
 sqlx.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

@@ -3402,8 +3402,10 @@ dependencies = [
 name = "kani-shared-test"
 version = "0.9.0"
 dependencies = [
+ "image",
  "kani-app",
  "sqlx",
+ "tokio",
 ]
 
 [[package]]

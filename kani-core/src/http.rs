@@ -224,6 +224,29 @@ impl SmartResponse {
 
         collect_bytes_limited(stream, content_length, max_bytes).await
     }
+
+    /// Reads at most `max_bytes` and stops, discarding the rest — a *prefix*,
+    /// not a whole body that happens to be small.
+    ///
+    /// `bytes_limited` treats an oversized body as an error, which is right when
+    /// the caller needs all of it. A header probe needs the opposite: it asks
+    /// for four kilobytes of a multi-megabyte image and a server that ignores
+    /// `Range` answers with the whole thing. Routing that through
+    /// `bytes_limited` rejected every such response, so against an
+    /// uncooperative host the probe measured nothing at all.
+    pub async fn bytes_prefix(mut self, max_bytes: usize) -> Result<bytes::Bytes> {
+        let mut buf = bytes::BytesMut::new();
+        while buf.len() < max_bytes {
+            match self.chunk().await? {
+                Some(chunk) => {
+                    let take = (max_bytes - buf.len()).min(chunk.len());
+                    buf.extend_from_slice(&chunk[..take]);
+                }
+                None => break,
+            }
+        }
+        Ok(buf.freeze())
+    }
 }
 
 #[derive(Clone)]

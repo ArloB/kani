@@ -1,0 +1,608 @@
+#![allow(clippy::unwrap_used)]
+//! Behaviour that only appears against a real, misbehaving HTTP origin.
+//!
+//! Everything here was previously unverifiable. The upgrade confirmation probe
+//! had never executed against a source at all; the `Content-Range` fallback
+//! needs a server that ignores `Range`, which no real source will do on
+//! request; re-upload detection needs a listing that *changes* between scans.
+//! `TestOrigin` supplies all three.
+
+mod common;
+use common::{insert_manga, insert_source, test_service};
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use kani_app::service::quality::UpgradeKind;
+use kani_app::source::{SourceBackend, YamlSource};
+use kani_shared::ast::Expr;
+use kani_shared_test::origin::{Body, Response, TestOrigin, greyscale_jpeg, jpeg_page, png_page};
+use kani_yaml::yaml::model::{
+    FieldSource, ValidatedEndpoint, ValidatedExtension, ValidatedField, ValidatedHnp,
+    ValidatedTotalPages,
+};
+use kani_yaml::yaml::schema::ResponseType;
+
+// ── YAML source plumbing ─────────────────────────────────────────────────────
+
+fn json_field(name: &str, pointer: &str, optional: bool) -> ValidatedField {
+    ValidatedField {
+        name: name.to_string(),
+        source: FieldSource::Blueprint(Expr::JsonPtr {
+            target: Box::new(Expr::SelfRef),
+            pointer: pointer.to_string(),
+        }),
+        optional,
+    }
+}
+
+fn json_endpoint(route: &str, container: &str, fields: Vec<ValidatedField>) -> ValidatedEndpoint {
+    ValidatedEndpoint {
+        route: route.to_string(),
+        method: "GET".into(),
+        headers: vec![],
+        queries: vec![],
+        filter_mapping: vec![],
+        filter_format: None,
+        response_type: ResponseType::Json,
+        container: container.to_string(),
+        bindings: vec![],
+        fields,
+        scalars: vec![],
+        has_next_page: ValidatedHnp::Static(false),
+        total_pages: ValidatedTotalPages::None,
+        pagination: None,
+        composite_id_decodes: vec![],
+        then_steps: vec![],
+        for_each_steps: vec![],
+        via: None,
+        page_url: None,
+        script_name: None,
+        timeout_ms: 10_000,
+    }
+}
+
+fn chapter_list_endpoint() -> ValidatedEndpoint {
+    json_endpoint(
+        "/chapters/$manga_id$",
+        "/chapters",
+        vec![
+            json_field("id", "/id", false),
+            json_field("number", "/number", false),
+            json_field("page_count", "/pages", true),
+            json_field("scanlator", "/group", true),
+        ],
+    )
+}
+
+fn pages_endpoint() -> ValidatedEndpoint {
+    json_endpoint(
+        "/pages/$chapter_id$",
+        "/pages",
+        vec![json_field("url", "/url", false)],
+    )
+}
+
+fn wire_source(svc: &kani_app::service::AppService, source_id: i64, base_url: &str) {
+    let ext = ValidatedExtension {
+        id: "fixture-source".into(),
+        name: "Fixture Source".into(),
+        version: "1.0.0".into(),
+        base_url: base_url.to_string(),
+        language: "en".into(),
+        unrestricted_http: true,
+        chapter_list: Some(chapter_list_endpoint()),
+        pages: Some(pages_endpoint()),
+        ..Default::default()
+    };
+    let source = YamlSource::new(
+        Arc::new(ext),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        format!("test-{source_id}:"),
+        HashMap::new(),
+        true,
+    );
+    svc.sources
+        .insert(source_id, SourceBackend::Yaml(Box::new(source)));
+}
+
+/// Serves a page listing plus the pages themselves at `/img/{n}.jpg`.
+fn serve_chapter(origin: &TestOrigin, chapter_id: &str, pages: &[Vec<u8>]) {
+    let urls: Vec<String> = (0..pages.len())
+        .map(|i| format!("{{\"url\":\"{}/img/{chapter_id}-{i}.jpg\"}}", origin.base()))
+        .collect();
+    origin.set(
+        &format!("/pages/{chapter_id}"),
+        Response::json(&format!("{{\"pages\":[{}]}}", urls.join(","))),
+    );
+    for (i, bytes) in pages.iter().enumerate() {
+        origin.set(
+            &format!("/img/{chapter_id}-{i}.jpg"),
+            Response::image(bytes.clone()),
+        );
+    }
+}
+
+async fn held_chapter_with_pages(
+    svc: &kani_app::service::AppService,
+    manga: kani_app::ids::MangaId,
+    title: &str,
+    source_chapter_id: &str,
+    number: f64,
+    pages: &[Vec<u8>],
+) -> kani_app::ids::ChapterId {
+    use std::io::Write;
+
+    let chapter = common::insert_chapter(&svc.db, manga, source_chapter_id, number).await;
+    sqlx::query("UPDATE chapters SET download_status = 2 WHERE id = ?")
+        .bind(chapter)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let library = { svc.settings.read().await.library_path.clone() };
+    std::fs::create_dir_all(library.join(format!(
+        "{} - {}",
+        kani_core::utilities::sanitize_filename(title),
+        manga.0
+    )))
+    .unwrap();
+
+    let cbz = svc.chapter_cbz_path(chapter).await.unwrap().path;
+    std::fs::create_dir_all(cbz.parent().unwrap()).unwrap();
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&cbz).unwrap());
+    let opts = zip::write::SimpleFileOptions::default();
+    for (i, bytes) in pages.iter().enumerate() {
+        zip.start_file(format!("{:04}.jpg", i + 1), opts).unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+    zip.finish().unwrap();
+    svc.record_chapter_manifest(chapter, cbz).await;
+    chapter
+}
+
+// ── 1. The confirmation probe, against a live source ─────────────────────────
+
+#[tokio::test]
+async fn the_confirmation_probe_measures_a_real_candidate_and_upgrades_on_resolution() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    let manga = insert_manga(&svc.db, source_id, "m1", "Probed").await;
+    wire_source(&svc, source_id, &origin.base());
+
+    // On disk: two small pages. At the source: five much larger ones.
+    let held_pages = vec![jpeg_page(800, 1200, false, 80); 2];
+    let chapter = held_chapter_with_pages(&svc, manga, "Probed", "ch-1", 1.0, &held_pages).await;
+
+    let candidate_pages = vec![jpeg_page(1600, 2400, false, 80); 5];
+    serve_chapter(&origin, "ch-1", &candidate_pages);
+
+    sqlx::query("UPDATE chapters SET source_page_count = 5 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    {
+        let mut s = svc.settings.write().await;
+        s.upgrade_confirm_fetches = 3;
+    }
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(found.len(), 1);
+    let c = &found[0];
+
+    assert_eq!(c.kind, UpgradeKind::QualityReupload);
+    let cand = c
+        .candidate_score
+        .expect("the probe ran against a live origin, so the candidate is measured");
+    assert_eq!(
+        cand.median_long_edge_px, 2400,
+        "the probe must read real dimensions out of the page headers"
+    );
+    assert_eq!(
+        c.verdict,
+        Some(kani_core::quality::QualityVerdict::Better(
+            kani_core::quality::QualityReason::Resolution
+        )),
+        "double the long edge is a resolution upgrade, and the dialogue should say so"
+    );
+    assert_eq!(c.reason_key, "upgrade.reason.resolution");
+
+    // The probe samples, it does not download: three of five pages, by header.
+    assert!(
+        origin.total_hits() <= 5,
+        "a confirmation must not cost as much as a download, got {} requests",
+        origin.total_hits()
+    );
+}
+
+#[tokio::test]
+async fn a_probed_downgrade_is_reported_as_reassurance_not_a_prompt() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    let manga = insert_manga(&svc.db, source_id, "m1", "Worse").await;
+    wire_source(&svc, source_id, &origin.base());
+
+    // More pages, but each one smaller — a re-split of a worse scan. Page count
+    // alone would call this an upgrade; the probe is what prevents that.
+    let held_pages = vec![jpeg_page(1600, 2400, false, 85); 2];
+    let chapter = held_chapter_with_pages(&svc, manga, "Worse", "ch-1", 1.0, &held_pages).await;
+    serve_chapter(&origin, "ch-1", &vec![jpeg_page(800, 1200, false, 85); 6]);
+
+    sqlx::query("UPDATE chapters SET source_page_count = 6 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    {
+        let mut s = svc.settings.write().await;
+        s.upgrade_confirm_fetches = 3;
+    }
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0].kind,
+        UpgradeKind::SourceDowngraded,
+        "six half-size pages are not an upgrade over two full-size ones, \
+         however much longer the listing is"
+    );
+}
+
+#[tokio::test]
+async fn a_colour_release_is_detected_as_an_upgrade_over_a_monochrome_copy() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    let manga = insert_manga(&svc.db, source_id, "m1", "Colour").await;
+    wire_source(&svc, source_id, &origin.base());
+
+    // Same resolution both sides; the only difference is colour. The held side
+    // is judged from decoded pixels via its manifest, the candidate from PNG
+    // headers — the one image format whose colour type is conclusive.
+    let held_pages = vec![greyscale_jpeg(1600, 2400, 85); 3];
+    let chapter = held_chapter_with_pages(&svc, manga, "Colour", "ch-1", 1.0, &held_pages).await;
+    serve_chapter(&origin, "ch-1", &vec![png_page(1600, 2400, true); 4]);
+
+    sqlx::query("UPDATE chapters SET source_page_count = 4 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    {
+        let mut s = svc.settings.write().await;
+        s.upgrade_confirm_fetches = 3;
+    }
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0].held_score.unwrap().colour,
+        kani_core::quality::ColourProfile::Monochrome,
+        "the manifest decodes pixels, so the held side knows it is monochrome"
+    );
+    assert_eq!(found[0].kind, UpgradeKind::QualityReupload);
+}
+
+// ── 2. The Content-Range fallback ────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_server_that_ignores_range_still_yields_a_usable_measurement() {
+    let origin = TestOrigin::start().await;
+    origin.ignore_range(true);
+
+    let pages = vec![jpeg_page(1600, 2400, false, 80); 3];
+    serve_chapter(&origin, "ch-1", &pages);
+
+    let svc = test_service().await;
+    let urls: Vec<String> = (0..3)
+        .map(|i| origin.url(&format!("/img/ch-1-{i}.jpg")))
+        .collect();
+
+    let score = svc
+        .probe_page_quality(&urls, 3)
+        .await
+        .expect("an uncooperative server must still produce a measurement");
+
+    assert_eq!(score.median_long_edge_px, 2400);
+    assert!(
+        score.bytes_per_megapixel > 0.0,
+        "with Range ignored the size must come from Content-Length, not be lost"
+    );
+}
+
+#[tokio::test]
+async fn an_honoured_range_reports_the_full_page_size_not_the_slice() {
+    let origin = TestOrigin::start().await;
+    let page = jpeg_page(1600, 2400, false, 90);
+    let full_len = page.len();
+    assert!(
+        full_len > 4096,
+        "the fixture must be larger than the probe prefix for this to mean anything"
+    );
+    serve_chapter(&origin, "ch-1", &[page.clone(), page.clone(), page]);
+
+    let svc = test_service().await;
+    let urls: Vec<String> = (0..3)
+        .map(|i| origin.url(&format!("/img/ch-1-{i}.jpg")))
+        .collect();
+    let score = svc.probe_page_quality(&urls, 3).await.unwrap();
+
+    // Three pages of `full_len` bytes at 1600x2400 each.
+    let expected = (full_len * 3) as f64 / ((1600.0 * 2400.0 * 3.0) / 1_000_000.0);
+    let ratio = score.bytes_per_megapixel as f64 / expected;
+    assert!(
+        (0.95..1.05).contains(&ratio),
+        "size must come from Content-Range's total, not the 4 KB slice — \
+         expected ~{expected:.0} B/MP, got {:.0}",
+        score.bytes_per_megapixel
+    );
+}
+
+// ── 3. Re-upload detection across two scans ──────────────────────────────────
+
+#[tokio::test]
+async fn a_listing_that_grows_between_scans_is_detected_as_a_reupload() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    let manga = insert_manga(&svc.db, source_id, "m1", "Growing").await;
+    wire_source(&svc, source_id, &origin.base());
+
+    // The same chapter, listed first with 3 pages and then with 5 — the thing
+    // that cannot be arranged against a real source.
+    origin.script(
+        "/chapters/m1",
+        vec![
+            Response::json(r#"{"chapters":[{"id":"ch-1","number":1,"pages":3}]}"#),
+            Response::json(r#"{"chapters":[{"id":"ch-1","number":1,"pages":5}]}"#),
+        ],
+    );
+
+    svc.fetch_and_store_chapters_silent(manga).await.unwrap();
+    let first: Option<i64> =
+        sqlx::query_scalar("SELECT source_page_count FROM chapters WHERE manga_id = ?")
+            .bind(manga)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert_eq!(first, Some(3), "the listing's page count must be stored");
+
+    svc.fetch_and_store_chapters_silent(manga).await.unwrap();
+    let second: Option<i64> =
+        sqlx::query_scalar("SELECT source_page_count FROM chapters WHERE manga_id = ?")
+            .bind(manga)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert_eq!(
+        second,
+        Some(5),
+        "a re-scan must refresh the count; INSERT OR IGNORE alone would leave it at 3 \
+         and re-upload detection could never fire"
+    );
+}
+
+#[tokio::test]
+async fn a_grown_listing_against_a_held_chapter_raises_a_candidate() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    let manga = insert_manga(&svc.db, source_id, "m1", "Grown").await;
+    wire_source(&svc, source_id, &origin.base());
+
+    let held_pages = vec![jpeg_page(800, 1200, false, 80); 3];
+    held_chapter_with_pages(&svc, manga, "Grown", "ch-1", 1.0, &held_pages).await;
+    serve_chapter(&origin, "ch-1", &vec![jpeg_page(1600, 2400, false, 80); 5]);
+
+    origin.set(
+        "/chapters/m1",
+        Response::json(r#"{"chapters":[{"id":"ch-1","number":1,"pages":5}]}"#),
+    );
+    {
+        let mut s = svc.settings.write().await;
+        s.upgrade_confirm_fetches = 3;
+    }
+
+    svc.fetch_and_store_chapters_silent(manga).await.unwrap();
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+
+    assert_eq!(
+        found.len(),
+        1,
+        "the scan wrote the source count and detection compared it against the archive"
+    );
+    assert_eq!(found[0].kind, UpgradeKind::QualityReupload);
+    assert_eq!(found[0].held_page_count, Some(3));
+    assert_eq!(found[0].candidate_page_count, Some(5));
+}
+
+// ── 4. Pathological images ───────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_truncated_header_does_not_poison_the_measurement() {
+    let origin = TestOrigin::start().await;
+    // Two readable pages and one cut off before its dimensions are complete.
+    let good = jpeg_page(1600, 2400, false, 80);
+    origin.set("/img/a.jpg", Response::image(good.clone()));
+    origin.set("/img/b.jpg", Response::image(good));
+    origin.set(
+        "/img/c.jpg",
+        Response::image(kani_shared_test::origin::truncated_jpeg(8)),
+    );
+
+    let svc = test_service().await;
+    let urls = vec![
+        origin.url("/img/a.jpg"),
+        origin.url("/img/b.jpg"),
+        origin.url("/img/c.jpg"),
+    ];
+    let score = svc.probe_page_quality(&urls, 3).await.unwrap();
+
+    assert_eq!(
+        score.median_long_edge_px, 2400,
+        "an unreadable page must be skipped, not counted as zero and dragged \
+         through the median"
+    );
+}
+
+#[tokio::test]
+async fn a_chapter_of_entirely_unreadable_pages_yields_no_measurement() {
+    let origin = TestOrigin::start().await;
+    for name in ["a", "b", "c"] {
+        origin.set(
+            &format!("/img/{name}.jpg"),
+            Response::image(b"not an image at all".to_vec()),
+        );
+    }
+
+    let svc = test_service().await;
+    let urls = ["a", "b", "c"]
+        .iter()
+        .map(|n| origin.url(&format!("/img/{n}.jpg")))
+        .collect::<Vec<_>>();
+
+    assert!(
+        svc.probe_page_quality(&urls, 3).await.is_none(),
+        "nothing readable must produce no score, so the caller can tell \
+         'not measured' from 'measured as zero'"
+    );
+}
+
+#[tokio::test]
+async fn a_page_the_server_refuses_is_skipped_without_failing_the_probe() {
+    let origin = TestOrigin::start().await;
+    let good = jpeg_page(1600, 2400, false, 80);
+    origin.set("/img/a.jpg", Response::image(good.clone()));
+    origin.set("/img/b.jpg", Response::status(403));
+    origin.set("/img/c.jpg", Response::image(good));
+
+    let svc = test_service().await;
+    let urls = ["a", "b", "c"]
+        .iter()
+        .map(|n| origin.url(&format!("/img/{n}.jpg")))
+        .collect::<Vec<_>>();
+
+    let score = svc
+        .probe_page_quality(&urls, 3)
+        .await
+        .expect("two readable pages are enough to measure");
+    assert_eq!(score.median_long_edge_px, 2400);
+}
+
+#[tokio::test]
+async fn a_body_that_stops_short_of_its_announced_length_is_not_measured_as_tiny() {
+    let origin = TestOrigin::start().await;
+    let page = jpeg_page(1600, 2400, false, 80);
+    let announced = page.len();
+
+    origin.set("/img/a.jpg", Response::image(page.clone()));
+    origin.set("/img/b.jpg", Response::image(page.clone()));
+    origin.set(
+        "/img/c.jpg",
+        Response::image(page.clone()).body(Body::Truncated {
+            bytes: page,
+            announced,
+            sent: 2048,
+        }),
+    );
+
+    let svc = test_service().await;
+    let urls = ["a", "b", "c"]
+        .iter()
+        .map(|n| origin.url(&format!("/img/{n}.jpg")))
+        .collect::<Vec<_>>();
+
+    let score = svc
+        .probe_page_quality(&urls, 3)
+        .await
+        .expect("an interrupted page must not sink the whole probe");
+    assert_eq!(score.median_long_edge_px, 2400);
+}
+
+#[tokio::test]
+async fn a_greyscale_png_is_read_as_conclusively_monochrome_from_its_header() {
+    let origin = TestOrigin::start().await;
+    for name in ["a", "b", "c"] {
+        origin.set(
+            &format!("/img/{name}.png"),
+            Response::image(png_page(1600, 2400, false)),
+        );
+    }
+
+    let svc = test_service().await;
+    let urls = ["a", "b", "c"]
+        .iter()
+        .map(|n| origin.url(&format!("/img/{n}.png")))
+        .collect::<Vec<_>>();
+    let score = svc.probe_page_quality(&urls, 3).await.unwrap();
+
+    assert_eq!(
+        score.colour,
+        kani_core::quality::ColourProfile::Monochrome,
+        "PNG states its colour type in the IHDR, so the header settles it"
+    );
+    assert_eq!(
+        score.median_encoder_quality, None,
+        "encoder quality is a JPEG quantisation-table estimate and must not be \
+         invented for a lossless format"
+    );
+}
+
+#[tokio::test]
+async fn a_greyscale_jpeg_is_honestly_reported_as_unknown_not_guessed_monochrome() {
+    let origin = TestOrigin::start().await;
+    let grey = greyscale_jpeg(1600, 2400, 85);
+    for name in ["a", "b", "c"] {
+        origin.set(&format!("/img/{name}.jpg"), Response::image(grey.clone()));
+    }
+
+    let svc = test_service().await;
+    let urls = ["a", "b", "c"]
+        .iter()
+        .map(|n| origin.url(&format!("/img/{n}.jpg")))
+        .collect::<Vec<_>>();
+    let score = svc.probe_page_quality(&urls, 3).await.unwrap();
+
+    assert_eq!(
+        score.colour,
+        kani_core::quality::ColourProfile::Unknown,
+        "a three-component JPEG of grey content is the common case; claiming to \
+         know its colour-ness from the header would mislabel most of a library"
+    );
+    assert!(
+        score.median_encoder_quality.is_some(),
+        "the quantisation table is inside the probe prefix, so quality is readable"
+    );
+}
+
+#[tokio::test]
+async fn encoder_quality_is_read_from_the_header_and_ordered_correctly() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+
+    let mut measured = Vec::new();
+    for (label, quality) in [("low", 45u8), ("high", 95u8)] {
+        for name in ["a", "b", "c"] {
+            origin.set(
+                &format!("/img/{label}-{name}.jpg"),
+                Response::image(greyscale_jpeg(1600, 2400, quality)),
+            );
+        }
+        let urls = ["a", "b", "c"]
+            .iter()
+            .map(|n| origin.url(&format!("/img/{label}-{n}.jpg")))
+            .collect::<Vec<_>>();
+        let score = svc.probe_page_quality(&urls, 3).await.unwrap();
+        measured.push(score.median_encoder_quality.expect("JPEG quality readable"));
+    }
+
+    assert!(
+        measured[1] > measured[0],
+        "the estimate need not be exact, but it must order a q95 encode above \
+         a q45 one — got {measured:?}"
+    );
+}
