@@ -339,3 +339,54 @@ async fn the_replaced_sweep_respects_the_retention_window() {
     assert_eq!(svc.purge_replaced(0).await.unwrap(), 1);
     assert!(!f.exists());
 }
+
+#[tokio::test]
+async fn a_zero_confirmation_budget_falls_back_to_page_count() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "NoBudget").await;
+    let chapter = held_chapter(&svc, manga, "NoBudget", 1.0, 2).await;
+    sqlx::query("UPDATE chapters SET page_count = 5 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    {
+        let mut s = svc.settings.write().await;
+        s.upgrade_confirm_fetches = 0;
+    }
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0].kind,
+        UpgradeKind::QualityReupload,
+        "with no budget to confirm, a longer listing is still the only signal \
+         available and must not be silently discarded"
+    );
+}
+
+#[tokio::test]
+async fn a_confirmation_that_cannot_reach_the_source_keeps_the_count_verdict() {
+    let svc = test_service().await;
+    let manga = seed_manga(&svc, "Unreachable").await;
+    let chapter = held_chapter(&svc, manga, "Unreachable", 1.0, 2).await;
+    sqlx::query("UPDATE chapters SET page_count = 5 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    {
+        let mut s = svc.settings.write().await;
+        s.upgrade_confirm_fetches = 3;
+    }
+
+    // The seeded source has no backend, so the probe cannot run.
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(
+        found.len(),
+        1,
+        "a source that cannot be reached must not make detection fail or drop \
+         the candidate"
+    );
+    assert_eq!(found[0].kind, UpgradeKind::QualityReupload);
+}

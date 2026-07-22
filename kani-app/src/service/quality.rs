@@ -49,6 +49,10 @@ fn now_unix() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
+/// Pages sampled per confirmation. Three spans the chapter without turning a
+/// scan into a crawl.
+const PROBE_SAMPLES: usize = 3;
+
 fn dismissal_key(c: &UpgradeCandidate) -> (String, Option<String>) {
     (
         c.candidate_source_chapter_id.clone(),
@@ -60,13 +64,24 @@ impl AppService {
     /// Re-derives the upgrade candidates for one manga and stores them on the
     /// affected chapter rows. Returns everything currently flagged.
     pub async fn evaluate_upgrades(&self, manga_id: MangaId) -> Result<Vec<UpgradeCandidate>> {
-        let (enabled, _min_gain) = {
+        let (enabled, min_gain, mut confirm_budget) = {
             let s = self.settings.read().await;
-            (s.upgrade_detection_enabled, s.upgrade_min_res_gain)
+            (
+                s.upgrade_detection_enabled,
+                s.upgrade_min_res_gain as f32,
+                s.upgrade_confirm_fetches.max(0),
+            )
         };
         if !enabled {
             return Ok(Vec::new());
         }
+
+        let source = sqlx::query!(
+            "SELECT source_id, source_manga_id FROM manga WHERE id = ?",
+            manga_id
+        )
+        .fetch_optional(&self.db_read)
+        .await?;
 
         let rows = sqlx::query!(
             "SELECT id, source_chapter_id, chapter_number, scanlator, page_count, \
@@ -113,11 +128,48 @@ impl AppService {
             if let (Some(hp), Some(lp)) = (held_pages, held.page_count)
                 && hp != lp
             {
-                let kind = if lp > hp {
+                // Page count alone cannot tell better from worse — a longer
+                // listing may be the same scan re-split. Spend a confirmation
+                // probe where the budget allows, reading page headers rather
+                // than downloading anything.
+                let mut kind = if lp > hp {
                     UpgradeKind::QualityReupload
                 } else {
                     UpgradeKind::SourceDowngraded
                 };
+
+                if confirm_budget > 0
+                    && let Some(src) = &source
+                    && let Some(held_score) = held
+                        .manifest_json
+                        .as_deref()
+                        .and_then(|j| {
+                            serde_json::from_str::<kani_core::manifest::ChapterManifest>(j).ok()
+                        })
+                        .map(|m| kani_core::quality::score_from_manifest(&m))
+                {
+                    confirm_budget -= 1;
+                    if let Some(urls) = self
+                        .candidate_page_urls(
+                            src.source_id,
+                            &src.source_manga_id,
+                            &held.source_chapter_id,
+                        )
+                        .await
+                        && let Some((cand_score, _colour)) =
+                            self.probe_page_quality(&urls, PROBE_SAMPLES).await
+                    {
+                        kind = if kani_core::quality::is_meaningfully_better(
+                            &cand_score,
+                            &held_score,
+                            min_gain,
+                        ) {
+                            UpgradeKind::QualityReupload
+                        } else {
+                            UpgradeKind::SourceDowngraded
+                        };
+                    }
+                }
                 candidates.push(UpgradeCandidate {
                     held_chapter_id: held.id,
                     kind,
@@ -363,6 +415,27 @@ fn collect_candidates(rows: impl Iterator<Item = Option<String>>) -> Vec<Upgrade
 }
 
 impl AppService {
+    /// Page URLs for a chapter as the source currently lists them.
+    async fn candidate_page_urls(
+        &self,
+        source_id: i64,
+        source_manga_id: &str,
+        source_chapter_id: &str,
+    ) -> Option<Vec<String>> {
+        let raw = self
+            .get_pages(source_id, source_manga_id, source_chapter_id)
+            .await
+            .ok()?;
+        let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let pages = parsed.get("pages")?.as_array()?;
+        Some(
+            pages
+                .iter()
+                .filter_map(|p| p.get("url")?.as_str().map(str::to_owned))
+                .collect(),
+        )
+    }
+
     /// Reads dimensions, size and encoding of a few pages without downloading
     /// them, by range-requesting each page's header.
     ///
