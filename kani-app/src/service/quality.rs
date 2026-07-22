@@ -640,10 +640,18 @@ impl AppService {
         source_manga_id: &str,
         source_chapter_id: &str,
     ) -> Option<Vec<String>> {
-        let raw = self
-            .get_pages(source_id, source_manga_id, source_chapter_id)
+        // Deliberately not `get_pages`, which reads through the page cache.
+        // The whole job here is to confirm what the source offers *now*; a
+        // cached listing is the very thing being checked, and confirming
+        // against it would attribute a stale measurement to a fresh candidate.
+        let backend = self.sources.get_backend(source_id)?;
+        let decoded_manga = crate::utils::decode_manga_id(source_manga_id);
+        let decoded_chapter = crate::utils::decode_manga_id(source_chapter_id);
+        let chapter = backend
+            .get_pages(&decoded_manga, &decoded_chapter)
             .await
             .ok()?;
+        let raw = serde_json::to_string(&chapter).ok()?;
         let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
         let pages = parsed.get("pages")?.as_array()?;
         Some(

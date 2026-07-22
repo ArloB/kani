@@ -1,6 +1,11 @@
 use super::*;
 use crate::ids::{ChapterId, MangaId, UserId};
 
+/// Ceiling on chapter-listing pagination. A long series runs to a few dozen
+/// pages; a source claiming more than this is malfunctioning, and following it
+/// grows memory and the database without bound.
+const MAX_CHAPTER_LIST_PAGES: usize = 500;
+
 /// Resolved metadata for a downloaded chapter, including its on-disk CBZ path.
 /// Returned by [`AppService::chapter_cbz_path`]; all callers get everything
 /// they need from one query instead of issuing follow-up round-trips.
@@ -449,8 +454,19 @@ impl AppService {
             let list: wit_types::ChapterList = serde_json::from_str(&json).map_err(|e| {
                 ServiceError::Internal(format!("Failed to parse chapter list: {e}"))
             })?;
+            let empty = list.chapters.is_empty();
             all.extend(list.chapters);
-            if !list.has_next_page {
+            // A source that always answers `has_next_page: true` would spin
+            // here forever, growing the vector without bound. This is reachable
+            // from a REST handler (`preview_migration`), so the ceiling is not
+            // hypothetical.
+            if empty || !list.has_next_page || page as usize >= MAX_CHAPTER_LIST_PAGES {
+                if page as usize >= MAX_CHAPTER_LIST_PAGES {
+                    tracing::warn!(
+                        "Chapter listing for source {source_id}/{source_manga_id} hit the \
+                         {MAX_CHAPTER_LIST_PAGES}-page ceiling; treating it as complete"
+                    );
+                }
                 break;
             }
             page += 1;

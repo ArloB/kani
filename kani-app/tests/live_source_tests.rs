@@ -1071,3 +1071,52 @@ async fn a_successful_page_fetch_is_recorded_against_the_sources_health() {
             .unwrap();
     assert!(ok.is_some(), "a successful page fetch must count as health");
 }
+
+// ── 10. The confirmation probe must not read through the page cache ──────────
+
+#[tokio::test]
+async fn the_probe_confirms_against_the_current_listing_not_a_cached_one() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    let manga = insert_manga(&svc.db, source_id, "m1", "Cached").await;
+    wire_source(&svc, source_id, &origin.base());
+
+    // Two small pages on disk.
+    let held_pages = vec![jpeg_page(800, 1200, false, 80); 2];
+    let chapter = held_chapter_with_pages(&svc, manga, "Cached", "ch-1", 1.0, &held_pages).await;
+
+    // The listing the app sees first: two pages, same size as what we hold.
+    serve_chapter(&origin, "ch-1", &vec![jpeg_page(800, 1200, false, 80); 2]);
+    svc.get_pages(source_id, "m1", "ch-1").await.unwrap();
+    let hits_after_warm = origin.hits("/pages/ch-1");
+
+    // The source re-uploads at double the resolution.
+    serve_chapter(&origin, "ch-1", &vec![jpeg_page(1600, 2400, false, 80); 5]);
+    sqlx::query("UPDATE chapters SET source_page_count = 5 WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    {
+        let mut s = svc.settings.write().await;
+        s.upgrade_confirm_fetches = 3;
+    }
+
+    let found = svc.evaluate_upgrades(manga).await.unwrap();
+    assert_eq!(found.len(), 1);
+
+    assert!(
+        origin.hits("/pages/ch-1") > hits_after_warm,
+        "the probe must re-ask the source; reading the cached listing means \
+         confirming a change against the very data being checked"
+    );
+    assert_eq!(
+        found[0]
+            .candidate_score
+            .expect("probed")
+            .median_long_edge_px,
+        2400,
+        "the measurement must describe the new upload, not the cached one"
+    );
+}
