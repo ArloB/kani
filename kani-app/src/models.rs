@@ -20,8 +20,6 @@ pub struct Settings {
     pub library_path: std::path::PathBuf,
     pub wasm_storage_path: std::path::PathBuf,
     pub concurrent_page_downloads: i64,
-    pub concurrent_manga_downloads: i64,
-    pub chapter_queue_size: i64,
     pub max_retries: i64,
     pub initial_retry_delay_ms: i64,
     pub max_wasm_instances: i64,

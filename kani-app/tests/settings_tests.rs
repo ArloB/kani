@@ -22,8 +22,6 @@ async fn update_download_settings_round_trips() {
     svc.update_settings(
         SettingsUpdate::Download(DownloadSettings {
             concurrent_page_downloads: 8,
-            concurrent_manga_downloads: 4,
-            chapter_queue_size: 64,
             max_retries: 5,
             initial_retry_delay_ms: 200,
             auto_download_category_ids: vec![],
@@ -37,8 +35,6 @@ async fn update_download_settings_round_trips() {
 
     let s = svc.get_settings().await;
     assert_eq!(s.concurrent_page_downloads, 8);
-    assert_eq!(s.concurrent_manga_downloads, 4);
-    assert_eq!(s.chapter_queue_size, 64);
     assert_eq!(s.max_retries, 5);
     assert_eq!(s.initial_retry_delay_ms, 200);
 }
@@ -161,8 +157,6 @@ async fn update_download_settings_rejects_invalid_page_concurrency() {
         .update_settings(
             SettingsUpdate::Download(DownloadSettings {
                 concurrent_page_downloads: 0, // below minimum of 1
-                concurrent_manga_downloads: 2,
-                chapter_queue_size: 32,
                 max_retries: 3,
                 initial_retry_delay_ms: 100,
                 auto_download_category_ids: vec![],
@@ -203,8 +197,6 @@ async fn update_settings_does_not_affect_unrelated_fields() {
     svc.update_settings(
         SettingsUpdate::Download(DownloadSettings {
             concurrent_page_downloads: 8,
-            concurrent_manga_downloads: 2,
-            chapter_queue_size: 32,
             max_retries: 3,
             initial_retry_delay_ms: 100,
             auto_download_category_ids: vec![],

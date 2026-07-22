@@ -86,7 +86,6 @@ pub struct BackupSettings {
     pub scan_interval_minutes: i64,
     pub auto_scan: bool,
     pub concurrent_page_downloads: i64,
-    pub concurrent_manga_downloads: i64,
 }
 
 // ── Preview (read-only, no DB writes) ────────────────────────────────────────
@@ -446,7 +445,6 @@ impl AppService {
             scan_interval_minutes: s.scan_interval_minutes,
             auto_scan: s.auto_scan,
             concurrent_page_downloads: s.concurrent_page_downloads,
-            concurrent_manga_downloads: s.concurrent_manga_downloads,
         });
         drop(s);
 
@@ -757,12 +755,11 @@ impl AppService {
         {
             sqlx::query!(
                 "UPDATE settings SET scan_interval_minutes = ?, auto_scan = ?, \
-                     concurrent_page_downloads = ?, concurrent_manga_downloads = ? \
+                     concurrent_page_downloads = ? \
                      WHERE id = 'singleton'",
                 s.scan_interval_minutes,
                 s.auto_scan,
                 s.concurrent_page_downloads,
-                s.concurrent_manga_downloads
             )
             .execute(&self.db)
             .await?;

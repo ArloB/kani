@@ -205,7 +205,7 @@ async fn a_revoked_session_cookie_stops_working() {
     let app = build_test_app(state).await;
 
     // Two independent logins for the same user — one to revoke, one to revoke from.
-    let victim = login(&app, username.clone(), password.clone()).await;
+    let victim = login(&app, username, password).await;
     let survivor = login(&app, username, password).await;
 
     // The victim must be recorded before it can be named.

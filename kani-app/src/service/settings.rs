@@ -22,8 +22,6 @@ impl AppService {
             library_path: s.library_path.to_string_lossy().into_owned(),
             wasm_storage_path: s.wasm_storage_path.to_string_lossy().into_owned(),
             concurrent_page_downloads: s.concurrent_page_downloads,
-            concurrent_manga_downloads: s.concurrent_manga_downloads,
-            chapter_queue_size: s.chapter_queue_size,
             max_retries: s.max_retries,
             initial_retry_delay_ms: s.initial_retry_delay_ms,
             max_wasm_instances: s.max_wasm_instances,
@@ -108,11 +106,6 @@ impl AppService {
                         "concurrent_page_downloads must be 1-32".into(),
                     ));
                 }
-                if s.concurrent_manga_downloads < 1 || s.concurrent_manga_downloads > 16 {
-                    return Err(ServiceError::Validation(
-                        "concurrent_manga_downloads must be 1-16".into(),
-                    ));
-                }
                 if s.scan_concurrency < 1 || s.scan_concurrency > 32 {
                     return Err(ServiceError::Validation(
                         "scan_concurrency must be 1-32".into(),
@@ -126,13 +119,11 @@ impl AppService {
                 let cat_ids_json = serde_json::to_string(&s.auto_download_category_ids)
                     .unwrap_or_else(|_| "[]".to_string());
                 sqlx::query!(
-                    "UPDATE settings SET concurrent_page_downloads=?, concurrent_manga_downloads=?, \
-                     chapter_queue_size=?, max_retries=?, initial_retry_delay_ms=?, \
+                    "UPDATE settings SET concurrent_page_downloads=?, \
+                     max_retries=?, initial_retry_delay_ms=?, \
                      auto_download_category_ids=?, scan_concurrency=?, \
                      per_source_download_concurrency=? WHERE id='singleton'",
                     s.concurrent_page_downloads,
-                    s.concurrent_manga_downloads,
-                    s.chapter_queue_size,
                     s.max_retries,
                     s.initial_retry_delay_ms,
                     cat_ids_json,
@@ -144,8 +135,6 @@ impl AppService {
                 {
                     let mut settings = self.settings.write().await;
                     settings.concurrent_page_downloads = s.concurrent_page_downloads;
-                    settings.concurrent_manga_downloads = s.concurrent_manga_downloads;
-                    settings.chapter_queue_size = s.chapter_queue_size;
                     settings.max_retries = s.max_retries;
                     settings.initial_retry_delay_ms = s.initial_retry_delay_ms;
                     settings.auto_download_category_ids = cat_ids_json;

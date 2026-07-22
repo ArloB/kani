@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE settings SET scan_interval_minutes = ?, auto_scan = ?, concurrent_page_downloads = ? WHERE id = 'singleton'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "c10d34ae12e3b88f17d5f0845cd33cb132ad32e5a476df59c8d316eeb0eec786"
+}

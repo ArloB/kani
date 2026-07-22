@@ -1171,8 +1171,6 @@ pub struct AppSettings {
     pub library_path: String,
     pub wasm_storage_path: String,
     pub concurrent_page_downloads: i64,
-    pub concurrent_manga_downloads: i64,
-    pub chapter_queue_size: i64,
     pub max_retries: i64,
     pub initial_retry_delay_ms: i64,
     pub max_wasm_instances: i64,
@@ -1315,8 +1313,6 @@ impl AuthenticatedUser {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DownloadSettings {
     pub concurrent_page_downloads: i64,
-    pub concurrent_manga_downloads: i64,
-    pub chapter_queue_size: i64,
     pub max_retries: i64,
     pub initial_retry_delay_ms: i64,
     pub auto_download_category_ids: Vec<i64>,
@@ -2024,8 +2020,6 @@ mod tests {
     fn settings_update_json_round_trip_all_variants() {
         json_rt(&SettingsUpdate::Download(DownloadSettings {
             concurrent_page_downloads: 4,
-            concurrent_manga_downloads: 2,
-            chapter_queue_size: 100,
             max_retries: 3,
             initial_retry_delay_ms: 1000,
             auto_download_category_ids: vec![1, 2],
