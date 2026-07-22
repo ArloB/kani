@@ -863,3 +863,111 @@ fn wire_paginated_source(svc: &kani_app::service::AppService, source_id: i64, ba
     svc.sources
         .insert(source_id, SourceBackend::Yaml(Box::new(source)));
 }
+
+// ── 8. Retry policy: permanent statuses, and the server's own Retry-After ────
+
+#[tokio::test]
+async fn a_permanent_status_is_not_retried() {
+    let origin = TestOrigin::start().await;
+    origin.set("/img/gone.jpg", Response::status(404));
+
+    let staging = tempfile::tempdir().unwrap();
+    let client = kani_core::http::SmartClient::new(None).unwrap();
+
+    let started = std::time::Instant::now();
+    let res = kani_core::downloader::DownloaderManager::download_page_with_retry_for_test(
+        &client,
+        &origin.url("/img/gone.jpg"),
+        1,
+        staging.path(),
+        3,
+        1_000,
+        &origin.base(),
+        None,
+    )
+    .await;
+    let elapsed = started.elapsed();
+
+    assert!(res.is_err());
+    assert_eq!(
+        origin.hits("/img/gone.jpg"),
+        1,
+        "a 404 will still be a 404 on the third try; retrying it burns the \
+         whole backoff schedule per page"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "a permanent failure must not sit through the backoff, took {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_transient_status_is_still_retried() {
+    let origin = TestOrigin::start().await;
+    let page = jpeg_page(400, 600, false, 80);
+    origin.script(
+        "/img/flaky.jpg",
+        vec![Response::status(503), Response::image(page)],
+    );
+
+    let staging = tempfile::tempdir().unwrap();
+    let client = kani_core::http::SmartClient::new(None).unwrap();
+
+    let res = kani_core::downloader::DownloaderManager::download_page_with_retry_for_test(
+        &client,
+        &origin.url("/img/flaky.jpg"),
+        1,
+        staging.path(),
+        3,
+        10,
+        &origin.base(),
+        None,
+    )
+    .await;
+
+    assert!(res.is_ok(), "a 503 is temporary and must be retried");
+    assert!(origin.hits("/img/flaky.jpg") >= 2);
+}
+
+#[tokio::test]
+async fn the_servers_retry_after_survives_into_the_error_classification() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/img/limited.jpg",
+        // Kept small: `send_request` honours this header for its own internal
+        // retries before the error ever surfaces, so a large value makes the
+        // test sleep for exactly that long.
+        Response::status(429).header("Retry-After", "1"),
+    );
+
+    let staging = tempfile::tempdir().unwrap();
+    let client = kani_core::http::SmartClient::new(None).unwrap();
+
+    let err = kani_core::downloader::DownloaderManager::download_page_for_test(
+        &client,
+        &origin.url("/img/limited.jpg"),
+        1,
+        staging.path(),
+        &origin.base(),
+        None,
+    )
+    .await
+    .expect_err("429 is an error");
+
+    match err {
+        kani_core::error::Error::HttpStatus {
+            status,
+            retry_after_secs,
+            ..
+        } => {
+            assert_eq!(status, 429);
+            assert_eq!(
+                retry_after_secs,
+                Some(1),
+                "the server said how long to wait; discarding it and guessing \
+                 with backoff is strictly worse"
+            );
+        }
+        other => panic!("expected a status error, got {other:?}"),
+    }
+}

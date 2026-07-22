@@ -14,6 +14,20 @@ pub enum Error {
     #[error("Not found: {0}")]
     NotFound(String),
 
+    /// A non-success HTTP status, with the code preserved.
+    ///
+    /// Carrying the status rather than formatting it into a string is what lets
+    /// a caller tell "try again" from "this will never work" without matching
+    /// on error text.
+    #[error("HTTP {status}: {context}")]
+    HttpStatus {
+        status: u16,
+        /// Seconds from a `Retry-After` header, when the server sent one.
+        /// Honouring the server's own number beats guessing with backoff.
+        retry_after_secs: Option<u64>,
+        context: String,
+    },
+
     #[error("WASM error: {0}")]
     Wasm(#[from] wasmtime::Error),
 

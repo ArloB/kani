@@ -39,6 +39,20 @@ pub(crate) fn classify_download_error(err: DownloadError) -> DownloadErrorKind {
             path: String::new(),
             message: e.to_string(),
         },
+        // The status is known exactly, so classify on it — and pass on the
+        // server's own `Retry-After` instead of discarding it and falling back
+        // to our backoff guess.
+        DownloadError::PageHttp {
+            status,
+            retry_after_secs,
+            ..
+        } => match status {
+            429 => DownloadErrorKind::RateLimited { retry_after_secs },
+            401 | 403 => DownloadErrorKind::AuthRequired,
+            404 | 410 => DownloadErrorKind::NotFound,
+            s if (500..600).contains(&s) => DownloadErrorKind::Network { retryable: true },
+            _ => DownloadErrorKind::Network { retryable: false },
+        },
         DownloadError::PageFetch(msg) => {
             let lower = msg.to_lowercase();
             if lower.contains("429") || lower.contains("rate limit") {

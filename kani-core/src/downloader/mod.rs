@@ -21,6 +21,14 @@ use tokio_util::sync::CancellationToken;
 #[derive(Debug)]
 pub enum DownloadError {
     PageFetch(String),
+    /// A page failed with a specific HTTP status. Kept structured so retry
+    /// policy is a numeric decision rather than a substring search over
+    /// formatted error text.
+    PageHttp {
+        status: u16,
+        retry_after_secs: Option<u64>,
+        message: String,
+    },
     Io(std::io::Error),
     Extension {
         kind: kani_shared::extension::ExtensionErrorKind,
@@ -33,6 +41,9 @@ impl std::fmt::Display for DownloadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PageFetch(msg) => write!(f, "page fetch failed: {msg}"),
+            Self::PageHttp {
+                status, message, ..
+            } => write!(f, "page fetch failed with HTTP {status}: {message}"),
             Self::Io(e) => write!(f, "io error: {e}"),
             Self::Extension { message, .. } => write!(f, "extension error: {message}"),
             Self::Cancelled => write!(f, "cancelled"),
@@ -245,6 +256,26 @@ impl DownloaderManager {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// `Retry-After` as whole seconds. Only the delta-seconds form is read; the
+    /// HTTP-date form is rare in practice and guessing at clock skew is worse than
+    /// falling back to our own backoff.
+    fn retry_after_secs(headers: &rquest::header::HeaderMap) -> Option<u64> {
+        headers
+            .get(rquest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+    }
+
+    /// Statuses no amount of retrying will change.
+    fn is_permanent_http(e: &error::Error) -> bool {
+        matches!(
+            e,
+            error::Error::HttpStatus { status, .. }
+                if matches!(status, 400 | 401 | 403 | 404 | 405 | 410 | 451)
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn download_page_with_retry(
         client: &SmartClient,
         url: &str,
@@ -265,6 +296,14 @@ impl DownloaderManager {
             {
                 Ok(data) => return Ok(data),
                 Err(e) => {
+                    // A page that is gone, forbidden or malformed will still be
+                    // gone on the third attempt. Retrying it burns the whole
+                    // backoff schedule — up to 30s a step — per page, turning a
+                    // chapter with one dead image into a multi-minute stall.
+                    if Self::is_permanent_http(&e) {
+                        tracing::warn!("Page {page_index} failed permanently: {e}");
+                        return Err(e);
+                    }
                     attempts += 1;
                     if attempts >= max_attempts {
                         tracing::error!(
@@ -293,6 +332,32 @@ impl DownloaderManager {
                 }
             }
         }
+    }
+
+    /// Test hook for `download_page_with_retry`.
+    #[cfg(any(test, feature = "test-util"))]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn download_page_with_retry_for_test(
+        client: &SmartClient,
+        url: &str,
+        page_index: i32,
+        staging_dir: &std::path::Path,
+        max_attempts: i64,
+        initial_retry_delay_ms: i64,
+        base_url: &str,
+        transform: Option<&str>,
+    ) -> Result<(PathBuf, String)> {
+        Self::download_page_with_retry(
+            client,
+            url,
+            page_index,
+            staging_dir,
+            max_attempts,
+            initial_retry_delay_ms,
+            base_url,
+            transform,
+        )
+        .await
     }
 
     /// Test hook for `download_page`, which is otherwise reachable only through
@@ -328,9 +393,11 @@ impl DownloaderManager {
 
         let status = resp.status();
         if !status.is_success() {
-            return Err(error::Error::Other(format!(
-                "HTTP {status} downloading page {page}"
-            )));
+            return Err(error::Error::HttpStatus {
+                status: status.as_u16(),
+                retry_after_secs: Self::retry_after_secs(resp.headers()),
+                context: format!("downloading page {page}"),
+            });
         }
 
         let scramble_seed = transform
@@ -615,13 +682,24 @@ impl DownloaderManager {
                         on_page2(done, total_pages);
                     }
 
-                    result.map_err(|e| e.to_string())
+                    result.map_err(|e| match e {
+                        error::Error::HttpStatus {
+                            status,
+                            retry_after_secs,
+                            ref context,
+                        } => DownloadError::PageHttp {
+                            status,
+                            retry_after_secs,
+                            message: format!("HTTP {status}: {context}"),
+                        },
+                        other => DownloadError::PageFetch(other.to_string()),
+                    })
                 }
             })
             .buffer_unordered(concurrent_pages);
 
         let mut successful: Vec<(PathBuf, String)> = Vec::new();
-        let mut page_error: Option<String> = None;
+        let mut page_error: Option<DownloadError> = None;
         let mut is_cancelled = false;
 
         while let Some(result) = tokio::select! {
@@ -655,8 +733,9 @@ impl DownloaderManager {
         }
 
         if let Some(err) = page_error {
+            let err_text = err.to_string();
             Self::update_active(&active_ref, chapter_id, |s| {
-                s.status = ActiveDownloadStatus::Failed(err.clone());
+                s.status = ActiveDownloadStatus::Failed(err_text.clone());
             })
             .await;
             Self::send_event(
@@ -664,11 +743,11 @@ impl DownloaderManager {
                 DownloadProgressEvent::ChapterFailed {
                     chapter_id,
                     chapter_name: name.clone(),
-                    error: format!("Page download failed: {err}"),
+                    error: format!("Page download failed: {err_text}"),
                 },
             );
             Self::schedule_active_cleanup(active_ref.clone(), chapter_id);
-            return Err(DownloadError::PageFetch(err));
+            return Err(err);
         }
 
         let successful_len = successful.len();
