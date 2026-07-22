@@ -766,6 +766,9 @@ pub struct Chapter {
     pub last_page_read: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub download_error: Option<serde_json::Value>,
+    /// Upgrade candidates found for this chapter, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_available: Option<serde_json::Value>,
 }
 
 #[cfg(feature = "host")]
@@ -1653,6 +1656,7 @@ mod tests {
             is_read: true,
             last_page_read: Some(10),
             download_error: None,
+            upgrade_available: None,
         });
     }
 

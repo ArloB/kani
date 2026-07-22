@@ -176,6 +176,7 @@ pub struct ChapterRow {
     pub is_read: Option<bool>,
     pub last_page_read: Option<i64>,
     pub download_error: Option<String>,
+    pub upgrade_available: Option<String>,
 }
 
 /// Slim row returned by filtered library queries (joins manga + source).

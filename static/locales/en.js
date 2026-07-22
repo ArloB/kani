@@ -222,6 +222,27 @@ export default {
   'storage.scrub.unhashed_n': '{n} not yet hashed',
   'storage.scrub.clean': 'Library is clean',
   'storage.scrub.clean.subtitle': 'Every downloaded chapter matched the hash recorded for it.',
+  'upgrade.title': 'A different version is available',
+  'upgrade.yours': 'Yours',
+  'upgrade.theirs': 'Available',
+  'upgrade.pages': 'Pages',
+  'upgrade.scanlator': 'Scanlator',
+  'upgrade.replace': 'Replace',
+  'upgrade.replace.confirm':
+    'Replace this chapter? The current file is kept for the trash retention period, and your reading position is carried across.',
+  'upgrade.replace.started': 'Replacement queued — the new version is downloading.',
+  'upgrade.replace.note':
+    'The file you hold is moved aside, not deleted, and can be recovered until the trash is purged.',
+  'upgrade.dismiss': 'Not interested',
+  'upgrade.downgrade.note':
+    'Nothing to do — this is here so you know the change was noticed, not so you act on it.',
+  'upgrade.badge': 'Upgrade',
+  'upgrade.badge.downgrade': 'Yours is better',
+  'upgrade.reason.more_pages': 'The source now lists more pages than the copy you hold.',
+  'upgrade.reason.source_downgraded':
+    'The source now lists fewer pages than the copy you hold — yours is the better copy.',
+  'upgrade.reason.preferred_scanlator':
+    'A version is available from a scanlator you rank higher.',
   'storage.archive.open': 'Export archive…',
   'storage.archive.title': 'Export archive',
   'storage.archive.desc':

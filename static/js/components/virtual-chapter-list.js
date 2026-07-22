@@ -3,9 +3,10 @@
 
 import { h } from 'preact';
 import { memo } from 'preact/compat';
-import { useState, useEffect, useRef, useMemo } from 'preact/hooks';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'preact/hooks';
 import htm from 'htm';
 import { hasPermission } from '../session.js';
+import { UpgradeCompare } from './upgrade-compare.js';
 import { getState, subscribe } from '../cache.js';
 import { formatDate, isChapterDownloaded } from '../utils.js';
 import { useBusy } from '../hooks/use-busy.js';
@@ -68,7 +69,11 @@ const OVERSCAN = 5;
  *   onCacheChange?: (id: number, cached: boolean) => void,
  * }} props
  */
-function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, selected, isCached, kccAvailable, hasNote, showScanlator, isKeyboardActive, menuTick, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange }) {
+function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, selected, isCached, kccAvailable, hasNote, showScanlator, isKeyboardActive, menuTick, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange, onUpgradeClick }) {
+  // The first candidate is enough for a badge; the dialogue shows the detail.
+  const upgradeCandidate = chapter.upgrade_available?.candidates?.[0] ?? null;
+  const upgradeIsReassurance = upgradeCandidate?.kind === 'source_downgraded';
+
   const [progress, setProgress] = useState(/** @type {ChapterProgress|null} */(null));
   const [isRead, setIsRead] = useState(!!chapter.read);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -323,6 +328,19 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, 
           ${chapter.is_orphaned && html`
             <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-sm bg-warn/20 text-warn">${t('chapter.badge.orphaned')}</span>
           `}
+          ${upgradeCandidate && html`
+            <button
+              type="button"
+              class=${'inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-sm ' +
+                (upgradeIsReassurance ? 'bg-success/20 text-success' : 'bg-accent/15 text-accent')}
+              title=${t(upgradeCandidate.reason_key)}
+              onClick=${(/** @type {any} */ e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onUpgradeClick?.(upgradeCandidate, chapter);
+              }}
+            >${upgradeIsReassurance ? t('upgrade.badge.downgrade') : t('upgrade.badge')}</button>
+          `}
           ${statusIndicator}
           ${isClickable
       ? html`<a class=${'text-sm truncate hover:text-accent transition-colors ' + (!downloaded ? 'text-text-muted' : isRead ? 'text-text-faint' : 'text-text')} href=${readerHref} tabindex="-1" title=${!downloaded ? t('chapter.list.download_to_read') : undefined}>${chapter.title}</a>`
@@ -397,7 +415,12 @@ const ChapterRow = memo(ChapterRowInner);
  *   onCacheChange?: (id: number, cached: boolean) => void,
  * }} props
  */
-export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId, height, hasMore, loading, selectMode, selected, canDownload, canDelete, allSelectedProp, onLoadMore, onToggleRead, onMarkUpTo, onToggleSelect, onSelectAll, onFlipSelection, onSelectUndownloaded, onSelectUnread, onBulkRead, onBulkDownload, onBulkDelete, onExitSelect, onEnterSelectWithChapter, onDelete, cachedChapterIds, kccAvailable, onCacheChange, notedChapterIds }) {
+export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId, height, hasMore, loading, selectMode, selected, canDownload, canDelete, allSelectedProp, onLoadMore, onToggleRead, onMarkUpTo, onToggleSelect, onSelectAll, onFlipSelection, onSelectUndownloaded, onSelectUnread, onBulkRead, onBulkDownload, onBulkDelete, onExitSelect, onEnterSelectWithChapter, onDelete, cachedChapterIds, kccAvailable, onCacheChange, notedChapterIds, onUpgradeApplied }) {
+  const [upgrade, setUpgrade] = useState(/** @type {any} */ (null));
+  const openUpgrade = useCallback((/** @type {any} */ candidate, /** @type {any} */ ch) => {
+    setUpgrade({ candidate, title: ch.title });
+  }, []);
+
   const [scrollTop, setScrollTop] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [focused, setFocused] = useState(false);
@@ -590,6 +613,7 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
               isCached=${cachedChapterIds ? cachedChapterIds.has(ch.id) : false}
               kccAvailable=${!!kccAvailable}
               onCacheChange=${onCacheChange}
+              onUpgradeClick=${openUpgrade}
               hasNote=${notedChapterIds ? notedChapterIds.has(ch.id) : false}
             />
           `)}
@@ -660,5 +684,12 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
       </div>
       ${bulkBar}
     </div>
+    <${UpgradeCompare}
+      open=${!!upgrade}
+      candidate=${upgrade?.candidate}
+      chapterTitle=${upgrade?.title ?? ''}
+      onClose=${() => setUpgrade(null)}
+      onChanged=${() => onUpgradeApplied?.()}
+    />
   `;
 }

@@ -1664,6 +1664,32 @@ export async function getAdminStorageStatsHistory() {
   return _req('GET', '/admin/storage/stats/history');
 }
 
+// ── Chapter upgrades ─────────────────────────────────────────────────────────
+
+/** @param {number|string} mangaId */
+export async function getMangaUpgrades(mangaId) {
+  return _req('GET', `/manga/${mangaId}/upgrades`);
+}
+
+export async function getAllUpgrades() {
+  return _req('GET', '/me/upgrades');
+}
+
+/** @param {number|string} chapterId */
+export async function applyChapterUpgrade(chapterId) {
+  return _req('POST', `/chapters/${chapterId}/upgrade`);
+}
+
+/** @param {number|string} chapterId */
+export async function dismissChapterUpgrade(chapterId) {
+  return _req('POST', `/chapters/${chapterId}/upgrade/dismiss`);
+}
+
+/** @param {number|string} mangaId @param {boolean} enabled */
+export async function setUpgradeAutoReplace(mangaId, enabled) {
+  return _req('PUT', `/manga/${mangaId}/upgrade-auto-replace`, { body: { enabled } });
+}
+
 // ── Admin — archive export ───────────────────────────────────────────────────
 
 /** @param {{ manga_ids?: number[]|null, zip?: boolean, include_viewer?: boolean }} spec */

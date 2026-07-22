@@ -831,6 +831,7 @@ function _mapChapter(ch) {
     last_page_read: ch.last_page_read ?? 0,
     is_orphaned: ch.is_orphaned ?? false,
     download_error: ch.download_error ?? null,
+    upgrade_available: ch.upgrade_available ?? null,
   };
 }
 
