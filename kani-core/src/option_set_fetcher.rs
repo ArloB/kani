@@ -8,7 +8,16 @@ pub async fn fetch_option_set(
     client: &SmartClient,
     def: &FilterFetchDef,
 ) -> Result<Vec<(String, String)>> {
-    let response = client.get(&def.route).await?.text().await?;
+    // Bounded: this is an operator-supplied URL fetched to populate a filter
+    // dropdown. An option set is kilobytes; anything past the cap is not a
+    // document we were going to parse.
+    const MAX_OPTION_SET_BYTES: usize = 4 * 1024 * 1024;
+    let bytes = client
+        .get(&def.route)
+        .await?
+        .bytes_prefix(MAX_OPTION_SET_BYTES)
+        .await?;
+    let response = String::from_utf8_lossy(&bytes).into_owned();
 
     match def.response_type.as_str() {
         "json" => parse_json_options(&response, def),
