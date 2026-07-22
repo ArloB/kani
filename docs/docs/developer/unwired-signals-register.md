@@ -88,6 +88,24 @@ renders from `reading_pace` bundled into `GET /stats`) and
 `/manga/{id}/upgrades` (the badge is fed by `chapter.upgrade_available` on the
 chapter listing).
 
+## Found during browser verification (2026-07-23)
+
+Two **pre-existing** bugs on the jobs page, surfaced only because pause/resume
+gave the active tab rows to act on — the fixture previously had none, so no row
+action had ever been clicked:
+
+1. **The list does not refresh after a row action.** `handleCancel` and
+   `handlePause` both call `_load()`, the refetch fires and returns 200, and the
+   rendered statuses do not change. Reproduced with the pre-existing **Cancel**
+   button, so it is not new. A cancelled job stays in the Active tab showing its
+   old status until a manual reload.
+2. **`Hook can only be invoked from render methods`** fires on any row action.
+   Also reproduced with Cancel. Preact-debug warning; harmless in production
+   builds but it points at a real state-update-during-render path.
+
+Neither is caused by this session's work. Recorded rather than fixed, because
+the page needs its own look rather than a patch bolted onto a verification pass.
+
 ## How to avoid adding to this list
 
 Trace a new value the whole way — computed → stored → selected → serialised →

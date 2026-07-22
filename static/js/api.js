@@ -1205,6 +1205,26 @@ export async function importTachiyomiBackup(file, opts = {}) {
   return res.json();
 }
 
+// ── Admin: database maintenance ──────────────────────────────────────────────
+
+/** @returns {Promise<{db_size_bytes:number, wal_size_bytes:number}>} */
+export async function getDbStats() {
+  return _req('GET', '/admin/db/stats');
+}
+
+export async function analyzeDb() {
+  return _req('POST', '/admin/db/analyze');
+}
+
+export async function vacuumDb() {
+  return _req('POST', '/admin/db/vacuum');
+}
+
+/** @param {string} kind */
+export async function triggerRecurring(kind) {
+  return _req('POST', `/admin/recurring/${encodeURIComponent(kind)}/run`);
+}
+
 // ── Pending imports ───────────────────────────────────────────────────────────
 
 export async function getPendingImports() {

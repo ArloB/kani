@@ -142,7 +142,10 @@ const PAGE_SIZE = 25;
 
 /** Status groups per tab — the server accepts a comma-separated status list. */
 const TAB_STATUSES = {
-  active:    ['pending', 'running'],
+  // `paused` belongs here: a paused job is still outstanding work, and leaving
+  // it out made pausing look like the job vanished — with the Resume button
+  // unreachable, since it only renders on the row.
+  active:    ['pending', 'running', 'paused'],
   completed: ['completed'],
   failed:    ['failed', 'cancelled'],
 };
