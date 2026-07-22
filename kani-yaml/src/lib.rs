@@ -257,3 +257,116 @@ pub fn resolve_composite_ids(
         }
     }
 }
+
+/// Maps active filters onto query parameters, per an endpoint's `filter_mapping`
+/// and `filter_format`.
+///
+/// This is the reference implementation for both execution paths. It previously
+/// existed only inside `kani-cli`'s codegen, which meant an interpreted YAML
+/// source rendered the filter panel, accepted a selection and then sent an
+/// unfiltered request — the same `.yaml` behaved differently depending on
+/// whether it had been compiled. See `docs/developer/backend-unification-plan.md`.
+pub fn apply_filters(
+    filter_mapping: &[(String, yaml::schema::FilterMappingEntry)],
+    filter_format: Option<&yaml::schema::FilterFormatCfg>,
+    filters: &[kani_shared::types::ActiveFilter],
+) -> Vec<(String, String)> {
+    use kani_shared::types::FilterState;
+    use yaml::schema::{ArrayFormat, FilterMappingEntry};
+
+    let bool_fmt = filter_format.map(|f| f.bool_format).unwrap_or_default();
+    let omit_empty = filter_format.map(|f| f.omit_empty).unwrap_or(true);
+    let array_fmt = filter_format.map(|f| f.multiselect).unwrap_or_default();
+    let array_sep = filter_format
+        .map(|f| f.array_separator.as_str())
+        .unwrap_or(",");
+
+    let mut out: Vec<(String, String)> = Vec::new();
+
+    for f in filters {
+        // `group:action` — the action half lets one filter group carry a value
+        // in its name, e.g. `genre:include`.
+        let (group, action) = f
+            .filter_name
+            .split_once(':')
+            .unwrap_or((f.filter_name.as_str(), ""));
+
+        let Some((_, entry)) = filter_mapping.iter().find(|(k, _)| k == group) else {
+            continue;
+        };
+
+        match entry {
+            FilterMappingEntry::Simple(param) => match &f.state {
+                FilterState::Checkbox(true) => {
+                    let v = if action.is_empty() {
+                        bool_literal(bool_fmt, true).to_string()
+                    } else {
+                        action.to_string()
+                    };
+                    out.push((param.clone(), v));
+                }
+                FilterState::Checkbox(false) if !omit_empty => {
+                    out.push((param.clone(), bool_literal(bool_fmt, false).to_string()));
+                }
+                FilterState::Multiselect(values) => match array_fmt {
+                    ArrayFormat::Default | ArrayFormat::Repeated => {
+                        for v in values {
+                            out.push((param.clone(), v.clone()));
+                        }
+                    }
+                    ArrayFormat::Bracket => {
+                        for v in values {
+                            out.push((format!("{param}[]"), v.clone()));
+                        }
+                    }
+                    ArrayFormat::CommaSeparated => {
+                        out.push((param.clone(), values.join(array_sep)));
+                    }
+                },
+                FilterState::Selection { value, .. } => out.push((param.clone(), value.clone())),
+                FilterState::TextInput(s) => out.push((param.clone(), s.clone())),
+                _ => {}
+            },
+            FilterMappingEntry::SortPair {
+                key_template,
+                direction_param,
+                ..
+            } => {
+                if let FilterState::Selection { value, .. } = &f.state
+                    && let Some((key_part, dir)) = value.split_once(':')
+                {
+                    out.push((key_template.replace("{}", key_part), dir.to_string()));
+                    if let Some(dir_param) = direction_param {
+                        out.push((dir_param.clone(), dir.to_string()));
+                    }
+                }
+            }
+            FilterMappingEntry::TupleSplit {
+                from_param,
+                to_param,
+                ..
+            } => {
+                if let FilterState::TextInput(s) = &f.state
+                    && let Some((from, to)) = s.split_once(':')
+                {
+                    out.push((from_param.clone(), from.to_string()));
+                    out.push((to_param.clone(), to.to_string()));
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn bool_literal(fmt: yaml::schema::BoolFormat, value: bool) -> &'static str {
+    use yaml::schema::BoolFormat;
+    match (fmt, value) {
+        (BoolFormat::TrueFalse, true) => "true",
+        (BoolFormat::TrueFalse, false) => "false",
+        (BoolFormat::OneZero, true) => "1",
+        (BoolFormat::OneZero, false) => "0",
+        (BoolFormat::YesNo, true) => "yes",
+        (BoolFormat::YesNo, false) => "no",
+    }
+}

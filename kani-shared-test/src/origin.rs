@@ -37,6 +37,13 @@ pub enum Body {
     Stall,
     /// Accept the connection and reset it without writing a byte.
     Reset,
+    /// Answer with a JSON description of the request that arrived — method,
+    /// path, query and headers.
+    ///
+    /// The only way to assert what a source *actually put on the wire*, as
+    /// opposed to what it intended to. Filter mapping, URL interpolation and
+    /// preference injection are all invisible without this.
+    Echo,
 }
 
 #[derive(Clone, Debug)]
@@ -84,6 +91,15 @@ impl Response {
         self
     }
 
+    /// A route that reflects the request back as JSON. See [`Body::Echo`].
+    pub fn echo() -> Self {
+        Self {
+            status: 200,
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body: Body::Echo,
+        }
+    }
+
     pub fn body(mut self, body: Body) -> Self {
         self.body = body;
         self
@@ -97,10 +113,59 @@ struct Route {
     cursor: usize,
 }
 
+/// What actually arrived on the wire for one request.
+#[derive(Clone, Debug, Default)]
+pub struct SeenRequest {
+    pub method: String,
+    pub path: String,
+    pub query: Option<String>,
+    /// Header names lowercased.
+    pub headers: Vec<(String, String)>,
+}
+
+impl SeenRequest {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let want = name.to_ascii_lowercase();
+        self.headers
+            .iter()
+            .find(|(k, _)| *k == want)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// `?a=1&b=2` → the value of `a`.
+    pub fn query_param(&self, name: &str) -> Option<String> {
+        self.query.as_deref()?.split('&').find_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            (k == name).then(|| v.to_string())
+        })
+    }
+
+    fn to_json(&self) -> String {
+        let headers: Vec<String> = self
+            .headers
+            .iter()
+            .map(|(k, v)| format!("{}:{}", json_escape(k), json_escape(v)))
+            .map(|s| format!("\"{s}\""))
+            .collect();
+        format!(
+            "{{\"method\":\"{}\",\"path\":\"{}\",\"query\":\"{}\",\"headers\":[{}]}}",
+            json_escape(&self.method),
+            json_escape(&self.path),
+            json_escape(self.query.as_deref().unwrap_or("")),
+            headers.join(",")
+        )
+    }
+}
+
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[derive(Default)]
 struct OriginState {
     routes: Mutex<HashMap<String, Route>>,
     hits: Mutex<HashMap<String, usize>>,
+    last_request: Mutex<HashMap<String, SeenRequest>>,
     total_hits: AtomicUsize,
     ignore_range: AtomicBool,
 }
@@ -176,6 +241,17 @@ impl TestOrigin {
             .unwrap_or(0)
     }
 
+    /// What the origin last received for this path — the assertion surface for
+    /// "did the source actually send what it declared?".
+    pub fn last_request(&self, path: &str) -> Option<SeenRequest> {
+        self.state
+            .last_request
+            .lock()
+            .expect("last_request lock")
+            .get(path)
+            .cloned()
+    }
+
     pub fn total_hits(&self) -> usize {
         self.state.total_hits.load(Ordering::SeqCst)
     }
@@ -198,13 +274,38 @@ async fn handle(mut stream: tokio::net::TcpStream, state: Arc<OriginState>) {
     }
     let request = String::from_utf8_lossy(&buf[..n]).to_string();
 
-    let path = request
-        .lines()
+    let mut request_lines = request.lines();
+    let start_line = request_lines.next().unwrap_or_default();
+    let method = start_line
+        .split_whitespace()
         .next()
-        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or("GET")
+        .to_string();
+    let path = start_line
+        .split_whitespace()
+        .nth(1)
         .unwrap_or("/")
         .to_string();
     let bare_path = path.split('?').next().unwrap_or("/").to_string();
+    let query = path.split_once('?').map(|(_, q)| q.to_string());
+
+    let headers: Vec<(String, String)> = request_lines
+        .take_while(|l| !l.is_empty())
+        .filter_map(|l| l.split_once(':'))
+        .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+        .collect();
+
+    let seen = SeenRequest {
+        method: method.clone(),
+        path: bare_path.clone(),
+        query: query.clone(),
+        headers: headers.clone(),
+    };
+    state
+        .last_request
+        .lock()
+        .expect("last_request lock")
+        .insert(bare_path.clone(), seen.clone());
 
     state.total_hits.fetch_add(1, Ordering::SeqCst);
     *state
@@ -245,6 +346,18 @@ async fn handle(mut stream: tokio::net::TcpStream, state: Arc<OriginState>) {
     let honour_range = range.is_some() && !state.ignore_range.load(Ordering::SeqCst);
 
     match response.body {
+        Body::Echo => {
+            let payload = seen.to_json();
+            let head = build_head(
+                response.status,
+                &response.headers,
+                Some(payload.len()),
+                None,
+            );
+            let _ = stream.write_all(head.as_bytes()).await;
+            let _ = stream.write_all(payload.as_bytes()).await;
+            let _ = stream.shutdown().await;
+        }
         Body::Stall => {
             tokio::time::sleep(std::time::Duration::from_secs(120)).await;
         }

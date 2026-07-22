@@ -1120,3 +1120,143 @@ async fn the_probe_confirms_against_the_current_listing_not_a_cached_one() {
         "the measurement must describe the new upload, not the cached one"
     );
 }
+
+// ── A1. Filters must reach the wire on the interpreted path ─────────────────
+
+/// A search endpoint that maps a `genre` filter onto a `g` query parameter.
+fn wire_filtering_source(svc: &kani_app::service::AppService, source_id: i64, base_url: &str) {
+    use kani_yaml::yaml::schema::FilterMappingEntry;
+
+    let mut ep = json_endpoint(
+        "/search",
+        "/results",
+        vec![
+            json_field("id", "/id", false),
+            json_field("title", "/title", false),
+        ],
+    );
+    ep.filter_mapping = vec![
+        ("genre".to_string(), FilterMappingEntry::Simple("g".into())),
+        ("tags".to_string(), FilterMappingEntry::Simple("t".into())),
+    ];
+
+    let ext = ValidatedExtension {
+        id: "filtering-source".into(),
+        name: "Filtering Source".into(),
+        version: "1.0.0".into(),
+        base_url: base_url.to_string(),
+        language: "en".into(),
+        unrestricted_http: true,
+        search: Some(ep),
+        ..Default::default()
+    };
+    let source = YamlSource::new(
+        Arc::new(ext),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        format!("filter-{source_id}:"),
+        HashMap::new(),
+        true,
+    );
+    svc.sources
+        .insert(source_id, SourceBackend::Yaml(Box::new(source)));
+}
+
+#[tokio::test]
+async fn an_interpreted_source_applies_a_selected_filter() {
+    use kani_shared::types::{ActiveFilter, FilterState};
+
+    let origin = TestOrigin::start().await;
+    origin.set("/search", Response::json(r#"{"results":[]}"#));
+
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "filtering-source").await;
+    wire_filtering_source(&svc, source_id, &origin.base());
+
+    let filters = vec![ActiveFilter {
+        filter_name: "genre".into(),
+        state: FilterState::Selection {
+            name: "Genre".into(),
+            value: "romance".into(),
+        },
+    }];
+    let json = serde_json::to_string(&filters).unwrap();
+    svc.search_manga(source_id, "anything", 1, 20, Some(json))
+        .await
+        .unwrap();
+
+    let seen = origin
+        .last_request("/search")
+        .expect("the search endpoint was called");
+    assert_eq!(
+        seen.query_param("g").as_deref(),
+        Some("romance"),
+        "the filter panel accepted a genre and the request must carry it — an \
+         interpreted source used to render the panel, take the selection and \
+         send an unfiltered query. Saw: {:?}",
+        seen.query
+    );
+}
+
+#[tokio::test]
+async fn an_interpreted_source_repeats_a_multiselect_filter() {
+    use kani_shared::types::{ActiveFilter, FilterState};
+
+    let origin = TestOrigin::start().await;
+    origin.set("/search", Response::json(r#"{"results":[]}"#));
+
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "filtering-source").await;
+    wire_filtering_source(&svc, source_id, &origin.base());
+
+    let filters = vec![ActiveFilter {
+        filter_name: "tags".into(),
+        state: FilterState::Multiselect(vec!["action".into(), "comedy".into()]),
+    }];
+    let json = serde_json::to_string(&filters).unwrap();
+    svc.search_manga(source_id, "q", 1, 20, Some(json))
+        .await
+        .unwrap();
+
+    let q = origin
+        .last_request("/search")
+        .unwrap()
+        .query
+        .unwrap_or_default();
+    assert!(
+        q.contains("t=action") && q.contains("t=comedy"),
+        "the default multiselect format repeats the parameter, got {q}"
+    );
+}
+
+#[tokio::test]
+async fn an_unmapped_filter_is_ignored_rather_than_guessed_at() {
+    use kani_shared::types::{ActiveFilter, FilterState};
+
+    let origin = TestOrigin::start().await;
+    origin.set("/search", Response::json(r#"{"results":[]}"#));
+
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "filtering-source").await;
+    wire_filtering_source(&svc, source_id, &origin.base());
+
+    let filters = vec![ActiveFilter {
+        filter_name: "not_in_the_mapping".into(),
+        state: FilterState::TextInput("x".into()),
+    }];
+    let json = serde_json::to_string(&filters).unwrap();
+    svc.search_manga(source_id, "q", 1, 20, Some(json))
+        .await
+        .unwrap();
+
+    let q = origin
+        .last_request("/search")
+        .unwrap()
+        .query
+        .unwrap_or_default();
+    assert!(
+        !q.contains("not_in_the_mapping") && !q.contains("x"),
+        "a filter the endpoint never declared must not be invented into the \
+         query string, got {q}"
+    );
+}

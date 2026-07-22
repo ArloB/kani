@@ -148,11 +148,17 @@ impl YamlSource {
         ext: &kani_yaml::ValidatedExtension,
         args: &HashMap<String, String>,
         endpoint_name: &str,
+        filters: &[kani_shared::types::ActiveFilter],
     ) -> kani_shared::ast::RequestDef {
         let mut resolved = args.clone();
         kani_yaml::resolve_composite_ids(ep, &mut resolved);
         let url = kani_yaml::build_url_with_args(&ext.base_url, &ep.route, &resolved);
-        let queries = kani_yaml::build_queries(&ep.queries, &resolved);
+        let mut queries = kani_yaml::build_queries(&ep.queries, &resolved);
+        queries.extend(kani_yaml::apply_filters(
+            &ep.filter_mapping,
+            ep.filter_format.as_ref(),
+            filters,
+        ));
         kani_shared::ast::RequestDef {
             url,
             method: ep.method.clone(),
@@ -167,11 +173,12 @@ impl YamlSource {
         ep: &kani_yaml::ValidatedEndpoint,
         endpoint_name: &str,
         args: &HashMap<String, String>,
+        filters: &[kani_shared::types::ActiveFilter],
     ) -> std::result::Result<serde_json::Value, String> {
         use kani_core::evaluator::{html_eval, json_eval};
         use kani_yaml::yaml::schema::ResponseType;
 
-        let req = Self::make_request(ep, &self.config, args, endpoint_name);
+        let req = Self::make_request(ep, &self.config, args, endpoint_name, filters);
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
         let mut state = self.make_host_state().map_err(|e| e.to_string())?;
 
@@ -235,7 +242,7 @@ impl YamlSource {
         )
         .await?;
 
-        let req = Self::make_request(ep, &self.config, args, endpoint_name);
+        let req = Self::make_request(ep, &self.config, args, endpoint_name, &[]);
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
         json_eval::extract_json_str(&mut state, &payload, &bp).await
     }
@@ -245,6 +252,7 @@ impl YamlSource {
         ep: &kani_yaml::ValidatedEndpoint,
         endpoint_name: &str,
         args: &HashMap<String, String>,
+        filters: &[kani_shared::types::ActiveFilter],
     ) -> Result<serde_json::Value> {
         use kani_yaml::yaml::schema::EndpointVia;
 
@@ -257,7 +265,10 @@ impl YamlSource {
 
         let mut retries_left = self.max_hook_requests;
         loop {
-            match self.eval_endpoint_once(ep, endpoint_name, args).await {
+            match self
+                .eval_endpoint_once(ep, endpoint_name, args, filters)
+                .await
+            {
                 Ok(v) => return Ok(v),
                 Err(ref e) if e.starts_with("__refresh_auth__:") => {
                     if retries_left == 0 {
@@ -272,7 +283,7 @@ impl YamlSource {
                     if let Some(auth_ep) = self.config.endpoint_by_name(auth_endpoint_name) {
                         let auth_args = HashMap::new();
                         let _ = self
-                            .eval_endpoint_once(auth_ep, auth_endpoint_name, &auth_args)
+                            .eval_endpoint_once(auth_ep, auth_endpoint_name, &auth_args, &[])
                             .await;
                     }
                 }
@@ -352,14 +363,14 @@ impl YamlSource {
                         total_pages: None,
                     });
                 }
-                self.search_inner("", page, page_size).await
+                self.search_inner("", page, page_size, filters).await
             }
             Some(ValidatedPopular::Full(ep)) => {
                 let args = Self::build_args(&[
                     ("page", &page.to_string()),
                     ("page_size", &page_size.to_string()),
                 ]);
-                let result = self.eval_endpoint(ep, "popular", &args).await?;
+                let result = self.eval_endpoint(ep, "popular", &args, filters).await?;
                 Ok(unpack_manga_list(&result, ep))
             }
             None => Err(Error::Extension(
@@ -370,7 +381,13 @@ impl YamlSource {
         }
     }
 
-    async fn search_inner(&self, query: &str, page: i32, page_size: i32) -> Result<MangaList> {
+    async fn search_inner(
+        &self,
+        query: &str,
+        page: i32,
+        page_size: i32,
+        filters: &[kani_shared::types::ActiveFilter],
+    ) -> Result<MangaList> {
         let ep = self.config.search.as_ref().ok_or_else(|| {
             Error::Extension(kani_shared::extension::ExtensionError::parse(
                 "search endpoint not configured".to_string(),
@@ -383,7 +400,7 @@ impl YamlSource {
             ("page", &page_str),
             ("page_size", &page_size_str),
         ]);
-        let result = self.eval_endpoint(ep, "search", &args).await?;
+        let result = self.eval_endpoint(ep, "search", &args, filters).await?;
         Ok(unpack_manga_list(&result, ep))
     }
 
@@ -392,10 +409,10 @@ impl YamlSource {
         query: &str,
         page: i32,
         page_size: i32,
-        _filters: &[kani_shared::types::ActiveFilter],
+        filters: &[kani_shared::types::ActiveFilter],
     ) -> Result<MangaList> {
         let _permit = self.acquire().await?;
-        self.search_inner(query, page, page_size).await
+        self.search_inner(query, page, page_size, filters).await
     }
 
     pub async fn get_manga_details(&self, manga_id: &str) -> Result<MangaInfo> {
@@ -408,7 +425,7 @@ impl YamlSource {
         })?;
 
         let args = Self::build_args(&[("manga_id", manga_id)]);
-        let result = self.eval_endpoint(ep, "manga_details", &args).await?;
+        let result = self.eval_endpoint(ep, "manga_details", &args, &[]).await?;
         unpack_manga_info(&result)
     }
 
@@ -436,7 +453,7 @@ impl YamlSource {
             ("page_size", &page_size_str),
             ("sort", sort_str),
         ]);
-        let result = self.eval_endpoint(ep, "chapter_list", &args).await?;
+        let result = self.eval_endpoint(ep, "chapter_list", &args, &[]).await?;
         Ok(unpack_chapter_list(&result, ep))
     }
 
@@ -450,7 +467,7 @@ impl YamlSource {
         })?;
 
         let args = Self::build_args(&[("manga_id", manga_id), ("chapter_id", chapter_id)]);
-        let result = self.eval_endpoint(ep, "pages", &args).await?;
+        let result = self.eval_endpoint(ep, "pages", &args, &[]).await?;
         Ok(unpack_chapter(&result))
     }
 
