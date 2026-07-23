@@ -88,7 +88,7 @@ These are defects, not gaps. Verified by reading the code this session.
 |---|---|---|---|---|
 | A1 | `a_yaml_source_actually_applies_selected_filters` | The query string the origin receives contains the mapped filter param | Echo route (H3); call `search_manga` with an `ActiveFilter` | SILENT-WRONG |
 | A2 | `a_rotated_maintainer_key_does_not_poison_the_index_cache` | After a rejected refresh, `install_from_repo` still uses the **old** index | `script("/index.json", [signed_by_A, signed_by_B])` + `.sig` routes | TRUST BYPASS |
-| A3 | `a_disabled_yaml_source_can_be_re_enabled` | `toggle_source_enabled(id, true)` then `search_manga` hits the origin | Any YAML source; disable, re-enable | CRASH-HANG |
+| A3 | `a_disabled_yaml_source_can_be_re_enabled` | ✅ FIXED — re-enable now rebuilds a YAML backend from the `.yaml`, not only a `.wasm` | Any YAML source; disable, re-enable | CRASH-HANG |
 | A4 | `a_degenerate_target_listing_does_not_delete_downloads` | CBZ files survive; no rows deleted | Target `chapter_list` returns `{"rows":[]}` | DATA-LOSS |
 | A5 | `a_listing_whose_numbers_are_unparseable_does_not_orphan_everything` | Same, for `number: "twelve"` → all `0.0` | Listing with string chapter numbers | DATA-LOSS |
 | A6 | `a_scramble_transform_on_a_tiny_image_does_not_panic` | Returns an error, does not unwind the download worker | 2×2 PNG for a page declaring `lcg-tile-5x5:1` | CRASH-HANG |
@@ -100,7 +100,16 @@ These are defects, not gaps. Verified by reading the code this session.
 | A12 | `the_rule_preview_matches_what_auto_download_actually_queues` | `preview_download_rules` count == chapters `filter_chapters_by_rules` returns | Set scanlator prefs + rules; compare both paths | SILENT-WRONG |
 | A13 | `a_webhook_cannot_be_pointed_at_a_private_address` | Configuring `http://169.254.169.254/…` or `http://127.0.0.1:8242/…` is refused, or the request is blocked at send | Bind an origin on loopback and register it as a webhook target | **SSRF** |
 | A14 | `a_webhook_does_not_follow_a_redirect_to_a_private_address` | A public URL that `302`s inward is not followed | Origin A returns `302` → origin B on loopback (H4) | **SSRF** |
-| A15 | `a_yaml_source_reports_a_usable_error_kind` | A `429` from a YAML source classifies as `RateLimited`, not `ParseError` | Listing route returns `429` + `Retry-After` | SILENT-WRONG |
+| A15 | `a_yaml_source_reports_a_usable_error_kind` | ⏸ DEFERRED — needs design | Listing route returns `429` + `Retry-After` | SILENT-WRONG |
+
+> **A15 status (2026-07-23):** deferred, not skipped. The evaluator's `fetch_body`
+> reads the response body regardless of HTTP status (after `on_status` hooks), so a
+> 429/404 is not currently surfaced as a typed error at all — the eval only fails later
+> if the body does not parse. Making a YAML source report `RateLimited`/`NotFound`
+> requires deciding *which* non-2xx codes should error vs. proceed, since some sources
+> legitimately return non-2xx bodies, and threading the status through the evaluator.
+> This is the lowest-severity Group A item (`ParseError` still retries), so it waits for
+> a considered change rather than a rushed one.
 
 > **A12 detail:** `filter_chapters_by_rules` (`rules.rs:130-185`) applies a second stage —
 > blocked scanlators and per-chapter-number priority selection — that

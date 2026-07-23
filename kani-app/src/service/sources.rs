@@ -272,12 +272,41 @@ impl AppService {
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
 
-            let wasm_path = self
-                .settings
-                .read()
-                .await
-                .wasm_storage_path
-                .join(format!("{}.wasm", source.name));
+            let wasm_storage_path = self.settings.read().await.wasm_storage_path.clone();
+
+            // Interpreted-YAML sources have no `.wasm` file. Re-enabling one used
+            // to fall straight into the WASM path below, fail to read a
+            // nonexistent `{name}.wasm`, and leave the registry empty — so every
+            // later call reported "Source not found". Rebuild the YAML backend
+            // the same way startup does.
+            let yaml_path = wasm_storage_path.join(format!("{}.yaml", source.name));
+            if yaml_path.exists() {
+                let text = tokio::fs::read_to_string(&yaml_path)
+                    .await
+                    .map_err(|e| ServiceError::Core(kani_core::Error::Io(e)))?;
+                let ext = kani_yaml::parse_and_validate(&text, &yaml_path).map_err(|errs| {
+                    ServiceError::Internal(
+                        errs.iter()
+                            .map(|e| e.to_string())
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    )
+                })?;
+                let prefs = self.load_pref_map(id).await?;
+                let browser_enabled = self.browser_enabled_flag(id).await;
+                let backend = loader::build_yaml_source(
+                    std::sync::Arc::new(ext),
+                    self.smart_client.clone(),
+                    std::sync::Arc::clone(&self.ext_cache),
+                    format!("{}:", source.name),
+                    prefs,
+                    browser_enabled,
+                );
+                self.sources.insert(id, backend);
+                return Ok(());
+            }
+
+            let wasm_path = wasm_storage_path.join(format!("{}.wasm", source.name));
 
             let bytes = tokio::fs::read(&wasm_path)
                 .await

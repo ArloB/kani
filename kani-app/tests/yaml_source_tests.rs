@@ -1215,3 +1215,62 @@ async fn yaml_hot_swap_in_flight_call_completes_with_old_config() {
         "post-swap call must use new config"
     );
 }
+
+#[tokio::test]
+async fn a_disabled_yaml_source_can_be_re_enabled() {
+    let html: &'static str = r#"<html><body>
+        <div class="item" data-id="m-1"><span class="title">Re-enable</span></div>
+    </body></html>"#;
+    let port = start_html_server(html).await;
+    let base_url = format!("http://127.0.0.1:{port}");
+
+    let dir = tempfile::tempdir().unwrap();
+    let yaml_content = format!(
+        r#"id: reenable-source
+name: reenable-source
+version: "1.0.0"
+base_url: "{base_url}"
+language: en
+requires_capabilities:
+  - unrestricted_http
+endpoints:
+  search:
+    route: /search
+    container: ".item"
+    fields:
+      id: 'self.attr("data-id")'
+      title: 'self.first(".title").text()'
+"#
+    );
+    std::fs::write(dir.path().join("reenable-source.yaml"), &yaml_content).unwrap();
+
+    let svc = test_service().await;
+    {
+        let mut s = svc.settings.write().await;
+        s.wasm_storage_path = dir.path().to_path_buf();
+    }
+    svc.scan_and_load_yaml_dir_for_test(dir.path())
+        .await
+        .unwrap();
+
+    use sqlx::Row as _;
+    let id: i64 = sqlx::query("SELECT id FROM sources WHERE name = 'reenable-source'")
+        .fetch_one(&svc.db)
+        .await
+        .unwrap()
+        .try_get("id")
+        .unwrap();
+
+    // Disable, then re-enable — the path that used to only ever read a .wasm.
+    svc.toggle_source_enabled(id, false).await.unwrap();
+    svc.toggle_source_enabled(id, true)
+        .await
+        .expect("re-enabling a YAML source must not fail reading a nonexistent .wasm");
+
+    // The proof it is live again: a search reaches the source.
+    let result = svc.search_manga(id, "anything", 1, 20, None).await;
+    assert!(
+        result.is_ok(),
+        "a re-enabled YAML source must serve requests, got {result:?}"
+    );
+}
