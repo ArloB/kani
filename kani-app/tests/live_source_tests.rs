@@ -1260,3 +1260,143 @@ async fn an_unmapped_filter_is_ignored_rather_than_guessed_at() {
          query string, got {q}"
     );
 }
+
+// ── A4/A5. A degenerate migration target must not delete downloads ───────────
+
+/// A source with the manga_details + chapter_list endpoints a migration target
+/// needs. The chapter listing is scriptable so a test can make it degenerate.
+fn wire_migration_target(svc: &kani_app::service::AppService, source_id: i64, base_url: &str) {
+    let details = json_endpoint(
+        "/target/$manga_id$",
+        "/manga",
+        vec![
+            json_field("id", "/id", false),
+            json_field("title", "/title", false),
+        ],
+    );
+    let chapters = json_endpoint(
+        "/target/$manga_id$/chapters",
+        "/chapters",
+        vec![
+            json_field("id", "/id", false),
+            json_field("number", "/number", false),
+        ],
+    );
+    let ext = ValidatedExtension {
+        id: "target-source".into(),
+        name: "Target Source".into(),
+        version: "1.0.0".into(),
+        base_url: base_url.to_string(),
+        language: "en".into(),
+        unrestricted_http: true,
+        manga_details: Some(details),
+        chapter_list: Some(chapters),
+        ..Default::default()
+    };
+    let source = YamlSource::new(
+        Arc::new(ext),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        format!("target-{source_id}:"),
+        HashMap::new(),
+        true,
+    );
+    svc.sources
+        .insert(source_id, SourceBackend::Yaml(Box::new(source)));
+}
+
+async fn seed_migration_scenario(
+    origin: &TestOrigin,
+    svc: &kani_app::service::AppService,
+    chapter_list_body: &str,
+) -> (kani_app::ids::MangaId, i64, std::path::PathBuf) {
+    let home_source = insert_source(&svc.db, "home-source").await;
+    let manga = insert_manga(&svc.db, home_source, "m1", "Held Series").await;
+
+    // One downloaded chapter with a real CBZ on disk.
+    let pages = vec![jpeg_page(800, 1200, false, 80); 2];
+    let held = held_chapter_with_pages(svc, manga, "Held Series", "ch-1", 1.0, &pages).await;
+    let cbz = svc.chapter_cbz_path(held).await.unwrap().path;
+    assert!(cbz.exists(), "fixture CBZ must exist before migration");
+
+    let target_source = insert_source(&svc.db, "target-source").await;
+    wire_migration_target(svc, target_source, &origin.base());
+    origin.set(
+        "/target/tgt-1",
+        Response::json(r#"{"manga":[{"id":"tgt-1","title":"Held Series"}]}"#),
+    );
+    origin.set("/target/tgt-1/chapters", Response::json(chapter_list_body));
+
+    (manga, target_source, cbz)
+}
+
+#[tokio::test]
+async fn an_empty_target_listing_does_not_delete_downloads() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let (manga, target, cbz) = seed_migration_scenario(&origin, &svc, r#"{"chapters":[]}"#).await;
+
+    let res = svc
+        .migrate_manga(manga, target, "tgt-1".into(), false)
+        .await;
+
+    assert!(
+        res.is_err(),
+        "migrating to a source that lists no chapters must be refused, not silently \
+         orphan and delete every download"
+    );
+    assert!(
+        cbz.exists(),
+        "the held CBZ must survive a refused migration"
+    );
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapters WHERE manga_id = ?")
+        .bind(manga)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert!(
+        rows > 0,
+        "no chapter rows may be deleted by a refused migration"
+    );
+}
+
+#[tokio::test]
+async fn a_target_whose_numbers_do_not_parse_does_not_delete_downloads() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    // Chapter numbers as strings collapse to 0.0 and match nothing.
+    let (manga, target, cbz) = seed_migration_scenario(
+        &origin,
+        &svc,
+        r#"{"chapters":[{"id":"t-1","number":"twelve"},{"id":"t-2","number":"thirteen"}]}"#,
+    )
+    .await;
+
+    let res = svc
+        .migrate_manga(manga, target, "tgt-1".into(), false)
+        .await;
+
+    assert!(res.is_err(), "a target matching nothing must be refused");
+    assert!(cbz.exists(), "the held CBZ must survive");
+}
+
+#[tokio::test]
+async fn a_migration_that_matches_is_still_allowed() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    // The target genuinely carries chapter 1 — a real, matching migration.
+    let (manga, target, _cbz) = seed_migration_scenario(
+        &origin,
+        &svc,
+        r#"{"chapters":[{"id":"t-1","number":1},{"id":"t-2","number":2}]}"#,
+    )
+    .await;
+
+    let res = svc
+        .migrate_manga(manga, target, "tgt-1".into(), false)
+        .await;
+    assert!(
+        res.is_ok(),
+        "a target that matches the held chapter must still migrate, got {res:?}"
+    );
+}

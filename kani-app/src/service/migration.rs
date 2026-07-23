@@ -118,6 +118,25 @@ impl AppService {
 
         let new_count = unmatched_new.len();
 
+        // Guard against a degenerate target listing destroying downloads. A
+        // migration deletes the CBZs of chapters the target does not carry, on
+        // the assumption the target is an equivalent source. But a target that
+        // returns an empty listing, or one whose chapter numbers all collapse
+        // to 0.0 (e.g. the source changed to string numbers), matches nothing —
+        // so *every* existing chapter orphans and every download is deleted. A
+        // source hiccup must not cost the user their library. If the target
+        // matches none of the existing chapters yet downloads would be lost,
+        // refuse; the user can still migrate with keep-orphaned-downloads on,
+        // which preserves the files.
+        if !keep_orphaned_downloads && !downloaded_orphan_ids.is_empty() && matched.is_empty() {
+            return Err(ServiceError::Validation(format!(
+                "The target source matches none of this series' {} existing chapters, so \
+                 migrating would delete every download. Refused. If this is intentional, \
+                 migrate with 'keep downloaded chapters' enabled.",
+                downloaded_orphan_ids.len()
+            )));
+        }
+
         let library_path = self.settings.read().await.library_path.clone();
         let old_dir_name = format!(
             "{} - {}",
