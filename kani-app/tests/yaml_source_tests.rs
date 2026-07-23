@@ -1274,3 +1274,139 @@ endpoints:
         "a re-enabled YAML source must serve requests, got {result:?}"
     );
 }
+
+async fn start_status_server(status_line: &'static str, extra_headers: &'static str) -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let _ = stream.read(&mut buf).await;
+                let body = "rate limited";
+                let response = format!(
+                    "HTTP/1.1 {status_line}\r\nContent-Type: text/html\r\n{extra_headers}\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+
+    port
+}
+
+fn extension_error(err: kani_core::error::Error) -> kani_shared::extension::ExtensionError {
+    match err {
+        kani_core::error::Error::Extension(e) => e,
+        other => panic!("expected Error::Extension, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn yaml_source_429_classifies_as_rate_limited_with_retry_after() {
+    use kani_shared::extension::ExtensionErrorKind;
+
+    let port = start_status_server("429 Too Many Requests", "Retry-After: 1\r\n").await;
+    let base_url = format!("http://127.0.0.1:{port}");
+
+    let src = yaml_source(
+        &base_url,
+        ValidatedExtension {
+            id: "rl-source".into(),
+            name: "RL Source".into(),
+            version: "1.0.0".into(),
+            base_url: base_url.clone(),
+            language: "en".into(),
+            unrestricted_http: true,
+            popular: Some(ValidatedPopular::Full(Box::new(list_endpoint(
+                "/popular", ".item",
+            )))),
+            ..Default::default()
+        },
+    );
+
+    let err = extension_error(src.get_popular_manga(1, 20, &[]).await.unwrap_err());
+    assert_eq!(
+        err.kind,
+        ExtensionErrorKind::RateLimited,
+        "a 429 must classify as RateLimited, not Parse"
+    );
+    assert_eq!(
+        err.retry_after_secs,
+        Some(1),
+        "the server's Retry-After must survive to the typed error"
+    );
+}
+
+#[tokio::test]
+async fn yaml_source_503_classifies_as_retryable_network() {
+    use kani_shared::extension::ExtensionErrorKind;
+
+    let port = start_status_server("503 Service Unavailable", "").await;
+    let base_url = format!("http://127.0.0.1:{port}");
+
+    let src = yaml_source(
+        &base_url,
+        ValidatedExtension {
+            id: "svc-source".into(),
+            name: "Svc Source".into(),
+            version: "1.0.0".into(),
+            base_url: base_url.clone(),
+            language: "en".into(),
+            unrestricted_http: true,
+            popular: Some(ValidatedPopular::Full(Box::new(list_endpoint(
+                "/popular", ".item",
+            )))),
+            ..Default::default()
+        },
+    );
+
+    let err = extension_error(src.get_popular_manga(1, 20, &[]).await.unwrap_err());
+    assert_eq!(
+        err.kind,
+        ExtensionErrorKind::Network,
+        "a 5xx must classify as retryable Network, not Parse"
+    );
+}
+
+#[tokio::test]
+async fn yaml_source_404_is_not_surfaced_as_a_typed_http_error() {
+    let port = start_status_server("404 Not Found", "").await;
+    let base_url = format!("http://127.0.0.1:{port}");
+
+    let src = yaml_source(
+        &base_url,
+        ValidatedExtension {
+            id: "nf-source".into(),
+            name: "NF Source".into(),
+            version: "1.0.0".into(),
+            base_url: base_url.clone(),
+            language: "en".into(),
+            unrestricted_http: true,
+            popular: Some(ValidatedPopular::Full(Box::new(list_endpoint(
+                "/popular", ".item",
+            )))),
+            ..Default::default()
+        },
+    );
+
+    // 404 is deliberately excluded from the typed-error guard: sources return it
+    // to signal "no more pages", so the body is extracted (matching nothing here)
+    // and the endpoint returns an empty list rather than a RateLimited/Network
+    // error. That keeps the pagination loop's terminate-on-empty semantics.
+    let result = src
+        .get_popular_manga(1, 20, &[])
+        .await
+        .expect("a 404 must not surface as a typed HTTP error");
+    assert!(result.manga.is_empty());
+}

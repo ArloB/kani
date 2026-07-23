@@ -11,6 +11,12 @@ use std::sync::{Arc, Mutex};
 pub const MAX_EVAL_ITERATIONS: u32 = 100_000;
 pub const MAX_EVAL_DEPTH: u32 = 50;
 pub const MAX_LIST_SIZE: usize = 10_000;
+
+/// Marker on an evaluator error that carries an HTTP status the caller should
+/// classify (`__http_status__:429:120`). Parsed by the YAML source into a typed
+/// `ExtensionError`. Follows the `__refresh_auth__:` convention already used for
+/// hook-driven control flow.
+pub const HTTP_STATUS_ERR_PREFIX: &str = "__http_status__:";
 pub const MAX_STRING_LENGTH: usize = 1_000_000;
 
 #[derive(Debug)]
@@ -967,6 +973,19 @@ pub async fn fetch_body(
             );
         }
 
+        // `Retry-After`, read before the response is consumed, so a 429 can
+        // carry the server's own wait time to the retry policy.
+        let retry_after = response
+            .headers()
+            .get(rquest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u32>().ok());
+
+        // Whether an on_status hook explicitly accepted this status. A source
+        // with hooks has opted into its own status handling, so the typed-error
+        // default below defers to it.
+        let mut proceeded = false;
+
         if let Some(ref registry) = hook_registry {
             let resp_headers: Vec<(String, String)> = response
                 .headers()
@@ -990,7 +1009,9 @@ pub async fn fetch_body(
                 .map_err(|e| format!("on_status hook: {e}"))?;
 
             match action.kind {
-                HookActionKind::Proceed => {}
+                HookActionKind::Proceed => {
+                    proceeded = true;
+                }
                 HookActionKind::Retry if hook_retries < max_hook_retries => {
                     hook_retries += 1;
                     continue;
@@ -1008,6 +1029,19 @@ pub async fn fetch_body(
                 }
                 _ => {}
             }
+        }
+
+        // Surface a typed error for statuses whose body is never useful to
+        // extraction, so an interpreted-YAML source can report RateLimited /
+        // Auth / a retryable server error instead of collapsing every failure
+        // into a parse error. 404 is deliberately excluded: some sources return
+        // it to signal "no more pages", and the chapter-list loop treats a
+        // fatal error differently from an empty body. A source that wants a
+        // non-2xx body extracted can accept it with an `on_status` Proceed hook.
+        let code = status.as_u16();
+        if !proceeded && (code == 429 || code == 401 || code == 403 || (500..600).contains(&code)) {
+            let ra = retry_after.map(|s| s.to_string()).unwrap_or_default();
+            return Err(format!("{HTTP_STATUS_ERR_PREFIX}{code}:{ra}"));
         }
 
         const MAX_BYTES: usize = 15 * 1024 * 1024;

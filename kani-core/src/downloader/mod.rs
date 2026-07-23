@@ -33,6 +33,10 @@ pub enum DownloadError {
     Extension {
         kind: kani_shared::extension::ExtensionErrorKind,
         message: String,
+        /// From the extension's `ExtensionError` — a source's own `Retry-After`
+        /// when it reported RateLimited. Dropped here before, so the retry
+        /// policy could not honour it.
+        retry_after_secs: Option<u32>,
     },
     Cancelled,
 }
@@ -59,10 +63,12 @@ impl DownloadError {
             crate::error::Error::Extension(ext) => Self::Extension {
                 kind: ext.kind,
                 message: ext.message,
+                retry_after_secs: ext.retry_after_secs,
             },
             other => Self::Extension {
                 kind: kani_shared::extension::ExtensionErrorKind::Unknown,
                 message: other.to_string(),
+                retry_after_secs: None,
             },
         }
     }
@@ -1014,7 +1020,7 @@ mod tests {
             retry_after_secs: None,
         });
         match DownloadError::from_page_list_error(e) {
-            DownloadError::Extension { kind, message } => {
+            DownloadError::Extension { kind, message, .. } => {
                 assert_eq!(kind, ExtensionErrorKind::Updating);
                 assert_eq!(message, "source updating");
             }

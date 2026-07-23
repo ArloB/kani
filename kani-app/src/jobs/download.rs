@@ -18,12 +18,16 @@ use crate::jobs::framework::{BackgroundJob, JobContext, JobId, JobPriority};
 pub(crate) fn classify_download_error(err: DownloadError) -> DownloadErrorKind {
     match err {
         DownloadError::Cancelled => DownloadErrorKind::Cancelled,
-        DownloadError::Extension { kind, message } => match kind {
+        DownloadError::Extension {
+            kind,
+            message,
+            retry_after_secs,
+        } => match kind {
             ExtensionErrorKind::Network
             | ExtensionErrorKind::Timeout
             | ExtensionErrorKind::Updating => DownloadErrorKind::Network { retryable: true },
             ExtensionErrorKind::RateLimited => DownloadErrorKind::RateLimited {
-                retry_after_secs: None,
+                retry_after_secs: retry_after_secs.map(u64::from),
             },
             ExtensionErrorKind::NotFound | ExtensionErrorKind::ContentUnavailable => {
                 DownloadErrorKind::NotFound
@@ -619,6 +623,7 @@ mod tests {
         DownloadError::Extension {
             kind,
             message: "boom".to_string(),
+            retry_after_secs: None,
         }
     }
 
@@ -648,6 +653,21 @@ mod tests {
             }
         ));
         assert!(mapped.is_retryable());
+    }
+
+    #[test]
+    fn rate_limited_extension_carries_retry_after_to_the_policy() {
+        let err = DownloadError::Extension {
+            kind: ExtensionErrorKind::RateLimited,
+            message: "slow down".to_string(),
+            retry_after_secs: Some(45),
+        };
+        assert!(matches!(
+            classify_download_error(err),
+            DownloadErrorKind::RateLimited {
+                retry_after_secs: Some(45)
+            }
+        ));
     }
 
     #[test]
