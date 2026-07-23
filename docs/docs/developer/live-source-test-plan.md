@@ -91,7 +91,7 @@ These are defects, not gaps. Verified by reading the code this session.
 | A3 | `a_disabled_yaml_source_can_be_re_enabled` | ✅ FIXED — re-enable now rebuilds a YAML backend from the `.yaml`, not only a `.wasm` | Any YAML source; disable, re-enable | CRASH-HANG |
 | A4 | ✅ FIXED `an_empty_target_listing_does_not_delete_downloads` | CBZ files survive; no rows deleted | Target `chapter_list` returns `{"rows":[]}` | DATA-LOSS |
 | A5 | ✅ FIXED `a_target_whose_numbers_do_not_parse_does_not_delete_downloads` | Same, for `number: "twelve"` → all `0.0` | Listing with string chapter numbers | DATA-LOSS |
-| A6 | `a_scramble_transform_on_a_tiny_image_does_not_panic` | Returns an error, does not unwind the download worker | 2×2 PNG for a page declaring `lcg-tile-5x5:1` | CRASH-HANG |
+| A6 | ✅ FIXED `descramble_does_not_panic_on_an_image_smaller_than_the_grid` | Returns an error, does not unwind the download worker | 2×2 PNG for a page declaring `lcg-tile-5x5:1` | CRASH-HANG |
 | A7 | `an_option_set_route_cannot_escape_the_sources_allowed_host` | Origin B is **not** hit | `options_fetched_by.route` absolute into origin B, `base_url` = origin A | SILENT-WRONG |
 | A8 | `a_relative_option_set_route_is_joined_to_the_base_url` | Origin A receives `/genres`; dropdown is populated | `route: "/genres"` | SILENT-WRONG |
 | A9 | `a_chapter_exceeding_the_io_budget_is_not_marked_complete` | Either the full page set, or a failed download — never a short CBZ marked complete | 60-page listing + 60 `for_each` detail routes | DATA-LOSS |

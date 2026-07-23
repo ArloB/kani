@@ -73,8 +73,18 @@ pub fn lcg_tile_descramble(data: &[u8], seed: i32) -> Result<Vec<u8>> {
 
         for dy in 0..tile_h {
             for dx in 0..tile_w {
-                let pixel = *src_img.get_pixel(src_x + dx, src_y + dy);
-                dst_img.put_pixel(dst_x + dx, dst_y + dy, pixel);
+                // Bounds-checked: `tile_w`/`tile_h` are floored to 1, so on an
+                // image narrower or shorter than the 5×5 grid a tile column can
+                // start past the edge (src_x = 4 on a 2px-wide image). Copying
+                // that would panic and unwind the download worker; skipping it
+                // leaves a nonsensically small image best-effort rather than
+                // crashing the whole chapter.
+                let (sx, sy) = (src_x + dx, src_y + dy);
+                let (dx2, dy2) = (dst_x + dx, dst_y + dy);
+                if sx < width && sy < height && dx2 < width && dy2 < height {
+                    let pixel = *src_img.get_pixel(sx, sy);
+                    dst_img.put_pixel(dx2, dy2, pixel);
+                }
             }
         }
     }
@@ -90,6 +100,25 @@ pub fn lcg_tile_descramble(data: &[u8], seed: i32) -> Result<Vec<u8>> {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn descramble_does_not_panic_on_an_image_smaller_than_the_grid() {
+        // A 2x2 image cannot be tiled into a 5x5 grid; the tile columns run
+        // past its edge. The old code indexed out of bounds and panicked,
+        // unwinding the download worker.
+        let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba([10, 20, 30, 255]),
+        ));
+        let mut png = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+
+        // Must return Ok (a best-effort image) rather than panic.
+        let out = lcg_tile_descramble(&png, 12345);
+        assert!(out.is_ok(), "a tiny image must not crash the descrambler");
+    }
 
     #[test]
     fn parse_scramble_seed_zero_returns_none() {
