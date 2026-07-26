@@ -20,6 +20,10 @@ pub struct WebhookService {
     pub db: SqlitePool,
     pub db_read: SqlitePool,
     pub http: rquest::Client,
+    /// Test-only escape hatch: when set, the SSRF egress guard permits
+    /// private/loopback hosts so a test can deliver to a local mock server.
+    /// Always `false` in production (there is no way to set it there).
+    allow_private_egress: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl WebhookService {
@@ -32,7 +36,21 @@ impl WebhookService {
             );
             rquest::Client::new()
         });
-        Self { db, db_read, http }
+        Self {
+            db,
+            db_read,
+            http,
+            allow_private_egress: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    /// Permit delivery to private/loopback hosts. Test-only — lets a test drive
+    /// the delivery pipeline against a loopback mock server while production
+    /// keeps blocking SSRF targets.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn allow_private_egress_for_test(&self) {
+        self.allow_private_egress
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -176,7 +194,11 @@ impl WebhookService {
         // Last line of defence at the egress point: a row may predate URL
         // validation, or an admin may have edited the DB directly. A literal
         // forbidden IP never reaches the resolver, so reject it here too.
-        if kani_core::network::is_forbidden_url_host(url) {
+        if !self
+            .allow_private_egress
+            .load(std::sync::atomic::Ordering::Relaxed)
+            && kani_core::network::is_forbidden_url_host(url)
+        {
             tracing::warn!("Webhook delivery to {url} refused: forbidden host");
             return (
                 None,
