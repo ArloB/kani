@@ -3,7 +3,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const DEV_EXTENSIONS: &[&str] = &["kani-example", "kani-test-abi", "kani-fixture-source"];
+const DEV_EXTENSIONS: &[&str] = &[
+    "kani-example",
+    "kani-test-abi",
+    "kani-fixture-source",
+    "kani-fixture-gen",
+];
 
 pub fn run(
     extension: Option<&str>,

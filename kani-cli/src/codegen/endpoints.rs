@@ -318,7 +318,13 @@ pub fn emit_pages(
 
     let row_assembly = emit_pages_assembly(ep);
 
-    let manga_param = if ep.composite_id_decodes.iter().any(|d| d.role == "manga") {
+    // Un-underscore `manga_id` when the pages route actually uses it (most
+    // sources key pages on chapter_id alone, but a route like
+    // `/manga/$manga_id$/chapter/$chapter_id$` needs it) or a composite decode
+    // consumes it.
+    let manga_param = if ep.route.contains("$manga_id$")
+        || ep.composite_id_decodes.iter().any(|d| d.role == "manga")
+    {
         "manga_id"
     } else {
         "_manga_id"
@@ -505,12 +511,21 @@ fn emit_manga_list_method(
 /// Build `Some(MangaListItem { ... })` from the ValidatedFields.
 fn emit_manga_list_item_assembly(ep: &ValidatedEndpoint) -> String {
     let mut fields = Vec::new();
+    let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for f in &ep.fields {
         let accessor = match &f.source {
             FieldSource::FnArg(name) => format!("{name}.to_string()"),
             FieldSource::Blueprint(_) => manga_list_item_accessor(&f.name, f.optional),
         };
         fields.push(format!("            {}: {accessor}", f.name));
+        declared.insert(f.name.as_str());
+    }
+    // Optional struct fields the YAML need not declare — default them so the
+    // literal is always complete (id/title are required and validated).
+    for (name, default) in [("cover_url", "None")] {
+        if !declared.contains(name) {
+            fields.push(format!("            {name}: {default}"));
+        }
     }
     format!("Some(MangaListItem {{\n{}\n        }})", fields.join(",\n"))
 }
@@ -604,12 +619,31 @@ fn manga_info_field_accessor(name: &str, optional: bool) -> String {
 /// Build `Some(ChapterInfo { ... })` from ValidatedFields.
 fn emit_chapter_info_assembly(ep: &ValidatedEndpoint) -> String {
     let mut fields = Vec::new();
+    let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for f in &ep.fields {
         let accessor = match &f.source {
             FieldSource::FnArg(name) => format!("{name}.to_string()"),
             FieldSource::Blueprint(_) => chapter_info_field_accessor(&f.name),
         };
         fields.push(format!("        {}: {accessor}", f.name));
+        declared.insert(f.name.as_str());
+    }
+    // Fields the YAML need not declare (id is required and validated). Keeps the
+    // literal complete when a source omits them — notably `page_count`, added to
+    // ChapterInfo after most YAMLs were written, which would otherwise break
+    // every regenerated extension.
+    for (name, default) in [
+        ("number", "0.0"),
+        ("title", "None"),
+        ("volume", "None"),
+        ("scanlator", "None"),
+        ("date_uploaded", "None"),
+        ("page_count", "None"),
+        ("language", "\"en\".to_string()"),
+    ] {
+        if !declared.contains(name) {
+            fields.push(format!("        {name}: {default}"));
+        }
     }
     format!("Some(ChapterInfo {{\n{}\n    }})", fields.join(",\n"))
 }

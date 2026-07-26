@@ -162,6 +162,7 @@ impl MangaExtension for TestFilterFormat {
                 Some(MangaListItem {
                     id: row.require_str("/id").ok()?,
                     title: row.require_str("/title").ok()?,
+                    cover_url: None,
                 })
             })
             .collect();

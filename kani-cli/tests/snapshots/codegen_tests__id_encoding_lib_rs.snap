@@ -175,6 +175,12 @@ impl MangaExtension for TestIdEncoding {
                 Some(ChapterInfo {
                     id: row.require_str("/id").ok()?,
                     language: row.get_str("/language").unwrap_or_else(|| "en".to_string()),
+                    number: 0.0,
+                    title: None,
+                    volume: None,
+                    scanlator: None,
+                    date_uploaded: None,
+                    page_count: None,
                 })
             })
             .collect();
