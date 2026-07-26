@@ -4,9 +4,8 @@ use std::sync::Arc;
 use kani_core::error::{Error, Result};
 use kani_core::wasm::AllowedHost;
 use kani_core::wasm::kani::extension::types::{
-    Chapter, ChapterInfo, ChapterList, FilterDef, FilterList, FilterOption, FilterSemantic,
-    FilterState, FilterTypeTag, MangaInfo, MangaList, MangaListItem, MangaStatus, OptionState,
-    Page, PrefKind, PreferenceSpec, SortOption,
+    Chapter, ChapterList, FilterDef, FilterList, FilterOption, FilterSemantic, FilterState,
+    FilterTypeTag, MangaInfo, MangaList, OptionState, PrefKind, PreferenceSpec, SortOption,
 };
 
 pub struct YamlSource {
@@ -688,42 +687,31 @@ fn classify_eval_error(e: String) -> kani_shared::extension::ExtensionError {
         .unwrap_or_else(|| kani_shared::extension::ExtensionError::parse(e))
 }
 
-fn unpack_manga_list(result: &serde_json::Value, ep: &kani_yaml::ValidatedEndpoint) -> MangaList {
-    use kani_yaml::yaml::model::{ValidatedHnp, ValidatedTotalPages};
-
-    let empty = vec![];
-    let rows = result["rows"].as_array().unwrap_or(&empty);
-    let has_next_page = match &ep.has_next_page {
-        ValidatedHnp::Static(b) => *b,
-        _ => result["scalars"]["has_next_page"]
-            .as_bool()
-            .unwrap_or(false),
-    };
-    let total_pages = match &ep.total_pages {
-        ValidatedTotalPages::Static(n) => Some(*n),
-        ValidatedTotalPages::None => None,
-        ValidatedTotalPages::Scalar(_) => {
-            result["scalars"]["total_pages"].as_u64().map(|n| n as u32)
+/// Lower an endpoint's `has_next_page` config to the shared unpack spec.
+fn hnp_spec(ep: &kani_yaml::ValidatedEndpoint) -> kani_shared::unpack::HasNextPage {
+    match &ep.has_next_page {
+        kani_yaml::yaml::model::ValidatedHnp::Static(b) => {
+            kani_shared::unpack::HasNextPage::Static(*b)
         }
-    };
-    let manga = rows
-        .iter()
-        .filter_map(|row| {
-            let id = row["id"].as_str()?.to_string();
-            let title = row["title"].as_str()?.to_string();
-            let cover_url = row["cover_url"].as_str().map(|s| s.to_string());
-            Some(MangaListItem {
-                id,
-                title,
-                cover_url,
-            })
-        })
-        .collect();
-    MangaList {
-        manga,
-        has_next_page,
-        total_pages,
+        _ => kani_shared::unpack::HasNextPage::FromScalar,
     }
+}
+
+/// Lower an endpoint's `total_pages` config to the shared unpack spec.
+fn total_pages_spec(ep: &kani_yaml::ValidatedEndpoint) -> kani_shared::unpack::TotalPages {
+    match &ep.total_pages {
+        kani_yaml::yaml::model::ValidatedTotalPages::Static(n) => {
+            kani_shared::unpack::TotalPages::Static(*n)
+        }
+        kani_yaml::yaml::model::ValidatedTotalPages::None => kani_shared::unpack::TotalPages::None,
+        kani_yaml::yaml::model::ValidatedTotalPages::Scalar(_) => {
+            kani_shared::unpack::TotalPages::FromScalar
+        }
+    }
+}
+
+fn unpack_manga_list(result: &serde_json::Value, ep: &kani_yaml::ValidatedEndpoint) -> MangaList {
+    kani_shared::unpack::unpack_manga_list(result, hnp_spec(ep), total_pages_spec(ep)).into()
 }
 
 /// Graft function-argument fields (`id: "$manga_id$"`) onto each extracted row.
@@ -764,124 +752,20 @@ fn inject_fn_arg_fields(
 }
 
 fn unpack_manga_info(result: &serde_json::Value) -> Result<MangaInfo> {
-    let empty = vec![];
-    let rows = result["rows"].as_array().unwrap_or(&empty);
-    let row = rows.first().ok_or_else(|| {
-        Error::Extension(kani_shared::extension::ExtensionError::parse(
-            "manga_details: no result row".to_string(),
-        ))
-    })?;
-
-    let id = row["id"]
-        .as_str()
-        .ok_or_else(|| {
-            Error::Extension(kani_shared::extension::ExtensionError::parse(
-                "manga_details: missing id".to_string(),
-            ))
-        })?
-        .to_string();
-    let title = row["title"]
-        .as_str()
-        .ok_or_else(|| {
-            Error::Extension(kani_shared::extension::ExtensionError::parse(
-                "manga_details: missing title".to_string(),
-            ))
-        })?
-        .to_string();
-    let status = match row["status"].as_str() {
-        Some("ongoing") => MangaStatus::Ongoing,
-        Some("completed") => MangaStatus::Completed,
-        Some("hiatus") => MangaStatus::Hiatus,
-        Some("cancelled") => MangaStatus::Cancelled,
-        _ => MangaStatus::Unknown,
-    };
-    Ok(MangaInfo {
-        id,
-        title,
-        cover_url: row["cover_url"].as_str().map(|s| s.to_string()),
-        description: row["description"].as_str().map(|s| s.to_string()),
-        authors: str_array(row, "authors"),
-        artists: str_array(row, "artists"),
-        status,
-        tags: str_array(row, "tags"),
-    })
-}
-
-fn str_array(row: &serde_json::Value, key: &str) -> Vec<String> {
-    row[key]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default()
+    kani_shared::unpack::unpack_manga_info(result)
+        .map(Into::into)
+        .map_err(Error::Extension)
 }
 
 fn unpack_chapter_list(
     result: &serde_json::Value,
     ep: &kani_yaml::ValidatedEndpoint,
 ) -> ChapterList {
-    use kani_yaml::yaml::model::{ValidatedHnp, ValidatedTotalPages};
-
-    let empty = vec![];
-    let rows = result["rows"].as_array().unwrap_or(&empty);
-    let has_next_page = match &ep.has_next_page {
-        ValidatedHnp::Static(b) => *b,
-        _ => result["scalars"]["has_next_page"]
-            .as_bool()
-            .unwrap_or(false),
-    };
-    let total_pages = match &ep.total_pages {
-        ValidatedTotalPages::Static(n) => Some(*n),
-        ValidatedTotalPages::None => None,
-        ValidatedTotalPages::Scalar(_) => {
-            result["scalars"]["total_pages"].as_u64().map(|n| n as u32)
-        }
-    };
-    let chapters = rows
-        .iter()
-        .filter_map(|row| {
-            let id = row["id"].as_str()?.to_string();
-            Some(ChapterInfo {
-                id,
-                number: row["number"].as_f64().unwrap_or(0.0),
-                title: row["title"].as_str().map(|s| s.to_string()),
-                volume: row["volume"].as_i64().map(|v| v as i32),
-                scanlator: row["scanlator"].as_str().map(|s| s.to_string()),
-                date_uploaded: row["date_uploaded"].as_i64(),
-                language: row["language"].as_str().unwrap_or("en").to_string(),
-                page_count: row["page_count"]
-                    .as_u64()
-                    .or_else(|| row["page_count"].as_str().and_then(|s| s.parse().ok()))
-                    .map(|n| n as u32),
-            })
-        })
-        .collect();
-    ChapterList {
-        chapters,
-        has_next_page,
-        total_pages,
-    }
+    kani_shared::unpack::unpack_chapter_list(result, hnp_spec(ep), total_pages_spec(ep)).into()
 }
 
 fn unpack_chapter(result: &serde_json::Value) -> Chapter {
-    let empty = vec![];
-    let rows = result["rows"].as_array().unwrap_or(&empty);
-    let pages = rows
-        .iter()
-        .enumerate()
-        .filter_map(|(i, row)| {
-            let url = row["url"].as_str()?.to_string();
-            let index = row["index"].as_i64().unwrap_or(i as i64) as i32;
-            Some(Page {
-                index,
-                url,
-                transform: None,
-            })
-        })
-        .collect();
-    Chapter { pages }
+    kani_shared::unpack::unpack_pages(result).into()
 }
 
 #[cfg(test)]
