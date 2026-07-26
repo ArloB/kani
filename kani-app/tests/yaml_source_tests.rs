@@ -1414,3 +1414,86 @@ async fn yaml_source_404_is_not_surfaced_as_a_typed_http_error() {
         .expect("a 404 must not surface as a typed HTTP error");
     assert!(result.manga.is_empty());
 }
+
+// ── A10 / A11: route placeholder safety ───────────────────────────────────────
+
+#[tokio::test]
+async fn a_source_supplied_id_cannot_rewrite_the_request_path() {
+    use kani_shared_test::origin::{Response, TestOrigin};
+
+    let origin = TestOrigin::start().await;
+    // Substituted raw, `../admin` would make the path /manga/../admin — a
+    // traversal. Percent-encoded, it is a single literal segment the origin sees
+    // verbatim. We register only the encoded path; a traversal would miss it.
+    origin.set("/manga/..%2Fadmin", Response::html("<html></html>"));
+
+    let details_ep = ValidatedEndpoint {
+        route: "/manga/$manga_id$".into(),
+        fields: vec![self_attr_field("id", "data-id"), text_field("title", "h1")],
+        container: ".manga".into(),
+        ..list_endpoint("/manga/$manga_id$", ".manga")
+    };
+
+    let src = yaml_source(
+        &origin.base(),
+        ValidatedExtension {
+            id: "fixture-source".into(),
+            name: "Fixture Source".into(),
+            version: "1.0.0".into(),
+            base_url: origin.base(),
+            language: "en".into(),
+            unrestricted_http: true,
+            manga_details: Some(details_ep),
+            ..Default::default()
+        },
+    );
+
+    // Extraction finds nothing in the empty doc; all we assert is where the
+    // request landed.
+    let _ = src.get_manga_details("../admin").await;
+
+    assert_eq!(
+        origin.hits("/manga/..%2Fadmin"),
+        1,
+        "the id must reach the origin percent-encoded, not as a path traversal"
+    );
+}
+
+#[tokio::test]
+async fn an_unresolved_route_placeholder_is_an_error_not_a_literal() {
+    use kani_shared_test::origin::{Response, TestOrigin};
+
+    let origin = TestOrigin::start().await;
+    origin.set("/list", Response::html("<html></html>"));
+
+    // `$missing$` is never supplied by get_popular_manga.
+    let ep = ValidatedEndpoint {
+        route: "/list/$missing$".into(),
+        ..list_endpoint("/list/$missing$", ".item")
+    };
+
+    let src = yaml_source(
+        &origin.base(),
+        ValidatedExtension {
+            id: "fixture-source".into(),
+            name: "Fixture Source".into(),
+            version: "1.0.0".into(),
+            base_url: origin.base(),
+            language: "en".into(),
+            unrestricted_http: true,
+            popular: Some(ValidatedPopular::Full(Box::new(ep))),
+            ..Default::default()
+        },
+    );
+
+    let result = src.get_popular_manga(1, 20, &[]).await;
+    assert!(
+        result.is_err(),
+        "an unresolved route placeholder must fail the call, not send a literal"
+    );
+    assert_eq!(
+        origin.hits("/list"),
+        0,
+        "no request must be sent when a placeholder is unresolved"
+    );
+}

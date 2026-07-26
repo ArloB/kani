@@ -149,23 +149,23 @@ impl YamlSource {
         args: &HashMap<String, String>,
         endpoint_name: &str,
         filters: &[kani_shared::types::ActiveFilter],
-    ) -> kani_shared::ast::RequestDef {
+    ) -> std::result::Result<kani_shared::ast::RequestDef, String> {
         let mut resolved = args.clone();
         kani_yaml::resolve_composite_ids(ep, &mut resolved);
-        let url = kani_yaml::build_url_with_args(&ext.base_url, &ep.route, &resolved);
+        let url = kani_yaml::build_url_with_args(&ext.base_url, &ep.route, &resolved)?;
         let mut queries = kani_yaml::build_queries(&ep.queries, &resolved);
         queries.extend(kani_yaml::apply_filters(
             &ep.filter_mapping,
             ep.filter_format.as_ref(),
             filters,
         ));
-        kani_shared::ast::RequestDef {
+        Ok(kani_shared::ast::RequestDef {
             url,
             method: ep.method.clone(),
             headers: ep.headers.clone(),
             queries,
             endpoint_id: Some(endpoint_name.to_string()),
-        }
+        })
     }
 
     async fn eval_endpoint_once(
@@ -178,7 +178,7 @@ impl YamlSource {
         use kani_core::evaluator::{html_eval, json_eval};
         use kani_yaml::yaml::schema::ResponseType;
 
-        let req = Self::make_request(ep, &self.config, args, endpoint_name, filters);
+        let req = Self::make_request(ep, &self.config, args, endpoint_name, filters)?;
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
         let mut state = self.make_host_state().map_err(|e| e.to_string())?;
 
@@ -218,7 +218,7 @@ impl YamlSource {
 
         let mut resolved = args.clone();
         kani_yaml::resolve_composite_ids(ep, &mut resolved);
-        let page_url = kani_yaml::build_url_with_args("", page_url_template, &resolved);
+        let page_url = kani_yaml::build_url_with_args("", page_url_template, &resolved)?;
 
         let mut state = self.make_host_state().map_err(|e| e.to_string())?;
         let profile_key = state.browser_profile_key.clone();
@@ -242,7 +242,7 @@ impl YamlSource {
         )
         .await?;
 
-        let req = Self::make_request(ep, &self.config, args, endpoint_name, &[]);
+        let req = Self::make_request(ep, &self.config, args, endpoint_name, &[])?;
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
         json_eval::extract_json_str(&mut state, &payload, &bp).await
     }
@@ -494,11 +494,8 @@ impl YamlSource {
             ))
         })?;
         let args = Self::build_args(&[("manga_id", manga_id)]);
-        Ok(kani_yaml::build_url_with_args(
-            &self.config.base_url,
-            template,
-            &args,
-        ))
+        kani_yaml::build_url_with_args(&self.config.base_url, template, &args)
+            .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))
     }
 
     pub async fn get_filter_list(&self) -> Result<FilterList> {

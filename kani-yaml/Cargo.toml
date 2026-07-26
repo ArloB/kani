@@ -20,3 +20,4 @@ thiserror   = "2.0"
 rhai        = { version = "1.19", features = ["sync"] }
 base64      = "0.22"
 semver      = "1"
+urlencoding = "2.1"

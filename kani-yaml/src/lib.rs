@@ -171,7 +171,7 @@ pub fn build_url_with_args(
     base_url: &str,
     route: &str,
     args: &std::collections::HashMap<String, String>,
-) -> String {
+) -> Result<String, String> {
     let mut result = String::with_capacity(route.len());
     let bytes = route.as_bytes();
     let mut i = 0;
@@ -187,12 +187,20 @@ pub fn build_url_with_args(
             if end < bytes.len() && bytes[end] == b'$' && end > start {
                 let placeholder = &route[start..end];
                 let key = placeholder.replace('.', "_");
-                if let Some(val) = args.get(&key) {
-                    result.push_str(val);
-                } else {
-                    result.push('$');
-                    result.push_str(placeholder);
-                    result.push('$');
+                match args.get(&key) {
+                    // A source-supplied value fills exactly one route slot, so it
+                    // is percent-encoded: an id like `../admin`, `x?y=1` or `a b`
+                    // must not smuggle in a path traversal, a query, or a space
+                    // that rewrites the request the route author declared.
+                    Some(val) => result.push_str(&urlencoding::encode(val)),
+                    // An unresolved placeholder was previously left in the URL as
+                    // a literal `$page$`, silently sending a wrong request. A
+                    // route slot with no argument is a bug — refuse it.
+                    None => {
+                        return Err(format!(
+                            "unresolved route placeholder `${placeholder}$` (no argument supplied)"
+                        ));
+                    }
                 }
                 i = end + 1;
             } else {
@@ -204,7 +212,7 @@ pub fn build_url_with_args(
             i += 1;
         }
     }
-    format!("{}{}", base_url.trim_end_matches('/'), result)
+    Ok(format!("{}{}", base_url.trim_end_matches('/'), result))
 }
 
 /// Resolve query parameters from an endpoint's query list and a runtime args map.
@@ -368,5 +376,80 @@ fn bool_literal(fmt: yaml::schema::BoolFormat, value: bool) -> &'static str {
         (BoolFormat::OneZero, false) => "0",
         (BoolFormat::YesNo, true) => "yes",
         (BoolFormat::YesNo, false) => "no",
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::build_url_with_args;
+    use std::collections::HashMap;
+
+    fn args(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn substitutes_a_plain_id() {
+        let url = build_url_with_args(
+            "https://src.example/",
+            "/manga/$manga_id$",
+            &args(&[("manga_id", "abc123")]),
+        )
+        .unwrap();
+        assert_eq!(url, "https://src.example/manga/abc123");
+    }
+
+    #[test]
+    fn a_source_supplied_id_cannot_rewrite_the_path() {
+        // A10: a traversal, a query, or a space in the id must be percent-encoded
+        // into a single path segment, not smuggled into the request structure.
+        let url = build_url_with_args(
+            "https://src.example",
+            "/manga/$manga_id$/details",
+            &args(&[("manga_id", "../admin")]),
+        )
+        .unwrap();
+        assert_eq!(url, "https://src.example/manga/..%2Fadmin/details");
+
+        let url = build_url_with_args(
+            "https://src.example",
+            "/manga/$manga_id$",
+            &args(&[("manga_id", "x?y=1")]),
+        )
+        .unwrap();
+        assert_eq!(url, "https://src.example/manga/x%3Fy%3D1");
+
+        let url = build_url_with_args(
+            "https://src.example",
+            "/manga/$manga_id$",
+            &args(&[("manga_id", "a b")]),
+        )
+        .unwrap();
+        assert_eq!(url, "https://src.example/manga/a%20b");
+    }
+
+    #[test]
+    fn an_unresolved_placeholder_is_an_error_not_a_literal() {
+        // A11: a route slot with no argument must fail, never send `$page$`.
+        let err = build_url_with_args(
+            "https://src.example",
+            "/list/$page$",
+            &args(&[("manga_id", "x")]),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("page"),
+            "error should name the placeholder: {err}"
+        );
+    }
+
+    #[test]
+    fn a_lone_dollar_is_kept_literally() {
+        let url = build_url_with_args("https://src.example", "/price/$5", &args(&[])).unwrap();
+        assert_eq!(url, "https://src.example/price/$5");
     }
 }
