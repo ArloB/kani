@@ -1316,7 +1316,11 @@ fn extension_error(err: kani_core::error::Error) -> kani_shared::extension::Exte
 async fn yaml_source_429_classifies_as_rate_limited_with_retry_after() {
     use kani_shared::extension::ExtensionErrorKind;
 
-    let port = start_status_server("429 Too Many Requests", "Retry-After: 1\r\n").await;
+    // Retry-After larger than the request's own timeout: before A16 the client
+    // slept on it in-request (capped, ×MAX_RETRIES) and overran the 90s outer
+    // timeout, so this surfaced as a misleading ParseError/timeout. Now the 429
+    // is returned immediately and classifies as RateLimited carrying the hint.
+    let port = start_status_server("429 Too Many Requests", "Retry-After: 120\r\n").await;
     let base_url = format!("http://127.0.0.1:{port}");
 
     let src = yaml_source(
@@ -1343,7 +1347,7 @@ async fn yaml_source_429_classifies_as_rate_limited_with_retry_after() {
     );
     assert_eq!(
         err.retry_after_secs,
-        Some(1),
+        Some(120),
         "the server's Retry-After must survive to the typed error"
     );
 }

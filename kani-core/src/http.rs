@@ -51,13 +51,21 @@ impl HostCircuit {
     }
 }
 
-/// 429, 502, 504 are retryable. 503 is excluded — it is the Cloudflare challenge signal.
+/// Only the transient gateway faults 502 and 504 are retried in-request — the
+/// upstream may recover within a couple of backoff windows.
+///
+/// 429 is deliberately NOT here: a rate-limit is not a transient blip. Sleeping
+/// on `Retry-After` inside the request (capped, up to MAX_RETRIES) pins a worker
+/// and a pooled connection for as long as a minute, and a large `Retry-After`
+/// overruns the caller's outer timeout — turning a clean 429 into a misleading
+/// timeout. Instead the 429 is surfaced immediately; the evaluator marks it with
+/// the HTTP-status sentinel so extraction reports a typed RateLimited (carrying
+/// `Retry-After`), and the download job's own retry policy reschedules with that
+/// backoff. 503 is excluded too — it is the Cloudflare challenge signal.
 fn is_retryable(status: rquest::StatusCode) -> bool {
     matches!(
         status,
-        rquest::StatusCode::TOO_MANY_REQUESTS
-            | rquest::StatusCode::BAD_GATEWAY
-            | rquest::StatusCode::GATEWAY_TIMEOUT
+        rquest::StatusCode::BAD_GATEWAY | rquest::StatusCode::GATEWAY_TIMEOUT
     )
 }
 
@@ -1299,8 +1307,10 @@ mod tests {
     // ── is_retryable ─────────────────────────────────────────────────────────
 
     #[test]
-    fn retryable_on_429() {
-        assert!(is_retryable(rquest::StatusCode::TOO_MANY_REQUESTS));
+    fn not_retryable_on_429() {
+        // A16: 429 is surfaced immediately rather than slept-on in-request; the
+        // extraction typed error + the download job retry policy honour it.
+        assert!(!is_retryable(rquest::StatusCode::TOO_MANY_REQUESTS));
     }
 
     #[test]
@@ -1731,48 +1741,44 @@ mod tests {
         assert_eq!(resp.status(), rquest::StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn retries_on_429_then_succeeds() {
+    #[tokio::test]
+    async fn a_429_is_returned_immediately_without_retrying() {
+        // A16: the client must not sleep-retry a 429 in-request. Exactly one
+        // request reaches the origin, and the 429 is surfaced for the caller to
+        // classify. `.expect(1)` is verified when the server drops.
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/retry"))
-            .respond_with(ResponseTemplate::new(429))
-            .up_to_n_times(2)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/retry"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .and(path("/rl"))
+            .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "120"))
+            .expect(1)
             .mount(&server)
             .await;
 
         let client = SmartClient::new_for_test().unwrap();
         let req = client
             .inner()
-            .get(format!("{}/retry", server.uri()))
+            .get(format!("{}/rl", server.uri()))
             .build()
             .unwrap();
         let resp = client.send_request(req).await.unwrap();
-        assert_eq!(resp.status(), rquest::StatusCode::OK);
+        assert_eq!(resp.status().as_u16(), 429);
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn retries_exhausted_returns_last_429() {
+    #[tokio::test]
+    async fn safe_get_returns_a_429_immediately_without_retrying() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/always429"))
-            .respond_with(ResponseTemplate::new(429))
-            .expect((1 + MAX_RETRIES) as u64)
+            .and(path("/rl"))
+            .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "120"))
+            .expect(1)
             .mount(&server)
             .await;
 
         let client = SmartClient::new_for_test().unwrap();
-        let req = client
-            .inner()
-            .get(format!("{}/always429", server.uri()))
-            .build()
+        let resp = client
+            .safe_get(&format!("{}/rl", server.uri()), None)
+            .await
             .unwrap();
-        let resp = client.send_request(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 429);
     }
 
