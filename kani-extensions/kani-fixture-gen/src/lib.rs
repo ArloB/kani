@@ -24,7 +24,6 @@ impl Default for FixtureGen {
 
 impl FixtureGen {
     pub fn new() -> Self {
-        // Test plumbing only (rest is generated): read the origin from a pref.
         Self {
             base_url: kani_shared::host_abi::prefs::get_str_or(
                 "base_url",
@@ -99,29 +98,17 @@ impl MangaExtension for FixtureGen {
             .endpoint_id("search")
             .query("q", query);
 
-        for f in filters {
-            let (group, action) = f
-                .filter_name
-                .split_once(':')
-                .unwrap_or((&f.filter_name, ""));
-            match group {
-                "genre" => match &f.state {
-                    FilterState::Checkbox(c) if *c => {
-                        req = req.query("genre", if action.is_empty() { "true" } else { action });
-                    }
-                    FilterState::Multiselect(values) => {
-                        for v in values {
-                            req = req.query("genre", v.as_str());
-                        }
-                    }
-                    FilterState::Selection { value, .. } => {
-                        req = req.query("genre", value.as_str())
-                    }
-                    FilterState::TextInput(s) => req = req.query("genre", s.as_str()),
-                    _ => {}
-                },
-                _ => {}
-            }
+        let __filter_mapping: [(String, kani_shared::request::FilterMapping); 1] = [(
+            "genre".to_string(),
+            kani_shared::request::FilterMapping::Simple("genre".to_string()),
+        )];
+        let __filter_format: Option<kani_shared::request::FilterFormat> = None;
+        for (k, v) in kani_shared::request::apply_filters(
+            &__filter_mapping,
+            __filter_format.as_ref(),
+            filters,
+        ) {
+            req = req.query(k, v);
         }
         let bp = BlueprintBuilder::new(".item")
             .request(req)

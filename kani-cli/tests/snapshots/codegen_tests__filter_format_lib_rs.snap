@@ -91,57 +91,36 @@ impl MangaExtension for TestFilterFormat {
             .endpoint_id("search")
             .query("q", query);
 
-        for f in filters {
-            let (group, action) = f
-                .filter_name
-                .split_once(':')
-                .unwrap_or((&f.filter_name, ""));
-            match group {
-                "genres" => match &f.state {
-                    FilterState::Checkbox(c) if *c => {
-                        req = req.query("genre", if action.is_empty() { "1" } else { action });
-                    }
-                    FilterState::Checkbox(_) => {
-                        req = req.query("genre", "0");
-                    }
-                    FilterState::Multiselect(values) => {
-                        for v in values {
-                            req = req.query("genre[]", v.as_str());
-                        }
-                    }
-                    FilterState::Selection { value, .. } => {
-                        req = req.query("genre", value.as_str())
-                    }
-                    FilterState::TextInput(s) => req = req.query("genre", s.as_str()),
-                    _ => {}
+        let __filter_mapping: [(String, kani_shared::request::FilterMapping); 3] = [
+            (
+                "genres".to_string(),
+                kani_shared::request::FilterMapping::Simple("genre".to_string()),
+            ),
+            (
+                "nsfw".to_string(),
+                kani_shared::request::FilterMapping::Simple("nsfw".to_string()),
+            ),
+            (
+                "year_range".to_string(),
+                kani_shared::request::FilterMapping::TupleSplit {
+                    from_param: "year_from".to_string(),
+                    to_param: "year_to".to_string(),
                 },
-                "nsfw" => match &f.state {
-                    FilterState::Checkbox(c) if *c => {
-                        req = req.query("nsfw", if action.is_empty() { "1" } else { action });
-                    }
-                    FilterState::Checkbox(_) => {
-                        req = req.query("nsfw", "0");
-                    }
-                    FilterState::Multiselect(values) => {
-                        for v in values {
-                            req = req.query("nsfw[]", v.as_str());
-                        }
-                    }
-                    FilterState::Selection { value, .. } => req = req.query("nsfw", value.as_str()),
-                    FilterState::TextInput(s) => req = req.query("nsfw", s.as_str()),
-                    _ => {}
-                },
-                "year_range" => match &f.state {
-                    FilterState::TextInput(s) => {
-                        if let Some((from, to)) = s.split_once(':') {
-                            req = req.query("year_from", from);
-                            req = req.query("year_to", to);
-                        }
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
+            ),
+        ];
+        let __filter_format: Option<kani_shared::request::FilterFormat> =
+            Some(kani_shared::request::FilterFormat {
+                multiselect: kani_shared::request::ArrayFormat::Bracket,
+                omit_empty: false,
+                bool_format: kani_shared::request::BoolFormat::OneZero,
+                array_separator: "|".to_string(),
+            });
+        for (k, v) in kani_shared::request::apply_filters(
+            &__filter_mapping,
+            __filter_format.as_ref(),
+            filters,
+        ) {
+            req = req.query(k, v);
         }
         let bp = BlueprintBuilder::new(".results .item")
             .request(req)
