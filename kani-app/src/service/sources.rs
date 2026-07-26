@@ -54,6 +54,8 @@ pub(crate) async fn resolve_option_set(
     cache: &dyn kani_core::cache::CacheBackend,
     client: &kani_core::http::SmartClient,
     source_id: i64,
+    base_url: &str,
+    unrestricted_http: bool,
     def: &kani_shared::FilterFetchDef,
 ) -> Option<Vec<(String, String)>> {
     use std::time::Duration;
@@ -63,7 +65,9 @@ pub(crate) async fn resolve_option_set(
     if let Some(cached) = cache.get(&cache_ns, cache_key).await {
         return Some(kani_shared::serde_json::from_slice(&cached).unwrap_or_default());
     }
-    match kani_core::option_set_fetcher::fetch_option_set(client, def).await {
+    match kani_core::option_set_fetcher::fetch_option_set(client, def, base_url, unrestricted_http)
+        .await
+    {
         Ok(opts) => {
             if let Ok(bytes) = kani_shared::serde_json::to_vec(&opts) {
                 cache.put(&cache_ns, cache_key, bytes, ttl).await;
@@ -542,9 +546,32 @@ impl AppService {
         mut filter_list: kani_core::WitFilterList,
         defs: &[kani_shared::FilterFetchDef],
     ) -> kani_core::WitFilterList {
+        // The source's own HTTP policy governs where an option-set may be
+        // fetched from — a fetched-option def must not escape the source's host
+        // (unless the source is unrestricted). Missing/failed lookup → treat as
+        // the safe default (restricted, empty base) so a bad def can't reach out.
+        let (base_url, unrestricted_http) = sqlx::query!(
+            "SELECT base_url, unrestricted_http AS \"unrestricted_http: bool\" \
+             FROM sources WHERE id = ?",
+            source_id
+        )
+        .fetch_optional(&self.db_read)
+        .await
+        .ok()
+        .flatten()
+        .map(|r| (r.base_url, r.unrestricted_http))
+        .unwrap_or_default();
+
         for def in defs {
-            let options =
-                resolve_option_set(&*self.ext_cache, &self.smart_client, source_id, def).await;
+            let options = resolve_option_set(
+                &*self.ext_cache,
+                &self.smart_client,
+                source_id,
+                &base_url,
+                unrestricted_http,
+                def,
+            )
+            .await;
             let Some(options) = options else { continue };
 
             if let Some(filter) = filter_list
@@ -1469,7 +1496,8 @@ mod tests {
             .await;
 
         let def = make_def(Some("genres-v1"));
-        let result = resolve_option_set(&*cache, &client, 1, &def).await;
+        let result =
+            resolve_option_set(&*cache, &client, 1, "https://example.invalid", false, &def).await;
 
         let result = result.expect("cache hit must return Some");
         assert_eq!(result.len(), 2);
@@ -1482,7 +1510,8 @@ mod tests {
         let cache = Arc::new(InMemoryCache::new());
         let client = kani_core::http::SmartClient::new(None).unwrap();
         let def = make_def(None);
-        let result = resolve_option_set(&*cache, &client, 1, &def).await;
+        let result =
+            resolve_option_set(&*cache, &client, 1, "https://example.invalid", false, &def).await;
         assert!(
             result.is_none(),
             "unreachable URL must return None (no cache, fetch fails)"
