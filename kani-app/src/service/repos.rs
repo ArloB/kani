@@ -192,6 +192,21 @@ impl AppService {
             let parsed: RepoIndex = serde_json::from_slice(&index_bytes)
                 .map_err(|e| ServiceError::Validation(format!("Invalid index.json: {e}")))?;
 
+            // Anchor to the PINNED key before trusting — or caching — anything.
+            // The fetched index carries its own maintainer_key, so verifying
+            // against parsed.maintainer_key only proves the index is
+            // self-consistent, which any attacker can arrange. A rotated or
+            // MITM'd key must force a re-add (out-of-band fingerprint confirm);
+            // it must never self-certify. Critically this runs BEFORE the
+            // index_cache write below: the old code wrote the cache first and
+            // checked the key afterwards, so a returned error still left the
+            // poisoned index in place for install_source_from_repo to trust.
+            if parsed.maintainer_key != repo.maintainer_key {
+                return Err(ServiceError::Validation(
+                    "Repository maintainer key changed since last trust — re-add the repo to confirm the new key.".to_string(),
+                ));
+            }
+
             let sig_url = format!("{base}/index.json.sig");
             let sig_raw = self
                 .proxy_client
@@ -212,7 +227,7 @@ impl AppService {
                 .trim()
                 .to_string();
 
-            signing::verify_artifact(&index_bytes, &parsed.maintainer_key, &sig_b64)
+            signing::verify_artifact(&index_bytes, &repo.maintainer_key, &sig_b64)
                 .map_err(|e| ServiceError::Validation(format!("Index signature invalid: {e}")))?;
 
             let index_json = serde_json::to_string(&parsed)
@@ -229,12 +244,6 @@ impl AppService {
 
             parsed
         };
-
-        if index.maintainer_key != repo.maintainer_key {
-            return Err(ServiceError::Validation(
-                "Repository maintainer key changed since last trust — re-add the repo to confirm the new key.".to_string(),
-            ));
-        }
 
         self.audit(user_id, "repo.refresh", Some(&repo.url), None)
             .await;

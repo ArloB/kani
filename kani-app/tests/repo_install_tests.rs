@@ -559,3 +559,108 @@ async fn bootstrap_wrong_key_is_skipped_without_error() {
         "mismatched key must not add repo"
     );
 }
+
+// ── A2 regression: refresh must not poison the cache with an unpinned key ──────
+
+type SharedRoutes = Arc<tokio::sync::RwLock<Arc<HashMap<String, Vec<u8>>>>>;
+
+async fn start_swappable_server(shared: SharedRoutes) -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let shared = Arc::clone(&shared);
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 8192];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                let path = request
+                    .lines()
+                    .next()
+                    .and_then(|l| l.split(' ').nth(1))
+                    .unwrap_or("/")
+                    .to_string();
+
+                let routes = shared.read().await.clone();
+                let response = if let Some(body) = routes.get(&path) {
+                    let header = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let mut resp = header.into_bytes();
+                    resp.extend_from_slice(body);
+                    resp
+                } else {
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_vec()
+                };
+                let _ = stream.write_all(&response).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+
+    port
+}
+
+#[tokio::test]
+async fn refresh_with_rotated_maintainer_key_does_not_poison_the_cache() {
+    let ext_id = unique_ext_id();
+    let original = TestRepo::new(&ext_id);
+
+    // An attacker serving the same URL: a fresh, self-consistent index signed by
+    // a key the attacker controls, advertising a malicious artifact.
+    let mut attacker = TestRepo::new(&ext_id);
+    attacker.artifact_yaml = format!(
+        "id: {ext_id}\nname: Pwned\nversion: \"0.1.0\"\nbase_url: \"https://evil.example\"\n"
+    );
+
+    let shared = Arc::new(tokio::sync::RwLock::new(original.build_routes("Good Repo")));
+    let port = start_swappable_server(Arc::clone(&shared)).await;
+    let url = format!("http://127.0.0.1:{port}");
+    let fp = fingerprint(&original.maintainer_key);
+
+    let svc = test_service().await;
+    let RepoAddResult::Added { id, .. } = svc.add_repo(&url, Some(&fp), None).await.unwrap() else {
+        panic!("add_repo must return Added");
+    };
+
+    // The repo host is now compromised: it serves the attacker's index.
+    *shared.write().await = attacker.build_routes("Good Repo");
+
+    let err = svc
+        .refresh_repo(id, None)
+        .await
+        .expect_err("a rotated maintainer key must be rejected on refresh");
+    assert!(
+        matches!(err, kani_app::error::ServiceError::Validation(_)),
+        "expected a validation error, got {err:?}"
+    );
+
+    // The pinned key is unchanged and the cached index was NOT overwritten with
+    // the attacker's — install still reads the original author key + digest.
+    let repo = svc.get_repo(id).await.unwrap();
+    assert_eq!(
+        repo.maintainer_key,
+        pk_b64(&original.maintainer_key),
+        "the pinned maintainer key must be untouched"
+    );
+    let cached: RepoIndex = serde_json::from_str(repo.index_cache.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        cached.maintainer_key,
+        pk_b64(&original.maintainer_key),
+        "cached index must still carry the original maintainer key, not the attacker's"
+    );
+    assert_eq!(
+        cached.extensions[0].author_key,
+        pk_b64(&original.author_key),
+        "cached entry must still point at the original author key — the cache was poisoned otherwise"
+    );
+}
