@@ -24,11 +24,15 @@ pub struct WebhookService {
 
 impl WebhookService {
     pub fn new(db: SqlitePool, db_read: SqlitePool) -> Self {
-        Self {
-            db,
-            db_read,
-            http: rquest::Client::new(),
-        }
+        let http = kani_core::network::build_validating_client().unwrap_or_else(|e| {
+            tracing::warn!(
+                "Webhook: failed to build SSRF-validating client ({e}); \
+                 falling back to a plain client — literal-IP delivery is still \
+                 blocked, but DNS-rebinding protection is unavailable"
+            );
+            rquest::Client::new()
+        });
+        Self { db, db_read, http }
     }
 }
 
@@ -96,7 +100,7 @@ struct Envelope<'a> {
 
 // ── Row types ─────────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct WebhookRow {
     pub id: i64,
     pub url: String,
@@ -169,6 +173,17 @@ impl WebhookService {
         secret: Option<&str>,
         body: &str,
     ) -> (Option<i64>, Option<String>) {
+        // Last line of defence at the egress point: a row may predate URL
+        // validation, or an admin may have edited the DB directly. A literal
+        // forbidden IP never reaches the resolver, so reject it here too.
+        if kani_core::network::is_forbidden_url_host(url) {
+            tracing::warn!("Webhook delivery to {url} refused: forbidden host");
+            return (
+                None,
+                Some("Refused: webhook host is not permitted".to_owned()),
+            );
+        }
+
         let sig = secret.map(|s| {
             let mut mac =
                 Hmac::<Sha256>::new_from_slice(s.as_bytes()).expect("HMAC accepts any key size");
@@ -467,6 +482,11 @@ fn validate_url(url: &str) -> Result<()> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(ServiceError::Validation(
             "Webhook URL must start with http:// or https://".to_owned(),
+        ));
+    }
+    if kani_core::network::is_forbidden_url_host(url) {
+        return Err(ServiceError::Validation(
+            "Webhook URL must not point at a private, loopback, or reserved address".to_owned(),
         ));
     }
     Ok(())
