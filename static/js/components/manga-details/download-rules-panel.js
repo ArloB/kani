@@ -68,11 +68,14 @@ function DownloadRulesPanel({ initialRules, dbId }) {
 
   const refreshPreview = useCallback(
     debounce(async (currentRules) => {
-      if (currentRules.length === 0) { setPreview(t('manga.rules.preview.all')); return; }
       setPreview(t('manga.rules.preview.calculating'));
       try {
         const res = await api.previewDownloadRules(dbId, currentRules.map(r => r.kind));
-        setPreview(t('manga.rules.preview.result', { matching: res.matching, total: res.total }));
+        setPreview(
+          res.matching === res.total
+            ? t('manga.rules.preview.all')
+            : t('manga.rules.preview.result', { matching: res.matching, total: res.total }),
+        );
       } catch { setPreview(''); }
     }, 400),
     [dbId],

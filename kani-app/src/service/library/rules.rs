@@ -5,6 +5,12 @@ use super::super::*;
 impl AppService {
     /// Returns `(matching_chapters, total_chapters)` for a hypothetical rule set,
     /// without modifying any state.
+    ///
+    /// `matching` is the count that would *actually* be downloaded: the same
+    /// pipeline auto-download runs — the rule predicate **and** the per-manga
+    /// scanlator whitelist/block + priority dedup. Applying only the rule
+    /// predicate here (as this once did) overstated the number, since the UI
+    /// promises "{matching} of {total} would be downloaded with these rules".
     pub async fn preview_download_rules(
         &self,
         manga_id: MangaId,
@@ -19,13 +25,18 @@ impl AppService {
         .await?;
 
         let total = rows.len();
-        if kinds.is_empty() {
-            return Ok((total, total));
-        }
 
-        let predicate = self.build_chapter_predicate(kinds);
-        let matching = rows.iter().filter(|r| predicate(r)).count();
-        Ok((matching, total))
+        let ids_after_rules: Vec<i64> = if kinds.is_empty() {
+            rows.iter().map(|r| r.id).collect()
+        } else {
+            let predicate = self.build_chapter_predicate(kinds);
+            rows.iter().filter(|r| predicate(r)).map(|r| r.id).collect()
+        };
+
+        let survivors = self
+            .select_by_scanlator_prefs(manga_id, ids_after_rules)
+            .await;
+        Ok((survivors.len(), total))
     }
 
     fn build_chapter_predicate(
@@ -78,7 +89,7 @@ impl AppService {
         .unwrap_or_default();
 
         let ids_after_rules = if raw_rules.is_empty() {
-            candidate_ids.clone()
+            candidate_ids
         } else {
             if candidate_ids.is_empty() {
                 return vec![];
@@ -117,6 +128,26 @@ impl AppService {
                 .collect()
         };
 
+        self.select_by_scanlator_prefs(manga_id, ids_after_rules)
+            .await
+            .into_iter()
+            .map(crate::ids::ChapterId)
+            .collect()
+    }
+
+    /// The second half of the auto-download selection: given the chapter ids that
+    /// already passed the download rules, apply the per-manga scanlator
+    /// whitelist/block mode and then keep only the highest-priority scanlator's
+    /// chapter for each chapter number. Order of the input is preserved.
+    ///
+    /// Shared by [`Self::filter_chapters_by_rules`] and
+    /// [`Self::preview_download_rules`] so the preview count matches what
+    /// auto-download actually grabs.
+    async fn select_by_scanlator_prefs(
+        &self,
+        manga_id: MangaId,
+        ids_after_rules: Vec<i64>,
+    ) -> Vec<i64> {
         let scanlator_mode = self
             .get_scanlator_mode(manga_id)
             .await
@@ -146,10 +177,7 @@ impl AppService {
             .collect();
 
         if prefs.is_empty() {
-            return ids_after_rules
-                .into_iter()
-                .map(crate::ids::ChapterId)
-                .collect();
+            return ids_after_rules;
         }
 
         if ids_after_rules.is_empty() {
@@ -220,7 +248,6 @@ impl AppService {
         ids_after_rules
             .into_iter()
             .filter(|id| winner_ids.contains(id))
-            .map(crate::ids::ChapterId)
             .collect()
     }
 }

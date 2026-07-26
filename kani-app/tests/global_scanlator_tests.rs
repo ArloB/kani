@@ -157,3 +157,77 @@ async fn scanlators_by_usage_ranks_by_how_much_you_hold() {
     assert_eq!(ranked[0], ("A".to_string(), 3));
     assert_eq!(ranked[1], ("B".to_string(), 1));
 }
+
+// ── A12: the rule preview must match what auto-download actually grabs ─────────
+
+async fn set_scanlator(
+    svc: &kani_app::service::AppService,
+    chapter: kani_app::ids::ChapterId,
+    name: &str,
+) {
+    sqlx::query("UPDATE chapters SET scanlator = ? WHERE id = ?")
+        .bind(name)
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn preview_count_matches_filter_under_scanlator_priority_dedup() {
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "s").await;
+    let manga = insert_manga(&svc.db, src, "m", "M").await;
+
+    // Two chapters share number 1.0 from different groups; number 2.0 is unique.
+    let ch1 = insert_chapter(&svc.db, manga, "c1", 1.0).await;
+    let ch2 = insert_chapter(&svc.db, manga, "c2", 1.0).await;
+    let ch3 = insert_chapter(&svc.db, manga, "c3", 2.0).await;
+    set_scanlator(&svc, ch1, "GroupA").await;
+    set_scanlator(&svc, ch2, "GroupB").await;
+    set_scanlator(&svc, ch3, "GroupA").await;
+
+    // Priority mode: GroupA outranks GroupB, so the number-1.0 duplicate collapses
+    // to GroupA — auto-download would grab 2 of the 3 chapters.
+    svc.set_scanlator_pref(manga, "GroupA", 10, false)
+        .await
+        .unwrap();
+    svc.set_scanlator_pref(manga, "GroupB", 1, false)
+        .await
+        .unwrap();
+
+    // No download rules → the preview must still reflect the scanlator dedup.
+    let (matching, total) = svc.preview_download_rules(manga, vec![]).await.unwrap();
+    assert_eq!(total, 3);
+    assert_eq!(
+        matching, 2,
+        "preview must count the deduped set (GroupA wins number 1.0), not all 3"
+    );
+
+    // And it must equal exactly what the real filter returns.
+    let filtered = svc
+        .filter_chapters_by_rules(manga, vec![ch1, ch2, ch3])
+        .await;
+    assert_eq!(
+        filtered.len(),
+        matching,
+        "preview count must equal the real filter's output count"
+    );
+    assert!(filtered.contains(&ch1) && filtered.contains(&ch3));
+    assert!(
+        !filtered.contains(&ch2),
+        "the lower-priority duplicate must be dropped by both preview and filter"
+    );
+}
+
+#[tokio::test]
+async fn preview_returns_total_when_no_scanlator_prefs() {
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "s").await;
+    let manga = insert_manga(&svc.db, src, "m", "M").await;
+    insert_chapter(&svc.db, manga, "c1", 1.0).await;
+    insert_chapter(&svc.db, manga, "c2", 2.0).await;
+
+    let (matching, total) = svc.preview_download_rules(manga, vec![]).await.unwrap();
+    assert_eq!((matching, total), (2, 2));
+}
