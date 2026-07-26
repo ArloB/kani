@@ -182,6 +182,27 @@ impl YamlSource {
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
         let mut state = self.make_host_state().map_err(|e| e.to_string())?;
 
+        // A paginated endpoint must go through the paginated extractor — the same
+        // one codegen invokes — so the offset param (e.g. `page=1`) reaches the
+        // wire and multi-page stitching happens. The plain extractor ignores the
+        // blueprint's pagination config entirely, so an interpreted paginated
+        // source diverged from the compiled one on both request and results.
+        if ep.pagination.is_some() {
+            let page = args.get("page").and_then(|p| p.parse().ok()).unwrap_or(1);
+            let page_size = args
+                .get("page_size")
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(20);
+            return match ep.response_type {
+                ResponseType::Html => {
+                    html_eval::extract_html_paginated(&mut state, page, page_size, &bp).await
+                }
+                ResponseType::Json => {
+                    json_eval::extract_json_paginated(&mut state, page, page_size, &bp).await
+                }
+            };
+        }
+
         match ep.response_type {
             ResponseType::Html => html_eval::extract_html(&mut state, None, &bp).await,
             ResponseType::Json => json_eval::extract_json(&mut state, None, &bp).await,
@@ -257,10 +278,12 @@ impl YamlSource {
         use kani_yaml::yaml::schema::EndpointVia;
 
         if ep.via == Some(EndpointVia::BrowserPayload) {
-            return self
+            let mut v = self
                 .eval_browser_payload_endpoint(ep, endpoint_name, args)
                 .await
-                .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)));
+                .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))?;
+            inject_fn_arg_fields(&mut v, ep, args);
+            return Ok(v);
         }
 
         let mut retries_left = self.max_hook_requests;
@@ -269,7 +292,10 @@ impl YamlSource {
                 .eval_endpoint_once(ep, endpoint_name, args, filters)
                 .await
             {
-                Ok(v) => return Ok(v),
+                Ok(mut v) => {
+                    inject_fn_arg_fields(&mut v, ep, args);
+                    return Ok(v);
+                }
                 Err(ref e) if e.starts_with("__refresh_auth__:") => {
                     if retries_left == 0 {
                         return Err(Error::Extension(
@@ -697,6 +723,43 @@ fn unpack_manga_list(result: &serde_json::Value, ep: &kani_yaml::ValidatedEndpoi
         manga,
         has_next_page,
         total_pages,
+    }
+}
+
+/// Graft function-argument fields (`id: "$manga_id$"`) onto each extracted row.
+///
+/// Codegen substitutes such a field from the method argument, but the
+/// interpreted engine builds a blueprint from only the `Blueprint`-sourced
+/// fields, so a `FnArg` field never appears in the extraction result. Without
+/// this, `unpack_manga_info` sees a row missing `id` and fails — a divergence
+/// from the compiled path for the standard `$manga_id$` id pattern.
+fn inject_fn_arg_fields(
+    result: &mut serde_json::Value,
+    ep: &kani_yaml::ValidatedEndpoint,
+    args: &HashMap<String, String>,
+) {
+    use kani_yaml::yaml::model::FieldSource;
+
+    let fn_arg_fields: Vec<(String, String)> = ep
+        .fields
+        .iter()
+        .filter_map(|f| match &f.source {
+            FieldSource::FnArg(arg) => args.get(arg).map(|v| (f.name.clone(), v.clone())),
+            _ => None,
+        })
+        .collect();
+    if fn_arg_fields.is_empty() {
+        return;
+    }
+
+    if let Some(rows) = result.get_mut("rows").and_then(|r| r.as_array_mut()) {
+        for row in rows.iter_mut() {
+            if let Some(obj) = row.as_object_mut() {
+                for (name, val) in &fn_arg_fields {
+                    obj.insert(name.clone(), serde_json::Value::String(val.clone()));
+                }
+            }
+        }
     }
 }
 

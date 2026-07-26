@@ -3363,6 +3363,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kani-fixture-gen"
+version = "0.1.0"
+dependencies = [
+ "kani-shared",
+]
+
+[[package]]
 name = "kani-fixture-source"
 version = "0.1.0"
 dependencies = [
