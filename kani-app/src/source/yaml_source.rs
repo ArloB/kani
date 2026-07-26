@@ -661,23 +661,8 @@ impl YamlSource {
 /// `RateLimited` (and honour `Retry-After`) and a 5xx could not be marked
 /// retryable distinctly.
 fn classify_eval_error(e: String) -> kani_shared::extension::ExtensionError {
-    use kani_shared::extension::ExtensionError;
-
-    if let Some(rest) = e.strip_prefix(kani_core::evaluator::HTTP_STATUS_ERR_PREFIX) {
-        let mut parts = rest.splitn(2, ':');
-        let code: u16 = parts.next().and_then(|c| c.parse().ok()).unwrap_or(0);
-        let retry_after: Option<u32> = parts.next().and_then(|s| s.parse().ok());
-        return match code {
-            429 => match retry_after {
-                Some(secs) => ExtensionError::rate_limited_with_retry(secs),
-                None => ExtensionError::rate_limited(),
-            },
-            401 | 403 => ExtensionError::auth(format!("HTTP {code}")),
-            c if (500..600).contains(&c) => ExtensionError::network(format!("HTTP {c}")),
-            c => ExtensionError::parse(format!("HTTP {c}")),
-        };
-    }
-    ExtensionError::parse(e)
+    kani_shared::extension::classify_status_error(&e)
+        .unwrap_or_else(|| kani_shared::extension::ExtensionError::parse(e))
 }
 
 fn unpack_manga_list(result: &serde_json::Value, ep: &kani_yaml::ValidatedEndpoint) -> MangaList {

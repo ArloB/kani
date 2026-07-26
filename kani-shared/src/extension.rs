@@ -7,6 +7,35 @@ use crate::{
 
 pub type ExtensionResult<T> = Result<T, ExtensionError>;
 
+/// Marker the host evaluator puts on an error whose HTTP status the caller
+/// should turn into a typed [`ExtensionError`] — `__http_status__:<code>:<retry>`
+/// (the retry part may be empty). The string is the wire contract between the
+/// evaluator that produces it (kani-core) and the two backends that consume it:
+/// the interpreted-YAML source host-side and the WASM guest's extraction
+/// wrappers. Keeping it here — the lowest shared crate — lets both classify the
+/// same way, so a 429/5xx reported by a compiled source is not silently
+/// downgraded to a bare error the way it was before.
+pub const HTTP_STATUS_ERR_PREFIX: &str = "__http_status__:";
+
+/// Decodes an [`HTTP_STATUS_ERR_PREFIX`] marker into a typed [`ExtensionError`],
+/// or returns `None` if `msg` is an ordinary (non-HTTP) error. 404 never reaches
+/// here — the evaluator excludes it so "no more pages" stays an empty result.
+pub fn classify_status_error(msg: &str) -> Option<ExtensionError> {
+    let rest = msg.strip_prefix(HTTP_STATUS_ERR_PREFIX)?;
+    let mut parts = rest.splitn(2, ':');
+    let code: u16 = parts.next().and_then(|c| c.parse().ok()).unwrap_or(0);
+    let retry_after: Option<u32> = parts.next().and_then(|s| s.parse().ok());
+    Some(match code {
+        429 => match retry_after {
+            Some(secs) => ExtensionError::rate_limited_with_retry(secs),
+            None => ExtensionError::rate_limited(),
+        },
+        401 | 403 => ExtensionError::auth(format!("HTTP {code}")),
+        c if (500..600).contains(&c) => ExtensionError::network(format!("HTTP {c}")),
+        c => ExtensionError::parse(format!("HTTP {c}")),
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtensionErrorKind {
     Network,
@@ -472,6 +501,43 @@ mod tests {
     fn kind_display() {
         assert_eq!(ExtensionErrorKind::Network.to_string(), "network");
         assert_eq!(ExtensionErrorKind::RateLimited.to_string(), "rate-limited");
+    }
+
+    #[test]
+    fn classify_status_error_decodes_429_with_retry_after() {
+        let e = classify_status_error("__http_status__:429:120").unwrap();
+        assert_eq!(e.kind, ExtensionErrorKind::RateLimited);
+        assert_eq!(e.retry_after_secs, Some(120));
+    }
+
+    #[test]
+    fn classify_status_error_429_without_retry_after() {
+        let e = classify_status_error("__http_status__:429:").unwrap();
+        assert_eq!(e.kind, ExtensionErrorKind::RateLimited);
+        assert_eq!(e.retry_after_secs, None);
+    }
+
+    #[test]
+    fn classify_status_error_maps_auth_and_server_ranges() {
+        assert_eq!(
+            classify_status_error("__http_status__:401:").unwrap().kind,
+            ExtensionErrorKind::Auth
+        );
+        assert_eq!(
+            classify_status_error("__http_status__:403:").unwrap().kind,
+            ExtensionErrorKind::Auth
+        );
+        assert_eq!(
+            classify_status_error("__http_status__:503:").unwrap().kind,
+            ExtensionErrorKind::Network
+        );
+    }
+
+    #[test]
+    fn classify_status_error_ignores_non_sentinel_errors() {
+        assert!(classify_status_error("selector matched nothing").is_none());
+        // 404 is never emitted with the sentinel, so it never reaches here.
+        assert!(classify_status_error("HTTP 404").is_none());
     }
 
     #[test]

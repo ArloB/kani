@@ -13,10 +13,10 @@ pub const MAX_EVAL_DEPTH: u32 = 50;
 pub const MAX_LIST_SIZE: usize = 10_000;
 
 /// Marker on an evaluator error that carries an HTTP status the caller should
-/// classify (`__http_status__:429:120`). Parsed by the YAML source into a typed
-/// `ExtensionError`. Follows the `__refresh_auth__:` convention already used for
-/// hook-driven control flow.
-pub const HTTP_STATUS_ERR_PREFIX: &str = "__http_status__:";
+/// classify (`__http_status__:429:120`). Canonical definition lives in
+/// `kani_shared` so both backends decode it identically; re-exported here for
+/// the evaluator that produces it.
+pub use kani_shared::extension::HTTP_STATUS_ERR_PREFIX;
 pub const MAX_STRING_LENGTH: usize = 1_000_000;
 
 #[derive(Debug)]

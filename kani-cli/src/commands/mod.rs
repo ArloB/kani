@@ -59,7 +59,7 @@ pub enum Command {
         /// Build all production extensions (excludes dev/test extensions)
         #[arg(long, conflicts_with = "dev")]
         all: bool,
-        /// Build dev/test extensions only (kani-example, kani-test-abi); excluded from --all
+        /// Build dev/test extensions only (kani-example, kani-test-abi, kani-fixture-source); excluded from --all
         #[arg(long)]
         dev: bool,
         /// Override the version embedded in the WASM (e.g. 1.2.3)

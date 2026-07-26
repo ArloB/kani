@@ -1,0 +1,320 @@
+#[cfg(not(target_family = "wasm"))]
+compile_error!(
+    "kani-extensions/* are WASM-only -- build with `cargo run -p kani-cli -- build <name>`. \
+     If a tool triggered this, it is using --workspace (or defaulting to it); scope it to \
+     default-members instead -- clippy/nextest omit the flag, cargo-dist needs precise-builds."
+);
+
+// A deliberately minimal *fetching* extension used only by Kani's own
+// conformance suite. It reads its origin from the `base_url` preference so a
+// test can point the compiled-WASM backend at a `TestOrigin` on a random port,
+// and its endpoints mirror the exact HTML contract that `yaml_source_tests`
+// drives — same routes, same selectors — so the suite can serve one set of
+// fixtures to both backends and assert they agree.
+
+use kani_shared::ast::{BlueprintBuilder, Expr};
+use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
+use kani_shared::host_abi::{HttpRequest, extract, prefs};
+use kani_shared::wit_types::ChapterInfo;
+use kani_shared::{
+    ExtensionMetadata, ExtensionResult, MangaExtension, MangaStatus, bindings, ext_version,
+    to_shared_filters, types::ActiveFilter, wit_types,
+};
+use wit_types::{Chapter, ChapterList, MangaInfo, MangaList, MangaListItem, Page, PreferenceSpec};
+
+kani_shared::guest_alloc!();
+
+const BASE_URL_PREF: &str = "base_url";
+const DEFAULT_BASE_URL: &str = "https://fixture.invalid";
+
+pub struct Fixture;
+
+impl Default for Fixture {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Fixture {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// The origin to fetch from, injected by the host as a preference. This is
+    /// what lets a test aim the source at a `TestOrigin` on an ephemeral port.
+    fn base_url(&self) -> String {
+        prefs::get_str_or(BASE_URL_PREF, DEFAULT_BASE_URL)
+            .trim_end_matches('/')
+            .to_string()
+    }
+
+    pub fn metadata() -> ExtensionMetadata {
+        ExtensionMetadata {
+            id: "fixture".to_string(),
+            name: "Fixture Source".to_string(),
+            version: ext_version!("0.1.0"),
+            base_url: DEFAULT_BASE_URL.to_string(),
+            language: "en".to_string(),
+            nsfw: false,
+            unrestricted_http: true,
+            mihon_source_id: None,
+            rate_limit: None,
+            ..Default::default()
+        }
+    }
+
+    fn fetch_list(&self, req: HttpRequest) -> ExtensionResult<MangaList> {
+        let bp = BlueprintBuilder::new(".item")
+            .request(req)
+            .field("id", Expr::self_ref().attr("data-id"))
+            .field("title", Expr::self_ref().first(".title").text())
+            .build();
+
+        let rows = extract::html(None, &bp)?;
+        let manga = (0..rows.rows_len())
+            .filter_map(|i| {
+                let row = rows.rows_get(i).ok()?;
+                Some(MangaListItem {
+                    id: row.require_str("/id").ok()?,
+                    title: row.require_str("/title").ok()?,
+                    cover_url: None,
+                })
+            })
+            .collect();
+
+        Ok(MangaList {
+            manga,
+            has_next_page: false,
+            total_pages: None,
+        })
+    }
+}
+
+impl MangaExtension for Fixture {
+    fn name(&self) -> &str {
+        "Fixture Source"
+    }
+
+    fn get_popular_manga(
+        &self,
+        _page: i32,
+        _page_size: i32,
+        _filters: &[ActiveFilter],
+    ) -> ExtensionResult<MangaList> {
+        self.fetch_list(HttpRequest::get(format!("{}/popular", self.base_url())))
+    }
+
+    fn search_manga(
+        &self,
+        query: &str,
+        _page: i32,
+        _page_size: i32,
+        _filters: &[ActiveFilter],
+    ) -> ExtensionResult<MangaList> {
+        self.fetch_list(HttpRequest::get(format!("{}/search", self.base_url())).query("q", query))
+    }
+
+    fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
+        let bp = BlueprintBuilder::new(".manga")
+            .request(HttpRequest::get(format!(
+                "{}/manga/{}",
+                self.base_url(),
+                manga_id
+            )))
+            .field("id", Expr::self_ref().attr("data-id"))
+            .field("title", Expr::self_ref().first("h1").text())
+            .build();
+
+        let rows = extract::html(None, &bp)?;
+        let row = rows
+            .rows_get(0)
+            .map_err(|_| kani_shared::ExtensionError::parse("no details row".into()))?;
+
+        Ok(MangaInfo {
+            id: manga_id.to_string(),
+            title: row.require_str("/title")?,
+            description: None,
+            status: MangaStatus::Unknown,
+            authors: vec![],
+            artists: vec![],
+            tags: vec![],
+            cover_url: None,
+        })
+    }
+
+    fn get_chapter_list(
+        &self,
+        manga_id: &str,
+        _page: i32,
+        _page_size: Option<i32>,
+        _sort: Option<String>,
+    ) -> ExtensionResult<ChapterList> {
+        let bp = BlueprintBuilder::new(".ch")
+            .request(HttpRequest::get(format!(
+                "{}/manga/{}/chapters",
+                self.base_url(),
+                manga_id
+            )))
+            .field("id", Expr::self_ref().attr("data-id"))
+            .field("title", Expr::self_ref().first(".title").text())
+            .build();
+
+        let rows = extract::html(None, &bp)?;
+        let chapters = (0..rows.rows_len())
+            .filter_map(|i| {
+                let row = rows.rows_get(i).ok()?;
+                Some(ChapterInfo {
+                    id: row.require_str("/id").ok()?,
+                    number: 0.0,
+                    title: row.get_str("/title"),
+                    volume: None,
+                    scanlator: None,
+                    date_uploaded: None,
+                    language: "en".to_string(),
+                    page_count: None,
+                })
+            })
+            .collect();
+
+        Ok(ChapterList {
+            chapters,
+            has_next_page: false,
+            total_pages: None,
+        })
+    }
+
+    fn get_pages(&self, manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter> {
+        let bp = BlueprintBuilder::new(".page")
+            .request(HttpRequest::get(format!(
+                "{}/manga/{}/chapter/{}",
+                self.base_url(),
+                manga_id,
+                chapter_id
+            )))
+            .field("url", Expr::self_ref().attr("data-url"))
+            .build();
+
+        let rows = extract::html(None, &bp)?;
+        Ok(Chapter {
+            pages: (0..rows.rows_len())
+                .filter_map(|i| {
+                    let row = rows.rows_get(i).ok()?;
+                    Some(Page {
+                        index: i as i32,
+                        url: row.require_str("/url").ok()?,
+                        transform: None,
+                    })
+                })
+                .collect(),
+        })
+    }
+
+    fn get_filter_list(&self) -> ExtensionResult<wit_types::FilterList> {
+        Ok(wit_types::FilterList { filters: vec![] })
+    }
+
+    fn get_preferences(&self) -> ExtensionResult<Vec<PreferenceSpec>> {
+        Ok(vec![])
+    }
+
+    fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<wit_types::SortOption>> {
+        Ok(vec![])
+    }
+}
+
+impl Guest for Fixture {
+    fn get_metadata() -> Result<String, wit_types::ExtensionError> {
+        Ok(kani_shared::serde_json::to_string(&Fixture::metadata())
+            .expect("ExtensionMetadata serializes to JSON"))
+    }
+
+    fn get_popular_manga(
+        page: i32,
+        page_size: i32,
+        filters: Vec<wit_types::ActiveFilter>,
+    ) -> Result<MangaList, wit_types::ExtensionError> {
+        let shared = to_shared_filters(filters);
+        get_extension()
+            .get_popular_manga(page, page_size, &shared)
+            .map_err(|e| e.into_wit())
+    }
+
+    fn search_manga(
+        query: String,
+        page: i32,
+        page_size: i32,
+        filters: Vec<wit_types::ActiveFilter>,
+    ) -> Result<MangaList, wit_types::ExtensionError> {
+        let shared = to_shared_filters(filters);
+        get_extension()
+            .search_manga(&query, page, page_size, &shared)
+            .map_err(|e| e.into_wit())
+    }
+
+    fn get_filter_list() -> Result<wit_types::FilterList, wit_types::ExtensionError> {
+        get_extension().get_filter_list().map_err(|e| e.into_wit())
+    }
+
+    fn get_fetched_option_sets() -> Result<String, wit_types::ExtensionError> {
+        get_extension()
+            .get_fetched_option_sets()
+            .map_err(|e| e.into_wit())
+    }
+
+    fn get_manga_details(manga_id: String) -> Result<MangaInfo, wit_types::ExtensionError> {
+        get_extension()
+            .get_manga_details(&manga_id)
+            .map_err(|e| e.into_wit())
+    }
+
+    fn get_chapter_list(
+        manga_id: String,
+        page: i32,
+        page_size: Option<i32>,
+        sort: Option<String>,
+    ) -> Result<ChapterList, wit_types::ExtensionError> {
+        get_extension()
+            .get_chapter_list(&manga_id, page, page_size, sort)
+            .map_err(|e| e.into_wit())
+    }
+
+    async fn get_chapter_list_stream(
+        manga_id: String,
+        sort: Option<String>,
+    ) -> kani_shared::StreamReader<Result<wit_types::ChapterInfo, wit_types::ExtensionError>> {
+        kani_shared::bridge_chapter_list_stream(get_extension(), manga_id, sort)
+    }
+
+    fn get_chapter_sort_list() -> Result<Vec<wit_types::SortOption>, wit_types::ExtensionError> {
+        get_extension()
+            .get_chapter_sort_list()
+            .map_err(|e| e.into_wit())
+    }
+
+    fn get_pages(
+        manga_id: String,
+        chapter_id: String,
+    ) -> Result<Chapter, wit_types::ExtensionError> {
+        get_extension()
+            .get_pages(&manga_id, &chapter_id)
+            .map_err(|e| e.into_wit())
+    }
+
+    fn get_preferences() -> Result<Vec<PreferenceSpec>, wit_types::ExtensionError> {
+        get_extension().get_preferences().map_err(|e| e.into_wit())
+    }
+
+    fn get_url(manga_id: String) -> Result<String, wit_types::ExtensionError> {
+        get_extension().get_url(&manga_id).map_err(|e| e.into_wit())
+    }
+}
+
+use std::sync::OnceLock;
+
+static EXTENSION: OnceLock<Fixture> = OnceLock::new();
+
+fn get_extension() -> &'static Fixture {
+    EXTENSION.get_or_init(Fixture::new)
+}
+
+bindings::export!(Fixture);
