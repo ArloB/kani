@@ -9,12 +9,10 @@ use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::host_abi::{extract, HttpRequest};
 use kani_shared::{
     bindings, filter_list, to_shared_filters, types::ActiveFilter, wit_types, ExtensionMetadata,
-    ExtensionResult, FilterState, MangaExtension, MangaStatus,
+    ExtensionResult, FilterState, MangaExtension,
 };
 use std::sync::OnceLock;
-use wit_types::{
-    Chapter, ChapterInfo, ChapterList, MangaInfo, MangaList, MangaListItem, Page, PreferenceSpec,
-};
+use wit_types::{Chapter, ChapterInfo, ChapterList, MangaInfo, MangaList, PreferenceSpec};
 
 kani_shared::guest_alloc!();
 
@@ -127,29 +125,12 @@ impl MangaExtension for TestChapters {
             .field_opt("title", Expr::self_ref().first(".title").text().trim())
             .build();
         let rows = extract::html(None, &bp)?;
-        let count = rows.rows_len();
-        let chapters = (0..count)
-            .filter_map(|i| {
-                let row = rows.rows_get(i).ok()?;
-                Some(ChapterInfo {
-                    id: row.require_str("/id").ok()?,
-                    language: row.get_str("/language").unwrap_or_else(|| "en".to_string()),
-                    number: row.get_f64("/number").unwrap_or(0.0),
-                    title: row.get_str("/title"),
-                    volume: None,
-                    scanlator: None,
-                    date_uploaded: None,
-                    page_count: None,
-                })
-            })
-            .collect();
-        let has_next_page = false;
-        let total_pages = None;
-        Ok(ChapterList {
-            chapters,
-            has_next_page,
-            total_pages,
-        })
+        Ok(kani_shared::unpack::unpack_chapter_list(
+            &rows,
+            kani_shared::unpack::HasNextPage::Static(false),
+            kani_shared::unpack::TotalPages::None,
+            &[],
+        ))
     }
 
     fn get_pages(&self, _manga_id: &str, _chapter_id: &str) -> ExtensionResult<Chapter> {

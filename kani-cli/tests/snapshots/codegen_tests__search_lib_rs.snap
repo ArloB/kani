@@ -9,12 +9,10 @@ use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::host_abi::{extract, HttpRequest};
 use kani_shared::{
     bindings, filter_list, to_shared_filters, types::ActiveFilter, wit_types, ExtensionMetadata,
-    ExtensionResult, FilterState, MangaExtension, MangaStatus,
+    ExtensionResult, FilterState, MangaExtension,
 };
 use std::sync::OnceLock;
-use wit_types::{
-    Chapter, ChapterInfo, ChapterList, MangaInfo, MangaList, MangaListItem, Page, PreferenceSpec,
-};
+use wit_types::{Chapter, ChapterInfo, ChapterList, MangaInfo, MangaList, PreferenceSpec};
 
 kani_shared::guest_alloc!();
 
@@ -102,23 +100,12 @@ impl MangaExtension for TestSearch {
             .field("title", Expr::self_ref().first(".title").text().trim())
             .build();
         let rows = extract::html(None, &bp)?;
-        let has_next_page = false;
-        let total_pages = None;
-        let manga = rows
-            .rows_iter()
-            .filter_map(|row| {
-                Some(MangaListItem {
-                    cover_url: row.get_str("/cover_url"),
-                    id: row.require_str("/id").ok()?,
-                    title: row.require_str("/title").ok()?,
-                })
-            })
-            .collect();
-        Ok(MangaList {
-            manga,
-            has_next_page,
-            total_pages,
-        })
+        Ok(kani_shared::unpack::unpack_manga_list(
+            &rows,
+            kani_shared::unpack::HasNextPage::FromScalar,
+            kani_shared::unpack::TotalPages::None,
+            &[],
+        ))
     }
 
     fn get_manga_details(&self, _manga_id: &str) -> ExtensionResult<MangaInfo> {

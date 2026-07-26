@@ -5,12 +5,10 @@ use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::host_abi::{extract, HttpRequest};
 use kani_shared::{
     bindings, filter_list, to_shared_filters, types::ActiveFilter, wit_types, ExtensionMetadata,
-    ExtensionResult, FilterState, MangaExtension, MangaStatus,
+    ExtensionResult, FilterState, MangaExtension,
 };
 use std::sync::OnceLock;
-use wit_types::{
-    Chapter, ChapterInfo, ChapterList, MangaInfo, MangaList, MangaListItem, Page, PreferenceSpec,
-};
+use wit_types::{Chapter, ChapterInfo, ChapterList, MangaInfo, MangaList, PreferenceSpec};
 
 kani_shared::guest_alloc!();
 
@@ -26,8 +24,7 @@ impl Default for FixtureGen {
 
 impl FixtureGen {
     pub fn new() -> Self {
-        // Test plumbing only (rest is generated): read the origin from a pref so
-        // the conformance suite can point this codegen'd source at a TestOrigin.
+        // Test plumbing only (rest is generated): read the origin from a pref.
         Self {
             base_url: kani_shared::host_abi::prefs::get_str_or(
                 "base_url",
@@ -83,23 +80,12 @@ impl MangaExtension for FixtureGen {
             .field("title", Expr::self_ref().first(".title").text())
             .build();
         let rows = extract::html(None, &bp)?;
-        let has_next_page = false;
-        let total_pages = None;
-        let manga = rows
-            .rows_iter()
-            .filter_map(|row| {
-                Some(MangaListItem {
-                    id: row.require_str("/id").ok()?,
-                    title: row.require_str("/title").ok()?,
-                    cover_url: None,
-                })
-            })
-            .collect();
-        Ok(MangaList {
-            manga,
-            has_next_page,
-            total_pages,
-        })
+        Ok(kani_shared::unpack::unpack_manga_list(
+            &rows,
+            kani_shared::unpack::HasNextPage::Static(false),
+            kani_shared::unpack::TotalPages::None,
+            &[],
+        ))
     }
 
     fn search_manga(
@@ -144,23 +130,12 @@ impl MangaExtension for FixtureGen {
             .paginated(20, "page", OffsetType::PageNumber { start: 1 })
             .build();
         let rows = extract::paginated_html(page, page_size, &bp)?;
-        let has_next_page = rows.get_scalar_bool("has_next_page");
-        let total_pages = None;
-        let manga = rows
-            .rows_iter()
-            .filter_map(|row| {
-                Some(MangaListItem {
-                    id: row.require_str("/id").ok()?,
-                    title: row.require_str("/title").ok()?,
-                    cover_url: None,
-                })
-            })
-            .collect();
-        Ok(MangaList {
-            manga,
-            has_next_page,
-            total_pages,
-        })
+        Ok(kani_shared::unpack::unpack_manga_list(
+            &rows,
+            kani_shared::unpack::HasNextPage::FromScalar,
+            kani_shared::unpack::TotalPages::None,
+            &[],
+        ))
     }
 
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
@@ -175,26 +150,7 @@ impl MangaExtension for FixtureGen {
             .field("title", Expr::self_ref().first("h1").text())
             .build();
         let rows = extract::html(None, &bp)?;
-        let row = rows
-            .rows_get(0)
-            .map_err(|_| kani_shared::ExtensionError::parse("no details row".into()))?;
-        let status = match row.get_str("/status").as_deref() {
-            Some("ongoing") => MangaStatus::Ongoing,
-            Some("completed") => MangaStatus::Completed,
-            Some("hiatus") => MangaStatus::Hiatus,
-            Some("cancelled") => MangaStatus::Cancelled,
-            _ => MangaStatus::Unknown,
-        };
-        Ok(MangaInfo {
-            artists: row.get_array_of_strings("/artists"),
-            authors: row.get_array_of_strings("/authors"),
-            id: manga_id.to_string(),
-            status: status,
-            tags: row.get_array_of_strings("/tags"),
-            title: row.require_str("/title")?,
-            cover_url: None,
-            description: None,
-        })
+        kani_shared::unpack::unpack_manga_info(&rows, &[("id", manga_id)])
     }
 
     fn get_chapter_list(
@@ -214,29 +170,12 @@ impl MangaExtension for FixtureGen {
             .field_opt("title", Expr::self_ref().first(".title").text())
             .build();
         let rows = extract::html(None, &bp)?;
-        let count = rows.rows_len();
-        let chapters = (0..count)
-            .filter_map(|i| {
-                let row = rows.rows_get(i).ok()?;
-                Some(ChapterInfo {
-                    id: row.require_str("/id").ok()?,
-                    language: row.get_str("/language").unwrap_or_else(|| "en".to_string()),
-                    number: row.get_f64("/number").unwrap_or(0.0),
-                    title: row.get_str("/title"),
-                    volume: None,
-                    scanlator: None,
-                    date_uploaded: None,
-                    page_count: None,
-                })
-            })
-            .collect();
-        let has_next_page = false;
-        let total_pages = None;
-        Ok(ChapterList {
-            chapters,
-            has_next_page,
-            total_pages,
-        })
+        Ok(kani_shared::unpack::unpack_chapter_list(
+            &rows,
+            kani_shared::unpack::HasNextPage::Static(false),
+            kani_shared::unpack::TotalPages::None,
+            &[],
+        ))
     }
 
     fn get_pages(&self, manga_id: &str, chapter_id: &str) -> ExtensionResult<Chapter> {
@@ -251,19 +190,7 @@ impl MangaExtension for FixtureGen {
             .field("url", Expr::self_ref().attr("data-url"))
             .build();
         let rows = extract::html(None, &bp)?;
-        let count = rows.rows_len();
-        Ok(Chapter {
-            pages: (0..count)
-                .filter_map(|i| {
-                    let row = rows.rows_get(i).ok()?;
-                    Some(Page {
-                        index: row.get_i64("/index").unwrap_or(i as i64) as i32,
-                        url: row.require_str("/url").ok()?,
-                        transform: None,
-                    })
-                })
-                .collect(),
-        })
+        Ok(kani_shared::unpack::unpack_pages(&rows, &[]))
     }
 
     fn get_chapter_sort_list(&self) -> ExtensionResult<Vec<wit_types::SortOption>> {

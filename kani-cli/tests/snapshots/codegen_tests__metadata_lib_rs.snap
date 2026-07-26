@@ -9,12 +9,10 @@ use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::host_abi::{extract, HttpRequest};
 use kani_shared::{
     bindings, filter_list, to_shared_filters, types::ActiveFilter, wit_types, ExtensionMetadata,
-    ExtensionResult, FilterState, MangaExtension, MangaStatus,
+    ExtensionResult, FilterState, MangaExtension,
 };
 use std::sync::OnceLock;
-use wit_types::{
-    Chapter, ChapterInfo, ChapterList, MangaInfo, MangaList, MangaListItem, Page, PreferenceSpec,
-};
+use wit_types::{Chapter, ChapterInfo, ChapterList, MangaInfo, MangaList, PreferenceSpec};
 
 kani_shared::guest_alloc!();
 
@@ -105,26 +103,7 @@ impl MangaExtension for TestMetadata {
             .field("title", Expr::dom("h1").text())
             .build();
         let rows = extract::html(None, &bp)?;
-        let row = rows
-            .rows_get(0)
-            .map_err(|_| kani_shared::ExtensionError::parse("no details row".into()))?;
-        let status = match row.get_str("/status").as_deref() {
-            Some("ongoing") => MangaStatus::Ongoing,
-            Some("completed") => MangaStatus::Completed,
-            Some("hiatus") => MangaStatus::Hiatus,
-            Some("cancelled") => MangaStatus::Cancelled,
-            _ => MangaStatus::Unknown,
-        };
-        Ok(MangaInfo {
-            id: manga_id.to_string(),
-            status: status,
-            title: row.require_str("/title")?,
-            cover_url: None,
-            description: None,
-            authors: vec![],
-            artists: vec![],
-            tags: vec![],
-        })
+        kani_shared::unpack::unpack_manga_info(&rows, &[("id", manga_id)])
     }
 
     fn get_chapter_list(

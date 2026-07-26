@@ -146,7 +146,12 @@ pub fn emit_manga_details(
     embedded_bytes: bool,
 ) -> String {
     let decode_prologue = emit_composite_id_decode_prologue(ep);
-    let row_assembly = emit_manga_info_assembly(ep);
+    // The shared unpacker reads row 0 and maps its fields; it returns exactly the
+    // method's `ExtensionResult<MangaInfo>`, so the body ends with the call.
+    let unpack = format!(
+        "kani_shared::unpack::unpack_manga_info(&rows, {})",
+        emit_fn_args(ep)
+    );
     let bp_chain = emit_blueprint_chain(ep, ext, "manga_details");
 
     if let Some(browser_fetch) = try_emit_browser_fetch(ep) {
@@ -156,8 +161,7 @@ pub fn emit_manga_details(
              {decode_prologue}\
              {bp_chain}\n\
              {browser_fetch}\n\
-             let row = rows.rows_get(0).map_err(|_| kani_shared::ExtensionError::parse(\"no details row\".into()))?;\n\
-             {row_assembly}\n\
+             {unpack}\n\
              }}"
         );
     }
@@ -188,8 +192,7 @@ pub fn emit_manga_details(
              {bp_bytes}\n\
              {req_block}\n\
              {fetch}\n\
-             let row = rows.rows_get(0).map_err(|_| kani_shared::ExtensionError::parse(\"no details row\".into()))?;\n\
-             {row_assembly}\n\
+             {unpack}\n\
              }}"
         )
     } else {
@@ -203,8 +206,7 @@ pub fn emit_manga_details(
              {req_block}\n\
              {bp_chain}\n\
              let rows = {extract_call};\n\
-             let row = rows.rows_get(0).map_err(|_| kani_shared::ExtensionError::parse(\"no details row\".into()))?;\n\
-             {row_assembly}\n\
+             {unpack}\n\
              }}"
         )
     }
@@ -226,9 +228,12 @@ pub fn emit_chapter_list(
         Some("chapter_list"),
     );
 
-    let hnp = emit_hnp_expr_static(&ep.has_next_page);
-    let tp = emit_total_pages_static(&ep.total_pages);
-    let row_assembly = emit_chapter_info_assembly(ep);
+    let unpack = format!(
+        "Ok(kani_shared::unpack::unpack_chapter_list(&rows, {}, {}, {}))",
+        emit_hnp_spec(&ep.has_next_page),
+        emit_total_pages_spec(&ep.total_pages),
+        emit_fn_args(ep),
+    );
 
     if let Some(browser_fetch) = try_emit_browser_fetch(ep) {
         let bp_chain = emit_blueprint_chain_no_request(ep, ext, "chapter_list");
@@ -237,14 +242,7 @@ pub fn emit_chapter_list(
              {decode_prologue}\
              {bp_chain}\n\
              {browser_fetch}\n\
-             let count = rows.rows_len();\n\
-             let chapters = (0..count).filter_map(|i| {{\n\
-                 let row = rows.rows_get(i).ok()?;\n\
-                 {row_assembly}\n\
-             }}).collect();\n\
-             let has_next_page = {hnp};\n\
-             let total_pages = {tp};\n\
-             Ok(ChapterList {{ chapters, has_next_page, total_pages }})\n\
+             {unpack}\n\
              }}"
         );
     }
@@ -265,14 +263,7 @@ pub fn emit_chapter_list(
              {bp_bytes}\n\
              {req_block}\n\
              {fetch}\n\
-             let count = rows.rows_len();\n\
-             let chapters = (0..count).filter_map(|i| {{\n\
-                 let row = rows.rows_get(i).ok()?;\n\
-                 {row_assembly}\n\
-             }}).collect();\n\
-             let has_next_page = {hnp};\n\
-             let total_pages = {tp};\n\
-             Ok(ChapterList {{ chapters, has_next_page, total_pages }})\n\
+             {unpack}\n\
              }}"
         )
     } else {
@@ -287,14 +278,7 @@ pub fn emit_chapter_list(
              {req_block}\n\
              {bp_chain}\n\
              let rows = {extract_call};\n\
-             let count = rows.rows_len();\n\
-             let chapters = (0..count).filter_map(|i| {{\n\
-                 let row = rows.rows_get(i).ok()?;\n\
-                 {row_assembly}\n\
-             }}).collect();\n\
-             let has_next_page = {hnp};\n\
-             let total_pages = {tp};\n\
-             Ok(ChapterList {{ chapters, has_next_page, total_pages }})\n\
+             {unpack}\n\
              }}"
         )
     }
@@ -316,7 +300,10 @@ pub fn emit_pages(
         Some("pages"),
     );
 
-    let row_assembly = emit_pages_assembly(ep);
+    let unpack = format!(
+        "Ok(kani_shared::unpack::unpack_pages(&rows, {}))",
+        emit_fn_args(ep)
+    );
 
     // Un-underscore `manga_id` when the pages route actually uses it (most
     // sources key pages on chapter_id alone, but a route like
@@ -337,13 +324,7 @@ pub fn emit_pages(
              {decode_prologue}\
              {bp_chain}\n\
              {browser_fetch}\n\
-             let count = rows.rows_len();\n\
-             Ok(Chapter {{\n\
-                 pages: (0..count).filter_map(|i| {{\n\
-                     let row = rows.rows_get(i).ok()?;\n\
-                     {row_assembly}\n\
-                 }}).collect(),\n\
-             }})\n\
+             {unpack}\n\
              }}"
         );
     }
@@ -364,13 +345,7 @@ pub fn emit_pages(
              {bp_bytes}\n\
              {req_block}\n\
              {fetch}\n\
-             let count = rows.rows_len();\n\
-             Ok(Chapter {{\n\
-                 pages: (0..count).filter_map(|i| {{\n\
-                     let row = rows.rows_get(i).ok()?;\n\
-                     {row_assembly}\n\
-                 }}).collect(),\n\
-             }})\n\
+             {unpack}\n\
              }}"
         )
     } else {
@@ -385,13 +360,7 @@ pub fn emit_pages(
              {req_block}\n\
              {bp_chain}\n\
              let rows = {extract_call};\n\
-             let count = rows.rows_len();\n\
-             Ok(Chapter {{\n\
-                 pages: (0..count).filter_map(|i| {{\n\
-                     let row = rows.rows_get(i).ok()?;\n\
-                     {row_assembly}\n\
-                 }}).collect(),\n\
-             }})\n\
+             {unpack}\n\
              }}"
         )
     }
@@ -416,312 +385,103 @@ fn emit_manga_list_method(
         ep.filter_format.as_ref(),
         Some(endpoint_id),
     );
-    let row_assembly = emit_manga_list_item_assembly(ep);
+    let unpack = format!(
+        "Ok(kani_shared::unpack::unpack_manga_list(&rows, {}, {}, {}))",
+        emit_hnp_spec(&ep.has_next_page),
+        emit_total_pages_spec(&ep.total_pages),
+        emit_fn_args(ep),
+    );
 
     if let Some(browser_fetch) = try_emit_browser_fetch(ep) {
         let bp_chain = emit_blueprint_chain_no_request(ep, ext, endpoint_id);
-        let hnp_line = emit_hnp_expr_static(&ep.has_next_page);
-        let tp_line = emit_total_pages_static(&ep.total_pages);
         return format!(
             "fn {method_name}(&self, {params}) -> ExtensionResult<MangaList> {{\n\
              {bp_chain}\n\
              {browser_fetch}\n\
-             let has_next_page = {hnp_line};\n\
-             let total_pages = {tp_line};\n\
-             let manga = rows.rows_iter().filter_map(|row| {{\n\
-                 {row_assembly}\n\
-             }}).collect();\n\
-             Ok(MangaList {{ manga, has_next_page, total_pages }})\n\
+             {unpack}\n\
              }}"
         );
     }
 
     if embedded_bytes {
         let bp_bytes = emit_blueprint_bytes(ep, ext, endpoint_id);
-        let (fetch, hnp_line, tp_line) = if ep.pagination.is_some() {
-            (
-                "let rows = extract_raw::paginated_html(page, page_size, req, BP)?;".to_string(),
-                emit_hnp_scalar(&ep.has_next_page),
-                emit_total_pages_scalar(&ep.total_pages),
-            )
+        let fetch = if ep.pagination.is_some() {
+            "let rows = extract_raw::paginated_html(page, page_size, req, BP)?;".to_string()
         } else {
-            let fetch = match ep.response_type {
+            match ep.response_type {
                 ResponseType::Html => {
-                    "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;"
+                    "let _doc = req.send_html()?;\nlet rows = extract_raw::html(Some(_doc.handle()), BP)?;".to_string()
                 }
                 ResponseType::Json => {
-                    "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;"
+                    "let _json = req.send_json_handle()?;\nlet rows = extract_raw::json(Some(_json.raw_handle()), BP)?;".to_string()
                 }
-            };
-            (
-                fetch.to_string(),
-                emit_hnp_expr_static(&ep.has_next_page),
-                emit_total_pages_static(&ep.total_pages),
-            )
+            }
         };
         format!(
             "fn {method_name}(&self, {params}) -> ExtensionResult<MangaList> {{\n\
              {bp_bytes}\n\
              {req_block}\n\
              {fetch}\n\
-             let has_next_page = {hnp_line};\n\
-             let total_pages = {tp_line};\n\
-             let manga = rows.rows_iter().filter_map(|row| {{\n\
-                 {row_assembly}\n\
-             }}).collect();\n\
-             Ok(MangaList {{ manga, has_next_page, total_pages }})\n\
+             {unpack}\n\
              }}"
         )
     } else {
         let bp_chain = emit_blueprint_chain(ep, ext, endpoint_id);
-        let (extract_call, hnp_line, tp_line): (String, String, String) = if ep.pagination.is_some()
-        {
-            (
-                "extract::paginated_html(page, page_size, &bp)?".to_string(),
-                emit_hnp_scalar(&ep.has_next_page),
-                emit_total_pages_scalar(&ep.total_pages),
-            )
+        let extract_call = if ep.pagination.is_some() {
+            "extract::paginated_html(page, page_size, &bp)?".to_string()
         } else {
-            let fn_name = match ep.response_type {
-                ResponseType::Json => "extract::json(None, &bp)?",
-                ResponseType::Html => "extract::html(None, &bp)?",
-            };
-            (
-                fn_name.to_string(),
-                emit_hnp_expr_static(&ep.has_next_page),
-                emit_total_pages_static(&ep.total_pages),
-            )
+            match ep.response_type {
+                ResponseType::Json => "extract::json(None, &bp)?".to_string(),
+                ResponseType::Html => "extract::html(None, &bp)?".to_string(),
+            }
         };
         format!(
             "fn {method_name}(&self, {params}) -> ExtensionResult<MangaList> {{\n\
              {req_block}\n\
              {bp_chain}\n\
              let rows = {extract_call};\n\
-             let has_next_page = {hnp_line};\n\
-             let total_pages = {tp_line};\n\
-             let manga = rows.rows_iter().filter_map(|row| {{\n\
-                 {row_assembly}\n\
-             }}).collect();\n\
-             Ok(MangaList {{ manga, has_next_page, total_pages }})\n\
+             {unpack}\n\
              }}"
         )
     }
 }
 
-/// Build `Some(MangaListItem { ... })` from the ValidatedFields.
-fn emit_manga_list_item_assembly(ep: &ValidatedEndpoint) -> String {
-    let mut fields = Vec::new();
-    let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for f in &ep.fields {
-        let accessor = match &f.source {
-            FieldSource::FnArg(name) => format!("{name}.to_string()"),
-            FieldSource::Blueprint(_) => manga_list_item_accessor(&f.name, f.optional),
-        };
-        fields.push(format!("            {}: {accessor}", f.name));
-        declared.insert(f.name.as_str());
-    }
-    // Optional struct fields the YAML need not declare — default them so the
-    // literal is always complete (id/title are required and validated).
-    for (name, default) in [("cover_url", "None")] {
-        if !declared.contains(name) {
-            fields.push(format!("            {name}: {default}"));
-        }
-    }
-    format!("Some(MangaListItem {{\n{}\n        }})", fields.join(",\n"))
+// ── has_next_page / total_pages spec (shared unpack) ─────────────────────────
+//
+// Emit the HasNextPage / TotalPages spec the shared `unpack_*` consumes. The
+// mapping matches the interpreter's `hnp_spec` / `total_pages_spec` exactly, so
+// both engines agree: a static value stays static, anything else reads the
+// scalar (which the paginated extractor and `Scalar` blueprints populate).
+
+/// Emit the `FnArgs` slice for the shared unpacker: fields whose value is a
+/// method argument (`id: "$manga_id$"`) rather than extracted. The guest can't
+/// inject them into its handle the way the interpreter injects into its Value, so
+/// it hands them to the unpacker directly.
+fn emit_fn_args(ep: &ValidatedEndpoint) -> String {
+    let pairs: Vec<String> = ep
+        .fields
+        .iter()
+        .filter_map(|f| match &f.source {
+            FieldSource::FnArg(argname) => Some(format!("(\"{}\", {})", f.name, argname)),
+            FieldSource::Blueprint(_) => None,
+        })
+        .collect();
+    format!("&[{}]", pairs.join(", "))
 }
 
-fn manga_list_item_accessor(name: &str, optional: bool) -> String {
-    match name {
-        "id" | "title" => {
-            if optional {
-                format!("row.get_str(\"/{name}\")")
-            } else {
-                format!("row.require_str(\"/{name}\").ok()?")
-            }
-        }
-        "cover_url" => "row.get_str(\"/cover_url\")".into(),
-        other => {
-            if optional {
-                format!("row.get_str(\"/{other}\")")
-            } else {
-                format!("row.require_str(\"/{other}\").ok()?")
-            }
-        }
-    }
-}
-
-/// Build `Ok(MangaInfo { ... })` from ValidatedFields.
-fn emit_manga_info_assembly(ep: &ValidatedEndpoint) -> String {
-    let mut fields = Vec::new();
-    let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for f in &ep.fields {
-        let accessor = match &f.source {
-            FieldSource::FnArg(name) => format!("{name}.to_string()"),
-            FieldSource::Blueprint(_) => manga_info_field_accessor(&f.name, f.optional),
-        };
-        fields.push(format!("    {}: {accessor}", f.name));
-        declared.insert(f.name.as_str());
-    }
-    for (name, default) in [
-        ("cover_url", "None"),
-        ("description", "None"),
-        ("authors", "vec![]"),
-        ("artists", "vec![]"),
-        ("tags", "vec![]"),
-    ] {
-        if !declared.contains(name) {
-            fields.push(format!("    {name}: {default}"));
-        }
-    }
-    // status is special — always extracted from blueprint then converted to enum
-    let has_status = ep.fields.iter().any(|f| f.name == "status");
-    let status_conversion = if has_status {
-        "let status = match row.get_str(\"/status\").as_deref() {\n\
-         Some(\"ongoing\")   => MangaStatus::Ongoing,\n\
-         Some(\"completed\") => MangaStatus::Completed,\n\
-         Some(\"hiatus\")    => MangaStatus::Hiatus,\n\
-         Some(\"cancelled\") => MangaStatus::Cancelled,\n\
-         _                   => MangaStatus::Unknown,\n\
-     };"
-    } else {
-        ""
-    };
-
-    format!(
-        "{status_conversion}\n\
-         Ok(MangaInfo {{\n{}\n}})",
-        fields.join(",\n")
-    )
-}
-
-fn manga_info_field_accessor(name: &str, optional: bool) -> String {
-    match name {
-        "id" | "title" => {
-            if optional {
-                format!("row.get_str(\"/{name}\")")
-            } else {
-                format!("row.require_str(\"/{name}\")?")
-            }
-        }
-        "description" | "cover_url" => format!("row.get_str(\"/{name}\")"),
-        "status" => "status".into(),
-        "authors" | "artists" | "tags" => format!("row.get_array_of_strings(\"/{name}\")"),
-        other => {
-            if optional {
-                format!("row.get_str(\"/{other}\")")
-            } else {
-                format!("row.require_str(\"/{other}\")?")
-            }
-        }
-    }
-}
-
-/// Build `Some(ChapterInfo { ... })` from ValidatedFields.
-fn emit_chapter_info_assembly(ep: &ValidatedEndpoint) -> String {
-    let mut fields = Vec::new();
-    let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    for f in &ep.fields {
-        let accessor = match &f.source {
-            FieldSource::FnArg(name) => format!("{name}.to_string()"),
-            FieldSource::Blueprint(_) => chapter_info_field_accessor(&f.name),
-        };
-        fields.push(format!("        {}: {accessor}", f.name));
-        declared.insert(f.name.as_str());
-    }
-    // Fields the YAML need not declare (id is required and validated). Keeps the
-    // literal complete when a source omits them — notably `page_count`, added to
-    // ChapterInfo after most YAMLs were written, which would otherwise break
-    // every regenerated extension.
-    for (name, default) in [
-        ("number", "0.0"),
-        ("title", "None"),
-        ("volume", "None"),
-        ("scanlator", "None"),
-        ("date_uploaded", "None"),
-        ("page_count", "None"),
-        ("language", "\"en\".to_string()"),
-    ] {
-        if !declared.contains(name) {
-            fields.push(format!("        {name}: {default}"));
-        }
-    }
-    format!("Some(ChapterInfo {{\n{}\n    }})", fields.join(",\n"))
-}
-
-fn chapter_info_field_accessor(name: &str) -> String {
-    match name {
-        "id" => "row.require_str(\"/id\").ok()?".into(),
-        "number" => "row.get_f64(\"/number\").unwrap_or(0.0)".into(),
-        "title" | "scanlator" => format!("row.get_str(\"/{name}\")"),
-        "volume" => "row.get_i64(\"/volume\").map(|v| v as i32)".into(),
-        "date_uploaded" => "row.get_i64(\"/date_uploaded\")".into(),
-        "page_count" => "row.get_i64(\"/page_count\").map(|v| v as u32)".into(),
-        "language" => "row.get_str(\"/language\").unwrap_or_else(|| \"en\".to_string())".into(),
-        other => format!("row.get_str(\"/{other}\")"),
-    }
-}
-
-/// Build `Some(Page { ... })` from ValidatedFields.
-fn emit_pages_assembly(ep: &ValidatedEndpoint) -> String {
-    let mut fields = Vec::new();
-    for f in &ep.fields {
-        let accessor = match &f.source {
-            FieldSource::FnArg(name) => format!("{name}.to_string()"),
-            FieldSource::Blueprint(_) => pages_field_accessor(&f.name),
-        };
-        fields.push(format!("        {}: {accessor}", f.name));
-    }
-    fields.push("        transform: None".to_string());
-    format!("Some(Page {{\n{}\n    }})", fields.join(",\n"))
-}
-
-fn pages_field_accessor(name: &str) -> String {
-    match name {
-        "url" => "row.require_str(\"/url\").ok()?".into(),
-        "index" => "row.get_i64(\"/index\").unwrap_or(i as i64) as i32".into(),
-        other => format!("row.get_str(\"/{other}\").unwrap_or_default()"),
-    }
-}
-
-// ── has_next_page helpers ────────────────────────────────────────────────────
-
-/// For paginated endpoints, read `has_next_page` from the scalar output.
-fn emit_hnp_scalar(hnp: &ValidatedHnp) -> String {
+fn emit_hnp_spec(hnp: &ValidatedHnp) -> String {
     match hnp {
-        ValidatedHnp::Static(b) => b.to_string(),
-        ValidatedHnp::Default | ValidatedHnp::Scalar(_) => {
-            "rows.get_scalar_bool(\"has_next_page\")".into()
-        }
+        ValidatedHnp::Static(b) => format!("kani_shared::unpack::HasNextPage::Static({b})"),
+        _ => "kani_shared::unpack::HasNextPage::FromScalar".to_string(),
     }
 }
 
-/// For non-paginated endpoints where hnp is a static or default bool.
-fn emit_hnp_expr_static(hnp: &ValidatedHnp) -> String {
-    match hnp {
-        ValidatedHnp::Static(b) => b.to_string(),
-        ValidatedHnp::Default => "false".into(),
-        ValidatedHnp::Scalar(_) => "rows.get_scalar_bool(\"has_next_page\")".into(),
-    }
-}
-
-/// For paginated endpoints, read `total_pages` from the scalar output.
-fn emit_total_pages_scalar(tp: &ValidatedTotalPages) -> String {
+fn emit_total_pages_spec(tp: &ValidatedTotalPages) -> String {
     match tp {
-        ValidatedTotalPages::Static(n) => format!("Some({n}u32)"),
-        ValidatedTotalPages::None => "None".into(),
-        ValidatedTotalPages::Scalar(_) => {
-            "rows.get_scalar_i64(\"total_pages\").map(|n| n as u32)".into()
+        ValidatedTotalPages::Static(n) => {
+            format!("kani_shared::unpack::TotalPages::Static({n})")
         }
-    }
-}
-
-/// For non-paginated endpoints, emit a static or scalar total_pages expression.
-fn emit_total_pages_static(tp: &ValidatedTotalPages) -> String {
-    match tp {
-        ValidatedTotalPages::Static(n) => format!("Some({n}u32)"),
-        ValidatedTotalPages::None => "None".into(),
-        ValidatedTotalPages::Scalar(_) => {
-            "rows.get_scalar_i64(\"total_pages\").map(|n| n as u32)".into()
-        }
+        ValidatedTotalPages::None => "kani_shared::unpack::TotalPages::None".to_string(),
+        ValidatedTotalPages::Scalar(_) => "kani_shared::unpack::TotalPages::FromScalar".to_string(),
     }
 }

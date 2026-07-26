@@ -151,6 +151,29 @@ pub enum TotalPages {
     FromScalar,
 }
 
+/// Function-argument field overrides: `(field_name, value)` pairs for fields
+/// whose value is a method argument (`id: "$manga_id$"`) rather than extracted.
+/// The interpreter injects these into the result before unpack, so it passes an
+/// empty slice; the guest can't mutate its handle, so codegen passes them here.
+pub type FnArgs<'a> = &'a [(&'a str, &'a str)];
+
+fn arg_or_field<T: JsonRows>(row: &T, fn_args: FnArgs, name: &str) -> Option<String> {
+    fn_args
+        .iter()
+        .find(|(k, _)| *k == name)
+        .map(|(_, v)| v.to_string())
+        .or_else(|| row.get_str(&format!("/{name}")))
+}
+
+fn arg_or_field_req<T: JsonRows>(
+    row: &T,
+    fn_args: FnArgs,
+    name: &str,
+) -> Result<String, ExtensionError> {
+    arg_or_field(row, fn_args, name)
+        .ok_or_else(|| ExtensionError::parse(format!("Missing required field: /{name}")))
+}
+
 fn resolve_has_next_page<T: JsonRows>(result: &T, hnp: HasNextPage) -> bool {
     match hnp {
         HasNextPage::Static(b) => b,
@@ -172,6 +195,7 @@ pub fn unpack_manga_list<T: JsonRows>(
     result: &T,
     hnp: HasNextPage,
     total: TotalPages,
+    fn_args: FnArgs,
 ) -> wit_types::MangaList {
     let has_next_page = resolve_has_next_page(result, hnp);
     let total_pages = resolve_total_pages(result, total);
@@ -179,9 +203,9 @@ pub fn unpack_manga_list<T: JsonRows>(
         .filter_map(|i| {
             let row = result.rows_get(i).ok()?;
             Some(wit_types::MangaListItem {
-                id: row.require_str("/id").ok()?,
-                title: row.require_str("/title").ok()?,
-                cover_url: row.get_str("/cover_url"),
+                id: arg_or_field_req(&row, fn_args, "id").ok()?,
+                title: arg_or_field_req(&row, fn_args, "title").ok()?,
+                cover_url: arg_or_field(&row, fn_args, "cover_url"),
             })
         })
         .collect();
@@ -194,7 +218,10 @@ pub fn unpack_manga_list<T: JsonRows>(
 
 /// Unpack manga details from the first row. A missing `id`/`title` is a spec
 /// mismatch (`Result`), where the old interpreter silently produced neither.
-pub fn unpack_manga_info<T: JsonRows>(result: &T) -> Result<wit_types::MangaInfo, ExtensionError> {
+pub fn unpack_manga_info<T: JsonRows>(
+    result: &T,
+    fn_args: FnArgs,
+) -> Result<wit_types::MangaInfo, ExtensionError> {
     let row = result
         .rows_get(0)
         .map_err(|_| ExtensionError::parse("manga_details: no result row".to_string()))?;
@@ -206,10 +233,10 @@ pub fn unpack_manga_info<T: JsonRows>(result: &T) -> Result<wit_types::MangaInfo
         _ => crate::types::MangaStatus::Unknown,
     };
     Ok(wit_types::MangaInfo {
-        id: row.require_str("/id")?,
-        title: row.require_str("/title")?,
-        cover_url: row.get_str("/cover_url"),
-        description: row.get_str("/description"),
+        id: arg_or_field_req(&row, fn_args, "id")?,
+        title: arg_or_field_req(&row, fn_args, "title")?,
+        cover_url: arg_or_field(&row, fn_args, "cover_url"),
+        description: arg_or_field(&row, fn_args, "description"),
         authors: row.get_array_of_strings("/authors"),
         artists: row.get_array_of_strings("/artists"),
         status,
@@ -222,6 +249,7 @@ pub fn unpack_chapter_list<T: JsonRows>(
     result: &T,
     hnp: HasNextPage,
     total: TotalPages,
+    fn_args: FnArgs,
 ) -> wit_types::ChapterList {
     let has_next_page = resolve_has_next_page(result, hnp);
     let total_pages = resolve_total_pages(result, total);
@@ -229,13 +257,14 @@ pub fn unpack_chapter_list<T: JsonRows>(
         .filter_map(|i| {
             let row = result.rows_get(i).ok()?;
             Some(wit_types::ChapterInfo {
-                id: row.require_str("/id").ok()?,
+                id: arg_or_field_req(&row, fn_args, "id").ok()?,
                 number: row.get_f64("/number").unwrap_or(0.0),
-                title: row.get_str("/title"),
+                title: arg_or_field(&row, fn_args, "title"),
                 volume: row.get_i64("/volume").map(|v| v as i32),
-                scanlator: row.get_str("/scanlator"),
+                scanlator: arg_or_field(&row, fn_args, "scanlator"),
                 date_uploaded: row.get_i64("/date_uploaded"),
-                language: row.get_str("/language").unwrap_or_else(|| "en".to_string()),
+                language: arg_or_field(&row, fn_args, "language")
+                    .unwrap_or_else(|| "en".to_string()),
                 // Accept a numeric or string-encoded page count, as the
                 // interpreter did.
                 page_count: row
@@ -253,13 +282,13 @@ pub fn unpack_chapter_list<T: JsonRows>(
 }
 
 /// Unpack a chapter's page list. Index falls back to row order when absent.
-pub fn unpack_pages<T: JsonRows>(result: &T) -> wit_types::Chapter {
+pub fn unpack_pages<T: JsonRows>(result: &T, fn_args: FnArgs) -> wit_types::Chapter {
     let pages = (0..result.rows_len())
         .filter_map(|i| {
             let row = result.rows_get(i).ok()?;
             Some(wit_types::Page {
                 index: row.get_i64("/index").unwrap_or(i as i64) as i32,
-                url: row.require_str("/url").ok()?,
+                url: arg_or_field_req(&row, fn_args, "url").ok()?,
                 transform: None,
             })
         })
@@ -309,7 +338,7 @@ mod tests {
             "rows": [{"id": "m1", "title": "A"}, {"id": "m2", "title": "B", "cover_url": "c"}],
             "scalars": {"has_next_page": true}
         });
-        let out = unpack_manga_list(&result, HasNextPage::FromScalar, TotalPages::None);
+        let out = unpack_manga_list(&result, HasNextPage::FromScalar, TotalPages::None, &[]);
         assert_eq!(out.manga.len(), 2);
         assert_eq!(out.manga[0].id, "m1");
         assert_eq!(out.manga[1].cover_url.as_deref(), Some("c"));
@@ -320,15 +349,15 @@ mod tests {
     #[test]
     fn unpack_manga_info_requires_id_and_title() {
         let ok = json!({"rows": [{"id": "m1", "title": "A", "status": "ongoing"}]});
-        let info = unpack_manga_info(&ok).unwrap();
+        let info = unpack_manga_info(&ok, &[]).unwrap();
         assert_eq!(info.id, "m1");
         assert_eq!(info.status, crate::types::MangaStatus::Ongoing);
 
         let missing = json!({"rows": [{"title": "A"}]});
-        assert!(unpack_manga_info(&missing).is_err());
+        assert!(unpack_manga_info(&missing, &[]).is_err());
 
         let empty = json!({"rows": []});
-        assert!(unpack_manga_info(&empty).is_err());
+        assert!(unpack_manga_info(&empty, &[]).is_err());
     }
 
     #[test]
@@ -336,7 +365,7 @@ mod tests {
         let result = json!({
             "rows": [{"id": "c1", "number": 1.5, "page_count": "20"}]
         });
-        let out = unpack_chapter_list(&result, HasNextPage::Static(false), TotalPages::None);
+        let out = unpack_chapter_list(&result, HasNextPage::Static(false), TotalPages::None, &[]);
         assert_eq!(out.chapters.len(), 1);
         assert_eq!(out.chapters[0].number, 1.5);
         assert_eq!(out.chapters[0].language, "en");
@@ -344,9 +373,23 @@ mod tests {
     }
 
     #[test]
+    fn fn_args_supply_a_field_the_extraction_lacks() {
+        // The guest path: `id` is a method argument (`$manga_id$`), never
+        // extracted, so it arrives via fn_args rather than the row.
+        let result = json!({"rows": [{"title": "T"}]});
+        let info = unpack_manga_info(&result, &[("id", "m-99")]).unwrap();
+        assert_eq!(info.id, "m-99");
+        assert_eq!(info.title, "T");
+
+        // An extracted field still wins when no fn_arg overrides it.
+        let extracted = json!({"rows": [{"id": "from-page", "title": "T"}]});
+        assert_eq!(unpack_manga_info(&extracted, &[]).unwrap().id, "from-page");
+    }
+
+    #[test]
     fn unpack_pages_falls_back_to_row_order() {
         let result = json!({"rows": [{"url": "a"}, {"url": "b", "index": 5}]});
-        let out = unpack_pages(&result);
+        let out = unpack_pages(&result, &[]);
         assert_eq!(out.pages.len(), 2);
         assert_eq!(out.pages[0].index, 0);
         assert_eq!(out.pages[1].index, 5);

@@ -711,7 +711,7 @@ fn total_pages_spec(ep: &kani_yaml::ValidatedEndpoint) -> kani_shared::unpack::T
 }
 
 fn unpack_manga_list(result: &serde_json::Value, ep: &kani_yaml::ValidatedEndpoint) -> MangaList {
-    kani_shared::unpack::unpack_manga_list(result, hnp_spec(ep), total_pages_spec(ep)).into()
+    kani_shared::unpack::unpack_manga_list(result, hnp_spec(ep), total_pages_spec(ep), &[]).into()
 }
 
 /// Graft function-argument fields (`id: "$manga_id$"`) onto each extracted row.
@@ -752,7 +752,7 @@ fn inject_fn_arg_fields(
 }
 
 fn unpack_manga_info(result: &serde_json::Value) -> Result<MangaInfo> {
-    kani_shared::unpack::unpack_manga_info(result)
+    kani_shared::unpack::unpack_manga_info(result, &[])
         .map(Into::into)
         .map_err(Error::Extension)
 }
@@ -761,11 +761,11 @@ fn unpack_chapter_list(
     result: &serde_json::Value,
     ep: &kani_yaml::ValidatedEndpoint,
 ) -> ChapterList {
-    kani_shared::unpack::unpack_chapter_list(result, hnp_spec(ep), total_pages_spec(ep)).into()
+    kani_shared::unpack::unpack_chapter_list(result, hnp_spec(ep), total_pages_spec(ep), &[]).into()
 }
 
 fn unpack_chapter(result: &serde_json::Value) -> Chapter {
-    kani_shared::unpack::unpack_pages(result).into()
+    kani_shared::unpack::unpack_pages(result, &[]).into()
 }
 
 #[cfg(test)]
