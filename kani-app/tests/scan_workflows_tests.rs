@@ -291,3 +291,151 @@ async fn a_new_chapter_fires_the_configured_webhook() {
         "payload names a chapter: {payload}"
     );
 }
+
+// ── B2 · auto-download chain (run_auto_scan_once) ─────────────────────────────
+
+/// Count chapter-download jobs submitted (rows persist through terminal status).
+async fn download_job_count(svc: &AppService) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE job_type = 'chapter_download'")
+        .fetch_one(&svc.db)
+        .await
+        .unwrap()
+}
+
+async fn enable_global_auto_scan(svc: &AppService) {
+    svc.settings.write().await.auto_scan = true;
+}
+
+// B2.1
+#[tokio::test]
+async fn a_new_chapter_is_enqueued_when_auto_download_is_on() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1/chapters", Response::html(LISTING_2));
+    let svc = test_service().await;
+    let manga_id = wire_source(&svc, &origin).await;
+    enable_global_auto_scan(&svc).await;
+    sqlx::query("UPDATE manga SET auto_download = 1 WHERE id = ?")
+        .bind(manga_id.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    svc.run_auto_scan_once().await;
+
+    assert!(
+        download_job_count(&svc).await >= 1,
+        "the new chapters are enqueued for download"
+    );
+}
+
+// B2.2
+#[tokio::test]
+async fn a_new_chapter_is_not_enqueued_when_auto_download_is_off() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1/chapters", Response::html(LISTING_2));
+    let svc = test_service().await;
+    let _manga_id = wire_source(&svc, &origin).await; // auto_download defaults off
+    enable_global_auto_scan(&svc).await;
+
+    svc.run_auto_scan_once().await;
+
+    // The chapters are discovered (scanned) but nothing is queued.
+    let chapters: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapters")
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(chapters, 2, "chapters are still scanned in");
+    assert_eq!(
+        download_job_count(&svc).await,
+        0,
+        "no download job without auto_download"
+    );
+}
+
+// B2.3
+#[tokio::test]
+async fn category_membership_enables_auto_download() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1/chapters", Response::html(LISTING_2));
+    let svc = test_service().await;
+    let manga_id = wire_source(&svc, &origin).await; // auto_download off on the manga
+    enable_global_auto_scan(&svc).await;
+
+    // A category the manga belongs to, marked as an auto-download category.
+    let cat_id: i64 =
+        sqlx::query_scalar("INSERT INTO categories (name) VALUES ('Follows') RETURNING id")
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    sqlx::query("INSERT INTO manga_categories (manga_id, category_id) VALUES (?, ?)")
+        .bind(manga_id.0)
+        .bind(cat_id)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    svc.settings.write().await.auto_download_category_ids = format!("[{cat_id}]");
+
+    svc.run_auto_scan_once().await;
+
+    assert!(
+        download_job_count(&svc).await >= 1,
+        "category membership enables auto-download even with the manga flag off"
+    );
+}
+
+// B2.4
+#[tokio::test]
+async fn auto_download_respects_download_rules() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1/chapters", Response::html(LISTING_2));
+    let svc = test_service().await;
+    let manga_id = wire_source(&svc, &origin).await;
+    enable_global_auto_scan(&svc).await;
+    sqlx::query("UPDATE manga SET auto_download = 1 WHERE id = ?")
+        .bind(manga_id.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    // A rule that admits only a language none of the chapters have — everything
+    // is filtered out, so nothing should be enqueued.
+    sqlx::query("INSERT INTO download_rules (manga_id, rule_type, value) VALUES (?, 'language_include', 'zz')")
+        .bind(manga_id.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    svc.run_auto_scan_once().await;
+
+    assert_eq!(
+        download_job_count(&svc).await,
+        0,
+        "chapters filtered out by rules are not enqueued"
+    );
+}
+
+// B2.6
+#[tokio::test]
+async fn auto_download_skips_a_manga_with_auto_scan_off() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1/chapters", Response::html(LISTING_2));
+    let svc = test_service().await;
+    let manga_id = wire_source(&svc, &origin).await;
+    enable_global_auto_scan(&svc).await;
+    sqlx::query("UPDATE manga SET auto_download = 1, auto_scan = 0 WHERE id = ?")
+        .bind(manga_id.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    svc.run_auto_scan_once().await;
+
+    let chapters: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapters")
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        chapters, 0,
+        "a manga with auto_scan off is not scanned at all"
+    );
+    assert_eq!(download_job_count(&svc).await, 0, "and nothing is enqueued");
+}
