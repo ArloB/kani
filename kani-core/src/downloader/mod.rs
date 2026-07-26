@@ -650,6 +650,27 @@ impl DownloaderManager {
 
         let pages = chapter_data.0.pages;
         let base_url = chapter_data.1;
+
+        // A chapter with zero pages is never legitimate — it means a challenge
+        // page, a transient block, or an extraction miss returned an empty list.
+        // Without this guard the download loop below runs over nothing, no page
+        // error fires, and create_cbz seals a 0-page archive that is then marked
+        // Completed: the user sees a "downloaded" chapter that cannot be read.
+        // Fail instead (retryable, so a transient empty response is re-attempted).
+        if pages.is_empty() {
+            Self::send_event(
+                &self.progress_tx,
+                DownloadProgressEvent::ChapterFailed {
+                    chapter_id,
+                    chapter_name: name.clone(),
+                    error: "Source returned no pages for this chapter".to_string(),
+                },
+            );
+            return Err(DownloadError::PageFetch(
+                "source returned no pages for this chapter".to_string(),
+            ));
+        }
+
         let total_pages = pages.len() as u64;
 
         // Count already-staged pages for resume reporting.
@@ -1001,6 +1022,46 @@ impl PageListFetcher for MockPageListFetcher {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[tokio::test]
+    async fn an_empty_page_list_fails_rather_than_sealing_a_zero_page_cbz() {
+        let tmp = tempfile::tempdir().unwrap();
+        let library_path = tmp.path().to_path_buf();
+        let save_path = library_path.join("manga");
+
+        let mgr =
+            DownloaderManager::new(SmartClient::new(None).unwrap(), DownloaderConfig::default())
+                .await
+                .unwrap();
+
+        let task = DownloadTask {
+            chapter_id: 1,
+            manga_id: 1,
+            manga_title: "M".to_string(),
+            source_manager: MockPageListFetcher::succeeding(0, 0), // empty page list
+            source_manga_id: "m".to_string(),
+            source_chapter_id: "c".to_string(),
+            name: "Chapter 1".to_string(),
+            library_path,
+            save_path: save_path.clone(),
+            comic_info: None,
+        };
+
+        let result = mgr
+            .download_chapter_direct(task, CancellationToken::new(), None, |_, _| {})
+            .await;
+
+        match result {
+            Err(DownloadError::PageFetch(_)) => {}
+            Err(other) => panic!("expected PageFetch error, got {other:?}"),
+            Ok(_) => panic!("an empty page list must fail, not seal a CBZ"),
+        }
+        // And crucially no .cbz was sealed.
+        assert!(
+            !save_path.join("Chapter 1.cbz").exists(),
+            "a zero-page CBZ must not be written"
+        );
+    }
 
     #[test]
     fn downloader_config_default_values() {
