@@ -439,3 +439,452 @@ async fn auto_download_skips_a_manga_with_auto_scan_off() {
     );
     assert_eq!(download_job_count(&svc).await, 0, "and nothing is enqueued");
 }
+
+// ── B4 · metadata refresh (refresh_manga_with_options) ────────────────────────
+
+use kani_app::models::{RefreshFields, RefreshOptions};
+
+const SOURCE_TITLE: &str = "Source Title";
+const SOURCE_DESC: &str = "Source description from origin";
+const DETAILS_HTML: &str = r#"<html><body><div class="manga"><h1>x</h1></div></body></html>"#;
+
+fn details_endpoint(cover_url: &str) -> ValidatedEndpoint {
+    ValidatedEndpoint {
+        route: "/manga/$manga_id$".into(),
+        method: "GET".into(),
+        headers: vec![],
+        queries: vec![],
+        filter_mapping: vec![],
+        filter_format: None,
+        response_type: ResponseType::Html,
+        container: ".manga".into(),
+        bindings: vec![],
+        fields: vec![
+            field("id", Expr::lit("m1")),
+            field("title", Expr::lit(SOURCE_TITLE)),
+            field("cover_url", Expr::lit(cover_url)),
+            field("description", Expr::lit(SOURCE_DESC)),
+            field("status", Expr::lit("ongoing")),
+            field(
+                "authors",
+                Expr::list(vec![Expr::lit("Alice"), Expr::lit("Bob")]),
+            ),
+            field("artists", Expr::list(vec![])),
+            field(
+                "tags",
+                Expr::list(vec![Expr::lit("Action"), Expr::lit("Drama")]),
+            ),
+        ],
+        scalars: vec![],
+        has_next_page: ValidatedHnp::Static(false),
+        total_pages: ValidatedTotalPages::None,
+        pagination: None,
+        composite_id_decodes: vec![],
+        then_steps: vec![],
+        for_each_steps: vec![],
+        via: None,
+        page_url: None,
+        script_name: None,
+        timeout_ms: 10_000,
+    }
+}
+
+/// Register a YAML source that resolves manga_details (and chapter_list) against
+/// `origin`, returning the id of the one manga row.
+async fn wire_source_with_details(svc: &AppService, origin: &TestOrigin) -> MangaId {
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    let manga_id = insert_manga(&svc.db, source_id, "m1", "Fixture Manga").await;
+    let ext = ValidatedExtension {
+        id: "fixture-source".into(),
+        name: "Fixture Source".into(),
+        version: "1.0.0".into(),
+        base_url: origin.base(),
+        language: "en".into(),
+        unrestricted_http: true,
+        manga_details: Some(details_endpoint(&origin.url("/cover.jpg"))),
+        chapter_list: Some(chapter_list_endpoint()),
+        ..Default::default()
+    };
+    svc.sources.insert(
+        source_id,
+        SourceBackend::Yaml(Box::new(YamlSource::new(
+            Arc::new(ext),
+            kani_core::http::SmartClient::new(None).unwrap(),
+            Arc::new(kani_core::cache::InMemoryCache::new()),
+            "test:".into(),
+            HashMap::new(),
+            true,
+        ))),
+    );
+    manga_id
+}
+
+fn no_fields() -> RefreshFields {
+    RefreshFields {
+        cover: false,
+        title: false,
+        description: false,
+        status: false,
+        people: false,
+        tags: false,
+    }
+}
+
+fn refresh_opts(fields: RefreshFields, clear_overrides: bool) -> RefreshOptions {
+    RefreshOptions {
+        fields,
+        fetch_chapters: false,
+        clear_overrides,
+    }
+}
+
+async fn manga_scalar<T>(svc: &AppService, id: MangaId, col: &str) -> T
+where
+    T: for<'r> sqlx::Decode<'r, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + Unpin,
+{
+    sqlx::query_scalar::<_, T>(&format!("SELECT {col} FROM manga WHERE id = ?"))
+        .bind(id.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap()
+}
+
+// B4.1 — DATA-LOSS: a user's custom cover survives a refresh that doesn't clear
+// overrides.
+#[tokio::test]
+async fn refresh_does_not_overwrite_a_pinned_cover() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    let svc = test_service().await;
+    let id = wire_source_with_details(&svc, &origin).await;
+    sqlx::query(
+        "UPDATE manga SET cover_overridden = 1, local_cover_path = '/library/custom.png' WHERE id = ?",
+    )
+    .bind(id.0)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    svc.refresh_manga_with_options(
+        id,
+        refresh_opts(
+            RefreshFields {
+                cover: true,
+                ..no_fields()
+            },
+            false,
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        manga_scalar::<Option<String>>(&svc, id, "local_cover_path").await,
+        Some("/library/custom.png".into()),
+        "the pinned cover path is untouched"
+    );
+    assert!(
+        manga_scalar::<bool>(&svc, id, "cover_overridden").await,
+        "the override flag stays set"
+    );
+}
+
+// B4.2 — title only.
+#[tokio::test]
+async fn refresh_title_touches_only_the_title() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    let svc = test_service().await;
+    let id = wire_source_with_details(&svc, &origin).await;
+    sqlx::query("UPDATE manga SET description = 'old desc', status = 3 WHERE id = ?")
+        .bind(id.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    svc.refresh_manga_with_options(
+        id,
+        refresh_opts(
+            RefreshFields {
+                title: true,
+                ..no_fields()
+            },
+            false,
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(manga_scalar::<String>(&svc, id, "name").await, SOURCE_TITLE);
+    assert_eq!(
+        manga_scalar::<Option<String>>(&svc, id, "description").await,
+        Some("old desc".into()),
+        "an unselected field is preserved"
+    );
+    assert_eq!(manga_scalar::<i64>(&svc, id, "status").await, 3);
+}
+
+// B4.3 — description only.
+#[tokio::test]
+async fn refresh_description_touches_only_the_description() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    let svc = test_service().await;
+    let id = wire_source_with_details(&svc, &origin).await;
+    let before = manga_scalar::<String>(&svc, id, "name").await;
+
+    svc.refresh_manga_with_options(
+        id,
+        refresh_opts(
+            RefreshFields {
+                description: true,
+                ..no_fields()
+            },
+            false,
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        manga_scalar::<Option<String>>(&svc, id, "description").await,
+        Some(SOURCE_DESC.into())
+    );
+    assert_eq!(manga_scalar::<String>(&svc, id, "name").await, before);
+}
+
+// B4.4 — status only.
+#[tokio::test]
+async fn refresh_status_touches_only_the_status() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    let svc = test_service().await;
+    let id = wire_source_with_details(&svc, &origin).await;
+    sqlx::query("UPDATE manga SET status = 3 WHERE id = ?")
+        .bind(id.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    svc.refresh_manga_with_options(
+        id,
+        refresh_opts(
+            RefreshFields {
+                status: true,
+                ..no_fields()
+            },
+            false,
+        ),
+    )
+    .await
+    .unwrap();
+
+    // "ongoing" == MangaStatus::Ongoing == 0.
+    assert_eq!(manga_scalar::<i64>(&svc, id, "status").await, 0);
+}
+
+// B4.5 — clearing overrides on the cover field re-enables source ownership.
+#[tokio::test]
+async fn refresh_cover_with_clear_overrides_drops_the_pin() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    let svc = test_service().await;
+    let id = wire_source_with_details(&svc, &origin).await;
+    sqlx::query(
+        "UPDATE manga SET cover_overridden = 1, local_cover_path = '/library/custom.png' WHERE id = ?",
+    )
+    .bind(id.0)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    svc.refresh_manga_with_options(
+        id,
+        refresh_opts(
+            RefreshFields {
+                cover: true,
+                ..no_fields()
+            },
+            true,
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        manga_scalar::<Option<String>>(&svc, id, "local_cover_path").await,
+        None,
+        "the pin is cleared"
+    );
+    assert!(!manga_scalar::<bool>(&svc, id, "cover_overridden").await);
+}
+
+// B4.6 — people replaced from the source.
+#[tokio::test]
+async fn refresh_people_replaces_the_people_set() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    let svc = test_service().await;
+    let id = wire_source_with_details(&svc, &origin).await;
+
+    svc.refresh_manga_with_options(
+        id,
+        refresh_opts(
+            RefreshFields {
+                people: true,
+                ..no_fields()
+            },
+            false,
+        ),
+    )
+    .await
+    .unwrap();
+
+    let people: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM manga_people WHERE manga_id = ?")
+        .bind(id.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(people, 2, "Alice and Bob are synced from the source");
+}
+
+// B4.7 — tags replaced from the source.
+#[tokio::test]
+async fn refresh_tags_replaces_the_tag_set() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    let svc = test_service().await;
+    let id = wire_source_with_details(&svc, &origin).await;
+
+    svc.refresh_manga_with_options(
+        id,
+        refresh_opts(
+            RefreshFields {
+                tags: true,
+                ..no_fields()
+            },
+            false,
+        ),
+    )
+    .await
+    .unwrap();
+
+    let tags: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM manga_tags WHERE manga_id = ?")
+        .bind(id.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(tags, 2, "Action and Drama are synced from the source");
+}
+
+// B4.8 — clearing overrides nulls the text overrides for the selected fields.
+#[tokio::test]
+async fn refresh_with_clear_overrides_nulls_text_overrides() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    let svc = test_service().await;
+    let id = wire_source_with_details(&svc, &origin).await;
+    sqlx::query(
+        "UPDATE manga SET local_name = 'My Title', local_description = 'My Desc', local_status = 2 WHERE id = ?",
+    )
+    .bind(id.0)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    svc.refresh_manga_with_options(
+        id,
+        refresh_opts(
+            RefreshFields {
+                title: true,
+                description: true,
+                status: true,
+                ..no_fields()
+            },
+            true,
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        manga_scalar::<Option<String>>(&svc, id, "local_name").await,
+        None
+    );
+    assert_eq!(
+        manga_scalar::<Option<String>>(&svc, id, "local_description").await,
+        None
+    );
+    assert_eq!(
+        manga_scalar::<Option<i64>>(&svc, id, "local_status").await,
+        None
+    );
+}
+
+// B4.9 — DATA-LOSS: a failed fetch leaves existing metadata intact (the mutation
+// happens in one transaction opened only after the fetch succeeds).
+#[tokio::test]
+async fn a_failed_fetch_leaves_metadata_intact() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::status(500));
+    let svc = test_service().await;
+    let id = wire_source_with_details(&svc, &origin).await;
+    sqlx::query(
+        "UPDATE manga SET name = 'Keep Me', description = 'Keep Desc', status = 1 WHERE id = ?",
+    )
+    .bind(id.0)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    let res = svc
+        .refresh_manga_with_options(id, refresh_opts(RefreshFields::default(), false))
+        .await;
+
+    assert!(res.is_err(), "the refresh surfaces the fetch failure");
+    assert_eq!(manga_scalar::<String>(&svc, id, "name").await, "Keep Me");
+    assert_eq!(
+        manga_scalar::<Option<String>>(&svc, id, "description").await,
+        Some("Keep Desc".into())
+    );
+    assert_eq!(manga_scalar::<i64>(&svc, id, "status").await, 1);
+}
+
+// B4.10 — a single-field refresh leaves every other source scalar as it was.
+#[tokio::test]
+async fn refresh_preserves_unselected_source_scalars() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    let svc = test_service().await;
+    let id = wire_source_with_details(&svc, &origin).await;
+    sqlx::query(
+        "UPDATE manga SET cover_url = 'http://old/cover.png', description = 'old', status = 3 WHERE id = ?",
+    )
+    .bind(id.0)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    svc.refresh_manga_with_options(
+        id,
+        refresh_opts(
+            RefreshFields {
+                title: true,
+                ..no_fields()
+            },
+            false,
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        manga_scalar::<Option<String>>(&svc, id, "cover_url").await,
+        Some("http://old/cover.png".into())
+    );
+    assert_eq!(
+        manga_scalar::<Option<String>>(&svc, id, "description").await,
+        Some("old".into())
+    );
+    assert_eq!(manga_scalar::<i64>(&svc, id, "status").await, 3);
+}
