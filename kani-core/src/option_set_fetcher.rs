@@ -25,15 +25,6 @@ fn resolve_route(base_url: &str, route: &str) -> Result<String> {
         .map_err(|e| Error::Other(format!("cannot resolve option-set route '{route}': {e}")))
 }
 
-/// Fetches and parses a `FilterFetchDef`, returning `(name, value)` pairs.
-/// Options with `nsfw=true` are excluded.
-///
-/// `base_url` / `unrestricted_http` are the owning source's HTTP policy. The
-/// route is resolved against `base_url`, and — unless the source is
-/// unrestricted — must resolve to the source's own host, the same restriction
-/// the guest HTTP path enforces. Otherwise a `FilterFetchDef` could point the
-/// server at an arbitrary host (the option-set fetch runs host-side, outside the
-/// WASM sandbox and its allowed-host check).
 /// Enforce the source's HTTP policy on a resolved option-set URL: unrestricted
 /// sources may fetch anywhere, restricted ones only from their own host (exact
 /// match, the same rule the guest HTTP path applies).
@@ -50,6 +41,13 @@ fn enforce_option_set_host(base_url: &str, url: &str, unrestricted_http: bool) -
         .map_err(Error::Other)
 }
 
+/// Fetches and parses a `FilterFetchDef`, returning `(name, value)` pairs.
+/// Options with `nsfw=true` are excluded.
+///
+/// `base_url` / `unrestricted_http` are the owning source's HTTP policy: the
+/// route is resolved against `base_url` and, unless the source is unrestricted,
+/// must resolve to the source's own host — otherwise a def could point the
+/// server at an arbitrary host, outside the WASM sandbox's allowed-host check.
 pub async fn fetch_option_set(
     client: &SmartClient,
     def: &FilterFetchDef,
