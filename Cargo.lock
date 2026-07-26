@@ -3409,6 +3409,7 @@ dependencies = [
  "sqlx",
  "talc",
  "time",
+ "urlencoding",
  "wit-bindgen 0.58.0",
 ]
 

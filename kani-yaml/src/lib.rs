@@ -165,54 +165,28 @@ pub fn make_fetch_expr(
 
 /// Build a URL by substituting `$var$` placeholders in `route` from `args`.
 ///
-/// Composite-id sub-field placeholders (`$manga.hid$`) are looked up by the
-/// dot-replaced key (`manga_hid`). The `base_url` is prepended verbatim.
+/// Delegates to [`kani_shared::request::build_url`] — the single implementation
+/// both YAML engines share. Composite-id sub-field placeholders (`$manga.hid$`)
+/// are looked up by the dot-replaced key (`manga_hid`).
 pub fn build_url_with_args(
     base_url: &str,
     route: &str,
     args: &std::collections::HashMap<String, String>,
 ) -> Result<String, String> {
-    let mut result = String::with_capacity(route.len());
-    let bytes = route.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' {
-            let start = i + 1;
-            let mut end = start;
-            while end < bytes.len()
-                && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_' || bytes[end] == b'.')
-            {
-                end += 1;
-            }
-            if end < bytes.len() && bytes[end] == b'$' && end > start {
-                let placeholder = &route[start..end];
-                let key = placeholder.replace('.', "_");
-                match args.get(&key) {
-                    // A source-supplied value fills exactly one route slot, so it
-                    // is percent-encoded: an id like `../admin`, `x?y=1` or `a b`
-                    // must not smuggle in a path traversal, a query, or a space
-                    // that rewrites the request the route author declared.
-                    Some(val) => result.push_str(&urlencoding::encode(val)),
-                    // An unresolved placeholder was previously left in the URL as
-                    // a literal `$page$`, silently sending a wrong request. A
-                    // route slot with no argument is a bug — refuse it.
-                    None => {
-                        return Err(format!(
-                            "unresolved route placeholder `${placeholder}$` (no argument supplied)"
-                        ));
-                    }
-                }
-                i = end + 1;
-            } else {
-                result.push('$');
-                i += 1;
-            }
-        } else {
-            result.push(bytes[i] as char);
-            i += 1;
+    kani_shared::request::build_url(base_url, route, args)
+}
+
+impl From<&yaml::model::QueryEntry> for kani_shared::request::QuerySpec {
+    fn from(e: &yaml::model::QueryEntry) -> Self {
+        use yaml::model::QueryValue as Y;
+        kani_shared::request::QuerySpec {
+            key: e.key.clone(),
+            value: match &e.value {
+                Y::Static(s) => kani_shared::request::QueryValue::Static(s.clone()),
+                Y::Arg(a) => kani_shared::request::QueryValue::Arg(a.clone()),
+            },
         }
     }
-    Ok(format!("{}{}", base_url.trim_end_matches('/'), result))
 }
 
 /// Resolve query parameters from an endpoint's query list and a runtime args map.
@@ -220,17 +194,8 @@ pub fn build_queries(
     entries: &[yaml::model::QueryEntry],
     args: &std::collections::HashMap<String, String>,
 ) -> Vec<(String, String)> {
-    use yaml::model::QueryValue;
-    entries
-        .iter()
-        .filter_map(|e| {
-            let val = match &e.value {
-                QueryValue::Static(s) => s.clone(),
-                QueryValue::Arg(name) => args.get(name.as_str())?.clone(),
-            };
-            Some((e.key.clone(), val))
-        })
-        .collect()
+    let specs: Vec<kani_shared::request::QuerySpec> = entries.iter().map(Into::into).collect();
+    kani_shared::request::build_queries(&specs, args)
 }
 
 /// Decode composite IDs referenced by `ep` and add the decoded sub-fields to `args`.
@@ -279,103 +244,59 @@ pub fn apply_filters(
     filter_format: Option<&yaml::schema::FilterFormatCfg>,
     filters: &[kani_shared::types::ActiveFilter],
 ) -> Vec<(String, String)> {
-    use kani_shared::types::FilterState;
-    use yaml::schema::{ArrayFormat, FilterMappingEntry};
+    let mapping: Vec<(String, kani_shared::request::FilterMapping)> = filter_mapping
+        .iter()
+        .map(|(group, entry)| (group.clone(), entry.into()))
+        .collect();
+    let format = filter_format.map(kani_shared::request::FilterFormat::from);
+    kani_shared::request::apply_filters(&mapping, format.as_ref(), filters)
+}
 
-    let bool_fmt = filter_format.map(|f| f.bool_format).unwrap_or_default();
-    let omit_empty = filter_format.map(|f| f.omit_empty).unwrap_or(true);
-    let array_fmt = filter_format.map(|f| f.multiselect).unwrap_or_default();
-    let array_sep = filter_format
-        .map(|f| f.array_separator.as_str())
-        .unwrap_or(",");
-
-    let mut out: Vec<(String, String)> = Vec::new();
-
-    for f in filters {
-        // `group:action` — the action half lets one filter group carry a value
-        // in its name, e.g. `genre:include`.
-        let (group, action) = f
-            .filter_name
-            .split_once(':')
-            .unwrap_or((f.filter_name.as_str(), ""));
-
-        let Some((_, entry)) = filter_mapping.iter().find(|(k, _)| k == group) else {
-            continue;
-        };
-
-        match entry {
-            FilterMappingEntry::Simple(param) => match &f.state {
-                FilterState::Checkbox(true) => {
-                    let v = if action.is_empty() {
-                        bool_literal(bool_fmt, true).to_string()
-                    } else {
-                        action.to_string()
-                    };
-                    out.push((param.clone(), v));
-                }
-                FilterState::Checkbox(false) if !omit_empty => {
-                    out.push((param.clone(), bool_literal(bool_fmt, false).to_string()));
-                }
-                FilterState::Multiselect(values) => match array_fmt {
-                    ArrayFormat::Default | ArrayFormat::Repeated => {
-                        for v in values {
-                            out.push((param.clone(), v.clone()));
-                        }
-                    }
-                    ArrayFormat::Bracket => {
-                        for v in values {
-                            out.push((format!("{param}[]"), v.clone()));
-                        }
-                    }
-                    ArrayFormat::CommaSeparated => {
-                        out.push((param.clone(), values.join(array_sep)));
-                    }
-                },
-                FilterState::Selection { value, .. } => out.push((param.clone(), value.clone())),
-                FilterState::TextInput(s) => out.push((param.clone(), s.clone())),
-                _ => {}
-            },
-            FilterMappingEntry::SortPair {
+impl From<&yaml::schema::FilterMappingEntry> for kani_shared::request::FilterMapping {
+    fn from(e: &yaml::schema::FilterMappingEntry) -> Self {
+        use kani_shared::request::FilterMapping as S;
+        use yaml::schema::FilterMappingEntry as Y;
+        match e {
+            Y::Simple(p) => S::Simple(p.clone()),
+            Y::SortPair {
                 key_template,
                 direction_param,
                 ..
-            } => {
-                if let FilterState::Selection { value, .. } = &f.state
-                    && let Some((key_part, dir)) = value.split_once(':')
-                {
-                    out.push((key_template.replace("{}", key_part), dir.to_string()));
-                    if let Some(dir_param) = direction_param {
-                        out.push((dir_param.clone(), dir.to_string()));
-                    }
-                }
-            }
-            FilterMappingEntry::TupleSplit {
+            } => S::SortPair {
+                key_template: key_template.clone(),
+                direction_param: direction_param.clone(),
+            },
+            Y::TupleSplit {
                 from_param,
                 to_param,
                 ..
-            } => {
-                if let FilterState::TextInput(s) = &f.state
-                    && let Some((from, to)) = s.split_once(':')
-                {
-                    out.push((from_param.clone(), from.to_string()));
-                    out.push((to_param.clone(), to.to_string()));
-                }
-            }
+            } => S::TupleSplit {
+                from_param: from_param.clone(),
+                to_param: to_param.clone(),
+            },
         }
     }
-
-    out
 }
 
-fn bool_literal(fmt: yaml::schema::BoolFormat, value: bool) -> &'static str {
-    use yaml::schema::BoolFormat;
-    match (fmt, value) {
-        (BoolFormat::TrueFalse, true) => "true",
-        (BoolFormat::TrueFalse, false) => "false",
-        (BoolFormat::OneZero, true) => "1",
-        (BoolFormat::OneZero, false) => "0",
-        (BoolFormat::YesNo, true) => "yes",
-        (BoolFormat::YesNo, false) => "no",
+impl From<&yaml::schema::FilterFormatCfg> for kani_shared::request::FilterFormat {
+    fn from(f: &yaml::schema::FilterFormatCfg) -> Self {
+        use kani_shared::request::{ArrayFormat as SA, BoolFormat as SB};
+        use yaml::schema::{ArrayFormat as YA, BoolFormat as YB};
+        kani_shared::request::FilterFormat {
+            // The interpreter always treated `Default` as `Repeated`.
+            multiselect: match f.multiselect {
+                YA::Default | YA::Repeated => SA::Repeated,
+                YA::Bracket => SA::Bracket,
+                YA::CommaSeparated => SA::CommaSeparated,
+            },
+            omit_empty: f.omit_empty,
+            bool_format: match f.bool_format {
+                YB::TrueFalse => SB::TrueFalse,
+                YB::OneZero => SB::OneZero,
+                YB::YesNo => SB::YesNo,
+            },
+            array_separator: f.array_separator.clone(),
+        }
     }
 }
 
