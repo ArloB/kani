@@ -16,6 +16,32 @@ const CREDENTIAL_TTL_SECS: u64 = 3600;
 const RETRY_AFTER_CAP_SECS: u64 = 60;
 const CIRCUIT_OPEN_THRESHOLD: u32 = 5;
 const CIRCUIT_COOLDOWN_SECS: u64 = 30;
+/// FlareSolverr's own `maxTimeout` is 60 s; the HTTP client wrapping it needs a
+/// slightly larger ceiling so a legitimately slow solve completes but an
+/// unreachable solver cannot hang the request indefinitely.
+const SOLVER_TIMEOUT_SECS: u64 = 65;
+
+/// Timing knobs for the retry/circuit/solver machinery. Production uses
+/// [`Timings::default`]; tests override them via [`SmartClient::with_timings`]
+/// to drive the same real code paths without minute-long backoff waits.
+#[derive(Clone, Copy)]
+pub struct Timings {
+    pub retry_base_delay: std::time::Duration,
+    pub retry_jitter: std::time::Duration,
+    pub circuit_cooldown: std::time::Duration,
+    pub solver_timeout: std::time::Duration,
+}
+
+impl Default for Timings {
+    fn default() -> Self {
+        Self {
+            retry_base_delay: BASE_DELAY,
+            retry_jitter: std::time::Duration::from_millis(1000),
+            circuit_cooldown: std::time::Duration::from_secs(CIRCUIT_COOLDOWN_SECS),
+            solver_timeout: std::time::Duration::from_secs(SOLVER_TIMEOUT_SECS),
+        }
+    }
+}
 
 pub struct RateState {
     limiter: DefaultDirectRateLimiter,
@@ -70,8 +96,12 @@ fn is_retryable(status: rquest::StatusCode) -> bool {
 }
 
 /// Parses Retry-After (integer seconds or HTTP-date), caps at RETRY_AFTER_CAP_SECS, falls back to exponential backoff.
-fn compute_delay(headers: Option<&rquest::header::HeaderMap>, attempt: u32) -> std::time::Duration {
-    let backoff = BASE_DELAY * 2u32.pow(attempt);
+fn compute_delay(
+    headers: Option<&rquest::header::HeaderMap>,
+    attempt: u32,
+    base_delay: std::time::Duration,
+) -> std::time::Duration {
+    let backoff = base_delay * 2u32.pow(attempt);
     headers
         .and_then(|h| h.get(rquest::header::RETRY_AFTER))
         .and_then(|v| v.to_str().ok())
@@ -93,9 +123,13 @@ fn compute_delay(headers: Option<&rquest::header::HeaderMap>, attempt: u32) -> s
         .unwrap_or(backoff)
 }
 
-fn jitter() -> std::time::Duration {
+fn jitter(max: std::time::Duration) -> std::time::Duration {
     use rand::RngExt;
-    std::time::Duration::from_millis(rand::rng().random_range(0u64..1000))
+    let max_ms = max.as_millis() as u64;
+    if max_ms == 0 {
+        return std::time::Duration::ZERO;
+    }
+    std::time::Duration::from_millis(rand::rng().random_range(0u64..max_ms))
 }
 
 #[derive(Clone, Default)]
@@ -287,9 +321,16 @@ pub struct SmartClient {
     pub rate_states: Arc<dashmap::DashMap<String, Arc<RateState>>>,
     pub circuit_event_tx: tokio::sync::broadcast::Sender<CircuitOpenedEvent>,
     pub cond_cache: Arc<ConditionalGetCache>,
+    timings: Timings,
 }
 
 impl SmartClient {
+    /// Overrides the retry/circuit/solver timings (test seam — see [`Timings`]).
+    pub fn with_timings(mut self, timings: Timings) -> Self {
+        self.timings = timings;
+        self
+    }
+
     pub fn new(solver_url: Option<String>) -> Result<Self> {
         let resolver = ValidatingResolver::new()?;
         let client = rquest::Client::builder()
@@ -311,6 +352,7 @@ impl SmartClient {
             rate_states: Arc::new(dashmap::DashMap::new()),
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
+            timings: Timings::default(),
         })
     }
 
@@ -340,6 +382,7 @@ impl SmartClient {
             rate_states: Arc::new(dashmap::DashMap::new()),
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
+            timings: Timings::default(),
         })
     }
 
@@ -406,7 +449,7 @@ impl SmartClient {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if prev + 1 >= CIRCUIT_OPEN_THRESHOLD {
             let now = std::time::Instant::now();
-            let until = now + std::time::Duration::from_secs(CIRCUIT_COOLDOWN_SECS);
+            let until = now + self.timings.circuit_cooldown;
             let mut guard = circuit.open_until.lock().expect("circuit mutex poisoned");
             let was_open = guard.map(|t| now < t).unwrap_or(false);
             *guard = Some(until);
@@ -492,7 +535,8 @@ impl SmartClient {
             let resp = match self.client.execute(current_request).await {
                 Ok(r) => r,
                 Err(e) if attempt < MAX_RETRIES && request_clone_for_retry.is_some() => {
-                    let delay = compute_delay(None, attempt) + jitter();
+                    let delay = compute_delay(None, attempt, self.timings.retry_base_delay)
+                        + jitter(self.timings.retry_jitter);
                     tracing::warn!(
                         "HTTP request failed ({}), retrying in {:?} (attempt {}/{})",
                         e,
@@ -515,7 +559,9 @@ impl SmartClient {
                 if attempt < MAX_RETRIES
                     && let Some(next_req) = request_clone_for_retry
                 {
-                    let delay = compute_delay(Some(resp.headers()), attempt) + jitter();
+                    let delay =
+                        compute_delay(Some(resp.headers()), attempt, self.timings.retry_base_delay)
+                            + jitter(self.timings.retry_jitter);
                     tracing::warn!(
                         "Upstream returned {}, retrying in {:?} (attempt {}/{})",
                         status.as_u16(),
@@ -766,7 +812,8 @@ impl SmartClient {
             let resp = match self.client.execute(req).await {
                 Ok(r) => r,
                 Err(e) if retry_count < MAX_RETRIES => {
-                    let delay = compute_delay(None, retry_count) + jitter();
+                    let delay = compute_delay(None, retry_count, self.timings.retry_base_delay)
+                        + jitter(self.timings.retry_jitter);
                     tracing::warn!(
                         "safe_get network error ({}), retrying in {:?} (attempt {}/{})",
                         e,
@@ -783,7 +830,11 @@ impl SmartClient {
             };
 
             if is_retryable(resp.status()) && retry_count < MAX_RETRIES {
-                let delay = compute_delay(Some(resp.headers()), retry_count) + jitter();
+                let delay = compute_delay(
+                    Some(resp.headers()),
+                    retry_count,
+                    self.timings.retry_base_delay,
+                ) + jitter(self.timings.retry_jitter);
                 tracing::warn!(
                     "safe_get got {}, retrying in {:?} (attempt {}/{})",
                     resp.status().as_u16(),
@@ -942,7 +993,9 @@ impl SmartClient {
             .as_deref()
             .ok_or_else(|| crate::error::Error::Other("No solver URL configured".into()))?;
 
-        let client = rquest::Client::new();
+        let client = rquest::Client::builder()
+            .timeout(self.timings.solver_timeout)
+            .build()?;
 
         let mut body = json!({
           "cmd": "request.get",
@@ -1050,7 +1103,9 @@ impl SmartClient {
             .as_deref()
             .ok_or_else(|| crate::error::Error::Other("No solver URL configured".into()))?;
 
-        let client = rquest::Client::new();
+        let client = rquest::Client::builder()
+            .timeout(self.timings.solver_timeout)
+            .build()?;
 
         let body = json!({
           "cmd": "request.get",
@@ -1295,6 +1350,7 @@ impl SmartClient {
             rate_states: Arc::new(dashmap::DashMap::new()),
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
+            timings: Timings::default(),
         })
     }
 }
@@ -1349,9 +1405,9 @@ mod tests {
     #[test]
     fn no_header_gives_exponential_backoff() {
         // attempt 0 → BASE_DELAY * 2^0 = 5s; attempt 1 → 10s; attempt 2 → 20s
-        let d0 = compute_delay(None, 0);
-        let d1 = compute_delay(None, 1);
-        let d2 = compute_delay(None, 2);
+        let d0 = compute_delay(None, 0, BASE_DELAY);
+        let d1 = compute_delay(None, 1, BASE_DELAY);
+        let d2 = compute_delay(None, 2, BASE_DELAY);
         assert_eq!(d0, BASE_DELAY);
         assert_eq!(d1, BASE_DELAY * 2);
         assert_eq!(d2, BASE_DELAY * 4);
@@ -1364,7 +1420,7 @@ mod tests {
             rquest::header::RETRY_AFTER,
             rquest::header::HeaderValue::from_static("10"),
         );
-        let d = compute_delay(Some(&headers), 0);
+        let d = compute_delay(Some(&headers), 0, BASE_DELAY);
         assert_eq!(d, std::time::Duration::from_secs(10));
     }
 
@@ -1376,14 +1432,14 @@ mod tests {
             rquest::header::RETRY_AFTER,
             rquest::header::HeaderValue::from_static("9999"),
         );
-        let d = compute_delay(Some(&headers), 0);
+        let d = compute_delay(Some(&headers), 0, BASE_DELAY);
         assert_eq!(d, std::time::Duration::from_secs(RETRY_AFTER_CAP_SECS));
     }
 
     #[test]
     fn empty_headers_falls_back_to_backoff() {
         let headers = rquest::header::HeaderMap::new();
-        let d = compute_delay(Some(&headers), 0);
+        let d = compute_delay(Some(&headers), 0, BASE_DELAY);
         assert_eq!(d, BASE_DELAY);
     }
 

@@ -6,8 +6,9 @@
 //! FlareSolverr envelope. The 503/403 paths are used deliberately: neither status
 //! is retryable, so these never hit the 5 s×2^n retry backoff.
 
-use kani_core::http::SmartClient;
-use kani_shared_test::origin::{Response, TestOrigin};
+use kani_core::http::{SmartClient, Timings};
+use kani_shared_test::origin::{Body, Response, TestOrigin};
+use std::time::Duration;
 
 /// A FlareSolverr `request.get` success envelope. `rendered` is echoed back as
 /// `solution.response` (the HTML the solver "saw" after clearing the challenge).
@@ -136,6 +137,34 @@ async fn stored_credentials_are_re_solved_after_a_403() {
         solver.hits("/v1"),
         2,
         "the second 403 dropped the stored credential and forced a fresh solve"
+    );
+}
+
+// C4 — a solver that never responds must not hang the request. The solver HTTP
+// client now carries a timeout (Timings::solver_timeout); shortened here so a
+// stalling solver surfaces as an error in milliseconds instead of hanging.
+#[tokio::test]
+async fn a_solver_that_is_unreachable_does_not_hang_the_request() {
+    let site = TestOrigin::start().await;
+    site.set("/page", Response::status(503));
+    let solver = TestOrigin::start().await;
+    solver.set("/v1", Response::status(200).body(Body::Stall));
+
+    let client = SmartClient::new(Some(solver.url("/v1")))
+        .unwrap()
+        .with_timings(Timings {
+            solver_timeout: Duration::from_millis(300),
+            ..Timings::default()
+        });
+
+    // A generous outer bound so a regression can never hang the whole suite.
+    let outcome = tokio::time::timeout(Duration::from_secs(10), client.get(&site.url("/page")))
+        .await
+        .expect("the request must return, not hang, when the solver stalls");
+
+    assert!(
+        outcome.is_err(),
+        "an unreachable solver surfaces as an error"
     );
 }
 
