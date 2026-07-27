@@ -30,6 +30,7 @@ pub struct Timings {
     pub retry_jitter: std::time::Duration,
     pub circuit_cooldown: std::time::Duration,
     pub solver_timeout: std::time::Duration,
+    pub credential_ttl: std::time::Duration,
 }
 
 impl Default for Timings {
@@ -39,6 +40,7 @@ impl Default for Timings {
             retry_jitter: std::time::Duration::from_millis(1000),
             circuit_cooldown: std::time::Duration::from_secs(CIRCUIT_COOLDOWN_SECS),
             solver_timeout: std::time::Duration::from_secs(SOLVER_TIMEOUT_SECS),
+            credential_ttl: std::time::Duration::from_secs(CREDENTIAL_TTL_SECS),
         }
     }
 }
@@ -481,7 +483,7 @@ impl SmartClient {
         if let Some(creds) = creds_map.get(&domain) {
             let expired = creds
                 .stored_at
-                .map(|t| t.elapsed().as_secs() > CREDENTIAL_TTL_SECS)
+                .map(|t| t.elapsed() > self.timings.credential_ttl)
                 .unwrap_or(true);
 
             if expired {
@@ -729,7 +731,7 @@ impl SmartClient {
             if let Some(creds) = creds_map.get(&domain) {
                 let expired = creds
                     .stored_at
-                    .map(|t| t.elapsed().as_secs() > CREDENTIAL_TTL_SECS)
+                    .map(|t| t.elapsed() > self.timings.credential_ttl)
                     .unwrap_or(true);
                 if expired {
                     tracing::debug!("Credentials for {} have expired, clearing", domain);
@@ -1251,8 +1253,10 @@ impl SmartClient {
             creds
                 .iter()
                 .filter_map(|(domain, cred)| {
-                    let age = cred.stored_at?.elapsed().as_secs();
-                    let expiring_soon = age + REFRESH_THRESHOLD_SECS >= CREDENTIAL_TTL_SECS;
+                    let elapsed = cred.stored_at?.elapsed();
+                    let expiring_soon = elapsed
+                        + std::time::Duration::from_secs(REFRESH_THRESHOLD_SECS)
+                        >= self.timings.credential_ttl;
                     let url = cred.challenge_url.clone()?;
                     if expiring_soon {
                         Some((domain.clone(), url))

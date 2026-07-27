@@ -140,6 +140,57 @@ async fn stored_credentials_are_re_solved_after_a_403() {
     );
 }
 
+// C6 — an expired credential is dropped before reuse: the stale cookie must not
+// ride the next request. Contrast: a live credential is attached by the same
+// pre-request block, so its absence here is the expiry drop, not a missing cred.
+#[tokio::test]
+async fn expired_credentials_are_dropped_before_reuse() {
+    let site = TestOrigin::start().await;
+    site.script(
+        "/page",
+        vec![
+            Response::status(503),             // R1: challenge
+            Response::html("<html>ok</html>"), // R1: replay after the solve
+            Response::html("<html>ok</html>"), // R2: direct 200
+        ],
+    );
+    let solver = TestOrigin::start().await;
+    solver.set("/v1", Response::json(&solver_envelope("unused")));
+
+    let client = SmartClient::new(Some(solver.url("/v1")))
+        .unwrap()
+        .with_timings(Timings {
+            credential_ttl: Duration::from_millis(20),
+            ..Timings::default()
+        });
+
+    // R1 solves and stores the credential, which rides the replay.
+    client.get(&site.url("/page")).await.unwrap();
+    assert!(
+        site.last_request("/page")
+            .unwrap()
+            .header("cookie")
+            .unwrap_or("")
+            .contains("cf_clearance"),
+        "sanity: the freshly-solved credential rode the replay"
+    );
+
+    // Let it expire, then make another request.
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    client.get(&site.url("/page")).await.unwrap();
+
+    let cookie = site
+        .last_request("/page")
+        .unwrap()
+        .header("cookie")
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        !cookie.contains("cf_clearance"),
+        "the expired credential was dropped rather than reused, got: {cookie:?}"
+    );
+}
+
 // C4 — a solver that never responds must not hang the request. The solver HTTP
 // client now carries a timeout (Timings::solver_timeout); shortened here so a
 // stalling solver surfaces as an error in milliseconds instead of hanging.
