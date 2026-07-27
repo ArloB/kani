@@ -180,6 +180,36 @@ pub fn build_range_response_headers(
 }
 
 /// Build an opaque proxy URL for use in `src` attributes.
+/// Tunable knobs for the image proxy's fetch path. Production uses
+/// [`ProxyConfig::default`]; tests override it on `AppState` to drive the retry,
+/// timeout, coalescing and cap paths without multi-second backoff or 50 MB bodies.
+#[derive(Clone, Copy)]
+pub struct ProxyConfig {
+    pub max_retries: u32,
+    pub base_delay: std::time::Duration,
+    pub retry_jitter: std::time::Duration,
+    pub retry_after_cap: std::time::Duration,
+    pub request_timeout: std::time::Duration,
+    pub per_host_concurrency: usize,
+    pub min_host_interval: std::time::Duration,
+    pub max_image_bytes: usize,
+}
+
+impl Default for ProxyConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            base_delay: std::time::Duration::from_secs(2),
+            retry_jitter: std::time::Duration::from_millis(1000),
+            retry_after_cap: std::time::Duration::from_secs(60),
+            request_timeout: std::time::Duration::from_secs(35),
+            per_host_concurrency: 5,
+            min_host_interval: std::time::Duration::from_millis(100),
+            max_image_bytes: 50 * 1024 * 1024,
+        }
+    }
+}
+
 pub fn make_proxy_url(
     url: &str,
     referer: &str,

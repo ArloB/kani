@@ -51,6 +51,10 @@ pub struct Response {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body: Body,
+    /// Optional pause before the response head is written — a "slow origin". Used
+    /// to keep concurrent requests in flight (coalescing) or to trip a client
+    /// read timeout without holding the socket forever like [`Body::Stall`].
+    pub delay: Option<std::time::Duration>,
 }
 
 impl Response {
@@ -59,6 +63,7 @@ impl Response {
             status: 200,
             headers: Vec::new(),
             body: Body::Bytes(body.into()),
+            delay: None,
         }
     }
 
@@ -79,6 +84,7 @@ impl Response {
             status,
             headers: Vec::new(),
             body: Body::Empty,
+            delay: None,
         }
     }
 
@@ -97,11 +103,18 @@ impl Response {
             status: 200,
             headers: vec![("Content-Type".into(), "application/json".into())],
             body: Body::Echo,
+            delay: None,
         }
     }
 
     pub fn body(mut self, body: Body) -> Self {
         self.body = body;
+        self
+    }
+
+    /// Pause for `d` before responding (a slow origin).
+    pub fn delay(mut self, d: std::time::Duration) -> Self {
+        self.delay = Some(d);
         self
     }
 }
@@ -344,6 +357,10 @@ async fn handle(mut stream: tokio::net::TcpStream, state: Arc<OriginState>) {
 
     let range = parse_range(&request);
     let honour_range = range.is_some() && !state.ignore_range.load(Ordering::SeqCst);
+
+    if let Some(d) = response.delay {
+        tokio::time::sleep(d).await;
+    }
 
     match response.body {
         Body::Echo => {

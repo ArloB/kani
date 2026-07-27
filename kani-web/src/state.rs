@@ -32,6 +32,7 @@ pub struct AppState {
     pub proxy_throttle: moka::future::Cache<String, Arc<tokio::sync::Mutex<std::time::Instant>>>,
     pub proxy_coalesce: moka::future::Cache<String, Arc<(Bytes, String)>>,
     pub proxy_bandwidth: Arc<DashMap<String, Arc<AtomicU64>>>,
+    pub proxy_config: crate::proxy::ProxyConfig,
     pub boot_id: String,
     /// Set to `true` by the restart handler; causes `main` to exit with code 42
     /// instead of 0, so an entrypoint wrapper can restart the process.
@@ -71,6 +72,7 @@ impl AppState {
                 .weigher(|_k, v: &Arc<(Bytes, String)>| v.0.len().min(u32::MAX as usize) as u32)
                 .build(),
             proxy_bandwidth: Arc::new(DashMap::new()),
+            proxy_config: crate::proxy::ProxyConfig::default(),
             boot_id: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -191,6 +193,7 @@ impl AppState {
             proxy_throttle: moka::future::Cache::builder().max_capacity(100).build(),
             proxy_coalesce: moka::future::Cache::builder().max_capacity(100).build(),
             proxy_bandwidth: Arc::new(DashMap::new()),
+            proxy_config: crate::proxy::ProxyConfig::default(),
             boot_id: "test-boot-id".to_string(),
             restart_requested: Arc::new(AtomicBool::new(false)),
             log_handle,
