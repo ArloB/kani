@@ -495,9 +495,11 @@ impl SmartClient {
             if expired {
                 tracing::debug!("Credentials for {} have expired, dropping", domain);
                 drop(creds_map);
-                let mut fresh = (**self.credentials.load()).clone();
-                fresh.remove(&domain);
-                self.credentials.store(Arc::new(fresh));
+                self.credentials.rcu(|old| {
+                    let mut m = (**old).clone();
+                    m.remove(&domain);
+                    Arc::new(m)
+                });
             } else {
                 if let Ok(val) = rquest::header::HeaderValue::from_str(&creds.cookies) {
                     request.headers_mut().insert(rquest::header::COOKIE, val);
@@ -668,14 +670,17 @@ impl SmartClient {
                     .and_then(|u| u.host_str().map(base_domain));
 
                 if let Some(ref d) = cf_domain {
-                    let mut creds = (**self.credentials.load()).clone();
-                    if creds.remove(d).is_some() {
+                    if self.credentials.load().contains_key(d) {
                         tracing::info!(
                             "Stored credentials for {} returned 403, clearing and re-solving",
                             d
                         );
-                        self.credentials.store(Arc::new(creds));
                     }
+                    self.credentials.rcu(|old| {
+                        let mut m = (**old).clone();
+                        m.remove(d);
+                        Arc::new(m)
+                    });
                 }
 
                 let req_headers = request_clone_for_retry.as_ref().map(|r| r.headers());
@@ -754,9 +759,11 @@ impl SmartClient {
                 if expired {
                     tracing::debug!("Credentials for {} have expired, clearing", domain);
                     drop(creds_map);
-                    let mut fresh = (**self.credentials.load()).clone();
-                    fresh.remove(&domain);
-                    self.credentials.store(Arc::new(fresh));
+                    self.credentials.rcu(|old| {
+                        let mut m = (**old).clone();
+                        m.remove(&domain);
+                        Arc::new(m)
+                    });
                 } else {
                     if let Ok(val) = rquest::header::HeaderValue::from_str(&creds.cookies) {
                         solver_headers.insert(rquest::header::COOKIE, val);
@@ -930,14 +937,17 @@ impl SmartClient {
                     .and_then(|u| u.host_str().map(base_domain));
 
                 if let Some(domain) = domain {
-                    let mut creds = (**self.credentials.load()).clone();
-                    if creds.remove(&domain).is_some() {
+                    if self.credentials.load().contains_key(&domain) {
                         tracing::info!(
                             "Stored credentials for {} returned 403, clearing and re-solving",
                             domain
                         );
-                        self.credentials.store(Arc::new(creds));
                     }
+                    self.credentials.rcu(|old| {
+                        let mut m = (**old).clone();
+                        m.remove(&domain);
+                        Arc::new(m)
+                    });
                 }
 
                 let (cookies, ua) = self
@@ -1252,17 +1262,19 @@ impl SmartClient {
             }
         };
 
-        let mut creds = (**self.credentials.load()).clone();
-        creds.insert(
-            domain,
-            CachedCredentials {
-                cookies: cookies.to_string(),
-                user_agent: Some(user_agent.to_string()),
-                stored_at: Some(std::time::Instant::now()),
-                challenge_url: Some(url.to_string()),
-            },
-        );
-        self.credentials.store(Arc::new(creds));
+        let entry = CachedCredentials {
+            cookies: cookies.to_string(),
+            user_agent: Some(user_agent.to_string()),
+            stored_at: Some(std::time::Instant::now()),
+            challenge_url: Some(url.to_string()),
+        };
+        // rcu (not load→clone→store): a blind store would clobber a concurrent
+        // update for a different domain. The retry-loop CAS preserves both.
+        self.credentials.rcu(|old| {
+            let mut m = (**old).clone();
+            m.insert(domain.clone(), entry.clone());
+            Arc::new(m)
+        });
     }
 
     pub async fn refresh_expiring_credentials(&self) {
