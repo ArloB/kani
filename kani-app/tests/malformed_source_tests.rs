@@ -228,3 +228,126 @@ async fn a_row_missing_its_id_is_reported_not_dropped() {
         res.map(|l| l.manga.len())
     );
 }
+
+// ── JSON + chapter_list variants for the remaining Group F cases ──────────────
+
+fn json_field(name: &str, ptr: &str) -> ValidatedField {
+    ValidatedField {
+        name: name.to_string(),
+        source: FieldSource::Blueprint(Expr::SelfRef.ptr(ptr)),
+        optional: false,
+    }
+}
+
+fn json_endpoint(route: &str, container: &str, fields: Vec<ValidatedField>) -> ValidatedEndpoint {
+    ValidatedEndpoint {
+        route: route.into(),
+        response_type: ResponseType::Json,
+        container: container.into(),
+        fields,
+        ..popular_endpoint()
+    }
+}
+
+/// A source whose popular endpoint parses JSON (`/items` array of `{id,title}`).
+fn json_source(origin: &TestOrigin) -> SourceBackend {
+    let config = ValidatedExtension {
+        id: "malformed".into(),
+        name: "Malformed".into(),
+        version: "1.0.0".into(),
+        base_url: origin.base(),
+        language: "en".into(),
+        unrestricted_http: true,
+        popular: Some(ValidatedPopular::Full(Box::new(json_endpoint(
+            "/popular",
+            "/items",
+            vec![json_field("id", "/id"), json_field("title", "/title")],
+        )))),
+        ..Default::default()
+    };
+    SourceBackend::Yaml(Box::new(YamlSource::new(
+        Arc::new(config),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        "test:".into(),
+        HashMap::new(),
+        true,
+    )))
+}
+
+/// A source with a JSON chapter_list endpoint (`/chapters` array of `{id,number}`).
+fn chapter_source(origin: &TestOrigin) -> SourceBackend {
+    let config = ValidatedExtension {
+        id: "malformed".into(),
+        name: "Malformed".into(),
+        version: "1.0.0".into(),
+        base_url: origin.base(),
+        language: "en".into(),
+        unrestricted_http: true,
+        chapter_list: Some(json_endpoint(
+            "/chapters",
+            "/chapters",
+            vec![json_field("id", "/id"), json_field("number", "/number")],
+        )),
+        ..Default::default()
+    };
+    SourceBackend::Yaml(Box::new(YamlSource::new(
+        Arc::new(config),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        "test:".into(),
+        HashMap::new(),
+        true,
+    )))
+}
+
+// F9 — a non-JSON body from a JSON endpoint is a parse error, not an empty list.
+#[tokio::test]
+async fn a_non_json_body_from_a_json_endpoint_is_an_error() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/popular",
+        Response::html("<html><body>definitely not json</body></html>"),
+    );
+    let backend = json_source(&origin);
+
+    let res = backend.get_popular_manga(1, 50, &[]).await;
+    assert!(
+        res.is_err(),
+        "HTML from a JSON endpoint must be a parse error"
+    );
+}
+
+// F1 — a container that is an object where a row array is expected is an error,
+// not a single bogus row.
+#[tokio::test]
+async fn a_container_object_where_an_array_is_expected_is_an_error() {
+    let origin = TestOrigin::start().await;
+    origin.set("/popular", Response::json(r#"{"items": {"a": 1}}"#));
+    let backend = json_source(&origin);
+
+    let res = backend.get_popular_manga(1, 50, &[]).await;
+    assert!(
+        res.is_err(),
+        "an object where the row array should be must error, got {:?}",
+        res.map(|l| l.manga.len())
+    );
+}
+
+// F3 — a chapter number encoded as a JSON string is parsed, not silently zeroed.
+#[tokio::test]
+async fn a_string_encoded_chapter_number_is_parsed_not_zeroed() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/chapters",
+        Response::json(r#"{"chapters": [{"id": "c1", "number": "12.5"}]}"#),
+    );
+    let backend = chapter_source(&origin);
+
+    let list = backend.get_chapter_list("m1", 1, None, None).await.unwrap();
+    assert_eq!(list.chapters.len(), 1);
+    assert_eq!(
+        list.chapters[0].number, 12.5,
+        "a string-encoded number must parse, not become 0.0"
+    );
+}

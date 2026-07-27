@@ -258,7 +258,15 @@ pub fn unpack_chapter_list<T: JsonRows>(
             let row = result.rows_get(i).ok()?;
             Some(wit_types::ChapterInfo {
                 id: arg_or_field_req(&row, fn_args, "id").ok()?,
-                number: row.get_f64("/number").unwrap_or(0.0),
+                // Accept a number encoded as a JSON string ("12.5") — some sources
+                // emit it that way — rather than silently zeroing it.
+                number: row
+                    .get_f64("/number")
+                    .or_else(|| {
+                        row.get_str("/number")
+                            .and_then(|s| s.trim().parse::<f64>().ok())
+                    })
+                    .unwrap_or(0.0),
                 title: arg_or_field(&row, fn_args, "title"),
                 volume: row.get_i64("/volume").map(|v| v as i32),
                 scanlator: arg_or_field(&row, fn_args, "scanlator"),
