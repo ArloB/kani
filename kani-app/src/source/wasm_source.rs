@@ -85,10 +85,16 @@ impl WasmSource {
     }
 
     pub async fn lease_instance(&self) -> Result<OwnedSourceInstance> {
-        self.lease_count.fetch_add(1, Ordering::AcqRel);
+        // SeqCst (not AcqRel/Acquire) on this increment-then-check pair and its
+        // mirror in `drain`: the two form a StoreLoad (bump lease_count, read
+        // draining) vs (set draining, read lease_count). Acquire/Release permits
+        // both sides to miss each other — a lease could start against a backend
+        // `drain` already believes is idle. Only a single total order (SeqCst)
+        // guarantees at least one side observes the other.
+        self.lease_count.fetch_add(1, Ordering::SeqCst);
 
-        if self.draining.load(Ordering::Acquire) {
-            self.lease_count.fetch_sub(1, Ordering::AcqRel);
+        if self.draining.load(Ordering::SeqCst) {
+            self.lease_count.fetch_sub(1, Ordering::SeqCst);
             return Err(kani_core::error::Error::Extension(
                 kani_shared::extension::ExtensionError::source_updating(),
             ));
@@ -157,10 +163,10 @@ impl WasmSource {
     }
 
     pub async fn drain(&self, timeout: std::time::Duration) {
-        self.draining.store(true, Ordering::Release);
+        self.draining.store(true, Ordering::SeqCst);
         let deadline = std::time::Instant::now() + timeout;
         loop {
-            if self.lease_count.load(Ordering::Acquire) == 0 {
+            if self.lease_count.load(Ordering::SeqCst) == 0 {
                 break;
             }
             if std::time::Instant::now() >= deadline {
@@ -216,7 +222,9 @@ struct LeaseGuard(Arc<AtomicUsize>);
 
 impl Drop for LeaseGuard {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
+        // SeqCst so `drain`'s lease_count load is guaranteed to observe the
+        // release of a lease that finished concurrently with the drain.
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
