@@ -246,6 +246,14 @@ impl HostState {
         })
     }
 
+    /// Replace the evaluator budget with one built from custom limits. Test seam
+    /// for tripping a cap (list size, string length, iterations, depth) without a
+    /// giant fixture; production keeps [`crate::evaluator::EvalLimits::default`].
+    pub fn set_eval_limits(&mut self, limits: crate::evaluator::EvalLimits) {
+        self.eval_budget =
+            std::sync::Arc::new(crate::evaluator::shared::EvalBudget::with_limits(limits));
+    }
+
     pub fn clear_all(&mut self) {
         self.html_docs.clear();
         self.html_lists.clear();

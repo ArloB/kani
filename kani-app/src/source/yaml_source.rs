@@ -21,6 +21,7 @@ pub struct YamlSource {
     browser_scripts: Arc<kani_core::scripting::BrowserScriptRegistry>,
     browser_enabled: Arc<std::sync::atomic::AtomicBool>,
     max_hook_requests: u32,
+    eval_limits: kani_core::evaluator::EvalLimits,
 }
 
 impl YamlSource {
@@ -88,7 +89,14 @@ impl YamlSource {
             browser_scripts,
             browser_enabled: Arc::new(std::sync::atomic::AtomicBool::new(browser_enabled)),
             max_hook_requests,
+            eval_limits: kani_core::evaluator::EvalLimits::default(),
         }
+    }
+
+    /// Override the evaluator limits (test seam — trip a cap without a giant fixture).
+    pub fn with_eval_limits(mut self, limits: kani_core::evaluator::EvalLimits) -> Self {
+        self.eval_limits = limits;
+        self
     }
 
     pub fn update_preferences(&self, prefs: HashMap<String, String>) {
@@ -124,6 +132,7 @@ impl YamlSource {
         state.pure_fn_registry = self.pure_fn_registry.clone();
         state.browser_scripts = Some(Arc::clone(&self.browser_scripts));
         state.max_hook_requests = self.max_hook_requests;
+        state.set_eval_limits(self.eval_limits);
         Ok(state)
     }
 
@@ -785,6 +794,7 @@ impl YamlSource {
             browser_scripts: Arc::new(kani_core::scripting::BrowserScriptRegistry::default()),
             browser_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             max_hook_requests: 3,
+            eval_limits: kani_core::evaluator::EvalLimits::default(),
         }
     }
 }

@@ -151,6 +151,13 @@ async fn extract_html_with_doc(
 
     let container_elements = select_all(&doc, &blueprint.container, &state.selector_cache)?;
 
+    // A hostile source can serve an enormous listing; cap the container row count
+    // at the evaluator's list-size limit rather than extracting all of it.
+    let max_rows = state.eval_budget.limits.max_list_size;
+    if container_elements.len() > max_rows {
+        return Err(format!("limit:max_list_size:{max_rows}"));
+    }
+
     let mut scalars = serde_json::Map::new();
     for scalar in &blueprint.scalars {
         let val = eval_html_field(state, &scalar.expr, &doc, None, env.clone()).await?;
