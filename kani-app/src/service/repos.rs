@@ -495,6 +495,14 @@ impl AppService {
         }
 
         let artifact_url = resolve_url(&repo.url, &entry.url);
+        // The repo is the trust anchor; its artifacts must live on its own host.
+        // A cross-host artifact URL is an SSRF/redirection vector (and would slip
+        // an IP-literal past the DNS-only resolver), so refuse it before dialling.
+        if url_authority(&artifact_url) != url_authority(&repo.url) {
+            return Err(ServiceError::Validation(format!(
+                "Extension artifact host does not match the repository host: {artifact_url}"
+            )));
+        }
         let artifact_bytes = self
             .proxy_client
             .safe_get(&artifact_url, None)
@@ -846,6 +854,14 @@ fn parse_index_cache(repo: &RepoRow) -> Result<RepoIndex> {
     })?;
     serde_json::from_str(json)
         .map_err(|e| ServiceError::Internal(format!("Failed to parse repo index: {e}")))
+}
+
+/// The `host[:port]` authority of an absolute URL, used to keep an extension
+/// artifact on the same host as the repository that vouches for it.
+fn url_authority(u: &str) -> Option<&str> {
+    let rest = u.split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    Some(authority.rsplit('@').next().unwrap_or(authority))
 }
 
 fn resolve_url(base: &str, artifact_url: &str) -> String {

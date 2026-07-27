@@ -98,6 +98,34 @@ async fn an_artifact_whose_hash_does_not_match_is_rejected() {
     }
 }
 
+// E3 — an index entry whose artifact URL points at a different host than the
+// repository is refused before any request is made.
+#[tokio::test]
+async fn an_index_entry_url_cannot_point_at_another_host() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    // Repo lives on the loopback origin; the entry points the artifact at a
+    // different (TEST-NET) host. The refusal is pre-fetch, so it is instant even
+    // though 192.0.2.0/24 is unroutable.
+    let repo_id = seed_repo_with_entry(
+        &svc,
+        &origin.base(),
+        "http://192.0.2.1/evil.wasm",
+        "deadbeef",
+    )
+    .await;
+
+    let res = svc.install_source_from_repo(repo_id, "ext1", None).await;
+
+    match res {
+        Err(ServiceError::Validation(msg)) => assert!(
+            msg.contains("does not match the repository host"),
+            "cross-host artifact is refused for the right reason, got: {msg}"
+        ),
+        other => panic!("expected a host-mismatch validation error, got {other:?}"),
+    }
+}
+
 // E5 — redirect bounding during the artifact download is covered by the SmartClient
 // unit test `safe_get_too_many_redirects_returns_error` (install just calls
 // `safe_get`). A TestOrigin-based duplicate here hit a harness quirk (a redirect

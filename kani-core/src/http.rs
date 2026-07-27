@@ -20,6 +20,7 @@ const CIRCUIT_COOLDOWN_SECS: u64 = 30;
 /// slightly larger ceiling so a legitimately slow solve completes but an
 /// unreachable solver cannot hang the request indefinitely.
 const SOLVER_TIMEOUT_SECS: u64 = 65;
+const REQUEST_TIMEOUT_SECS: u64 = 35;
 
 /// Timing knobs for the retry/circuit/solver machinery. Production uses
 /// [`Timings::default`]; tests override them via [`SmartClient::with_timings`]
@@ -31,6 +32,10 @@ pub struct Timings {
     pub circuit_cooldown: std::time::Duration,
     pub solver_timeout: std::time::Duration,
     pub credential_ttl: std::time::Duration,
+    /// Per-attempt ceiling on a single request/response. Applied on top of the
+    /// client's own transport timeout so tests can bound an in-flight call
+    /// (e.g. against a stalling origin) without waiting out the 35 s default.
+    pub request_timeout: std::time::Duration,
 }
 
 impl Default for Timings {
@@ -41,6 +46,7 @@ impl Default for Timings {
             circuit_cooldown: std::time::Duration::from_secs(CIRCUIT_COOLDOWN_SECS),
             solver_timeout: std::time::Duration::from_secs(SOLVER_TIMEOUT_SECS),
             credential_ttl: std::time::Duration::from_secs(CREDENTIAL_TTL_SECS),
+            request_timeout: std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
         }
     }
 }
@@ -534,14 +540,21 @@ impl SmartClient {
         loop {
             let request_clone_for_retry = current_request.try_clone();
 
-            let resp = match self.client.execute(current_request).await {
-                Ok(r) => r,
-                Err(e) if attempt < MAX_RETRIES && request_clone_for_retry.is_some() => {
+            let executed = tokio::time::timeout(
+                self.timings.request_timeout,
+                self.client.execute(current_request),
+            )
+            .await;
+            let resp = match executed {
+                Ok(Ok(r)) => r,
+                // A transport error or an elapsed per-attempt timeout: retry if we can.
+                Ok(Err(_)) | Err(_)
+                    if attempt < MAX_RETRIES && request_clone_for_retry.is_some() =>
+                {
                     let delay = compute_delay(None, attempt, self.timings.retry_base_delay)
                         + jitter(self.timings.retry_jitter);
                     tracing::warn!(
-                        "HTTP request failed ({}), retrying in {:?} (attempt {}/{})",
-                        e,
+                        "HTTP request failed/timed out, retrying in {:?} (attempt {}/{})",
                         delay,
                         attempt + 1,
                         MAX_RETRIES,
@@ -553,7 +566,12 @@ impl SmartClient {
                     attempt += 1;
                     continue;
                 }
-                Err(e) => return Err(e.into()),
+                Ok(Err(e)) => return Err(e.into()),
+                Err(_) => {
+                    return Err(crate::error::Error::Other(
+                        "HTTP request exceeded the per-attempt timeout".into(),
+                    ));
+                }
             };
             let status = resp.status();
 
@@ -811,14 +829,15 @@ impl SmartClient {
 
             let current_headers = req.headers().clone();
 
-            let resp = match self.client.execute(req).await {
-                Ok(r) => r,
-                Err(e) if retry_count < MAX_RETRIES => {
+            let executed =
+                tokio::time::timeout(self.timings.request_timeout, self.client.execute(req)).await;
+            let resp = match executed {
+                Ok(Ok(r)) => r,
+                Ok(Err(_)) | Err(_) if retry_count < MAX_RETRIES => {
                     let delay = compute_delay(None, retry_count, self.timings.retry_base_delay)
                         + jitter(self.timings.retry_jitter);
                     tracing::warn!(
-                        "safe_get network error ({}), retrying in {:?} (attempt {}/{})",
-                        e,
+                        "safe_get network error/timeout, retrying in {:?} (attempt {}/{})",
                         delay,
                         retry_count + 1,
                         MAX_RETRIES,
@@ -828,7 +847,12 @@ impl SmartClient {
                     tokio::time::sleep(delay).await;
                     continue;
                 }
-                Err(e) => return Err(e.into()),
+                Ok(Err(e)) => return Err(e.into()),
+                Err(_) => {
+                    return Err(crate::error::Error::Other(
+                        "safe_get exceeded the per-attempt timeout".into(),
+                    ));
+                }
             };
 
             if is_retryable(resp.status()) && retry_count < MAX_RETRIES {
