@@ -83,8 +83,8 @@ impl WasmSource {
     }
 
     pub async fn lease_instance(&self) -> Result<OwnedSourceInstance> {
-        // The lease/drain StoreLoad race lives in LeaseCoordinator (SeqCst,
-        // loom-checked in the kani-lease crate).
+        // Lease/drain coordination is a single-word CAS in the kani-lease crate
+        // (loom-verified). try_acquire fails while the source is draining.
         if !self.lease.try_acquire() {
             return Err(kani_core::error::Error::Extension(
                 kani_shared::extension::ExtensionError::source_updating(),
