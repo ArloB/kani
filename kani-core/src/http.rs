@@ -1885,6 +1885,72 @@ mod tests {
         );
     }
 
+    // C12 — a relative Location (`../dest`) resolves against the request URL, not
+    // as a bare path off the origin root.
+    #[tokio::test]
+    async fn a_relative_redirect_resolves_against_the_current_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/a/redir"))
+            .respond_with(ResponseTemplate::new(301).insert_header("location", "../dest"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/dest"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("final"))
+            .mount(&server)
+            .await;
+
+        let client = SmartClient::new_for_test().unwrap();
+        let resp = client
+            .safe_get(&format!("{}/a/redir", server.uri()), None)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), rquest::StatusCode::OK);
+        assert_eq!(
+            resp.url().path(),
+            "/dest",
+            "`../dest` joined against `/a/redir`"
+        );
+    }
+
+    // C13 — a protocol-relative Location (`//host/dest`) inherits the current
+    // scheme rather than being rejected as schemeless.
+    #[tokio::test]
+    async fn a_protocol_relative_redirect_inherits_the_scheme() {
+        let server = MockServer::start().await;
+        let authority = server
+            .uri()
+            .strip_prefix("http://")
+            .expect("wiremock serves over http")
+            .to_string();
+        Mock::given(method("GET"))
+            .and(path("/redir"))
+            .respond_with(
+                ResponseTemplate::new(301)
+                    .insert_header("location", format!("//{authority}/dest").as_str()),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/dest"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("final"))
+            .mount(&server)
+            .await;
+
+        let client = SmartClient::new_for_test().unwrap();
+        let resp = client
+            .safe_get(&format!("{}/redir", server.uri()), None)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), rquest::StatusCode::OK);
+        assert_eq!(
+            resp.url().scheme(),
+            "http",
+            "the protocol-relative Location inherited the http scheme"
+        );
+    }
+
     #[tokio::test]
     async fn safe_get_redirect_to_non_http_scheme_returns_error() {
         let server = MockServer::start().await;

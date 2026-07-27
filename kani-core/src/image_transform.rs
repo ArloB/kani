@@ -142,6 +142,67 @@ mod tests {
         assert_eq!(parse_scramble_seed(""), None);
     }
 
+    fn header_map(name: &str, value: &str) -> rquest::header::HeaderMap {
+        let mut h = rquest::header::HeaderMap::new();
+        h.insert(
+            rquest::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+            rquest::header::HeaderValue::from_str(value).unwrap(),
+        );
+        h
+    }
+
+    // C14 — a page whose hint defers to the header resolves its seed from
+    // `x-scramble-seed`, and the inline-seed hint resolves from the hint itself.
+    #[test]
+    fn a_scramble_seed_header_drives_the_descramble() {
+        let headers = header_map("x-scramble-seed", "12345");
+        assert_eq!(
+            resolve_scramble_seed("lcg-tile-5x5-from-header", &headers),
+            Some(12345),
+            "the header value becomes the descramble seed"
+        );
+        // The inline form carries the seed in the hint, no header needed.
+        assert_eq!(
+            resolve_scramble_seed("lcg-tile-5x5:777", &rquest::header::HeaderMap::new()),
+            Some(777)
+        );
+    }
+
+    // C15 — a missing or malformed seed resolves to None, so the raw image is
+    // stored rather than mangled by a bogus permutation.
+    #[test]
+    fn a_missing_or_malformed_scramble_seed_stores_the_raw_image() {
+        // Header absent entirely.
+        assert_eq!(
+            resolve_scramble_seed(
+                "lcg-tile-5x5-from-header",
+                &rquest::header::HeaderMap::new()
+            ),
+            None
+        );
+        // Header present but not a number.
+        assert_eq!(
+            resolve_scramble_seed(
+                "lcg-tile-5x5-from-header",
+                &header_map("x-scramble-seed", "abc")
+            ),
+            None
+        );
+        // Header present but zero (the sentinel for "no scramble").
+        assert_eq!(
+            resolve_scramble_seed(
+                "lcg-tile-5x5-from-header",
+                &header_map("x-scramble-seed", "0")
+            ),
+            None
+        );
+        // A hint that names no transform never scrambles, header or not.
+        assert_eq!(
+            resolve_scramble_seed("none", &header_map("x-scramble-seed", "12345")),
+            None
+        );
+    }
+
     #[test]
     fn build_order_is_permutation() {
         let order = build_order(99999);
