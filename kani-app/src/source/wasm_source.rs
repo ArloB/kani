@@ -1,6 +1,6 @@
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicBool, Ordering},
 };
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use wasmtime::Store;
@@ -25,8 +25,7 @@ pub struct WasmSource {
     pure_fn_registry: Option<Arc<kani_core::scripting::PureFunctionRegistry>>,
     hook_registry: Option<Arc<kani_core::scripting::HookRegistry>>,
     max_hook_requests: u32,
-    draining: AtomicBool,
-    lease_count: Arc<AtomicUsize>,
+    lease: Arc<kani_lease::LeaseCoordinator>,
 }
 
 impl WasmSource {
@@ -61,8 +60,7 @@ impl WasmSource {
             pure_fn_registry,
             hook_registry,
             max_hook_requests,
-            draining: AtomicBool::new(false),
-            lease_count: Arc::new(AtomicUsize::new(0)),
+            lease: Arc::new(kani_lease::LeaseCoordinator::new()),
         }
     }
 
@@ -85,22 +83,17 @@ impl WasmSource {
     }
 
     pub async fn lease_instance(&self) -> Result<OwnedSourceInstance> {
-        // SeqCst (not AcqRel/Acquire) on this increment-then-check pair and its
-        // mirror in `drain`: the two form a StoreLoad (bump lease_count, read
-        // draining) vs (set draining, read lease_count). Acquire/Release permits
-        // both sides to miss each other — a lease could start against a backend
-        // `drain` already believes is idle. Only a single total order (SeqCst)
-        // guarantees at least one side observes the other.
-        self.lease_count.fetch_add(1, Ordering::SeqCst);
-
-        if self.draining.load(Ordering::SeqCst) {
-            self.lease_count.fetch_sub(1, Ordering::SeqCst);
+        // The lease/drain StoreLoad race lives in LeaseCoordinator (SeqCst,
+        // loom-checked in the kani-lease crate).
+        if !self.lease.try_acquire() {
             return Err(kani_core::error::Error::Extension(
                 kani_shared::extension::ExtensionError::source_updating(),
             ));
         }
 
-        let lease_guard = LeaseGuard(Arc::clone(&self.lease_count));
+        // Created immediately after a successful acquire so any `?` below releases
+        // the lease on the way out.
+        let lease_guard = LeaseGuard(Arc::clone(&self.lease));
 
         let permit = self
             .semaphore
@@ -163,10 +156,10 @@ impl WasmSource {
     }
 
     pub async fn drain(&self, timeout: std::time::Duration) {
-        self.draining.store(true, Ordering::SeqCst);
+        self.lease.start_drain();
         let deadline = std::time::Instant::now() + timeout;
         loop {
-            if self.lease_count.load(Ordering::SeqCst) == 0 {
+            if self.lease.active() == 0 {
                 break;
             }
             if std::time::Instant::now() >= deadline {
@@ -218,13 +211,11 @@ impl WasmSource {
     }
 }
 
-struct LeaseGuard(Arc<AtomicUsize>);
+struct LeaseGuard(Arc<kani_lease::LeaseCoordinator>);
 
 impl Drop for LeaseGuard {
     fn drop(&mut self) {
-        // SeqCst so `drain`'s lease_count load is guaranteed to observe the
-        // release of a lease that finished concurrently with the drain.
-        self.0.fetch_sub(1, Ordering::SeqCst);
+        self.0.release();
     }
 }
 
@@ -335,30 +326,31 @@ impl OwnedSourceInstance {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::LeaseGuard;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use kani_lease::LeaseCoordinator;
+    use std::sync::Arc;
 
     #[test]
-    fn lease_guard_decrements_on_drop() {
-        let count = Arc::new(AtomicUsize::new(1));
+    fn a_lease_guard_releases_on_drop() {
+        let coord = Arc::new(LeaseCoordinator::new());
+        assert!(coord.try_acquire());
         {
-            let _guard = LeaseGuard(Arc::clone(&count));
-            assert_eq!(count.load(Ordering::SeqCst), 1);
+            let _guard = LeaseGuard(Arc::clone(&coord));
+            assert_eq!(coord.active(), 1);
         }
-        assert_eq!(count.load(Ordering::SeqCst), 0);
+        assert_eq!(coord.active(), 0);
     }
 
     #[test]
-    fn multiple_lease_guards_decrement_independently() {
-        let count = Arc::new(AtomicUsize::new(2));
-        let g1 = LeaseGuard(Arc::clone(&count));
-        let g2 = LeaseGuard(Arc::clone(&count));
-        assert_eq!(count.load(Ordering::SeqCst), 2);
-        drop(g1);
-        assert_eq!(count.load(Ordering::SeqCst), 1);
-        drop(g2);
-        assert_eq!(count.load(Ordering::SeqCst), 0);
+    fn a_lease_is_refused_once_draining() {
+        let coord = LeaseCoordinator::new();
+        assert!(coord.try_acquire());
+        coord.release();
+        coord.start_drain();
+        assert!(!coord.try_acquire(), "no lease after draining begins");
+        assert_eq!(
+            coord.active(),
+            0,
+            "a refused lease leaves the count at zero"
+        );
     }
 }

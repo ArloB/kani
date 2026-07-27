@@ -11,6 +11,7 @@ unwrap_used = { level = "deny", priority = 1 }
 kani-core   = { path = "../kani-core" }
 kani-shared = { path = "../kani-shared", features = ["ssr"] }
 kani-yaml   = { path = "../kani-yaml" }
+kani-lease  = { path = "../kani-lease" }
 wasmtime    = { version = "46.0.1", features = ["async", "component-model"] }
 
 serde.workspace = true
@@ -75,4 +76,7 @@ ed25519-dalek.workspace = true
 [build-dependencies]
 prost-build = "0.14.3"
 protox = "0.9.1"
+
+# `loom` model-checks the lease/drain coordination in src/source/lease.rs.
+# Only pulled in under `--cfg loom`; run: RUSTFLAGS="--cfg loom" cargo test -p kani-app --lib source::lease
 

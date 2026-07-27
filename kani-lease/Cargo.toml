@@ -1,0 +1,14 @@
+[package]
+name = "kani-lease"
+version = "0.9.0"
+edition = "2024"
+
+[dependencies]
+
+# `loom` model-checks the lease/drain coordination. Only pulled in under
+# `--cfg loom`; run: RUSTFLAGS="--cfg loom" cargo test -p kani-lease
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
