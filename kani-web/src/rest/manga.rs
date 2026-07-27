@@ -40,6 +40,10 @@ pub fn router() -> Router<AppState> {
         .route("/manga/{id}/refresh", post(refresh_manga))
         .route("/manga/{id}/scan", post(scan_manga))
         .route(
+            "/manga/{id}/dismiss-suppressed",
+            post(dismiss_suppressed_chapters),
+        )
+        .route(
             "/manga/{id}/toggle_auto_download",
             post(toggle_auto_download),
         )
@@ -281,6 +285,7 @@ pub(crate) async fn get_local_manga_details(
         "upgrade_auto_replace":        d.manga.upgrade_auto_replace,
         "notes":                       d.manga.notes,
         "cover_overridden":            d.manga.cover_overridden,
+        "suppressed_chapter_count":    d.manga.suppressed_chapter_count,
         "local_name":                  d.manga.local_name,
         "local_description":           d.manga.local_description,
         "local_status":                d.manga.local_status,
@@ -1150,5 +1155,14 @@ pub(crate) async fn dismiss_chapter_upgrade(
     Path(chapter_id): Path<ChapterId>,
 ) -> Result<impl IntoResponse, AppError> {
     state.service.dismiss_upgrade(chapter_id).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+pub(crate) async fn dismiss_suppressed_chapters(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(state): State<AppState>,
+    Path(manga_id): Path<MangaId>,
+) -> Result<impl IntoResponse, AppError> {
+    state.service.dismiss_suppressed_chapters(manga_id).await?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }

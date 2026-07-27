@@ -663,6 +663,11 @@ export async function scanManga(id) {
   return _req('POST', `/manga/${id}/scan`);
 }
 
+/** @param {number} id */
+export async function dismissSuppressedChapters(id) {
+  return _req('POST', `/manga/${id}/dismiss-suppressed`);
+}
+
 /** @returns {Promise<{ queued: number }>} */
 export async function scanAllLibrary() {
   return _req('POST', '/library/scan-all');

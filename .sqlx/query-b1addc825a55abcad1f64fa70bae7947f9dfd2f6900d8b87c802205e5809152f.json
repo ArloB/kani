@@ -117,6 +117,11 @@
         "name": "upgrade_auto_replace",
         "ordinal": 22,
         "type_info": "Bool"
+      },
+      {
+        "name": "suppressed_chapter_count",
+        "ordinal": 23,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -145,6 +150,7 @@
       false,
       true,
       true,
+      false,
       false
     ]
   },

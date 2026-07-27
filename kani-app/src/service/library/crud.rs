@@ -30,6 +30,19 @@ impl AppService {
             .ok_or_else(|| ServiceError::NotFound(format!("Manga {id} not found")))
     }
 
+    /// Clears the "new chapters were filtered out by your rules" signal that
+    /// drives the dismissable banner on the manga-details page.
+    pub async fn dismiss_suppressed_chapters(&self, id: MangaId) -> Result<()> {
+        sqlx::query!(
+            "UPDATE manga SET suppressed_chapter_count = 0 WHERE id = ?",
+            id
+        )
+        .execute(&self.db)
+        .await?;
+        self.invalidate_library();
+        Ok(())
+    }
+
     /// Returns one page (20 rows) of the library ordered by id ASC (order=0) or DESC (order=1).
     pub async fn get_library(&self, page: i32, order: i32) -> Result<Vec<crate::models::Manga>> {
         let order_sql = if order == 1 { "id DESC" } else { "id ASC" };

@@ -302,6 +302,28 @@ async fn download_job_count(svc: &AppService) -> i64 {
         .unwrap()
 }
 
+async fn chapter_ids_of(svc: &AppService, manga_id: MangaId) -> Vec<i64> {
+    sqlx::query_scalar("SELECT id FROM chapters WHERE manga_id = ? ORDER BY id")
+        .bind(manga_id.0)
+        .fetch_all(&svc.db)
+        .await
+        .unwrap()
+}
+
+/// A chapter-download job whose description names exactly this chapter. Matches
+/// on `description` (not `params_json`, which the manager nulls on completion),
+/// so it is race-free against the job actually running.
+async fn has_download_job_for(svc: &AppService, chapter_id: i64) -> bool {
+    let n: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM jobs WHERE job_type = 'chapter_download' AND description LIKE ?",
+    )
+    .bind(format!("Download chapter {chapter_id} (%"))
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+    n >= 1
+}
+
 async fn enable_global_auto_scan(svc: &AppService) {
     svc.settings.write().await.auto_scan = true;
 }
@@ -322,10 +344,14 @@ async fn a_new_chapter_is_enqueued_when_auto_download_is_on() {
 
     svc.run_auto_scan_once().await;
 
-    assert!(
-        download_job_count(&svc).await >= 1,
-        "the new chapters are enqueued for download"
-    );
+    let chapters = chapter_ids_of(&svc, manga_id).await;
+    assert_eq!(chapters.len(), 2, "both chapters were scanned in");
+    for ch in chapters {
+        assert!(
+            has_download_job_for(&svc, ch).await,
+            "chapter {ch} has its own download job enqueued"
+        );
+    }
 }
 
 // B2.2
@@ -377,10 +403,14 @@ async fn category_membership_enables_auto_download() {
 
     svc.run_auto_scan_once().await;
 
-    assert!(
-        download_job_count(&svc).await >= 1,
-        "category membership enables auto-download even with the manga flag off"
-    );
+    let chapters = chapter_ids_of(&svc, manga_id).await;
+    assert!(!chapters.is_empty(), "chapters were scanned in");
+    for ch in chapters {
+        assert!(
+            has_download_job_for(&svc, ch).await,
+            "category membership enqueues chapter {ch} even with the manga flag off"
+        );
+    }
 }
 
 // B2.4
@@ -410,6 +440,54 @@ async fn auto_download_respects_download_rules() {
         download_job_count(&svc).await,
         0,
         "chapters filtered out by rules are not enqueued"
+    );
+    assert_eq!(
+        manga_scalar::<i64>(&svc, manga_id, "suppressed_chapter_count").await,
+        2,
+        "the suppressed-count signal records the filtered chapters"
+    );
+}
+
+// B2.5 — a scan that lets any chapter through clears the suppressed signal.
+#[tokio::test]
+async fn a_passing_scan_clears_the_suppressed_signal() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1/chapters", Response::html(LISTING_2));
+    let svc = test_service().await;
+    let manga_id = wire_source(&svc, &origin).await; // no download rules → all pass
+    enable_global_auto_scan(&svc).await;
+    sqlx::query("UPDATE manga SET auto_download = 1, suppressed_chapter_count = 5 WHERE id = ?")
+        .bind(manga_id.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    svc.run_auto_scan_once().await;
+
+    assert_eq!(
+        manga_scalar::<i64>(&svc, manga_id, "suppressed_chapter_count").await,
+        0,
+        "chapters flowing again clears the signal"
+    );
+}
+
+// B2.5 — dismissal zeroes the signal.
+#[tokio::test]
+async fn dismissing_suppressed_chapters_zeroes_the_signal() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let manga_id = wire_source(&svc, &origin).await;
+    sqlx::query("UPDATE manga SET suppressed_chapter_count = 3 WHERE id = ?")
+        .bind(manga_id.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    svc.dismiss_suppressed_chapters(manga_id).await.unwrap();
+
+    assert_eq!(
+        manga_scalar::<i64>(&svc, manga_id, "suppressed_chapter_count").await,
+        0
     );
 }
 

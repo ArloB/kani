@@ -1230,12 +1230,40 @@ impl AppService {
                                 "All new chapters for manga {} filtered out by download rules",
                                 manga_db_id
                             );
+                            let suppressed = new_ids.len() as i64;
+                            if let Err(e) = sqlx::query!(
+                                "UPDATE manga SET suppressed_chapter_count = ? WHERE id = ?",
+                                suppressed,
+                                manga_db_id
+                            )
+                            .execute(&self.db)
+                            .await
+                            {
+                                tracing::warn!(
+                                    "Failed to record suppressed-chapter count for manga {}: {}",
+                                    manga_db_id,
+                                    e
+                                );
+                            }
                         } else {
                             tracing::info!(
                                 "{} new chapters passed download rules for manga {}",
                                 filtered_ids.len(),
                                 manga_db_id
                             );
+                            if let Err(e) = sqlx::query!(
+                                "UPDATE manga SET suppressed_chapter_count = 0 WHERE id = ?",
+                                manga_db_id
+                            )
+                            .execute(&self.db)
+                            .await
+                            {
+                                tracing::warn!(
+                                    "Failed to clear suppressed-chapter count for manga {}: {}",
+                                    manga_db_id,
+                                    e
+                                );
+                            }
                             let mut join_set = tokio::task::JoinSet::new();
                             for new_id in filtered_ids {
                                 let s = self.clone();

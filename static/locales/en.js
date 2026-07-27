@@ -1229,6 +1229,9 @@ export default {
   'manga.rules.empty': 'No download filters.',
   'manga.rules.add_failed': 'Failed to add rule',
 
+  'manga.suppressed.message':
+    '{count} new chapter(s) matched none of your download rules and were not downloaded.',
+  'manga.suppressed.dismiss': 'Dismiss',
   'manga.details.view_on_source': 'View on source',
   'manga.details.enrich': 'Enrich Metadata…',
   'manga.details.chapter_count': '{count} chapter{s}',

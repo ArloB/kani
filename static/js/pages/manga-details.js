@@ -32,6 +32,7 @@ import { mountVolumesPanel } from '../components/manga-details/volumes-panel.js'
 import { mountCategoryPicker } from '../components/manga-details/category-picker.js';
 import { mountDownloadRulesPanel } from '../components/manga-details/download-rules-panel.js';
 import { mountScanlatorPrefsPanel } from '../components/manga-details/scanlator-prefs-panel.js';
+import { mountSuppressedBanner } from '../components/manga-details/suppressed-banner.js';
 import { mkSectionHeader, mkCard, mkTitledCard, mkRow, mkItem } from '../components/manga-details/_shared.js';
 import { subscribeJob } from '../sse.js';
 import { t } from '../i18n.js';
@@ -68,6 +69,7 @@ let _mangaData = /** @type {any} */ (null);
 let _scanlatorMode = 'priority';
 let _downloadAllPreferredOnly = true;
 let _upgradeAutoReplace = false;
+let _suppressedCount = 0;
 let _filterDownloaded = false;
 let _filterUnread = false;
 let _filterCached = false;
@@ -183,6 +185,7 @@ export async function init(container, params) {
       _scanlatorMode = res.scanlator_mode ?? 'priority';
       _downloadAllPreferredOnly = res.download_all_preferred_only ?? true;
       _upgradeAutoReplace = res.upgrade_auto_replace ?? false;
+      _suppressedCount = res.suppressed_chapter_count ?? 0;
       if (info) {
         if (res.notes !== undefined) info.notes = res.notes;
         info.cover_overridden   = res.cover_overridden ?? false;
@@ -302,6 +305,10 @@ export async function init(container, params) {
   // with hard vertical seams). The inner div re-centres the title onto the
   // same content grid as the columns below.
   container.insertBefore(hero, wrap);
+
+  if (_isLocal && _dbId && _suppressedCount > 0) {
+    mountSuppressedBanner(wrap, _dbId, _suppressedCount);
+  }
 
   const layout = document.createElement('div');
   layout.className = 'flex flex-col md:flex-row gap-6 md:gap-8 md:items-start manga-hero__body';
