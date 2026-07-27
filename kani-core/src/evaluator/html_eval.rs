@@ -87,9 +87,15 @@ fn insert_field_value(
     field_name: &str,
     optional: bool,
     val: Value,
+    max_string_length: usize,
 ) -> Result<(), String> {
     match val.to_json() {
         Some(v) => {
+            if let serde_json::Value::String(s) = &v
+                && s.len() > max_string_length
+            {
+                return Err(format!("limit:max_string_length:{max_string_length}"));
+            }
             row.insert(field_name.to_string(), v);
             Ok(())
         }
@@ -242,7 +248,13 @@ async fn extract_html_with_doc(
                                 budget,
                             )
                             .await?;
-                            insert_field_value(&mut row, &field.name, field.optional, val)?;
+                            insert_field_value(
+                                &mut row,
+                                &field.name,
+                                field.optional,
+                                val,
+                                state.eval_budget.limits.max_string_length,
+                            )?;
                         }
                     },
                 }
@@ -256,7 +268,13 @@ async fn extract_html_with_doc(
                 env.clone(),
             )
             .await?;
-            insert_field_value(&mut row, &field.name, field.optional, val)?;
+            insert_field_value(
+                &mut row,
+                &field.name,
+                field.optional,
+                val,
+                state.eval_budget.limits.max_string_length,
+            )?;
         }
         results.push(row);
     }
@@ -293,9 +311,13 @@ async fn extract_html_with_doc(
                 Err(e) => Err(e),
             };
             match (outcome, p.on_failure) {
-                (Ok(v), _) => {
-                    insert_field_value(&mut results[p.row_index], &p.field_name, p.optional, v)?
-                }
+                (Ok(v), _) => insert_field_value(
+                    &mut results[p.row_index],
+                    &p.field_name,
+                    p.optional,
+                    v,
+                    state.eval_budget.limits.max_string_length,
+                )?,
                 (Err(_), OnFailurePolicy::Skip) => {
                     results[p.row_index].insert(p.field_name.clone(), serde_json::Value::Null);
                 }
@@ -314,7 +336,13 @@ async fn extract_html_with_doc(
                         budget,
                     )
                     .await?;
-                    insert_field_value(&mut results[p.row_index], &p.field_name, p.optional, val)?
+                    insert_field_value(
+                        &mut results[p.row_index],
+                        &p.field_name,
+                        p.optional,
+                        val,
+                        state.eval_budget.limits.max_string_length,
+                    )?
                 }
             }
         }

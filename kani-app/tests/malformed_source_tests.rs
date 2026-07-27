@@ -158,6 +158,52 @@ async fn a_missing_required_field_is_an_error() {
     );
 }
 
+// F5 — an astral-plane / multibyte id round-trips through extraction unchanged.
+#[tokio::test]
+async fn an_astral_plane_id_round_trips() {
+    let origin = TestOrigin::start().await;
+    let id = "漫画-🎉-𝕏";
+    origin.set(
+        "/popular",
+        Response::html(&format!(
+            r#"<html><body><div class="item" data-id="{id}"><span class="title">T</span></div></body></html>"#
+        )),
+    );
+    let backend = source(&origin, EvalLimits::default());
+
+    let list = backend.get_popular_manga(1, 50, &[]).await.unwrap();
+    assert_eq!(list.manga.len(), 1);
+    assert_eq!(list.manga[0].id, id, "the multibyte id survived extraction");
+}
+
+// F4 — an enormous field value is refused, not extracted whole. (Driven with a
+// small max_string_length via the seam so no multi-MB fixture is needed.)
+#[tokio::test]
+async fn an_enormous_field_value_is_refused() {
+    let origin = TestOrigin::start().await;
+    let big = "x".repeat(200);
+    origin.set(
+        "/popular",
+        Response::html(&format!(
+            r#"<html><body><div class="item" data-id="m1"><span class="title">{big}</span></div></body></html>"#
+        )),
+    );
+    let backend = source(
+        &origin,
+        EvalLimits {
+            max_string_length: 32,
+            ..EvalLimits::default()
+        },
+    );
+
+    let res = backend.get_popular_manga(1, 50, &[]).await;
+    assert!(
+        res.is_err(),
+        "a 200-char field must be refused at a cap of 32, got {:?}",
+        res.map(|l| l.manga.len())
+    );
+}
+
 // F2 — a row missing the required id is reported, not silently dropped from the
 // listing.
 #[tokio::test]
