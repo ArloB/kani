@@ -402,6 +402,7 @@ fn eval_json_expr<'a>(
             env.clone(),
             &|e, env| eval_json_expr(e, doc, current, env, registry, Arc::clone(&budget)),
             registry,
+            budget.limits,
         )
         .await
         {

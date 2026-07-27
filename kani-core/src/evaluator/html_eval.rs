@@ -519,6 +519,7 @@ fn eval_html_expr<'a>(
             env.clone(),
             &|e, env| eval_html_expr(e, doc, current, env, cache, registry, Arc::clone(&budget)),
             registry,
+            budget.limits,
         )
         .await
         {
