@@ -344,7 +344,13 @@ impl SmartClient {
     }
 
     /// Allow egress to private/loopback IP literals (test seam so a `TestOrigin`
-    /// on `127.0.0.1` is reachable; never set in production).
+    /// on `127.0.0.1` is reachable).
+    ///
+    /// Gated to test builds: it exists only under `cfg(test)` or the `test-util`
+    /// feature, neither of which a release binary compiles (dev-deps are excluded
+    /// from a production build). So there is **no way to disable the SSRF guard in
+    /// production** — the field is constructed `false` and has no public mutator.
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_allow_private_egress(mut self, allow: bool) -> Self {
         self.allow_private_egress = allow;
         self
