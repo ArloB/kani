@@ -10,7 +10,7 @@
 //! from silently drifting apart.
 //!
 //! The fixture WASM must be built first:
-//!   cargo run -p kani-cli -- build kani-fixture-source
+//!   cargo run -p kani-cli -- build --dev
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -79,7 +79,7 @@ fn wasm_backend(origin_base: &str) -> Option<SourceBackend> {
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!(
             "\n[SKIP] {} not found — build it with: \
-             cargo run -p kani-cli -- build kani-fixture-source\n",
+             cargo run -p kani-cli -- build --dev\n",
             path.display()
         );
         return None;
@@ -418,5 +418,82 @@ async fn a_preference_change_reaches_a_running_wasm_instance() {
         second.hits("/popular"),
         1,
         "the preference change reached the running instance — the next call hit the new origin"
+    );
+}
+
+// O1 — the compiled guest applies a selected filter. The WASM counterpart to A1,
+// which was a real silent-wrong bug on the interpreted path: a source can render
+// the filter panel, accept the user's selection, and then send an unfiltered
+// query. Only the wire tells you which happened.
+#[tokio::test]
+async fn a_wasm_source_applies_selected_filters() {
+    use kani_shared::types::{ActiveFilter, FilterState};
+
+    let origin = TestOrigin::start().await;
+    origin.set("/search", Response::html(SEARCH_HTML));
+    let wasm = wasm_or_skip!(origin);
+
+    // The guest must advertise the filter before a client could select it.
+    let (filters, _fetched_defs) = wasm.get_filter_list_with_options().await.unwrap();
+    let genre = filters
+        .filters
+        .iter()
+        .find(|f| f.id == "genre")
+        .expect("the fixture declares a genre filter");
+    assert!(
+        genre.options.iter().any(|o| o.value == "romance"),
+        "the declared filter carries selectable options"
+    );
+
+    wasm.search_manga(
+        "anything",
+        1,
+        20,
+        &[ActiveFilter {
+            filter_name: "genre".into(),
+            state: FilterState::Selection {
+                name: "Genre".into(),
+                value: "romance".into(),
+            },
+        }],
+    )
+    .await
+    .unwrap();
+
+    let seen = origin
+        .last_request("/search")
+        .expect("the guest issued the search");
+    assert_eq!(
+        seen.query_param("g").as_deref(),
+        Some("romance"),
+        "the selection the guest was handed must reach the wire. Saw: {:?}",
+        seen.query
+    );
+}
+
+// O9 (partial) — the rate limit the guest declares survives the ABI into host
+// metadata. That is the half this harness can prove: it builds the backend via
+// `loader::build_wasm_source` directly, whereas *enforcement* is registered in
+// the service load path (`service/sources.rs`, which calls
+// `smart_client.register_rate_limit`) — so a limiter assertion here would be
+// testing the harness, not the code. The enforcement half needs a service-level
+// install; SmartClient's limiter itself is already covered by
+// `live_source_tests::a_declared_rate_limit_applies_to_page_fetches_not_only_catalogue_calls`.
+#[tokio::test]
+async fn a_wasm_source_declares_its_rate_limit_in_metadata() {
+    let origin = TestOrigin::start().await;
+    let wasm = wasm_or_skip!(origin);
+
+    let raw = wasm.get_metadata().await.unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let rl = &meta["rate_limit"];
+    assert!(
+        !rl.is_null(),
+        "the guest's declared rate limit must reach the host, got {meta}"
+    );
+    assert_eq!(
+        rl["requests_per_second"].as_f64(),
+        Some(5.0),
+        "and carry the declared value"
     );
 }

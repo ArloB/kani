@@ -1239,6 +1239,76 @@ async fn a_preference_change_propagates_without_a_restart() {
     );
 }
 
+// ── I1. A preference reaches the next request's headers ──────────────────────
+
+// For a YAML source, `$pref:` only resolves inside the extraction DSL — it never
+// touches the plain route/query/header path. Getting a preference onto the wire
+// is therefore a `pre_request` hook's job. This proves the whole chain: the hook
+// reads the pref, sets a header, the header arrives at the origin — and after
+// `update_preferences` the *next* request carries the new value.
+#[tokio::test]
+async fn a_preference_change_reaches_the_next_request() {
+    let origin = TestOrigin::start().await;
+    origin.set("/popular", Response::json(r#"{"results":[]}"#));
+
+    let mut ep = json_endpoint(
+        "/popular",
+        "/results",
+        vec![
+            json_field("id", "/id", false),
+            json_field("title", "/title", false),
+        ],
+    );
+    ep.route = "/popular".into();
+
+    let ext = ValidatedExtension {
+        id: "pref-header-source".into(),
+        name: "Pref Header Source".into(),
+        version: "1.0.0".into(),
+        base_url: origin.base(),
+        language: "en".into(),
+        unrestricted_http: true,
+        popular: Some(kani_yaml::yaml::model::ValidatedPopular::Full(Box::new(ep))),
+        pre_request: Some(
+            r#"req.set_header("X-Kani-Region", ctx.pref("region")); proceed()"#.to_string(),
+        ),
+        ..Default::default()
+    };
+    let source = YamlSource::new(
+        Arc::new(ext),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        "prefhdr:".into(),
+        HashMap::from([("region".to_string(), "US".to_string())]),
+        true,
+    );
+
+    source.get_popular_manga(1, 20, &[]).await.unwrap();
+    assert_eq!(
+        origin
+            .last_request("/popular")
+            .expect("the popular endpoint was called")
+            .header("x-kani-region"),
+        Some("US"),
+        "the pre_request hook put the preference on the wire"
+    );
+
+    // Change the preference on the running source — the next request must carry
+    // the new value, with no rebuild.
+    source.update_preferences(HashMap::from([("region".to_string(), "JP".to_string())]));
+    source.get_popular_manga(1, 20, &[]).await.unwrap();
+
+    assert_eq!(
+        origin
+            .last_request("/popular")
+            .unwrap()
+            .header("x-kani-region"),
+        Some("JP"),
+        "the changed preference reached the very next request"
+    );
+    assert_eq!(origin.hits("/popular"), 2, "both requests were real");
+}
+
 // ── I4. A sort option maps into the request via the SortPair format ──────────
 
 /// A search endpoint whose `sort` filter is a SortPair: the sort field goes

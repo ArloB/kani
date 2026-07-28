@@ -58,7 +58,12 @@ impl Fixture {
             nsfw: false,
             unrestricted_http: true,
             mihon_source_id: None,
-            rate_limit: None,
+            rate_limit: Some(kani_shared::extension::RateLimitConfig {
+                requests_per_second: 5.0,
+                burst: 1,
+                max_concurrent: 1,
+                ..Default::default()
+            }),
             ..Default::default()
         }
     }
@@ -109,9 +114,20 @@ impl MangaExtension for Fixture {
         query: &str,
         _page: i32,
         _page_size: i32,
-        _filters: &[ActiveFilter],
+        filters: &[ActiveFilter],
     ) -> ExtensionResult<MangaList> {
-        self.fetch_list(HttpRequest::get(format!("{}/search", self.base_url())).query("q", query))
+        let mut req = HttpRequest::get(format!("{}/search", self.base_url())).query("q", query);
+        // Map a selected `genre` onto `g`, mirroring the interpreted source's
+        // filter_mapping. A guest that renders the panel but drops the selection
+        // is the silent-wrong failure this exists to catch.
+        for f in filters {
+            if f.filter_name == "genre"
+                && let kani_shared::types::FilterState::Selection { value, .. } = &f.state
+            {
+                req = req.query("g", value);
+            }
+        }
+        self.fetch_list(req)
     }
 
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
@@ -210,7 +226,26 @@ impl MangaExtension for Fixture {
     }
 
     fn get_filter_list(&self) -> ExtensionResult<wit_types::FilterList> {
-        Ok(wit_types::FilterList { filters: vec![] })
+        // A single select filter with real options, so the conformance suite can
+        // assert the WASM path renders a panel AND puts the selection on the
+        // wire — the guest counterpart to A1 on the interpreted path.
+        Ok(wit_types::FilterList {
+            filters: vec![wit_types::FilterDef {
+                id: "genre".to_string(),
+                name: "Genre".to_string(),
+                tag: wit_types::FilterTypeTag::Select,
+                options: ["action", "romance"]
+                    .iter()
+                    .map(|v| wit_types::FilterOption {
+                        filter_name: "genre".to_string(),
+                        name: v.to_string(),
+                        value: v.to_string(),
+                    })
+                    .collect(),
+                default_value: None,
+                semantic: None,
+            }],
+        })
     }
 
     fn get_preferences(&self) -> ExtensionResult<Vec<PreferenceSpec>> {
