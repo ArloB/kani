@@ -247,11 +247,8 @@ mod tests {
     fn transform_impl_applies_the_descramble() {
         use image::{DynamicImage, ImageFormat, RgbaImage};
 
-        let img = DynamicImage::ImageRgba8(RgbaImage::from_pixel(
-            2,
-            2,
-            image::Rgba([10, 20, 30, 255]),
-        ));
+        let img =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255])));
         let mut png = Vec::new();
         img.write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png)
             .unwrap();

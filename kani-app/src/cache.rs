@@ -569,6 +569,71 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1, "m2 should remain cached");
     }
 
+    #[tokio::test]
+    async fn a_failed_page_fetch_is_not_cached_as_a_success() {
+        // moka's try_get_with must not persist an Err: a failing origin
+        // (a 500) followed by a healthy one (a 200) must re-run init and
+        // return the success, never a poisoned cached error.
+        let cache = RequestCache::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let c = calls.clone();
+        let first = cache
+            .get_or_fetch_pages(1, "m1", "c1", async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Err::<String, std::io::Error>(std::io::Error::other("upstream 500"))
+            })
+            .await;
+        assert!(first.is_err(), "the failing fetch surfaces its error");
+
+        let c = calls.clone();
+        let second = cache
+            .get_or_fetch_pages(1, "m1", "c1", async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, std::io::Error>("pages".to_string())
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            second.as_str(),
+            "pages",
+            "the retry succeeds, not a cached error"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "init must run again after a failure — the error was not cached"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_chapter_list_fetch_is_not_cached_as_a_success() {
+        let cache = RequestCache::new();
+        let calls = Arc::new(AtomicU32::new(0));
+
+        let c = calls.clone();
+        let first = cache
+            .get_or_fetch_chapter_list(1, "m1", 1, 20, "", async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Err::<String, std::io::Error>(std::io::Error::other("upstream 500"))
+            })
+            .await;
+        assert!(first.is_err());
+
+        let c = calls.clone();
+        let second = cache
+            .get_or_fetch_chapter_list(1, "m1", 1, 20, "", async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, std::io::Error>("chapters".to_string())
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(second.as_str(), "chapters");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
     #[test]
     fn preference_schema_insert_and_get() {
         let cache = RequestCache::new();
