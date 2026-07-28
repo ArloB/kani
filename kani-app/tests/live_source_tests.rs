@@ -1744,6 +1744,64 @@ async fn a_migration_that_matches_is_still_allowed() {
     );
 }
 
+// ── K10. A captured manifest survives the migration rename ───────────────────
+
+// Migration is the one flow that moves files on disk: a differently-titled
+// target renames the manga directory, so every stored `file_path` has to follow
+// or the manifest points at nothing. Driven with a manifest captured from a real
+// CBZ (`record_chapter_manifest`) rather than a hand-written row.
+#[tokio::test]
+async fn a_manifest_survives_the_migration_rename() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+
+    let home_source = insert_source(&svc.db, "home-source").await;
+    let manga = insert_manga(&svc.db, home_source, "m1", "Held Series").await;
+    let pages = vec![jpeg_page(400, 600, false, 80); 2];
+    let chapter = held_chapter_with_pages(&svc, manga, "Held Series", "ch-1", 1.0, &pages).await;
+
+    let stored_before: Option<String> =
+        sqlx::query_scalar("SELECT file_path FROM chapters WHERE id = ?")
+            .bind(chapter.0)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    let before = stored_before.expect("the download captured a manifest path");
+    assert!(before.starts_with("Held Series - "), "sanity: {before}");
+
+    let target_source = insert_source(&svc.db, "target-source").await;
+    wire_migration_target(&svc, target_source, &origin.base());
+    // The target calls the series something else, which forces the rename.
+    origin.set(
+        "/target/tgt-1",
+        Response::json(r#"{"manga":[{"id":"tgt-1","title":"Renamed Series"}]}"#),
+    );
+    origin.set(
+        "/target/tgt-1/chapters",
+        Response::json(r#"{"chapters":[{"id":"t-1","number":1}]}"#),
+    );
+
+    svc.migrate_manga(manga, target_source, "tgt-1".into(), false)
+        .await
+        .unwrap();
+
+    let after: String = sqlx::query_scalar("SELECT file_path FROM chapters WHERE id = ?")
+        .bind(chapter.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert!(
+        after.starts_with("Renamed Series - "),
+        "the stored path must follow the renamed directory, got {after}"
+    );
+
+    let library = { svc.settings.read().await.library_path.clone() };
+    assert!(
+        library.join(&after).exists(),
+        "and the repointed path must actually resolve to the moved file: {after}"
+    );
+}
+
 // ── J3. A truncated target listing must not orphan the remainder ─────────────
 
 // `fetch_all_chapter_pages` stops at a 500-page ceiling. It used to return that
