@@ -204,6 +204,31 @@ async fn an_enormous_field_value_is_refused() {
     );
 }
 
+// H7 — the DEFAULT max_string_length (the production 1 MB ceiling, not a
+// shortened seam) refuses an oversized field on a live response. F4 proves the
+// cap mechanism fires; this proves the production default is actually wired
+// into the YamlSource extraction path, so a real 2 MB field can't slip through.
+#[tokio::test]
+async fn the_default_max_string_length_is_enforced_on_a_live_response() {
+    let origin = TestOrigin::start().await;
+    // 2 MB — comfortably over the 1 MB production default.
+    let big = "x".repeat(2 * 1024 * 1024);
+    origin.set(
+        "/popular",
+        Response::html(&format!(
+            r#"<html><body><div class="item" data-id="m1"><span class="title">{big}</span></div></body></html>"#
+        )),
+    );
+    let backend = source(&origin, EvalLimits::default());
+
+    let res = backend.get_popular_manga(1, 50, &[]).await;
+    assert!(
+        res.is_err(),
+        "a 2 MB field must be refused by the default 1 MB ceiling, got {:?}",
+        res.map(|l| l.manga.len())
+    );
+}
+
 // F2 — a row missing the required id is reported, not silently dropped from the
 // listing.
 #[tokio::test]
