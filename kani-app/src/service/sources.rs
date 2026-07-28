@@ -1540,4 +1540,48 @@ mod tests {
             "a failed fetch must leave the cache empty so the next call re-fetches"
         );
     }
+
+    // G2 — a declared option-set cache TTL is honoured end-to-end: within the
+    // TTL the cached values are served without re-hitting the origin; once it
+    // elapses the entry expires and the next resolve re-fetches. Driven through
+    // resolve_option_set with a 1s TTL against a TestOrigin.
+    #[tokio::test]
+    async fn a_declared_option_set_cache_ttl_is_honoured() {
+        use kani_shared_test::origin::{Response, TestOrigin};
+        let origin = TestOrigin::start().await;
+        origin.set(
+            "/genres",
+            Response::json(r#"[{"name":"Action","value":"action"}]"#),
+        );
+
+        let cache = Arc::new(InMemoryCache::new());
+        let client = kani_core::http::SmartClient::new(None).unwrap();
+        let mut def = make_def(Some("genres-v1"));
+        def.route = origin.url("/genres");
+        def.cache_ttl = 1;
+
+        // First resolve fetches and populates the cache.
+        let first = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
+        assert_eq!(first.expect("first fetch succeeds").len(), 1);
+        assert_eq!(origin.hits("/genres"), 1);
+
+        // Within the TTL: served from cache, no new origin hit.
+        let cached = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
+        assert_eq!(cached.expect("cache hit").len(), 1);
+        assert_eq!(
+            origin.hits("/genres"),
+            1,
+            "within the declared TTL the cache is honoured, no re-fetch"
+        );
+
+        // Past the TTL: the entry expires and the next resolve re-fetches.
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        let refetched = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
+        assert_eq!(refetched.expect("re-fetch succeeds").len(), 1);
+        assert_eq!(
+            origin.hits("/genres"),
+            2,
+            "once the declared TTL elapses the value is re-fetched"
+        );
+    }
 }
