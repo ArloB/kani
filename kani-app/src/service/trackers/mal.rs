@@ -7,17 +7,54 @@ const AUTH_URL: &str = "https://myanimelist.net/v1/oauth2/authorize";
 const TOKEN_URL: &str = "https://myanimelist.net/v1/oauth2/token";
 const API_URL: &str = "https://api.myanimelist.net/v2";
 
+/// Endpoint set for the tracker. Defaults to MAL's real URLs; a test can point
+/// them at a local origin via [`MalTracker::with_test_base`].
+struct Endpoints {
+    auth: String,
+    token: String,
+    api: String,
+}
+
+impl Default for Endpoints {
+    fn default() -> Self {
+        Self {
+            auth: AUTH_URL.to_string(),
+            token: TOKEN_URL.to_string(),
+            api: API_URL.to_string(),
+        }
+    }
+}
+
 pub struct MalTracker {
     client_id: String,
     http: rquest::Client,
+    endpoints: Endpoints,
 }
 
 impl MalTracker {
     pub fn new(client_id: String) -> Self {
         Self {
             client_id,
-            http: rquest::Client::new(),
+            http: super::tracker_http_client(),
+            endpoints: Endpoints::default(),
         }
+    }
+
+    /// Test-only: point every endpoint at a local origin (`{base}/authorize`,
+    /// `{base}/token`, `{base}` for the API) and shorten the client timeout so a
+    /// stalled-origin test resolves quickly.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn with_test_base(mut self, base: &str) -> Self {
+        self.http = rquest::Client::builder()
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap_or_else(|_| rquest::Client::new());
+        self.endpoints = Endpoints {
+            auth: format!("{base}/authorize"),
+            token: format!("{base}/token"),
+            api: base.to_string(),
+        };
+        self
     }
 
     fn map_status_to_mal(status: MangaTrackingStatus) -> &'static str {
@@ -101,7 +138,7 @@ impl ExternalTracker for MalTracker {
         let challenge = code_challenge.unwrap_or("");
         format!(
             "{}?response_type=code&client_id={}&redirect_uri={}&state={}&code_challenge={}&code_challenge_method=S256",
-            AUTH_URL,
+            self.endpoints.auth,
             urlencoding::encode(&self.client_id),
             urlencoding::encode(redirect_uri),
             urlencoding::encode(state),
@@ -118,7 +155,7 @@ impl ExternalTracker for MalTracker {
         let verifier = code_verifier.unwrap_or("");
         let resp: MalTokenResponse = self
             .http
-            .post(TOKEN_URL)
+            .post(&self.endpoints.token)
             .form(&[
                 ("client_id", self.client_id.as_str()),
                 ("grant_type", "authorization_code"),
@@ -147,7 +184,7 @@ impl ExternalTracker for MalTracker {
     async fn refresh_token(&self, refresh_token: &str) -> Result<TokenResponse> {
         let resp: MalTokenResponse = self
             .http
-            .post(TOKEN_URL)
+            .post(&self.endpoints.token)
             .form(&[
                 ("client_id", self.client_id.as_str()),
                 ("grant_type", "refresh_token"),
@@ -178,7 +215,7 @@ impl ExternalTracker for MalTracker {
     ) -> Result<Vec<TrackerMangaResult>> {
         let resp: MalSearchResponse = self
             .http
-            .get(format!("{}/manga", API_URL))
+            .get(format!("{}/manga", self.endpoints.api))
             .bearer_auth(access_token)
             .query(&[("q", query), ("limit", "10"), ("fields", "main_picture")])
             .send()
@@ -227,7 +264,7 @@ impl ExternalTracker for MalTracker {
             .http
             .patch(format!(
                 "{}/manga/{}/my_list_status",
-                API_URL, tracker_manga_id
+                self.endpoints.api, tracker_manga_id
             ))
             .bearer_auth(access_token)
             .form(&params)
@@ -253,7 +290,7 @@ impl ExternalTracker for MalTracker {
     ) -> Result<TrackerMangaStatus> {
         let resp = self
             .http
-            .get(format!("{}/manga/{}", API_URL, tracker_manga_id))
+            .get(format!("{}/manga/{}", self.endpoints.api, tracker_manga_id))
             .bearer_auth(access_token)
             .query(&[("fields", "my_list_status")])
             .send()

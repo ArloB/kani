@@ -54,6 +54,16 @@ pub struct TrackerMangaStatus {
     pub chapters_read: i64,
 }
 
+/// HTTP client for tracker API calls. A 30s timeout bounds a stalled provider
+/// so it cannot hang a sync job forever (the tracker clients previously had no
+/// timeout at all). Falls back to a plain client if the builder fails.
+pub(super) fn tracker_http_client() -> rquest::Client {
+    rquest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| rquest::Client::new())
+}
+
 /// Trait that all external tracker integrations must implement.
 #[async_trait::async_trait]
 pub trait ExternalTracker: Send + Sync {

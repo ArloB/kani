@@ -38,10 +38,33 @@ pub struct PasswordStrength {
 ///
 /// `identity` is the username or email to use for the same-as-identity check.
 /// `http_client` is used for the HIBP k-anonymity call; if unavailable the check is skipped.
+const HIBP_BASE: &str = "https://api.pwnedpasswords.com";
+
 pub async fn check_password(
     password: &str,
     identity: &str,
     http_client: &kani_core::http::SmartClient,
+) -> Result<PasswordStrength, PasswordPolicyError> {
+    check_password_impl(password, identity, http_client, HIBP_BASE).await
+}
+
+/// Test-only: run the full policy check against a chosen HIBP base URL so the
+/// breach-check behaviour can be exercised against a local origin.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn check_password_with_hibp_base(
+    password: &str,
+    identity: &str,
+    http_client: &kani_core::http::SmartClient,
+    hibp_base: &str,
+) -> Result<PasswordStrength, PasswordPolicyError> {
+    check_password_impl(password, identity, http_client, hibp_base).await
+}
+
+async fn check_password_impl(
+    password: &str,
+    identity: &str,
+    http_client: &kani_core::http::SmartClient,
+    hibp_base: &str,
 ) -> Result<PasswordStrength, PasswordPolicyError> {
     // 1. Length.
     if password.len() < 10 {
@@ -76,7 +99,7 @@ pub async fn check_password(
         .unwrap_or_default();
 
     // 4. HIBP k-anonymity (advisory; skip on error).
-    let pwned_count = check_hibp(password, http_client).await;
+    let pwned_count = check_hibp(password, http_client, hibp_base).await;
 
     if let Some(count) = pwned_count
         && count > 0
@@ -100,7 +123,11 @@ pub fn sha1_hex_upper(password: &str) -> String {
 
 /// SHA-1 k-anonymity lookup against the HIBP Pwned Passwords API.
 /// Returns `None` if the network call fails (advisory only).
-async fn check_hibp(password: &str, http_client: &kani_core::http::SmartClient) -> Option<u64> {
+async fn check_hibp(
+    password: &str,
+    http_client: &kani_core::http::SmartClient,
+    hibp_base: &str,
+) -> Option<u64> {
     // 1. SHA-1 of the password.
     let mut hasher = Sha1::new();
     hasher.update(password.as_bytes());
@@ -110,7 +137,7 @@ async fn check_hibp(password: &str, http_client: &kani_core::http::SmartClient) 
     let suffix = &hash[5..];
 
     // 2. k-anonymity API call — only the 5-character prefix is sent.
-    let url = format!("https://api.pwnedpasswords.com/range/{prefix}");
+    let url = format!("{hibp_base}/range/{prefix}");
     let response = http_client.inner().get(&url).send().await.ok()?;
 
     if !response.status().is_success() {

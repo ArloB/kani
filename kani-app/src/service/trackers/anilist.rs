@@ -7,10 +7,29 @@ const AUTH_URL: &str = "https://anilist.co/api/v2/oauth/authorize";
 const TOKEN_URL: &str = "https://anilist.co/api/v2/oauth/token";
 const GRAPHQL_URL: &str = "https://graphql.anilist.co";
 
+/// Endpoint set for the tracker. Defaults to AniList's real URLs; a test can
+/// point them at a local origin via [`AnilistTracker::with_test_base`].
+struct Endpoints {
+    auth: String,
+    token: String,
+    graphql: String,
+}
+
+impl Default for Endpoints {
+    fn default() -> Self {
+        Self {
+            auth: AUTH_URL.to_string(),
+            token: TOKEN_URL.to_string(),
+            graphql: GRAPHQL_URL.to_string(),
+        }
+    }
+}
+
 pub struct AnilistTracker {
     client_id: String,
     client_secret: String,
     http: rquest::Client,
+    endpoints: Endpoints,
 }
 
 impl AnilistTracker {
@@ -18,8 +37,26 @@ impl AnilistTracker {
         Self {
             client_id,
             client_secret,
-            http: rquest::Client::new(),
+            http: super::tracker_http_client(),
+            endpoints: Endpoints::default(),
         }
+    }
+
+    /// Test-only: point every endpoint at a local origin (`{base}/authorize`,
+    /// `{base}/token`, `{base}/graphql`) and shorten the client timeout so a
+    /// stalled-origin test resolves quickly.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn with_test_base(mut self, base: &str) -> Self {
+        self.http = rquest::Client::builder()
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap_or_else(|_| rquest::Client::new());
+        self.endpoints = Endpoints {
+            auth: format!("{base}/authorize"),
+            token: format!("{base}/token"),
+            graphql: format!("{base}/graphql"),
+        };
+        self
     }
 
     fn map_status_to_anilist(status: MangaTrackingStatus) -> &'static str {
@@ -117,7 +154,7 @@ impl ExternalTracker for AnilistTracker {
     fn auth_url(&self, redirect_uri: &str, state: &str, _code_challenge: Option<&str>) -> String {
         format!(
             "{}?client_id={}&redirect_uri={}&response_type=code&state={}",
-            AUTH_URL,
+            self.endpoints.auth,
             urlencoding::encode(&self.client_id),
             urlencoding::encode(redirect_uri),
             urlencoding::encode(state),
@@ -132,7 +169,7 @@ impl ExternalTracker for AnilistTracker {
     ) -> Result<TokenResponse> {
         let resp: AnilistTokenResponse = self
             .http
-            .post(TOKEN_URL)
+            .post(&self.endpoints.token)
             .json(&serde_json::json!({
                 "grant_type": "authorization_code",
                 "client_id": self.client_id,
@@ -185,7 +222,7 @@ impl ExternalTracker for AnilistTracker {
 
         let resp: GraphqlResponse<SearchData> = self
             .http
-            .post(GRAPHQL_URL)
+            .post(&self.endpoints.graphql)
             .bearer_auth(access_token)
             .json(&serde_json::json!({
                 "query": graphql,
@@ -260,7 +297,7 @@ impl ExternalTracker for AnilistTracker {
 
         let resp = self
             .http
-            .post(GRAPHQL_URL)
+            .post(&self.endpoints.graphql)
             .bearer_auth(access_token)
             .json(&serde_json::json!({
                 "query": graphql,
@@ -310,7 +347,7 @@ impl ExternalTracker for AnilistTracker {
 
         let resp = self
             .http
-            .post(GRAPHQL_URL)
+            .post(&self.endpoints.graphql)
             .bearer_auth(access_token)
             .json(&serde_json::json!({
                 "query": graphql,

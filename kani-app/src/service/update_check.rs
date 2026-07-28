@@ -23,8 +23,26 @@ pub async fn check_for_update(
     client: &kani_core::http::SmartClient,
     current: &str,
 ) -> Option<UpdateInfo> {
+    check_for_update_impl(client, current, RELEASES_URL).await
+}
+
+/// Test-only: run the update check against a chosen releases URL.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn check_for_update_at(
+    client: &kani_core::http::SmartClient,
+    current: &str,
+    releases_url: &str,
+) -> Option<UpdateInfo> {
+    check_for_update_impl(client, current, releases_url).await
+}
+
+async fn check_for_update_impl(
+    client: &kani_core::http::SmartClient,
+    current: &str,
+    releases_url: &str,
+) -> Option<UpdateInfo> {
     let response = client
-        .get(RELEASES_URL)
+        .get(releases_url)
         .await
         .inspect_err(|e| tracing::debug!("update check request failed: {e}"))
         .ok()?;
