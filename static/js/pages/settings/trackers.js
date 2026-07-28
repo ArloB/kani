@@ -261,18 +261,28 @@ function TrackerCard({ tracker, isAdmin, onChanged }) {
     <${SettingsGroup} label=${tracker.name}>
       ${tracker.configured
         ? html`<${SettingsRow}
-            label=${tracker.linked ? t('trackers.linked_label') : t('trackers.not_linked_label')}
-            description=${tracker.linked
-              ? t('trackers.linked_desc', { name: tracker.name })
-              : t('trackers.not_linked_desc', { name: tracker.name })}
+            label=${tracker.needs_reauth
+              ? t('trackers.needs_reauth_label')
+              : tracker.linked
+                ? t('trackers.linked_label')
+                : t('trackers.not_linked_label')}
+            description=${tracker.needs_reauth
+              ? t('trackers.needs_reauth_desc', { name: tracker.name })
+              : tracker.linked
+                ? t('trackers.linked_desc', { name: tracker.name })
+                : t('trackers.not_linked_desc', { name: tracker.name })}
           >
-            <button
-              type="button"
-              class=${(tracker.linked ? 'btn-danger' : 'btn-secondary') + ' btn-sm'}
-              onClick=${tracker.linked ? unlink : link}
-            >
-              ${tracker.linked ? t('trackers.unlink') : t('trackers.link')}
-            </button>
+            ${tracker.needs_reauth
+              ? html`<button type="button" class="btn-secondary btn-sm" onClick=${link}>
+                  ${t('trackers.relink')}
+                </button>`
+              : html`<button
+                  type="button"
+                  class=${(tracker.linked ? 'btn-danger' : 'btn-secondary') + ' btn-sm'}
+                  onClick=${tracker.linked ? unlink : link}
+                >
+                  ${tracker.linked ? t('trackers.unlink') : t('trackers.link')}
+                </button>`}
           <//>`
         : html`<${SettingsRow}
             label=${t('trackers.not_configured')}

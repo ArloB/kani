@@ -182,7 +182,7 @@ impl ExternalTracker for MalTracker {
     }
 
     async fn refresh_token(&self, refresh_token: &str) -> Result<TokenResponse> {
-        let resp: MalTokenResponse = self
+        let resp = self
             .http
             .post(&self.endpoints.token)
             .form(&[
@@ -192,7 +192,15 @@ impl ExternalTracker for MalTracker {
             ])
             .send()
             .await
-            .map_err(|e| ServiceError::Internal(format!("MAL token refresh failed: {e}")))?
+            .map_err(|e| ServiceError::Internal(format!("MAL token refresh failed: {e}")))?;
+        if !resp.status().is_success() {
+            let code = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ServiceError::TrackerAuthExpired(format!(
+                "MyAnimeList refused to refresh the token (HTTP {code}): {body}"
+            )));
+        }
+        let resp: MalTokenResponse = resp
             .json()
             .await
             .map_err(|e| ServiceError::Internal(format!("MAL token refresh parse failed: {e}")))?;
@@ -213,14 +221,15 @@ impl ExternalTracker for MalTracker {
         access_token: &str,
         query: &str,
     ) -> Result<Vec<TrackerMangaResult>> {
-        let resp: MalSearchResponse = self
+        let resp = self
             .http
             .get(format!("{}/manga", self.endpoints.api))
             .bearer_auth(access_token)
             .query(&[("q", query), ("limit", "10"), ("fields", "main_picture")])
             .send()
             .await
-            .map_err(|e| ServiceError::Internal(format!("MAL search failed: {e}")))?
+            .map_err(|e| ServiceError::Internal(format!("MAL search failed: {e}")))?;
+        let resp: MalSearchResponse = super::check_tracker_response(resp, "MyAnimeList")?
             .json()
             .await
             .map_err(|e| ServiceError::Internal(format!("MAL search parse failed: {e}")))?;
@@ -272,9 +281,7 @@ impl ExternalTracker for MalTracker {
             .await
             .map_err(|e| ServiceError::Internal(format!("MAL update failed: {e}")))?;
 
-        if let Some(e) = super::rate_limited_error(&resp) {
-            return Err(e);
-        }
+        let resp = super::check_tracker_response(resp, "MyAnimeList")?;
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(ServiceError::Internal(format!("MAL update failed: {text}")));
@@ -296,9 +303,7 @@ impl ExternalTracker for MalTracker {
             .send()
             .await
             .map_err(|e| ServiceError::Internal(format!("MAL get_status failed: {e}")))?;
-        if let Some(e) = super::rate_limited_error(&resp) {
-            return Err(e);
-        }
+        let resp = super::check_tracker_response(resp, "MyAnimeList")?;
         let resp: MalMangaDetail = resp
             .json()
             .await

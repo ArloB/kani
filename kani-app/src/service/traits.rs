@@ -1790,6 +1790,7 @@ mod tests {
                 name: "stub".into(),
                 configured: false,
                 linked: false,
+                needs_reauth: false,
             }])
         }
         async fn get_tracker_auth_url(

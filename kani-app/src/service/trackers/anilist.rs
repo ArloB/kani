@@ -220,7 +220,7 @@ impl ExternalTracker for AnilistTracker {
             }
         "#;
 
-        let resp: GraphqlResponse<SearchData> = self
+        let resp = self
             .http
             .post(&self.endpoints.graphql)
             .bearer_auth(access_token)
@@ -230,7 +230,8 @@ impl ExternalTracker for AnilistTracker {
             }))
             .send()
             .await
-            .map_err(|e| ServiceError::Internal(format!("AniList search failed: {e}")))?
+            .map_err(|e| ServiceError::Internal(format!("AniList search failed: {e}")))?;
+        let resp: GraphqlResponse<SearchData> = super::check_tracker_response(resp, "AniList")?
             .json()
             .await
             .map_err(|e| ServiceError::Internal(format!("AniList search parse failed: {e}")))?;
@@ -306,9 +307,7 @@ impl ExternalTracker for AnilistTracker {
             .send()
             .await
             .map_err(|e| ServiceError::Internal(format!("AniList update failed: {e}")))?;
-        if let Some(e) = super::rate_limited_error(&resp) {
-            return Err(e);
-        }
+        let resp = super::check_tracker_response(resp, "AniList")?;
         let resp: GraphqlResponse<serde_json::Value> = resp
             .json()
             .await
@@ -356,9 +355,7 @@ impl ExternalTracker for AnilistTracker {
             .send()
             .await
             .map_err(|e| ServiceError::Internal(format!("AniList get_status failed: {e}")))?;
-        if let Some(e) = super::rate_limited_error(&resp) {
-            return Err(e);
-        }
+        let resp = super::check_tracker_response(resp, "AniList")?;
         let resp: GraphqlResponse<MediaListData> = resp
             .json()
             .await

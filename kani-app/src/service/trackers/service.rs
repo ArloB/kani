@@ -18,6 +18,9 @@ pub struct TrackerStatusItem {
     pub configured: bool,
     /// Whether this user has linked their account.
     pub linked: bool,
+    /// The stored credentials were rejected (refresh refused, or a 401 during
+    /// sync) — the link exists but cannot authenticate until re-linked.
+    pub needs_reauth: bool,
 }
 
 /// Mapping entry returned by `get_tracker_mappings`.
@@ -42,21 +45,23 @@ impl AppService {
                 .id
                 .ok_or_else(|| ServiceError::Internal("tracker row missing id".into()))?;
             let configured = registry.trackers.contains_key(&tracker_id);
-            let linked = sqlx::query_scalar!(
-                "SELECT COUNT(*) FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?",
+            let cred = sqlx::query!(
+                "SELECT needs_reauth AS \"needs_reauth: bool\" FROM user_tracker_credentials \
+                 WHERE user_id = ? AND tracker_id = ?",
                 user_id,
                 tracker_id,
             )
-            .fetch_one(&self.db_read)
+            .fetch_optional(&self.db_read)
             .await
-            .unwrap_or(0)
-                > 0;
+            .ok()
+            .flatten();
 
             items.push(TrackerStatusItem {
                 id: tracker_id,
                 name: row.name,
                 configured,
-                linked,
+                linked: cred.is_some(),
+                needs_reauth: cred.map(|c| c.needs_reauth).unwrap_or(false),
             });
         }
 

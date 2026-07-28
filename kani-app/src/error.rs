@@ -25,6 +25,12 @@ pub enum ServiceError {
     #[error("Rate limited")]
     RateLimited { retry_after_secs: Option<u64> },
 
+    /// The tracker rejected our credentials (401/403, or a refusal to refresh).
+    /// Distinct from `Internal` because the caller must flag the link for
+    /// re-authentication rather than retry it.
+    #[error("Tracker authentication expired: {0}")]
+    TrackerAuthExpired(String),
+
     #[error("Possible duplicate")]
     PossibleDuplicate(Vec<crate::service::dedup::SimilarMangaHit>),
 

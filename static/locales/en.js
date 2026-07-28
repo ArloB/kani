@@ -2153,6 +2153,10 @@ export default {
   'trackers.not_linked_label': 'Not linked',
   'trackers.linked_desc': 'Your {name} account is connected.',
   'trackers.not_linked_desc': 'Connect your {name} account to sync progress.',
+  'trackers.relink': 'Re-link Account',
+  'trackers.needs_reauth_label': 'Re-authentication needed',
+  'trackers.needs_reauth_desc':
+    '{name} rejected the saved credentials, so syncing has stopped. Re-link to resume.',
   'trackers.confirm.unlink.title': 'Unlink tracker',
   'trackers.confirm.unlink.msg': 'Unlink your {name} account?',
   'trackers.error.unlink_failed': 'Failed to unlink.',

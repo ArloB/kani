@@ -55,6 +55,17 @@ impl AppService {
                 let remote = match tracker.get_status(&token, &tracker_manga_id).await {
                     Ok(s) => s,
                     Err(e @ ServiceError::RateLimited { .. }) => return Err(e),
+                    // The token was revoked while still notionally valid, so the
+                    // proactive `expires_at` refresh never fired. Flag the link
+                    // rather than retrying a dead credential forever.
+                    Err(e @ ServiceError::TrackerAuthExpired(_)) => {
+                        tracing::warn!(
+                            "{} rejected the stored credentials; marking link for reauth: {e}",
+                            tracker.name()
+                        );
+                        super::mark_needs_reauth(&self.db, user_id, tracker_id).await;
+                        continue;
+                    }
                     Err(e) => {
                         tracing::warn!(
                             "Failed to get status from {} for manga {}: {e}",
@@ -83,6 +94,13 @@ impl AppService {
                     {
                         Ok(()) => {}
                         Err(e @ ServiceError::RateLimited { .. }) => return Err(e),
+                        Err(e @ ServiceError::TrackerAuthExpired(_)) => {
+                            tracing::warn!(
+                                "{} rejected the stored credentials on push; marking link for reauth: {e}",
+                                tracker.name()
+                            );
+                            super::mark_needs_reauth(&self.db, user_id, tracker_id).await;
+                        }
                         Err(e) => tracing::warn!("Failed to push to {}: {e}", tracker.name()),
                     }
                 }

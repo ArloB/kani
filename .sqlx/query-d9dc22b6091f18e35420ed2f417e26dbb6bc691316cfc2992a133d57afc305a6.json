@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT access_token, refresh_token, expires_at FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?",
+  "query": "SELECT access_token, refresh_token, expires_at AS \"expires_at: String\"\n           FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?",
   "describe": {
     "columns": [
       {
@@ -14,7 +14,7 @@
         "type_info": "Text"
       },
       {
-        "name": "expires_at",
+        "name": "expires_at: String",
         "ordinal": 2,
         "type_info": "Datetime"
       }
@@ -28,5 +28,5 @@
       true
     ]
   },
-  "hash": "e96aa2bbce7f5b180bba65f14516bcb55c68a0becc750ef8f6d34b8e09a3d382"
+  "hash": "d9dc22b6091f18e35420ed2f417e26dbb6bc691316cfc2992a133d57afc305a6"
 }

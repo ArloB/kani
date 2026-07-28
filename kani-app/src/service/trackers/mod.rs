@@ -30,6 +30,50 @@ pub(crate) fn rate_limited_error(resp: &rquest::Response) -> Option<ServiceError
     })
 }
 
+/// If the response rejects our credentials (401/403), returns a
+/// `ServiceError::TrackerAuthExpired`. The token is dead regardless of what
+/// `expires_at` claims, so the caller must flag the link for re-authentication
+/// rather than retry it.
+pub(crate) fn auth_expired_error(resp: &rquest::Response, provider: &str) -> Option<ServiceError> {
+    let code = resp.status().as_u16();
+    match code {
+        401 | 403 => Some(ServiceError::TrackerAuthExpired(format!(
+            "{provider} rejected the stored credentials (HTTP {code})"
+        ))),
+        _ => None,
+    }
+}
+
+/// Reject a rate-limited or credential-rejected response *before* its body is
+/// parsed. Without this both surface as opaque JSON parse errors, which is why
+/// nothing could react to a revoked token.
+pub(crate) fn check_tracker_response(
+    resp: rquest::Response,
+    provider: &str,
+) -> Result<rquest::Response> {
+    if let Some(e) = rate_limited_error(&resp) {
+        return Err(e);
+    }
+    if let Some(e) = auth_expired_error(&resp, provider) {
+        return Err(e);
+    }
+    Ok(resp)
+}
+
+/// Record that a tracker link can no longer authenticate, so the settings page
+/// can prompt the user to re-link. Best-effort: a failure here must not mask
+/// the original error.
+pub async fn mark_needs_reauth(db: &SqlitePool, user_id: UserId, tracker_id: i64) {
+    let _ = sqlx::query!(
+        "UPDATE user_tracker_credentials SET needs_reauth = TRUE \
+         WHERE user_id = ? AND tracker_id = ?",
+        user_id,
+        tracker_id,
+    )
+    .execute(db)
+    .await;
+}
+
 /// Token response from an OAuth exchange or refresh.
 #[derive(Debug, Clone)]
 pub struct TokenResponse {
@@ -364,7 +408,8 @@ pub async fn store_credentials(
            ON CONFLICT (user_id, tracker_id) DO UPDATE SET
                access_token = excluded.access_token,
                refresh_token = COALESCE(excluded.refresh_token, user_tracker_credentials.refresh_token),
-               expires_at = excluded.expires_at"#,
+               expires_at = excluded.expires_at,
+               needs_reauth = FALSE"#,
         user_id,
         tracker_id,
         access_token,
@@ -385,8 +430,14 @@ pub async fn get_access_token(
     tracker: &dyn ExternalTracker,
     cipher: Option<&CredentialCipher>,
 ) -> Result<String> {
+    // `expires_at` is read as TEXT on purpose: `store_credentials` writes an
+    // RFC3339 string, and letting sqlx decode the DATETIME column into a `time`
+    // type meant the old `exp.to_string()` produced a non-RFC3339 rendering that
+    // never re-parsed — so `needs_refresh` was silently always false and the
+    // proactive refresh never fired for anyone.
     let row = sqlx::query!(
-        "SELECT access_token, refresh_token, expires_at FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?",
+        r#"SELECT access_token, refresh_token, expires_at AS "expires_at: String"
+           FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?"#,
         user_id,
         tracker_id,
     )
@@ -396,14 +447,11 @@ pub async fn get_access_token(
 
     let needs_refresh = row
         .expires_at
-        .as_ref()
-        .map(|exp| {
-            let exp_str = exp.to_string();
-            time::OffsetDateTime::parse(&exp_str, &time::format_description::well_known::Rfc3339)
-                .ok()
-                .map(|t| t < time::OffsetDateTime::now_utc() + time::Duration::seconds(60))
-                .unwrap_or(false)
+        .as_deref()
+        .and_then(|exp| {
+            time::OffsetDateTime::parse(exp, &time::format_description::well_known::Rfc3339).ok()
         })
+        .map(|t| t < time::OffsetDateTime::now_utc() + time::Duration::seconds(60))
         .unwrap_or(false);
 
     if needs_refresh {
@@ -414,9 +462,19 @@ pub async fn get_access_token(
             .transpose()
             .map_err(|e| ServiceError::Internal(format!("Cannot decrypt refresh token: {e}")))?;
         if let Some(ref refresh) = refresh_plain {
-            let new_tokens = tracker.refresh_token(refresh).await?;
-            store_credentials(db, user_id, tracker_id, &new_tokens, cipher).await?;
-            return Ok(new_tokens.access_token);
+            match tracker.refresh_token(refresh).await {
+                Ok(new_tokens) => {
+                    store_credentials(db, user_id, tracker_id, &new_tokens, cipher).await?;
+                    return Ok(new_tokens.access_token);
+                }
+                Err(e) => {
+                    // A refresh the provider rejects will keep being rejected.
+                    // Flag the link so the user is told to re-authenticate,
+                    // instead of retrying the same doomed call on every sync.
+                    mark_needs_reauth(db, user_id, tracker_id).await;
+                    return Err(e);
+                }
+            }
         }
     }
 

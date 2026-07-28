@@ -116,6 +116,7 @@ pub(crate) async fn list_trackers(
                 "name": t.name,
                 "configured": t.configured,
                 "linked": t.linked,
+                "needs_reauth": t.needs_reauth,
             })
         })
         .collect();
@@ -435,6 +436,7 @@ mod tests {
                 name: "AniList".into(),
                 configured: false,
                 linked: false,
+                needs_reauth: false,
             }])
         }
         async fn get_tracker_auth_url(
