@@ -433,11 +433,14 @@ impl AppService {
             .map_err(ServiceError::Core)
     }
 
-    pub(super) async fn fetch_all_chapter_pages(
+    /// Every chapter the source lists, plus whether the page ceiling cut the
+    /// listing short. A truncated listing must never be read as "these are all
+    /// the chapters that exist" — callers that delete on absence have to know.
+    pub(super) async fn fetch_all_chapter_pages_checked(
         &self,
         source_id: i64,
         source_manga_id: &str,
-    ) -> Result<Vec<wit_types::ChapterInfo>> {
+    ) -> Result<(Vec<wit_types::ChapterInfo>, bool)> {
         let backend = self
             .sources
             .get_backend(source_id)
@@ -455,22 +458,28 @@ impl AppService {
                 ServiceError::Internal(format!("Failed to parse chapter list: {e}"))
             })?;
             let empty = list.chapters.is_empty();
+            let more = list.has_next_page;
             all.extend(list.chapters);
             // A source that always answers `has_next_page: true` would spin
             // here forever, growing the vector without bound. This is reachable
             // from a REST handler (`preview_migration`), so the ceiling is not
             // hypothetical.
-            if empty || !list.has_next_page || page as usize >= MAX_CHAPTER_LIST_PAGES {
-                if page as usize >= MAX_CHAPTER_LIST_PAGES {
+            if empty || !more || page as usize >= MAX_CHAPTER_LIST_PAGES {
+                // Hitting the ceiling while the source still claims more pages
+                // means the listing is INCOMPLETE. Report that instead of
+                // pretending otherwise: a caller that deletes downloads for
+                // chapters "missing" from the listing would destroy data over
+                // chapters it simply never fetched.
+                let truncated = !empty && more && page as usize >= MAX_CHAPTER_LIST_PAGES;
+                if truncated {
                     tracing::warn!(
                         "Chapter listing for source {source_id}/{source_manga_id} hit the \
-                         {MAX_CHAPTER_LIST_PAGES}-page ceiling; treating it as complete"
+                         {MAX_CHAPTER_LIST_PAGES}-page ceiling and is incomplete"
                     );
                 }
-                break;
+                return Ok((all, truncated));
             }
             page += 1;
         }
-        Ok(all)
     }
 }

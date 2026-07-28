@@ -1599,6 +1599,55 @@ fn wire_migration_target(svc: &kani_app::service::AppService, source_id: i64, ba
         .insert(source_id, SourceBackend::Yaml(Box::new(source)));
 }
 
+/// Like [`wire_migration_target`] but the chapter listing always reports another
+/// page, so `fetch_all_chapter_pages_checked` can only stop at the ceiling.
+fn wire_endless_migration_target(
+    svc: &kani_app::service::AppService,
+    source_id: i64,
+    base_url: &str,
+) {
+    let details = json_endpoint(
+        "/target/$manga_id$",
+        "/manga",
+        vec![
+            json_field("id", "/id", false),
+            json_field("title", "/title", false),
+        ],
+    );
+    let chapters = ValidatedEndpoint {
+        has_next_page: ValidatedHnp::Static(true),
+        ..json_endpoint(
+            "/target/$manga_id$/chapters",
+            "/chapters",
+            vec![
+                json_field("id", "/id", false),
+                json_field("number", "/number", false),
+            ],
+        )
+    };
+    let ext = ValidatedExtension {
+        id: "target-source".into(),
+        name: "Target Source".into(),
+        version: "1.0.0".into(),
+        base_url: base_url.to_string(),
+        language: "en".into(),
+        unrestricted_http: true,
+        manga_details: Some(details),
+        chapter_list: Some(chapters),
+        ..Default::default()
+    };
+    let source = YamlSource::new(
+        Arc::new(ext),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        format!("endless-{source_id}:"),
+        HashMap::new(),
+        true,
+    );
+    svc.sources
+        .insert(source_id, SourceBackend::Yaml(Box::new(source)));
+}
+
 async fn seed_migration_scenario(
     origin: &TestOrigin,
     svc: &kani_app::service::AppService,
@@ -1692,6 +1741,69 @@ async fn a_migration_that_matches_is_still_allowed() {
     assert!(
         res.is_ok(),
         "a target that matches the held chapter must still migrate, got {res:?}"
+    );
+}
+
+// ── J3. A truncated target listing must not orphan the remainder ─────────────
+
+// `fetch_all_chapter_pages` stops at a 500-page ceiling. It used to return that
+// partial listing as if it were complete, so migration treated every chapter it
+// had simply never fetched as absent from the target — and deleted its
+// download. Same family as A4/A5: never destroy data on the strength of a
+// listing you know is incomplete.
+#[tokio::test]
+async fn a_partial_target_listing_does_not_orphan_the_remainder() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+
+    let home_source = insert_source(&svc.db, "home-source").await;
+    let manga = insert_manga(&svc.db, home_source, "m1", "Held Series").await;
+    let pages = vec![jpeg_page(400, 600, false, 80); 1];
+    // Chapter 1 matches the target; chapter 2 is downloaded and never appears in
+    // the truncated listing.
+    held_chapter_with_pages(&svc, manga, "Held Series", "ch-1", 1.0, &pages).await;
+    let orphan = held_chapter_with_pages(&svc, manga, "Held Series", "ch-2", 2.0, &pages).await;
+    let orphan_cbz = svc.chapter_cbz_path(orphan).await.unwrap().path;
+    assert!(orphan_cbz.exists());
+
+    let target_source = insert_source(&svc.db, "target-source").await;
+    // A target that always claims another page — the listing can only ever be
+    // truncated at the ceiling.
+    wire_endless_migration_target(&svc, target_source, &origin.base());
+    origin.set(
+        "/target/tgt-1",
+        Response::json(r#"{"manga":[{"id":"tgt-1","title":"Held Series"}]}"#),
+    );
+    origin.set(
+        "/target/tgt-1/chapters",
+        Response::json(r#"{"chapters":[{"id":"t-1","number":1}]}"#),
+    );
+
+    let res = svc
+        .migrate_manga(manga, target_source, "tgt-1".into(), false)
+        .await;
+
+    let err = res.expect_err(
+        "a listing truncated at the page ceiling must not be treated as proof \
+         that the downloaded chapter is gone from the target",
+    );
+    assert!(
+        err.to_string().contains("cut short"),
+        "the refusal must be the truncation guard, not some incidental error: {err}"
+    );
+    assert!(
+        orphan_cbz.exists(),
+        "the download survives a truncated listing"
+    );
+
+    // And the user can still proceed deliberately: keeping orphaned downloads
+    // removes the risk the guard exists to prevent.
+    svc.migrate_manga(manga, target_source, "tgt-1".into(), true)
+        .await
+        .expect("keep-orphaned migration is still allowed");
+    assert!(
+        orphan_cbz.exists(),
+        "and the file is preserved on that path"
     );
 }
 

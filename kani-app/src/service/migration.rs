@@ -7,6 +7,9 @@ pub(super) struct MigrationContext {
     pub orphaned_ids: Vec<i64>,
     pub unmatched_new: Vec<wit_types::ChapterInfo>,
     pub downloaded_orphan_ids: Vec<i64>,
+    /// The target's listing hit the page ceiling, so "absent from the listing"
+    /// does not mean "does not exist on the target".
+    pub listing_truncated: bool,
 }
 
 impl AppService {
@@ -36,8 +39,8 @@ impl AppService {
         let new_details: wit_types::MangaInfo = serde_json::from_str(&raw)
             .map_err(|e| ServiceError::Internal(format!("Failed to parse manga details: {e}")))?;
 
-        let target_chapters = self
-            .fetch_all_chapter_pages(target_source_id, target_source_manga_id)
+        let (target_chapters, listing_truncated) = self
+            .fetch_all_chapter_pages_checked(target_source_id, target_source_manga_id)
             .await?;
 
         let existing_chapters = sqlx::query!(
@@ -67,6 +70,7 @@ impl AppService {
             orphaned_ids,
             unmatched_new,
             downloaded_orphan_ids,
+            listing_truncated,
         })
     }
 
@@ -114,6 +118,7 @@ impl AppService {
             orphaned_ids,
             unmatched_new,
             downloaded_orphan_ids,
+            listing_truncated,
         } = ctx;
 
         let new_count = unmatched_new.len();
@@ -133,6 +138,22 @@ impl AppService {
                 "The target source matches none of this series' {} existing chapters, so \
                  migrating would delete every download. Refused. If this is intentional, \
                  migrate with 'keep downloaded chapters' enabled.",
+                downloaded_orphan_ids.len()
+            )));
+        }
+
+        // The same principle for a listing cut short by the page ceiling: a
+        // chapter missing from a *truncated* listing may exist on the target and
+        // simply never have been fetched. Orphaning on that basis deletes
+        // downloads over an artefact of pagination, so refuse while any download
+        // is at stake. Matching chapters still migrate once the user opts to
+        // keep the orphaned files.
+        if !keep_orphaned_downloads && !downloaded_orphan_ids.is_empty() && listing_truncated {
+            return Err(ServiceError::Validation(format!(
+                "The target source's chapter listing was cut short at the page ceiling, so \
+                 it cannot be told apart from a listing that genuinely lacks {} of this \
+                 series' downloaded chapters. Refused rather than risk deleting them. \
+                 Migrate with 'keep downloaded chapters' enabled to proceed.",
                 downloaded_orphan_ids.len()
             )));
         }
