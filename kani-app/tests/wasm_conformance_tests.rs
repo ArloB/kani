@@ -370,3 +370,53 @@ async fn error_404_is_empty_in_both_backends() {
     assert!(w.manga.is_empty());
     assert!(y.manga.is_empty());
 }
+
+// ── Group O — the WASM path against a live origin ────────────────────────────
+
+// O2 — the compiled guest builds the request it declared: a search issues a GET
+// to /search carrying the query the guest assembled, verified on the wire.
+#[tokio::test]
+async fn a_wasm_source_builds_the_request_it_declared() {
+    let origin = TestOrigin::start().await;
+    origin.set("/search", Response::html(SEARCH_HTML));
+    let wasm = wasm_or_skip!(origin);
+
+    wasm.search_manga("berserk", 1, 20, &[]).await.unwrap();
+
+    let seen = origin
+        .last_request("/search")
+        .expect("the guest sent its declared search request");
+    assert_eq!(seen.method, "GET", "the guest declared a GET");
+    assert_eq!(
+        seen.query_param("q").as_deref(),
+        Some("berserk"),
+        "the search query the guest built reached the wire. Saw: {:?}",
+        seen.query
+    );
+}
+
+// O3 — a preference change reaches a running WASM instance: the fixture reads
+// its origin from the `base_url` preference on every call, so updating that
+// preference redirects the very next call, no re-instantiation.
+#[tokio::test]
+async fn a_preference_change_reaches_a_running_wasm_instance() {
+    let first = TestOrigin::start().await;
+    let second = TestOrigin::start().await;
+    first.set("/popular", Response::html(POPULAR_HTML));
+    second.set("/popular", Response::html(POPULAR_HTML));
+
+    let wasm = wasm_or_skip!(first);
+    wasm.get_popular_manga(1, 20, &[]).await.unwrap();
+    assert_eq!(first.hits("/popular"), 1);
+    assert_eq!(second.hits("/popular"), 0);
+
+    // Point the running instance at the second origin via a preference update.
+    wasm.update_preferences(HashMap::from([("base_url".to_string(), second.base())]));
+    wasm.get_popular_manga(1, 20, &[]).await.unwrap();
+
+    assert_eq!(
+        second.hits("/popular"),
+        1,
+        "the preference change reached the running instance — the next call hit the new origin"
+    );
+}
