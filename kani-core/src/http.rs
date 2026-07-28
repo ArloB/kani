@@ -329,10 +329,17 @@ impl SmartResponse {
 
 const REDIRECT_LIMIT: usize = 10;
 
+/// The one SSRF egress decision, shared by both redirect-following mechanisms
+/// (the auto-follow `Policy::custom` for `send_request`, and `safe_get`'s manual
+/// loop): refuse a hop whose target is a forbidden IP literal — the hole the
+/// DNS-only resolver never sees — unless `allow_private` is set (tests only).
+fn redirect_egress_forbidden(allow_private: &std::sync::atomic::AtomicBool, url: &str) -> bool {
+    !allow_private.load(std::sync::atomic::Ordering::Relaxed)
+        && crate::network::is_forbidden_url_host(url)
+}
+
 /// Redirect policy for the auto-following client (source extraction): follow up
-/// to `REDIRECT_LIMIT` hops, but refuse a hop whose target is a forbidden IP
-/// literal — the SSRF-via-redirect hole the DNS-only resolver never sees. The
-/// `allow_private` flag (tests only) lets a `TestOrigin` redirect stay reachable.
+/// to `REDIRECT_LIMIT` hops, refusing a forbidden egress target per hop.
 fn ssrf_aware_redirect_policy(
     allow_private: Arc<std::sync::atomic::AtomicBool>,
 ) -> rquest::redirect::Policy {
@@ -342,9 +349,7 @@ fn ssrf_aware_redirect_policy(
                 "too many redirects",
             ));
         }
-        if !allow_private.load(std::sync::atomic::Ordering::Relaxed)
-            && crate::network::is_forbidden_url_host(attempt.url().as_str())
-        {
+        if redirect_egress_forbidden(&allow_private, attempt.url().as_str()) {
             return attempt.error(Box::<dyn std::error::Error + Send + Sync>::from(
                 "redirect to a forbidden host refused",
             ));
@@ -996,16 +1001,9 @@ impl SmartClient {
                     }
                 }
 
-                // Re-validate the redirect TARGET for SSRF. The resolver guards
-                // DNS names but never sees an IP literal (the connector dials it
-                // directly), so a benign-looking URL can 302 to
-                // http://169.254.169.254/ and slip through. Refuse a forbidden IP
-                // literal per hop.
-                if !self
-                    .allow_private_egress
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    && crate::network::is_forbidden_url_host(next.as_str())
-                {
+                // Re-validate the redirect TARGET for SSRF (same decision the
+                // auto-follow policy makes — the resolver never sees an IP literal).
+                if redirect_egress_forbidden(&self.allow_private_egress, next.as_str()) {
                     return Err(crate::error::Error::Other(format!(
                         "redirect to a forbidden host refused: {next}"
                     )));
