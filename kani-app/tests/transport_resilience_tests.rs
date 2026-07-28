@@ -80,6 +80,36 @@ async fn the_circuit_recovers_after_the_cooldown() {
     assert_eq!(status.as_u16(), 200);
 }
 
+// H9 — a body that never arrives trips the per-attempt request timeout and
+// retries out to an error, rather than hanging the caller forever.
+#[tokio::test]
+async fn a_slow_body_hits_the_request_timeout_not_a_hang() {
+    let site = TestOrigin::start().await;
+    // Stall accepts the connection and holds it open without ever writing the
+    // response head, so `execute` only unblocks when the client's own timeout
+    // fires.
+    site.set("/x", Response::status(200).body(Body::Stall));
+    let client = SmartClient::new(None).unwrap().with_timings(Timings {
+        retry_base_delay: Duration::from_millis(1),
+        retry_jitter: Duration::ZERO,
+        request_timeout: Duration::from_millis(80),
+        ..Timings::default()
+    });
+
+    let start = std::time::Instant::now();
+    let res = client.get(&site.url("/x")).await;
+    let elapsed = start.elapsed();
+
+    assert!(
+        res.is_err(),
+        "a stalled body must surface a timeout error, not a value"
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "the call must return promptly via the request timeout, not hang (took {elapsed:?})"
+    );
+}
+
 // C11 — a connection reset mid-request is retried rather than surfaced.
 #[tokio::test]
 async fn a_connection_reset_mid_request_is_retried() {
