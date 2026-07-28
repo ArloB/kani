@@ -21,6 +21,9 @@ const CIRCUIT_COOLDOWN_SECS: u64 = 30;
 /// unreachable solver cannot hang the request indefinitely.
 const SOLVER_TIMEOUT_SECS: u64 = 65;
 const REQUEST_TIMEOUT_SECS: u64 = 35;
+/// Ceiling on a whole call: 3 retries at 5/10/20 s backoff (~35 s) plus one
+/// 65 s solve, with headroom.
+const WHOLE_CALL_DEADLINE_SECS: u64 = 120;
 
 /// Timing knobs for the retry/circuit/solver machinery. Production uses
 /// [`Timings::default`]; tests override them via [`SmartClient::with_timings`]
@@ -36,6 +39,10 @@ pub struct Timings {
     /// client's own transport timeout so tests can bound an in-flight call
     /// (e.g. against a stalling origin) without waiting out the 35 s default.
     pub request_timeout: std::time::Duration,
+    /// Wall-clock ceiling on a WHOLE call, across every retry, backoff and
+    /// challenge solve. `request_timeout` bounds one attempt; this bounds the sum
+    /// so a pathological composition can't run for minutes.
+    pub whole_call_deadline: std::time::Duration,
 }
 
 impl Default for Timings {
@@ -47,6 +54,7 @@ impl Default for Timings {
             solver_timeout: std::time::Duration::from_secs(SOLVER_TIMEOUT_SECS),
             credential_ttl: std::time::Duration::from_secs(CREDENTIAL_TTL_SECS),
             request_timeout: std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
+            whole_call_deadline: std::time::Duration::from_secs(WHOLE_CALL_DEADLINE_SECS),
         }
     }
 }
@@ -590,8 +598,14 @@ impl SmartClient {
 
         let mut current_request = request;
         let mut attempt = 0;
+        let call_deadline = tokio::time::Instant::now() + self.timings.whole_call_deadline;
 
         loop {
+            if tokio::time::Instant::now() >= call_deadline {
+                return Err(crate::error::Error::Other(
+                    "HTTP request exceeded its overall deadline".into(),
+                ));
+            }
             let request_clone_for_retry = current_request.try_clone();
 
             let executed = tokio::time::timeout(
@@ -791,7 +805,8 @@ impl SmartClient {
         headers: Option<rquest::header::HeaderMap>,
         cond_cache: Option<&ConditionalGetCache>,
     ) -> Result<SmartResponse> {
-        const MAX_REDIRECTS: usize = 5;
+        // Unified with the auto-following client's policy limit.
+        const MAX_REDIRECTS: usize = REDIRECT_LIMIT;
 
         let mut current_url = initial_url.to_string();
         let mut solver_headers = rquest::header::HeaderMap::new();
@@ -860,8 +875,14 @@ impl SmartClient {
 
         let mut redirect_count = 0usize;
         let mut retry_count = 0u32;
+        let call_deadline = tokio::time::Instant::now() + self.timings.whole_call_deadline;
 
         loop {
+            if tokio::time::Instant::now() >= call_deadline {
+                return Err(crate::error::Error::Other(
+                    "safe_get exceeded its overall deadline".into(),
+                ));
+            }
             let mut req_builder = self.client.get(&current_url);
             // Conditional-GET validators stay pinned to the URL they were
             // stored for; an ETag means nothing to whatever the redirect lands
@@ -1978,8 +1999,8 @@ mod tests {
     #[tokio::test]
     async fn safe_get_too_many_redirects_returns_error() {
         let server = MockServer::start().await;
-        // 5 sequential redirects triggers the MAX_REDIRECTS guard
-        for i in 1..=5 {
+        // A chain longer than MAX_REDIRECTS (10) trips the guard.
+        for i in 1..=12 {
             let next = format!("{}/r{}", server.uri(), i + 1);
             Mock::given(method("GET"))
                 .and(path(format!("/r{}", i)))
@@ -2143,6 +2164,34 @@ mod tests {
         assert!(
             elapsed < std::time::Duration::from_secs(5),
             "redirect loop must fail fast, took {elapsed:?}"
+        );
+    }
+
+    // The whole-call deadline bounds the cumulative time across retries/backoff,
+    // even when each individual attempt stays under request_timeout.
+    #[tokio::test]
+    async fn a_call_is_bounded_by_the_whole_call_deadline() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/x"))
+            .respond_with(ResponseTemplate::new(502)) // retryable → would keep retrying
+            .mount(&server)
+            .await;
+
+        let client = SmartClient::new_for_test().unwrap().with_timings(Timings {
+            whole_call_deadline: std::time::Duration::from_millis(50),
+            retry_base_delay: std::time::Duration::from_millis(100), // one backoff blows the deadline
+            retry_jitter: std::time::Duration::ZERO,
+            ..Timings::default()
+        });
+        let start = std::time::Instant::now();
+        let res = client.get(&format!("{}/x", server.uri())).await;
+        let elapsed = start.elapsed();
+
+        assert!(res.is_err(), "the call is stopped at its deadline");
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "the deadline bounds cumulative retry time, took {elapsed:?}"
         );
     }
 
