@@ -78,6 +78,7 @@ http-body-util = "0.1"
 zip = "7"
 kani-app = { path = "../kani-app", features = ["test-util"] }
 kani-shared-test = { path = "../kani-shared-test" }
+kani-yaml = { path = "../kani-yaml" }
 moka = { workspace = true }
 async-trait = "0.1"
 ed25519-dalek.workspace = true

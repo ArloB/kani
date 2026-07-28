@@ -300,3 +300,127 @@ async fn opds_root_feed_contains_catalogue_link() {
         "Root feed should have expected id"
     );
 }
+
+// ── K9. The feed reflects what the source actually returned ───────────────────
+
+// Every other OPDS test seeds chapter rows by hand, so none of them prove the
+// feed matches what a *source* served. This drives the whole path — a live
+// origin, a real scan through `AppService`, then the rendered feed — so a break
+// anywhere between the source response and the XML shows up here.
+#[tokio::test]
+async fn opds_reflects_what_the_source_actually_returned() {
+    use kani_app::source::{SourceBackend, YamlSource};
+    use kani_shared::ast::Expr;
+    use kani_shared_test::origin::{Response, TestOrigin};
+    use kani_yaml::yaml::model::{
+        FieldSource, ValidatedEndpoint, ValidatedExtension, ValidatedField, ValidatedHnp,
+        ValidatedTotalPages,
+    };
+    use kani_yaml::yaml::schema::ResponseType;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/chapters/m1",
+        Response::json(
+            r#"{"chapters":[{"id":"c1","number":1,"title":"The Wasteland"},
+                            {"id":"c2","number":2,"title":"Nightfall"}]}"#,
+        ),
+    );
+
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let src = insert_source(&state.db, "src").await;
+    let manga = insert_manga(&state.db, src, "m1", "Dragon Ball").await;
+
+    let field = |name: &str, ptr: &str| ValidatedField {
+        name: name.to_string(),
+        source: FieldSource::Blueprint(Expr::JsonPtr {
+            target: Box::new(Expr::SelfRef),
+            pointer: ptr.to_string(),
+        }),
+        optional: false,
+    };
+    let chapter_list = ValidatedEndpoint {
+        route: "/chapters/$manga_id$".into(),
+        method: "GET".into(),
+        headers: vec![],
+        queries: vec![],
+        filter_mapping: vec![],
+        filter_format: None,
+        response_type: ResponseType::Json,
+        container: "/chapters".into(),
+        bindings: vec![],
+        fields: vec![
+            field("id", "/id"),
+            field("number", "/number"),
+            field("title", "/title"),
+        ],
+        scalars: vec![],
+        has_next_page: ValidatedHnp::Static(false),
+        total_pages: ValidatedTotalPages::None,
+        pagination: None,
+        composite_id_decodes: vec![],
+        then_steps: vec![],
+        for_each_steps: vec![],
+        via: None,
+        page_url: None,
+        script_name: None,
+        timeout_ms: 10_000,
+    };
+    let ext = ValidatedExtension {
+        id: "src".into(),
+        name: "Src".into(),
+        version: "1.0.0".into(),
+        base_url: origin.base(),
+        language: "en".into(),
+        unrestricted_http: true,
+        chapter_list: Some(chapter_list),
+        ..Default::default()
+    };
+    state.service.sources.insert(
+        src,
+        SourceBackend::Yaml(Box::new(YamlSource::new(
+            Arc::new(ext),
+            kani_core::http::SmartClient::new(None).unwrap(),
+            Arc::new(kani_core::cache::InMemoryCache::new()),
+            "opds:".into(),
+            HashMap::new(),
+            true,
+        ))),
+    );
+
+    state
+        .service
+        .fetch_and_store_chapters_silent(manga)
+        .await
+        .unwrap();
+
+    // The feed lists downloaded chapters only — it exists to serve files — so
+    // mark them as the downloader would. Their titles and numbers still come
+    // from the source response, which is what this asserts on.
+    sqlx::query("UPDATE chapters SET download_status = 2 WHERE manga_id = ?")
+        .bind(manga.0)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+    let app = build_test_app_with_opds(state).await;
+    let cookie = login(&app, username, password).await;
+    let res = app
+        .oneshot(opds_authed_req(
+            &format!("/opds/manga/{}", manga.0),
+            &cookie,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let xml = std::str::from_utf8(&bytes).unwrap();
+    assert!(
+        xml.contains("The Wasteland") && xml.contains("Nightfall"),
+        "the feed must list the chapters the source served, got: {xml}"
+    );
+}
