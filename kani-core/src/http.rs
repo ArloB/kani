@@ -319,6 +319,32 @@ impl SmartResponse {
     }
 }
 
+const REDIRECT_LIMIT: usize = 10;
+
+/// Redirect policy for the auto-following client (source extraction): follow up
+/// to `REDIRECT_LIMIT` hops, but refuse a hop whose target is a forbidden IP
+/// literal — the SSRF-via-redirect hole the DNS-only resolver never sees. The
+/// `allow_private` flag (tests only) lets a `TestOrigin` redirect stay reachable.
+fn ssrf_aware_redirect_policy(
+    allow_private: Arc<std::sync::atomic::AtomicBool>,
+) -> rquest::redirect::Policy {
+    rquest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= REDIRECT_LIMIT {
+            return attempt.error(Box::<dyn std::error::Error + Send + Sync>::from(
+                "too many redirects",
+            ));
+        }
+        if !allow_private.load(std::sync::atomic::Ordering::Relaxed)
+            && crate::network::is_forbidden_url_host(attempt.url().as_str())
+        {
+            return attempt.error(Box::<dyn std::error::Error + Send + Sync>::from(
+                "redirect to a forbidden host refused",
+            ));
+        }
+        attempt.follow()
+    })
+}
+
 #[derive(Clone)]
 pub struct SmartClient {
     client: rquest::Client,
@@ -332,8 +358,9 @@ pub struct SmartClient {
     timings: Timings,
     /// When false (production), a redirect to a forbidden IP literal
     /// (private/loopback/metadata) is refused — closing the SSRF-via-redirect
-    /// hole the DNS-only resolver can't see. Tests set it true to reach loopback.
-    allow_private_egress: bool,
+    /// hole the DNS-only resolver can't see. Shared with the client's redirect
+    /// policy closure so it is read live. Tests set it true to reach loopback.
+    allow_private_egress: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl SmartClient {
@@ -351,16 +378,22 @@ impl SmartClient {
     /// from a production build). So there is **no way to disable the SSRF guard in
     /// production** — the field is constructed `false` and has no public mutator.
     #[cfg(any(test, feature = "test-util"))]
-    pub fn with_allow_private_egress(mut self, allow: bool) -> Self {
-        self.allow_private_egress = allow;
+    pub fn with_allow_private_egress(self, allow: bool) -> Self {
+        self.allow_private_egress
+            .store(allow, std::sync::atomic::Ordering::Relaxed);
         self
     }
 
     pub fn new(solver_url: Option<String>) -> Result<Self> {
         let resolver = ValidatingResolver::new()?;
+        let allow_private_egress = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Auto-following client (source extraction). The redirect policy validates
+        // every hop for SSRF; send_request keeps its simple loop.
         let client = rquest::Client::builder()
             .emulation(rquest_util::Emulation::Chrome130)
-            .redirect(rquest::redirect::Policy::limited(10))
+            .redirect(ssrf_aware_redirect_policy(Arc::clone(
+                &allow_private_egress,
+            )))
             .dns_resolver(Arc::new(resolver))
             .pool_idle_timeout(std::time::Duration::from_secs(300))
             .pool_max_idle_per_host(100)
@@ -378,7 +411,7 @@ impl SmartClient {
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
             timings: Timings::default(),
-            allow_private_egress: false,
+            allow_private_egress,
         })
     }
 
@@ -409,7 +442,7 @@ impl SmartClient {
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
             timings: Timings::default(),
-            allow_private_egress: false,
+            allow_private_egress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
 
@@ -568,6 +601,10 @@ impl SmartClient {
             .await;
             let resp = match executed {
                 Ok(Ok(r)) => r,
+                // A redirect-policy rejection (SSRF hop / too many redirects) is
+                // terminal — retrying just re-walks the same chain (the old 35s
+                // amplification).
+                Ok(Err(e)) if e.is_redirect() => return Err(e.into()),
                 // A transport error or an elapsed per-attempt timeout: retry if we can.
                 Ok(Err(_)) | Err(_)
                     if attempt < MAX_RETRIES && request_clone_for_retry.is_some() =>
@@ -859,6 +896,8 @@ impl SmartClient {
                 tokio::time::timeout(self.timings.request_timeout, self.client.execute(req)).await;
             let resp = match executed {
                 Ok(Ok(r)) => r,
+                // A redirect-policy rejection is terminal (see send_request).
+                Ok(Err(e)) if e.is_redirect() => return Err(e.into()),
                 Ok(Err(_)) | Err(_) if retry_count < MAX_RETRIES => {
                     let delay = compute_delay(None, retry_count, self.timings.retry_base_delay)
                         + jitter(self.timings.retry_jitter);
@@ -941,7 +980,9 @@ impl SmartClient {
                 // directly), so a benign-looking URL can 302 to
                 // http://169.254.169.254/ and slip through. Refuse a forbidden IP
                 // literal per hop.
-                if !self.allow_private_egress
+                if !self
+                    .allow_private_egress
+                    .load(std::sync::atomic::Ordering::Relaxed)
                     && crate::network::is_forbidden_url_host(next.as_str())
                 {
                     return Err(crate::error::Error::Other(format!(
@@ -1423,7 +1464,7 @@ impl SmartClient {
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
             timings: Timings::default(),
-            allow_private_egress: true,
+            allow_private_egress: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         })
     }
 }
@@ -2052,6 +2093,56 @@ mod tests {
         assert!(
             err.to_string().contains("forbidden host"),
             "refused for the right reason, got: {err}"
+        );
+    }
+
+    // send_request (via get) auto-follows redirects through the SSRF-aware policy;
+    // a hop to a forbidden IP literal is refused, not followed. This covers the
+    // source hot path, which previously auto-followed with no per-hop check.
+    #[tokio::test]
+    async fn get_refuses_a_redirect_to_a_forbidden_ip_literal() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/redir"))
+            .respond_with(
+                ResponseTemplate::new(301)
+                    .insert_header("location", "http://169.254.169.254/latest/meta-data/"),
+            )
+            .mount(&server)
+            .await;
+
+        // Production `new()` (allow_private_egress = false). The loopback origin is
+        // reached (IP literal bypasses the resolver), the redirect target is not.
+        let client = SmartClient::new(None).unwrap();
+        let res = client.get(&format!("{}/redir", server.uri())).await;
+        assert!(
+            res.is_err(),
+            "a source redirect to a forbidden host must be refused"
+        );
+    }
+
+    // A redirect loop trips the limit and fails FAST — no retry amplification
+    // (the old bug spent ~35s re-walking the chain per retry).
+    #[tokio::test]
+    async fn a_redirect_loop_fails_fast_without_amplification() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/loop"))
+            .respond_with(ResponseTemplate::new(301).insert_header("location", "/loop"))
+            .mount(&server)
+            .await;
+
+        let client = SmartClient::new(None)
+            .unwrap()
+            .with_allow_private_egress(true); // let the loopback loop run to the limit
+        let start = std::time::Instant::now();
+        let res = client.get(&format!("{}/loop", server.uri())).await;
+        let elapsed = start.elapsed();
+
+        assert!(res.is_err(), "a redirect loop is refused at the limit");
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "redirect loop must fail fast, took {elapsed:?}"
         );
     }
 
