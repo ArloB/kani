@@ -330,12 +330,23 @@ pub struct SmartClient {
     pub circuit_event_tx: tokio::sync::broadcast::Sender<CircuitOpenedEvent>,
     pub cond_cache: Arc<ConditionalGetCache>,
     timings: Timings,
+    /// When false (production), a redirect to a forbidden IP literal
+    /// (private/loopback/metadata) is refused — closing the SSRF-via-redirect
+    /// hole the DNS-only resolver can't see. Tests set it true to reach loopback.
+    allow_private_egress: bool,
 }
 
 impl SmartClient {
     /// Overrides the retry/circuit/solver timings (test seam — see [`Timings`]).
     pub fn with_timings(mut self, timings: Timings) -> Self {
         self.timings = timings;
+        self
+    }
+
+    /// Allow egress to private/loopback IP literals (test seam so a `TestOrigin`
+    /// on `127.0.0.1` is reachable; never set in production).
+    pub fn with_allow_private_egress(mut self, allow: bool) -> Self {
+        self.allow_private_egress = allow;
         self
     }
 
@@ -361,6 +372,7 @@ impl SmartClient {
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
             timings: Timings::default(),
+            allow_private_egress: false,
         })
     }
 
@@ -391,6 +403,7 @@ impl SmartClient {
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
             timings: Timings::default(),
+            allow_private_egress: false,
         })
     }
 
@@ -917,6 +930,19 @@ impl SmartClient {
                     }
                 }
 
+                // Re-validate the redirect TARGET for SSRF. The resolver guards
+                // DNS names but never sees an IP literal (the connector dials it
+                // directly), so a benign-looking URL can 302 to
+                // http://169.254.169.254/ and slip through. Refuse a forbidden IP
+                // literal per hop.
+                if !self.allow_private_egress
+                    && crate::network::is_forbidden_url_host(next.as_str())
+                {
+                    return Err(crate::error::Error::Other(format!(
+                        "redirect to a forbidden host refused: {next}"
+                    )));
+                }
+
                 redirect_count += 1;
                 if redirect_count >= MAX_REDIRECTS {
                     return Err(crate::error::Error::Other(format!(
@@ -1391,6 +1417,7 @@ impl SmartClient {
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
             timings: Timings::default(),
+            allow_private_egress: true,
         })
     }
 }
@@ -1988,6 +2015,37 @@ mod tests {
             resp.url().scheme(),
             "http",
             "the protocol-relative Location inherited the http scheme"
+        );
+    }
+
+    // SSRF-via-redirect: a benign-looking URL that 302s to an internal IP literal
+    // (which the DNS resolver never sees) is refused at the hop.
+    #[tokio::test]
+    async fn a_redirect_to_a_forbidden_ip_literal_is_refused() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/redir"))
+            .respond_with(
+                ResponseTemplate::new(301)
+                    .insert_header("location", "http://169.254.169.254/latest/meta-data/"),
+            )
+            .mount(&server)
+            .await;
+
+        // allow_private_egress(false): the loopback *origin* is still reached (the
+        // initial hop is not gated here), but the redirect *target* is refused.
+        let client = SmartClient::new_for_test()
+            .unwrap()
+            .with_allow_private_egress(false);
+        let Err(err) = client
+            .safe_get(&format!("{}/redir", server.uri()), None)
+            .await
+        else {
+            panic!("expected the redirect to a forbidden host to be refused");
+        };
+        assert!(
+            err.to_string().contains("forbidden host"),
+            "refused for the right reason, got: {err}"
         );
     }
 
