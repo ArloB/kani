@@ -149,3 +149,49 @@ async fn an_oversized_image_is_capped() {
         res.status()
     );
 }
+
+// K5 — the reader asks for a byte range; the upstream ignores it and answers
+// `200` with the whole body. The proxy must pass that through as a complete
+// `200` rather than mislabelling it `206 Partial Content` (which would tell the
+// reader it received only a slice) or failing the request outright.
+#[tokio::test]
+async fn an_upstream_that_ignores_range_still_serves_the_reader() {
+    let origin = TestOrigin::start().await;
+    let image = vec![9u8; 2048];
+    origin.set("/img.jpg", Response::image(image.clone()));
+    origin.ignore_range(true);
+
+    let mut state = test_state().await;
+    state.proxy_config = fast_proxy_config();
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app_with_proxy(state.clone()).await;
+    let cookie = login(&app, u, p).await;
+
+    let signed = make_proxy_url(
+        &origin.url("/img.jpg"),
+        "http://ref.test/",
+        &state.proxy_secret,
+        None,
+    );
+    let mut req = authed_get(&signed, &cookie);
+    req.headers_mut().insert(
+        axum::http::header::RANGE,
+        axum::http::HeaderValue::from_static("bytes=0-511"),
+    );
+
+    let res = app.oneshot(req).await.unwrap();
+
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "an ignored range is a complete response, not partial content"
+    );
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(
+        body.len(),
+        image.len(),
+        "the reader still receives the whole usable image"
+    );
+}
