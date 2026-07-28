@@ -702,7 +702,12 @@ async fn credentials_are_not_carried_across_a_cross_host_redirect() {
         rquest::header::HeaderValue::from_static("bytes=0-99"),
     );
 
-    let client = kani_core::http::SmartClient::new(None).unwrap();
+    // TestOrigins are on loopback; production refuses redirects to private
+    // hosts, so this must opt into private egress to exercise the cross-host
+    // credential-stripping behaviour at all.
+    let client = kani_core::http::SmartClient::new(None)
+        .unwrap()
+        .with_allow_private_egress(true);
     let res = client.safe_get(&first.url("/start"), Some(headers)).await;
     assert!(res.is_ok(), "the redirect should still be followed");
     assert_eq!(
@@ -1160,6 +1165,295 @@ fn wire_filtering_source(svc: &kani_app::service::AppService, source_id: i64, ba
     );
     svc.sources
         .insert(source_id, SourceBackend::Yaml(Box::new(source)));
+}
+
+// ── I2. A preference change propagates to the next eval without a restart ────
+
+// The interpreted evaluator reads `$pref:key` from a HostState rebuilt per call
+// (yaml_source.rs re-reads prefs into it each eval), so update_preferences must
+// be visible to the very next extraction on the *same* source instance.
+#[tokio::test]
+async fn a_preference_change_propagates_without_a_restart() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/popular",
+        Response::html(r#"<html><body><div class="item" data-id="m1"></div></body></html>"#),
+    );
+
+    // Title is read straight from the `region` preference so a change is visible
+    // in the extracted output.
+    let popular = ValidatedEndpoint {
+        route: "/popular".into(),
+        container: ".item".into(),
+        fields: vec![
+            ValidatedField {
+                name: "id".into(),
+                source: FieldSource::Blueprint(Expr::Attr {
+                    target: Box::new(Expr::SelfRef),
+                    name: "data-id".into(),
+                }),
+                optional: false,
+            },
+            ValidatedField {
+                name: "title".into(),
+                source: FieldSource::Blueprint(Expr::pref("region")),
+                optional: false,
+            },
+        ],
+        ..json_endpoint("/popular", ".item", vec![])
+    };
+    let mut popular = popular;
+    popular.response_type = ResponseType::Html;
+
+    let ext = ValidatedExtension {
+        id: "pref-source".into(),
+        name: "Pref Source".into(),
+        version: "1.0.0".into(),
+        base_url: origin.base(),
+        language: "en".into(),
+        unrestricted_http: true,
+        popular: Some(kani_yaml::yaml::model::ValidatedPopular::Full(Box::new(
+            popular,
+        ))),
+        ..Default::default()
+    };
+    let source = YamlSource::new(
+        Arc::new(ext),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        "pref:".into(),
+        HashMap::from([("region".to_string(), "US".to_string())]),
+        true,
+    );
+
+    let first = source.get_popular_manga(1, 50, &[]).await.unwrap();
+    assert_eq!(first.manga[0].title, "US", "the initial preference is used");
+
+    // Change the preference on the running instance — no rebuild.
+    source.update_preferences(HashMap::from([("region".to_string(), "JP".to_string())]));
+
+    let second = source.get_popular_manga(1, 50, &[]).await.unwrap();
+    assert_eq!(
+        second.manga[0].title, "JP",
+        "the next eval must see the updated preference, no restart"
+    );
+}
+
+// ── I4. A sort option maps into the request via the SortPair format ──────────
+
+/// A search endpoint whose `sort` filter is a SortPair: the sort field goes
+/// into a templated key and the direction into its own parameter.
+fn wire_sorting_source(svc: &kani_app::service::AppService, source_id: i64, base_url: &str) {
+    use kani_yaml::yaml::schema::{FilterMappingEntry, SortPairKind};
+
+    let mut ep = json_endpoint(
+        "/search",
+        "/results",
+        vec![
+            json_field("id", "/id", false),
+            json_field("title", "/title", false),
+        ],
+    );
+    ep.filter_mapping = vec![(
+        "sort".to_string(),
+        FilterMappingEntry::SortPair {
+            kind: SortPairKind::SortPair,
+            // Bracket-free so the query key isn't percent-encoded on the wire.
+            key_template: "sort_{}".into(),
+            direction_param: Some("dir".into()),
+        },
+    )];
+
+    let ext = ValidatedExtension {
+        id: "sorting-source".into(),
+        name: "Sorting Source".into(),
+        version: "1.0.0".into(),
+        base_url: base_url.to_string(),
+        language: "en".into(),
+        unrestricted_http: true,
+        search: Some(ep),
+        ..Default::default()
+    };
+    let source = YamlSource::new(
+        Arc::new(ext),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        format!("sort-{source_id}:"),
+        HashMap::new(),
+        true,
+    );
+    svc.sources
+        .insert(source_id, SourceBackend::Yaml(Box::new(source)));
+}
+
+// ── I3 / I5. A fetched option set populates (or degrades) the filter panel ──
+
+/// Register a source with a `genre` select filter whose options are fetched from
+/// `{origin}/genres` (a JSON array of `{name,value}`).
+async fn wire_fetched_options_source(
+    svc: &kani_app::service::AppService,
+    source_id: i64,
+    base_url: &str,
+) {
+    use kani_yaml::yaml::schema::{
+        FetchedOptionsDef, FilterEntry, FilterKind, OptionSetDef, ResponseType,
+    };
+    use std::collections::BTreeMap;
+
+    let mut option_sets = BTreeMap::new();
+    option_sets.insert(
+        "genres".to_string(),
+        OptionSetDef::Fetched {
+            options_fetched_by: FetchedOptionsDef {
+                route: "/genres".into(),
+                response_type: ResponseType::Json,
+                container: None,
+                fields: BTreeMap::new(),
+                nsfw_field: None,
+                cache: None,
+            },
+        },
+    );
+
+    let ext = ValidatedExtension {
+        id: "fetched-options-source".into(),
+        name: "Fetched Options Source".into(),
+        version: "1.0.0".into(),
+        base_url: base_url.to_string(),
+        language: "en".into(),
+        unrestricted_http: true,
+        filters: vec![FilterEntry {
+            id: "genre".into(),
+            name: "Genre".into(),
+            kind: FilterKind::Select,
+            options: vec![],
+            default: None,
+            semantic: None,
+            name_i18n: None,
+            options_ref: Some("genres".into()),
+            min: None,
+            max: None,
+            step: None,
+        }],
+        option_sets,
+        ..Default::default()
+    };
+    let source = YamlSource::new(
+        Arc::new(ext),
+        kani_core::http::SmartClient::new(None).unwrap(),
+        Arc::new(kani_core::cache::InMemoryCache::new()),
+        format!("optset-{source_id}:"),
+        HashMap::new(),
+        true,
+    );
+    svc.sources
+        .insert(source_id, SourceBackend::Yaml(Box::new(source)));
+
+    // inject_fetched_options reads base_url + unrestricted_http from the DB row
+    // (not the in-memory config) to bound where an option-set may be fetched.
+    sqlx::query("UPDATE sources SET base_url = ?, unrestricted_http = 1 WHERE id = ?")
+        .bind(base_url)
+        .bind(source_id)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_fetched_option_set_populates_the_filter_panel() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/genres",
+        Response::json(
+            r#"[{"name":"Action","value":"action"},{"name":"Romance","value":"romance"}]"#,
+        ),
+    );
+
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fetched-options-source").await;
+    wire_fetched_options_source(&svc, source_id, &origin.base()).await;
+
+    let list = svc.get_filter_list(source_id).await.unwrap();
+    let genre = list
+        .filters
+        .iter()
+        .find(|f| f.id == "genre")
+        .expect("the genre filter is present");
+    let values: Vec<&str> = genre.options.iter().map(|o| o.value.as_str()).collect();
+    assert_eq!(
+        values,
+        vec!["action", "romance"],
+        "the live-fetched option set populated the filter's dropdown values"
+    );
+}
+
+// I5 — a broken option-set fetch leaves that filter's options empty but does not
+// fail the whole panel: the source's other filters and the panel itself survive.
+// (Documents the deliberate graceful-degrade — a down option-set endpoint must
+// not take out the entire filter UI.)
+#[tokio::test]
+async fn a_broken_option_set_degrades_gracefully_without_failing_the_panel() {
+    let origin = TestOrigin::start().await;
+    origin.set("/genres", Response::status(500));
+
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "fetched-options-source").await;
+    wire_fetched_options_source(&svc, source_id, &origin.base()).await;
+
+    let list = svc
+        .get_filter_list(source_id)
+        .await
+        .expect("the panel still builds when an option-set endpoint is down");
+    let genre = list
+        .filters
+        .iter()
+        .find(|f| f.id == "genre")
+        .expect("the genre filter is still present");
+    assert!(
+        genre.options.is_empty(),
+        "a failed option-set fetch leaves the dropdown empty rather than inventing values"
+    );
+}
+
+#[tokio::test]
+async fn a_sort_option_maps_into_the_request() {
+    use kani_shared::types::{ActiveFilter, FilterState};
+
+    let origin = TestOrigin::start().await;
+    origin.set("/search", Response::json(r#"{"results":[]}"#));
+
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "sorting-source").await;
+    wire_sorting_source(&svc, source_id, &origin.base());
+
+    // A `field:direction` selection is the SortPair input shape.
+    let filters = vec![ActiveFilter {
+        filter_name: "sort".into(),
+        state: FilterState::Selection {
+            name: "Sort".into(),
+            value: "popularity:desc".into(),
+        },
+    }];
+    let json = serde_json::to_string(&filters).unwrap();
+    svc.search_manga(source_id, "q", 1, 20, Some(json))
+        .await
+        .unwrap();
+
+    let seen = origin
+        .last_request("/search")
+        .expect("the search endpoint was called");
+    assert_eq!(
+        seen.query_param("sort_popularity").as_deref(),
+        Some("desc"),
+        "the sort field maps into its templated key. Saw: {:?}",
+        seen.query
+    );
+    assert_eq!(
+        seen.query_param("dir").as_deref(),
+        Some("desc"),
+        "the sort direction maps into its own parameter. Saw: {:?}",
+        seen.query
+    );
 }
 
 #[tokio::test]

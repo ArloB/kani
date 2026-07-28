@@ -862,10 +862,17 @@ impl AppService {
             error_reporting_enabled: false,
         };
 
-        let smart_client =
-            kani_core::http::SmartClient::new(None).expect("SmartClient::new failed in test");
-        let proxy_client =
-            kani_core::http::SmartClient::new(None).expect("proxy SmartClient::new failed in test");
+        // Every test origin is on loopback, and production `new()`/`new_proxy()`
+        // refuse redirects to private hosts — so the test clients must opt into
+        // private egress or no service-level test could follow a redirect to a
+        // TestOrigin. SSRF blocking itself is verified at the http.rs unit and
+        // webhook levels, which use their own clients.
+        let smart_client = kani_core::http::SmartClient::new(None)
+            .expect("SmartClient::new failed in test")
+            .with_allow_private_egress(true);
+        let proxy_client = kani_core::http::SmartClient::new(None)
+            .expect("proxy SmartClient::new failed in test")
+            .with_allow_private_egress(true);
         let wasm_runtime =
             Arc::new(WasmRuntime::new_on_demand().expect("WasmRuntime::new failed in test"));
         let downloader = DownloaderManager::new(
