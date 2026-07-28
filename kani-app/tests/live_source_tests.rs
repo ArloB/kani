@@ -1695,6 +1695,98 @@ async fn a_migration_that_matches_is_still_allowed() {
     );
 }
 
+// ── J5. A failed migration must not have already destroyed downloads ─────────
+
+// Orphaned CBZs were deleted *before* `tx.commit()`. If the transaction then
+// failed, the database rolled back but the files were already gone — permanent
+// data loss with no record of it. The failure here is realistic: a target
+// listing that reuses one id across two chapter numbers makes both matched rows
+// UPDATE to the same `source_chapter_id`, violating UNIQUE(manga_id,
+// source_chapter_id) partway through the transaction.
+#[tokio::test]
+async fn a_failed_migration_does_not_delete_downloads_before_committing() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+
+    let home_source = insert_source(&svc.db, "home-source").await;
+    let manga = insert_manga(&svc.db, home_source, "m1", "Held Series").await;
+    let pages = vec![jpeg_page(400, 600, false, 80); 1];
+
+    // Chapters 1 and 2 will match the target; chapter 3 has no match, so it
+    // orphans and its download is what the old code deleted up front.
+    held_chapter_with_pages(&svc, manga, "Held Series", "ch-1", 1.0, &pages).await;
+    held_chapter_with_pages(&svc, manga, "Held Series", "ch-2", 2.0, &pages).await;
+    let orphan = held_chapter_with_pages(&svc, manga, "Held Series", "ch-3", 3.0, &pages).await;
+    let orphan_cbz = svc.chapter_cbz_path(orphan).await.unwrap().path;
+    assert!(orphan_cbz.exists(), "fixture CBZ must exist up front");
+
+    let target_source = insert_source(&svc.db, "target-source").await;
+    wire_migration_target(&svc, target_source, &origin.base());
+    origin.set(
+        "/target/tgt-1",
+        Response::json(r#"{"manga":[{"id":"tgt-1","title":"Held Series"}]}"#),
+    );
+    // Both target chapters carry the SAME id — the collision that fails the tx.
+    origin.set(
+        "/target/tgt-1/chapters",
+        Response::json(r#"{"chapters":[{"id":"dup","number":1},{"id":"dup","number":2}]}"#),
+    );
+
+    let res = svc
+        .migrate_manga(manga, target_source, "tgt-1".into(), false)
+        .await;
+    assert!(
+        res.is_err(),
+        "the colliding target listing must fail the migration"
+    );
+
+    assert!(
+        orphan_cbz.exists(),
+        "a migration that failed must leave every download intact — the database \
+         rolled back, so deleting the file first is unrecoverable data loss"
+    );
+}
+
+// The other half of J5: a migration that *succeeds* must still delete the
+// orphaned downloads. Without this, moving the deletion after `tx.commit()`
+// could have dropped the cleanup entirely and every existing test would still
+// have passed.
+#[tokio::test]
+async fn a_successful_migration_deletes_orphaned_downloads() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+
+    let home_source = insert_source(&svc.db, "home-source").await;
+    let manga = insert_manga(&svc.db, home_source, "m1", "Held Series").await;
+    let pages = vec![jpeg_page(400, 600, false, 80); 1];
+
+    held_chapter_with_pages(&svc, manga, "Held Series", "ch-1", 1.0, &pages).await;
+    let orphan = held_chapter_with_pages(&svc, manga, "Held Series", "ch-2", 2.0, &pages).await;
+    let orphan_cbz = svc.chapter_cbz_path(orphan).await.unwrap().path;
+    assert!(orphan_cbz.exists());
+
+    let target_source = insert_source(&svc.db, "target-source").await;
+    wire_migration_target(&svc, target_source, &origin.base());
+    origin.set(
+        "/target/tgt-1",
+        Response::json(r#"{"manga":[{"id":"tgt-1","title":"Held Series"}]}"#),
+    );
+    // The target carries chapter 1 only, so chapter 2 orphans.
+    origin.set(
+        "/target/tgt-1/chapters",
+        Response::json(r#"{"chapters":[{"id":"t-1","number":1}]}"#),
+    );
+
+    svc.migrate_manga(manga, target_source, "tgt-1".into(), false)
+        .await
+        .unwrap();
+
+    assert!(
+        !orphan_cbz.exists(),
+        "a committed migration still cleans up the orphaned download"
+    );
+}
+
 // ── J1. Chapters are matched by number across sources ────────────────────────
 
 #[tokio::test]

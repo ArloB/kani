@@ -155,6 +155,12 @@ impl AppService {
             .filter(|id| !downloaded_orphan_ids.contains(id))
             .collect();
 
+        // Resolve the paths now — the chapter rows are deleted inside the
+        // transaction below, so their names are unavailable afterwards — but do
+        // not touch the filesystem yet. Deleting before the commit meant a
+        // transaction that later failed left the database rolled back and the
+        // user's downloads already destroyed, with nothing recording the loss.
+        let mut orphaned_cbz_paths: Vec<std::path::PathBuf> = Vec::new();
         if !keep_orphaned_downloads {
             for orphan_id in &downloaded_orphan_ids {
                 let ch = sqlx::query!(
@@ -166,15 +172,10 @@ impl AppService {
 
                 if let Some(ch) = ch {
                     let ch_name = chapter_name(ch.volume, ch.chapter_number, ch.name);
-                    let cbz_path = library_path.join(&old_dir_name).join(format!(
+                    orphaned_cbz_paths.push(library_path.join(&old_dir_name).join(format!(
                         "{}.cbz",
                         kani_core::utilities::sanitize_filename(&ch_name)
-                    ));
-                    if cbz_path.exists()
-                        && let Err(e) = tokio::fs::remove_file(&cbz_path).await
-                    {
-                        tracing::warn!("Failed to delete orphaned CBZ {:?}: {}", cbz_path, e);
-                    }
+                    )));
                 }
             }
         }
@@ -271,6 +272,16 @@ impl AppService {
         Self::sync_manga_metadata(&mut tx, manga_db_id, &new_details).await?;
 
         tx.commit().await?;
+
+        // Committed: the orphan rows are gone for good, so their files can go
+        // too. Any failure above returned early with every download intact.
+        for cbz_path in &orphaned_cbz_paths {
+            if cbz_path.exists()
+                && let Err(e) = tokio::fs::remove_file(cbz_path).await
+            {
+                tracing::warn!("Failed to delete orphaned CBZ {:?}: {}", cbz_path, e);
+            }
+        }
 
         if old_dir_name != new_dir_name {
             let old_path = library_path.join(&old_dir_name);
