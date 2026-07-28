@@ -75,6 +75,43 @@ fn chapter_list_endpoint() -> ValidatedEndpoint {
     }
 }
 
+/// Like [`chapter_list_endpoint`] but `has_next_page` is statically true, so the
+/// scan loop always advances to the next page until a fetch/extraction fails.
+fn chapter_list_endpoint_always_paginated() -> ValidatedEndpoint {
+    ValidatedEndpoint {
+        has_next_page: ValidatedHnp::Static(true),
+        ..chapter_list_endpoint()
+    }
+}
+
+/// Register a YAML source whose chapter_list always claims another page.
+async fn wire_source_always_paginated(svc: &AppService, origin: &TestOrigin) -> MangaId {
+    let source_id = insert_source(&svc.db, "fixture-source").await;
+    let manga_id = insert_manga(&svc.db, source_id, "m1", "Fixture Manga").await;
+    let ext = ValidatedExtension {
+        id: "fixture-source".into(),
+        name: "Fixture Source".into(),
+        version: "1.0.0".into(),
+        base_url: origin.base(),
+        language: "en".into(),
+        unrestricted_http: true,
+        chapter_list: Some(chapter_list_endpoint_always_paginated()),
+        ..Default::default()
+    };
+    svc.sources.insert(
+        source_id,
+        SourceBackend::Yaml(Box::new(YamlSource::new(
+            Arc::new(ext),
+            kani_core::http::SmartClient::new(None).unwrap(),
+            Arc::new(kani_core::cache::InMemoryCache::new()),
+            "test:".into(),
+            HashMap::new(),
+            true,
+        ))),
+    );
+    manga_id
+}
+
 /// Register a YAML source (with only a chapter_list endpoint) pointed at `origin`.
 async fn wire_source(svc: &AppService, origin: &TestOrigin) -> MangaId {
     let source_id = insert_source(&svc.db, "fixture-source").await;
@@ -137,6 +174,44 @@ async fn a_grown_listing_emits_new_chapters_once_with_the_right_count() {
         drain_new_chapter_counts(&mut rx),
         vec![1],
         "exactly one NewChapters event, count 1 — not 3"
+    );
+}
+
+// ── H8 ─────────────────────────────────────────────────────────────────────────
+
+// H8 — a chapter-list pagination that fails on a later page is reported as an
+// error, never silently completed with only the pages fetched so far. Page 1
+// lists chapters and declares more pages (has_next_page = true); page 2 fails
+// extraction (a `.ch` row missing its required id). The scan must surface the
+// failure rather than treat page 1's chapters as the whole, complete list.
+#[tokio::test]
+async fn a_chapter_list_page_failure_is_reported_not_silently_completed() {
+    let origin = TestOrigin::start().await;
+    origin.script(
+        "/manga/m1/chapters",
+        vec![
+            // Page 1: two valid chapters; the source claims there is more.
+            Response::html(LISTING_2),
+            // Page 2: a `.ch` element with no data-id → the required `id` field
+            // is null → extraction errors, rather than yielding an empty page
+            // that the loop would read as "done".
+            Response::html(
+                r#"<html><body><div class="ch"><span class="title">broken</span></div></body></html>"#,
+            ),
+        ],
+    );
+    let svc = test_service().await;
+    let manga_id = wire_source_always_paginated(&svc, &origin).await;
+
+    let res = svc.fetch_and_store_chapters_silent(manga_id).await;
+    assert!(
+        res.is_err(),
+        "a failure on page 2 must be reported, not silently completed with only page 1: {res:?}"
+    );
+    assert_eq!(
+        origin.hits("/manga/m1/chapters"),
+        2,
+        "the scan advanced to page 2 (where it failed), proving page 1 was not treated as complete"
     );
 }
 
