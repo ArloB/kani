@@ -205,6 +205,63 @@ async fn a_revoked_token_is_recovered_from_reactively() {
     );
 }
 
+// L7 — one entry failing must not abort the rest of the sync. The loop isolates
+// each manga, so a 500 on the first still leaves the second attempted.
+#[tokio::test]
+async fn a_partial_sync_failure_does_not_abort_the_remaining_entries() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, "alice").await;
+    let tid = tracker_id(&svc.db).await;
+    seed_credentials(&svc.db, user, tid, 3600).await;
+
+    let origin = TestOrigin::start().await;
+    // The first mapped manga errors; the second answers normally.
+    origin.set("/manga/bad", Response::status(500));
+    origin.set(
+        "/manga/good",
+        Response::json(r#"{"my_list_status":{"status":"reading","num_chapters_read":3}}"#),
+    );
+    {
+        let mut registry = svc.tracker_registry.write().await;
+        registry.trackers.insert(
+            tid,
+            Box::new(MalTracker::new("client".into()).with_test_base(&origin.base())),
+        );
+    }
+
+    let source = common::insert_source(&svc.db, "src").await;
+    for (local, remote) in [("m-bad", "bad"), ("m-good", "good")] {
+        let manga = common::insert_manga(&svc.db, source, local, local).await;
+        svc.set_manga_tracking_enabled(user, manga, true)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO tracker_manga_mappings (user_id, tracker_id, manga_id, tracker_manga_id) \
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(user.0)
+        .bind(tid)
+        .bind(manga.0)
+        .bind(remote)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    }
+
+    svc.sync_all_trackers(user).await.unwrap();
+
+    assert_eq!(
+        origin.hits("/manga/bad"),
+        1,
+        "the failing entry was attempted"
+    );
+    assert_eq!(
+        origin.hits("/manga/good"),
+        1,
+        "and the failure did not abort the remaining entry"
+    );
+}
+
 // Re-linking clears the flag — otherwise the warning would stick forever.
 #[tokio::test]
 async fn storing_fresh_credentials_clears_the_reauth_flag() {

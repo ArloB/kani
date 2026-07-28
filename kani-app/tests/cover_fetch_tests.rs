@@ -142,6 +142,43 @@ async fn a_cover_larger_than_the_cap_is_rejected() {
     );
 }
 
+// K8 — a cover the origin refuses is queued for the retry sweep, and the sweep's
+// per-manga retry then succeeds once the origin recovers. Driving
+// `retry_single_cover` directly rather than waiting out the sweep's interval
+// exercises both halves: the enqueue on failure and the recovery on retry.
+#[tokio::test]
+async fn a_failed_cover_is_retried_by_the_sweep() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    origin.set("/cover", Response::status(503));
+
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "cover-source").await;
+    wire_cover_source(&svc, source_id, &origin);
+
+    let manga = svc.save_to_library(source_id, "m1", false).await.unwrap();
+    assert!(
+        cover_path(&svc, manga).await.is_none(),
+        "the 503 leaves no cover stored"
+    );
+    assert!(
+        svc.cover_retry_queue.lock().await.contains(&manga),
+        "a failed cover must be queued for the retry sweep, not forgotten"
+    );
+
+    // The origin recovers; the sweep's retry stores the cover.
+    origin.set(
+        "/cover",
+        Response::image(kani_shared_test::origin::jpeg_page(64, 96, false, 80)),
+    );
+    svc.retry_single_cover(manga).await.unwrap();
+
+    assert!(
+        cover_path(&svc, manga).await.is_some(),
+        "the retry stores the cover once the origin is healthy again"
+    );
+}
+
 // K7b — the same gate accepts a real image: the cover is stored.
 #[tokio::test]
 async fn a_valid_image_cover_is_stored() {
