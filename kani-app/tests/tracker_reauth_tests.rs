@@ -262,6 +262,112 @@ async fn a_partial_sync_failure_does_not_abort_the_remaining_entries() {
     );
 }
 
+// L4 — a 429 carrying `Retry-After` must actually make the sync wait before it
+// touches that account again, rather than hammering straight through the
+// provider's limit.
+#[tokio::test]
+async fn a_tracker_rate_limit_is_respected() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, "alice").await;
+    let tid = tracker_id(&svc.db).await;
+    seed_credentials(&svc.db, user, tid, 3600).await;
+
+    let origin = TestOrigin::start().await;
+    // The first mapping is rate-limited with a 1s Retry-After; the second is fine.
+    origin.set(
+        "/manga/limited",
+        Response::status(429).header("Retry-After", "1"),
+    );
+    origin.set(
+        "/manga/ok",
+        Response::json(r#"{"my_list_status":{"status":"reading","num_chapters_read":1}}"#),
+    );
+    {
+        let mut registry = svc.tracker_registry.write().await;
+        registry.trackers.insert(
+            tid,
+            Box::new(MalTracker::new("client".into()).with_test_base(&origin.base())),
+        );
+    }
+
+    let source = common::insert_source(&svc.db, "src").await;
+    for (local, remote) in [("m-a", "limited"), ("m-b", "ok")] {
+        let manga = common::insert_manga(&svc.db, source, local, local).await;
+        svc.set_manga_tracking_enabled(user, manga, true)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO tracker_manga_mappings (user_id, tracker_id, manga_id, tracker_manga_id) \
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(user.0)
+        .bind(tid)
+        .bind(manga.0)
+        .bind(remote)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    }
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let started = std::time::Instant::now();
+    let outcome = svc
+        .sync_stale_trackers(0, 10, std::time::Duration::ZERO, &cancel)
+        .await
+        .unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(outcome.rate_limited, 1, "the 429 was recognised as such");
+    assert!(
+        elapsed >= std::time::Duration::from_secs(1),
+        "the Retry-After must be waited out before the next call to that \
+         account, but the run finished in {elapsed:?}"
+    );
+}
+
+// L9 — tracker tokens must never reach a support bundle. Bundles get shared
+// with strangers to debug a deployment, so a leaked OAuth token there is a live
+// account compromise. The bundle ships the DB *schema* (not rows) and redacts
+// secret-named settings keys; this pins both against a future change that
+// starts dumping credential rows or logging a token.
+#[tokio::test]
+async fn tracker_tokens_are_never_written_to_the_support_bundle() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, "alice").await;
+    let tid = tracker_id(&svc.db).await;
+
+    const SECRET_ACCESS: &str = "ACCESS-TOKEN-CANARY-a1b2c3";
+    const SECRET_REFRESH: &str = "REFRESH-TOKEN-CANARY-d4e5f6";
+    sqlx::query(
+        "INSERT INTO user_tracker_credentials \
+         (user_id, tracker_id, access_token, refresh_token) VALUES (?, ?, ?, ?)",
+    )
+    .bind(user.0)
+    .bind(tid)
+    .bind(SECRET_ACCESS)
+    .bind(SECRET_REFRESH)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    let (zip_bytes, _name) = svc.generate_support_bundle(Vec::new()).await.unwrap();
+
+    // Scan every entry in the archive, not just the ones we expect to be risky.
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).unwrap();
+    for i in 0..archive.len() {
+        use std::io::Read;
+        let mut entry = archive.by_index(i).unwrap();
+        let name = entry.name().to_string();
+        let mut contents = Vec::new();
+        entry.read_to_end(&mut contents).unwrap();
+        let text = String::from_utf8_lossy(&contents);
+        assert!(
+            !text.contains(SECRET_ACCESS) && !text.contains(SECRET_REFRESH),
+            "a tracker token leaked into support bundle entry {name}"
+        );
+    }
+}
+
 // Re-linking clears the flag — otherwise the warning would stick forever.
 #[tokio::test]
 async fn storing_fresh_credentials_clears_the_reauth_flag() {
