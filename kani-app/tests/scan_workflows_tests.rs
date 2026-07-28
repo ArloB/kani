@@ -177,6 +177,43 @@ async fn a_grown_listing_emits_new_chapters_once_with_the_right_count() {
     );
 }
 
+// ── M2 ─────────────────────────────────────────────────────────────────────────
+
+// M2 — a webhook target that never responds must not hold up the action that
+// triggered it. Delivery is a background job, so the scan must finish promptly
+// while the delivery is still hanging.
+#[tokio::test]
+async fn a_failing_webhook_does_not_block_the_triggering_action() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1/chapters", Response::html(LISTING_2));
+    let svc = test_service().await;
+    let manga_id = wire_source(&svc, &origin).await;
+
+    // A webhook pointed at a socket that accepts and then never answers.
+    svc.webhook_service.allow_private_egress_for_test();
+    let hook = TestOrigin::start().await;
+    hook.set(
+        "/hook",
+        Response::status(200).body(kani_shared_test::origin::Body::Stall),
+    );
+    sqlx::query("INSERT INTO webhooks (url, events, enabled) VALUES (?, '[\"*\"]', 1)")
+        .bind(hook.url("/hook"))
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    svc.spawn_webhook_listener();
+
+    let started = std::time::Instant::now();
+    let found = svc.scan_for_new_chapters(manga_id).await.unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(found.len(), 2, "the scan still did its real work");
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "the scan must not wait on webhook delivery, took {elapsed:?}"
+    );
+}
+
 // ── F8 ─────────────────────────────────────────────────────────────────────────
 
 // F8 — a listing that repeats the same chapter id must not create two rows.

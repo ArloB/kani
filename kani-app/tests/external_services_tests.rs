@@ -56,6 +56,37 @@ async fn a_breach_check_failure_does_not_block_registration() {
     );
 }
 
+// N4 — a hostile breach response is bounded. The breach check runs during
+// registration on an unauthenticated request, so an unbounded read here is a
+// memory-exhaustion lever. An oversized body must be abandoned, and (because
+// the check is advisory) a strong password must still be accepted.
+#[tokio::test]
+async fn a_hostile_breach_response_is_bounded() {
+    let hash = sha1_hex_upper(STRONG_PW);
+    let (prefix, _) = hash.split_at(5);
+
+    let origin = TestOrigin::start().await;
+    // 4 MB of junk, well past the 1 MB ceiling.
+    origin.set(
+        &format!("/range/{prefix}"),
+        Response::ok(vec![b'A'; 4 * 1024 * 1024]),
+    );
+
+    let client = SmartClient::new(None).unwrap();
+    let res = check_password_with_hibp_base(STRONG_PW, "alice", &client, &origin.base()).await;
+
+    assert!(
+        res.is_ok(),
+        "an oversized breach response must be abandoned, leaving the advisory \
+         check inconclusive rather than blocking registration: {res:?}"
+    );
+    assert_eq!(
+        res.unwrap().pwned_count,
+        None,
+        "the abandoned response yields no breach count at all"
+    );
+}
+
 // N5 — an update-check failure is silent and harmless: a 500 and malformed JSON
 // both yield no update info, never a panic or error.
 #[tokio::test]

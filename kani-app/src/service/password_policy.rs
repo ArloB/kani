@@ -145,7 +145,27 @@ async fn check_hibp(
         return None;
     }
 
-    let body = response.text().await.ok()?;
+    // A real range response is tens of KB. Read with a ceiling rather than
+    // `.text()`, which would buffer whatever a hostile or broken endpoint sent —
+    // this call sits in the registration path, so an unbounded body here is a
+    // memory-exhaustion lever on an unauthenticated request.
+    const MAX_HIBP_BYTES: usize = 1024 * 1024;
+    let mut buf: Vec<u8> = Vec::new();
+    let mut response = response;
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if buf.len() + chunk.len() > MAX_HIBP_BYTES {
+                    tracing::warn!("HIBP response exceeded {MAX_HIBP_BYTES} bytes; ignoring it");
+                    return None;
+                }
+                buf.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(_) => return None,
+        }
+    }
+    let body = String::from_utf8_lossy(&buf).into_owned();
 
     // 3. Check locally whether our suffix matches any returned line.
     for line in body.lines() {

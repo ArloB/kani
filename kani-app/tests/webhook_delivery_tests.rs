@@ -96,6 +96,88 @@ async fn the_hmac_signature_matches_the_delivered_body() {
     );
 }
 
+// M5 — one event yields exactly one delivery. A 2xx is terminal: the job must
+// not retry a webhook that already succeeded into a second, duplicate POST.
+#[tokio::test]
+async fn a_webhook_is_not_retried_into_a_duplicate_delivery() {
+    let svc = test_service().await;
+    svc.webhook_service.allow_private_egress_for_test();
+    let origin = TestOrigin::start().await;
+    origin.set("/hook", Response::json("{}"));
+
+    let webhook_id: i64 =
+        sqlx::query_scalar("INSERT INTO webhooks (url, enabled) VALUES (?, 1) RETURNING id")
+            .bind(origin.url("/hook"))
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+
+    let job_id = svc
+        .job_manager
+        .submit(kani_app::jobs::webhook_delivery::WebhookDeliveryJob::new(
+            webhook_id,
+            "chapter.new".to_string(),
+            "{}".to_string(),
+        ))
+        .await
+        .unwrap();
+
+    // Wait for the job to reach a terminal state.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let status: Option<String> = sqlx::query_scalar("SELECT status FROM jobs WHERE id = ?")
+            .bind(job_id.to_string())
+            .fetch_optional(&svc.db)
+            .await
+            .unwrap();
+        if matches!(status.as_deref(), Some("completed") | Some("failed")) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "webhook delivery job never finished"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    assert_eq!(
+        origin.hits("/hook"),
+        1,
+        "a successful delivery is posted exactly once"
+    );
+    let deliveries: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM webhook_deliveries WHERE webhook_id = ?")
+            .bind(webhook_id)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert_eq!(deliveries, 1, "and recorded exactly once");
+}
+
+// M6 — an oversized webhook response is never buffered. Delivery reads the
+// status and drops the body, so a huge reply costs nothing; a buffering
+// implementation would stall here.
+#[tokio::test]
+async fn an_oversized_webhook_response_is_not_buffered() {
+    let svc = test_service().await;
+    svc.webhook_service.allow_private_egress_for_test();
+    let origin = TestOrigin::start().await;
+    origin.set("/hook", Response::ok(vec![b'X'; 8 * 1024 * 1024]));
+
+    let started = std::time::Instant::now();
+    let (status, err) = svc
+        .webhook_service
+        .send_signed(&origin.url("/hook"), None, "{}")
+        .await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(status, Some(200), "the status is still read: {err:?}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "an 8 MB reply must not be buffered into the delivery path, took {elapsed:?}"
+    );
+}
+
 // M4b — with no secret configured, no signature header is attached.
 #[tokio::test]
 async fn an_unsigned_webhook_carries_no_signature_header() {
