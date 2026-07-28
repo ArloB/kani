@@ -1517,4 +1517,27 @@ mod tests {
             "unreachable URL must return None (no cache, fetch fails)"
         );
     }
+
+    // Group G — a failed fetch must not be cached as a (successful) result. A
+    // poisoned cache would serve the failure/empty on the next call instead of
+    // re-fetching once the origin recovers. Driven with a 500 from a TestOrigin
+    // (fast, non-retryable) rather than an unresolvable host.
+    #[tokio::test]
+    async fn a_failed_option_set_fetch_does_not_write_the_cache() {
+        use kani_shared_test::origin::{Response, TestOrigin};
+        let origin = TestOrigin::start().await;
+        origin.set("/genres", Response::status(500));
+
+        let cache = Arc::new(InMemoryCache::new());
+        let client = kani_core::http::SmartClient::new(None).unwrap();
+        let mut def = make_def(Some("genres-v1"));
+        def.route = origin.url("/genres");
+
+        let result = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
+        assert!(result.is_none(), "a 500 fetch returns None");
+        assert!(
+            cache.get("fetched_opts:1", "genres-v1").await.is_none(),
+            "a failed fetch must leave the cache empty so the next call re-fetches"
+        );
+    }
 }
