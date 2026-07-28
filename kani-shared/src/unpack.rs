@@ -158,11 +158,17 @@ pub enum TotalPages {
 pub type FnArgs<'a> = &'a [(&'a str, &'a str)];
 
 fn arg_or_field<T: JsonRows>(row: &T, fn_args: FnArgs, name: &str) -> Option<String> {
+    let ptr = format!("/{name}");
     fn_args
         .iter()
         .find(|(k, _)| *k == name)
         .map(|(_, v)| v.to_string())
-        .or_else(|| row.get_str(&format!("/{name}")))
+        .or_else(|| row.get_str(&ptr))
+        // A JSON number is a legitimate id on plenty of sources. `get_str`
+        // returns None for one, and for `id` that None used to drop the entire
+        // row from the listing (`.ok()?` inside a `filter_map`) — a chapter
+        // silently disappearing rather than any error being reported.
+        .or_else(|| row.get_i64(&ptr).map(|n| n.to_string()))
 }
 
 fn arg_or_field_req<T: JsonRows>(
@@ -266,6 +272,11 @@ pub fn unpack_chapter_list<T: JsonRows>(
                         row.get_str("/number")
                             .and_then(|s| s.trim().parse::<f64>().ok())
                     })
+                    // "NaN"/"inf" parse happily via the string path above, and a
+                    // non-finite number poisons everything downstream: NaN != NaN
+                    // so migration matching silently finds nothing, and sort order
+                    // becomes inconsistent. Never let one reach the database.
+                    .filter(|n| n.is_finite())
                     .unwrap_or(0.0),
                 title: arg_or_field(&row, fn_args, "title"),
                 volume: row.get_i64("/volume").map(|v| v as i32),

@@ -177,6 +177,46 @@ async fn a_grown_listing_emits_new_chapters_once_with_the_right_count() {
     );
 }
 
+// ── F8 ─────────────────────────────────────────────────────────────────────────
+
+// F8 — a listing that repeats the same chapter id must not create two rows.
+// Dedup is insert-level (`INSERT OR IGNORE` on the unique key), so this proves
+// the guarantee where it actually lives rather than in unpack.
+#[tokio::test]
+async fn a_duplicate_chapter_id_in_one_listing_is_deduplicated() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/manga/m1/chapters",
+        Response::html(
+            r#"<html><body>
+            <div class="ch" data-id="ch-1"><span class="title">Chapter 1</span></div>
+            <div class="ch" data-id="ch-1"><span class="title">Chapter 1 again</span></div>
+            <div class="ch" data-id="ch-2"><span class="title">Chapter 2</span></div>
+            </body></html>"#,
+        ),
+    );
+    let svc = test_service().await;
+    let manga_id = wire_source(&svc, &origin).await;
+
+    svc.fetch_and_store_chapters_silent(manga_id).await.unwrap();
+
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM chapters WHERE manga_id = ? AND source_chapter_id = 'ch-1'",
+    )
+    .bind(manga_id.0)
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+    assert_eq!(rows, 1, "a repeated chapter id must yield exactly one row");
+
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapters WHERE manga_id = ?")
+        .bind(manga_id.0)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(total, 2, "the distinct chapters both survive");
+}
+
 // ── H8 ─────────────────────────────────────────────────────────────────────────
 
 // H8 — a chapter-list pagination that fails on a later page is reported as an

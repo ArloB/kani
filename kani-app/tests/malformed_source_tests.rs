@@ -359,6 +359,71 @@ async fn a_container_object_where_an_array_is_expected_is_an_error() {
     );
 }
 
+// F2 — a chapter whose id is a JSON number must not vanish. `get_str` only
+// accepts a JSON string, and `unpack_chapter_list` drops any row whose id fails
+// to resolve (`.ok()?` inside a `filter_map`), so a numeric id silently costs
+// the user a chapter.
+#[tokio::test]
+async fn a_chapter_with_a_numeric_id_is_reported_not_silently_dropped() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/chapters",
+        Response::json(r#"{"chapters": [{"id": 12, "number": 1}, {"id": "c2", "number": 2}]}"#),
+    );
+    let backend = chapter_source(&origin);
+
+    let list = backend.get_chapter_list("m1", 1, None, None).await.unwrap();
+    let ids: Vec<&str> = list.chapters.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["12", "c2"],
+        "a numeric id is coerced to its string form, not silently dropped"
+    );
+}
+
+// F10 — a non-finite chapter number must never reach the database. "NaN" and
+// "inf" parse successfully through the string path (the one F3 added), and NaN
+// poisons everything downstream: NaN != NaN, so migration matching silently
+// finds nothing and sort order becomes inconsistent.
+#[tokio::test]
+async fn a_non_finite_chapter_number_is_rejected() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/chapters",
+        Response::json(
+            r#"{"chapters": [{"id": "c1", "number": "NaN"}, {"id": "c2", "number": "inf"}]}"#,
+        ),
+    );
+    let backend = chapter_source(&origin);
+
+    let list = backend.get_chapter_list("m1", 1, None, None).await.unwrap();
+    assert!(
+        list.chapters.iter().all(|c| c.number.is_finite()),
+        "no chapter may carry a non-finite number, got {:?}",
+        list.chapters.iter().map(|c| c.number).collect::<Vec<_>>()
+    );
+}
+
+// F10 (negative) — a negative number is *deliberately tolerated*: sources do use
+// 0 and occasionally negative positions for prologues/specials, and unlike NaN a
+// negative value only sorts early rather than corrupting comparisons. Documented
+// here so the allowance is a decision rather than an oversight.
+#[tokio::test]
+async fn a_negative_chapter_number_is_preserved_not_zeroed() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/chapters",
+        Response::json(r#"{"chapters": [{"id": "c1", "number": -1}]}"#),
+    );
+    let backend = chapter_source(&origin);
+
+    let list = backend.get_chapter_list("m1", 1, None, None).await.unwrap();
+    assert_eq!(
+        list.chapters[0].number, -1.0,
+        "a negative number is preserved as the source gave it"
+    );
+}
+
 // F3 — a chapter number encoded as a JSON string is parsed, not silently zeroed.
 #[tokio::test]
 async fn a_string_encoded_chapter_number_is_parsed_not_zeroed() {
