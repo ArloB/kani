@@ -406,8 +406,13 @@ impl DownloaderManager {
             });
         }
 
-        let scramble_seed = transform
-            .and_then(|hint| crate::image_transform::resolve_scramble_seed(hint, resp.headers()));
+        let resolved = transform.and_then(|hint| {
+            crate::transform::registry().resolve(
+                hint,
+                crate::transform::TransformKind::Image,
+                resp.headers(),
+            )
+        });
 
         let announced = resp
             .headers()
@@ -419,8 +424,9 @@ impl DownloaderManager {
         // Content-Type and URL both say nothing can still be identified from
         // its magic bytes.
         let first_chunk = resp.chunk().await?;
-        let (extension, filename) = if scramble_seed.is_some() {
-            ("jpg", format!("{:04}.jpg", page))
+        let (extension, filename) = if let Some(r) = &resolved {
+            let ext = r.output().file_extension;
+            (ext, format!("{:04}.{}", page, ext))
         } else {
             let ext = Self::get_image_extension_sniffed(
                 &resp,
@@ -438,7 +444,7 @@ impl DownloaderManager {
         // correct. Silent and permanent.
         let part_file_path = staging_dir.join(format!("{:04}.{}.part", page, extension));
 
-        if let Some(seed) = scramble_seed {
+        if let Some(r) = &resolved {
             let mut raw: Vec<u8> = Vec::new();
             if let Some(ref c) = first_chunk {
                 raw.extend_from_slice(c);
@@ -452,7 +458,7 @@ impl DownloaderManager {
                 )));
             }
             Self::check_complete(announced, raw.len() as u64, page)?;
-            let descrambled = crate::image_transform::lcg_tile_descramble(&raw, seed)?;
+            let descrambled = r.apply(&raw)?;
             let mut file = tokio::fs::File::create(&part_file_path).await?;
             file.write_all(&descrambled).await?;
             file.flush().await?;

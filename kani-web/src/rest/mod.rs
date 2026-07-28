@@ -555,7 +555,7 @@ async fn image_proxy(
                     host_semaphore(&state.proxy_semaphores, &host, cfg.per_host_concurrency).await;
                 let mut attempt = 0u32;
 
-                let (response, ct_string, scramble_seed) = loop {
+                let (response, ct_string, resolved) = loop {
                     let permit = Arc::clone(&semaphore)
                         .acquire_owned()
                         .await
@@ -665,11 +665,15 @@ async fn image_proxy(
                                 )));
                             }
                             let ct_string = ct_str.to_string();
-                            let scramble_seed = transform_hint
-                                .as_deref()
-                                .and_then(|hint| kani_core::image_transform::resolve_scramble_seed(hint, resp.headers()));
+                            let resolved = transform_hint.as_deref().and_then(|hint| {
+                                kani_core::transform::registry().resolve(
+                                    hint,
+                                    kani_core::transform::TransformKind::Image,
+                                    resp.headers(),
+                                )
+                            });
                             drop(permit);
-                            break (resp, ct_string, scramble_seed);
+                            break (resp, ct_string, resolved);
                         }
                     }
                 };
@@ -684,10 +688,12 @@ async fn image_proxy(
                     buf.extend_from_slice(&chunk);
                 }
 
-                let (processed_bytes, processed_ct) = if let Some(seed) = scramble_seed {
-                    let descrambled = kani_core::image_transform::lcg_tile_descramble(&buf, seed)
+                let (processed_bytes, processed_ct) = if let Some(r) = &resolved {
+                    let out = r.output();
+                    let descrambled = r
+                        .apply(&buf)
                         .map_err(|e| AppError::InternalServerError(format!("Descramble failed: {e}")))?;
-                    (bytes::Bytes::from(descrambled), "image/jpeg".to_string())
+                    (bytes::Bytes::from(descrambled), out.content_type.to_string())
                 } else {
                     (buf.freeze(), ct_string)
                 };

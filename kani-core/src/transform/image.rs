@@ -1,19 +1,46 @@
-//! Generic image post-processing for content sources.
-//!
-//! Extensions declare a per-page `transform` hint (e.g. `"lcg-tile-5x5-from-header"`)
-//! in the WIT `page` record. The proxy and downloader call [`resolve_scramble_seed`]
-//! while the upstream response headers are still available, then call
-//! [`lcg_tile_descramble`] after the body is buffered.
+//! Image transforms: the LCG tile descrambler, exposed through the registry as
+//! [`LcgTileDescramble`].
 
+use super::{ResolvedTransform, Transform, TransformError, TransformKind, TransformOutput};
 use crate::error::{Error, Result};
 use image::{DynamicImage, ImageFormat};
+use rquest::header::HeaderMap;
+
+pub struct LcgTileDescramble;
+
+impl Transform for LcgTileDescramble {
+    fn names(&self) -> &'static [&'static str] {
+        &["lcg-tile-5x5-from-header", "lcg-tile-5x5"]
+    }
+
+    fn kind(&self) -> TransformKind {
+        TransformKind::Image
+    }
+
+    fn description(&self) -> &'static str {
+        "LCG tile descrambler; seed from the x-scramble-seed header or an inline hint parameter"
+    }
+
+    fn resolve(&self, hint: &str, headers: &HeaderMap) -> Option<ResolvedTransform> {
+        let seed = resolve_scramble_seed(hint, headers)?;
+        Some(ResolvedTransform::new(
+            TransformOutput {
+                file_extension: "jpg",
+                content_type: "image/jpeg",
+            },
+            move |data| {
+                lcg_tile_descramble(data, seed).map_err(|e| TransformError::Apply(e.to_string()))
+            },
+        ))
+    }
+}
 
 const GRID: usize = 5;
 const TILES: usize = GRID * GRID; // 25
 
 /// Resolve the LCG scramble seed for a page, given the per-page transform hint
 /// declared by the extension and the HTTP response headers from the upstream CDN.
-pub fn resolve_scramble_seed(hint: &str, headers: &rquest::header::HeaderMap) -> Option<i32> {
+fn resolve_scramble_seed(hint: &str, headers: &rquest::header::HeaderMap) -> Option<i32> {
     match hint {
         "lcg-tile-5x5-from-header" => headers
             .get("x-scramble-seed")
@@ -28,7 +55,7 @@ pub fn resolve_scramble_seed(hint: &str, headers: &rquest::header::HeaderMap) ->
 
 /// Parse the raw string value of an `x-scramble-seed` header.
 /// Returns `None` for a zero seed or any value that does not parse as a decimal integer.
-pub fn parse_scramble_seed(raw: &str) -> Option<i32> {
+fn parse_scramble_seed(raw: &str) -> Option<i32> {
     let seed = raw.trim().parse::<i64>().ok()? as i32;
     if seed == 0 { None } else { Some(seed) }
 }
@@ -48,7 +75,7 @@ fn build_order(seed: i32) -> [usize; TILES] {
 }
 
 /// Descramble an image whose tiles have been permuted with the given LCG seed.
-pub fn lcg_tile_descramble(data: &[u8], seed: i32) -> Result<Vec<u8>> {
+fn lcg_tile_descramble(data: &[u8], seed: i32) -> Result<Vec<u8>> {
     let src_img = image::load_from_memory(data)
         .map_err(|e| Error::Other(format!("image decode error: {e}")))?
         .into_rgba8();
@@ -200,6 +227,41 @@ mod tests {
         assert_eq!(
             resolve_scramble_seed("none", &header_map("x-scramble-seed", "12345")),
             None
+        );
+    }
+
+    #[test]
+    fn transform_impl_exposes_image_kind_and_jpeg_output() {
+        let t = LcgTileDescramble;
+        assert_eq!(t.kind(), TransformKind::Image);
+        assert!(t.names().contains(&"lcg-tile-5x5-from-header"));
+
+        let resolved = t
+            .resolve("lcg-tile-5x5:12345", &rquest::header::HeaderMap::new())
+            .expect("inline seed resolves");
+        assert_eq!(resolved.output().file_extension, "jpg");
+        assert_eq!(resolved.output().content_type, "image/jpeg");
+    }
+
+    #[test]
+    fn transform_impl_applies_the_descramble() {
+        use image::{DynamicImage, ImageFormat, RgbaImage};
+
+        let img = DynamicImage::ImageRgba8(RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba([10, 20, 30, 255]),
+        ));
+        let mut png = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+
+        let resolved = LcgTileDescramble
+            .resolve("lcg-tile-5x5:777", &rquest::header::HeaderMap::new())
+            .unwrap();
+        assert!(
+            resolved.apply(&png).is_ok(),
+            "resolved transform applies without error"
         );
     }
 

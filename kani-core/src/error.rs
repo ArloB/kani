@@ -82,3 +82,9 @@ impl From<Error> for String {
         value.to_string()
     }
 }
+
+impl From<crate::transform::TransformError> for Error {
+    fn from(value: crate::transform::TransformError) -> Self {
+        Error::Other(value.to_string())
+    }
+}
