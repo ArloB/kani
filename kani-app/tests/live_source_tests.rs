@@ -1694,3 +1694,130 @@ async fn a_migration_that_matches_is_still_allowed() {
         "a target that matches the held chapter must still migrate, got {res:?}"
     );
 }
+
+// ── J1. Chapters are matched by number across sources ────────────────────────
+
+#[tokio::test]
+async fn migration_matches_chapters_by_number_across_sources() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    // The target carries number 1 (as "t-1") and number 2 ("t-2"); the held
+    // chapter is number 1.0.
+    let (manga, target, _cbz) = seed_migration_scenario(
+        &origin,
+        &svc,
+        r#"{"chapters":[{"id":"t-1","number":1},{"id":"t-2","number":2}]}"#,
+    )
+    .await;
+
+    svc.migrate_manga(manga, target, "tgt-1".into(), false)
+        .await
+        .unwrap();
+
+    // The series now belongs to the target source.
+    let src: i64 = sqlx::query_scalar("SELECT source_id FROM manga WHERE id = ?")
+        .bind(manga)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        src, target,
+        "the manga's source pointer moved to the target"
+    );
+
+    // The held chapter (number 1.0) was matched to the target's number-1 chapter
+    // — same DB row, source_chapter_id remapped to the target's id.
+    let scid: String = sqlx::query_scalar(
+        "SELECT source_chapter_id FROM chapters WHERE manga_id = ? AND chapter_number = 1.0",
+    )
+    .bind(manga)
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        scid, "t-1",
+        "chapter 1 was matched across sources by its number, not dropped"
+    );
+}
+
+// ── J2. keep_orphaned_downloads = true preserves files on the safe branch ────
+
+#[tokio::test]
+async fn keep_orphaned_downloads_true_preserves_files() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    // A target that matches nothing (empty listing) — refused with
+    // keep_orphaned=false (A4). With keep_orphaned=true the user accepts it and
+    // the downloaded file is preserved, the chapter kept as an orphan.
+    let (manga, target, cbz) = seed_migration_scenario(&origin, &svc, r#"{"chapters":[]}"#).await;
+
+    svc.migrate_manga(manga, target, "tgt-1".into(), true)
+        .await
+        .expect("keep-orphaned migration proceeds even when the target matches nothing");
+
+    assert!(
+        cbz.exists(),
+        "the downloaded CBZ is preserved on the keep-orphaned branch"
+    );
+    let orphaned: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapters WHERE manga_id = ? AND is_orphaned = 1")
+            .bind(manga)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    assert!(
+        orphaned >= 1,
+        "the held download is kept as an orphan rather than deleted"
+    );
+}
+
+// ── J4. Reading progress survives a migration ────────────────────────────────
+
+#[tokio::test]
+async fn read_progress_survives_a_migration() {
+    let origin = TestOrigin::start().await;
+    let svc = test_service().await;
+    let (manga, target, _cbz) = seed_migration_scenario(
+        &origin,
+        &svc,
+        r#"{"chapters":[{"id":"t-1","number":1},{"id":"t-2","number":2}]}"#,
+    )
+    .await;
+    let user = common::insert_user(&svc.db, "reader").await;
+
+    // The held chapter (number 1.0) has read progress at page 5.
+    let held: i64 =
+        sqlx::query_scalar("SELECT id FROM chapters WHERE manga_id = ? AND chapter_number = 1.0")
+            .bind(manga)
+            .fetch_one(&svc.db)
+            .await
+            .unwrap();
+    sqlx::query(
+        "INSERT INTO user_chapter_tracking (user_id, chapter_id, last_page_read, is_read) \
+         VALUES (?, ?, 5, 0)",
+    )
+    .bind(user.0)
+    .bind(held)
+    .execute(&svc.db)
+    .await
+    .unwrap();
+
+    svc.migrate_manga(manga, target, "tgt-1".into(), false)
+        .await
+        .unwrap();
+
+    // The matched chapter keeps its row id, so its progress is untouched.
+    let page: Option<i64> = sqlx::query_scalar(
+        "SELECT last_page_read FROM user_chapter_tracking WHERE chapter_id = ? AND user_id = ?",
+    )
+    .bind(held)
+    .bind(user.0)
+    .fetch_optional(&svc.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        page,
+        Some(5),
+        "reading progress survives migration on the matched chapter"
+    );
+}
