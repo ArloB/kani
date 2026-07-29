@@ -469,6 +469,22 @@ impl AppService {
             }
         });
 
+        // Create everything the app expects to find under its data and library
+        // directories, on every start. A fresh deployment has none of them: the
+        // Docker image mounts an empty /data, so the very first boot logged
+        // "Failed to scan and register sources: No such file or directory"
+        // because `wasm_sources/` — the extension directory it is meant to read
+        // — had never been created. Directories are cheap; assuming they exist
+        // is what cost a clean install its extension registry.
+        for (label, dir) in [
+            ("WASM storage", settings.wasm_storage_path.as_path()),
+            ("library", settings.library_path.as_path()),
+        ] {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                tracing::error!("Failed to create {label} directory {}: {e}", dir.display());
+            }
+        }
+
         let library_path = std::path::Path::new(&settings.library_path);
         if library_path.exists() {
             if let Err(e) = cleanup_staging_dirs(library_path, &pool).await {

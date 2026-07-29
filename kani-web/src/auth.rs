@@ -20,6 +20,21 @@ use sqlx::SqlitePool;
 
 use crate::error::AppError;
 
+/// Where the first-run admin password is written.
+///
+/// The **data directory**, not the home directory. In Docker `HOME` is `/app`,
+/// which is root-owned and not writable by the `kani` user the container runs
+/// as — so this write failed *after* the admin account had already been
+/// created, leaving a fresh deployment with an account whose randomly generated
+/// password nobody could ever read. The data dir is a mounted volume, is
+/// writable, and is where an operator would think to look.
+pub fn admin_password_path() -> std::path::PathBuf {
+    std::env::var("KANI_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| ".".into()))
+        .join(".kani_admin_password")
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
     pub id: UserId,
@@ -210,9 +225,7 @@ impl AuthBackend {
         user_id: UserId,
         new_password: &str,
     ) -> Result<(), AppError> {
-        let path = dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".kani_admin_password");
+        let path = admin_password_path();
 
         if let Err(e) = std::fs::remove_file(&path)
             && e.kind() != std::io::ErrorKind::NotFound
@@ -751,6 +764,25 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     use axum_login::AuthzBackend;
+
+    // The first-run admin password must land in the data directory. It used to
+    // use `dirs::home_dir()`, which in Docker is `/app` — root-owned and not
+    // writable by the container's `kani` user. The write failed *after* the
+    // admin account was created, so a fresh deployment ended up with an account
+    // whose password nobody could read, while still reporting healthy.
+    #[test]
+    fn the_admin_password_is_written_to_the_data_dir_not_the_home_dir() {
+        // SAFETY: single-threaded test process; no other thread reads the env.
+        unsafe { std::env::set_var("KANI_DATA_DIR", "/tmp/kani-data-dir-test") };
+        let path = admin_password_path();
+        unsafe { std::env::remove_var("KANI_DATA_DIR") };
+
+        assert_eq!(
+            path,
+            std::path::Path::new("/tmp/kani-data-dir-test/.kani_admin_password"),
+            "the password file must sit in the data dir, which is a writable volume"
+        );
+    }
 
     // ── hash / verify password ───────────────────────────────────────────────
 

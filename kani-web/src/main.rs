@@ -646,9 +646,7 @@ fn write_admin_file(
     #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
 
-    let path = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".kani_admin_password");
+    let path = kani_web::auth::admin_password_path();
 
     let content = format!(
         "Username: {}\nEmail: {}\nPassword: {}",
@@ -664,7 +662,16 @@ fn write_admin_file(
         .and_then(|mut f| f.write_all(content.as_bytes()))
         .inspect(|_| tracing::info!("No users found - admin password written to: {}\n\nPlease change this password immediately after logging in!\n\n", path.display()))
         .map_err(|e| {
-            tracing::error!("Failed to write admin password to {:?}: {}", path, e);
+            // The account has already been created at this point, so a failure
+            // here strands the deployment: the password exists only in memory.
+            // Say so explicitly rather than leaving an operator to guess.
+            tracing::error!(
+                "Failed to write admin password to {:?}: {}. The 'admin' account \
+                 was created but its password could not be saved — delete the \
+                 database and restart, or set KANI_DATA_DIR to a writable path.",
+                path,
+                e
+            );
             kani_web::error::AppError::InternalServerError(e.to_string())
         })
 }
