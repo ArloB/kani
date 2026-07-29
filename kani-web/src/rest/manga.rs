@@ -308,7 +308,7 @@ pub(crate) async fn get_local_manga_details(
     params(
         ("id" = i64, Path, description = "Manga ID"),
         ("page" = Option<i32>, Query, description = "Page number (default 1)"),
-        ("page_size" = Option<i32>, Query, description = "Items per page (default 20, max 200)"),
+        ("page_size" = Option<i32>, Query, description = "Items per page (default 50, max 200)"),
         ("sort_order" = Option<String>, Query, description = "asc or desc"),
         ("filter_downloaded" = Option<bool>, Query, description = "true = downloaded only, false = undownloaded only"),
         ("filter_unread" = Option<bool>, Query, description = "true = unread only"),

@@ -101,8 +101,10 @@ pub struct FilterOptionResult {
 #[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct LibraryQuery {
     #[garde(range(min = 1))]
+    #[serde(default = "default_page")]
     pub page: i32,
     #[garde(range(min = 1, max = 200))]
+    #[serde(default = "default_library_page_size")]
     pub page_size: i32,
     #[garde(skip)]
     pub search: Option<String>,
@@ -137,6 +139,7 @@ pub struct LibraryQuery {
 #[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct LocalChaptersQuery {
     #[garde(range(min = 1))]
+    #[serde(default = "default_page")]
     pub page: i32,
     #[garde(range(min = 1, max = 200))]
     #[serde(default = "default_chapter_page_size")]
@@ -183,9 +186,25 @@ fn default_chapter_page_size() -> i32 {
     50
 }
 
+/// Paginated endpoints document `page` and `page_size` as optional in their
+/// OpenAPI parameters, so omitting them must work — a client generated from the
+/// spec sends neither. These supply the documented defaults.
+fn default_page() -> i32 {
+    1
+}
+
+fn default_library_page_size() -> i32 {
+    20
+}
+
+fn default_search_scope() -> kani_shared::SearchScope {
+    kani_shared::SearchScope::AllEnabled
+}
+
 #[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct PageQuery {
     #[garde(range(min = 1))]
+    #[serde(default = "default_page")]
     pub page: i32,
 }
 
@@ -207,10 +226,15 @@ where
 #[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct GlobalSearchQuery {
     pub query: String,
-    #[serde(deserialize_with = "deserialize_search_scope")]
+    #[serde(
+        deserialize_with = "deserialize_search_scope",
+        default = "default_search_scope"
+    )]
     #[schema(value_type = Object)]
     pub scope: kani_shared::SearchScope,
+    #[serde(default = "default_page")]
     pub page: i32,
+    #[serde(default = "default_library_page_size")]
     pub page_size: i32,
 }
 
