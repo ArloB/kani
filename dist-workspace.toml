@@ -27,6 +27,15 @@ targets = [
 # and fail to compile natively, which is why default-members excludes them; a
 # --workspace build drags them in and breaks the release.
 precise-builds = true
+# Build the full artifact matrix on release-affecting PRs, without publishing
+# (release.yml gates publishing on `!github.event.pull_request`).
+#
+# The default, "plan", only computes what *would* be built — so the first real
+# execution of the pipeline would be the tag that is meant to ship. This repo has
+# never cut a tag, and the Docker image was unbuildable on the branch for weeks
+# without anyone noticing, because nothing ever exercised it. "upload" makes
+# every PR a rehearsal.
+pr-run-mode = "upload"
 # Where to host releases
 hosting = "github"
 # Whether to install an updater program
