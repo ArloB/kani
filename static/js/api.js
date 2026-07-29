@@ -295,6 +295,26 @@ export async function deleteSource(id) {
 }
 
 /** @param {number} id */
+export async function getUiThemes() {
+  return _req('GET', '/ui/themes');
+}
+
+export async function saveUiTheme(body) {
+  return _req('POST', '/ui/themes', { body });
+}
+
+export async function activateUiTheme(id) {
+  return _req('PUT', `/ui/themes/${id}/activate`);
+}
+
+export async function deactivateUiTheme() {
+  return _req('PUT', '/ui/themes/deactivate');
+}
+
+export async function deleteUiTheme(id) {
+  return _req('DELETE', `/ui/themes/${id}`);
+}
+
 export async function reloadSource(id) {
   return _req('POST', `/sources/${id}/reload`);
 }

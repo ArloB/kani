@@ -10,12 +10,17 @@ import {
   getCustomThemes,
   saveCustomTheme,
   deleteCustomTheme,
-  generateThemeId,
   snapshotCurrentTokens,
   accentFromHex,
   getCurrentTheme,
   applyTheme,
+  applyCustomCss,
 } from '../theme.js';
+import { sanitizeCss } from '../sanitize-css.js';
+import { saveUiTheme, deleteUiTheme } from '../api.js';
+import { hasPermission } from '../session.js';
+import { showApiError } from './toast.js';
+import { useBusy } from '../hooks/use-busy.js';
 import { t } from '../i18n.js';
 
 const html = htm.bind(h);
@@ -169,6 +174,13 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
     return getCustomThemes().find(c => c.id === themeId)?.name ?? '';
   });
 
+  const existingTheme = themeId ? getCustomThemes().find(c => c.id === themeId) : undefined;
+  const [customCss, setCustomCss] = useState(existingTheme?.customCss ?? '');
+  const [instanceWide, setInstanceWide] = useState(!!existingTheme?.instanceWide);
+  const [error, setError] = useState('');
+  const { busy, run } = useBusy();
+  const canPublish = hasPermission('theme:publish');
+
   const [tokens, setTokens] = useState(() => {
     if (themeId) {
       const existing = getCustomThemes().find(c => c.id === themeId);
@@ -202,6 +214,10 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    applyCustomCss(customCss);
+  }, [customCss]);
+
   /** @param {string} key @param {string} value */
   function handleTokenChange(key, value) {
     setTokens(prev => ({ ...prev, [key]: value }));
@@ -213,19 +229,38 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     const trimmedName = name.trim();
     if (!trimmedName) return;
-    const id = themeId || generateThemeId();
+    setError('');
     const accent = tokens['--color-accent'] || DEFAULT_ACCENT_COLOR;
     const { hover, dim } = accentFromHex(accent);
-    saveCustomTheme({
-      id,
-      name: trimmedName,
-      tokens: { ...tokens, '--color-accent-hover': hover, '--color-accent-dim': dim },
+    const full = Object.fromEntries(
+      Object.entries({ ...tokens, '--color-accent-hover': hover, '--color-accent-dim': dim })
+        .filter(([, v]) => v && v.trim()),
+    );
+    await run(async () => {
+      try {
+        const saved = await saveUiTheme({
+          id: themeId || undefined,
+          name: trimmedName,
+          tokens: full,
+          custom_css: customCss.trim() || null,
+          instance_wide: instanceWide,
+        });
+        saveCustomTheme({
+          id: saved.id,
+          name: saved.name,
+          tokens: saved.tokens ?? full,
+          customCss: saved.custom_css ?? undefined,
+          instanceWide: !!saved.instance_wide,
+        });
+        committedRef.current = true;
+        onSave(saved.id);
+      } catch (e) {
+        setError(/** @type {any} */ (e)?.message || t('theme.custom.save_failed'));
+      }
     });
-    committedRef.current = true;
-    onSave(id);
   }
 
   async function handleDelete() {
@@ -235,25 +270,34 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
       confirmLabel: t('theme.custom.delete'),
     });
     if (!confirmed) return;
-    deleteCustomTheme(themeId);
-    committedRef.current = true;
-    onSave(null);
+    await run(async () => {
+      try {
+        await deleteUiTheme(themeId);
+      } catch (e) {
+        showApiError(e);
+        return;
+      }
+      deleteCustomTheme(themeId);
+      committedRef.current = true;
+      onSave(null);
+    });
   }
 
-  const canSave = name.trim().length > 0;
+  const canSave = name.trim().length > 0 && !busy;
+  const stripped = customCss.trim() ? sanitizeCss(customCss).stripped : [];
 
   const footer = html`
     <div class="flex items-center gap-3 w-full">
       ${!isNew && html`
-        <button type="button" class="btn-danger btn-sm mr-auto" onClick=${handleDelete}>
+        <button type="button" class="btn-danger btn-sm mr-auto" onClick=${handleDelete} disabled=${busy}>
           ${t('theme.custom.delete')}
         </button>
       `}
-      <button type="button" class="btn-ghost btn-sm" onClick=${onClose}>
+      <button type="button" class="btn-ghost btn-sm" onClick=${onClose} disabled=${busy}>
         ${t('theme.custom.cancel')}
       </button>
       <button type="button" class="btn-primary btn-sm" onClick=${handleSave} disabled=${!canSave}>
-        ${t('theme.custom.save')}
+        ${busy ? t('theme.custom.saving') : t('theme.custom.save')}
       </button>
     </div>
   `;
@@ -316,6 +360,43 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
             }
           </div>
         `)}
+
+        <div class="flex flex-col gap-1.5">
+          <label class="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            ${t('theme.custom.css')}
+          </label>
+          <textarea
+            class="input w-full font-mono text-xs"
+            rows="6"
+            spellcheck="false"
+            placeholder=${t('theme.custom.css.placeholder')}
+            value=${customCss}
+            onInput=${(/** @type {Event} */ e) => setCustomCss(/** @type {HTMLTextAreaElement} */ (e.target).value)}
+          ></textarea>
+          <p class="text-xs text-text-faint">${t('theme.custom.css.help')}</p>
+          ${stripped.length > 0 && html`
+            <p class="text-xs text-warn">
+              ${t('theme.custom.css.stripped')} ${stripped.join(', ')}
+            </p>
+          `}
+        </div>
+
+        ${canPublish && html`
+          <label class="flex items-start gap-2.5 text-sm text-text">
+            <input
+              type="checkbox"
+              class="mt-0.5"
+              checked=${instanceWide}
+              onChange=${(/** @type {Event} */ e) => setInstanceWide(/** @type {HTMLInputElement} */ (e.target).checked)}
+            />
+            <span>
+              ${t('theme.custom.publish')}
+              <span class="block text-xs text-text-faint">${t('theme.custom.publish.help')}</span>
+            </span>
+          </label>
+        `}
+
+        ${error && html`<p class="text-xs text-danger">${error}</p>`}
 
         <p class="text-xs text-text-muted">${t('theme.custom.contrast_warning')}</p>
       </div>

@@ -31,6 +31,8 @@ pub(crate) struct UpsertUiThemeRequest {
     pub instance_wide: bool,
 }
 
+const THEME_NOT_YOURS: &str = "That theme belongs to someone else";
+
 fn to_json(t: &UiTheme) -> serde_json::Value {
     json!({
         "id": t.id,
@@ -101,13 +103,18 @@ pub(crate) async fn upsert_theme(
 ) -> Result<impl IntoResponse, AppError> {
     // Changing an existing theme is governed by who owns it, not by the flag in
     // the body — otherwise omitting `instance_wide` would be enough to edit the
-    // published theme.
+    // published theme. Resolving the owner from the row is only safe if a row
+    // belonging to somebody else is refused here: passing that owner down would
+    // otherwise authorise the write against the very row being overwritten.
     let owner = if let Some(ref id) = body.id {
-        let existing = state.service.ui_theme_owner(id).await?;
-        if existing.is_none() {
-            require_publish(&auth, &user).await?;
+        match state.service.ui_theme_owner(id).await? {
+            None => {
+                require_publish(&auth, &user).await?;
+                None
+            }
+            Some(uid) if uid == user.id.0 => Some(user.id),
+            Some(_) => return Err(AppError::Forbidden(THEME_NOT_YOURS.into())),
         }
-        existing.map(kani_app::ids::UserId)
     } else if body.instance_wide {
         require_publish(&auth, &user).await?;
         None
@@ -188,13 +195,14 @@ pub(crate) async fn delete_theme(
 ) -> Result<impl IntoResponse, AppError> {
     // Resolve the owner first: removing the instance-wide theme affects every
     // user, so it needs the publish authority even though the route does not.
-    let owner = state.service.ui_theme_owner(&id).await?;
-    if owner.is_none() {
-        require_publish(&auth, &user).await?;
-    }
-    state
-        .service
-        .delete_ui_theme(owner.map(kani_app::ids::UserId), &id)
-        .await?;
+    let owner = match state.service.ui_theme_owner(&id).await? {
+        None => {
+            require_publish(&auth, &user).await?;
+            None
+        }
+        Some(uid) if uid == user.id.0 => Some(user.id),
+        Some(_) => return Err(AppError::Forbidden(THEME_NOT_YOURS.into())),
+    };
+    state.service.delete_ui_theme(owner, &id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

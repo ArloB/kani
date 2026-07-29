@@ -329,6 +329,205 @@ async fn a_regular_user_cannot_edit_the_instance_theme_by_omitting_the_flag() {
     );
 }
 
+// ── Another user's *private* theme ────────────────────────────────────────────
+//
+// The instance-wide tests above cover the `user_id IS NULL` row. These cover the
+// other half: a theme owned by a different ordinary user. Nothing hides a theme
+// id — the owner's own browser has it, and it appears in their `GET /ui/themes` —
+// so id alone must never be enough to change or remove someone else's theme.
+
+#[tokio::test]
+async fn a_user_cannot_edit_another_users_theme() {
+    let state = test_state().await;
+    let (au, ap) = create_admin(&state).await;
+    let (bu, bp) = create_regular_user(&state, "bob").await;
+    let app = build_test_app(state).await;
+
+    let alice = login(&app, au, ap).await;
+    let mine = json_of(
+        app.clone()
+            .oneshot(authed_post(
+                "/rest/ui/themes",
+                &alice,
+                theme_body("Alice's", false),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let id = mine["id"].as_str().unwrap().to_string();
+
+    let bob = login(&app, bu, bp).await;
+    let mut hijack = theme_body("Bob was here", false);
+    hijack["id"] = serde_json::json!(id);
+    let res = app
+        .clone()
+        .oneshot(authed_post("/rest/ui/themes", &bob, hijack))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    let listed = json_of(
+        app.oneshot(authed_get("/rest/ui/themes", &alice))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        listed["themes"][0]["name"], "Alice's",
+        "alice's theme is unchanged"
+    );
+}
+
+#[tokio::test]
+async fn a_user_cannot_delete_another_users_theme() {
+    let state = test_state().await;
+    let (au, ap) = create_admin(&state).await;
+    let (bu, bp) = create_regular_user(&state, "bob").await;
+    let app = build_test_app(state).await;
+
+    let alice = login(&app, au, ap).await;
+    let mine = json_of(
+        app.clone()
+            .oneshot(authed_post(
+                "/rest/ui/themes",
+                &alice,
+                theme_body("Alice's", false),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let id = mine["id"].as_str().unwrap().to_string();
+
+    let bob = login(&app, bu, bp).await;
+    let res = app
+        .clone()
+        .oneshot(del(&format!("/rest/ui/themes/{id}"), &bob))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    let listed = json_of(
+        app.oneshot(authed_get("/rest/ui/themes", &alice))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        listed["themes"].as_array().unwrap().len(),
+        1,
+        "alice's theme still exists"
+    );
+}
+
+// ── The shapes the frontend actually sends (plan 05 Phase 4) ─────────────────
+
+/// Every token the theme editor writes, exactly as `handleSave` in
+/// `static/js/components/theme-editor.js` assembles it: `CORE_TOKENS` plus the
+/// two accent values it derives. If the allowlist and `CORE_TOKENS` drift, the
+/// editor starts failing to save and the only symptom is a 422.
+#[tokio::test]
+async fn the_editors_full_token_payload_is_accepted() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, u, p).await;
+
+    let core = [
+        "--color-bg",
+        "--color-surface",
+        "--color-surface-2",
+        "--color-surface-3",
+        "--color-border",
+        "--color-border-subtle",
+        "--color-accent",
+        "--color-text",
+        "--color-text-muted",
+        "--color-text-faint",
+        "--color-success",
+        "--color-warn",
+        "--color-danger",
+        "--color-accent-hover",
+    ];
+    let mut tokens = serde_json::Map::new();
+    for name in core {
+        tokens.insert(name.to_string(), serde_json::json!("#123456"));
+    }
+    tokens.insert(
+        "--color-accent-dim".into(),
+        serde_json::json!("rgba(18,52,86,0.15)"),
+    );
+
+    let res = app
+        .clone()
+        .oneshot(authed_post(
+            "/rest/ui/themes",
+            &cookie,
+            serde_json::json!({ "name": "Full", "tokens": tokens }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "the editor's own payload must be accepted"
+    );
+
+    let saved = json_of(res).await;
+    assert_eq!(
+        saved["tokens"].as_object().unwrap().len(),
+        core.len() + 1,
+        "every token the editor sent comes back"
+    );
+}
+
+/// `syncServerThemes` in `static/js/theme.js` adopts a local-only theme by
+/// posting name + tokens + custom_css and nothing else — no `id`, no
+/// `instance_wide`. That must create a theme owned by the caller, not one
+/// published to everybody.
+#[tokio::test]
+async fn the_sync_upload_shape_creates_a_private_theme() {
+    let state = test_state().await;
+    let (au, ap) = create_admin(&state).await;
+    let (bu, bp) = create_regular_user(&state, "bob").await;
+    let app = build_test_app(state).await;
+
+    let admin = login(&app, au, ap).await;
+    let created = json_of(
+        app.clone()
+            .oneshot(authed_post(
+                "/rest/ui/themes",
+                &admin,
+                serde_json::json!({
+                    "name": "Adopted",
+                    "tokens": { "--color-accent": "#b93a24" },
+                    "custom_css": serde_json::Value::Null,
+                }),
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        created["instance_wide"], false,
+        "an admin's sync upload must not publish for everyone by default"
+    );
+
+    let bob = login(&app, bu, bp).await;
+    let listed = json_of(
+        app.oneshot(authed_get("/rest/ui/themes", &bob))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        listed["themes"].as_array().unwrap().len(),
+        0,
+        "bob does not see another user's theme"
+    );
+}
+
 // The stored CSS is the sanitised output, so what a later GET returns is
 // already safe even though the client posted something that was not.
 #[tokio::test]

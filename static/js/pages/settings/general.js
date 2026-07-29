@@ -2,7 +2,7 @@
 // Settings — General section (display, reading, notifications).
 
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import { getLocal, setLocal, resetAllConfirmDialogs } from '../../utils.js';
 import { SettingsGroup, SettingsRow, ToggleRow, SelectRow } from './_shared.js';
@@ -12,9 +12,12 @@ import {
   saveAndApplyTheme,
   getCustomThemes,
   applyCustomTheme,
+  syncServerThemes,
 } from '../../theme.js';
+import { activateUiTheme, deactivateUiTheme } from '../../api.js';
+import { hasPermission } from '../../session.js';
 import { t } from '../../i18n.js';
-import { showToast } from '../../components/toast.js';
+import { showToast, showApiError } from '../../components/toast.js';
 import { ThemeEditor, ThemePreviewSwatch } from '../../components/theme-editor.js';
 import { showCheatsheet } from '../../shortcuts.js';
 
@@ -71,16 +74,27 @@ export function GeneralSection() {
     setTick((n) => n + 1);
   };
 
+  useEffect(() => {
+    syncServerThemes().then(refresh).catch(() => { /* cache stays valid */ });
+  }, []);
+
   const applyTheme = (/** @type {string} */ th, /** @type {string} */ dn, /** @type {string} */ ac) => {
     saveAndApplyTheme(th, dn, ac);
     refresh();
+    if (!th.startsWith('custom:')) deactivateUiTheme().catch(showApiError);
+  };
+
+  const pickCustomTheme = (/** @type {string} */ id) => {
+    applyCustomTheme(id);
+    refresh();
+    activateUiTheme(id).catch(showApiError);
   };
 
   const openEditor = (/** @type {string|null} */ id) => setEditor({ open: true, id });
   const closeEditor = () => setEditor({ open: false, id: null });
   const onEditorSave = (/** @type {string|null} */ savedId) => {
     if (savedId !== null) {
-      applyCustomTheme(savedId);
+      pickCustomTheme(savedId);
     } else {
       const prev = getCurrentTheme();
       if (editor.id && prev.theme === `custom:${editor.id}`) {
@@ -99,6 +113,7 @@ export function GeneralSection() {
   };
 
   const customThemes = getCustomThemes();
+  const canPublish = hasPermission('theme:publish');
   const activeTheme = theme.theme;
   const hasNotification = typeof window !== 'undefined' && 'Notification' in window;
 
@@ -234,16 +249,16 @@ export function GeneralSection() {
             key=${ct.id}
             class=${`flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-surface-3 transition-colors${isActive ? ' bg-surface-3' : ''}`}
             aria-current=${isActive ? 'true' : undefined}
-            onClick=${() => {
-              applyCustomTheme(ct.id);
-              refresh();
-            }}
+            onClick=${() => pickCustomTheme(ct.id)}
           >
             <div><${ThemePreviewSwatch} tokens=${ct.tokens} /></div>
             <span class=${`text-sm flex-1 min-w-0 truncate${isActive ? ' font-semibold text-accent' : ' text-text'}`}
               >${ct.name}</span
             >
-            <button
+            ${ct.instanceWide &&
+            html`<span class="text-xs text-text-faint shrink-0">${t('theme.custom.instance_wide')}</span>`}
+            ${(!ct.instanceWide || canPublish) &&
+            html`<button
               type="button"
               class="btn-ghost btn-sm shrink-0"
               onClick=${(/** @type {Event} */ e) => {
@@ -252,7 +267,7 @@ export function GeneralSection() {
               }}
             >
               ${t('theme.custom.edit_action')}
-            </button>
+            </button>`}
           </div>
         `;
       })}

@@ -2,7 +2,7 @@
 // App entry point. Bootstraps permissions, SSE, nav, and the SPA router.
 
 import { initPermissions, getState, setState, subscribe, hasPermission } from './session.js';
-import { initTheme } from './theme.js';
+import { initTheme, syncServerThemes } from './theme.js';
 import { connectSSE } from './sse.js';
 import { initRouter, navigate, onNavigate } from './router.js';
 import { getBootId, logout, getFeatures, getSystemInfo, getChangelog, getCurrentUser } from './api.js';
@@ -33,6 +33,7 @@ import { openCommandPalette } from './components/command-palette.js';
   }
 
   await initPermissions();
+  syncServerThemes().catch(() => { /* the cached theme stays applied */ });
   getCurrentUser().then(user => setState('user', user)).catch(() => { /* non-fatal */ });
   initTooltip();
   connectSSE();
