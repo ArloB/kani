@@ -70,6 +70,7 @@ pub mod thumbnails;
 pub mod totp;
 pub mod trackers;
 pub mod traits;
+pub mod ui_ext;
 pub mod update_check;
 pub mod volumes;
 pub mod webhooks;

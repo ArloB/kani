@@ -159,6 +159,9 @@ permissions! {
     Metrics => "metrics" {
         Read => "read",
     },
+    Theme => "theme" {
+        Publish => "publish",
+    },
 }
 
 impl serde::Serialize for Permission {
