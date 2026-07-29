@@ -8,6 +8,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     curl \
     unzip \
+    # boring-sys2 (BoringSSL, pulled in by rquest) needs CMake to configure,
+    # Perl to generate its assembly, and libclang for its bindgen step. Without
+    # these the image cannot be built at all: the build script panics first with
+    # "is `cmake` not installed?", then "Unable to find libclang".
+    cmake \
+    perl \
+    clang \
+    libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the full workspace

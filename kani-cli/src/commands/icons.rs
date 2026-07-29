@@ -6,6 +6,18 @@ use tiny_skia::{Pixmap, Transform};
 pub fn run() -> Result<(), CliError> {
     let svg_path = Path::new("static/icons/kani-mark.svg");
     let out_dir = Path::new("static/icons");
+    // `static/icons/` is gitignored, so a clean checkout (CI, Docker, a fresh
+    // clone) has no source SVG. Icon generation is polish, not a build step —
+    // hard-failing here broke `kani-cli setup`, and with it the Docker image
+    // build, for anyone who did not already have the file locally.
+    if !svg_path.exists() {
+        eprintln!(
+            "note: {} not found — skipping PWA icon generation. \
+             Add the source SVG to generate icon-192/512/512-maskable.",
+            svg_path.display()
+        );
+        return Ok(());
+    }
     generate_icons(svg_path, out_dir)
 }
 
