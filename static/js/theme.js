@@ -231,8 +231,17 @@ export function initTheme() {
 }
 
 
-/** @param {string | undefined} css */
-export function applyCustomCss(css) {
+/**
+ * Install (or remove) a theme's custom CSS.
+ *
+ * Pass `raw: true` ONLY for text the user is still typing. Stored CSS arrives
+ * already sanitised *and scoped* by the server, and scoping is not idempotent —
+ * re-sanitising it yields `[data-kani-theme] [data-kani-theme] .btn`, a
+ * descendant selector that matches nothing, silently disabling every rule.
+ * @param {string | undefined} css
+ * @param {{ raw?: boolean }} [opts]
+ */
+export function applyCustomCss(css, opts = {}) {
   const h = document.documentElement;
   const existing = document.getElementById('kani-theme-css');
   if (!css || !css.trim()) {
@@ -240,8 +249,8 @@ export function applyCustomCss(css) {
     h.removeAttribute('data-kani-theme');
     return;
   }
-  const safe = sanitizeCss(css).css;
-  if (!safe) {
+  const safe = opts.raw ? sanitizeCss(css).css : css;
+  if (!safe.trim()) {
     existing?.remove();
     h.removeAttribute('data-kani-theme');
     return;

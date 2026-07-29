@@ -215,7 +215,7 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    applyCustomCss(customCss);
+    applyCustomCss(customCss, { raw: true });
   }, [customCss]);
 
   /** @param {string} key @param {string} value */

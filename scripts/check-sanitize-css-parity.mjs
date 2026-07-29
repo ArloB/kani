@@ -63,6 +63,29 @@ for (const [name, input, wantCss, wantStripped] of CASES) {
   }
 }
 
+// Scoping is deliberately NOT idempotent: sanitising already-scoped CSS scopes
+// it a second time, producing a descendant selector that matches nothing. Stored
+// CSS is sanitised server-side, so `applyCustomCss` in static/js/theme.js must
+// only re-sanitise text the user is still typing (`{ raw: true }`). This shipped
+// once and disabled every custom rule silently, so it is pinned here: if someone
+// makes scoping idempotent, this fails and the `raw` flag should go with it.
+{
+  const once = sanitizeCss('.btn { color: red }').css;
+  const twice = sanitizeCss(once).css;
+  if (once === twice) {
+    failures += 1;
+    console.error(
+      '✘ scoping became idempotent — applyCustomCss can now drop its `raw` option ' +
+        '(and this check should be deleted along with it)',
+    );
+  } else if (!twice.includes('[data-kani-theme] [data-kani-theme]')) {
+    failures += 1;
+    console.error(
+      `✘ double-scoping changed shape; re-check applyCustomCss.\n  got: ${JSON.stringify(twice)}`,
+    );
+  }
+}
+
 if (failures > 0) {
   console.error(
     `\n${failures} sanitiser parity failure(s). The client mirror and the Rust ` +
