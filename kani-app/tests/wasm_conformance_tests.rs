@@ -75,6 +75,12 @@ fn fixture_wasm_path() -> std::path::PathBuf {
 /// the `base_url` preference the guest reads to construct its requests. Returns
 /// `None` (with a skip note) if the fixture has not been built.
 fn wasm_backend(origin_base: &str) -> Option<SourceBackend> {
+    wasm_backend_with_client(origin_base, SmartClient::new(None).unwrap())
+}
+
+/// Same, but with a caller-supplied client — lets a test register the rate limit
+/// the way `service/sources.rs` does before the guest issues any request.
+fn wasm_backend_with_client(origin_base: &str, client: SmartClient) -> Option<SourceBackend> {
     let path = fixture_wasm_path();
     let Ok(bytes) = std::fs::read(&path) else {
         eprintln!(
@@ -96,7 +102,7 @@ fn wasm_backend(origin_base: &str) -> Option<SourceBackend> {
     Some(loader::build_wasm_source(
         engine,
         instance_pre,
-        SmartClient::new(None).unwrap(),
+        client,
         None,
         true, // unrestricted_http → reach loopback
         false,
@@ -471,29 +477,127 @@ async fn a_wasm_source_applies_selected_filters() {
     );
 }
 
-// O9 (partial) — the rate limit the guest declares survives the ABI into host
-// metadata. That is the half this harness can prove: it builds the backend via
-// `loader::build_wasm_source` directly, whereas *enforcement* is registered in
-// the service load path (`service/sources.rs`, which calls
-// `smart_client.register_rate_limit`) — so a limiter assertion here would be
-// testing the harness, not the code. The enforcement half needs a service-level
-// install; SmartClient's limiter itself is already covered by
-// `live_source_tests::a_declared_rate_limit_applies_to_page_fetches_not_only_catalogue_calls`.
+// O9 — the rate limit a guest declares is honoured on the compiled path, end to
+// end: read it out of the guest's own metadata, register it exactly as
+// `service/sources.rs` does at load time, then prove it governs the requests the
+// guest actually issues.
+//
+// The registration is done here rather than by the service because the service
+// keys the limiter on the host in `metadata.base_url`, while a test necessarily
+// redirects the guest to a local origin via the `base_url` preference. Deriving
+// the config from the guest's declared metadata (never hardcoding it) keeps the
+// thing under test honest: it is the guest's own declaration that must bite.
 #[tokio::test]
-async fn a_wasm_source_declares_its_rate_limit_in_metadata() {
+async fn a_wasm_source_honours_its_declared_rate_limit() {
     let origin = TestOrigin::start().await;
-    let wasm = wasm_or_skip!(origin);
+    origin.set("/popular", Response::html(POPULAR_HTML));
 
-    let raw = wasm.get_metadata().await.unwrap();
+    // 1. What does the guest declare? (Also proves the limit survives the ABI.)
+    let probe = wasm_or_skip!(origin);
+    let raw = probe.get_metadata().await.unwrap();
     let meta: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    let rl = &meta["rate_limit"];
+    let declared: kani_shared::extension::RateLimitConfig =
+        serde_json::from_value(meta["rate_limit"].clone())
+            .expect("the guest must declare a rate limit for this test to mean anything");
     assert!(
-        !rl.is_null(),
-        "the guest's declared rate limit must reach the host, got {meta}"
+        declared.requests_per_second > 0.0 && declared.burst >= 1,
+        "declared limit must be usable, got {declared:?}"
     );
+
+    // 2. Register it the way the loader does, against the host the guest calls.
+    let host = origin
+        .base()
+        .parse::<rquest::Url>()
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .expect("origin has a host");
+    let client = SmartClient::new(None).unwrap();
+    client.register_rate_limit(&host, &declared);
+
+    let wasm = match wasm_backend_with_client(&origin.base(), client) {
+        Some(b) => b,
+        None => return,
+    };
+
+    // 3. Enough calls that the declared rate makes a measurable floor: with
+    //    burst `b` and `r` per second, `n` calls cost at least (n - b) / r.
+    let calls = 6u32;
+    let floor = std::time::Duration::from_secs_f32(
+        (calls.saturating_sub(declared.burst) as f32 / declared.requests_per_second) * 0.8,
+    );
+    let started = std::time::Instant::now();
+    for _ in 0..calls {
+        wasm.get_popular_manga(1, 20, &[]).await.unwrap();
+    }
+    let elapsed = started.elapsed();
+
     assert_eq!(
-        rl["requests_per_second"].as_f64(),
-        Some(5.0),
-        "and carry the declared value"
+        origin.hits("/popular"),
+        calls as usize,
+        "every call still reached the origin — throttled, not dropped"
+    );
+    assert!(
+        elapsed >= floor,
+        "the guest's declared {} rps (burst {}) must throttle the compiled path, \
+         but {calls} calls took {elapsed:?} (expected at least {floor:?})",
+        declared.requests_per_second,
+        declared.burst
+    );
+}
+
+// O7 — a call already in flight completes across a hot swap. This is the
+// integration half of the lease coordinator that `kani-lease` proves under loom:
+// `drain()` must wait for the outstanding lease rather than tearing the instance
+// out from under a running call. A regression here surfaces as a request that
+// dies mid-flight whenever a source is reloaded — exactly when the user is
+// least able to explain it.
+#[tokio::test]
+async fn an_in_flight_wasm_call_completes_across_a_hot_swap() {
+    let origin = TestOrigin::start().await;
+    // Slow enough that the drain necessarily begins while the call is running.
+    origin.set(
+        "/popular",
+        Response::html(POPULAR_HTML).delay(std::time::Duration::from_millis(300)),
+    );
+
+    let backend = std::sync::Arc::new(wasm_or_skip!(origin));
+
+    // Start the call, then begin draining while it is still outstanding.
+    let calling = {
+        let b = std::sync::Arc::clone(&backend);
+        tokio::spawn(async move { b.get_popular_manga(1, 20, &[]).await })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let drained = {
+        let b = std::sync::Arc::clone(&backend);
+        tokio::spawn(async move {
+            match &*b {
+                SourceBackend::Wasm(w) => w.drain(std::time::Duration::from_secs(5)).await,
+                SourceBackend::Yaml(_) => unreachable!("wasm_backend builds a WASM source"),
+            }
+        })
+    };
+
+    let result = calling.await.unwrap();
+    let list = result.expect("the in-flight call must complete, not be torn down mid-swap");
+    assert_eq!(
+        list.manga.len(),
+        2,
+        "and return its real results, not a truncated set"
+    );
+
+    // The drain must have observed the lease and waited it out rather than
+    // timing out, so it finishes promptly once the call lets go.
+    tokio::time::timeout(std::time::Duration::from_secs(5), drained)
+        .await
+        .expect("drain must finish once the in-flight lease is released")
+        .unwrap();
+
+    // And once drained, the instance refuses new leases — the swap can proceed.
+    let after = backend.get_popular_manga(1, 20, &[]).await;
+    assert!(
+        after.is_err(),
+        "a drained source must refuse new work so the swap is safe"
     );
 }
