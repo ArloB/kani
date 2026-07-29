@@ -116,6 +116,29 @@ impl MangaExtension for Fixture {
         _page_size: i32,
         filters: &[ActiveFilter],
     ) -> ExtensionResult<MangaList> {
+        // Conformance affordance: `__fanout__:N` issues N sequential sub-fetches
+        // in a single call, so the suite can prove the host charges the per-call
+        // HTTP budget on the compiled path exactly as it does on the interpreted
+        // one. Kept behind a magic query so the ordinary search tests are
+        // unaffected.
+        if let Some(n) = query.strip_prefix("__fanout__:")
+            && let Ok(n) = n.parse::<i32>()
+        {
+            for i in 0..n {
+                let bp = BlueprintBuilder::new(".item")
+                    .request(HttpRequest::get(format!("{}/fanout/{i}", self.base_url())))
+                    .field("id", Expr::self_ref().attr("data-id"))
+                    .build();
+                // Propagates the budget error the host raises once the cap is hit.
+                extract::html(None, &bp)?;
+            }
+            return Ok(MangaList {
+                manga: vec![],
+                has_next_page: false,
+                total_pages: None,
+            });
+        }
+
         let mut req = HttpRequest::get(format!("{}/search", self.base_url())).query("q", query);
         // Map a selected `genre` onto `g`, mirroring the interpreted source's
         // filter_mapping. A guest that renders the panel but drops the selection
@@ -130,7 +153,50 @@ impl MangaExtension for Fixture {
         self.fetch_list(req)
     }
 
+    /// Conformance affordance: a manga id of the form `__composite__:<encoded>`
+    /// carries a base64url `series|volume` pair the guest must decode to build
+    /// the detail request. Proves a composite id survives the round trip out to
+    /// the host and back into a live call.
     fn get_manga_details(&self, manga_id: &str) -> ExtensionResult<MangaInfo> {
+        if let Some(encoded) = manga_id.strip_prefix("__composite__:") {
+            let parts = kani_shared::encoding::decode_composite(
+                encoded,
+                "|",
+                &kani_shared::ast::IdEncoding::Base64Url,
+                &["series", "volume"],
+            )
+            .map_err(kani_shared::extension::ExtensionError::parse)?;
+            let get = |k: &str| {
+                parts
+                    .iter()
+                    .find(|(name, _)| name == k)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_default()
+            };
+            let bp = BlueprintBuilder::new(".manga")
+                .request(HttpRequest::get(format!(
+                    "{}/series/{}/vol/{}",
+                    self.base_url(),
+                    get("series"),
+                    get("volume")
+                )))
+                .field("id", Expr::self_ref().attr("data-id"))
+                .field("title", Expr::self_ref().first("h1").text())
+                .build();
+            let handle = extract::html(None, &bp)?;
+            let row = handle.rows_get(0)?;
+            return Ok(MangaInfo {
+                id: manga_id.to_string(),
+                title: row.require_str("/title")?,
+                description: None,
+                status: MangaStatus::Unknown,
+                authors: vec![],
+                artists: vec![],
+                tags: vec![],
+                cover_url: None,
+            });
+        }
+
         let bp = BlueprintBuilder::new(".manga")
             .request(HttpRequest::get(format!(
                 "{}/manga/{}",

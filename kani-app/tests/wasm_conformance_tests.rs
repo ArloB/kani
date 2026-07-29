@@ -601,3 +601,70 @@ async fn an_in_flight_wasm_call_completes_across_a_hot_swap() {
         "a drained source must refuse new work so the swap is safe"
     );
 }
+
+// O8 — the per-call HTTP budget is charged identically on both backends. The
+// interpreted side is covered by `io_budget_tests`; this proves the compiled
+// guest is held to the same 32-request cap rather than being able to fan out
+// without limit through the host ABI.
+#[tokio::test]
+async fn the_io_budget_is_charged_identically_on_both_backends() {
+    let origin = TestOrigin::start().await;
+    for i in 0..64 {
+        origin.set(
+            &format!("/fanout/{i}"),
+            Response::html(r#"<div class="item" data-id="x"></div>"#),
+        );
+    }
+    let wasm = wasm_or_skip!(origin);
+
+    // Comfortably inside the cap: the guest fans out and succeeds.
+    wasm.search_manga("__fanout__:10", 1, 20, &[])
+        .await
+        .expect("10 sub-fetches are within the per-call budget");
+
+    // Past the cap: the host must stop it, exactly as it stops a YAML source.
+    let over = wasm.search_manga("__fanout__:40", 1, 20, &[]).await;
+    assert!(
+        over.is_err(),
+        "40 sub-fetches in one call must exceed the budget on the compiled path too"
+    );
+
+    // And the budget is per call, not cumulative: a fresh call still works.
+    wasm.search_manga("__fanout__:10", 1, 20, &[])
+        .await
+        .expect("the budget resets per call on the compiled path");
+}
+
+// O10 — a composite id survives the round trip: the host hands the guest an
+// encoded id, the guest decodes it and builds the request its parts describe.
+// A break here sends every detail request to the wrong URL while still looking
+// like a valid id everywhere it is displayed.
+#[tokio::test]
+async fn composite_id_encoding_round_trips_through_a_live_call() {
+    use base64::Engine as _;
+
+    let origin = TestOrigin::start().await;
+    // The id encodes series=berserk, volume=12 — only a correct decode reaches
+    // this route.
+    origin.set(
+        "/series/berserk/vol/12",
+        Response::html(r#"<div class="manga" data-id="berserk"><h1>Berserk Vol. 12</h1></div>"#),
+    );
+    let wasm = wasm_or_skip!(origin);
+
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("berserk|12");
+    let details = wasm
+        .get_manga_details(&format!("__composite__:{encoded}"))
+        .await
+        .expect("the guest must decode the composite id and fetch its parts");
+
+    assert_eq!(
+        details.title, "Berserk Vol. 12",
+        "the decoded parts must have addressed the right resource"
+    );
+    assert_eq!(
+        origin.hits("/series/berserk/vol/12"),
+        1,
+        "the request went to the URL the id's parts describe"
+    );
+}
