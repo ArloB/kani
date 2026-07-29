@@ -73,7 +73,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fi \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd -r kani && useradd -r -g kani -d /app kani
+# Pin the uid/gid rather than letting `useradd -r` pick from the system range.
+# It was landing on 999 while docker-compose told users to `chown 1000:1000` to
+# fix bind-mount permissions — advice that could not work. 1000 is also the
+# first non-system uid on a typical Linux desktop, so a bind mount owned by the
+# host user just works with no chown at all.
+RUN groupadd -g 1000 kani && useradd -u 1000 -g kani -d /app -M kani
 
 # Copy the compiled binary and static web assets (CSS and JS already built by build.rs).
 WORKDIR /app
