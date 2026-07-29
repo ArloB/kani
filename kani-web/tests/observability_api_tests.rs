@@ -396,3 +396,249 @@ async fn system_update_requires_authentication() {
 
     assert_eq!(res.status(), axum::http::StatusCode::UNAUTHORIZED);
 }
+
+// ── Group R — the Prometheus exposition, as a scraper reads it ────────────────
+//
+// The consumer is a scraper. `text.contains("# TYPE")` cannot tell a valid
+// exposition from a broken one, and a malformed body means monitoring fails
+// silently — the worst way for observability to fail. These parse the document.
+
+#[derive(Debug)]
+struct Exposition {
+    /// metric base name → declared type
+    declared: std::collections::HashMap<String, String>,
+    helped: std::collections::HashSet<String>,
+    /// (full sample name, label block, value)
+    samples: Vec<(String, Option<String>, String)>,
+}
+
+fn is_valid_metric_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' || c == ':' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+}
+
+/// Parse the text exposition format strictly: anything we cannot account for is
+/// a failure, because a scraper would reject it too.
+fn parse_exposition(body: &str) -> Exposition {
+    let mut out = Exposition {
+        declared: std::collections::HashMap::new(),
+        helped: std::collections::HashSet::new(),
+        samples: Vec::new(),
+    };
+
+    for (lineno, raw) in body.lines().enumerate() {
+        let line = raw.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("# TYPE ") {
+            let mut parts = rest.split_whitespace();
+            let name = parts.next().unwrap_or_default().to_string();
+            let kind = parts.next().unwrap_or_default().to_string();
+            assert!(
+                !name.is_empty() && !kind.is_empty(),
+                "line {}: malformed TYPE line: {line}",
+                lineno + 1
+            );
+            assert!(
+                out.declared.insert(name.clone(), kind).is_none(),
+                "line {}: duplicate TYPE declaration for {name}",
+                lineno + 1
+            );
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("# HELP ") {
+            let name = rest.split_whitespace().next().unwrap_or_default();
+            assert!(
+                !name.is_empty(),
+                "line {}: malformed HELP line: {line}",
+                lineno + 1
+            );
+            out.helped.insert(name.to_string());
+            continue;
+        }
+        if line.starts_with('#') {
+            continue; // a plain comment
+        }
+
+        // A sample: `name{labels} value [timestamp]`
+        let (name_and_labels, value) = line
+            .rsplit_once(' ')
+            .unwrap_or_else(|| panic!("line {}: sample has no value: {line}", lineno + 1));
+        let (name, labels) = match name_and_labels.split_once('{') {
+            Some((n, l)) => {
+                let l = l.strip_suffix('}').unwrap_or_else(|| {
+                    panic!("line {}: unterminated label block: {line}", lineno + 1)
+                });
+                (n.to_string(), Some(l.to_string()))
+            }
+            None => (name_and_labels.to_string(), None),
+        };
+        assert!(
+            value.parse::<f64>().is_ok()
+                || value == "NaN"
+                || value.starts_with("+Inf")
+                || value.starts_with("-Inf"),
+            "line {}: sample value is not a number: {line}",
+            lineno + 1
+        );
+        out.samples.push((name, labels, value.to_string()));
+    }
+    out
+}
+
+/// The base metric a sample belongs to, stripping the suffixes histograms and
+/// summaries add to their derived series.
+fn base_name(sample: &str) -> String {
+    for suffix in ["_bucket", "_sum", "_count", "_total"] {
+        if let Some(stripped) = sample.strip_suffix(suffix) {
+            return stripped.to_string();
+        }
+    }
+    sample.to_string()
+}
+
+// R1 — the whole document parses as the text exposition format.
+#[tokio::test]
+async fn the_metrics_exposition_parses_as_prometheus_text_format() {
+    kani_web::metrics::describe();
+    let text = kani_web::metrics::prometheus().1.render();
+    let parsed = parse_exposition(&text);
+    assert!(
+        !parsed.declared.is_empty(),
+        "an exposition with no declared metrics is not worth scraping"
+    );
+}
+
+// R2 — every sample belongs to a declared metric, and declarations are paired.
+#[tokio::test]
+async fn every_metric_has_a_matching_help_and_type_line() {
+    kani_web::metrics::describe();
+    let text = kani_web::metrics::prometheus().1.render();
+    let parsed = parse_exposition(&text);
+
+    for (sample, _, _) in &parsed.samples {
+        let base = base_name(sample);
+        assert!(
+            parsed.declared.contains_key(&base) || parsed.declared.contains_key(sample),
+            "sample {sample} has no # TYPE declaration; a scraper treats it as untyped"
+        );
+    }
+    for name in parsed.declared.keys() {
+        assert!(
+            parsed.helped.contains(name),
+            "{name} is TYPEd but has no # HELP line"
+        );
+    }
+}
+
+// R4 — metric names are valid identifiers. A name derived from user data (a
+// source or extension id) would break the entire scrape, not just its own line.
+#[tokio::test]
+async fn metric_names_are_valid_identifiers() {
+    kani_web::metrics::describe();
+    let text = kani_web::metrics::prometheus().1.render();
+    let parsed = parse_exposition(&text);
+
+    for name in parsed.declared.keys() {
+        assert!(
+            is_valid_metric_name(name),
+            "{name} is not a valid Prometheus metric name"
+        );
+    }
+    for (sample, labels, _) in &parsed.samples {
+        assert!(
+            is_valid_metric_name(sample),
+            "{sample} is not a valid Prometheus metric name"
+        );
+        // R3 — label blocks must be well-formed: quoted values, no raw newline.
+        if let Some(l) = labels {
+            assert!(
+                !l.contains('\n'),
+                "{sample} has a raw newline in its label block"
+            );
+            for pair in l.split("\",") {
+                if pair.trim().is_empty() {
+                    continue;
+                }
+                assert!(
+                    pair.contains("=\""),
+                    "{sample} has an unquoted label value: {pair}"
+                );
+            }
+        }
+    }
+}
+
+// R5 — counters never go backwards between scrapes. A decreasing counter
+// silently corrupts every rate() built on it.
+#[tokio::test]
+async fn counters_do_not_go_backwards_across_two_scrapes() {
+    kani_web::metrics::describe();
+    let handle = &kani_web::metrics::prometheus().1;
+
+    let first = parse_exposition(&handle.render());
+    let second = parse_exposition(&handle.render());
+
+    let counters: std::collections::HashSet<&String> = first
+        .declared
+        .iter()
+        .filter(|(_, kind)| kind.as_str() == "counter")
+        .map(|(name, _)| name)
+        .collect();
+
+    for (sample, labels, value) in &second.samples {
+        if !counters.contains(&base_name(sample)) {
+            continue;
+        }
+        let before = first
+            .samples
+            .iter()
+            .find(|(n, l, _)| n == sample && l == labels)
+            .and_then(|(_, _, v)| v.parse::<f64>().ok());
+        let after = value.parse::<f64>().unwrap_or(f64::NAN);
+        if let Some(before) = before {
+            assert!(
+                after >= before,
+                "counter {sample} went backwards: {before} → {after}"
+            );
+        }
+    }
+}
+
+// The validator above is only worth having if it rejects things. These pin that
+// it does — a parser that accepts anything would make R1/R2/R4 vacuous.
+
+#[test]
+#[should_panic(expected = "sample value is not a number")]
+fn the_exposition_parser_rejects_a_non_numeric_sample() {
+    parse_exposition("# HELP x h\n# TYPE x counter\nx not_a_number\n");
+}
+
+#[test]
+#[should_panic(expected = "duplicate TYPE declaration")]
+fn the_exposition_parser_rejects_a_duplicate_type_declaration() {
+    parse_exposition("# TYPE x counter\n# TYPE x gauge\n");
+}
+
+#[test]
+#[should_panic(expected = "unterminated label block")]
+fn the_exposition_parser_rejects_an_unterminated_label_block() {
+    parse_exposition("# HELP x h\n# TYPE x counter\nx{a=\"1\" 5\n");
+}
+
+#[test]
+fn a_sample_without_a_type_declaration_is_detected() {
+    // Not a panic in the parser — R2 is what catches this, so prove the shape
+    // R2 relies on is what an undeclared sample actually produces.
+    let parsed = parse_exposition("# HELP x h\n# TYPE x counter\nx 1\ny 2\n");
+    assert!(parsed.declared.contains_key("x"));
+    assert!(
+        !parsed.declared.contains_key("y"),
+        "y is undeclared, which is exactly what R2 fails on"
+    );
+}

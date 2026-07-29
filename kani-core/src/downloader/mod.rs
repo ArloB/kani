@@ -1277,6 +1277,228 @@ mod tests {
         );
     }
 
+    // ── Group P — the ComicInfo.xml a consumer actually reads ────────────────
+    //
+    // Komga, Kavita, Calibre and Jellyfin parse this sidecar. The tests above
+    // only assert the *entry exists*; these read it back out of the archive and
+    // parse it, so a document that is present but unusable cannot pass.
+
+    fn full_info() -> crate::comic_info::ComicInfo {
+        crate::comic_info::ComicInfo {
+            xmlns_xsi: "http://www.w3.org/2001/XMLSchema-instance",
+            series: "Berserk".to_string(),
+            title: Some("The Black Swordsman".to_string()),
+            number: 12.5,
+            volume: Some(3),
+            summary: Some("A summary.".to_string()),
+            language_iso: Some("en".to_string()),
+            writer: Some("Kentaro Miura".to_string()),
+            penciller: Some("Kentaro Miura".to_string()),
+            genre: Some("Dark Fantasy".to_string()),
+            web: Some("https://example.com/berserk".to_string()),
+            pages: None,
+        }
+    }
+
+    /// Build a CBZ through the real writer and return its ComicInfo.xml.
+    async fn cbz_comic_info(
+        dir: &std::path::Path,
+        info: crate::comic_info::ComicInfo,
+        page_count: usize,
+    ) -> String {
+        let mut staged = Vec::new();
+        for i in 0..page_count {
+            let p = dir.join(format!("p{i}.tmp"));
+            tokio::fs::write(&p, b"data").await.unwrap();
+            staged.push((p, format!("{:04}.jpg", i + 1)));
+        }
+        let cbz_path = dir.join("out.cbz");
+        DownloaderManager::create_cbz(&cbz_path, staged, Some(info))
+            .await
+            .unwrap();
+
+        let file = std::fs::File::open(&cbz_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut xml = String::new();
+        std::io::Read::read_to_string(&mut archive.by_name("ComicInfo.xml").unwrap(), &mut xml)
+            .unwrap();
+        xml
+    }
+
+    /// Read `<Tag>` text out of the document, parsing rather than substring
+    /// matching — a malformed document fails here, which is the point.
+    fn xml_field(xml: &str, tag: &str) -> Option<String> {
+        let mut reader = quick_xml::Reader::from_str(xml);
+        let mut buf = Vec::new();
+        let mut capture = false;
+        let mut out = String::new();
+        let mut seen = false;
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(quick_xml::events::Event::Eof) => break,
+                Err(e) => panic!("ComicInfo.xml is not well-formed, no reader could use it: {e}"),
+                Ok(quick_xml::events::Event::Start(e)) => {
+                    if e.name().as_ref() == tag.as_bytes() {
+                        capture = true;
+                        seen = true;
+                    }
+                }
+                Ok(quick_xml::events::Event::End(e)) => {
+                    if e.name().as_ref() == tag.as_bytes() {
+                        capture = false;
+                    }
+                }
+                Ok(quick_xml::events::Event::Text(t)) if capture => {
+                    out.push_str(&t.xml_content().unwrap_or_default());
+                }
+                Ok(quick_xml::events::Event::GeneralRef(r)) if capture => {
+                    if let Ok(Some(c)) = r.resolve_char_ref() {
+                        out.push(c);
+                    } else {
+                        out.push_str(match String::from_utf8_lossy(r.as_ref()).as_ref() {
+                            "amp" => "&",
+                            "lt" => "<",
+                            "gt" => ">",
+                            "quot" => "\"",
+                            "apos" => "'",
+                            other => panic!("unresolvable entity &{other}; in ComicInfo.xml"),
+                        });
+                    }
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+        seen.then_some(out)
+    }
+
+    // P1/P2 — the sidecar parses, and every field round-trips.
+    #[tokio::test]
+    async fn a_written_cbz_contains_parseable_comicinfo_that_round_trips() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let xml = cbz_comic_info(dir.path(), full_info(), 2).await;
+
+        assert_eq!(xml_field(&xml, "Series").as_deref(), Some("Berserk"));
+        assert_eq!(
+            xml_field(&xml, "Title").as_deref(),
+            Some("The Black Swordsman")
+        );
+        assert_eq!(xml_field(&xml, "Number").as_deref(), Some("12.5"));
+        assert_eq!(xml_field(&xml, "Volume").as_deref(), Some("3"));
+        assert_eq!(xml_field(&xml, "Writer").as_deref(), Some("Kentaro Miura"));
+        assert_eq!(xml_field(&xml, "LanguageISO").as_deref(), Some("en"));
+        assert_eq!(
+            xml_field(&xml, "Web").as_deref(),
+            Some("https://example.com/berserk")
+        );
+    }
+
+    // P3 — XML-hostile metadata must not produce a document readers choke on.
+    // A `contains()` assertion cannot catch this: the substrings survive in a
+    // broken document.
+    #[tokio::test]
+    async fn xml_hostile_metadata_still_parses() {
+        const NASTY: &str = r#"Tom & Jerry <vol "1"> 'x' ]]> --"#;
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut info = full_info();
+        info.series = NASTY.to_string();
+        info.summary = Some(NASTY.to_string());
+
+        let xml = cbz_comic_info(dir.path(), info, 1).await;
+        assert_eq!(
+            xml_field(&xml, "Series").as_deref(),
+            Some(NASTY),
+            "the series title must round-trip through escaping intact"
+        );
+        assert_eq!(xml_field(&xml, "Summary").as_deref(), Some(NASTY));
+    }
+
+    // P4 — element names are the ComicRack names consumers match on. A rename
+    // compiles and ships, and every consumer silently loses that field.
+    #[tokio::test]
+    async fn comicinfo_element_names_match_the_schema() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let xml = cbz_comic_info(dir.path(), full_info(), 1).await;
+        for tag in [
+            "Series",
+            "Title",
+            "Number",
+            "Volume",
+            "Summary",
+            "LanguageISO",
+            "Writer",
+            "Penciller",
+            "Genre",
+            "Web",
+        ] {
+            assert!(
+                xml_field(&xml, tag).is_some(),
+                "consumers match on <{tag}>; it is missing from the sidecar"
+            );
+        }
+    }
+
+    // P5 — an absent optional is omitted, not emitted empty. A reader that sees
+    // `<Writer></Writer>` records a writer whose name is the empty string.
+    #[tokio::test]
+    async fn absent_optional_metadata_is_omitted_not_emitted_empty() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let info = crate::comic_info::ComicInfo {
+            title: None,
+            volume: None,
+            summary: None,
+            writer: None,
+            penciller: None,
+            genre: None,
+            web: None,
+            language_iso: None,
+            ..full_info()
+        };
+        let xml = cbz_comic_info(dir.path(), info, 1).await;
+
+        for tag in ["Title", "Volume", "Summary", "Writer", "Penciller", "Web"] {
+            assert!(
+                xml_field(&xml, tag).is_none(),
+                "<{tag}> was absent and must be omitted entirely, not emitted empty"
+            );
+        }
+        // The required fields are still there.
+        assert_eq!(xml_field(&xml, "Series").as_deref(), Some("Berserk"));
+    }
+
+    // P6 — the Pages block describes the images actually in the archive. Drift
+    // here is the classic sidecar-vs-payload mismatch.
+    #[tokio::test]
+    async fn page_metadata_matches_the_images_actually_in_the_archive() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut staged = Vec::new();
+        for i in 0..4 {
+            let p = dir.path().join(format!("p{i}.tmp"));
+            tokio::fs::write(&p, b"data").await.unwrap();
+            staged.push((p, format!("{:04}.jpg", i + 1)));
+        }
+        let cbz_path = dir.path().join("pages.cbz");
+        DownloaderManager::create_cbz(&cbz_path, staged, Some(full_info()))
+            .await
+            .unwrap();
+
+        let file = std::fs::File::open(&cbz_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let images = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .filter(|n| n != "ComicInfo.xml")
+            .count();
+        let mut xml = String::new();
+        std::io::Read::read_to_string(&mut archive.by_name("ComicInfo.xml").unwrap(), &mut xml)
+            .unwrap();
+
+        let page_elements = xml.matches("<Page ").count();
+        assert_eq!(
+            page_elements, images,
+            "the Pages block describes {page_elements} pages but the archive holds {images}"
+        );
+    }
+
     #[tokio::test]
     async fn create_cbz_without_comic_info_has_no_xml() {
         let dir = tempfile::TempDir::new().unwrap();
