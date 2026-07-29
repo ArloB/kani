@@ -54,6 +54,7 @@ fn advanced_settings() -> AdvancedSettings {
         browser_idle_timeout_s: 300,
         update_check_enabled: true,
         error_reporting_enabled: false,
+        opds_page_index_zero_based: false,
     }
 }
 
@@ -257,4 +258,73 @@ async fn error_reporting_defaults_off_and_round_trips() {
         .unwrap();
 
     assert!(svc.get_settings().await.error_reporting_enabled);
+}
+
+// ── Degraded subsystems ───────────────────────────────────────────────────────
+//
+// The registry exists so a reduced-but-running instance is visible somewhere
+// other than the log. That only holds if it reaches the diagnostics payload the
+// UI reads — the mechanism being correct in isolation is what this codebase
+// keeps shipping.
+
+#[tokio::test]
+async fn a_registered_degradation_reaches_the_diagnostics_payload() {
+    let svc = common::test_service().await;
+    assert!(
+        svc.get_diagnostics().await.unwrap().degradations.is_empty(),
+        "a healthy service reports nothing"
+    );
+
+    svc.degradations.register(
+        kani_app::service::degradations::ids::WASM_MODULE_CACHE,
+        kani_app::service::degradations::Severity::Warn,
+        "WASM module cache",
+        "not writable",
+        "make it writable",
+    );
+
+    let payload = svc.get_diagnostics().await.unwrap();
+    assert_eq!(payload.degradations.len(), 1);
+    let d = &payload.degradations[0];
+    assert_eq!(d.title, "WASM module cache");
+    assert_eq!(d.detail, "not writable");
+    assert!(!d.remedy.is_empty(), "every degradation carries a remedy");
+}
+
+#[tokio::test]
+async fn diagnostics_lists_errors_before_warnings() {
+    let svc = common::test_service().await;
+    use kani_app::service::degradations::{Severity, ids};
+
+    svc.degradations.register(
+        ids::WASM_MODULE_CACHE,
+        Severity::Warn,
+        "Cache",
+        "slow",
+        "fix",
+    );
+    svc.degradations.register(
+        ids::ENCRYPTED_SETTINGS,
+        Severity::Error,
+        "Encrypted settings",
+        "cannot decrypt",
+        "restore secret.key",
+    );
+
+    let payload = svc.get_diagnostics().await.unwrap();
+    assert_eq!(payload.degradations[0].severity, Severity::Error);
+    assert_eq!(payload.degradations[1].severity, Severity::Warn);
+}
+
+#[tokio::test]
+async fn a_recovered_subsystem_disappears_from_diagnostics() {
+    let svc = common::test_service().await;
+    use kani_app::service::degradations::{Severity, ids};
+
+    svc.degradations
+        .register(ids::LIBRARY_PATH, Severity::Warn, "Library", "gone", "fix");
+    assert_eq!(svc.get_diagnostics().await.unwrap().degradations.len(), 1);
+
+    svc.degradations.clear(ids::LIBRARY_PATH);
+    assert!(svc.get_diagnostics().await.unwrap().degradations.is_empty());
 }

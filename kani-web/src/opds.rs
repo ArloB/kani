@@ -362,9 +362,18 @@ async fn opds_set_progress(
     if !opds_allowed(&identity, Permission::Opds(Opds::Progress), &state).await {
         return opds_403();
     }
+    // The reader reports a PSE page number; progress is stored as a 0-based index.
+    let page_index = match state
+        .service
+        .opds_page_to_index(body.page.max(0) as usize)
+        .await
+    {
+        Ok(i) => i as i64,
+        Err(e) => return error_response(e),
+    };
     match state
         .service
-        .set_chapter_progress(identity.user.id, chapter_id, body.page)
+        .set_chapter_progress(identity.user.id, chapter_id, page_index)
         .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),

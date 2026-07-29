@@ -341,6 +341,18 @@ pub struct WasmRuntime {
 }
 
 impl WasmRuntime {
+    /// Enable the compiled-module cache, rooted at the instance's data
+    /// directory. Returns the directory and error if it could not be created,
+    /// so the caller can report it rather than silently running without a cache.
+    pub fn attach_module_cache(
+        &mut self,
+        data_dir: &std::path::Path,
+    ) -> std::result::Result<(), (std::path::PathBuf, std::io::Error)> {
+        let cache = cache::WasmModuleCache::open(data_dir)?;
+        self.module_cache = Some(std::sync::Mutex::new(cache));
+        Ok(())
+    }
+
     pub fn new(max_instances: u32) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model(true);
@@ -370,12 +382,10 @@ impl WasmRuntime {
 
         KaniExtension::add_to_linker::<_, HasSelf<HostState>>(&mut linker, |state| state)?;
 
-        let module_cache = cache::WasmModuleCache::from_env().map(std::sync::Mutex::new);
-
         Ok(Self {
             engine,
             linker,
-            module_cache,
+            module_cache: None,
         })
     }
 

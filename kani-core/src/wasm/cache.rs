@@ -20,19 +20,24 @@ impl WasmModuleCache {
         })
     }
 
-    pub fn from_env() -> Option<Self> {
-        let dir = std::env::var("KANI_WASM_MODULE_CACHE_DIR")
+    /// Resolve the cache directory for a given data directory.
+    ///
+    /// The default used to be a hard-coded `/data/.wasm_cache`, which is only
+    /// correct inside the Docker image. Every native install therefore failed to
+    /// create it, silently disabled the cache, and recompiled every extension on
+    /// every load. The data directory is the one path that is always right.
+    pub fn resolve_dir(data_dir: &std::path::Path) -> PathBuf {
+        std::env::var("KANI_WASM_MODULE_CACHE_DIR")
             .ok()
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/data/.wasm_cache"));
+            .unwrap_or_else(|| data_dir.join(".wasm_cache"))
+    }
 
-        match Self::new(dir) {
-            Ok(cache) => Some(cache),
-            Err(e) => {
-                tracing::warn!("WASM module cache disabled: {e}");
-                None
-            }
-        }
+    /// Returns the cache, or the directory and error that stopped it being
+    /// created so the caller can report the degradation.
+    pub fn open(data_dir: &std::path::Path) -> Result<Self, (PathBuf, std::io::Error)> {
+        let dir = Self::resolve_dir(data_dir);
+        Self::new(dir.clone()).map_err(|e| (dir, e))
     }
 
     pub fn sha256_hex(bytes: &[u8]) -> String {

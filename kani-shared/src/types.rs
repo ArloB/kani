@@ -1228,6 +1228,9 @@ pub struct AppSettings {
     pub browser_idle_timeout_s: i64,
     pub update_check_enabled: bool,
     pub error_reporting_enabled: bool,
+    /// OPDS-PSE `?page=` numbering. Default false = 1-based, matching how most
+    /// readers substitute `{pageNumber}`; true restores the old 0-based index.
+    pub opds_page_index_zero_based: bool,
 }
 
 #[cfg(feature = "host")]
@@ -1383,6 +1386,9 @@ pub struct AdvancedSettings {
     pub browser_idle_timeout_s: i64,
     pub update_check_enabled: bool,
     pub error_reporting_enabled: bool,
+    /// OPDS-PSE `?page=` numbering. Default false = 1-based, matching how most
+    /// readers substitute `{pageNumber}`; true restores the old 0-based index.
+    pub opds_page_index_zero_based: bool,
 }
 
 #[cfg(feature = "host")]
@@ -2062,6 +2068,7 @@ mod tests {
             browser_idle_timeout_s: 300,
             update_check_enabled: true,
             error_reporting_enabled: false,
+            opds_page_index_zero_based: false,
         }));
         json_rt(&SettingsUpdate::Tracking(TrackingSettings {
             default_tracking_enabled: true,

@@ -280,11 +280,11 @@ async fn a_client_can_navigate_from_the_root_feed_to_every_page() {
     // the feed claims exists. A template that resolves to nothing passes every
     // substring assertion but breaks every reader.
     //
-    // NOTE: this server indexes pages from 0, so `pse:count=3` means 0,1,2. The
-    // feed carries no signal of that convention, and a reader that assumes
-    // 1-based (as several do) silently skips the first page and 404s on the
-    // last. Pinned here so the convention is at least explicit and cannot drift.
-    for page in 0..count {
+    // Pages are 1-based, so `pse:count=3` means 1,2,3 — what a reader derives
+    // from the count. This previously indexed from 0, which meant page `count`
+    // (the last one) did not resolve at all; walking the full inclusive range is
+    // what catches that.
+    for page in 1..=count {
         let href = to_path(&stream.href).replace("{pageNumber}", &page.to_string());
         let res = app.clone().oneshot(authed(&href, &cookie)).await.unwrap();
         assert_eq!(
@@ -299,12 +299,14 @@ async fn a_client_can_navigate_from_the_root_feed_to_every_page() {
         );
     }
 
-    // And the count is honest at the boundary: index `count` is one past the end.
-    let href = to_path(&stream.href).replace("{pageNumber}", &count.to_string());
+    // And the count is honest at the boundary: with 1-based numbering `count` is
+    // the last valid page, so `count + 1` is the first that must not resolve.
+    let past = count + 1;
+    let href = to_path(&stream.href).replace("{pageNumber}", &past.to_string());
     let res = app.clone().oneshot(authed(&href, &cookie)).await.unwrap();
     assert!(
         !res.status().is_success(),
-        "index {count} is past pse:count and must not resolve"
+        "page {past} is past pse:count ({count}) and must not resolve"
     );
 }
 

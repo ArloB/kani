@@ -99,18 +99,91 @@ async fn chapter_feed_reflects_progress() {
         .opds_chapter_feed(ch, user, "http://host")
         .await
         .unwrap();
-    assert!(feed.contains(r#"pse:lastRead="1""#), "feed: {feed}");
+    // Stored progress is a 0-based index, so index 1 is the second page and is
+    // reported as `2` under the 1-based default.
+    assert!(feed.contains(r#"pse:lastRead="2""#), "feed: {feed}");
     assert!(feed.contains("pse:lastReadDate="));
 }
 
+// ── Page numbering ────────────────────────────────────────────────────────────
+//
+// `?page=` is what an OPDS reader substituted into `{pageNumber}`. Kani used to
+// treat it as a raw 0-based index, so a reader that starts at 1 saw the second
+// page first and 404'd on the last one. Default is now 1-based.
+
 #[tokio::test]
-async fn chapter_page_returns_exact_bytes() {
+async fn page_one_is_the_first_page() {
     let svc = test_service().await;
     let (ch, pages) = seed_downloaded_chapter(&svc).await;
 
     let (bytes, ct) = svc.opds_chapter_page(ch, 1, 0, None).await.unwrap();
-    assert_eq!(bytes, pages[1]);
+    assert_eq!(bytes, pages[0], "page=1 must serve the first page");
     assert_eq!(ct, "image/png");
+}
+
+#[tokio::test]
+async fn page_two_is_the_second_page() {
+    let svc = test_service().await;
+    let (ch, pages) = seed_downloaded_chapter(&svc).await;
+
+    let (bytes, _) = svc.opds_chapter_page(ch, 2, 0, None).await.unwrap();
+    assert_eq!(bytes, pages[1]);
+}
+
+// The regression that motivated the change: the highest page number a reader
+// derives from `pse:count` must exist.
+#[tokio::test]
+async fn the_last_page_by_pse_count_is_reachable() {
+    let svc = test_service().await;
+    let (ch, pages) = seed_downloaded_chapter(&svc).await;
+
+    let (bytes, _) = svc
+        .opds_chapter_page(ch, pages.len(), 0, None)
+        .await
+        .unwrap();
+    assert_eq!(bytes, pages[pages.len() - 1]);
+}
+
+#[tokio::test]
+async fn page_zero_is_rejected_when_one_based() {
+    let svc = test_service().await;
+    let (ch, _pages) = seed_downloaded_chapter(&svc).await;
+
+    let err = svc.opds_chapter_page(ch, 0, 0, None).await.unwrap_err();
+    assert!(
+        matches!(err, kani_app::error::ServiceError::Validation(_)),
+        "page 0 under 1-based numbering is a bad request, not a 404: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn zero_based_mode_restores_the_old_indexing() {
+    let svc = test_service().await;
+    let (ch, pages) = seed_downloaded_chapter(&svc).await;
+    svc.settings.write().await.opds_page_index_zero_based = true;
+
+    let (bytes, _) = svc.opds_chapter_page(ch, 0, 0, None).await.unwrap();
+    assert_eq!(bytes, pages[0], "page=0 is the first page in 0-based mode");
+
+    let (bytes, _) = svc.opds_chapter_page(ch, 1, 0, None).await.unwrap();
+    assert_eq!(bytes, pages[1]);
+}
+
+#[tokio::test]
+async fn zero_based_mode_reports_last_read_unshifted() {
+    let svc = test_service().await;
+    let (ch, _pages) = seed_downloaded_chapter(&svc).await;
+    let user = insert_user(&svc.db, "zb").await;
+    svc.settings.write().await.opds_page_index_zero_based = true;
+
+    svc.set_chapter_progress(user, ch, 1).await.unwrap();
+    svc.flush_progress_buffer().await;
+
+    let feed = svc
+        .opds_chapter_feed(ch, user, "http://host")
+        .await
+        .unwrap();
+    assert!(feed.contains(r#"pse:lastRead="1""#), "feed: {feed}");
 }
 
 #[tokio::test]
@@ -143,7 +216,7 @@ async fn chapter_page_transcode_downscales() {
     let (ch, _pages) = seed_downloaded_chapter(&svc).await;
 
     // page 2 is 400x300; ask for width 2.
-    let (bytes, ct) = svc.opds_chapter_page(ch, 2, 2, None).await.unwrap();
+    let (bytes, ct) = svc.opds_chapter_page(ch, 3, 2, None).await.unwrap();
     assert_eq!(ct, "image/jpeg");
     let out = image::load_from_memory(&bytes).unwrap();
     assert!(out.width() <= 2, "width should be clamped: {}", out.width());
@@ -155,7 +228,7 @@ async fn chapter_page_width_above_clamp_does_not_upscale() {
     let (ch, _pages) = seed_downloaded_chapter(&svc).await;
 
     // Request an absurd width; the 400px source must not be upscaled.
-    let (bytes, _ct) = svc.opds_chapter_page(ch, 2, 100_000, None).await.unwrap();
+    let (bytes, _ct) = svc.opds_chapter_page(ch, 3, 100_000, None).await.unwrap();
     let out = image::load_from_memory(&bytes).unwrap();
     assert_eq!(out.width(), 400);
 }

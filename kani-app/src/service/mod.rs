@@ -34,6 +34,7 @@ mod chapters;
 mod cover;
 pub mod credential_migration;
 pub mod dedup;
+pub mod degradations;
 pub mod diagnostics;
 mod downloads;
 pub mod email;
@@ -100,6 +101,8 @@ pub struct AppService {
     /// Optional authenticated-encryption cipher for credential fields.
     /// Present when `KANI_SECRET_KEY` or `KANI_SECRET_KEY_FILE` is set at startup.
     pub encryption: Option<Arc<encryption::CredentialCipher>>,
+    /// Subsystems running in a reduced state. Surfaced in Settings → Diagnostics.
+    pub degradations: Arc<degradations::DegradationRegistry>,
     pub webhook_service: webhooks::WebhookService,
     pub metadata_provider_registry:
         Arc<tokio::sync::RwLock<metadata_provider::MetadataProviderRegistry>>,
@@ -125,19 +128,26 @@ pub struct AppService {
 /// The auto-provisioned file is written with `0o600` permissions (owner-read only on Unix).
 fn load_or_provision_credential_cipher(
     data_dir: &std::path::Path,
+    reg: &degradations::DegradationRegistry,
 ) -> Option<encryption::CredentialCipher> {
     if let Ok(path) = std::env::var("KANI_SECRET_KEY_FILE") {
         let hex = match std::fs::read_to_string(path.trim()) {
             Ok(s) => s.trim().to_string(),
             Err(e) => {
-                tracing::error!("KANI_SECRET_KEY_FILE set but could not read file: {e}");
+                reg.register(
+                    degradations::ids::CREDENTIAL_KEY,
+                    degradations::Severity::Error,
+                    "Credential encryption",
+                    format!("KANI_SECRET_KEY_FILE is set but the file could not be read ({e}), so credential encryption is disabled."),
+                    "Check the path and that the server user can read it.",
+                );
                 return None;
             }
         };
-        return parse_cipher_hex(&hex);
+        return parse_cipher_hex(&hex, reg);
     }
     if let Ok(val) = std::env::var("KANI_SECRET_KEY") {
-        return parse_cipher_hex(val.trim());
+        return parse_cipher_hex(val.trim(), reg);
     }
 
     // Auto-provision path.
@@ -172,17 +182,29 @@ fn load_or_provision_credential_cipher(
         );
         hex
     };
-    parse_cipher_hex(&hex)
+    parse_cipher_hex(&hex, reg)
 }
 
-fn parse_cipher_hex(hex: &str) -> Option<encryption::CredentialCipher> {
+fn parse_cipher_hex(
+    hex: &str,
+    reg: &degradations::DegradationRegistry,
+) -> Option<encryption::CredentialCipher> {
     match encryption::CredentialCipher::from_hex(hex) {
         Ok(c) => {
             tracing::info!("Credential encryption enabled");
             Some(c)
         }
         Err(e) => {
-            tracing::error!("Invalid encryption key — credential encryption disabled: {e}");
+            reg.register(
+                degradations::ids::CREDENTIAL_KEY,
+                degradations::Severity::Error,
+                "Credential encryption",
+                format!(
+                    "The encryption key is not usable, so credential encryption is disabled: {e}"
+                ),
+                "Check KANI_SECRET_KEY / KANI_SECRET_KEY_FILE, or the secret.key file in the data \
+                 directory — it must be 64 hex characters.",
+            );
             None
         }
     }
@@ -293,9 +315,10 @@ impl AppService {
 
         let sources_registry = SourceRegistry::new();
 
-        let enc = load_or_provision_credential_cipher(data_dir);
+        let degradation_registry = Arc::new(degradations::DegradationRegistry::new());
+        let enc = load_or_provision_credential_cipher(data_dir, &degradation_registry);
 
-        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_ids, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours, browser_max_memory_mb, browser_max_instances, browser_idle_timeout_s, update_check_enabled, error_reporting_enabled, integrity_quick_scrub_interval_hours, integrity_deep_scrub_interval_hours, scrub_on_startup, integrity_revalidate_after_days, upgrade_detection_enabled, upgrade_min_res_gain, upgrade_confirm_fetches, upgrade_axis_resolution, upgrade_axis_colour, upgrade_axis_encoder, upgrade_axis_bitrate, upgrade_show_downgrades, upgrade_auto_replace_reasons FROM settings")
+        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_ids, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours, browser_max_memory_mb, browser_max_instances, browser_idle_timeout_s, update_check_enabled, error_reporting_enabled, integrity_quick_scrub_interval_hours, integrity_deep_scrub_interval_hours, scrub_on_startup, integrity_revalidate_after_days, upgrade_detection_enabled, upgrade_min_res_gain, upgrade_confirm_fetches, upgrade_axis_resolution, upgrade_axis_colour, upgrade_axis_encoder, upgrade_axis_bitrate, upgrade_show_downgrades, upgrade_auto_replace_reasons, opds_page_index_zero_based FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
@@ -310,7 +333,15 @@ impl AppService {
         if let Some(ref cipher) = enc {
             match cipher.decrypt(&settings.email_provider_config) {
                 Ok(plain) => settings.email_provider_config = plain,
-                Err(e) => tracing::warn!("Cannot decrypt email_provider_config on startup: {e}"),
+                Err(e) => degradation_registry.register(
+                    degradations::ids::ENCRYPTED_SETTINGS,
+                    degradations::Severity::Error,
+                    "Encrypted settings",
+                    format!("The stored email provider configuration cannot be decrypted: {e}. Email sending will not work."),
+                    "This normally means secret.key was lost or replaced. Restore the \
+                     original key file, or re-enter the email settings to store them \
+                     under the new key.",
+                ),
             }
         }
 
@@ -446,8 +477,24 @@ impl AppService {
         }
 
         let max_wasm_instances = settings.max_wasm_instances as u32;
-        let wasm_runtime =
-            Arc::new(WasmRuntime::new(max_wasm_instances).map_err(ServiceError::Core)?);
+        let wasm_runtime = {
+            let mut runtime = WasmRuntime::new(max_wasm_instances).map_err(ServiceError::Core)?;
+            if let Err((dir, e)) = runtime.attach_module_cache(data_dir) {
+                degradation_registry.register(
+                    degradations::ids::WASM_MODULE_CACHE,
+                    degradations::Severity::Warn,
+                    "WASM module cache",
+                    format!(
+                        "The compiled-module cache at {} is unavailable ({e}), so every \
+                             extension is recompiled on each load.",
+                        dir.display()
+                    ),
+                    "Make the directory writable by the server user, or point \
+                         KANI_WASM_MODULE_CACHE_DIR somewhere that is.",
+                );
+            }
+            Arc::new(runtime)
+        };
 
         let shutdown_token = tokio_util::sync::CancellationToken::new();
 
@@ -482,14 +529,29 @@ impl AppService {
             ("library", settings.library_path.as_path()),
         ] {
             if let Err(e) = std::fs::create_dir_all(dir) {
-                tracing::error!("Failed to create {label} directory {}: {e}", dir.display());
+                degradation_registry.register(
+                    degradations::ids::STORAGE_DIRECTORY,
+                    degradations::Severity::Error,
+                    "Storage directory",
+                    format!(
+                        "The {label} directory {} could not be created: {e}",
+                        dir.display()
+                    ),
+                    "Check the path in Settings and that the server user can write to it.",
+                );
             }
         }
 
         let library_path = std::path::Path::new(&settings.library_path);
         if library_path.exists() {
             if let Err(e) = cleanup_staging_dirs(library_path, &pool).await {
-                tracing::warn!("Failed to read library path for cleanup: {}", e);
+                degradation_registry.register(
+                    degradations::ids::LIBRARY_PATH,
+                    degradations::Severity::Warn,
+                    "Library path",
+                    format!("The library directory could not be read at startup: {e}"),
+                    "Check that the library path exists and is readable by the server user.",
+                );
             }
             tracing::info!("Library cleanup complete");
         }
@@ -516,7 +578,13 @@ impl AppService {
         )
         .await
         {
-            tracing::error!("Failed to scan and register sources: {}", e);
+            degradation_registry.register(
+                degradations::ids::SOURCE_REGISTRY,
+                degradations::Severity::Error,
+                "Source registry",
+                format!("Installed extensions could not be scanned or registered: {e}. Sources may be missing."),
+                "Check that the WASM storage directory exists and is readable, then restart.",
+            );
         }
         tracing::info!("Sources scanned and registered");
 
@@ -779,6 +847,7 @@ impl AppService {
             cover_retry_queue: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             email_service: Arc::new(tokio::sync::RwLock::new(email_svc)),
             encryption: enc,
+            degradations: Arc::clone(&degradation_registry),
             webhook_service,
             metadata_provider_registry: Arc::new(tokio::sync::RwLock::new(
                 metadata_provider::MetadataProviderRegistry::new(),
@@ -796,10 +865,19 @@ impl AppService {
 
         // Encrypt any plaintext credentials left over from pre-encryption installs.
         if let Err(e) = svc.migrate_credentials_to_encrypted().await {
-            tracing::warn!("Credential encryption migration on startup failed: {e}");
+            degradation_registry.register(
+                degradations::ids::CREDENTIAL_MIGRATION,
+                degradations::Severity::Error,
+                "Credential encryption migration",
+                format!("Stored credentials could not be migrated to the current key: {e}"),
+                "Check the server log for the failing row, then restart. Until this \
+                 succeeds, some credentials remain in their previous form.",
+            );
         } else if svc.encryption.is_some() {
             tracing::info!("Credential encryption migration complete");
         }
+
+        degradations::log_startup_summary(&degradation_registry);
 
         Ok(svc)
     }
@@ -876,6 +954,7 @@ impl AppService {
             browser_max_instances: 2,
             browser_idle_timeout_s: 300,
             update_check_enabled: true,
+            opds_page_index_zero_based: false,
             error_reporting_enabled: false,
         };
 
@@ -974,6 +1053,7 @@ impl AppService {
             cover_retry_queue: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             email_service: Arc::new(tokio::sync::RwLock::new(None)),
             encryption: None,
+            degradations: Arc::new(degradations::DegradationRegistry::new()),
             webhook_service: webhooks::WebhookService::new(pool.clone(), pool),
             metadata_provider_registry: Arc::new(tokio::sync::RwLock::new(
                 metadata_provider::MetadataProviderRegistry::new(),

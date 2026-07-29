@@ -77,6 +77,7 @@ pub struct Settings {
     pub browser_max_instances: i64,
     pub browser_idle_timeout_s: i64,
     pub update_check_enabled: bool,
+    pub opds_page_index_zero_based: bool,
     pub error_reporting_enabled: bool,
 }
 

@@ -68,6 +68,8 @@ pub struct DiagnosticsPayload {
     pub extensions: Vec<ExtensionStatus>,
     pub browser: BrowserDiagnostics,
     pub recent_error_count: u64,
+    /// Subsystems running in a reduced state, worst first.
+    pub degradations: Vec<super::degradations::Degradation>,
 }
 
 async fn file_len(path: std::path::PathBuf) -> u64 {
@@ -159,6 +161,7 @@ impl AppService {
             extensions,
             browser,
             recent_error_count: 0,
+            degradations: self.degradations.list(),
         })
     }
 }

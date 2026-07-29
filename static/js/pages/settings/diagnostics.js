@@ -12,6 +12,7 @@ import { showApiError } from '../../components/toast.js';
 import * as api from '../../api.js';
 import { t } from '../../i18n.js';
 
+import './diagnostics/card-degraded.js';
 import './diagnostics/card-system.js';
 import './diagnostics/card-database.js';
 import './diagnostics/card-jobs.js';
@@ -58,7 +59,12 @@ export function DiagnosticsSection() {
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         ${cards.map(
-          card => html`<${card.Component} key=${card.id} refreshToken=${refreshToken} />`
+          card =>
+            html`<${card.Component}
+              key=${card.id}
+              refreshToken=${refreshToken}
+              span=${card.span}
+            />`
         )}
       </div>
 

@@ -10,6 +10,7 @@ import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSourc
 import { mountNotificationsPanel } from './components/notifications-panel.js';
 import { mountAppHeader } from './components/app-header.js';
 import { maybeShowUpdateBanner } from './components/update-banner.js';
+import { maybeShowDegradedBanner } from './components/degraded-banner.js';
 import { initTooltip } from './components/tooltip.js';
 import { showAlert } from './components/modal.js';
 import { showWhatsNew } from './components/whats-new.js';
@@ -59,6 +60,7 @@ import { openCommandPalette } from './components/command-palette.js';
     // Async: show security banner if admin and TOTP not enabled on public instance.
     _maybeShowSecurityBanner(appEl);
     maybeShowUpdateBanner(appEl);
+  maybeShowDegradedBanner(appEl);
     mountNotificationsPanel(notificationsMount);
 
     const pageContent = document.createElement('div');
