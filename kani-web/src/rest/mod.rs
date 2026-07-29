@@ -68,6 +68,7 @@ pub(crate) mod sse;
 pub(crate) mod stats;
 pub(crate) mod system;
 pub(crate) mod trackers;
+pub(crate) mod ui_themes;
 pub(crate) mod volumes;
 pub(crate) mod webhooks;
 
@@ -232,6 +233,7 @@ pub fn routes(state: AppState) -> Router {
         .merge(downloads::router())
         .merge(jobs::router())
         .merge(trackers::router())
+        .merge(ui_themes::router())
         .merge(filters::router())
         .merge(settings::router())
         .merge(volumes::router())

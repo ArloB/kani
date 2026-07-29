@@ -545,6 +545,17 @@ impl AppService {
         Ok(())
     }
 
+    /// Who owns a theme: `Some(user_id)`, or `None` for an instance-wide one.
+    /// The REST layer needs this *before* acting, to decide whether the request
+    /// requires `theme:publish` and which owner to authorise against.
+    pub async fn ui_theme_owner(&self, theme_id: &str) -> Result<Option<i64>> {
+        let row = sqlx::query!("SELECT user_id FROM ui_themes WHERE id = ?", theme_id)
+            .fetch_optional(&self.db_read)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound(format!("Theme {theme_id} not found")))?;
+        Ok(row.user_id)
+    }
+
     /// Delete a theme. `owner` must match the row's owner — `None` (instance
     /// theme) requires the caller to have checked `theme:publish`.
     pub async fn delete_ui_theme(&self, owner: Option<UserId>, theme_id: &str) -> Result<()> {
