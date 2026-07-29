@@ -1542,6 +1542,8 @@ export default {
   'update_banner.dismiss': 'Dismiss',
   'settings.section.diagnostics.label': 'Diagnostics',
   'settings.section.diagnostics.desc': 'Runtime health, resource usage and support tooling.',
+  'settings.section.sources_health.label': 'Sources health',
+  'settings.section.sources_health.desc': 'Per-source status, last error and reload.',
   'diag.refresh': 'Refresh',
   'diag.system.title': 'System',
   'diag.system.version': 'Version',
