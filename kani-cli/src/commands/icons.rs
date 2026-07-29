@@ -3,6 +3,12 @@ use resvg::usvg;
 use std::path::Path;
 use tiny_skia::{Pixmap, Transform};
 
+/// The seal colour of `kani-mark.svg`, used to bleed the maskable icon to its
+/// edges. Keep in sync with the `<rect>` fill in the mark.
+fn seal_bleed() -> tiny_skia::Color {
+    tiny_skia::Color::from_rgba8(0xb9, 0x3a, 0x24, 0xff)
+}
+
 pub fn run() -> Result<(), CliError> {
     let svg_path = Path::new("static/icons/kani-mark.svg");
     let out_dir = Path::new("static/icons");
@@ -38,9 +44,19 @@ pub fn generate_icons(svg_path: &Path, out_dir: &Path) -> Result<(), CliError> {
 
     std::fs::create_dir_all(out_dir)?;
 
-    render_at_size(&tree, 192, out_dir.join("icon-192.png"), 0.0)?;
-    render_at_size(&tree, 512, out_dir.join("icon-512.png"), 0.0)?;
-    render_at_size(&tree, 512, out_dir.join("icon-512-maskable.png"), 0.10)?;
+    render_at_size(&tree, 192, out_dir.join("icon-192.png"), 0.0, None)?;
+    render_at_size(&tree, 512, out_dir.join("icon-512.png"), 0.0, None)?;
+    // A maskable icon must be full-bleed: the launcher crops it to a shape of
+    // its choosing, so transparent padding shows through as clipped corners.
+    // Fill the canvas with the mark's seal colour and let the safe zone hold
+    // the artwork.
+    render_at_size(
+        &tree,
+        512,
+        out_dir.join("icon-512-maskable.png"),
+        0.10,
+        Some(seal_bleed()),
+    )?;
 
     println!("Icons written to {}", out_dir.display());
     Ok(())
@@ -48,17 +64,22 @@ pub fn generate_icons(svg_path: &Path, out_dir: &Path) -> Result<(), CliError> {
 
 /// Renders the tree into a square PNG of `size` × `size` pixels.
 ///
-/// `safe_zone_ratio` adds blank padding on each side as a fraction of `size`
+/// `safe_zone_ratio` adds padding on each side as a fraction of `size`
 /// (e.g. 0.10 = 10% per side, leaving 80% for the mark — satisfying the 20% total
-/// safe-zone requirement for maskable icons).
+/// safe-zone requirement for maskable icons). `bleed` fills the whole canvas
+/// first, which a maskable icon needs so its padding is not transparent.
 fn render_at_size(
     tree: &usvg::Tree,
     size: u32,
     output: impl AsRef<Path>,
     safe_zone_ratio: f32,
+    bleed: Option<tiny_skia::Color>,
 ) -> Result<(), CliError> {
     let mut pixmap = Pixmap::new(size, size)
         .ok_or_else(|| CliError::Other(format!("failed to allocate {size}×{size} pixmap")))?;
+    if let Some(colour) = bleed {
+        pixmap.fill(colour);
+    }
 
     let padding = (size as f32 * safe_zone_ratio).round();
     let inner = size as f32 - padding * 2.0;

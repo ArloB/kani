@@ -2,7 +2,10 @@ target
 wasm_sources
 CLAUDE.md
 .claude/
-static/icons/
+# Generated PWA icons — regenerate with `cargo run -p kani-cli -- icons`.
+# The source mark itself is tracked: without it a clean checkout cannot build
+# the icons at all.
+static/icons/*.png
 *.snap.new
 lcov.info
 .env
