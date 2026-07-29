@@ -1741,6 +1741,13 @@ export default {
   'settings.health.empty.title': 'No sources installed',
   'settings.health.empty.desc': 'Install extensions from the Sources page to see health data.',
   'settings.health.error': 'Failed to load extension health data.',
+  'settings.health.col.actions': 'Actions',
+  'settings.health.reload': 'Reload',
+  'settings.health.reloading': 'Reloading…',
+  'settings.health.reload.done': 'Source reloaded.',
+  'settings.section.sources-health.label': 'Extension health',
+  'settings.section.sources-health.desc':
+    'Recent success, failure and response times for each installed extension.',
   'settings.health.col.source': 'Source',
   'settings.health.col.last_success': 'Last success',
   'settings.health.col.last_error': 'Last error',

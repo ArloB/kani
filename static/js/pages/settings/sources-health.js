@@ -1,11 +1,14 @@
 // @ts-check
-// Settings — Sources Health section. (Built; awaiting registration — plan 05.)
+// Settings — Sources Health section.
 
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import htm from 'htm';
 import * as api from '../../api.js';
 import { SettingsGroup } from './_shared.js';
+import { hasPermission } from '../../session.js';
+import { useBusy } from '../../hooks/use-busy.js';
+import { showToast, showApiError } from '../../components/toast.js';
 import { fmtCompactDate, errorCountAriaLabel } from '../../utils.js';
 import { EmptyState } from '../../components/empty-state.js';
 import { ErrorState } from '../../components/error-state.js';
@@ -31,17 +34,41 @@ function CountBadge({ errors }) {
   return html`<span class="text-text-muted">0</span>`;
 }
 
+/**
+ * Reload control for a source that keeps failing. Viewing health only needs
+ * `source:browse`, but reloading needs `source:install` — so a browse-only user
+ * must not be shown a button that would 403.
+ */
+function ReloadButton({ sourceId, onReloaded }) {
+  const { busy, withBusy } = useBusy();
+  const reload = () =>
+    withBusy(async () => {
+      try {
+        await api.reloadSource(sourceId);
+        showToast(t('settings.health.reload.done'), { type: 'success' });
+        onReloaded();
+      } catch (e) {
+        showApiError(e);
+      }
+    });
+  return html`<button type="button" class="btn-secondary btn-sm" disabled=${busy} onClick=${reload}>
+    ${busy ? t('settings.health.reloading') : t('settings.health.reload')}
+  </button>`;
+}
+
 export function SourcesHealthSection() {
   const [state, setState] = useState(
     /** @type {{ status: string, rows: any[] }} */ ({ status: 'loading', rows: [] }),
   );
+  const [reloadKey, setReloadKey] = useState(0);
+  const canReload = hasPermission('source:install');
 
   useEffect(() => {
     api
       .getSourcesHealth()
       .then((rows) => setState({ status: 'ready', rows: Array.isArray(rows) ? rows : [] }))
       .catch(() => setState({ status: 'error', rows: [] }));
-  }, []);
+  }, [reloadKey]);
 
   return html`
     <${SettingsGroup} label=${t('settings.health.group')}>
@@ -74,6 +101,7 @@ export function SourcesHealthSection() {
                     <th class="text-right text-xs font-medium text-text-muted px-4 py-2">
                       ${t('settings.health.col.avg_ms')}
                     </th>
+                    <th class="px-4 py-2"><span class="sr-only">${t('settings.health.col.actions')}</span></th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-border-subtle">
@@ -93,6 +121,14 @@ export function SourcesHealthSection() {
                         </td>
                         <td class="px-4 py-2.5 text-right tabular-nums text-text-muted">
                           ${row.avg_response_ms != null ? `${Math.round(row.avg_response_ms)}` : '—'}
+                        </td>
+                        <td class="px-4 py-2.5 text-right">
+                          ${errors >= 3 && canReload
+                            ? html`<${ReloadButton}
+                                sourceId=${row.source_id}
+                                onReloaded=${() => setReloadKey((k) => k + 1)}
+                              />`
+                            : null}
                         </td>
                       </tr>
                     `;

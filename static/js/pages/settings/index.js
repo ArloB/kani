@@ -39,6 +39,7 @@ import { AdvancedSection } from './advanced.js';
 import { StorageSection } from './storage.js';
 import { MaintenanceSection } from './maintenance.js';
 import { ServerSection } from './server.js';
+import { SourcesHealthSection } from './sources-health.js';
 import { AccountSection } from './account.js';
 import { ClientsSection } from './clients.js';
 import { SecuritySection } from './security.js';
@@ -75,6 +76,15 @@ function buildSections(settings, categories, bootId) {
     { id: 'storage', perm: 'admin:manage', group: g.server, C: StorageSection, props: {} },
     { id: 'maintenance', perm: 'settings:edit_advanced', group: g.server, C: MaintenanceSection, props: { settings } },
     { id: 'server', perm: 'server:manage', group: g.server, C: ServerSection, props: {} },
+    {
+      id: 'sources-health',
+      // Mirrors the guard on GET /rest/sources/health (SourceBrowse), not the
+      // stricter one on the reload action the section offers.
+      perm: 'source:browse',
+      group: g.server,
+      C: SourcesHealthSection,
+      props: {},
+    },
     {
       id: 'diagnostics',
       perm: 'server:manage',
