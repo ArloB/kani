@@ -47,6 +47,14 @@ let _currentParams = {};
 /** @type {(() => Promise<boolean>) | null} — resolve false to cancel navigation */
 let _beforeNavigate = null;
 let _isInitialRoute = true;
+/**
+ * Bumped by every navigation. A route that started earlier compares its own
+ * value after each await and bails if a newer navigation has superseded it —
+ * otherwise a slow page's `await import()` resolves *after* a redirect and
+ * renders itself over the page the redirect chose, leaving the URL and the
+ * content disagreeing.
+ */
+let _navGeneration = 0;
 
 /**
  * Registers a guard called before every programmatic navigation.
@@ -89,6 +97,36 @@ export async function navigate(path, opts = {}) {
  * Returns the params extracted from the current matched route.
  * @returns {Record<string, string>}
  */
+const INTENDED_KEY = 'kani-intended-destination';
+
+/**
+ * Park the destination a redirect is about to discard, so the flow that
+ * interrupted the user can send them back to it.
+ * @param {string} path pathname + search
+ */
+export function rememberIntendedDestination(path) {
+  try {
+    if (path && path !== '/') sessionStorage.setItem(INTENDED_KEY, path);
+  } catch {
+    /* storage unavailable — the redirect still works, it just forgets */
+  }
+}
+
+/**
+ * Take the parked destination, clearing it so a later unrelated visit to the
+ * interrupting page does not bounce somewhere unexpected.
+ * @returns {string | null}
+ */
+export function consumeIntendedDestination() {
+  try {
+    const v = sessionStorage.getItem(INTENDED_KEY);
+    sessionStorage.removeItem(INTENDED_KEY);
+    return v;
+  } catch {
+    return null;
+  }
+}
+
 export function getCurrentParams() {
   return { ..._currentParams };
 }
@@ -117,6 +155,7 @@ export function onNavigate(callback) {
  */
 async function _route(path, fromPopstate = false) {
   if (!_container) return;
+  const generation = ++_navGeneration;
 
   // Strip query string before matching — pages read location.search directly
   const pathname = path.split('?')[0];
@@ -149,7 +188,9 @@ async function _route(path, fromPopstate = false) {
   } else {
     try {
       const mod = await matched.load();
+      if (generation !== _navGeneration) return;
       const swap = async () => {
+        if (generation !== _navGeneration) return;
         // Clear old content only once the new module is ready to render
         /** @type {HTMLElement} */ (_container).innerHTML = '';
         _activePage = mod;

@@ -3,7 +3,7 @@
 
 import * as api from '../api.js';
 import { hasPermission } from '../session.js';
-import { navigate } from '../router.js';
+import { navigate, consumeIntendedDestination } from '../router.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { showApiError } from '../components/toast.js';
 import { t } from '../i18n.js';
@@ -176,7 +176,7 @@ export async function init(container) {
       btn.disabled = true;
       try {
         await api.markFirstRunComplete();
-        navigate('/');
+        navigate(consumeIntendedDestination() ?? '/');
       } catch (e) {
         showApiError(e);
         btn.disabled = false;

@@ -4,7 +4,7 @@
 import { initPermissions, getState, setState, subscribe, hasPermission } from './session.js';
 import { initTheme, syncServerThemes } from './theme.js';
 import { connectSSE } from './sse.js';
-import { initRouter, navigate, onNavigate } from './router.js';
+import { initRouter, navigate, onNavigate, rememberIntendedDestination } from './router.js';
 import { getBootId, logout, getFeatures, getSystemInfo, getChangelog, getCurrentUser } from './api.js';
 import { iconSettings, iconLogout, iconWarning, iconBell, iconLibrary, iconSources, iconSearch, iconUpdates, iconDownloads, iconAccounts, iconBookOpen, iconCube, iconStats, iconLogs, iconRefresh, iconEllipsisHorizontal, iconArrowUp } from './icons.js';
 import { mountNotificationsPanel } from './components/notifications-panel.js';
@@ -91,6 +91,11 @@ async function _maybeRedirectFirstRun() {
   try {
     const info = await getSystemInfo();
     if (info?.first_run && location.pathname !== '/onboarding') {
+      // Remember where they were going. Discarding it silently sends every
+      // first-run deep link to the library instead — and a link carrying a query
+      // string (`/settings?section=diagnostics`) lands somewhere that looks
+      // plausible, so the drop is invisible rather than merely annoying.
+      rememberIntendedDestination(location.pathname + location.search);
       navigate('/onboarding');
     }
   } catch { /* non-fatal */ }
