@@ -262,3 +262,8 @@ jobs:
 
       - name: Untranslated string check
         run: node scripts/check-untranslated-strings.js
+
+      # The theme editor previews what the server will store. If the client
+      # mirror drifts from the Rust sanitiser it misreports what gets saved.
+      - name: CSS sanitiser parity check
+        run: node scripts/check-sanitize-css-parity.mjs

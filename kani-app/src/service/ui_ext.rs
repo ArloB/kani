@@ -670,6 +670,72 @@ mod tests {
         assert!(out.css.contains("color: red"));
     }
 
+    /// The exact fixtures `static/js/sanitize-css.js` is checked against, with
+    /// their expected output. The client mirror exists to preview what the
+    /// server will store; if the two drift the editor lies about what is saved,
+    /// so both sides are pinned to these same strings rather than merely
+    /// "looking similar".
+    ///
+    /// Client-side equivalent: `scripts/check-sanitize-css-parity.mjs`.
+    #[test]
+    fn the_client_mirror_fixtures_produce_exactly_these_outputs() {
+        let cases: &[(&str, &str, &str, &str)] = &[
+            (
+                "import",
+                "@import url(evil.css); .btn { color: red }",
+                "[data-kani-theme] .btn {\n  color: red;\n}",
+                "at-rule @import",
+            ),
+            (
+                "url_decl",
+                ".a { color: red; background: url(x.png); font-size: 12px }",
+                "[data-kani-theme] .a {\n  color: red;\n  font-size: 12px;\n}",
+                "declaration `background`",
+            ),
+            (
+                "scope",
+                ".btn { color: red }",
+                "[data-kani-theme] .btn {\n  color: red;\n}",
+                "",
+            ),
+            (
+                "root",
+                ":root { --x: 1 }",
+                ":root[data-kani-theme] {\n  --x: 1;\n}",
+                "",
+            ),
+            (
+                "media",
+                "@media (min-width: 40rem) { .a { color: red } }",
+                "@media (min-width: 40rem) { .a { color: red } }",
+                "",
+            ),
+            (
+                "fontface",
+                "@font-face { src: local(x) }",
+                "",
+                "at-rule @font-face",
+            ),
+            (
+                "comment",
+                "/* } body { background: url(x) */ .a { color: red }",
+                "[data-kani-theme] .a {\n  color: red;\n}",
+                "",
+            ),
+            ("unbalanced", ".a { color: red", "", "unparseable input"),
+        ];
+
+        for (name, input, want_css, want_stripped) in cases {
+            let got = sanitize_custom_css(input);
+            assert_eq!(&got.css, want_css, "css mismatch for fixture `{name}`");
+            assert_eq!(
+                got.stripped.join("|"),
+                *want_stripped,
+                "stripped mismatch for fixture `{name}`"
+            );
+        }
+    }
+
     #[test]
     fn an_unbalanced_brace_does_not_panic_or_emit_a_broken_rule() {
         let out = sanitize_custom_css(".a { color: red");
