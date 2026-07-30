@@ -123,6 +123,93 @@ async fn stored_path_is_relative_to_the_library_root() {
     assert!(stored.ends_with(".cbz"), "got {stored}");
 }
 
+/// The configured `library_path` is not always the canonical form of the path a
+/// resolved CBZ carries — the shipped default is the relative `./library`, and a
+/// root can be a symlink. A stored path derived by naive prefix-stripping is then
+/// silently NULL, which is how this shipped: every native install kept re-running
+/// the backfill and never gained rename safety.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_library_root_that_is_not_canonical_still_stores_the_path() {
+    let svc = test_service().await;
+    let real_root = { svc.settings.read().await.library_path.clone() };
+    let link = real_root
+        .parent()
+        .unwrap()
+        .join(format!("kani-library-link-{}", std::process::id()));
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(&real_root, &link).unwrap();
+    {
+        svc.settings.write().await.library_path = link.clone();
+    }
+
+    let (chapter, _) = seed_downloaded_chapter(&svc, "Symlinked Root").await;
+    let path = svc.chapter_cbz_path(chapter).await.unwrap().path;
+    svc.record_chapter_manifest(chapter, path).await;
+
+    let stored: Option<String> = sqlx::query_scalar("SELECT file_path FROM chapters WHERE id = ?")
+        .bind(chapter)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    let stored = stored.expect("file_path must be stored even when the root needs canonicalising");
+    assert!(!stored.starts_with('/'), "got {stored}");
+    assert!(stored.ends_with(".cbz"), "got {stored}");
+
+    // The path has to round-trip: the whole point of storing it is that
+    // resolution stops depending on the title.
+    sqlx::query("UPDATE manga SET name = 'Renamed After Storing' WHERE id = (SELECT manga_id FROM chapters WHERE id = ?)")
+        .bind(chapter)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    let resolved = svc.chapter_cbz_path(chapter).await.unwrap().path;
+    assert!(
+        resolved.exists(),
+        "the stored path must still resolve after a rename, got {}",
+        resolved.display()
+    );
+
+    let _ = std::fs::remove_file(&link);
+}
+
+/// A downloaded chapter that lives outside the library root has no storable
+/// relative path — it must stay NULL rather than gain a misleading one.
+#[tokio::test]
+async fn a_chapter_outside_the_library_root_stores_no_path() {
+    let svc = test_service().await;
+    let (chapter, _) = seed_downloaded_chapter(&svc, "Outside Root").await;
+
+    let elsewhere = tempfile::Builder::new()
+        .prefix("kani-out-")
+        .tempdir()
+        .unwrap();
+    let stray = elsewhere.path().join("stray.cbz");
+    write_cbz(&stray, &[10, 90]);
+
+    svc.record_chapter_manifest(chapter, stray).await;
+
+    let stored: Option<String> = sqlx::query_scalar("SELECT file_path FROM chapters WHERE id = ?")
+        .bind(chapter)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored, None,
+        "a path outside the library must not be stored"
+    );
+
+    let hash: Option<String> = sqlx::query_scalar("SELECT content_hash FROM chapters WHERE id = ?")
+        .bind(chapter)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert!(
+        hash.is_some(),
+        "the manifest itself is still worth recording"
+    );
+}
+
 #[tokio::test]
 async fn renaming_a_manga_does_not_orphan_its_chapter() {
     let svc = test_service().await;
@@ -370,6 +457,45 @@ async fn seed_and_record(
     (chapter, cbz)
 }
 
+/// The stored path is library-relative and the disk walk is rooted, so a scrub
+/// that compares the two forms directly calls every healthy chapter drifted —
+/// and `fix` then writes the rooted path back into a relative column, after
+/// which nothing resolves at all.
+#[tokio::test]
+async fn a_healthy_chapter_reports_no_drift() {
+    let svc = test_service().await;
+    let (chapter, _) = seed_and_record(&svc, "Undrifted").await;
+    sqlx::query("UPDATE chapters SET file_verified_at = NULL WHERE id = ?")
+        .bind(chapter)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let report = svc
+        .scrub_library(ScrubDepth::Quick, false, None)
+        .await
+        .unwrap();
+
+    assert_eq!(report.ok, 1);
+    assert!(
+        report.path_drift.is_empty(),
+        "a file sitting exactly where the DB says must not be drift: {:?}",
+        report.path_drift
+    );
+    assert!(report.missing_files.is_empty());
+    assert!(report.orphaned_files.is_empty());
+
+    let stored: Option<String> = sqlx::query_scalar("SELECT file_path FROM chapters WHERE id = ?")
+        .bind(chapter)
+        .fetch_one(&svc.db)
+        .await
+        .unwrap();
+    assert!(
+        stored.is_some_and(|p| !p.starts_with('/')),
+        "the scrub must leave the relative form alone"
+    );
+}
+
 #[tokio::test]
 async fn scrub_reports_a_missing_file() {
     let svc = test_service().await;
@@ -455,15 +581,16 @@ async fn scrub_marks_verified_chapters() {
 async fn scrub_fix_repoints_path_drift() {
     let svc = test_service().await;
     let (chapter, cbz) = seed_and_record(&svc, "Drifter").await;
+    sqlx::query("UPDATE chapters SET file_verified_at = NULL WHERE id = ?")
+        .bind(chapter.0)
+        .execute(&svc.db)
+        .await
+        .unwrap();
 
     // Simulate a stored path that no longer matches where the file is: the row
-    // points somewhere gone, but the title-derived location still has it.
-    sqlx::query("UPDATE chapters SET file_path = ? WHERE id = ?")
-        .bind(
-            cbz.with_file_name("moved-away.cbz")
-                .to_string_lossy()
-                .to_string(),
-        )
+    // points somewhere gone, but the title-derived location still has it. The
+    // column holds a library-relative path, so the stale value is one too.
+    sqlx::query("UPDATE chapters SET file_path = 'Drifter - 1/moved-away.cbz' WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
         .await
@@ -484,7 +611,20 @@ async fn scrub_fix_repoints_path_drift() {
         .fetch_one(&svc.db)
         .await
         .unwrap();
-    assert_eq!(stored.unwrap(), cbz.to_string_lossy());
+    let stored = stored.unwrap();
+    assert!(
+        !stored.starts_with('/') && !stored.contains(':'),
+        "a repair must store the library-relative form, got {stored}"
+    );
+
+    // The repaired value has to be one resolution can use, and a second scrub
+    // must find nothing left to repair.
+    assert_eq!(svc.chapter_cbz_path(chapter).await.unwrap().path, cbz);
+    let again = svc
+        .scrub_library(ScrubDepth::Quick, false, None)
+        .await
+        .unwrap();
+    assert!(again.path_drift.is_empty(), "{again:?}");
 }
 
 #[tokio::test]

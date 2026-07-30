@@ -51,10 +51,14 @@ pub async fn capture(cbz_path: PathBuf, library_path: &Path) -> Option<CapturedM
             .ok()?;
 
     let score = kani_core::quality::score_from_manifest(&manifest);
-    let rel_path = cbz_path
-        .strip_prefix(library_path)
-        .ok()
-        .map(|p| p.to_string_lossy().replace('\\', "/"));
+    let rel_path = kani_core::utilities::relative_within_root(library_path, &cbz_path);
+    if rel_path.is_none() {
+        tracing::warn!(
+            "{} is not under the library root {} — its canonical path cannot be stored",
+            cbz_path.display(),
+            library_path.display()
+        );
+    }
 
     Some(CapturedManifest {
         manifest,
@@ -165,20 +169,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn relative_path_is_derived_against_the_library_root() {
-        let lib = PathBuf::from("/library");
-        let cbz = PathBuf::from("/library/Some Manga - 1/0001.cbz");
-        let rel = cbz
-            .strip_prefix(&lib)
-            .ok()
-            .map(|p| p.to_string_lossy().replace('\\', "/"));
-        assert_eq!(rel.as_deref(), Some("Some Manga - 1/0001.cbz"));
+    fn the_colour_column_round_trips() {
+        for profile in [
+            kani_core::quality::ColourProfile::Monochrome,
+            kani_core::quality::ColourProfile::ColourAccent,
+            kani_core::quality::ColourProfile::FullColour,
+            kani_core::quality::ColourProfile::Unknown,
+        ] {
+            assert_eq!(colour_from_column(&colour_to_column(profile)), profile);
+        }
     }
 
     #[test]
-    fn a_path_outside_the_library_yields_no_relative_path() {
-        let lib = PathBuf::from("/library");
-        let cbz = PathBuf::from("/elsewhere/0001.cbz");
-        assert!(cbz.strip_prefix(&lib).is_err());
+    fn an_unknown_colour_column_falls_back_rather_than_failing() {
+        assert_eq!(
+            colour_from_column("sepia"),
+            kani_core::quality::ColourProfile::Unknown
+        );
     }
 }

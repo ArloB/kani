@@ -180,7 +180,15 @@ impl AppService {
 
         for r in &rows {
             let derived = derived_path(&library_path, r);
-            let stored = r.file_path.as_ref().map(PathBuf::from);
+            // `file_path` is stored relative to the library root, while the disk
+            // walk and the derived path are both rooted. Comparing the stored
+            // string directly would match nothing and report every chapter as
+            // drifted.
+            let stored = r
+                .file_path
+                .as_deref()
+                .filter(|p| !p.is_empty())
+                .map(|rel| library_path.join(rel));
 
             // The stored path is authoritative; fall back to the derived one so
             // rows the backfill has not reached are still checkable.
@@ -196,9 +204,13 @@ impl AppService {
                 None => report.missing_files.push(r.id),
                 Some(path) => {
                     if drifted {
-                        report
-                            .path_drift
-                            .push((r.id, path.to_string_lossy().into_owned()));
+                        // Report the relative form: this value is written straight
+                        // back into `file_path`, which resolution re-joins against
+                        // the library root.
+                        let relative =
+                            kani_core::utilities::relative_within_root(&library_path, &path)
+                                .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                        report.path_drift.push((r.id, relative));
                     }
                     expected.insert(path.clone());
                     if r.file_verified_at.is_some_and(|t| t > verified_cutoff) {
