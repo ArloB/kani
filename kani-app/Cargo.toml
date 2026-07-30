@@ -72,6 +72,7 @@ kani-shared-test = { path = "../kani-shared-test" }
 tokio-util  = { workspace = true }
 tokio = { version = "1", features = ["net"] }
 ed25519-dalek.workspace = true
+mail-parser = "0.11.5"
 
 [build-dependencies]
 prost-build = "0.14.3"

@@ -119,6 +119,37 @@ local signal that anything went wrong.
 
 Location: `kani-app/tests/email_tests.rs`. S1/S2 need a MIME parser dev-dep.
 
+**DONE (2026-07-30).** Landed as in-file `#[cfg(test)]` modules rather than an
+integration test, because the subjects are pure functions: `service/email.rs`
+(message construction) and `service/email_templates.rs` (rendering). The test
+seam is a new `build_message(from, to, subject, html)` extracted out of
+`SmtpEmailTransport::send`, so a message can be built and inspected without an
+SMTP transport. `mail-parser` is the dev-dep; every header assertion runs against
+its parse, not a substring of ours.
+
+Coverage against the table: S1 ✓, S2 ✓, S3 ✓ (split into display-name/recipient
+and subject vectors — CRLF in an address is *rejected*, CRLF in a subject is
+absorbed into an RFC 2047 encoded word, and the check is header-set equality
+against a clean message, with `the_header_name_scan_sees_an_extra_header` proving
+the scanner would notice an injected header). S4 was **re-scoped**: the messages
+are single-part `text/html`, so there are no alternative parts to compare —
+the equivalent guarantee is that the action link survives without the styled
+button (`an_action_link_is_reachable_without_rendering_the_button`). S5 ✓
+(`a_verification_link_survives_transfer_encoding`, asserted on the *decoded* body).
+
+**Two real defects fixed:**
+- **No `Message-ID` header.** lettre only emits one if you ask; `build_message`
+  never did, so every Kani email shipped without it (SpamAssassin `MISSING_MID`,
+  and clients thread/dedupe on it). Now generated as `<uuid@from-domain>`.
+- **The username was interpolated raw into HTML.** Escaped now (`escape_html`),
+  along with the action URL, so a display name cannot inject markup or break out
+  of the `href` attribute. Impact was low — these mails go to the account's own
+  address — but `&` in a legitimate username also rendered as a broken entity.
+
+**Known gap, deliberately not closed here:** there is still no `text/plain`
+alternative part. Adding one is a product change (every template needs a text
+rendering), not a test.
+
 ---
 
 ## Group T — SSE event contract (frontend ↔ backend)
@@ -144,12 +175,35 @@ caught every past instance of this drift, and it needs no JS harness.
 Location: `kani-app/tests/sse_contract_tests.rs` (T1/T3) and a small script or
 test for T2.
 
+**DONE (2026-07-30)** — all three, in `kani-web/tests/sse_contract_tests.rs`
+(not kani-app: the frame set is only complete at the route, which merges
+`AppEvent`, `DownloadProgressEvent` and the hand-rolled `state_snapshot` frame
+built in `rest/sse.rs`).
+
+- T1 `every_app_event_serialises_to_a_snake_case_type_tag` — every variant is
+  sampled and its wire tag pinned by an exhaustive `expected_app_event_tag`
+  match, so adding a variant fails to compile until its tag is declared.
+- T2 `the_emitted_event_names_match_the_frontend_subscriptions` — both
+  directions. Emitted-but-unhandled is allowed only via a declared prefix
+  handler (`job_`, checked to still exist in `static/js`); subscribed-but-never-
+  emitted is allowed only via the declared `NON_SSE_TYPE_DISCRIMINANTS` list.
+  The scanner reads `useSSE('…')` and `.type === '…'`, and deliberately skips
+  `job_type === '…'` and `typeof x === 'string'` — pinned by
+  `the_subscription_scanner_reads_handlers_and_not_lookalikes`. Two anti-vacuity
+  tests back it: `the_frontend_scan_reaches_the_real_sources` and
+  `the_contract_check_rejects_a_renamed_event`.
+- T3 `a_subscriber_receives_a_well_formed_event_payload` — opens `/rest/events`
+  as an authed client, asserts the `text/event-stream` content type, parses the
+  first frame as `state_snapshot` with its documented fields, then drives
+  `invalidate_library()` and asserts the live frame that follows.
+
 ---
 
 ## Suggested order
 
-1. **P** (ComicInfo) — cheapest, and a stated 1.0 promise.
-2. **R** (metrics) — cheapest of all; a parser dev-dep and five focused tests.
-3. **T2** (SSE name contract) — small, static, catches a whole failure class.
-4. **S** (email) — moderate; S3 is a security property worth having regardless.
-5. **Q** (Mihon import) — highest value, but blocked on sourcing a real fixture.
+1. ~~**P** (ComicInfo)~~ — done (ea8d992).
+2. ~~**R** (metrics)~~ — done (ea8d992).
+3. ~~**T** (SSE contract)~~ — done 2026-07-30, all of T1–T3.
+4. ~~**S** (email)~~ — done 2026-07-30; two real defects fixed, S4 re-scoped.
+5. **Q** (Mihon import) — the only group left, still blocked on sourcing a small
+   anonymised real Mihon backup.
