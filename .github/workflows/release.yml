@@ -296,6 +296,7 @@ jobs:
     uses: ./.github/workflows/docker.yml
     with:
       plan: ${{ needs.plan.outputs.val }}
+      publish: ${{ fromJson(needs.plan.outputs.publishing) }}
     secrets: inherit
     # publish jobs get escalated permissions
     permissions:
