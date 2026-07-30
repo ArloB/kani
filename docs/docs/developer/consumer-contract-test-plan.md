@@ -80,6 +80,38 @@ categories) and commit it under `kani-app/tests/fixtures/mihon/`.
 
 Location: `kani-app/tests/mihon_import_tests.rs`.
 
+**DONE (2026-07-30).** 11 tests in `kani-app/tests/mihon_import_tests.rs`, driven
+by two fixtures derived from a real Suwayomi export — see
+`kani-app/tests/fixtures/mihon/README.md` for provenance and for the two fields
+that are synthetic. `scripts/anonymise-tachibk.py` produced them by rewriting the
+protobuf **wire format** rather than re-encoding through
+`kani-app/proto/tachiyomi_backup.proto`, so the top-level `101`/`9000`/`9001`
+blocks Kani has no message for survive byte-identical; the tests therefore prove
+Kani tolerates a real file's unknown fields, not merely its own output. The donor
+also revealed that Suwayomi source ids are its own hashes, unrelated to Mihon's.
+
+Every expectation is read out of the fixture at test time (the tests decode it
+with `prost` themselves), so no assertion hardcodes a value that could silently
+drift from the file.
+
+Against the table: Q1 ✓ (plus title/description/cover/status/genre/author
+mapping), Q2 ✓, Q3 ✓ (pre-seeded chapter rows so the progress-matching path runs
+without a live source), Q4 ✓, Q5 ✓ (truncated gzip → error, and `manga`,
+`categories`, `pending_imports` all still empty), Q6 ✓, Q7 ✓. Four beyond the
+table: the preview writes nothing, tracker links map (`syncId 2` → AniList,
+status 1 → Kani 0), progress that cannot be applied yet is *warned* about rather
+than dropped in silence, and a series resembling one already in the library is
+parked with `possible_duplicate_of` set instead of imported.
+
+**No defects found** — the importer was correct on every path tested, which is
+worth recording given it had 659 lines and zero tests.
+
+**Not covered, for want of donor data:** `viewer`/`viewer_flags` (reading
+direction) and `favorite` are absent from this backup, so the reading-direction
+mapping remains untested. A future donor backup with tracking and a viewer flag
+set would upgrade three of these tests from schema-understanding to observed
+output.
+
 ---
 
 ## Group R — Prometheus `/metrics` exposition
@@ -205,5 +237,8 @@ built in `rest/sse.rs`).
 2. ~~**R** (metrics)~~ — done (ea8d992).
 3. ~~**T** (SSE contract)~~ — done 2026-07-30, all of T1–T3.
 4. ~~**S** (email)~~ — done 2026-07-30; two real defects fixed, S4 re-scoped.
-5. **Q** (Mihon import) — the only group left, still blocked on sourcing a small
-   anonymised real Mihon backup.
+5. ~~**Q** (Mihon import)~~ — done 2026-07-30 from a real Suwayomi export.
+
+**All five groups are complete.** What remains is upgrade work, not gaps: a donor
+backup carrying tracking / viewer flags (Q), and a `text/plain` alternative part
+(S) if the email templates ever grow one.
