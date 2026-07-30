@@ -611,8 +611,38 @@ impl AppService {
                 .wasm_storage_path
                 .join(format!("{}.wasm", source.name));
 
+            // One unreadable extension file used to abort startup entirely, with
+            // an IoError that named neither the source nor the path. A missing
+            // extension is a degraded source, not a dead server.
+            if !yaml_path.exists() && !wasm_path.exists() {
+                degradation_registry.register(
+                    &degradations::ids::source_load(&source.name),
+                    degradations::Severity::Error,
+                    format!("Source '{}'", source.name),
+                    format!(
+                        "No extension file at {} or {}, so this source cannot be used.",
+                        yaml_path.display(),
+                        wasm_path.display()
+                    ),
+                    "Reinstall the extension, or remove the source if it is no longer wanted.",
+                );
+                continue;
+            }
+
             let backend = if yaml_path.exists() {
-                let text = tokio::fs::read_to_string(&yaml_path).await?;
+                let text = match tokio::fs::read_to_string(&yaml_path).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        degradation_registry.register(
+                            &degradations::ids::source_load(&source.name),
+                            degradations::Severity::Error,
+                            format!("Source '{}'", source.name),
+                            format!("Cannot read {}: {e}", yaml_path.display()),
+                            "Check the file's permissions, then restart.",
+                        );
+                        continue;
+                    }
+                };
                 match kani_yaml::parse_and_validate(&text, &yaml_path) {
                     Ok(ext) => {
                         if wasm_path.exists() {
@@ -641,16 +671,41 @@ impl AppService {
                     }
                 }
             } else {
-                let bytes = tokio::fs::read(&wasm_path).await?;
+                let bytes = match tokio::fs::read(&wasm_path).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        degradation_registry.register(
+                            &degradations::ids::source_load(&source.name),
+                            degradations::Severity::Error,
+                            format!("Source '{}'", source.name),
+                            format!("Cannot read {}: {e}", wasm_path.display()),
+                            "Reinstall the extension, or remove the source if it is no longer wanted.",
+                        );
+                        continue;
+                    }
+                };
                 live_wasm_hashes
                     .insert(kani_core::wasm::cache::WasmModuleCache::sha256_hex(&bytes));
-                let component = wasm_runtime
+                let compiled = wasm_runtime
                     .compile_component(&bytes)
-                    .map_err(ServiceError::Core)?;
-
-                let instance_pre = wasm_runtime
-                    .instantiate_pre(&component)
-                    .map_err(ServiceError::Core)?;
+                    .and_then(|component| {
+                        wasm_runtime
+                            .instantiate_pre(&component)
+                            .map(|pre| (component, pre))
+                    });
+                let (component, instance_pre) = match compiled {
+                    Ok(pair) => pair,
+                    Err(e) => {
+                        degradation_registry.register(
+                            &degradations::ids::source_load(&source.name),
+                            degradations::Severity::Error,
+                            format!("Source '{}'", source.name),
+                            format!("{} is not a loadable extension: {e}", wasm_path.display()),
+                            "Reinstall the extension — the file is corrupt or built for another Kani version.",
+                        );
+                        continue;
+                    }
+                };
 
                 let (pure_registry, hook_registry, max_hook_requests) = {
                     let mut inst = kani_core::sources::SourceInstance::new(

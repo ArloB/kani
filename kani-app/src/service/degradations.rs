@@ -34,6 +34,12 @@ pub mod ids {
     pub const STORAGE_DIRECTORY: &str = "storage_directory";
     pub const LIBRARY_PATH: &str = "library_path";
     pub const SOURCE_REGISTRY: &str = "source_registry";
+
+    /// One id per source, so several broken extensions each report themselves
+    /// instead of overwriting one shared entry.
+    pub fn source_load(source_name: &str) -> String {
+        format!("source_load:{source_name}")
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
