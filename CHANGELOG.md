@@ -22,7 +22,6 @@ before 1.0 makes its compatibility promises.
   browser runtime, circuit breakers and proxy bandwidth.
 - Downloadable support bundle with redacted settings, schema and recent logs.
 - Daily update check with a dismissible banner, toggleable in Settings → Advanced.
-- Opt-in error reporting, gated on both `KANI_GLITCHTIP_DSN` and a setting that defaults to off.
 - `kani-cli rollback <backup.zip>` verifies a backup archive can be restored onto this build.
 - `/healthz` and `/readyz` aliases for the existing health probes.
 

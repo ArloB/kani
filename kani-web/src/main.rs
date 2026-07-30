@@ -81,15 +81,9 @@ async fn main() {
             .boxed()
     };
 
-    #[cfg(feature = "error-reporting")]
-    let _sentry_guard = init_error_reporting();
-
     let registry = tracing_subscriber::registry()
         .with(ring_layer.with_filter(make_filter()))
         .with(fmt_layer);
-
-    #[cfg(feature = "error-reporting")]
-    let registry = registry.with(sentry::integrations::tracing::layer());
 
     registry.init();
 
@@ -142,11 +136,6 @@ async fn main() {
 
     kani_web::HTTP_LOGGING_ENABLED.store(
         state.get_settings().await.http_request_logging,
-        std::sync::atomic::Ordering::Relaxed,
-    );
-
-    kani_web::ERROR_REPORTING_ENABLED.store(
-        state.get_settings().await.error_reporting_enabled,
         std::sync::atomic::Ordering::Relaxed,
     );
 
@@ -674,30 +663,6 @@ fn write_admin_file(
             );
             kani_web::error::AppError::InternalServerError(e.to_string())
         })
-}
-
-#[cfg(feature = "error-reporting")]
-fn init_error_reporting() -> Option<sentry::ClientInitGuard> {
-    let dsn = std::env::var("KANI_GLITCHTIP_DSN")
-        .ok()
-        .filter(|d| !d.is_empty())?;
-
-    let guard = sentry::init((
-        dsn,
-        sentry::ClientOptions {
-            release: Some(format!("kani@{}+{}", env!("CARGO_PKG_VERSION"), env!("GIT_SHA")).into()),
-            before_send: Some(std::sync::Arc::new(|event| {
-                if kani_web::ERROR_REPORTING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
-                    Some(event)
-                } else {
-                    None
-                }
-            })),
-            ..Default::default()
-        },
-    ));
-    tracing::info!("Error reporting initialised (gated on the error_reporting_enabled setting)");
-    Some(guard)
 }
 
 async fn ensure_default_user(

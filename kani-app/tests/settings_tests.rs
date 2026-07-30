@@ -53,7 +53,6 @@ fn advanced_settings() -> AdvancedSettings {
         browser_max_instances: 2,
         browser_idle_timeout_s: 300,
         update_check_enabled: true,
-        error_reporting_enabled: false,
         opds_page_index_zero_based: false,
     }
 }
@@ -240,24 +239,6 @@ async fn update_check_enabled_round_trips_and_defaults_on() {
         !svc.get_settings().await.update_check_enabled,
         "the toggle must persist through update_settings"
     );
-}
-
-#[tokio::test]
-async fn error_reporting_defaults_off_and_round_trips() {
-    let svc = test_service().await;
-
-    assert!(
-        !svc.get_settings().await.error_reporting_enabled,
-        "error reporting must be opt-in, never on by default"
-    );
-
-    let mut advanced = advanced_settings();
-    advanced.error_reporting_enabled = true;
-    svc.update_settings(SettingsUpdate::Advanced(advanced), UserId(1))
-        .await
-        .unwrap();
-
-    assert!(svc.get_settings().await.error_reporting_enabled);
 }
 
 // ── Degraded subsystems ───────────────────────────────────────────────────────

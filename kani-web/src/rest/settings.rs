@@ -86,10 +86,6 @@ pub(crate) async fn update_settings(
             adv.http_request_logging,
             std::sync::atomic::Ordering::Relaxed,
         );
-        crate::ERROR_REPORTING_ENABLED.store(
-            adv.error_reporting_enabled,
-            std::sync::atomic::Ordering::Relaxed,
-        );
     }
     svc.update_settings(update, user.id).await?;
     Ok(Json(json!({})))

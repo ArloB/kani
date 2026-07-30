@@ -40,8 +40,8 @@ async fn settings_singleton_exists_with_recent_columns() {
 
     // Spot-check the newest columns: a migration that fails to add one would
     // otherwise only surface as a query error at runtime.
-    let row: (bool, bool, i64) = sqlx::query_as(
-        "SELECT update_check_enabled, error_reporting_enabled, browser_max_instances \
+    let row: (bool, i64) = sqlx::query_as(
+        "SELECT update_check_enabled, browser_max_instances \
          FROM settings WHERE id = 'singleton'",
     )
     .fetch_one(&pool)
@@ -49,8 +49,7 @@ async fn settings_singleton_exists_with_recent_columns() {
     .unwrap();
 
     assert!(row.0, "update checking defaults on");
-    assert!(!row.1, "error reporting must default off");
-    assert!(row.2 > 0, "browser_max_instances should have a default");
+    assert!(row.1 > 0, "browser_max_instances should have a default");
 }
 
 #[tokio::test]

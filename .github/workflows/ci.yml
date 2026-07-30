@@ -83,11 +83,6 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --no-deps -- -D warnings
 
-      - name: Check optional error-reporting feature
-        run: cargo check --locked -p kani-web --features error-reporting
-        env:
-          SQLX_OFFLINE: "true"
-
       # Benches are not run in CI (a shared runner gives meaningless numbers), but
       # they must keep compiling. No --workspace: kani-extensions/* are WASM-only.
       - name: Check benchmarks compile

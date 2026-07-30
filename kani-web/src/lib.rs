@@ -26,7 +26,7 @@ pub mod state;
 pub mod types;
 pub mod utils;
 
-pub use kani_core::{ERROR_REPORTING_ENABLED, HTTP_LOGGING_ENABLED};
+pub use kani_core::HTTP_LOGGING_ENABLED;
 
 pub static SOURCE_INSTALL_ALLOWED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
