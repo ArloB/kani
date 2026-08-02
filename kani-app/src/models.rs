@@ -78,6 +78,8 @@ pub struct Settings {
     pub browser_idle_timeout_s: i64,
     pub update_check_enabled: bool,
     pub opds_page_index_zero_based: bool,
+    pub scan_barren_page_tolerance: i64,
+    pub global_search_timeout_secs: i64,
 }
 
 #[derive(sqlx::FromRow)]

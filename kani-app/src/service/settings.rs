@@ -78,6 +78,8 @@ impl AppService {
             browser_max_instances: s.browser_max_instances,
             update_check_enabled: s.update_check_enabled,
             opds_page_index_zero_based: s.opds_page_index_zero_based,
+            scan_barren_page_tolerance: s.scan_barren_page_tolerance,
+            global_search_timeout_secs: s.global_search_timeout_secs,
             browser_idle_timeout_s: s.browser_idle_timeout_s,
         }
     }
@@ -161,6 +163,11 @@ impl AppService {
                         "upgrade_confirm_fetches must be >= 0".into(),
                     ));
                 }
+                if !(1..=20).contains(&s.scan_barren_page_tolerance) {
+                    return Err(ServiceError::Validation(
+                        "scan_barren_page_tolerance must be between 1 and 20".into(),
+                    ));
+                }
                 for (name, value) in [
                     ("upgrade_axis_resolution", &s.upgrade_axis_resolution),
                     ("upgrade_axis_colour", &s.upgrade_axis_colour),
@@ -190,7 +197,8 @@ impl AppService {
                      upgrade_min_res_gain=?, upgrade_confirm_fetches=?, \
                      upgrade_axis_resolution=?, upgrade_axis_colour=?, \
                      upgrade_axis_encoder=?, upgrade_axis_bitrate=?, \
-                     upgrade_show_downgrades=?, upgrade_auto_replace_reasons=? \
+                     upgrade_show_downgrades=?, upgrade_auto_replace_reasons=?, \
+                     scan_barren_page_tolerance=? \
                      WHERE id='singleton'",
                     s.auto_scan,
                     s.scan_interval_minutes,
@@ -203,7 +211,8 @@ impl AppService {
                     s.upgrade_axis_encoder,
                     s.upgrade_axis_bitrate,
                     s.upgrade_show_downgrades,
-                    s.upgrade_auto_replace_reasons
+                    s.upgrade_auto_replace_reasons,
+                    s.scan_barren_page_tolerance
                 )
                 .execute(&self.db)
                 .await?;
@@ -220,6 +229,7 @@ impl AppService {
                 settings.upgrade_axis_bitrate = s.upgrade_axis_bitrate.clone();
                 settings.upgrade_show_downgrades = s.upgrade_show_downgrades;
                 settings.upgrade_auto_replace_reasons = s.upgrade_auto_replace_reasons.clone();
+                settings.scan_barren_page_tolerance = s.scan_barren_page_tolerance;
                 self.audit(Some(user_id), "settings.update.scan", None, None)
                     .await;
             }
@@ -263,12 +273,17 @@ impl AppService {
                         "browser_idle_timeout_s must be 10-3600".into(),
                     ));
                 }
+                if !(1..=60).contains(&s.global_search_timeout_secs) {
+                    return Err(ServiceError::Validation(
+                        "global_search_timeout_secs must be 1-60".into(),
+                    ));
+                }
                 sqlx::query!(
                     "UPDATE settings SET flaresolverr_url=?, library_path=?, wasm_storage_path=?, \
                      max_wasm_instances=?, http_request_logging=?, browser_debug_logging=?, \
                      registration_enabled=?, cover_max_dimension=?, browser_max_memory_mb=?, \
                      browser_max_instances=?, browser_idle_timeout_s=?, \
-                     update_check_enabled=?, \
+                     update_check_enabled=?, global_search_timeout_secs=?, \
                      opds_page_index_zero_based=? WHERE id='singleton'",
                     s.flaresolverr_url,
                     s.library_path,
@@ -282,6 +297,7 @@ impl AppService {
                     s.browser_max_instances,
                     s.browser_idle_timeout_s,
                     s.update_check_enabled,
+                    s.global_search_timeout_secs,
                     s.opds_page_index_zero_based,
                 )
                 .execute(&self.db)
@@ -300,6 +316,7 @@ impl AppService {
                     settings.browser_max_instances = s.browser_max_instances;
                     settings.browser_idle_timeout_s = s.browser_idle_timeout_s;
                     settings.update_check_enabled = s.update_check_enabled;
+                    settings.global_search_timeout_secs = s.global_search_timeout_secs;
                     settings.opds_page_index_zero_based = s.opds_page_index_zero_based;
                 }
                 kani_core::v8_process::set_v8_debug_logging(s.browser_debug_logging);

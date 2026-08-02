@@ -54,6 +54,7 @@ fn advanced_settings() -> AdvancedSettings {
         browser_idle_timeout_s: 300,
         update_check_enabled: true,
         opds_page_index_zero_based: false,
+        global_search_timeout_secs: 6,
     }
 }
 
@@ -96,8 +97,46 @@ async fn update_advanced_settings_rejects_invalid_browser_caps() {
 }
 
 #[tokio::test]
+async fn global_search_timeout_defaults_and_round_trips() {
+    let svc = test_service().await;
+
+    assert_eq!(svc.get_settings().await.global_search_timeout_secs, 6);
+
+    svc.update_settings(
+        SettingsUpdate::Advanced(AdvancedSettings {
+            global_search_timeout_secs: 9,
+            ..advanced_settings()
+        }),
+        UserId(1),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(svc.get_settings().await.global_search_timeout_secs, 9);
+}
+
+#[tokio::test]
+async fn global_search_timeout_rejects_values_outside_its_bound() {
+    let svc = test_service().await;
+
+    let result = svc
+        .update_settings(
+            SettingsUpdate::Advanced(AdvancedSettings {
+                global_search_timeout_secs: 61,
+                ..advanced_settings()
+            }),
+            UserId(1),
+        )
+        .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
 async fn update_scan_settings_round_trips() {
     let svc = test_service().await;
+
+    assert_eq!(svc.get_settings().await.scan_barren_page_tolerance, 3);
 
     svc.update_settings(
         SettingsUpdate::Scan(ScanSettings {
@@ -113,6 +152,7 @@ async fn update_scan_settings_round_trips() {
             upgrade_axis_bitrate: "gain".into(),
             upgrade_show_downgrades: false,
             upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
+            scan_barren_page_tolerance: 4,
         }),
         UserId(1),
     )
@@ -123,6 +163,7 @@ async fn update_scan_settings_round_trips() {
     assert!(s.auto_scan);
     assert_eq!(s.scan_interval_minutes, 30);
     assert!(s.scan_exclude_completed);
+    assert_eq!(s.scan_barren_page_tolerance, 4);
 }
 
 #[tokio::test]
@@ -143,10 +184,39 @@ async fn update_scan_settings_rejects_short_interval() {
                 upgrade_axis_bitrate: "gain".into(),
                 upgrade_show_downgrades: false,
                 upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
+                scan_barren_page_tolerance: 3,
             }),
             UserId(1),
         )
         .await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn scan_barren_page_tolerance_rejects_values_outside_its_bound() {
+    let svc = test_service().await;
+
+    let result = svc
+        .update_settings(
+            SettingsUpdate::Scan(ScanSettings {
+                auto_scan: false,
+                scan_interval_minutes: 5,
+                scan_exclude_completed: false,
+                upgrade_detection_enabled: true,
+                upgrade_min_res_gain: 1.2,
+                upgrade_confirm_fetches: 3,
+                upgrade_axis_resolution: "both".into(),
+                upgrade_axis_colour: "both".into(),
+                upgrade_axis_encoder: "both".into(),
+                upgrade_axis_bitrate: "gain".into(),
+                upgrade_show_downgrades: false,
+                upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
+                scan_barren_page_tolerance: 21,
+            }),
+            UserId(1),
+        )
+        .await;
+
     assert!(result.is_err());
 }
 
@@ -187,6 +257,7 @@ async fn update_settings_does_not_affect_unrelated_fields() {
             upgrade_axis_bitrate: "gain".into(),
             upgrade_show_downgrades: false,
             upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
+            scan_barren_page_tolerance: 3,
         }),
         UserId(1),
     )

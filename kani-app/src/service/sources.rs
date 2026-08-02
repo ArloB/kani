@@ -4,9 +4,7 @@ use crate::models::SourceHealthRow;
 use crate::source::loader;
 use sqlx::Row as _;
 
-/// How long one source may take before a global search gives up on it and
-/// ships everyone else's results.
-const GLOBAL_SEARCH_PER_SOURCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+const DEFAULT_GLOBAL_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
 
 pub(crate) fn compile_pure_registry(
     metadata: &kani_shared::ExtensionMetadata,
@@ -752,6 +750,12 @@ impl AppService {
         .map(|r| (r.id, r.name))
         .collect();
 
+        let per_source_timeout =
+            u64::try_from(self.settings.read().await.global_search_timeout_secs)
+                .map(std::time::Duration::from_secs)
+                .unwrap_or(DEFAULT_GLOBAL_SEARCH_TIMEOUT)
+                .max(std::time::Duration::from_secs(1));
+
         let tasks: Vec<_> = ids_to_search
             .iter()
             .map(|(&source_id, source_name)| {
@@ -765,7 +769,7 @@ impl AppService {
                     // has already answered; this one reports as failed and the
                     // results ship.
                     let result = match tokio::time::timeout(
-                        GLOBAL_SEARCH_PER_SOURCE_TIMEOUT,
+                        per_source_timeout,
                         state.search_manga(source_id, &q, page, page_size, None),
                     )
                     .await
@@ -775,7 +779,7 @@ impl AppService {
                             state.record_source_error(source_id).await;
                             Err(ServiceError::Internal(format!(
                                 "Source {source_id} did not answer within {}s",
-                                GLOBAL_SEARCH_PER_SOURCE_TIMEOUT.as_secs()
+                                per_source_timeout.as_secs()
                             )))
                         }
                     };

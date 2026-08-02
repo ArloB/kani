@@ -38,6 +38,7 @@ export function ScanSection({ settings }) {
     upgrade_show_downgrades: !!settings?.upgrade_show_downgrades,
     upgrade_auto_replace_reasons:
       settings?.upgrade_auto_replace_reasons ?? 'preferred_scanlator,resolution,colour',
+    scan_barren_page_tolerance: Number(settings?.scan_barren_page_tolerance ?? 3),
   };
   const [form, setForm] = useState(initial);
   const [saved, setSaved] = useState(initial);
@@ -91,6 +92,15 @@ export function ScanSection({ settings }) {
         description=${t('settings.scan.exclude.desc')}
         checked=${form.scan_exclude_completed}
         onChange=${(v) => set('scan_exclude_completed', v)}
+      />
+      <${NumberRow}
+        label=${t('settings.scan.barren_pages.label')}
+        description=${t('settings.scan.barren_pages.desc')}
+        value=${form.scan_barren_page_tolerance}
+        min=${1}
+        max=${20}
+        stepper=${true}
+        onChange=${(v) => set('scan_barren_page_tolerance', v)}
       />
     <//>
 

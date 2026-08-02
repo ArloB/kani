@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_ids, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours, browser_max_memory_mb, browser_max_instances, browser_idle_timeout_s, update_check_enabled, integrity_quick_scrub_interval_hours, integrity_deep_scrub_interval_hours, scrub_on_startup, integrity_revalidate_after_days, upgrade_detection_enabled, upgrade_min_res_gain, upgrade_confirm_fetches, upgrade_axis_resolution, upgrade_axis_colour, upgrade_axis_encoder, upgrade_axis_bitrate, upgrade_show_downgrades, upgrade_auto_replace_reasons, opds_page_index_zero_based FROM settings",
+  "query": "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_ids, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours, browser_max_memory_mb, browser_max_instances, browser_idle_timeout_s, update_check_enabled, integrity_quick_scrub_interval_hours, integrity_deep_scrub_interval_hours, scrub_on_startup, integrity_revalidate_after_days, upgrade_detection_enabled, upgrade_min_res_gain, upgrade_confirm_fetches, upgrade_axis_resolution, upgrade_axis_colour, upgrade_axis_encoder, upgrade_axis_bitrate, upgrade_show_downgrades, upgrade_auto_replace_reasons, opds_page_index_zero_based, scan_barren_page_tolerance, global_search_timeout_secs FROM settings",
   "describe": {
     "columns": [
       {
@@ -312,6 +312,16 @@
         "name": "opds_page_index_zero_based",
         "ordinal": 61,
         "type_info": "Bool"
+      },
+      {
+        "name": "scan_barren_page_tolerance",
+        "ordinal": 62,
+        "type_info": "Integer"
+      },
+      {
+        "name": "global_search_timeout_secs",
+        "ordinal": 63,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -379,8 +389,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "524e17016b761bb15b975b5cc2824293e0ef537ae76a3dec4eeca473d115f927"
+  "hash": "a2aac4b1e7c4441df1de24cf929105d4562cb400eaa8af25ef077385ec070c64"
 }

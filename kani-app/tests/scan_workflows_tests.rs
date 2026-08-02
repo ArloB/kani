@@ -6,7 +6,7 @@
 //! scan sees a grown listing.
 
 mod common;
-use common::{insert_manga, insert_source, test_service};
+use common::{insert_chapter, insert_manga, insert_source, test_service};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -289,6 +289,56 @@ async fn a_chapter_list_page_failure_is_reported_not_silently_completed() {
         origin.hits("/manga/m1/chapters"),
         2,
         "the scan advanced to page 2 (where it failed), proving page 1 was not treated as complete"
+    );
+}
+
+#[tokio::test]
+async fn scan_stops_after_the_configured_run_of_known_pages() {
+    let origin = TestOrigin::start().await;
+    origin.script("/manga/m1/chapters", vec![Response::html(LISTING_2)]);
+    let svc = test_service().await;
+    let manga_id = wire_source_always_paginated(&svc, &origin).await;
+    insert_chapter(&svc.db, manga_id, "ch-1", 1.0).await;
+    insert_chapter(&svc.db, manga_id, "ch-2", 2.0).await;
+    svc.settings.write().await.scan_barren_page_tolerance = 2;
+
+    svc.fetch_and_store_chapters_silent(manga_id).await.unwrap();
+
+    assert_eq!(origin.hits("/manga/m1/chapters"), 2);
+}
+
+/// The other half of the tolerance, and the reason it is not 1: a run of known
+/// pages shorter than the tolerance must not end the scan, or every chapter
+/// beyond it is missed on every future run. Page 3 carries the new chapter.
+#[tokio::test]
+async fn a_run_of_known_pages_shorter_than_the_tolerance_does_not_end_the_scan() {
+    let origin = TestOrigin::start().await;
+    origin.script(
+        "/manga/m1/chapters",
+        vec![
+            Response::html(LISTING_2),
+            Response::html(LISTING_2),
+            Response::html(LISTING_3),
+        ],
+    );
+    let svc = test_service().await;
+    let manga_id = wire_source_always_paginated(&svc, &origin).await;
+    insert_chapter(&svc.db, manga_id, "ch-1", 1.0).await;
+    insert_chapter(&svc.db, manga_id, "ch-2", 2.0).await;
+    svc.settings.write().await.scan_barren_page_tolerance = 3;
+
+    svc.fetch_and_store_chapters_silent(manga_id).await.unwrap();
+
+    let found: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM chapters WHERE manga_id = ? AND source_chapter_id = 'ch-3'",
+    )
+    .bind(manga_id)
+    .fetch_one(&svc.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        found, 1,
+        "the chapter beyond two known pages was never reached"
     );
 }
 

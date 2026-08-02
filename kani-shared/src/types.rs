@@ -1230,6 +1230,10 @@ pub struct AppSettings {
     /// OPDS-PSE `?page=` numbering. Default false = 1-based, matching how most
     /// readers substitute `{pageNumber}`; true restores the old 0-based index.
     pub opds_page_index_zero_based: bool,
+    #[serde(default = "default_barren_page_tolerance")]
+    pub scan_barren_page_tolerance: i64,
+    #[serde(default = "default_global_search_timeout_secs")]
+    pub global_search_timeout_secs: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1347,11 +1351,23 @@ pub struct ScanSettings {
     pub upgrade_show_downgrades: bool,
     #[serde(default = "default_auto_replace_reasons")]
     pub upgrade_auto_replace_reasons: String,
+    #[serde(default = "default_barren_page_tolerance")]
+    pub scan_barren_page_tolerance: i64,
 }
 
 #[cfg(feature = "host")]
 fn default_revalidate_days() -> i64 {
     30
+}
+
+#[cfg(feature = "host")]
+fn default_barren_page_tolerance() -> i64 {
+    3
+}
+
+#[cfg(feature = "host")]
+fn default_global_search_timeout_secs() -> i64 {
+    6
 }
 
 #[cfg(feature = "host")]
@@ -1387,6 +1403,8 @@ pub struct AdvancedSettings {
     /// OPDS-PSE `?page=` numbering. Default false = 1-based, matching how most
     /// readers substitute `{pageNumber}`; true restores the old 0-based index.
     pub opds_page_index_zero_based: bool,
+    #[serde(default = "default_global_search_timeout_secs")]
+    pub global_search_timeout_secs: i64,
 }
 
 #[cfg(feature = "host")]
@@ -2051,6 +2069,7 @@ mod tests {
             upgrade_axis_bitrate: "gain".into(),
             upgrade_show_downgrades: false,
             upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
+            scan_barren_page_tolerance: 3,
         }));
         json_rt(&SettingsUpdate::Advanced(AdvancedSettings {
             flaresolverr_url: String::new(),
@@ -2066,6 +2085,7 @@ mod tests {
             browser_idle_timeout_s: 300,
             update_check_enabled: true,
             opds_page_index_zero_based: false,
+            global_search_timeout_secs: 6,
         }));
         json_rt(&SettingsUpdate::Tracking(TrackingSettings {
             default_tracking_enabled: true,

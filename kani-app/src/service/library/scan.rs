@@ -7,7 +7,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 /// Consecutive all-known listing pages tolerated before a scan concludes it has
 /// caught up. More than one, because hitting a page of already-held chapters is
 /// routine at a pagination boundary and says nothing about what follows.
-const MAX_BARREN_PAGES: usize = 3;
+const DEFAULT_BARREN_PAGE_TOLERANCE: usize = 3;
 
 impl AppService {
     /// `force` skips the fuzzy duplicate check (used after the user confirms "add anyway").
@@ -515,6 +515,10 @@ impl AppService {
         let mut total_received = 0usize;
         let mut page = 1;
         let mut barren_pages = 0usize;
+        let barren_tolerance =
+            usize::try_from(self.settings.read().await.scan_barren_page_tolerance)
+                .unwrap_or(DEFAULT_BARREN_PAGE_TOLERANCE)
+                .max(1);
 
         loop {
             let res = match backend
@@ -585,7 +589,7 @@ impl AppService {
             } else {
                 barren_pages = 0;
             }
-            if barren_pages >= MAX_BARREN_PAGES || !chapter_list.has_next_page {
+            if barren_pages >= barren_tolerance || !chapter_list.has_next_page {
                 break;
             }
 
