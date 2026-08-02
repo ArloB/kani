@@ -306,10 +306,6 @@ export async function init(container, params) {
   // same content grid as the columns below.
   container.insertBefore(hero, wrap);
 
-  if (_isLocal && _dbId && _suppressedCount > 0) {
-    mountSuppressedBanner(wrap, _dbId, _suppressedCount);
-  }
-
   const layout = document.createElement('div');
   layout.className = 'flex flex-col md:flex-row gap-6 md:gap-8 md:items-start manga-hero__body';
   wrap.appendChild(layout);
@@ -321,6 +317,13 @@ export async function init(container, params) {
   const rightCol = document.createElement('div');
   rightCol.className = 'w-full min-w-0 flex flex-col gap-4 md:flex-1';
   layout.appendChild(rightCol);
+
+  // The notice is about chapters, so it heads the chapter column rather than
+  // spanning the page under the title: it keeps the hero band's overlap intact
+  // and sits next to the list it is talking about.
+  if (_isLocal && _dbId && _suppressedCount > 0) {
+    mountSuppressedBanner(rightCol, _dbId, _suppressedCount);
+  }
 
   const { destroy: destroyHeader } = mountMangaHeader(leftCol, info, source, {
     isLocal: _isLocal,

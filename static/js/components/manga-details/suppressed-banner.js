@@ -52,10 +52,6 @@ export function SuppressedBanner({ dbId, count, onDismiss }) {
  */
 export function mountSuppressedBanner(parent, dbId, count) {
   const mount = document.createElement('div');
-  // The columns below are pulled up under the hero band by a negative margin
-  // and raised with a z-index. Without a class of its own the notice lands
-  // underneath them: visible, but with its Dismiss button unclickable.
-  mount.className = 'manga-hero__notice';
   parent.appendChild(mount);
   const destroy = () => {
     render(null, mount);
