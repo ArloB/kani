@@ -1,6 +1,7 @@
 target
 wasm_sources
 CLAUDE.md
+AGENTS.md
 .claude/
 # Generated PWA icons — regenerate with `cargo run -p kani-cli -- icons`.
 # The source mark itself is tracked: without it a clean checkout cannot build
