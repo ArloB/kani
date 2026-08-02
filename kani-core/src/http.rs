@@ -11,6 +11,11 @@ const BASE_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 /// pages are a few hundred kilobytes; anything past this is not a page we were
 /// going to parse anyway.
 const MAX_HTML_BODY_BYTES: usize = 16 * 1024 * 1024;
+/// Ceiling on a response body handed to a guest extension.
+const MAX_HTTP_RESPONSE_BYTES: usize = 15 * 1024 * 1024;
+/// Ceiling on an operator-configured option-set fetch. An option set is
+/// kilobytes; anything past this is not a document we were going to parse.
+const MAX_OPTION_SET_BYTES: usize = 4 * 1024 * 1024;
 
 const CREDENTIAL_TTL_SECS: u64 = 3600;
 const RETRY_AFTER_CAP_SECS: u64 = 60;
@@ -55,6 +60,31 @@ impl Default for Timings {
             credential_ttl: std::time::Duration::from_secs(CREDENTIAL_TTL_SECS),
             request_timeout: std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
             whole_call_deadline: std::time::Duration::from_secs(WHOLE_CALL_DEADLINE_SECS),
+        }
+    }
+}
+
+/// Ceilings on how many bytes a single response may occupy in memory.
+///
+/// Production uses [`Budgets::default`]; a test overrides them via
+/// [`SmartClient::with_budgets`] so an oversized-body path can be driven with a
+/// few kilobytes instead of allocating the real megabyte ceilings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Budgets {
+    /// HTML buffered before the Cloudflare-challenge sniff.
+    pub max_html_body_bytes: usize,
+    /// Response body handed to a guest extension.
+    pub max_http_response_bytes: usize,
+    /// Operator-configured option-set fetch, used to populate a filter dropdown.
+    pub max_option_set_bytes: usize,
+}
+
+impl Default for Budgets {
+    fn default() -> Self {
+        Self {
+            max_html_body_bytes: MAX_HTML_BODY_BYTES,
+            max_http_response_bytes: MAX_HTTP_RESPONSE_BYTES,
+            max_option_set_bytes: MAX_OPTION_SET_BYTES,
         }
     }
 }
@@ -369,6 +399,7 @@ pub struct SmartClient {
     pub circuit_event_tx: tokio::sync::broadcast::Sender<CircuitOpenedEvent>,
     pub cond_cache: Arc<ConditionalGetCache>,
     timings: Timings,
+    budgets: Budgets,
     /// When false (production), a redirect to a forbidden IP literal
     /// (private/loopback/metadata) is refused — closing the SSRF-via-redirect
     /// hole the DNS-only resolver can't see. Shared with the client's redirect
@@ -381,6 +412,17 @@ impl SmartClient {
     pub fn with_timings(mut self, timings: Timings) -> Self {
         self.timings = timings;
         self
+    }
+
+    /// Overrides the response-size ceilings (test seam — see [`Budgets`]).
+    pub fn with_budgets(mut self, budgets: Budgets) -> Self {
+        self.budgets = budgets;
+        self
+    }
+
+    /// The response-size ceilings this client enforces.
+    pub fn budgets(&self) -> Budgets {
+        self.budgets
     }
 
     /// Allow egress to private/loopback IP literals (test seam so a `TestOrigin`
@@ -424,6 +466,7 @@ impl SmartClient {
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
             timings: Timings::default(),
+            budgets: Budgets::default(),
             allow_private_egress,
         })
     }
@@ -455,6 +498,7 @@ impl SmartClient {
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
             timings: Timings::default(),
+            budgets: Budgets::default(),
             allow_private_egress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
@@ -701,7 +745,7 @@ impl SmartClient {
                             }
                         })),
                         None,
-                        MAX_HTML_BODY_BYTES,
+                        self.budgets.max_html_body_bytes,
                     )
                     .await?;
                     let body_str = String::from_utf8_lossy(&bytes);
@@ -1483,6 +1527,7 @@ impl SmartClient {
             circuit_event_tx,
             cond_cache: Arc::new(ConditionalGetCache::new()),
             timings: Timings::default(),
+            budgets: Budgets::default(),
             allow_private_egress: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         })
     }
@@ -1928,6 +1973,91 @@ mod tests {
             .unwrap();
         let resp = client.send_request(req).await.unwrap();
         assert_eq!(resp.status(), rquest::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn an_html_body_over_the_budget_is_refused_not_buffered() {
+        // The challenge sniff buffers the whole body before looking at it, so
+        // the ceiling is the only thing standing between a hostile origin and
+        // the server's memory. Driving it needs the budget seam: the real
+        // ceiling is 16 MB.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/huge"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw("x".repeat(64 * 1024).into_bytes(), "text/html"),
+            )
+            .mount(&server)
+            .await;
+
+        let client = SmartClient::new_for_test().unwrap().with_budgets(Budgets {
+            max_html_body_bytes: 1024,
+            ..Budgets::default()
+        });
+        let req = client
+            .inner()
+            .get(format!("{}/huge", server.uri()))
+            .build()
+            .unwrap();
+
+        let err = match client.send_request(req).await {
+            Ok(_) => panic!("a body past the ceiling must be refused"),
+            Err(e) => e,
+        };
+        assert!(
+            err.to_string().contains("limit") || err.to_string().contains("exceeds"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_html_body_within_the_budget_is_still_served() {
+        // The complement, so the test above cannot pass by refusing everything.
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/small"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                "<html><body>ok</body></html>".as_bytes().to_vec(),
+                "text/html",
+            ))
+            .mount(&server)
+            .await;
+
+        let client = SmartClient::new_for_test().unwrap().with_budgets(Budgets {
+            max_html_body_bytes: 1024,
+            ..Budgets::default()
+        });
+        let req = client
+            .inner()
+            .get(format!("{}/small", server.uri()))
+            .build()
+            .unwrap();
+
+        let resp = client.send_request(req).await.unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+    }
+
+    #[test]
+    fn the_budget_seam_overrides_every_ceiling() {
+        // Each field feeds a different call site — the html sniff here, the
+        // guest response in wasm::abi, the option set in option_set_fetcher —
+        // so a partially-applied override would leave one path on its default.
+        let client = SmartClient::new_for_test().unwrap().with_budgets(Budgets {
+            max_html_body_bytes: 1,
+            max_http_response_bytes: 2,
+            max_option_set_bytes: 3,
+        });
+        assert_eq!(client.budgets().max_html_body_bytes, 1);
+        assert_eq!(client.budgets().max_http_response_bytes, 2);
+        assert_eq!(client.budgets().max_option_set_bytes, 3);
+
+        let default = SmartClient::new_for_test().unwrap();
+        assert_eq!(
+            default.budgets(),
+            Budgets::default(),
+            "a client that was never overridden must carry the shipped ceilings"
+        );
     }
 
     #[tokio::test]

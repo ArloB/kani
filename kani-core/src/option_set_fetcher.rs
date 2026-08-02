@@ -60,11 +60,10 @@ pub async fn fetch_option_set(
     // Bounded: this is an operator-supplied URL fetched to populate a filter
     // dropdown. An option set is kilobytes; anything past the cap is not a
     // document we were going to parse.
-    const MAX_OPTION_SET_BYTES: usize = 4 * 1024 * 1024;
     let bytes = client
         .get(&url)
         .await?
-        .bytes_prefix(MAX_OPTION_SET_BYTES)
+        .bytes_prefix(client.budgets().max_option_set_bytes)
         .await?;
     let response = String::from_utf8_lossy(&bytes).into_owned();
 
@@ -324,6 +323,71 @@ mod tests {
         assert!(
             enforce_option_set_host("https://source.invalid", "https://anywhere.invalid/x", true)
                 .is_ok()
+        );
+    }
+
+    /// The option-set ceiling truncates rather than refusing, so an oversized
+    /// document yields the options that fit and drops the rest. Proving that
+    /// needs the budget seam: the shipped ceiling is 4 MB.
+    #[tokio::test]
+    async fn an_option_set_past_the_budget_is_truncated_at_the_ceiling() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let mut body = String::from("<html><body><ul>");
+        for i in 0..200 {
+            body.push_str(&format!(
+                "<li><span class=\"name\">Option {i}</span><a data-id=\"v{i}\">v{i}</a></li>"
+            ));
+        }
+        body.push_str("</ul></body></html>");
+        let full_len = body.len();
+
+        Mock::given(method("GET"))
+            .and(path("/options"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body.into_bytes(), "text/html"))
+            .mount(&server)
+            .await;
+
+        let def = FilterFetchDef {
+            route: format!("{}/options", server.uri()),
+            ..make_def(
+                "html",
+                Some("li"),
+                vec![("name", "span.name"), ("value", "a|data-id")],
+                None,
+            )
+        };
+
+        let generous = SmartClient::new_for_test()
+            .unwrap()
+            .with_allow_private_egress(true);
+        let all = fetch_option_set(&generous, &def, &server.uri(), true)
+            .await
+            .unwrap();
+        assert!(all.len() > 10, "fixture must produce a long option set");
+
+        let stingy = SmartClient::new_for_test()
+            .unwrap()
+            .with_allow_private_egress(true)
+            .with_budgets(crate::http::Budgets {
+                max_option_set_bytes: full_len / 8,
+                ..crate::http::Budgets::default()
+            });
+        let truncated = fetch_option_set(&stingy, &def, &server.uri(), true)
+            .await
+            .unwrap();
+
+        assert!(
+            truncated.len() < all.len(),
+            "the ceiling did not bound the document: {} vs {}",
+            truncated.len(),
+            all.len()
+        );
+        assert!(
+            !truncated.is_empty(),
+            "truncation must keep the prefix, not discard everything"
         );
     }
 
