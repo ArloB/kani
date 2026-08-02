@@ -1036,6 +1036,21 @@
     }
   }
 
+  /* A notice between the band and the columns has to keep its own space: the
+     pull-up above would otherwise draw the columns over it, and their z-index
+     would take its clicks. */
+  .manga-hero__notice {
+    position: relative;
+    z-index: 2;
+  }
+
+  .manga-hero__notice + .manga-hero__body {
+    margin-top: 0;
+    @media (min-width: 768px) {
+      margin-top: 0;
+    }
+  }
+
   /* ── Prose ──
      Token-styled rendering for server-sanitised markdown (changelog, manga
      descriptions). Typography-first: headings carry the hierarchy, no boxes. */
