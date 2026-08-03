@@ -47,11 +47,13 @@ export function SliderRow({ label, min, max, value, step = 1, unit = '', onChang
       <div class="flex items-center justify-between gap-2">
         <span class="text-sm text-text min-w-0 truncate">${label}</span>
         <input type="number" min=${min} max=${max} step=${step} value=${value} title=${unit}
+               aria-label=${label}
                class="no-spinners text-xs text-muted tabular-nums text-right w-14 bg-transparent border border-border rounded px-1 py-0.5 shrink-0 focus:outline-none focus:border-accent"
                onChange=${(/** @type {any} */ e) => commit(e.currentTarget.value)}
                onKeyDown=${(/** @type {any} */ e) => e.stopPropagation()} />
       </div>
       <input type="range" min=${min} max=${max} step=${step} value=${value}
+             aria-label=${label}
              class="w-full accent-accent h-1.5 cursor-pointer"
              onInput=${(/** @type {any} */ e) => onChange(Number(e.currentTarget.value))} />
     </div>`;
