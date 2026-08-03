@@ -30,6 +30,31 @@
 | `authed_post(app, path, cookie, body)` | Authenticated POST with JSON body |
 | `body_json(response)` | Extract `serde_json::Value` from response body |
 
+## Permission-gated UI
+
+The frontend hides whole surfaces behind `hasPermission(...)`, so the number of
+possible layouts is combinatorial. Two checks cover it without enumerating
+combinations:
+
+- `kani-web/tests/permission_contract_tests.rs` — every `'resource:action'`
+  literal the UI gates on parses as a server `Permission`. A typo there hides a
+  feature silently and forever, with no error anywhere.
+- `scripts/verify-permission-matrix.mjs` — per *permission* rather than per
+  combination: for each one, an account that holds it and an account that does
+  not, asserting the surfaces it gates appear in the first case and not the
+  second. Expectations are read out of `static/js/app.js`,
+  `static/js/pages/settings/index.js` and `static/locales/en.js`, so it cannot
+  drift from the app.
+
+```bash
+node scripts/verify-permission-matrix.mjs http://127.0.0.1:8299 admin '<password>'
+```
+
+It needs Playwright and an instance you may create users on — it makes
+`permmatrix-*` roles and accounts. Point it at a throwaway instance, and raise
+`KANI_API_RATE_PER_SECOND` / `KANI_API_BURST_SIZE` on it: the sweep is heavy
+enough to drain the limiter otherwise.
+
 ## Database path
 
 Integration tests use `sqlite:kani.db`. Run kani-app tests with `--features test-util`:

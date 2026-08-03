@@ -34,9 +34,19 @@ docker compose up -d
 
 Wait a few seconds, then open [http://localhost:8242](http://localhost:8242) in your browser.
 
-## 3 — First-run wizard
+## 3 — Create your account
 
-Kani opens a setup wizard on first launch. It will ask for:
+A new server has no accounts and no generated password. The first page you see asks you to create
+the administrator: choose a username and password, and you are signed in immediately.
+
+Setup closes as soon as that account exists — a second attempt is refused. It is also only accepted
+from a loopback or private address, so an instance reachable from the internet before you get to it
+cannot be claimed by a stranger. Setting up over the internet directly? Start the server with
+`KANI_ALLOW_REMOTE_SETUP=true`.
+
+## 4 — First-run wizard
+
+The wizard then asks for:
 
 1. **Library path** — where downloaded chapters are stored inside the container (`/library` in the
    default compose file maps to `./library` on the host).
@@ -44,12 +54,12 @@ Kani opens a setup wizard on first launch. It will ask for:
 
 Complete the wizard and you land on the library screen.
 
-## 4 — Install a source
+## 5 — Install a source
 
 Navigate to **Settings → Sources** and click **Browse**. Find a source, click its card, and
 install it. Once installed it appears under **Sources** in the sidebar.
 
-## 5 — Follow a series
+## 6 — Follow a series
 
 Open a source, search for a title, open the manga detail page, and click **Follow**. Kani will
 check for new chapters on its next scheduled scan.

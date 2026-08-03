@@ -64,6 +64,9 @@ environment:
 | `KANI_SECRET_KEY` | — | **Required.** 32+ char random string used to sign session cookies |
 | `KANI_SECURE_COOKIES` | `false` | Set `true` when serving over HTTPS |
 | `KANI_CORS_ORIGIN` | — | Allowed CORS origin (e.g. `https://kani.example.com`) |
+| `KANI_ALLOW_REMOTE_SETUP` | `false` | Allow first-run account creation from a public address. Only needed when setting up over the internet |
+| `KANI_API_RATE_PER_SECOND` | `5` | Sustained API request budget per client |
+| `KANI_API_BURST_SIZE` | `200` | Burst allowance before the API budget applies |
 | `KANI_OIDC_ISSUER` | — | OIDC provider URL to enable single sign-on |
 | `KANI_OIDC_CLIENT_ID` | — | OIDC client ID |
 | `KANI_OIDC_CLIENT_SECRET` | — | OIDC client secret |

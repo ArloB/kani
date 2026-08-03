@@ -41,7 +41,20 @@ SQLite WAL mode should prevent this in normal use. Causes:
 - Confirm the username and password are correct.
 - If OIDC is configured, ensure `KANI_OIDC_ISSUER`, `KANI_OIDC_CLIENT_ID`, and `KANI_OIDC_CLIENT_SECRET` are all set.
 - Check `/rest/system/info` — if `registration_enabled: false` and you've lost your admin password,
-  you'll need to reset the database.
+  you'll need to reset the database. There is no generated password to recover: on a new server the
+  first account is created through the setup screen, and that window closes once it exists.
+
+## The setup screen says setup is unavailable
+
+A new server shows a setup screen to create the administrator. It is refused in two cases:
+
+- **An account already exists.** Setup closes permanently the moment the first account is created.
+  Sign in instead; if nobody knows the password, reset the database.
+- **You are not on the local network.** Setup is only accepted from a loopback or private address,
+  so an instance exposed to the internet before its owner reaches it cannot be claimed by a
+  stranger. Reach it over the LAN or an SSH tunnel, or start the server with
+  `KANI_ALLOW_REMOTE_SETUP=true` if it genuinely must be done over the internet. Behind a reverse
+  proxy the proxy's address is what Kani sees, so the proxy is the boundary.
 
 ## Getting more help
 
