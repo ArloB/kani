@@ -307,6 +307,51 @@ async fn scan_stops_after_the_configured_run_of_known_pages() {
     assert_eq!(origin.hits("/manga/m1/chapters"), 2);
 }
 
+/// The write pool holds a single connection. A transaction opened around the
+/// page-fetch loop is therefore held across every HTTP round trip, and no other
+/// writer in the process can proceed until the scan finishes — measured on a
+/// real library as a 28.8 s acquire and one failed recurring job.
+#[tokio::test]
+async fn a_slow_source_does_not_block_other_writers_during_a_scan() {
+    let origin = TestOrigin::start().await;
+    origin.script(
+        "/manga/m1/chapters",
+        vec![Response::html(LISTING_2).delay(std::time::Duration::from_millis(1500))],
+    );
+    // Production's write pool is `max_connections(1)`; the shared test pool is
+    // not, so a default `test_service()` cannot observe this at all — the test
+    // passed against the buggy code until the pool matched production.
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    sqlx::migrate!("../migrations").run(&pool).await.unwrap();
+    let svc = AppService::new_for_test(pool).await;
+    let manga_id = wire_source(&svc, &origin).await;
+
+    let scanner = svc.clone();
+    let scan = tokio::spawn(async move { scanner.fetch_and_store_chapters_silent(manga_id).await });
+
+    // Give the scan time to be mid-fetch rather than still starting up.
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    let started = std::time::Instant::now();
+    sqlx::query("UPDATE manga SET name = 'Renamed While Scanning' WHERE id = ?")
+        .bind(manga_id)
+        .execute(&svc.db)
+        .await
+        .expect("an unrelated write must not wait on the scan's network I/O");
+    let waited = started.elapsed();
+
+    assert!(
+        waited < std::time::Duration::from_millis(500),
+        "an unrelated write waited {waited:?} on a scan that was still fetching"
+    );
+
+    scan.await.unwrap().unwrap();
+}
+
 /// The other half of the tolerance, and the reason it is not 1: a run of known
 /// pages shorter than the tolerance must not end the scan, or every chapter
 /// beyond it is missed on every future run. Page 3 carries the new chapter.

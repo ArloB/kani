@@ -510,8 +510,25 @@ impl AppService {
             .get_backend(ids.source_id)
             .ok_or_else(|| ServiceError::NotFound(format!("Source {} not found", ids.source_id)))?;
 
-        let mut tx = self.db.begin().await?;
-        let mut new_chapter_ids = Vec::new();
+        // The write pool holds exactly one connection, so a transaction opened
+        // here would be held across every page fetch — each with its retries,
+        // backoff and possible challenge solve — starving every other writer in
+        // the process. A scan of a real library was measured blocking a
+        // recurring job for 28.8 s that way. Pages are collected first and
+        // written once, after all network I/O is done.
+        //
+        // Deciding "new on this page" without writing needs the ids already
+        // held, which is what the barren-page guard counts.
+        let mut known_ids: std::collections::HashSet<String> = sqlx::query_scalar!(
+            "SELECT source_chapter_id FROM chapters WHERE manga_id = ?",
+            manga_row_id
+        )
+        .fetch_all(&self.db_read)
+        .await?
+        .into_iter()
+        .collect();
+
+        let mut collected: Vec<wit_types::ChapterInfo> = Vec::new();
         let mut total_received = 0usize;
         let mut page = 1;
         let mut barren_pages = 0usize;
@@ -547,24 +564,14 @@ impl AppService {
                 break;
             }
 
-            let mut page_new_ids = Vec::new();
-            for chunk in chapter_list.chapters.chunks(100) {
-                let chunk_ids = self
-                    .insert_chapters_batch(&mut tx, manga_row_id, chunk)
-                    .await?;
-                page_new_ids.extend(chunk_ids);
-            }
-
-            // `INSERT OR IGNORE` above leaves already-known rows untouched, so a
-            // re-listed chapter whose page count changed would keep the count it
-            // was first discovered with. Refreshing it here is what turns
-            // re-upload detection from theoretical into something that can fire.
-            self.refresh_source_page_counts(&mut tx, manga_row_id, &chapter_list.chapters)
-                .await?;
+            let new_on_page = chapter_list
+                .chapters
+                .iter()
+                .filter(|ch| known_ids.insert(decode_manga_id(&ch.id)))
+                .count();
 
             total_received += chapter_list.chapters.len();
-            let new_on_page = page_new_ids.len();
-            new_chapter_ids.extend(page_new_ids);
+            collected.extend(chapter_list.chapters.iter().cloned());
 
             if emit_progress {
                 let _ = self.refresh_tx.send(AppEvent::ChapterListPartial {
@@ -596,6 +603,20 @@ impl AppService {
             page += 1;
         }
 
+        // One short checkout of the single write connection, with no network in
+        // scope. Still all-or-nothing: a page failure above returns before this
+        // runs, so a partial listing is never half-stored.
+        let mut tx = self.db.begin().await?;
+        let new_chapter_ids = self
+            .insert_chapters_batch(&mut tx, manga_row_id, &collected)
+            .await?;
+
+        // `INSERT OR IGNORE` leaves already-known rows untouched, so a re-listed
+        // chapter whose page count changed would keep the count it was first
+        // discovered with. Refreshing it here is what turns re-upload detection
+        // from theoretical into something that can fire.
+        self.refresh_source_page_counts(&mut tx, manga_row_id, &collected)
+            .await?;
         tx.commit().await?;
 
         if !new_chapter_ids.is_empty() {
