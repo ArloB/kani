@@ -23,7 +23,12 @@
  *  - `settings.*` loads as one struct query, so every settings column reports
  *    zero selects. Treat that whole table as noise.
  *  - A column that is legitimately only ever a filter (`deleted_at`,
- *    `token_hash`) is correct usage, not a defect.
+ *    `token_hash`) is correct usage, not a defect. So is a soft-hide flag whose
+ *    `WHERE x = FALSE` *is* the read (`duplicate_pairs.dismissed`).
+ *  - `DELETE ... RETURNING col` is a read this cannot see
+ *    (`captcha_challenges.answer`).
+ *  - A value threaded through a trait as a parameter rather than selected by
+ *    name (`user_page_bookmarks.page_index`).
  *
  * The signal worth chasing is a column written with a meaningful value whose
  * only reads exclude that value — which is what `chapters.is_orphaned` was
