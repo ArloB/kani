@@ -365,4 +365,47 @@ impl AppService {
             chapters_kept: kept_count,
         })
     }
+
+    /// Queues a migration and returns the job id.
+    ///
+    /// Rejects a second migration of the same series while one is already
+    /// pending or running: the two would race over the same chapter rows and
+    /// CBZs, and the loser could delete files the winner had just re-matched.
+    pub async fn submit_migration(
+        &self,
+        manga_db_id: crate::ids::MangaId,
+        target_source_id: i64,
+        target_source_manga_id: String,
+        keep_orphaned_downloads: bool,
+    ) -> Result<crate::jobs::JobId> {
+        if self.migration_job_active(manga_db_id.0).await {
+            return Err(ServiceError::Conflict(
+                "A migration for this manga is already in progress".to_string(),
+            ));
+        }
+
+        let job = crate::jobs::migration::MigrationJob::new(
+            manga_db_id,
+            target_source_id,
+            target_source_manga_id,
+            keep_orphaned_downloads,
+        );
+        self.job_manager
+            .submit(job)
+            .await
+            .map_err(|e| ServiceError::Internal(e.to_string()))
+    }
+
+    async fn migration_job_active(&self, manga_id: i64) -> bool {
+        sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM jobs WHERE job_type = 'migration' \
+             AND status IN ('pending', 'running') \
+             AND json_extract(params_json, '$.manga_id') = ?",
+            manga_id
+        )
+        .fetch_one(&self.db_read)
+        .await
+        .map(|c| c > 0)
+        .unwrap_or(false)
+    }
 }

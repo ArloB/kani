@@ -13,8 +13,8 @@ use crate::service::import::tachiyomi::{
 use crate::service::trackers::{TrackerMangaResult, TrackerMappingItem, TrackerStatusItem};
 use kani_shared::types::{
     AppSettings, Category, Chapter, ChapterSortOrder, ContinueReadingChapter, DownloadRule,
-    DownloadRuleKind, MangaTracking, MangaTrackingStatus, MigrationPreview, MigrationResult,
-    ScanlatorPreference, SettingsUpdate, SortOption, Source,
+    DownloadRuleKind, MangaTracking, MangaTrackingStatus, MigrationPreview, ScanlatorPreference,
+    SettingsUpdate, SortOption, Source,
 };
 
 #[async_trait::async_trait]
@@ -618,13 +618,14 @@ pub trait MangaDomain: Send + Sync {
         target_source_id: i64,
         target_source_manga_id: String,
     ) -> Result<MigrationPreview>;
-    async fn migrate_manga(
+    /// Queues the migration; the caller polls the returned job.
+    async fn submit_migration(
         &self,
         manga_id: MangaId,
         target_source_id: i64,
         target_source_manga_id: String,
         keep_orphaned_downloads: bool,
-    ) -> Result<MigrationResult>;
+    ) -> Result<crate::jobs::JobId>;
     async fn get_download_rules(&self, manga_id: MangaId) -> Result<Vec<DownloadRule>>;
     async fn add_download_rule(&self, manga_id: MangaId, kind: DownloadRuleKind) -> Result<i64>;
     async fn delete_download_rule(&self, rule_id: i64) -> Result<()>;
@@ -794,14 +795,14 @@ impl MangaDomain for AppService {
             .await
     }
 
-    async fn migrate_manga(
+    async fn submit_migration(
         &self,
         manga_id: MangaId,
         target_source_id: i64,
         target_source_manga_id: String,
         keep_orphaned_downloads: bool,
-    ) -> Result<MigrationResult> {
-        self.migrate_manga(
+    ) -> Result<crate::jobs::JobId> {
+        self.submit_migration(
             manga_id,
             target_source_id,
             target_source_manga_id,
@@ -1713,13 +1714,13 @@ mod tests {
         ) -> Result<MigrationPreview> {
             unimplemented!()
         }
-        async fn migrate_manga(
+        async fn submit_migration(
             &self,
             _manga_id: MangaId,
             _target_source_id: i64,
             _target_source_manga_id: String,
             _keep_orphaned_downloads: bool,
-        ) -> Result<MigrationResult> {
+        ) -> Result<crate::jobs::JobId> {
             unimplemented!()
         }
         async fn add_download_rule(

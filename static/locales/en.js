@@ -1036,6 +1036,8 @@ export default {
   'migration.error.search_failed': 'Search failed',
   'migration.error.preview_failed': 'Failed to load migration preview.',
   'migration.error.migrate_failed': 'Migration failed.',
+  'migration.error.migrate_cancelled': 'Migration was cancelled.',
+  'migration.error.already_running': 'A migration for this series is already running.',
 
   'path_migration.title': 'Move {label} files',
   'path_migration.label.library': 'Library',

@@ -848,6 +848,7 @@ impl AppService {
         job_registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
         job_registry.register::<crate::jobs::update_check::UpdateCheckJob>();
         job_registry.register::<crate::jobs::manifest_backfill::ManifestBackfillJob>();
+        job_registry.register::<crate::jobs::migration::MigrationJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),

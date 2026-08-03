@@ -693,9 +693,10 @@ pub(crate) async fn preview_migration(
     params(("id" = i64, Path, description = "Manga ID")),
     request_body = MigrateMangaRequest,
     responses(
-        (status = 200, description = "Manga migrated to new source"),
+        (status = 202, description = "Migration queued; poll GET /rest/jobs/{job_id} for the result"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Insufficient permissions"),
+        (status = 409, description = "A migration for this manga is already in progress"),
     ),
     security(("session" = [])),
     tag = "manga"
@@ -706,15 +707,15 @@ pub(crate) async fn migrate_manga_handler(
     Path(manga_id): Path<MangaId>,
     Json(body): Json<MigrateMangaRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let result = svc
-        .migrate_manga(
+    let job_id = svc
+        .submit_migration(
             manga_id,
             body.target_source_id,
             body.target_source_manga_id,
             body.keep_orphaned_downloads,
         )
         .await?;
-    Ok(Json(result))
+    Ok((StatusCode::ACCEPTED, Json(json!({ "job_id": job_id }))))
 }
 
 #[utoipa::path(
@@ -888,7 +889,6 @@ mod tests {
     use kani_app::service::traits::MangaDomain;
     use kani_shared::types::{
         Chapter, ChapterSortOrder, DownloadRule, DownloadRuleKind, MigrationPreview,
-        MigrationResult,
     };
     use std::sync::Arc;
 
@@ -1038,13 +1038,13 @@ mod tests {
         ) -> kani_app::error::Result<MigrationPreview> {
             unimplemented!()
         }
-        async fn migrate_manga(
+        async fn submit_migration(
             &self,
             _manga_id: MangaId,
             _target_source_id: i64,
             _target_source_manga_id: String,
             _keep_orphaned_downloads: bool,
-        ) -> kani_app::error::Result<MigrationResult> {
+        ) -> kani_app::error::Result<kani_app::jobs::JobId> {
             unimplemented!()
         }
         async fn add_download_rule(

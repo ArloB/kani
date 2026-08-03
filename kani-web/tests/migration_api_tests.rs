@@ -1,0 +1,231 @@
+#![allow(clippy::unwrap_used)]
+// Migration is job-shaped: the endpoint queues work and answers 202 with a job
+// id rather than blocking on network I/O against the target source. These tests
+// pin that contract before 1.0 freezes it, and pin the guard that stops a second
+// migration racing the first over the same chapter rows and CBZs.
+
+mod common;
+use axum::http::StatusCode;
+use common::{build_test_app, create_admin, create_regular_user, test_state};
+use serde_json::json;
+use tower::ServiceExt;
+
+fn post(
+    path: &str,
+    cookie: Option<&str>,
+    body: serde_json::Value,
+) -> axum::http::Request<axum::body::Body> {
+    let mut b = axum::http::Request::builder()
+        .method("POST")
+        .uri(path)
+        .header(axum::http::header::CONTENT_TYPE, "application/json");
+    if let Some(c) = cookie {
+        b = b.header(axum::http::header::COOKIE, c);
+    }
+    b.body(axum::body::Body::from(body.to_string())).unwrap()
+}
+
+async fn seed_manga(db: &sqlx::SqlitePool, source_name: &str, source_manga_id: &str) -> (i64, i64) {
+    let source_id: i64 =
+        sqlx::query_scalar("INSERT INTO sources (name, version) VALUES (?, '0.1') RETURNING id")
+            .bind(source_name)
+            .fetch_one(db)
+            .await
+            .unwrap();
+    let manga_id: i64 = sqlx::query_scalar(
+        "INSERT INTO manga (source_id, source_manga_id, name, status) \
+         VALUES (?, ?, 'Vagabond', 0) RETURNING id",
+    )
+    .bind(source_id)
+    .bind(source_manga_id)
+    .fetch_one(db)
+    .await
+    .unwrap();
+    (source_id, manga_id)
+}
+
+fn migrate_body(target_source_id: i64) -> serde_json::Value {
+    json!({
+        "target_source_id": target_source_id,
+        "target_source_manga_id": "tgt-1",
+        "keep_orphaned_downloads": false,
+    })
+}
+
+#[tokio::test]
+async fn migrating_is_accepted_and_answers_with_a_job_id() {
+    let state = test_state().await;
+    let db = state.service.db.clone();
+    let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
+    let (target_source_id, _) = seed_manga(&db, "target", "m2").await;
+
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(post(
+            &format!("/rest/manga/{manga_id}/migrate"),
+            Some(&cookie),
+            migrate_body(target_source_id),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        res.status(),
+        StatusCode::ACCEPTED,
+        "a migration does network I/O against the target source, so it must not \
+         block the request"
+    );
+    let body = common::body_json(res).await;
+    assert!(
+        body.get("job_id").and_then(|v| v.as_str()).is_some(),
+        "the caller has nothing to poll without a job id: {body}"
+    );
+}
+
+/// Puts a migration job for `manga_id` in the queue, without running it.
+///
+/// Submitting a real one and racing it does not work: with no backend installed
+/// the job fails in microseconds, so the pending row is gone before a second
+/// request arrives. The guard reads this table, so seeding it is what actually
+/// exercises the guard.
+async fn seed_pending_migration(db: &sqlx::SqlitePool, manga_id: i64) {
+    sqlx::query(
+        "INSERT INTO jobs (id, job_type, status, priority, description, params_json, created_at) \
+         VALUES (?, 'migration', 'running', 1, 'seeded', ?, 0)",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(json!({ "manga_id": manga_id }).to_string())
+    .execute(db)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_second_migration_of_the_same_manga_is_refused() {
+    // Two migrations of one series race over the same chapter rows and CBZs;
+    // the loser can delete files the winner just re-matched.
+    let state = test_state().await;
+    let db = state.service.db.clone();
+    let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
+    let (target_source_id, _) = seed_manga(&db, "target", "m2").await;
+    seed_pending_migration(&db, manga_id).await;
+
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(post(
+            &format!("/rest/manga/{manga_id}/migrate"),
+            Some(&cookie),
+            migrate_body(target_source_id),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::CONFLICT,
+        "a concurrent migration of the same series must be refused, not queued"
+    );
+}
+
+#[tokio::test]
+async fn an_in_flight_migration_does_not_block_a_different_series() {
+    // The guard is keyed on the series, so it must not serialise the library.
+    let state = test_state().await;
+    let db = state.service.db.clone();
+    let (_, busy_manga) = seed_manga(&db, "origin", "m1").await;
+    let (_, other_manga) = seed_manga(&db, "other", "m2").await;
+    let (target_source_id, _) = seed_manga(&db, "target", "m3").await;
+    seed_pending_migration(&db, busy_manga).await;
+
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(post(
+            &format!("/rest/manga/{other_manga}/migrate"),
+            Some(&cookie),
+            migrate_body(target_source_id),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
+async fn migrating_unauthenticated_is_401() {
+    let state = test_state().await;
+    let db = state.service.db.clone();
+    let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
+    let app = build_test_app(state).await;
+
+    let res = app
+        .oneshot(post(
+            &format!("/rest/manga/{manga_id}/migrate"),
+            None,
+            migrate_body(1),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn migrating_without_library_manage_is_403() {
+    // `library:manage` is seeded to the default `user` role in this app, so a
+    // standard account can migrate by design. Stripping the role is what proves
+    // the endpoint is gated at all rather than merely authenticated.
+    let state = test_state().await;
+    let db = state.service.db.clone();
+    let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
+
+    let (u, p) = create_regular_user(&state, "gail").await;
+    sqlx::query("DELETE FROM user_roles WHERE user_id = (SELECT id FROM users WHERE username = ?)")
+        .bind(u)
+        .execute(&db)
+        .await
+        .unwrap();
+
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(post(
+            &format!("/rest/manga/{manga_id}/migrate"),
+            Some(&cookie),
+            migrate_body(1),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_malformed_migration_body_is_rejected() {
+    let state = test_state().await;
+    let db = state.service.db.clone();
+    let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
+
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(post(
+            &format!("/rest/manga/{manga_id}/migrate"),
+            Some(&cookie),
+            json!({ "target_source_id": "not a number" }),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        res.status().is_client_error(),
+        "expected a 4xx, got {}",
+        res.status()
+    );
+}
