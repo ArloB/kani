@@ -22,7 +22,7 @@ import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { renderTabs } from '../components/tabs.js';
 import { showToast, showApiError } from '../components/toast.js';
 import { Modal, mountIntoModalRoot, showConfirm } from '../components/modal.js';
-import { iconDocument } from '../icons.js';
+import { iconDocument, iconX} from '../icons.js';
 import { getCachedChapterIds, onChapterCached } from '../offline.js';
 import { mountMangaHeader } from '../components/manga-details/manga-header.js';
 import { mountLibrarySettingsPanel } from '../components/manga-details/library-settings-panel.js';
@@ -1019,7 +1019,7 @@ function _openChapterNotesModal() {
   const closeBtn = document.createElement('button');
   closeBtn.className = 'btn-icon';
   closeBtn.setAttribute('aria-label', t('common.close'));
-  closeBtn.textContent = '✕';
+  closeBtn.innerHTML = iconX;
   hdr.appendChild(title);
   hdr.appendChild(closeBtn);
 

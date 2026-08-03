@@ -29,7 +29,7 @@ import { skeletonGrid } from '../components/skeletons.js';
 import { startLoading, finishLoading } from '../components/page-loading-bar.js';
 import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
-import { iconBookOpen, iconChevronDown, iconRefresh } from '../icons.js';
+import { iconBookOpen, iconChevronDown, iconRefresh, iconCheck} from '../icons.js';
 import { showToast, showApiError } from '../components/toast.js';
 import { showContextMenu } from '../components/menu.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
@@ -936,8 +936,8 @@ function _toggleMangaSelected(id, cardEl) {
     if (!cardEl.querySelector('.js-select-overlay')) {
       const overlay = document.createElement('div');
       overlay.className = 'js-select-overlay absolute top-1 right-1 w-5 h-5 bg-accent rounded-full flex items-center justify-center text-on-accent text-xs font-bold pointer-events-none z-10';
-      overlay.textContent = '✓';
-      overlay.style.fontSize = '10px';
+      overlay.innerHTML = iconCheck;
+      overlay.classList.add('icon-2xs');
       const coverWrap = cardEl.querySelector('.relative');
       if (coverWrap) /** @type {HTMLElement} */ (coverWrap).appendChild(overlay);
     }

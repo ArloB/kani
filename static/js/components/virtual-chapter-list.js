@@ -14,7 +14,7 @@ import { navigate } from '../router.js';
 import { downloadChapter, deleteChapter, cancelDownload, setChapterReadStatus, markChaptersUpTo, retryChapterDownload } from '../api.js';
 import * as api from '../api.js';
 import { Modal } from './modal.js';
-import { iconCheck, iconDownload, iconCloud, iconCloudCheck } from '../icons.js';
+import { iconCheck, iconDownload, iconCloud, iconCloudCheck, iconPencil} from '../icons.js';
 import { Icon } from './icon.js';
 import { ContextMenu } from './menu.js';
 import { BulkBar } from './bulk-bar.js';
@@ -357,7 +357,9 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, onAssignVolu
         <div class="flex items-center gap-3 text-xs text-text-muted">
           ${showScanlator && chapter.scanlator && html`<span>${chapter.scanlator}</span>`}
           ${chapter.date_uploaded && html`<span>${formatDate(chapter.date_uploaded)}</span>`}
-          ${hasNote && html`<span class="text-accent" title=${t('chapter.badge.has_note')}>✎</span>`}
+          ${hasNote && html`<span class="text-accent icon-2xs" title=${t('chapter.badge.has_note')}>
+            <${Icon} svg=${iconPencil} label=${t('chapter.badge.has_note')} />
+          </span>`}
         </div>
       </div>
       <div class="flex items-center gap-1 shrink-0">

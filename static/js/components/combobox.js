@@ -5,7 +5,7 @@
 import { h, render } from 'preact';
 import { useState, useEffect, useRef, useMemo } from 'preact/hooks';
 import htm from 'htm';
-import { iconX, iconChevronDown } from '../icons.js';
+import { iconX, iconChevronDown, iconCheck } from '../icons.js';
 import { Icon } from './icon.js';
 import { Pill } from './pill.js';
 import { renderPopover, useOutsideClose } from './popover.js';
@@ -338,7 +338,7 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
               >
                 <span class=${'shrink-0 w-4 h-4 rounded border flex items-center justify-center text-2xs leading-none '
                   + (isSelected ? 'bg-accent border-accent text-on-accent' : 'border-border bg-surface')}>
-                  ${isSelected ? '✓' : ''}
+                  ${isSelected ? html`<span class="icon-2xs"><${Icon} svg=${iconCheck} /></span>` : ''}
                 </span>
                 ${opt.name}
               </div>

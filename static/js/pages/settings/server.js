@@ -9,6 +9,7 @@ import { showConfirm } from '../../components/modal.js';
 import { showToast, showApiError } from '../../components/toast.js';
 import { SettingsGroup, SettingsRow } from './_shared.js';
 import { useBusy } from '../../hooks/use-busy.js';
+import { iconSpinner } from '../../icons.js';
 import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
@@ -33,7 +34,7 @@ function _showRestartOverlay() {
     'bg-bg/90 backdrop-blur-sm',
   ].join(' ');
   overlay.innerHTML = `
-    <div class="w-10 h-10 border-4 border-accent border-t-transparent rounded-full animate-spin"></div>
+    <div class="icon-2xl text-accent">${iconSpinner}</div>
     <p class="text-lg font-semibold text-text">${t('settings.server.restart_overlay.title')}</p>
     <p class="text-sm text-text-muted">${t('settings.server.restart_overlay.desc')}</p>
   `;
