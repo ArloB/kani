@@ -33,6 +33,7 @@ impl AppService {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
+        filter_orphaned: Option<bool>,
     ) -> Result<(Vec<kani_shared::types::Chapter>, bool, Option<u32>, u32)> {
         let limit = (page_size as i64) + 1;
         let offset = ((page - 1).max(0) as i64) * (page_size as i64);
@@ -46,6 +47,14 @@ impl AppService {
         if filter_unread == Some(true) {
             extra.push_str(" AND (uct.is_read IS NULL OR uct.is_read = 0)");
         }
+        // Chapters kept by a migration's "keep downloaded chapters" are hidden
+        // unless asked for: they no longer exist on the series' current source,
+        // so they are an archive rather than part of the listing.
+        extra.push_str(if filter_orphaned == Some(true) {
+            " AND c.is_orphaned = true"
+        } else {
+            " AND c.is_orphaned = false"
+        });
 
         let sql = format!(
             r#"SELECT c.id, c.source_chapter_id, c.name, c.chapter_number, c.language,
@@ -56,7 +65,6 @@ impl AppService {
                LEFT JOIN user_chapter_tracking uct
                    ON uct.chapter_id = c.id AND uct.user_id = ?
                WHERE c.manga_id = ?{extra}
-                 AND c.is_orphaned = false
                  AND (? IS NULL OR c.scanlator = ?)
                ORDER BY {}, COALESCE((
                    SELECT sp.priority FROM scanlator_preferences sp

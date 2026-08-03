@@ -580,6 +580,7 @@ pub trait MangaDomain: Send + Sync {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
+        filter_orphaned: Option<bool>,
     ) -> Result<(Vec<Chapter>, bool, Option<u32>, u32)>;
     #[allow(clippy::too_many_arguments)]
     async fn get_chapter_ids(
@@ -684,6 +685,7 @@ impl MangaDomain for AppService {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
+        filter_orphaned: Option<bool>,
     ) -> Result<(Vec<Chapter>, bool, Option<u32>, u32)> {
         self.get_local_chapters(
             manga_id,
@@ -694,6 +696,7 @@ impl MangaDomain for AppService {
             filter_downloaded,
             filter_unread,
             filter_scanlator,
+            filter_orphaned,
         )
         .await
     }
@@ -1636,6 +1639,7 @@ mod tests {
             _filter_downloaded: Option<bool>,
             _filter_unread: Option<bool>,
             _filter_scanlator: Option<String>,
+            _filter_orphaned: Option<bool>,
         ) -> Result<(Vec<Chapter>, bool, Option<u32>, u32)> {
             unimplemented!()
         }

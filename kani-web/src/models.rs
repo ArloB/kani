@@ -157,6 +157,9 @@ pub struct LocalChaptersQuery {
     /// Limit to a specific scanlator when set
     #[garde(skip)]
     pub filter_scanlator: Option<String>,
+    /// `true` = only chapters a migration orphaned; absent = hide them
+    #[garde(skip)]
+    pub filter_orphaned: Option<bool>,
 }
 
 /// Query parameters for the chapter-IDs endpoint (no pagination).

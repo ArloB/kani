@@ -48,6 +48,7 @@ function _updateUrl() {
     rsort: (!_isLocal && _remoteSort) ? _remoteSort : null,
     dl: _filterDownloaded ? '1' : null,
     unread: _filterUnread ? '1' : null,
+    orphaned: _filterOrphaned ? '1' : null,
     scanlator: _filterScanlator || null,
   });
 }
@@ -72,6 +73,7 @@ let _upgradeAutoReplace = false;
 let _suppressedCount = 0;
 let _filterDownloaded = false;
 let _filterUnread = false;
+let _filterOrphaned = false;
 let _filterCached = false;
 let _filterScanlator = /** @type {string|null} */ (null);
 let _cachedChapterIds = /** @type {Set<number>} */ (new Set());
@@ -148,6 +150,7 @@ export async function init(container, params) {
   _downloadAllPreferredOnly = true;
   _filterDownloaded = _dbId ? getLocal(`kani_filter_downloaded_${_dbId}`) === 'true' : false;
   _filterUnread = false;
+  _filterOrphaned = false;
   _filterCached = false;
   _filterScanlator = null;
   _cachedChapterIds = new Set();
@@ -167,6 +170,7 @@ export async function init(container, params) {
     if (_sortParam) { _sortOrder = _sortParam; setLocal('kani_chapter_sort_order', _sortOrder); }
     if (_urlParams.get('dl') === '1') _filterDownloaded = true;
     if (_urlParams.get('unread') === '1') _filterUnread = true;
+    if (_urlParams.get('orphaned') === '1') _filterOrphaned = true;
     const _scanlatorParam = _urlParams.get('scanlator');
     if (_scanlatorParam) _filterScanlator = _scanlatorParam;
   }
@@ -1173,6 +1177,14 @@ async function _fetchChapters(sectionEl) {
       },
     );
     mkFilterChip(
+      t('manga.details.filter.orphaned'), _filterOrphaned,
+      _filterOrphaned ? t('manga.details.filter.all') : t('manga.details.filter.orphaned.show'),
+      () => {
+        _filterOrphaned = !_filterOrphaned;
+        _page = 1; _updateUrl(); _fetchChapters(sectionEl);
+      },
+    );
+    mkFilterChip(
       t('manga.details.filter.cached'), _filterCached,
       _filterCached ? t('manga.details.filter.all') : t('manga.details.filter.cached.show'),
       () => {
@@ -1219,6 +1231,7 @@ async function _fetchChapters(sectionEl) {
             filterDownloaded: _filterDownloaded ? true : null,
             filterUnread: _filterUnread ? true : null,
             filterScanlator: _filterScanlator,
+            filterOrphaned: _filterOrphaned ? true : null,
           })
         : await api.getRemoteChapters(_sid, _mangaId, _page, _chapterPageSize, _abort?.signal,
             _remoteChapterSorts?.length ? _remoteSort : null);
@@ -1475,6 +1488,7 @@ async function _loadMoreChapters() {
           filterDownloaded: _filterDownloaded ? true : null,
           filterUnread: _filterUnread ? true : null,
           filterScanlator: _filterScanlator,
+          filterOrphaned: _filterOrphaned ? true : null,
         })
       : await api.getRemoteChapters(_sid, _mangaId, _page, _chapterPageSize, _abort?.signal,
           _remoteChapterSorts?.length ? _remoteSort : null);

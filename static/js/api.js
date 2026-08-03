@@ -667,10 +667,10 @@ export async function getMangaDetails(id, signal) {
  * @param {number} pageSize
  * @param {string} sortOrder
  * @param {AbortSignal | undefined} signal
- * @param {{ filterDownloaded?: boolean|null, filterUnread?: boolean|null, filterScanlator?: string|null }} [filters]
+ * @param {{ filterDownloaded?: boolean|null, filterUnread?: boolean|null, filterScanlator?: string|null, filterOrphaned?: boolean|null }} [filters]
  */
 export async function getLocalChapters(id, page, pageSize, sortOrder, signal, filters = {}) {
-  const { filterDownloaded, filterUnread, filterScanlator } = filters;
+  const { filterDownloaded, filterUnread, filterScanlator, filterOrphaned } = filters;
   return _req('GET', `/manga/${id}/chapters`, {
     params: {
       page,
@@ -679,6 +679,7 @@ export async function getLocalChapters(id, page, pageSize, sortOrder, signal, fi
       ...(filterDownloaded != null && { filter_downloaded: filterDownloaded }),
       ...(filterUnread != null && { filter_unread: filterUnread }),
       ...(filterScanlator != null && { filter_scanlator: filterScanlator }),
+      ...(filterOrphaned != null && { filter_orphaned: filterOrphaned }),
     },
     signal,
   });

@@ -229,3 +229,57 @@ async fn a_malformed_migration_body_is_rejected() {
         res.status()
     );
 }
+
+#[tokio::test]
+async fn the_chapter_listing_can_ask_for_orphans() {
+    // Chapters kept by "keep downloaded chapters" are hidden by default; the
+    // filter is the only way the user reaches files the migration preserved.
+    let state = test_state().await;
+    let db = state.service.db.clone();
+    let (_, manga_id) = seed_manga(&db, "origin", "m1").await;
+
+    sqlx::query(
+        "INSERT INTO chapters (manga_id, source_chapter_id, chapter_number, language, name, is_orphaned) \
+         VALUES (?, 'old-5', 5.0, 'en', 'Kept', 1)",
+    )
+    .bind(manga_id)
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let hidden = common::body_json(
+        app.clone()
+            .oneshot(common::authed_get(
+                &format!("/rest/manga/{manga_id}/chapters"),
+                &cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        hidden["chapters"].as_array().map(|a| a.len()),
+        Some(0),
+        "orphans stay out of the default listing"
+    );
+
+    let shown = common::body_json(
+        app.oneshot(common::authed_get(
+            &format!("/rest/manga/{manga_id}/chapters?filter_orphaned=true"),
+            &cookie,
+        ))
+        .await
+        .unwrap(),
+    )
+    .await;
+    let rows = shown["chapters"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "the filter must reach them: {shown}");
+    assert_eq!(
+        rows[0]["is_orphaned"], true,
+        "the row renders its Orphaned badge from this field"
+    );
+}

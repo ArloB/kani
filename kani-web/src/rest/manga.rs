@@ -368,6 +368,7 @@ pub(crate) async fn get_local_manga_details(
         ("filter_downloaded" = Option<bool>, Query, description = "true = downloaded only, false = undownloaded only"),
         ("filter_unread" = Option<bool>, Query, description = "true = unread only"),
         ("filter_scanlator" = Option<String>, Query, description = "Scanlator name"),
+        ("filter_orphaned" = Option<bool>, Query, description = "true = only chapters a migration orphaned; absent hides them"),
     ),
     responses(
         (status = 200, description = "Paginated chapter list"),
@@ -392,6 +393,7 @@ pub(crate) async fn get_local_chapters(
             q.filter_downloaded,
             q.filter_unread,
             q.filter_scanlator,
+            q.filter_orphaned,
         )
         .await?;
     Ok(Json(crate::types::ChapterList {
@@ -942,6 +944,7 @@ mod tests {
             _filter_downloaded: Option<bool>,
             _filter_unread: Option<bool>,
             _filter_scanlator: Option<String>,
+            _filter_orphaned: Option<bool>,
         ) -> kani_app::error::Result<(Vec<Chapter>, bool, Option<u32>, u32)> {
             unimplemented!()
         }

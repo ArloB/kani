@@ -1308,6 +1308,8 @@ export default {
   'manga.details.filter.all': 'Show all chapters',
   'manga.details.filter.unread': 'Unread',
   'manga.details.filter.unread.show': 'Show unread chapters only',
+  'manga.details.filter.orphaned': 'Orphaned',
+  'manga.details.filter.orphaned.show': 'Show chapters kept from a previous source',
   'manga.details.filter.cached': 'Cached',
   'manga.details.filter.cached.show': 'Show cached chapters only',
   'manga.details.scanlator.aria': 'Filter by scanlator',
