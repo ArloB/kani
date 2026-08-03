@@ -1536,6 +1536,7 @@ export default {
   'settings.advanced.update_check.desc': 'Periodically check GitHub for a newer Kani release and show a banner when one is available.',
   'settings.advanced.global_search_timeout.label': 'Global search source timeout',
   'settings.advanced.global_search_timeout.desc': 'Seconds to wait for one source before returning results from the sources that answered.',
+  'session.permissions_failed': 'Could not load your permissions, so some features are hidden. Reload to try again.',
   'update_banner.label': 'Update available',
   'update_banner.message': 'Kani {version} has been released.',
   'update_banner.action': 'View release',

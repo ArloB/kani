@@ -43,6 +43,14 @@ export async function initPermissions() {
   } catch (e) {
     /** @type {any} */
     const err = e;
-    if (err.status !== 401) console.error('Failed to load permissions:', err);
+    if (err.status !== 401) {
+      console.error('Failed to load permissions:', err);
+      // Every hasPermission() is now false, so navigation entries and admin
+      // sections quietly disappear. Say so: a stripped-down UI with no
+      // explanation reads as "the feature is gone", not "reload me".
+      const { showToast } = await import('./components/toast.js');
+      const { t } = await import('./i18n.js');
+      showToast(t('session.permissions_failed'), { type: 'error' });
+    }
   }
 }
