@@ -356,15 +356,15 @@ export async function init(container, params) {
   container.insertBefore(hero, wrap);
 
   const layout = document.createElement('div');
-  layout.className = 'flex flex-col md:flex-row gap-6 md:gap-8 md:items-stretch page-fill manga-hero__body';
+  layout.className = 'flex flex-col lg:flex-row gap-6 lg:gap-8 lg:items-stretch page-fill manga-hero__body';
   wrap.appendChild(layout);
 
   const leftCol = document.createElement('div');
-  leftCol.className = 'manga-rail w-full flex flex-col md:w-1/4 md:shrink-0 page-col';
+  leftCol.className = 'manga-rail w-full flex flex-col lg:shrink-0 page-col';
   layout.appendChild(leftCol);
 
   const rightCol = document.createElement('div');
-  rightCol.className = 'w-full min-w-0 flex flex-col gap-4 md:flex-1 page-col';
+  rightCol.className = 'w-full min-w-0 flex flex-col gap-4 lg:flex-1 page-col';
   layout.appendChild(rightCol);
 
   // The notice is about chapters, so it heads the chapter column rather than
@@ -608,7 +608,7 @@ async function _renderManageTab(contentEl) {
   };
 
   function applyManageHeight() {
-    if (window.innerWidth >= 768) {
+    if (window.innerWidth >= 1024) {
       const top = contentEl.getBoundingClientRect().top;
       contentEl.style.height = Math.max(200, window.innerHeight - top - 48) + 'px';
       contentEl.style.overflowY = 'auto';
@@ -1431,7 +1431,10 @@ function _renderChapterList() {
   // what is available and what the rows actually need. Claiming the whole
   // column regardless left a three-chapter series with ~490 px of empty
   // scroller under it and the pager stranded at the bottom of the page.
-  const height = window.innerWidth >= 768
+  // 1024, matching the layout: between 768 and 1023 the columns are stacked,
+  // and handing the list a windowed pixel height computed for a layout that is
+  // not on screen collapsed it to 64 px.
+  const height = window.innerWidth >= 1024
     ? (() => {
         // Measure against the column the list actually lives in, not the
         // window with a magic 48 px of slack: the section already ends where
@@ -1440,7 +1443,10 @@ function _renderChapterList() {
         const bottom = section
           ? section.getBoundingClientRect().bottom
           : window.innerHeight - 48;
-        const available = Math.max(200, bottom - _listContainerEl.getBoundingClientRect().top - paginH - 12);
+        // No 200 px floor: on a short window that floor was larger than the
+        // space actually left, which pushed the page into overflow — the one
+        // thing this layout exists to prevent. The list takes what there is.
+        const available = Math.max(64, bottom - _listContainerEl.getBoundingClientRect().top - paginH - 12);
         const needed = displayChapters.length * readChapterRowHeight() + (_chaptersHasMore ? 48 : 0);
         return Math.min(available, Math.max(needed, 120));
       })()

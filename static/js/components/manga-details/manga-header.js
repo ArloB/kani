@@ -119,11 +119,14 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     ? api.getMangaCoverUrl(dbId, 'lg') + '&v=' + Date.now()
     : (info?.cover_url ?? info?.cover_image_url ?? null);
 
-  const isDesktop = () => window.innerWidth >= 768;
+  // The two-column rail needs ~740 px of content (a 260 px rail plus a readable
+  // chapter column). With the sidebar that is ~975 px, so the split happens at
+  // lg rather than md — at 768 the rail was 130 px and clipped its own labels.
+  const isDesktop = () => window.innerWidth >= 1024;
 
   // ── Cover ──
   const coverInner = document.createElement('div');
-  coverInner.className = 'rail-cover-slot aspect-[2/3] rounded-xl overflow-hidden bg-surface-2 shrink-0 cursor-pointer shadow-card'; /* justified: manga cover aspect ratio */
+  coverInner.className = 'rail-cover-slot aspect-[2/3] rounded-xl overflow-hidden bg-surface-2 cursor-pointer shadow-card'; /* justified: manga cover aspect ratio */
   coverInner.appendChild(createCoverImage({ url: coverUrl, alt: info?.title ?? '' }));
 
   // Cover lightbox
@@ -390,7 +393,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   titleMetaCard.appendChild(meta);
 
   const contentCard = document.createElement('div');
-  contentCard.className = 'flex flex-col gap-3 min-w-0 page-fill';
+  contentCard.className = 'flex flex-col gap-3 min-w-0 rail-content';
   contentCard.style.position = 'relative';
   contentCard.style.zIndex = '1';
 
@@ -401,7 +404,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   // The scroll boundary sits below the actions: the cover and Read/Download/Scan
   // hold their place, and only the credits, facts and description move. Putting
   // it any higher scrolled the primary actions out of reach.
-  metaPanel.className = 'rail-metapanel flex flex-col gap-3 min-w-0 pt-1 page-body';
+  metaPanel.className = 'rail-metapanel flex flex-col gap-3 min-w-0 pt-1 rail-meta-panel';
 
   const heroRow = document.createElement('div');
   leftCol.appendChild(heroRow);
@@ -427,7 +430,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     } else {
       // Cap the column so the cover and panel don't sprawl across a quarter of
       // an ultra-wide viewport.
-      leftCol.style.maxWidth = '20rem';
+      leftCol.style.maxWidth = '';
       // The cover holds its place; everything under it is the scroll region.
       // Expanding the description used to grow the column and scroll the page,
       // which slid the cover up out of view — the artwork is the last thing

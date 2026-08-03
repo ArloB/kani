@@ -2020,6 +2020,50 @@
     -webkit-mask-image: none;
   }
 
+  /* The rail holds a cover, a 2x2 fact grid and a synopsis, all of which were
+     drawn for about 300 px. As a fraction of the viewport it was 186 px at
+     1024 and 305 px at 1500 — the same column doing the same job at wildly
+     different sizes, clipping its own labels at the small end. A pixel range
+     keeps it legible everywhere and makes the layout question arithmetic:
+     260 + ~450 for chapters + gap is roughly 740 px of content. */
+  @media (min-width: 1024px) {
+    /* The cover is the element that gives way. Everything else in the rail —
+       the actions, the credits, the facts, three lines of synopsis — has a
+       size it needs, and the artwork is the only part that can lose height and
+       still do its job. Left fixed, a 420 px cover on a 768 px screen pushed
+       the description off the bottom entirely, which is the one thing in the
+       rail people actually read. */
+    .rail-cover-slot {
+      flex: 1 1 auto;
+      min-height: 7rem;
+      max-height: 42vh;
+    }
+    /* Crops from the bottom: a cover's title and the character's face live at
+       the top, so that is the part worth keeping when height is short. */
+    .rail-cover-slot img { object-fit: cover; object-position: top center; }
+
+    /* Actions, credits, facts and the synopsis take the height they need and
+       refuse to shrink, so the cover above them absorbs the whole squeeze
+       rather than the two splitting it and the description losing either way. */
+    .rail-content { flex: 0 0 auto; min-height: 0; }
+
+    /* Sized to what it holds, so it is never the thing that gets squeezed;
+       it only scrolls if even the cover's minimum cannot buy enough room. */
+    .rail-meta-panel {
+      flex: 0 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
+
+    .manga-rail {
+      /* flex-basis, not width: the stacked layout needs `w-full` on this
+         element and a utility width outranks anything declared here, so the
+         rail pinned to its max instead of its intended size. */
+      flex: 0 0 17.5rem;
+      max-width: 17.5rem;
+    }
+  }
+
   /* ── Fixed-viewport page layout ──
      A desktop page fills the shell exactly and never scrolls itself: its
      heading, filters and pagination hold their place and only the data region
@@ -2034,7 +2078,7 @@
      scrolling the page — so below the floor these are inert and the document
      scrolls as normal. Tailwind's `md:` cannot express that, which is why
      these are real classes rather than utilities. */
-  @media (min-width: 768px) and (min-height: 700px) {
+  @media (min-width: 1024px) and (min-height: 700px) {
     /* The page root is #page-content itself, which already lays out as a
        scrolling column. What it needs is for its child to be allowed to
        shrink — and `#page-content > * { flex-shrink: 0 }` outranks a plain
@@ -2071,13 +2115,22 @@
     .page-body-host { flex: 1 1 auto; min-height: 0; }
   }
 
+  /* Below lg the rail is a stacked row and the cover must hold its size; the
+     `shrink-0` utility that used to do this was removed because at lg it beat
+     the rule that lets the cover absorb the column's squeeze. */
+  @media (max-width: 1023px) {
+    .rail-cover-slot { flex: none; }
+  }
+
   /* ── Chapter tab row: sticky on a phone ──
      Vertical space above the list is cheap on mobile — a flick clears the hero
      — so nothing here is about saving pixels. It is about reach: once the hero
      has scrolled past, a 219-chapter list leaves the sort, filters and the
      Manage tab stranded at the top of the document. Sticking the row keeps
      them a thumb away. Desktop does not need it; nothing scrolls there. */
-  @media (max-width: 767px) {
+  /* Up to lg, since that is where the stacked layout ends — a 900 px tablet
+     gets the same treatment as a phone because it has the same layout. */
+  @media (max-width: 1023px) {
     /* Full width, split evenly: two tabs sharing a phone's width read as a
        segmented control, which is what they are. The controls wrap beneath —
        vertical space is the cheap axis here. */
