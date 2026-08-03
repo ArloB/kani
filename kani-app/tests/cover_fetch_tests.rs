@@ -121,6 +121,55 @@ async fn a_cover_served_as_html_is_rejected() {
     );
 }
 
+// A CDN serving a genuine image as `application/octet-stream` is common, and a
+// gate on the declared type refused it — the cover never stored, and the image
+// proxy answered 500. Observed against a real source.
+#[tokio::test]
+async fn a_cover_served_as_octet_stream_is_still_stored() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    origin.set(
+        "/cover",
+        Response::ok(kani_shared_test::origin::jpeg_page(64, 96, false, 80))
+            .header("Content-Type", "application/octet-stream"),
+    );
+
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "cover-source").await;
+    wire_cover_source(&svc, source_id, &origin);
+
+    let manga = svc.save_to_library(source_id, "m1", false).await.unwrap();
+
+    assert!(
+        cover_path(&svc, manga).await.is_some(),
+        "a real JPEG must be judged on its bytes, not on a generic Content-Type"
+    );
+}
+
+// The other direction, and the reason the gate exists: a label cannot buy
+// passage for something that is not an image.
+#[tokio::test]
+async fn a_page_labelled_as_an_image_is_still_rejected() {
+    let origin = TestOrigin::start().await;
+    origin.set("/manga/m1", Response::html(DETAILS_HTML));
+    origin.set(
+        "/cover",
+        Response::ok(b"<html><body>Just a moment...</body></html>".to_vec())
+            .header("Content-Type", "image/png"),
+    );
+
+    let svc = test_service().await;
+    let source_id = insert_source(&svc.db, "cover-source").await;
+    wire_cover_source(&svc, source_id, &origin);
+
+    let manga = svc.save_to_library(source_id, "m1", false).await.unwrap();
+
+    assert!(
+        cover_path(&svc, manga).await.is_none(),
+        "an HTML challenge page claiming to be a PNG must not be stored as a cover"
+    );
+}
+
 // K6 — a cover larger than the 10 MB cap is rejected even with a valid image
 // content-type: bytes_limited stops the download, so nothing is stored.
 #[tokio::test]

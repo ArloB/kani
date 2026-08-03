@@ -36,7 +36,10 @@ async fn the_image_proxy_retries_a_429_then_succeeds() {
     let origin = TestOrigin::start().await;
     origin.script(
         "/img.jpg",
-        vec![Response::status(429), Response::image(vec![1, 2, 3, 4])],
+        vec![
+            Response::status(429),
+            Response::image(kani_shared_test::origin::jpeg_page(16, 16, false, 80)),
+        ],
     );
     let mut state = test_state().await;
     state.proxy_config = fast_proxy_config();
@@ -55,7 +58,7 @@ async fn the_image_proxy_retries_a_429_then_succeeds() {
         .unwrap();
     assert_eq!(
         &body[..],
-        &[1, 2, 3, 4],
+        &kani_shared_test::origin::jpeg_page(16, 16, false, 80)[..],
         "the retried request served the image"
     );
     assert_eq!(origin.hits("/img.jpg"), 2, "the 429 was retried once");
@@ -98,7 +101,8 @@ async fn concurrent_proxy_requests_for_one_url_coalesce() {
     // Slow enough that all five requests are in-flight before the first resolves.
     origin.set(
         "/img.jpg",
-        Response::image(vec![9; 32]).delay(Duration::from_millis(200)),
+        Response::image(kani_shared_test::origin::jpeg_page(16, 16, false, 80))
+            .delay(Duration::from_millis(200)),
     );
     let mut state = test_state().await;
     state.proxy_config = fast_proxy_config();
@@ -146,6 +150,64 @@ async fn an_oversized_image_is_capped() {
     assert!(
         res.status().is_server_error(),
         "a body past the cap is refused, got {}",
+        res.status()
+    );
+}
+
+// A CDN serving a real image as `application/octet-stream` used to be refused by
+// the declared-type gate — the proxy answered 500 and the page showed a broken
+// image. Observed against a real source during a browser sweep.
+#[tokio::test]
+async fn an_image_served_as_octet_stream_is_proxied() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/img",
+        Response::ok(kani_shared_test::origin::jpeg_page(32, 48, false, 80))
+            .header("Content-Type", "application/octet-stream"),
+    );
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app_with_proxy(state.clone()).await;
+    let cookie = login(&app, u, p).await;
+
+    let res = app
+        .oneshot(signed_get(&state, &origin.url("/img"), &cookie))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK, "a real JPEG must be served");
+    assert_eq!(
+        res.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("image/jpeg"),
+        "the served type comes from the bytes, not from the upstream's label"
+    );
+}
+
+// The security half: a label must not buy passage. This is stronger than the
+// old gate, which trusted `Content-Type: image/png` outright.
+#[tokio::test]
+async fn a_page_labelled_as_an_image_is_not_proxied() {
+    let origin = TestOrigin::start().await;
+    origin.set(
+        "/not-img",
+        Response::ok(b"<html><body>Just a moment...</body></html>".to_vec())
+            .header("Content-Type", "image/png"),
+    );
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app_with_proxy(state.clone()).await;
+    let cookie = login(&app, u, p).await;
+
+    let res = app
+        .oneshot(signed_get(&state, &origin.url("/not-img"), &cookie))
+        .await
+        .unwrap();
+
+    assert!(
+        !res.status().is_success(),
+        "an HTML page claiming to be a PNG must not be served as an image, got {}",
         res.status()
     );
 }

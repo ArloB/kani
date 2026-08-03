@@ -52,6 +52,40 @@ pub fn probe_header(prefix: &[u8], bytes: Option<u64>) -> PageProbe {
     }
 }
 
+/// The image type a byte prefix actually *is*, from its magic number.
+///
+/// Content-Type is a claim, not evidence: CDNs routinely serve real images as
+/// `application/octet-stream`, and an attacker can label anything `image/png`.
+/// Deciding on the bytes fixes both — a legitimate image is accepted whatever
+/// its label, and an HTML error or challenge page is refused however it is
+/// labelled.
+pub fn sniff_image_mime(b: &[u8]) -> Option<&'static str> {
+    if is_png(b) {
+        return Some("image/png");
+    }
+    if is_jpeg(b) {
+        return Some("image/jpeg");
+    }
+    if b.starts_with(b"GIF87a") || b.starts_with(b"GIF89a") {
+        return Some("image/gif");
+    }
+    if b.len() >= 12 && b.starts_with(b"RIFF") && &b[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    if b.starts_with(&[0x42, 0x4D]) {
+        return Some("image/bmp");
+    }
+    // ISO-BMFF brands: AVIF and HEIC share the `ftyp` box layout.
+    if b.len() >= 12 && &b[4..8] == b"ftyp" {
+        return match &b[8..12] {
+            b"avif" | b"avis" => Some("image/avif"),
+            b"heic" | b"heix" | b"hevc" | b"mif1" => Some("image/heic"),
+            _ => None,
+        };
+    }
+    None
+}
+
 fn is_png(b: &[u8]) -> bool {
     b.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A])
 }
@@ -579,5 +613,47 @@ mod tests {
             assert_eq!(p.width, None);
             assert_eq!(p.jpeg_quality, None);
         }
+    }
+}
+
+#[cfg(test)]
+mod sniff_tests {
+    use super::sniff_image_mime;
+
+    #[test]
+    fn real_magic_numbers_are_recognised() {
+        assert_eq!(
+            sniff_image_mime(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]),
+            Some("image/png")
+        );
+        assert_eq!(
+            sniff_image_mime(&[0xFF, 0xD8, 0xFF, 0xE0]),
+            Some("image/jpeg")
+        );
+        assert_eq!(sniff_image_mime(b"GIF89a...."), Some("image/gif"));
+        assert_eq!(
+            sniff_image_mime(b"RIFF\0\0\0\0WEBPVP8 "),
+            Some("image/webp")
+        );
+        assert_eq!(sniff_image_mime(b"\0\0\0\x20ftypavif"), Some("image/avif"));
+    }
+
+    #[test]
+    fn a_page_pretending_to_be_an_image_is_not_one() {
+        // The case the Content-Type gate existed for, now decided on bytes so a
+        // hostile `Content-Type: image/png` cannot get past it.
+        assert_eq!(sniff_image_mime(b"<!DOCTYPE html><html>"), None);
+        assert_eq!(
+            sniff_image_mime(b"<html><body>Just a moment...</body>"),
+            None
+        );
+        assert_eq!(sniff_image_mime(b"{\"error\": \"nope\"}"), None);
+    }
+
+    #[test]
+    fn a_truncated_prefix_is_refused_rather_than_guessed() {
+        assert_eq!(sniff_image_mime(b""), None);
+        assert_eq!(sniff_image_mime(&[0x89]), None);
+        assert_eq!(sniff_image_mime(b"RIFF"), None);
     }
 }

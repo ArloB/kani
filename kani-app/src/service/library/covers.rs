@@ -109,7 +109,10 @@ impl AppService {
             .unwrap_or("image/jpeg")
             .to_string();
 
-        if !content_type.starts_with("image/") {
+        // An HTML body is worth refusing before it is read; everything else is
+        // judged on its magic number below, because CDNs serve perfectly good
+        // covers as `application/octet-stream` and a label can lie either way.
+        if content_type.starts_with("text/html") {
             return Err(ServiceError::Internal(format!(
                 "Expected image for cover, got Content-Type: {}",
                 content_type
@@ -121,6 +124,14 @@ impl AppService {
             .bytes_limited(MAX_COVER_BYTES)
             .await
             .map_err(|e| ServiceError::Internal(e.to_string()))?;
+
+        // The cover is re-encoded to JPEG below, so the sniff is purely a gate:
+        // it is what stops an error or challenge page being stored as a cover.
+        if kani_core::probe::sniff_image_mime(&bytes).is_none() {
+            return Err(ServiceError::Internal(format!(
+                "Cover is not an image (upstream declared Content-Type: {content_type})"
+            )));
+        }
 
         let max_dim = self
             .settings

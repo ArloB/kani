@@ -655,10 +655,17 @@ async fn image_proxy(
                                         "Upstream response missing Content-Type".into(),
                                     )
                                 })?;
+                            // The declared type is a claim, not evidence: CDNs
+                            // serve real images as `application/octet-stream`,
+                            // and a hostile origin can label a challenge page
+                            // `image/png`. The body is fully buffered below, so
+                            // the magic number decides — see the sniff after the
+                            // read. Only an outright HTML page is worth
+                            // rejecting this early, before spending the read.
                             let ct_str = content_type.to_str().unwrap_or("");
-                            if !ct_str.starts_with("image/") {
+                            if ct_str.starts_with("text/html") {
                                 tracing::warn!(
-                                    "Upstream proxy returned non-image Content-Type: {}",
+                                    "Upstream proxy returned an HTML page instead of an image: {}",
                                     ct_str
                                 );
                                 return Err(AppError::Other(format!(
@@ -689,6 +696,24 @@ async fn image_proxy(
                     }
                     buf.extend_from_slice(&chunk);
                 }
+
+                // What the bytes actually are. A generic or wrong label is
+                // corrected here; anything that is not an image at all is
+                // refused, whatever the upstream called it.
+                let sniffed = kani_core::probe::sniff_image_mime(&buf);
+                let ct_string = match sniffed {
+                    Some(mime) => mime.to_string(),
+                    None if resolved.is_some() => ct_string,
+                    None => {
+                        tracing::warn!(
+                            "Upstream proxy body is not an image (declared {})",
+                            ct_string
+                        );
+                        return Err(AppError::Other(format!(
+                            "Expected image, upstream returned Content-Type: {ct_string}"
+                        )));
+                    }
+                };
 
                 let (processed_bytes, processed_ct) = if let Some(r) = &resolved {
                     let out = r.output();
