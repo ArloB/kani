@@ -678,6 +678,7 @@ export async function getLocalChapters(id, page, pageSize, sortOrder, signal, fi
       sort_order: sortOrder,
       ...(filterDownloaded != null && { filter_downloaded: filterDownloaded }),
       ...(filterUnread != null && { filter_unread: filterUnread }),
+      ...(filterOrphaned != null && { filter_orphaned: filterOrphaned }),
       ...(filterScanlator != null && { filter_scanlator: filterScanlator }),
       ...(filterOrphaned != null && { filter_orphaned: filterOrphaned }),
     },
@@ -688,15 +689,16 @@ export async function getLocalChapters(id, page, pageSize, sortOrder, signal, fi
 /**
  * Returns all chapter IDs matching the given filters (no pagination).
  * @param {number} id
- * @param {{ filterDownloaded?: boolean|null, filterUnread?: boolean|null, filterScanlator?: string|null, preferredOnly?: boolean, sortOrder?: string }} [opts]
+ * @param {{ filterDownloaded?: boolean|null, filterUnread?: boolean|null, filterScanlator?: string|null, preferredOnly?: boolean, sortOrder?: string, filterOrphaned?: boolean|null }} [opts]
  * @returns {Promise<{ ids: number[] }>}
  */
 export async function getChapterIds(id, opts = {}) {
-  const { filterDownloaded, filterUnread, filterScanlator, preferredOnly, sortOrder } = opts;
+  const { filterDownloaded, filterUnread, filterScanlator, preferredOnly, sortOrder, filterOrphaned } = opts;
   return _req('GET', `/manga/${id}/chapter_ids`, {
     params: {
       ...(filterDownloaded != null && { filter_downloaded: filterDownloaded }),
       ...(filterUnread != null && { filter_unread: filterUnread }),
+      ...(filterOrphaned != null && { filter_orphaned: filterOrphaned }),
       ...(filterScanlator != null && { filter_scanlator: filterScanlator }),
       ...(preferredOnly && { preferred_only: true }),
       ...(sortOrder && { sort_order: sortOrder }),

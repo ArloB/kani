@@ -277,3 +277,89 @@ async fn an_orphan_and_a_live_chapter_can_share_a_number() {
         "two distinct rows at the same chapter number"
     );
 }
+
+#[tokio::test]
+async fn chapter_ids_expose_orphans_only_on_request() {
+    // Bulk download and preferred-version selection both read this. Reaching a
+    // chapter the current source does not carry would fail every fetch, so the
+    // default must stay orphan-free; only an explicit ask returns them.
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "src").await;
+    let manga_id = insert_manga(&svc.db, src, "m1", "Manga").await;
+    let live = insert_chapter(&svc.db, manga_id, "ch1", 1.0).await;
+    let kept = insert_chapter(&svc.db, manga_id, "ch2", 2.0).await;
+    orphan_chapter(&svc.db, kept).await;
+
+    let default_ids = svc
+        .get_chapter_ids(
+            manga_id,
+            UserId(1),
+            ChapterSortOrder::ChapterDesc,
+            None,
+            None,
+            None,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        default_ids,
+        vec![live],
+        "bulk actions must not reach orphans"
+    );
+
+    let orphan_ids = svc
+        .get_chapter_ids(
+            manga_id,
+            UserId(1),
+            ChapterSortOrder::ChapterDesc,
+            None,
+            None,
+            None,
+            false,
+            Some(true),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        orphan_ids,
+        vec![kept],
+        "selecting orphans for deletion needs exactly them"
+    );
+}
+
+#[tokio::test]
+async fn chapter_ids_are_scoped_to_the_manga_not_the_user() {
+    // Regression: the binds were one out of step, so `? IS NULL` received
+    // manga_id and the scanlator guard rejected every row, while the manga
+    // filter matched on user_id. Every fixture used manga_id == user_id == 1,
+    // which made the swap invisible. Distinct ids are the whole point here.
+    let svc = test_service().await;
+    let src = insert_source(&svc.db, "src").await;
+    let first = insert_manga(&svc.db, src, "m1", "First").await;
+    let second = insert_manga(&svc.db, src, "m2", "Second").await;
+    insert_chapter(&svc.db, first, "a1", 1.0).await;
+    insert_chapter(&svc.db, first, "a2", 2.0).await;
+    insert_chapter(&svc.db, second, "b1", 1.0).await;
+
+    let ids = svc
+        .get_chapter_ids(
+            second,
+            UserId(7),
+            ChapterSortOrder::ChapterDesc,
+            None,
+            None,
+            None,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        ids.len(),
+        1,
+        "no scanlator filter must still return the manga's chapters"
+    );
+}

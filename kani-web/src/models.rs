@@ -183,6 +183,9 @@ pub struct ChapterIdsQuery {
     #[garde(skip)]
     #[serde(default)]
     pub preferred_only: bool,
+    /// `true` = only chapters a migration orphaned; absent = hide them
+    #[garde(skip)]
+    pub filter_orphaned: Option<bool>,
 }
 
 fn default_chapter_page_size() -> i32 {

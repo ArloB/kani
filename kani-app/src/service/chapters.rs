@@ -150,6 +150,7 @@ impl AppService {
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
         preferred_only: bool,
+        filter_orphaned: Option<bool>,
     ) -> Result<Vec<ChapterId>> {
         // When preferred_only is set, restrict to undownloaded chapters and
         // apply filter_chapters_by_rules afterwards.
@@ -168,6 +169,14 @@ impl AppService {
         if filter_unread == Some(true) {
             extra.push_str(" AND (uct.is_read IS NULL OR uct.is_read = 0)");
         }
+        // Opt-in, like the listing. Bulk download and preferred-version
+        // selection pass None, so they never reach for a chapter the current
+        // source does not carry; only "select orphaned" asks for them.
+        extra.push_str(if filter_orphaned == Some(true) {
+            " AND c.is_orphaned = true"
+        } else {
+            " AND c.is_orphaned = false"
+        });
 
         let sql = format!(
             r#"SELECT c.id
@@ -175,7 +184,6 @@ impl AppService {
                LEFT JOIN user_chapter_tracking uct
                    ON uct.chapter_id = c.id AND uct.user_id = ?
                WHERE c.manga_id = ?{extra}
-                 AND c.is_orphaned = false
                  AND (? IS NULL OR c.scanlator = ?)
                ORDER BY {}, COALESCE((
                    SELECT sp.priority FROM scanlator_preferences sp
@@ -186,8 +194,12 @@ impl AppService {
             sort_order.to_sql_order()
         );
 
+        // Bind in placeholder order: the join's user_id, the manga_id, then the
+        // scanlator guard twice. This bound five values for four placeholders,
+        // which put manga_id into `? IS NULL` — never null, so the guard failed
+        // for every row and the whole call returned nothing unless a scanlator
+        // filter happened to be set.
         let ids: Vec<ChapterId> = sqlx::query_scalar::<_, i64>(&sql)
-            .bind(manga_id)
             .bind(user_id)
             .bind(manga_id)
             .bind(filter_scanlator.clone())

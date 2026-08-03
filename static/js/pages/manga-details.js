@@ -74,6 +74,25 @@ let _suppressedCount = 0;
 let _filterDownloaded = false;
 let _filterUnread = false;
 let _filterOrphaned = false;
+let _orphanCount = 0;
+let _orphanCountLoaded = false;
+
+/**
+ * How many chapters a migration kept from this series' previous source.
+ * Drives the disabled state of the bulk "Orphaned" selector; one cheap request
+ * per series, refreshed when a delete could have changed it.
+ */
+async function _refreshOrphanCount() {
+  if (!_isLocal || !_dbId) { _orphanCount = 0; return; }
+  try {
+    const res = await api.getLocalChapters(_dbId, 1, 1, _sortOrder, undefined, { filterOrphaned: true });
+    _orphanCount = Number(res?.total ?? 0);
+  } catch {
+    _orphanCount = 0;
+  _orphanCountLoaded = false;
+  }
+  _orphanCountLoaded = true;
+}
 let _filterCached = false;
 let _filterScanlator = /** @type {string|null} */ (null);
 let _cachedChapterIds = /** @type {Set<number>} */ (new Set());
@@ -151,6 +170,7 @@ export async function init(container, params) {
   _filterDownloaded = _dbId ? getLocal(`kani_filter_downloaded_${_dbId}`) === 'true' : false;
   _filterUnread = false;
   _filterOrphaned = false;
+  _orphanCount = 0;
   _filterCached = false;
   _filterScanlator = null;
   _cachedChapterIds = new Set();
@@ -1250,6 +1270,10 @@ async function _fetchChapters(sectionEl) {
   listEl.innerHTML = '';
   finishLoading();
 
+  if (_isLocal && !_orphanCountLoaded) {
+    _refreshOrphanCount().then(() => { if (_orphanCount > 0) _renderChapterList(); });
+  }
+
   if (!_isLocal && result !== null && _allRemoteChapters === null && _page === 1) {
     const raw = Array.isArray(result?.chapters) ? result.chapters : Array.isArray(result) ? result : [];
     const serverPaged = result?.has_next_page === true || result?.has_next === true;
@@ -1402,6 +1426,12 @@ function _renderChapterList() {
       }
       _selected = new Set(ids); _allSelected = false; _renderChapterList();
     }}
+    orphanCount=${_orphanCount}
+    onSelectOrphaned=${async () => {
+      const res = await api.getChapterIds(_dbId, { filterOrphaned: true, sortOrder: _sortOrder }).catch(() => null);
+      const ids = res?.ids ?? _chapters.filter(ch => ch.is_orphaned).map(ch => ch.id);
+      _selected = new Set(ids); _allSelected = false; _renderChapterList();
+    }}
     onSelectUnread=${async () => {
       let ids;
       if (_isLocal) {
@@ -1443,6 +1473,7 @@ function _renderChapterList() {
       const idSet = new Set(ids);
       _chapters = _chapters.filter(ch => !(idSet.has(ch.id) && ch.is_orphaned)).map(ch => idSet.has(ch.id) ? { ...ch, download_status: 0, page_count: null, downloaded: false } : ch);
       _selected.clear(); _selectMode = false; _allSelected = false; _renderChapterList();
+      _refreshOrphanCount().then(_renderChapterList);
       showToast(t('manga.details.bulk.deleted', { count: ids.length, s: ids.length !== 1 ? 's' : '' }));
     }}
     onExitSelect=${() => { _selectMode = false; _selected.clear(); _allSelected = false; _renderChapterList(); }}

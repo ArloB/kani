@@ -16,7 +16,7 @@ const html = htm.bind(h);
 
 /**
  * @typedef {{ label: string, onClick: () => void, kind?: 'secondary'|'danger', disabled?: boolean, title?: string }} BulkAction
- * @typedef {{ label: string, onClick: () => void, title?: string }} BulkHelper
+ * @typedef {{ label: string, onClick: () => void, title?: string, disabled?: boolean }} BulkHelper
  */
 
 /**
@@ -39,7 +39,8 @@ export function BulkBar({ countLabel, statLine = null, helpers = [], actions, on
       ${helpers.length > 0 && html`
         <div class="flex items-center gap-1 flex-wrap border-r border-border-subtle pr-3">
           ${helpers.map(hp => html`
-            <button key=${hp.label} type="button" class="btn-ghost btn-sm" title=${hp.title} onClick=${hp.onClick}>
+            <button key=${hp.label} type="button" class="btn-ghost btn-sm" title=${hp.title}
+              disabled=${hp.disabled} onClick=${hp.onClick}>
               ${hp.label}
             </button>
           `)}

@@ -413,6 +413,8 @@ const ChapterRow = memo(ChapterRowInner);
  *   onFlipSelection?: () => void,
  *   onSelectUndownloaded?: () => void,
  *   onSelectUnread?: () => void,
+ *   onSelectOrphaned?: () => void,
+ *   orphanCount?: number,
  *   onBulkRead?: (isRead: boolean) => void,
  *   onBulkDownload?: () => void,
  *   onBulkDelete?: () => void,
@@ -492,7 +494,7 @@ function VolumePicker({ chapter, mangaId, onClose, onAssigned }) {
   `;
 }
 
-export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId, height, hasMore, loading, selectMode, selected, canDownload, canDelete, allSelectedProp, onLoadMore, onToggleRead, onMarkUpTo, onToggleSelect, onSelectAll, onFlipSelection, onSelectUndownloaded, onSelectUnread, onBulkRead, onBulkDownload, onBulkDelete, onExitSelect, onEnterSelectWithChapter, onDelete, cachedChapterIds, kccAvailable, onCacheChange, notedChapterIds, onUpgradeApplied }) {
+export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId, height, hasMore, loading, selectMode, selected, canDownload, canDelete, allSelectedProp, onLoadMore, onToggleRead, onMarkUpTo, onToggleSelect, onSelectAll, onFlipSelection, onSelectUndownloaded, onSelectUnread, onSelectOrphaned, orphanCount = 0, onBulkRead, onBulkDownload, onBulkDelete, onExitSelect, onEnterSelectWithChapter, onDelete, cachedChapterIds, kccAvailable, onCacheChange, notedChapterIds, onUpgradeApplied }) {
   const [upgrade, setUpgrade] = useState(/** @type {any} */ (null));
   const [volumeFor, setVolumeFor] = useState(/** @type {any} */ (null));
   const openAssignVolume = useCallback((/** @type {any} */ ch) => setVolumeFor(ch), []);
@@ -629,6 +631,18 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
     ...(onFlipSelection ? [{ label: t('chapter.bulk.flip'), onClick: () => onFlipSelection() }] : []),
     ...(onSelectUndownloaded ? [{ label: t('chapter.bulk.undownloaded'), onClick: () => onSelectUndownloaded() }] : []),
     ...(onSelectUnread ? [{ label: t('chapter.bulk.unread'), onClick: () => onSelectUnread() }] : []),
+    // Kept from a previous source. Offered even at zero so the capability is
+    // discoverable, but disabled with a reason rather than silently inert.
+    ...(onSelectOrphaned
+      ? [{
+          label: t('chapter.bulk.orphaned'),
+          title: orphanCount > 0
+            ? t('chapter.bulk.orphaned.title', { count: orphanCount })
+            : t('chapter.bulk.orphaned.none'),
+          disabled: orphanCount === 0,
+          onClick: () => onSelectOrphaned(),
+        }]
+      : []),
   ];
   const bulkActions = [
     { label: t('chapter.bulk.mark_read'), onClick: () => onBulkRead && runBulk(() => onBulkRead(true)), disabled: selectedCount === 0 },

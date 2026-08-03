@@ -592,6 +592,7 @@ pub trait MangaDomain: Send + Sync {
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
         preferred_only: bool,
+        filter_orphaned: Option<bool>,
     ) -> Result<Vec<ChapterId>>;
     async fn download_all_chapters(&self, manga_id: MangaId) -> Result<uuid::Uuid>;
     async fn queue_manga_scan(&self, manga_id: MangaId, trigger: String) -> Result<uuid::Uuid>;
@@ -711,6 +712,7 @@ impl MangaDomain for AppService {
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
         preferred_only: bool,
+        filter_orphaned: Option<bool>,
     ) -> Result<Vec<ChapterId>> {
         self.get_chapter_ids(
             manga_id,
@@ -720,6 +722,7 @@ impl MangaDomain for AppService {
             filter_unread,
             filter_scanlator,
             preferred_only,
+            filter_orphaned,
         )
         .await
     }
@@ -1653,6 +1656,7 @@ mod tests {
             _filter_unread: Option<bool>,
             _filter_scanlator: Option<String>,
             _preferred_only: bool,
+            _filter_orphaned: Option<bool>,
         ) -> Result<Vec<ChapterId>> {
             unimplemented!()
         }

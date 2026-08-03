@@ -412,6 +412,7 @@ pub(crate) async fn get_local_chapters(
         ("filter_downloaded" = Option<bool>, Query, description = "Downloaded only"),
         ("filter_unread" = Option<bool>, Query, description = "Unread only"),
         ("filter_scanlator" = Option<String>, Query, description = "Scanlator name"),
+        ("filter_orphaned" = Option<bool>, Query, description = "true = only chapters a migration orphaned; absent hides them"),
         ("preferred_only" = Option<bool>, Query, description = "Preferred scanlator only"),
     ),
     responses(
@@ -436,6 +437,7 @@ pub(crate) async fn get_chapter_ids(
             q.filter_unread,
             q.filter_scanlator,
             q.preferred_only,
+            q.filter_orphaned,
         )
         .await?;
     Ok(Json(json!({ "ids": ids })))
@@ -958,6 +960,7 @@ mod tests {
             _filter_unread: Option<bool>,
             _filter_scanlator: Option<String>,
             _preferred_only: bool,
+            _filter_orphaned: Option<bool>,
         ) -> kani_app::error::Result<Vec<kani_app::ids::ChapterId>> {
             unimplemented!()
         }
