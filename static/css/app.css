@@ -2020,6 +2020,57 @@
     -webkit-mask-image: none;
   }
 
+  /* ── Fixed-viewport page layout ──
+     A desktop page fills the shell exactly and never scrolls itself: its
+     heading, filters and pagination hold their place and only the data region
+     moves. Three primitives, used together:
+
+       .page-fixed   the page root — fills the shell, lays out as a column
+       .page-body    the one region that scrolls; everything else is chrome
+       .page-col     a nested column that also needs to distribute height
+
+     Gated on height as well as width. At 768 px wide but 600 px tall a pinned
+     layout leaves a scroll region a few rows deep, which is worse than simply
+     scrolling the page — so below the floor these are inert and the document
+     scrolls as normal. Tailwind's `md:` cannot express that, which is why
+     these are real classes rather than utilities. */
+  @media (min-width: 768px) and (min-height: 700px) {
+    /* The page root is #page-content itself, which already lays out as a
+       scrolling column. What it needs is for its child to be allowed to
+       shrink — and `#page-content > * { flex-shrink: 0 }` outranks a plain
+       class, so the primitive has to be scoped to beat it. Without this the
+       page silently kept scrolling and every measurement said so. */
+    #page-content.page-fixed { overflow: hidden; }
+    #page-content.page-fixed > .page-body-host { flex: 1 1 auto; min-height: 0; }
+    .page-fixed {
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .page-col {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .page-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    /* Sized to its content, capped by the space available — a short list must
+       not stretch into an empty box with its footer stranded below. */
+    .page-body--fit {
+      flex: 0 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    /* Grows to fill without becoming a scroller itself — for the wrappers
+       between the page root and the region that does scroll. */
+    .page-fill { flex: 1 1 auto; min-height: 0; }
+    .page-body-host { flex: 1 1 auto; min-height: 0; }
+  }
+
   /* ── Chapter tab row: sticky on a phone ──
      Vertical space above the list is cheap on mobile — a flick clears the hero
      — so nothing here is about saving pixels. It is about reach: once the hero

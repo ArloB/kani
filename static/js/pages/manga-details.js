@@ -290,9 +290,9 @@ export async function init(container, params) {
   // Desktop and tablet fill the shell exactly and never scroll the page: the
   // rail and the chapter list are their own scroll regions. Mobile keeps
   // ordinary document flow, where swiping is the natural gesture.
-  container.classList.add('md:h-full', 'md:min-h-0', 'md:flex', 'md:flex-col');
+  container.classList.add('page-fixed');
   const wrap = document.createElement('div');
-  wrap.className = 'max-w-page w-full mx-auto px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6 md:gap-8 md:flex-1 md:min-h-0';
+  wrap.className = 'max-w-page w-full mx-auto px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6 md:gap-8 page-body-host';
   container.appendChild(wrap);
 
   _fromSourceId = new URLSearchParams(location.search).get('from_source');
@@ -356,15 +356,15 @@ export async function init(container, params) {
   container.insertBefore(hero, wrap);
 
   const layout = document.createElement('div');
-  layout.className = 'flex flex-col md:flex-row gap-6 md:gap-8 md:items-stretch md:flex-1 md:min-h-0 manga-hero__body';
+  layout.className = 'flex flex-col md:flex-row gap-6 md:gap-8 md:items-stretch page-fill manga-hero__body';
   wrap.appendChild(layout);
 
   const leftCol = document.createElement('div');
-  leftCol.className = 'manga-rail w-full flex flex-col md:w-1/4 md:shrink-0 md:min-h-0';
+  leftCol.className = 'manga-rail w-full flex flex-col md:w-1/4 md:shrink-0 page-col';
   layout.appendChild(leftCol);
 
   const rightCol = document.createElement('div');
-  rightCol.className = 'w-full min-w-0 flex flex-col gap-4 md:flex-1 md:min-h-0';
+  rightCol.className = 'w-full min-w-0 flex flex-col gap-4 md:flex-1 page-col';
   layout.appendChild(rightCol);
 
   // The notice is about chapters, so it heads the chapter column rather than
@@ -529,7 +529,7 @@ function _renderTabs(wrap) {
   const tabContent = document.createElement('div');
   // A flex column: the chapter list scrolls inside it and the pager stays put
   // at the bottom rather than floating below the last row.
-  tabContent.className = 'md:flex-1 md:min-h-0 md:flex md:flex-col';
+  tabContent.className = 'page-fill page-col';
   _contentSection = tabContent;
 
   // The tab row carries the chapter controls on its right. They used to sit on
@@ -1131,7 +1131,7 @@ async function _fetchChapters(sectionEl) {
 
   if (_page === 1) { _chapters = []; _chaptersHasMore = false; _chaptersLoading = false; }
 
-  sectionEl.className = 'flex flex-col gap-3 md:flex-1 md:min-h-0';
+  sectionEl.className = 'flex flex-col gap-3 page-fill';
   sectionEl.innerHTML = '';
   startLoading();
 
@@ -1306,7 +1306,7 @@ async function _fetchChapters(sectionEl) {
   // list over 486 px of empty column with the pager stranded at the bottom.
   // The list takes the height it needs, shrinks when there is more than fits,
   // and the pager follows the rows either way.
-  listEl.className = 'md:flex-initial md:min-h-0 md:overflow-y-auto';
+  listEl.className = 'page-body--fit';
   sectionEl.appendChild(listEl);
 
   // The pager is the column's footer: it sits on the bottom edge with its own

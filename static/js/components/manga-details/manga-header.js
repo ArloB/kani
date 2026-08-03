@@ -318,7 +318,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
   if (info?.description_html || info?.description) {
     descWrap = document.createElement('div');
-    descWrap.className = 'flex flex-col gap-1.5 min-h-0 md:flex-1 md:pb-1';
+    descWrap.className = 'flex flex-col gap-1.5 min-h-0 page-fill md:pb-1';
     desc = document.createElement('div');
     desc.className = 'text-sm text-text-muted leading-relaxed rail-desc';
     // Deliberately not role="button": a synopsis can contain links, and a
@@ -390,7 +390,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   titleMetaCard.appendChild(meta);
 
   const contentCard = document.createElement('div');
-  contentCard.className = 'flex flex-col gap-3 min-w-0 md:flex-1 md:min-h-0';
+  contentCard.className = 'flex flex-col gap-3 min-w-0 page-fill';
   contentCard.style.position = 'relative';
   contentCard.style.zIndex = '1';
 
@@ -401,7 +401,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   // The scroll boundary sits below the actions: the cover and Read/Download/Scan
   // hold their place, and only the credits, facts and description move. Putting
   // it any higher scrolled the primary actions out of reach.
-  metaPanel.className = 'rail-metapanel flex flex-col gap-3 min-w-0 pt-1 md:flex-1 md:min-h-0 md:overflow-y-auto';
+  metaPanel.className = 'rail-metapanel flex flex-col gap-3 min-w-0 pt-1 page-body';
 
   const heroRow = document.createElement('div');
   leftCol.appendChild(heroRow);
