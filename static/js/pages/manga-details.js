@@ -1242,7 +1242,7 @@ async function _fetchChapters(sectionEl) {
     const activeFilters = filterDefs.filter(f => f.active);
     const filterBtn = document.createElement('button');
     filterBtn.type = 'button';
-    filterBtn.className = activeFilters.length ? 'chip chip-active' : 'chip';
+    filterBtn.className = (activeFilters.length ? 'chip chip-active' : 'chip') + ' chapter-filter-btn';
     filterBtn.setAttribute('aria-haspopup', 'menu');
     filterBtn.setAttribute('aria-expanded', 'false');
     filterBtn.setAttribute('aria-controls', 'chapter-filter-menu');

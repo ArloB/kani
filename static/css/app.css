@@ -2033,6 +2033,9 @@
     .chapter-tabs { width: 100%; }
     .chapter-tabs [role="tab"] { flex: 1 1 0; justify-content: center; text-align: center; }
     .chapter-tabrow > * { width: 100%; }
+    /* Sort and page size read left-to-right with the rows they order; Filters
+       is the odd one out and sits on the opposite edge, where the thumb is. */
+    .chapter-filter-btn { margin-left: auto; }
 
     .chapter-tabrow {
       position: sticky;
