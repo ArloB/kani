@@ -102,6 +102,7 @@ export function NumberRow({ label, description, badge, tooltip, id, value, min, 
         type="number"
         inputMode="numeric"
         id=${id}
+        aria-label=${label}
         class="input w-24 text-sm"
         value=${value ?? ''}
         min=${min ?? undefined}
