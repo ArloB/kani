@@ -1985,10 +1985,19 @@
   }
   .rail-desc:hover { color: var(--color-text); }
 
-  .rail-cover-slot,
-  .rail-meta { transition: none; }
+  /* One gesture, not three. The cover's height is the animation worth having
+     because it *is* the exchange — space visibly moving from the artwork to
+     the text — and the arriving text eases in on the same curve so it does not
+     pop while the cover glides. The departing facts are not animated: things
+     leaving should get out of the way, not perform. */
+  .rail-cover-slot { transition: none; }
   @media (prefers-reduced-motion: no-preference) {
     .rail-cover-slot { transition: height 220ms cubic-bezier(0.2, 0, 0, 1); }
+    .rail--reading .rail-desc { animation: rail-desc-in 220ms cubic-bezier(0.2, 0, 0, 1); }
+    @keyframes rail-desc-in {
+      from { opacity: 0.35; }
+      to   { opacity: 1; }
+    }
   }
 
   .rail--reading .rail-cover-slot {
@@ -2009,6 +2018,28 @@
     cursor: default;
     mask-image: none;
     -webkit-mask-image: none;
+  }
+
+  /* ── Chapter tab row: sticky on a phone ──
+     Vertical space above the list is cheap on mobile — a flick clears the hero
+     — so nothing here is about saving pixels. It is about reach: once the hero
+     has scrolled past, a 219-chapter list leaves the sort, filters and the
+     Manage tab stranded at the top of the document. Sticking the row keeps
+     them a thumb away. Desktop does not need it; nothing scrolls there. */
+  @media (max-width: 767px) {
+    .chapter-tabrow {
+      position: sticky;
+      /* Zero, not the header height: #page-content is the scroll container and
+         the app header sits outside it, so its offset is already accounted
+         for. */
+      top: 0;
+      z-index: var(--z-sticky, 20);
+      background: var(--color-bg);
+      padding-block: 0.4rem;
+      margin-inline: -1rem;
+      padding-inline: 1rem;
+      box-shadow: 0 1px 0 var(--color-border-subtle);
+    }
   }
 
   /* ── Floating bulk bar ──

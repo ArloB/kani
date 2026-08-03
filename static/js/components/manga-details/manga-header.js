@@ -321,10 +321,11 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     descWrap.className = 'flex flex-col gap-1.5 min-h-0 md:flex-1 md:pb-1';
     desc = document.createElement('div');
     desc.className = 'text-sm text-text-muted leading-relaxed rail-desc';
-    desc.setAttribute('role', 'button');
-    desc.setAttribute('tabindex', '0');
-    desc.setAttribute('aria-expanded', 'false');
-    desc.setAttribute('aria-label', t('manga.header.show_more'));
+    // Deliberately not role="button": a synopsis can contain links, and a
+    // control containing links is nested interactive content — invalid, and
+    // unusable by keyboard. The button below owns the interaction; clicking
+    // the text is a mouse convenience on top of it.
+    desc.id = 'manga-description';
     desc.innerHTML = info.description_html ?? `<p>${escapeHtml(info.description)}</p>`;
 
     desc.querySelectorAll('a[href]').forEach(link => {
@@ -342,7 +343,9 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'text-xs text-text-muted underline underline-offset-2 decoration-border hover:text-accent text-left self-start shrink-0 py-1';
-    toggle.textContent = t('manga.header.show_less');
+    toggle.textContent = t('manga.header.show_more');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.setAttribute('aria-controls', 'manga-description');
     toggle.hidden = true;
 
     descWrap.appendChild(desc);
@@ -360,45 +363,24 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
       // layer wins on order, so `.rail--reading .rail-meta { display:none }`
       // never beat the `flex` class already on this element.
       meta.classList.toggle('hidden', on);
-      // Expanded, the text is just text: the button role and its label belong
-      // to the collapse control alone. Leaving them on produced two controls
-      // with the same accessible name, which is ambiguous to a screen reader
-      // and picked the wrong one under test.
-      if (on) {
-        desc.removeAttribute('role');
-        desc.removeAttribute('tabindex');
-        desc.removeAttribute('aria-label');
-        desc.removeAttribute('aria-expanded');
-      } else {
-        desc.setAttribute('role', 'button');
-        desc.setAttribute('tabindex', '0');
-        desc.setAttribute('aria-label', t('manga.header.show_more'));
-        desc.setAttribute('aria-expanded', 'false');
-      }
-      toggle.hidden = !on;
+      toggle.textContent = on ? t('manga.header.show_less') : t('manga.header.show_more');
+      toggle.setAttribute('aria-expanded', String(on));
     };
 
     // Only offer it when there is more than the three lines already showing.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        // Nothing behind the clamp means nothing to disclose.
         if (desc && desc.scrollHeight <= desc.clientHeight + 2) {
           desc.classList.remove('rail-desc');
-          desc.removeAttribute('role');
-          desc.removeAttribute('tabindex');
-          desc.removeAttribute('aria-expanded');
-          desc.removeAttribute('aria-label');
+        } else {
+          toggle.hidden = false;
         }
       });
     });
 
     desc.addEventListener('click', () => { if (!expanded && desc?.classList.contains('rail-desc')) setReading(true); });
-    desc.addEventListener('keydown', (e) => {
-      if ((e.key === 'Enter' || e.key === ' ') && !expanded && desc?.classList.contains('rail-desc')) {
-        e.preventDefault();
-        setReading(true);
-      }
-    });
-    toggle.addEventListener('click', () => setReading(false));
+    toggle.addEventListener('click', () => setReading(!expanded));
     _destroyDesc = () => setReading(false);
   }
 

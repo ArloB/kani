@@ -266,11 +266,13 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, onAssignVolu
         ref=${btnRef}
         class="inline-flex items-center justify-center w-9 h-9 text-text-muted hover:text-text rounded-md cursor-pointer select-none transition-colors"
         aria-label=${t('chapter.list.more_actions')}
+        aria-haspopup="menu"
         aria-expanded=${menuOpen}
+        aria-controls=${menuOpen ? `chapter-menu-${chapter.id}` : undefined}
         tabindex="-1"
         onClick=${(e) => { e.preventDefault(); e.stopPropagation(); setMenuOpen(o => !o); }}
       ><${Icon} svg=${iconEllipsisVertical} class="icon-sm" /></button>
-      ${menuOpen && html`<${ContextMenu} items=${menuItems} trigger=${btnRef} onClose=${() => setMenuOpen(false)} />`}
+      ${menuOpen && html`<${ContextMenu} id=${`chapter-menu-${chapter.id}`} items=${menuItems} trigger=${btnRef} onClose=${() => setMenuOpen(false)} />`}
     </div>
   ` : null;
 

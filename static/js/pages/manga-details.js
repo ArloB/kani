@@ -536,7 +536,7 @@ function _renderTabs(wrap) {
   // their own line directly beneath, which cost a chapter row for chrome the
   // tab row had space for.
   const tabRow = document.createElement('div');
-  tabRow.className = 'flex items-end justify-between gap-4 flex-wrap';
+  tabRow.className = 'chapter-tabrow flex items-end justify-between gap-4 flex-wrap';
 
   const tabBar = document.createElement('div');
   const tabsHandle = renderTabs(tabBar, {
@@ -1244,6 +1244,7 @@ async function _fetchChapters(sectionEl) {
     filterBtn.className = activeFilters.length ? 'chip chip-active' : 'chip';
     filterBtn.setAttribute('aria-haspopup', 'menu');
     filterBtn.setAttribute('aria-expanded', 'false');
+    filterBtn.setAttribute('aria-controls', 'chapter-filter-menu');
     filterBtn.textContent = activeFilters.length
       ? t('manga.details.filter.active', { count: activeFilters.length })
       : t('manga.details.filter.label');
@@ -1269,6 +1270,7 @@ async function _fetchChapters(sectionEl) {
             label: f.active ? t('manga.details.filter.on', { name: f.label }) : f.label,
             action: () => f.toggle(),
           }))}
+          id="chapter-filter-menu"
           trigger=${{ current: filterBtn }}
           onClose=${close}
         />`,
