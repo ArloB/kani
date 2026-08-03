@@ -955,13 +955,6 @@
   /* Manga-details metadata panel: a gentle raised surface sitting halfway
      between the page bg and a full surface, so it separates from the background
      without reading as a stark white card (notably in the light theme). */
-  .meta-card {
-    background-color: color-mix(in srgb, var(--color-surface) 50%, var(--color-bg));
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-lg);
-    padding: 0.75rem 1rem;
-  }
-
   /* ── Manga details hero (D5) ──
      A blurred, cover-derived band bleeding past the page gutters, with the title
      set in the display face. The cover (first child of the left column) rises into
@@ -1908,6 +1901,78 @@
   .modal-wide   { max-width: 50rem; }    /* 800px */
   .max-h-modal  { max-height: 90vh; max-height: 90dvh; }
   .max-h-sheet  { max-height: 85vh; max-height: 85dvh; }
+
+  /* ── Manga details rail ──
+     Credits then facts, in the shape of a book's edition page. The label sits
+     above its value like the old eyebrow did, so the calibration is the whole
+     point: the label is smaller, lighter, less tracked and fainter than the
+     value on every axis at once. The previous eyebrow was heavier (600) and
+     more tracked (0.07em) than the value it named, which is why it won the eye. */
+  .rail-credit-name {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.0625rem;
+    line-height: 1.25;
+    letter-spacing: -0.005em;
+  }
+  /* Trailing credits: a series with four credited people must not grow four
+     headlines, so everyone after the byline drops to the body face. */
+  .rail-credit-name--secondary {
+    font-family: var(--font-body);
+    font-weight: 500;
+    font-size: 0.9375rem;
+    color: var(--color-text-muted);
+  }
+  .rail-credit-role {
+    font-size: 0.6875rem;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-text-faint);
+  }
+  .rail-facts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem 1rem;
+  }
+  .rail-fact-k {
+    font-size: 0.6875rem;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-text-faint);
+  }
+  .rail-fact-v {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+  /* The one vermilion mark in the rail. A seal, not a traffic light — hence a
+     small square with a softened corner rather than a dot. */
+  .rail-seal {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 2px;
+    flex: none;
+    display: inline-block;
+  }
+
+  /* ── Description disclosure ──
+     Clamp on, clamp off. The previous version tweened max-height by measuring
+     scrollHeight, forcing a reflow, caching the collapsed height on a dataset
+     attribute and racing a transitionend against a safety timer — about ninety
+     lines to animate text height, which reads worse than simply revealing it.
+     The mask makes the cut deliberate; the cap keeps a long synopsis from
+     running off the page. */
+  .desc-fade {
+    mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  }
+  .desc-open {
+    max-height: min(55vh, 32rem);
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
 
   /* ── Floating bulk bar ──
      Centres over the content column, not the viewport, so the selection count

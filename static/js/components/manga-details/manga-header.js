@@ -169,69 +169,126 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   const META_LINK_CLS = 'text-text hover:text-accent hover:underline underline-offset-4 transition-colors focus-visible:outline-none focus-visible:text-accent';
 
   /**
+   * Splits the two credit lists into the rows a cover would print.
+   *
+   * Whoever is both author and artist takes the byline; whoever is left on
+   * each side follows. Rows come out most-responsible first and empty ones are
+   * dropped, so a name is never printed twice — the old layout listed the same
+   * person under AUTHORS and again under ARTISTS on almost every series.
+   *
+   * @param {Array<{ id?: number, name: string }>} authors
+   * @param {Array<{ id?: number, name: string }>} artists
+   * @returns {Array<{ roleKey: string, people: Array<{ id?: number, name: string }>, kind: 'Author'|'Artist', param: string }>}
+   */
+  function splitCredits(authors, artists) {
+    const artistNames = new Set(artists.map(a => a.name));
+    const authorNames = new Set(authors.map(a => a.name));
+    const both = authors.filter(a => artistNames.has(a.name));
+    const storyOnly = authors.filter(a => !artistNames.has(a.name));
+    const artOnly = artists.filter(a => !authorNames.has(a.name));
+    const rows = [];
+    if (both.length) rows.push({ roleKey: 'manga.header.role.story_art', people: both, kind: /** @type {'Author'} */ ('Author'), param: 'author_id' });
+    if (storyOnly.length) rows.push({ roleKey: 'manga.header.role.story', people: storyOnly, kind: /** @type {'Author'} */ ('Author'), param: 'author_id' });
+    if (artOnly.length) rows.push({ roleKey: 'manga.header.role.art', people: artOnly, kind: /** @type {'Artist'} */ ('Artist'), param: 'artist_id' });
+    return rows;
+  }
+
+  const credits = splitCredits(info?.authors ?? [], info?.artists ?? []);
+  if (credits.length) {
+    const block = document.createElement('div');
+    block.className = 'flex flex-col gap-3';
+    credits.forEach((row, idx) => {
+      const line = document.createElement('div');
+      line.className = 'flex flex-col gap-0.5 min-w-0';
+      const names = document.createElement('p');
+      names.className = idx === 0 ? 'rail-credit-name' : 'rail-credit-name rail-credit-name--secondary';
+      names.innerHTML = row.people.map((a, i) => isLocal
+        ? `<a class="${META_LINK_CLS}" href="/?${row.param}=${a.id}" data-idx="${i}">${escapeHtml(a.name)}</a>`
+        : `<a class="${META_LINK_CLS}" href="/source/${sid}?q=${encodeURIComponent(a.name)}" data-idx="${i}">${escapeHtml(a.name)}</a>`
+      ).join(', ');
+      names.querySelectorAll('a').forEach(el => {
+        const person = row.people[Number(/** @type {HTMLElement} */(el).dataset.idx)];
+        el.addEventListener('click', e => {
+          e.preventDefault();
+          if (isLocal) navigate(`/?${row.param}=${person.id}`);
+          else buildSourceMetaUrl(sid, person.name, row.kind).then(url => navigate(url));
+        });
+      });
+      const role = document.createElement('p');
+      role.className = 'rail-credit-role';
+      role.textContent = t(row.roleKey);
+      line.appendChild(names);
+      line.appendChild(role);
+      block.appendChild(line);
+    });
+    meta.appendChild(block);
+  }
+
+  // ── Production facts ──
+  const facts = document.createElement('dl');
+  facts.className = 'rail-facts';
+  let factCount = 0;
+
+  /**
    * @param {string} label
    * @param {string} valueHtml
-   * @returns {HTMLElement} the value paragraph, for wiring links
+   * @param {string} [sealCls] colour class for the status seal, when this row has one
+   * @returns {HTMLElement} the value element, for wiring links
    */
-  function mkMetaRow(label, valueHtml) {
-    const row = document.createElement('div');
-    row.className = 'flex flex-col gap-0.5 min-w-0';
-    const lbl = document.createElement('p');
-    lbl.className = 'eyebrow';
-    lbl.textContent = label;
-    const val = document.createElement('p');
-    val.className = 'text-sm leading-snug';
-    val.innerHTML = valueHtml;
-    row.appendChild(lbl);
-    row.appendChild(val);
-    meta.appendChild(row);
-    return val;
+  function mkFact(label, valueHtml, sealCls) {
+    const cell = document.createElement('div');
+    cell.className = 'flex flex-col gap-0.5 min-w-0';
+    const k = document.createElement('dt');
+    k.className = 'rail-fact-k';
+    k.textContent = label;
+    const v = document.createElement('dd');
+    v.className = 'rail-fact-v m-0 flex items-center gap-1.5 min-w-0';
+    if (sealCls) {
+      const seal = document.createElement('span');
+      seal.className = `rail-seal ${sealCls}`;
+      seal.setAttribute('aria-hidden', 'true');
+      v.appendChild(seal);
+    }
+    const text = document.createElement('span');
+    text.className = 'truncate';
+    text.innerHTML = valueHtml;
+    v.appendChild(text);
+    cell.appendChild(k);
+    cell.appendChild(v);
+    facts.appendChild(cell);
+    factCount++;
+    return text;
   }
 
   if (isLocal && (source || info?.source_id || sid)) {
     const sname = escapeHtml(source?.name || info?.source_name || 'Source');
     const srcId = source?.id || info?.source_id || sid;
-    const val = mkMetaRow(t('manga.header.source'), `<a href="/source/${srcId}" class="${META_LINK_CLS}">${sname}</a>`);
+    const val = mkFact(t('manga.header.source'), `<a href="/source/${srcId}" class="${META_LINK_CLS}">${sname}</a>`);
     val.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/source/${srcId}`); });
   }
 
   if (info?.status && info.status.toLowerCase() !== 'unknown') {
     const statusVal = info.status.toLowerCase();
     const statusDisplay = info.status.charAt(0).toUpperCase() + info.status.slice(1);
-    const dotCls = {
-      ongoing: 'bg-success', publishing: 'bg-success', releasing: 'bg-success',
+    const sealCls = {
+      ongoing: 'bg-accent', publishing: 'bg-accent', releasing: 'bg-accent',
       completed: 'bg-text-faint', finished: 'bg-text-faint',
       hiatus: 'bg-warn', 'on hiatus': 'bg-warn',
       cancelled: 'bg-danger', dropped: 'bg-danger',
     }[statusVal] ?? 'bg-text-faint';
-    const val = mkMetaRow(t('manga.header.status'),
-      `<a href="/?status=${statusVal}" class="${META_LINK_CLS} inline-flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full ${dotCls}" aria-hidden="true"></span>${escapeHtml(statusDisplay)}</a>`);
+    const val = mkFact(t('manga.header.status'),
+      `<a href="/?status=${statusVal}" class="${META_LINK_CLS}">${escapeHtml(statusDisplay)}</a>`, sealCls);
     val.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/?status=${statusVal}`); });
   }
 
-  /**
-   * @param {string} label
-   * @param {Array<{ id?: number, name: string }>} people
-   * @param {'Author'|'Artist'} kind
-   * @param {string} localParam
-   */
-  function mkPeopleRow(label, people, kind, localParam) {
-    const val = mkMetaRow(label, people.map((a, i) => isLocal
-      ? `<a class="${META_LINK_CLS}" href="/?${localParam}=${a.id}" data-idx="${i}">${escapeHtml(a.name)}</a>`
-      : `<a class="${META_LINK_CLS}" href="/source/${sid}?q=${encodeURIComponent(a.name)}" data-idx="${i}">${escapeHtml(a.name)}</a>`
-    ).join(', '));
-    val.querySelectorAll('a').forEach(el => {
-      const person = people[Number(/** @type {HTMLElement} */(el).dataset.idx)];
-      el.addEventListener('click', e => {
-        e.preventDefault();
-        if (isLocal) navigate(`/?${localParam}=${person.id}`);
-        else buildSourceMetaUrl(sid, person.name, kind).then(url => navigate(url));
-      });
-    });
+  if (factCount) {
+    if (credits.length) {
+      const rule = document.createElement('div');
+      rule.className = 'h-px bg-border-subtle';
+      meta.appendChild(rule);
+    }
+    meta.appendChild(facts);
   }
-
-  if (info?.authors?.length) mkPeopleRow(t('manga.header.authors'), info.authors, 'Author', 'author_id');
-  if (info?.artists?.length) mkPeopleRow(t('manga.header.artists'), info.artists, 'Artist', 'artist_id');
 
   // ── Button group ──
   const btnGroupEl = document.createElement('div');
@@ -267,87 +324,32 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     toggle.className = 'text-xs text-text-muted underline underline-offset-2 decoration-border hover:text-accent text-left mt-1 self-start';
     toggle.textContent = t('manga.header.show_more');
     toggle.style.display = 'none';
+    toggle.setAttribute('aria-expanded', 'false');
     descWrap.appendChild(toggle);
 
+    // Only offer the toggle when there is something behind the clamp.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        if (desc && desc.scrollHeight > desc.offsetHeight + 2) toggle.style.display = '';
+        if (!desc) return;
+        if (desc.scrollHeight > desc.offsetHeight + 2) {
+          toggle.style.display = '';
+          desc.classList.add('desc-fade');
+        }
       });
     });
 
-    // Expand/collapse is a plain clamp toggle with a max-height tween: the
-    // description grows in place. A long description is capped at ~55vh and
-    // scrolls internally so it never pushes a huge page scrollbar; a short one
-    // just expands fully. (The previous version slid the whole content card up
-    // over the cover — fragile and disorienting.)
-    // Cap the expanded height to the space between the description's top and the
-    // viewport bottom, so a long description scrolls internally instead of
-    // running off the page (its start point varies with the column layout).
-    const _expandCap = () => {
-      const top = desc ? desc.getBoundingClientRect().top : 0;
-      return Math.max(160, Math.round(window.innerHeight - top - 24));
-    };
-
+    // Clamp on, clamp off. No measuring, no tween, no timers — the height of a
+    // paragraph is not worth animating, and the mask makes the cut read as
+    // deliberate rather than clipped. A long synopsis is capped by CSS and
+    // scrolls inside itself instead of running down the page.
     toggle.addEventListener('click', () => {
+      if (!desc) return;
       expanded = !expanded;
       toggle.textContent = expanded ? t('manga.header.show_less') : t('manga.header.show_more');
-      if (!desc) return;
-
-      const natural = expanded ? (desc.scrollHeight) : 0;
-      const cap = _expandCap();
-      const capped = expanded && natural > cap;
-
-      const applyExpandedOverflow = () => {
-        if (!desc) return;
-        if (capped) {
-          desc.style.maxHeight = cap + 'px';
-          desc.style.overflowY = 'auto';
-          desc.style.scrollbarWidth = 'thin';
-        } else {
-          desc.style.maxHeight = '';
-          desc.style.overflow = '';
-          desc.style.overflowY = '';
-        }
-      };
-
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        desc.classList.toggle('line-clamp-3', !expanded);
-        if (expanded) applyExpandedOverflow();
-        else { desc.style.maxHeight = ''; desc.style.overflow = ''; desc.style.overflowY = ''; desc.style.scrollbarWidth = ''; }
-        return;
-      }
-
-      const settle = () => {
-        if (!desc) return;
-        desc.style.transition = '';
-        if (expanded) {
-          applyExpandedOverflow();
-        } else {
-          desc.style.maxHeight = '';
-          desc.style.overflow = '';
-          desc.style.overflowY = '';
-          desc.style.scrollbarWidth = '';
-          desc.classList.add('line-clamp-3');
-        }
-      };
-
-      const from = desc.offsetHeight;
-      desc.style.overflow = 'hidden';
-      desc.style.maxHeight = from + 'px';
-      let to;
-      if (expanded) {
-        desc.dataset.clampedHeight = String(from);
-        desc.classList.remove('line-clamp-3');
-        to = Math.min(natural, cap);
-      } else {
-        to = parseInt(desc.dataset.clampedHeight ?? '', 10) || 72;
-      }
-      desc.offsetHeight; // force reflow so the transition has a start value
-      desc.style.transition = 'max-height 0.3s ease';
-      desc.style.maxHeight = to + 'px';
-
-      const safety = setTimeout(settle, 350);
-      desc.addEventListener('transitionend', () => { clearTimeout(safety); settle(); }, { once: true });
+      toggle.setAttribute('aria-expanded', String(expanded));
+      desc.classList.toggle('line-clamp-3', !expanded);
+      desc.classList.toggle('desc-fade', !expanded);
+      desc.classList.toggle('desc-open', expanded);
     });
   }
 
@@ -361,10 +363,11 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   contentCard.style.position = 'relative';
   contentCard.style.zIndex = '1';
 
-  // Desktop-only reference panel: wraps the metadata rows and the description
-  // as one subtle surface (the action buttons stay free-standing above it).
+  // The rail holds credits, facts and the description. No surrounding surface:
+  // the hairline between credits and facts carries the structure, and a border
+  // around content that is already the only thing in the column adds nothing.
   const metaPanel = document.createElement('div');
-  metaPanel.className = 'meta-card flex flex-col gap-3 min-w-0';
+  metaPanel.className = 'flex flex-col gap-3 min-w-0 pt-1';
 
   const heroRow = document.createElement('div');
   leftCol.appendChild(heroRow);
