@@ -4,7 +4,8 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_get, authed_patch, body_json, build_test_app, create_admin, get_req, login, test_state,
+    authed_get, authed_patch, body_json, build_test_app, create_admin, create_regular_user,
+    get_req, login, test_state,
 };
 use tower::ServiceExt;
 
@@ -26,6 +27,89 @@ async fn get_settings_returns_200_for_authed_user() {
     assert!(
         body.get("auto_scan").is_some(),
         "settings must include auto_scan"
+    );
+}
+
+/// `settings:view` belongs to the default `user` role, so this payload is read
+/// by every account on the instance. It must not describe the deployment.
+#[tokio::test]
+async fn a_plain_user_cannot_read_the_infrastructure_settings() {
+    let state = test_state().await;
+    let (admin_u, admin_p) = create_admin(&state).await;
+    let (user_u, user_p) = create_regular_user(&state, "plain").await;
+    let app = build_test_app(state).await;
+
+    // The admin configures an SMTP relay and a solver on the internal network.
+    let admin_cookie = login(&app, admin_u, admin_p).await;
+    let res = app
+        .clone()
+        .oneshot(authed_patch(
+            "/rest/settings",
+            &admin_cookie,
+            serde_json::json!({ "Email": {
+                "email_enabled": true,
+                "email_provider": "smtp",
+                "email_provider_config": "{\"host\":\"smtp.internal.lan\",\"port\":587,\"username\":\"kani@example.com\",\"password\":\"hunter2\"}",
+                "email_from_address": "kani@example.com",
+                "app_url": "https://kani.internal.lan",
+                "password_reset_enabled": true,
+                "email_verification_required": false
+            }}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "admin may configure email");
+
+    let user_cookie = login(&app, user_u, user_p).await;
+    let res = app
+        .clone()
+        .oneshot(authed_get("/rest/settings", &user_cookie))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "a plain user may read settings"
+    );
+    let body = body_json(res).await;
+
+    for field in [
+        "email_provider_config",
+        "email_from_address",
+        "app_url",
+        "flaresolverr_url",
+        "library_path",
+        "wasm_storage_path",
+    ] {
+        assert_eq!(
+            body.get(field).and_then(|v| v.as_str()),
+            Some(""),
+            "{field} describes the deployment and must be withheld from a plain user"
+        );
+    }
+    let serialised = body.to_string();
+    assert!(
+        !serialised.contains("smtp.internal.lan") && !serialised.contains("kani.internal.lan"),
+        "no infrastructure host may appear anywhere in the payload: {serialised}"
+    );
+
+    // The toggles the UI keys off are still readable, or the app breaks.
+    assert!(body.get("auto_scan").is_some());
+    assert_eq!(
+        body.get("email_enabled").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+
+    // And an admin still sees the real values.
+    let res = app
+        .oneshot(authed_get("/rest/settings", &admin_cookie))
+        .await
+        .unwrap();
+    let admin_body = body_json(res).await;
+    assert_eq!(
+        admin_body.get("app_url").and_then(|v| v.as_str()),
+        Some("https://kani.internal.lan"),
+        "an admin must still be able to read what they configured"
     );
 }
 

@@ -20,10 +20,37 @@ pub fn router() -> Router<AppState> {
     tag = "system"
 )]
 pub(crate) async fn get_settings(
-    _: AuthGuard<crate::permissions::guards::SettingsView>,
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::SettingsView>,
+    auth: crate::auth::AuthSession,
     State(svc): State<Arc<dyn SettingsDomain>>,
 ) -> Result<impl IntoResponse, AppError> {
-    Ok(Json(svc.get_settings().await))
+    let mut settings = svc.get_settings().await;
+
+    // `settings:view` belongs to the default `user` role, and this payload
+    // carries infrastructure: the FlareSolverr address, the SMTP host and
+    // username, the public URL and the server's filesystem paths. The SMTP
+    // password is already masked, but the rest describes the deployment to
+    // anyone with an account. Only a caller who may edit those fields needs to
+    // read them; the toggles the UI keys off stay visible to everyone.
+    let may_see_infrastructure = auth
+        .backend
+        .has_perm(
+            &user,
+            crate::permissions::Permission::Settings(crate::permissions::Settings::EditAdvanced),
+        )
+        .await
+        .unwrap_or(false);
+
+    if !may_see_infrastructure {
+        settings.flaresolverr_url = String::new();
+        settings.email_provider_config = String::new();
+        settings.email_from_address = String::new();
+        settings.app_url = String::new();
+        settings.library_path = String::new();
+        settings.wasm_storage_path = String::new();
+    }
+
+    Ok(Json(settings))
 }
 
 #[utoipa::path(
