@@ -287,8 +287,12 @@ export async function init(container, params) {
   if (_isLocal && _dbId) api.markMangaSeen(_dbId).catch(() => {});
 
   container.innerHTML = '';
+  // Desktop and tablet fill the shell exactly and never scroll the page: the
+  // rail and the chapter list are their own scroll regions. Mobile keeps
+  // ordinary document flow, where swiping is the natural gesture.
+  container.classList.add('md:h-full', 'md:min-h-0', 'md:flex', 'md:flex-col');
   const wrap = document.createElement('div');
-  wrap.className = 'max-w-page w-full mx-auto px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6 md:gap-8';
+  wrap.className = 'max-w-page w-full mx-auto px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6 md:gap-8 md:flex-1 md:min-h-0';
   container.appendChild(wrap);
 
   _fromSourceId = new URLSearchParams(location.search).get('from_source');
@@ -352,15 +356,15 @@ export async function init(container, params) {
   container.insertBefore(hero, wrap);
 
   const layout = document.createElement('div');
-  layout.className = 'flex flex-col md:flex-row gap-6 md:gap-8 md:items-start manga-hero__body';
+  layout.className = 'flex flex-col md:flex-row gap-6 md:gap-8 md:items-stretch md:flex-1 md:min-h-0 manga-hero__body';
   wrap.appendChild(layout);
 
   const leftCol = document.createElement('div');
-  leftCol.className = 'w-full flex flex-col md:w-1/4 md:shrink-0';
+  leftCol.className = 'w-full flex flex-col md:w-1/4 md:shrink-0 md:min-h-0';
   layout.appendChild(leftCol);
 
   const rightCol = document.createElement('div');
-  rightCol.className = 'w-full min-w-0 flex flex-col gap-4 md:flex-1';
+  rightCol.className = 'w-full min-w-0 flex flex-col gap-4 md:flex-1 md:min-h-0';
   layout.appendChild(rightCol);
 
   // The notice is about chapters, so it heads the chapter column rather than
@@ -523,6 +527,8 @@ export async function init(container, params) {
 
 function _renderTabs(wrap) {
   const tabContent = document.createElement('div');
+  // The chapter list is its own scroll region so the page never scrolls.
+  tabContent.className = 'md:flex-1 md:min-h-0 md:overflow-y-auto';
   _contentSection = tabContent;
 
   // The tab row carries the chapter controls on its right. They used to sit on

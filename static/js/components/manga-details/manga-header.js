@@ -372,7 +372,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   titleMetaCard.appendChild(meta);
 
   const contentCard = document.createElement('div');
-  contentCard.className = 'flex flex-col gap-3 min-w-0';
+  contentCard.className = 'flex flex-col gap-3 min-w-0 md:flex-1 md:min-h-0';
   contentCard.style.position = 'relative';
   contentCard.style.zIndex = '1';
 
@@ -380,7 +380,10 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   // the hairline between credits and facts carries the structure, and a border
   // around content that is already the only thing in the column adds nothing.
   const metaPanel = document.createElement('div');
-  metaPanel.className = 'flex flex-col gap-3 min-w-0 pt-1';
+  // The scroll boundary sits below the actions: the cover and Read/Download/Scan
+  // hold their place, and only the credits, facts and description move. Putting
+  // it any higher scrolled the primary actions out of reach.
+  metaPanel.className = 'flex flex-col gap-3 min-w-0 pt-1 md:flex-1 md:min-h-0 md:overflow-y-auto';
 
   const heroRow = document.createElement('div');
   leftCol.appendChild(heroRow);
@@ -407,7 +410,11 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
       // Cap the column so the cover and panel don't sprawl across a quarter of
       // an ultra-wide viewport.
       leftCol.style.maxWidth = '20rem';
-      heroRow.style.cssText = 'display:flex;flex-direction:column;gap:1rem';
+      // The cover holds its place; everything under it is the scroll region.
+      // Expanding the description used to grow the column and scroll the page,
+      // which slid the cover up out of view — the artwork is the last thing
+      // that should move when you ask to read more text.
+      heroRow.style.cssText = 'display:flex;flex-direction:column;gap:1rem;flex:1 1 auto;min-height:0';
       btnGroupEl.style.paddingTop = '';
       btnGroupEl.style.paddingBottom = '';
       if (!heroRow.contains(coverInner)) heroRow.insertBefore(coverInner, heroRow.firstChild);
