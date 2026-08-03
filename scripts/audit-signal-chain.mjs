@@ -20,8 +20,10 @@
  *  - Coalescing done in Rust rather than SQL is invisible here. That same
  *    column is applied as `local_description.or(description)` in
  *    `kani-web/src/rest/manga.rs`, so it was never broken.
- *  - `settings.*` loads as one struct query, so every settings column reports
- *    zero selects. Treat that whole table as noise.
+ *  - Long explicit SELECT lists: the settings singleton names ~64 columns in
+ *    one ~1800-character statement, so a short lookahead misses everything past
+ *    the first few. The window is 2400 chars for this reason — raise it again if
+ *    a wider table starts flagging wholesale.
  *  - A column that is legitimately only ever a filter (`deleted_at`,
  *    `token_hash`) is correct usage, not a defect. So is a soft-hide flag whose
  *    `WHERE x = FALSE` *is* the read (`duplicate_pairs.dismissed`).
@@ -97,7 +99,7 @@ for (const [table, cols] of schema()) {
     const written = (sqlText.match(new RegExp(`(INSERT INTO[\\s\\S]{0,400}?\\b${col}\\b|SET[^;"]{0,200}\\b${col}\\b\\s*=)`, 'g')) ?? []).length;
     const mentions = (rustText.match(word) ?? []).length;
     // A SELECT that only ever appears inside a filter is not a read.
-    const selected = (sqlText.match(new RegExp(`SELECT[\\s\\S]{0,600}?\\b${col}\\b`, 'g')) ?? []).length;
+    const selected = (sqlText.match(new RegExp(`SELECT[\\s\\S]{0,2400}?\\b${col}\\b`, 'g')) ?? []).length;
     const filtered = (sqlText.match(new RegExp(`(WHERE|AND|OR)[^;"']{0,80}\\b${col}\\b\\s*(=|IS|!=|<>)`, 'g')) ?? []).length;
     const inJs = (jsText.match(word) ?? []).length;
 
