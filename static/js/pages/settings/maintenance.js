@@ -80,7 +80,7 @@ function DatabaseCard() {
         <span class="text-sm text-text-muted">
           ${stats ? formatBytes(stats.db_size_bytes) : '—'}
           ${stats && stats.wal_size_bytes > 0
-            ? html` <span class="text-xs">(+${formatBytes(stats.wal_size_bytes)} WAL)</span>`
+            ? html` <span class="text-xs">${t('settings.db.size.wal', { size: formatBytes(stats.wal_size_bytes) })}</span>`
             : null}
         </span>
       <//>

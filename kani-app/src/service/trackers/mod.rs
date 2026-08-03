@@ -544,6 +544,43 @@ pub async fn get_mapping(
     Ok(row)
 }
 
+/// A mapping plus the last time it synced, for display.
+pub async fn get_mapping_row(
+    db: &SqlitePool,
+    user_id: UserId,
+    tracker_id: i64,
+    manga_id: MangaId,
+) -> Result<Option<(String, Option<time::OffsetDateTime>)>> {
+    let row = sqlx::query!(
+        "SELECT tracker_manga_id, last_synced_at FROM tracker_manga_mappings \
+         WHERE user_id = ? AND tracker_id = ? AND manga_id = ?",
+        user_id,
+        tracker_id,
+        manga_id,
+    )
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|r| (r.tracker_manga_id, r.last_synced_at)))
+}
+
+/// Ids this series is known by on external catalogues, keyed by provider.
+///
+/// Written by metadata enrichment and backfilled from the `anilist_id` /
+/// `mal_id` columns that `20260614000002` dropped. Nothing read them until the
+/// tracker panel began offering them as link suggestions.
+pub async fn get_external_ids(db: &SqlitePool, manga_id: MangaId) -> Result<Vec<(String, String)>> {
+    let rows = sqlx::query!(
+        "SELECT provider, external_id FROM manga_external_ids WHERE manga_id = ?",
+        manga_id
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.provider, r.external_id))
+        .collect())
+}
+
 pub async fn delete_mapping(
     db: &SqlitePool,
     user_id: UserId,

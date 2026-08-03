@@ -3,8 +3,8 @@ use sha2::Digest;
 
 use super::{
     TrackerMangaResult, TrackerRegistry, consume_pkce_state, delete_credentials,
-    delete_tracker_app_config, get_access_token, get_mapping, get_tracker_app_config,
-    set_tracker_app_config, store_credentials, store_pkce_state,
+    delete_tracker_app_config, get_access_token, get_external_ids, get_mapping_row,
+    get_tracker_app_config, set_tracker_app_config, store_credentials, store_pkce_state,
 };
 use crate::error::{Result, ServiceError};
 use crate::ids::{MangaId, UserId};
@@ -28,6 +28,22 @@ pub struct TrackerMappingItem {
     pub tracker_id: i64,
     pub tracker_name: &'static str,
     pub tracker_manga_id: Option<String>,
+    /// When this mapping last synced. `None` while it never has.
+    pub last_synced_at: Option<time::OffsetDateTime>,
+    /// An id this series is already known by on that catalogue, offered when
+    /// the user has not mapped it yet. Comes from metadata enrichment, and from
+    /// the `anilist_id` / `mal_id` columns migration `20260614000002` folded
+    /// into `manga_external_ids`.
+    pub suggested_manga_id: Option<String>,
+}
+
+/// The `manga_external_ids.provider` key a tracker's entries are stored under.
+fn provider_key(tracker_name: &str) -> Option<&'static str> {
+    match tracker_name {
+        "AniList" => Some("anilist"),
+        "MyAnimeList" => Some("mal"),
+        _ => None,
+    }
 }
 
 impl AppService {
@@ -183,13 +199,34 @@ impl AppService {
         manga_id: MangaId,
     ) -> Result<Vec<TrackerMappingItem>> {
         let registry = self.tracker_registry.read().await;
+        let external = get_external_ids(&self.db_read, manga_id)
+            .await
+            .unwrap_or_default();
         let mut mappings = Vec::new();
         for (&tid, tracker) in &registry.trackers {
-            let tracker_manga_id = get_mapping(&self.db, user_id, tid, manga_id).await?;
+            let row = get_mapping_row(&self.db, user_id, tid, manga_id).await?;
+            let (tracker_manga_id, last_synced_at) = match row {
+                Some((id, synced)) => (Some(id), synced),
+                None => (None, None),
+            };
+            // Only worth offering while nothing is mapped; once the user has
+            // chosen, their choice stands.
+            let suggested_manga_id = if tracker_manga_id.is_some() {
+                None
+            } else {
+                provider_key(tracker.name()).and_then(|key| {
+                    external
+                        .iter()
+                        .find(|(p, _)| p == key)
+                        .map(|(_, id)| id.clone())
+                })
+            };
             mappings.push(TrackerMappingItem {
                 tracker_id: tid,
                 tracker_name: tracker.name(),
                 tracker_manga_id,
+                last_synced_at,
+                suggested_manga_id,
             });
         }
         Ok(mappings)

@@ -6,6 +6,7 @@ import htm from 'htm';
 import * as api from '../../api.js';
 import { t } from '../../i18n.js';
 import { getState, setState } from '../../ui-state.js';
+import { formatRelativeTime } from '../../utils.js';
 import { showAlert } from '../modal.js';
 import { ManageRow } from './manage-row.js';
 import { Select } from '../form/select.js';
@@ -194,8 +195,25 @@ function TrackerRow({ tracker: tr, mapping, dbId, title, onMappingSet, onMapping
     statusText = t('manga.tracker.not_linked');
   } else if (mapping?.tracker_manga_id) {
     statusText = t('manga.tracker.mapped', { id: mapping.tracker_manga_id });
+  } else if (mapping?.suggested_manga_id) {
+    statusText = t('manga.tracker.suggested', { id: mapping.suggested_manga_id });
   } else {
     statusText = t('manga.tracker.linked_not_mapped');
+  }
+
+  // A mapping that has never synced says so rather than showing nothing; the
+  // sync schedule is driven off this timestamp, so it is worth seeing.
+  const syncedText = mapping?.tracker_manga_id
+    ? (mapping.last_synced_at
+        ? t('manga.tracker.last_synced', { when: formatRelativeTime(mapping.last_synced_at) })
+        : t('manga.tracker.never_synced'))
+    : null;
+
+  async function handleUseSuggestion() {
+    const id = mapping?.suggested_manga_id;
+    if (!id) return;
+    await api.setTrackerMapping(dbId, tr.id, id);
+    onMappingSet(id);
   }
 
   function handleSearch() {
@@ -231,8 +249,14 @@ function TrackerRow({ tracker: tr, mapping, dbId, title, onMappingSet, onMapping
       <div>
         <p class="text-sm font-medium text-text">${tr.name}</p>
         <p class="text-xs text-text-muted mt-0.5">${statusText}</p>
+        ${syncedText && html`<p class="text-xs text-text-faint mt-0.5">${syncedText}</p>`}
       </div>
       <div class="flex items-center gap-2 shrink-0">
+        ${tr.linked && !mapping?.tracker_manga_id && mapping?.suggested_manga_id && html`
+          <button type="button" class="btn-secondary btn-sm" onClick=${handleUseSuggestion}>
+            ${t('manga.tracker.use_suggestion')}
+          </button>
+        `}
         ${tr.linked && !mapping?.tracker_manga_id && html`
           <button type="button" class="btn-ghost btn-sm" onClick=${handleSearch}>${t('manga.tracker.search_link')}</button>
         `}

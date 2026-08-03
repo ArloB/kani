@@ -316,6 +316,12 @@ pub(crate) async fn get_tracker_mappings(
                 "tracker_id": m.tracker_id,
                 "tracker_name": m.tracker_name,
                 "tracker_manga_id": m.tracker_manga_id,
+                // RFC 3339, not time's default array form, which `new Date()`
+                // cannot parse.
+                "last_synced_at": m.last_synced_at.and_then(|t| {
+                    t.format(&time::format_description::well_known::Rfc3339).ok()
+                }),
+                "suggested_manga_id": m.suggested_manga_id,
             })
         })
         .collect();

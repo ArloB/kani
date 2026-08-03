@@ -483,6 +483,7 @@ export default {
   'settings.maintenance.group': 'Maintenance',
   'settings.db.group': 'Database',
   'settings.db.size': 'Size on disk',
+  'settings.db.size.wal': '(+{size} write-ahead log)',
   'settings.db.size.desc': 'The database file, plus the write-ahead log if one is present.',
   'settings.db.actions': 'Reclaim space',
   'settings.db.actions.desc':
@@ -1204,6 +1205,10 @@ export default {
   'manga.tracker.none_configured': 'No trackers configured. Add OAuth app credentials in Settings → Trackers.',
   'manga.tracker.not_linked': 'Not linked — link in Settings',
   'manga.tracker.mapped': 'Mapped to ID: {id}',
+  'manga.tracker.suggested': 'Known as {id} — not linked yet',
+  'manga.tracker.use_suggestion': 'Link',
+  'manga.tracker.last_synced': 'Last synced {when}',
+  'manga.tracker.never_synced': 'Never synced',
   'manga.tracker.linked_not_mapped': 'Linked but not mapped to this manga',
   'manga.tracker.search_link': 'Search & Link',
   'manga.tracker.no_results': 'No results found.',
