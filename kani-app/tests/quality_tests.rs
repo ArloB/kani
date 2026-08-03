@@ -60,6 +60,24 @@ async fn held_chapter(
     chapter
 }
 
+/// Chapters of `manga` currently carrying an upgrade badge.
+///
+/// The badge renders from `chapters.upgrade_available` on the chapter listing,
+/// so this asserts the same column the UI reads rather than a parallel path.
+/// Dismissal empties `candidates` while leaving the row present — the badge is
+/// the candidate count, not the column's nullity.
+async fn pending_badges(svc: &kani_app::service::AppService, manga: MangaId) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM chapters \
+         WHERE manga_id = ? AND upgrade_available IS NOT NULL \
+           AND json_array_length(upgrade_available, '$.candidates') > 0",
+    )
+    .bind(manga)
+    .fetch_one(&svc.db)
+    .await
+    .unwrap()
+}
+
 async fn seed_manga(svc: &kani_app::service::AppService, title: &str) -> MangaId {
     let src = insert_source(&svc.db, &format!("s-{title}")).await;
     insert_manga(&svc.db, src, "m1", title).await
@@ -236,7 +254,7 @@ async fn dismissing_prevents_the_same_candidate_returning() {
 
     assert_eq!(svc.evaluate_upgrades(manga).await.unwrap().len(), 1);
     svc.dismiss_upgrade(chapter).await.unwrap();
-    assert!(svc.get_upgrades(manga).await.unwrap().is_empty());
+    assert_eq!(pending_badges(&svc, manga).await, 0);
 
     // The whole point: a re-scan must not raise it again.
     assert!(
@@ -650,9 +668,9 @@ async fn the_library_wide_list_hides_reassurance_by_default() {
 
     svc.evaluate_upgrades(manga).await.unwrap();
     assert_eq!(
-        svc.get_upgrades(manga).await.unwrap().len(),
+        pending_badges(&svc, manga).await,
         1,
-        "the per-manga view keeps it — the chapter badge is where it belongs"
+        "the per-chapter badge keeps it — that is where a downgrade belongs"
     );
     assert!(
         svc.all_upgrades().await.unwrap().is_empty(),

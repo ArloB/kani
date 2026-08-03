@@ -229,29 +229,3 @@ async fn get_manga_chapter_notes_returns_401_unauthenticated() {
 }
 
 // ── Reading pace ──────────────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn reading_pace_returns_200_authed() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_get("/rest/stats/pace", &cookie))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn reading_pace_returns_401_unauthenticated() {
-    let state = test_state().await;
-    let app = build_test_app(state).await;
-
-    let res = app
-        .oneshot(authed_get("/rest/stats/pace", ""))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-}

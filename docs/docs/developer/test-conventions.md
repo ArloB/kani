@@ -30,6 +30,27 @@
 | `authed_post(app, path, cookie, body)` | Authenticated POST with JSON body |
 | `body_json(response)` | Extract `serde_json::Value` from response body |
 
+## Trace a signal to a pixel
+
+The recurring failure in this codebase is a mechanism that is built and never
+connected: a probe with no caller, a column never selected into its listing, a
+setting validated and persisted but read by nothing. Each looks complete in
+isolation and each ships a feature that does nothing.
+
+Follow a new value the whole way — computed → stored → selected → serialised →
+rendered — and name the file at each hop before calling it done. Two traps this
+project has hit repeatedly:
+
+- **Hand-built JSON projections.** `/rest/manga/{id}/details` builds its
+  response with `json!({...})` rather than serialising the model, so a field can
+  exist on the struct, be returned by `/rest/manga/{id}`, and still be invisible
+  to the page that renders the control.
+- **State atoms are not pixels.** Adding an SSE handler that updates a store is
+  the same defect one layer further out, unless something reads the store.
+
+If a step is deliberately deferred, say so in the commit — silence reads as
+wired.
+
 ## Permission-gated UI
 
 The frontend hides whole surfaces behind `hasPermission(...)`, so the number of

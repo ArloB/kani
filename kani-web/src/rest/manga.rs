@@ -23,7 +23,6 @@ pub fn router() -> Router<AppState> {
                 .route_layer(axum::middleware::from_fn(crate::etag::etag_middleware)),
         )
         .route("/manga/{id}/chapter_ids", get(get_chapter_ids))
-        .route("/manga/{id}/upgrades", get(get_manga_upgrades))
         .route(
             "/manga/{id}/upgrade-auto-replace",
             put(set_upgrade_auto_replace),
@@ -1144,25 +1143,6 @@ mod tests {
 }
 
 // ── Upgrade detection ────────────────────────────────────────────────────────
-
-#[utoipa::path(
-    get, path = "/rest/manga/{id}/upgrades",
-    params(("id" = i64, Path, description = "Manga id")),
-    responses(
-        (status = 200, description = "Chapters of this manga for which a better version is available"),
-        (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Insufficient permissions"),
-    ),
-    security(("session" = [])),
-    tag = "manga"
-)]
-pub(crate) async fn get_manga_upgrades(
-    _: AuthGuard<crate::permissions::guards::LibraryView>,
-    State(state): State<AppState>,
-    Path(manga_id): Path<MangaId>,
-) -> Result<impl IntoResponse, AppError> {
-    Ok(Json(state.service.get_upgrades(manga_id).await?))
-}
 
 /// The manga this user has muted, so the client can honour the setting for
 /// every series rather than only those it happens to have loaded.

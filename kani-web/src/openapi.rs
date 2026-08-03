@@ -111,7 +111,6 @@ use utoipa::OpenApi;
         crate::rest::manga::dismiss_suppressed_chapters,
         crate::rest::manga::untrash_manga_handler,
         crate::rest::manga::set_upgrade_auto_replace,
-        crate::rest::manga::get_manga_upgrades,
         crate::rest::manga::get_notify_prefs,
         crate::rest::manga::get_all_upgrades,
         crate::rest::manga::purge_trash_all_handler,
@@ -157,7 +156,6 @@ use utoipa::OpenApi;
         crate::rest::api_tokens::revoke_token,
         // stats
         crate::rest::stats::reading_stats,
-        crate::rest::stats::reading_pace_handler,
         // sources
         crate::rest::sources::list_sources,
         crate::rest::sources::add_source,

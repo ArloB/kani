@@ -238,7 +238,8 @@ pub fn resolve_composite_ids(
 /// existed only inside `kani-cli`'s codegen, which meant an interpreted YAML
 /// source rendered the filter panel, accepted a selection and then sent an
 /// unfiltered request — the same `.yaml` behaved differently depending on
-/// whether it had been compiled. See `docs/developer/backend-unification-plan.md`.
+/// whether it had been compiled. The conformance suite (`kani-fixture-source`)
+/// exists to catch that class of divergence.
 pub fn apply_filters(
     filter_mapping: &[(String, yaml::schema::FilterMappingEntry)],
     filter_format: Option<&yaml::schema::FilterFormatCfg>,

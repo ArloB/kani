@@ -376,19 +376,6 @@ impl AppService {
         Ok(())
     }
 
-    pub async fn get_upgrades(&self, manga_id: MangaId) -> Result<Vec<UpgradeCandidate>> {
-        let rows = sqlx::query!(
-            "SELECT upgrade_available FROM chapters \
-             WHERE manga_id = ? AND upgrade_available IS NOT NULL",
-            manga_id
-        )
-        .fetch_all(&self.db_read)
-        .await?;
-        Ok(collect_candidates(
-            rows.into_iter().map(|r| r.upgrade_available),
-        ))
-    }
-
     /// Every pending candidate in the library, attributed to its series and
     /// chapter.
     ///
@@ -648,13 +635,6 @@ impl AppService {
         }
         Ok(removed)
     }
-}
-
-fn collect_candidates(rows: impl Iterator<Item = Option<String>>) -> Vec<UpgradeCandidate> {
-    rows.flatten()
-        .filter_map(|j| serde_json::from_str::<UpgradeDescriptor>(&j).ok())
-        .flat_map(|d| d.candidates)
-        .collect()
 }
 
 impl AppService {

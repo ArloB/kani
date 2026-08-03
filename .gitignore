@@ -17,6 +17,11 @@ kani-shared/bindings
 kani-web/dist
 todo.txt
 changes
+# Planning artifacts are local working notes, not documentation — they go stale
+# the moment the work lands and describe intent rather than the system.
+/plans
+/overviews
+*-plan.md
 .vscode
 .kani_admin_password
 log/

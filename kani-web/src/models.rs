@@ -415,11 +415,6 @@ pub struct SetChapterNoteRequest {
 }
 
 #[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
-pub struct PaceQuery {
-    pub period: Option<i32>,
-}
-
-#[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct TrackerAuthUrlQuery {
     pub redirect_uri: String,
 }
