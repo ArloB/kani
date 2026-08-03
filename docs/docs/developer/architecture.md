@@ -74,7 +74,7 @@ Return type: `ExtensionResult<T>` = `Result<T, ExtensionError>`.
 - REST API under `/rest/` — per-domain modules in `kani-web/src/rest/`, each exposing
   `pub fn router() -> Router<AppState>`, merged in `rest::routes()`.
 - Static assets and SPA fallback — served from the `static/` directory embedded at compile time.
-- Swagger UI — mounted at `/api-docs`.
+- Swagger UI — mounted at `/api-docs` in debug builds only; release builds omit it.
 
 Auth is a global `auth_guard` middleware layer with an `is_public_path()` allow-list
 (`kani-web/src/auth.rs`). Role-based access: permissions are `resource:action` strings

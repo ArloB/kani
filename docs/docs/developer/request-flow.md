@@ -15,7 +15,7 @@ nginx / Caddy (TLS termination)
 Axum (kani-web)
   ├─ Static assets → served directly from embedded static/
   ├─ /health → inline handler
-  ├─ /api-docs → Swagger UI
+  ├─ /api-docs → Swagger UI (debug builds only)
   └─ /rest/* → auth_guard middleware
                   │
                   ├─ is_public_path() → bypass auth

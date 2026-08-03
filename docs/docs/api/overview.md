@@ -1,6 +1,9 @@
 # API Overview
 
-Kani exposes a REST API under `/rest/`. An interactive Swagger UI is available at `/api-docs` when the server is running.
+Kani exposes a REST API under `/rest/`. Debug builds also serve an interactive
+Swagger UI at `/api-docs`; release builds — including the published Docker
+image — do not, so treat this page and the OpenAPI document itself as the
+reference.
 
 ## Base URL
 
@@ -17,8 +20,10 @@ All endpoints except the ones listed below require an authenticated session. See
 | Endpoint | Description |
 |----------|-------------|
 | `GET /rest/system/info` | Server version and first-run state |
-| `POST /rest/auth/login` | Create a session |
-| `GET /rest/auth/oidc/callback` | OIDC callback |
+| `GET /rest/auth/*` | The whole auth surface: login, registration, password reset, e-mail verification, captcha, and first-run setup |
+| `GET /health`, `/healthz`, `/ready`, `/readyz` | Liveness and readiness probes |
+| `GET /metrics` | Prometheus metrics |
+| `GET /opds/*` | OPDS catalog (authenticates per-handler, and accepts HTTP Basic) |
 
 ## Response format
 
@@ -47,4 +52,6 @@ List endpoints accept `page` and `page_size` query parameters and return a pagin
 
 ## Interactive docs
 
-Open `/api-docs` in your browser while Kani is running for the full Swagger UI with live request testing.
+Debug builds serve the full Swagger UI at `/api-docs`, with live request
+testing. A release build does not mount it — build from source with
+`cargo run -p kani-web` if you want to explore the surface interactively.
