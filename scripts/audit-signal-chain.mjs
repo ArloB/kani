@@ -13,6 +13,22 @@
  * and reports the hop where a column falls off. It is a lead generator, not a
  * verdict: read the code before believing any row.
  *
+ * Known blind spots, each confirmed by a false positive on the first run:
+ *
+ *  - `SELECT *` hides every column, so a column read that way looks unselected.
+ *    `manga.local_description` flagged for exactly this reason.
+ *  - Coalescing done in Rust rather than SQL is invisible here. That same
+ *    column is applied as `local_description.or(description)` in
+ *    `kani-web/src/rest/manga.rs`, so it was never broken.
+ *  - `settings.*` loads as one struct query, so every settings column reports
+ *    zero selects. Treat that whole table as noise.
+ *  - A column that is legitimately only ever a filter (`deleted_at`,
+ *    `token_hash`) is correct usage, not a defect.
+ *
+ * The signal worth chasing is a column written with a meaningful value whose
+ * only reads exclude that value — which is what `chapters.is_orphaned` was
+ * before commit 2e63b9c.
+ *
  * Usage: node scripts/audit-signal-chain.mjs [--all]
  */
 
