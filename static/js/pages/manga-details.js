@@ -20,6 +20,7 @@ import { createEmptyState } from '../components/empty-state.js';
 import { mountMigrationDialogue } from '../components/migration-dialogue.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { renderTabs } from '../components/tabs.js';
+import { ContextMenu } from '../components/menu.js';
 import { showToast, showApiError } from '../components/toast.js';
 import { Modal, mountIntoModalRoot, showConfirm } from '../components/modal.js';
 import { iconDocument, iconX} from '../icons.js';
@@ -74,6 +75,24 @@ let _suppressedCount = 0;
 let _filterDownloaded = false;
 let _filterUnread = false;
 let _filterOrphaned = false;
+/** @type {{ update: (activeId: string, tabs?: any[]) => void }|null} */
+let _tabsHandle = null;
+/** @type {HTMLElement|null} */
+let _chapterControlsSlot = null;
+let _chapterTotal = /** @type {number|null} */ (null);
+
+/** Tab labels; the chapter tab states the count so no separate line has to. */
+function _tabDefs() {
+  return [
+    {
+      id: 'chapters',
+      name: _chapterTotal != null && _chapterTotal > 0
+        ? t('manga.details.tab.chapters_count', { count: _chapterTotal })
+        : t('manga.details.tab.chapters'),
+    },
+    { id: 'manage', name: t('manga.details.tab.manage') },
+  ];
+}
 let _orphanCount = 0;
 let _orphanCountLoaded = false;
 
@@ -506,17 +525,26 @@ function _renderTabs(wrap) {
   const tabContent = document.createElement('div');
   _contentSection = tabContent;
 
+  // The tab row carries the chapter controls on its right. They used to sit on
+  // their own line directly beneath, which cost a chapter row for chrome the
+  // tab row had space for.
+  const tabRow = document.createElement('div');
+  tabRow.className = 'flex items-end justify-between gap-4 flex-wrap';
+
   const tabBar = document.createElement('div');
   const tabsHandle = renderTabs(tabBar, {
-    tabs: [
-      { id: 'chapters', name: t('manga.details.tab.chapters') },
-      { id: 'manage', name: t('manga.details.tab.manage') },
-    ],
+    tabs: _tabDefs(),
     activeId: _activeTab,
     onSelect: switchTab,
   });
+  _tabsHandle = tabsHandle;
 
-  wrap.appendChild(tabBar);
+  _chapterControlsSlot = document.createElement('div');
+  _chapterControlsSlot.className = 'flex items-center gap-2 flex-wrap pb-2';
+
+  tabRow.appendChild(tabBar);
+  tabRow.appendChild(_chapterControlsSlot);
+  wrap.appendChild(tabRow);
   wrap.appendChild(tabContent);
 
   function switchTab(/** @type {string} */ tab) {
@@ -1099,16 +1127,14 @@ async function _fetchChapters(sectionEl) {
   sectionEl.innerHTML = '';
   startLoading();
 
+  // Controls live in the tab row when there is one (the local library view);
+  // the remote-source view has no tabs, so it keeps a header of its own.
   const header = document.createElement('div');
-  header.className = 'flex items-center justify-between gap-3 flex-wrap';
+  header.className = 'flex items-center justify-end gap-3 flex-wrap';
 
-  const headerTitle = document.createElement('h2');
-  headerTitle.className = 'text-sm font-medium text-text-muted';
-  headerTitle.textContent = t('manga.details.chapters');
-  header.appendChild(headerTitle);
-
-  const controls = document.createElement('div');
-  controls.className = 'flex items-center gap-2 flex-wrap';
+  const controls = _chapterControlsSlot ?? document.createElement('div');
+  if (!_chapterControlsSlot) controls.className = 'flex items-center gap-2 flex-wrap';
+  controls.innerHTML = '';
 
   const mountControl = (/** @type {any} */ vnode) => {
     const el = document.createElement('div');
@@ -1170,50 +1196,78 @@ async function _fetchChapters(sectionEl) {
   }
 
   if (_isLocal) {
-    const mkFilterChip = (/** @type {string} */ label, /** @type {boolean} */ active, /** @type {string} */ title, /** @type {() => void} */ onClick) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = active ? 'chip chip-active' : 'chip';
-      b.setAttribute('aria-pressed', String(active));
-      b.textContent = label;
-      b.title = title;
-      b.addEventListener('click', onClick);
-      controls.appendChild(b);
-    };
+    // One control rather than four chips. Four fitted at 1500 px and wrapped at
+    // 1280, which pushed the list further down than before the tab row was
+    // consolidated at all — the saving has to hold at every width or it is not
+    // a saving.
+    const filterDefs = [
+      {
+        key: 'downloaded',
+        label: t('manga.details.filter.downloaded'),
+        get active() { return _filterDownloaded; },
+        toggle: () => {
+          _filterDownloaded = !_filterDownloaded;
+          setLocal(`kani_filter_downloaded_${_dbId}`, String(_filterDownloaded));
+          _page = 1; _updateUrl(); _fetchChapters(sectionEl);
+        },
+      },
+      {
+        key: 'unread',
+        label: t('manga.details.filter.unread'),
+        get active() { return _filterUnread; },
+        toggle: () => { _filterUnread = !_filterUnread; _page = 1; _updateUrl(); _fetchChapters(sectionEl); },
+      },
+      {
+        key: 'orphaned',
+        label: t('manga.details.filter.orphaned'),
+        get active() { return _filterOrphaned; },
+        toggle: () => { _filterOrphaned = !_filterOrphaned; _page = 1; _updateUrl(); _fetchChapters(sectionEl); },
+      },
+      {
+        key: 'cached',
+        label: t('manga.details.filter.cached'),
+        get active() { return _filterCached; },
+        toggle: () => { _filterCached = !_filterCached; _renderChapterList(); },
+      },
+    ];
 
-    mkFilterChip(
-      t('manga.details.filter.downloaded'), _filterDownloaded,
-      _filterDownloaded ? t('manga.details.filter.all') : t('manga.details.filter.downloaded.show'),
-      () => {
-        _filterDownloaded = !_filterDownloaded;
-        setLocal(`kani_filter_downloaded_${_dbId}`, String(_filterDownloaded));
-        _page = 1; _updateUrl(); _fetchChapters(sectionEl);
-      },
-    );
-    mkFilterChip(
-      t('manga.details.filter.unread'), _filterUnread,
-      _filterUnread ? t('manga.details.filter.all') : t('manga.details.filter.unread.show'),
-      () => {
-        _filterUnread = !_filterUnread;
-        _page = 1; _updateUrl(); _fetchChapters(sectionEl);
-      },
-    );
-    mkFilterChip(
-      t('manga.details.filter.orphaned'), _filterOrphaned,
-      _filterOrphaned ? t('manga.details.filter.all') : t('manga.details.filter.orphaned.show'),
-      () => {
-        _filterOrphaned = !_filterOrphaned;
-        _page = 1; _updateUrl(); _fetchChapters(sectionEl);
-      },
-    );
-    mkFilterChip(
-      t('manga.details.filter.cached'), _filterCached,
-      _filterCached ? t('manga.details.filter.all') : t('manga.details.filter.cached.show'),
-      () => {
-        _filterCached = !_filterCached;
-        _renderChapterList();
-      },
-    );
+    const activeFilters = filterDefs.filter(f => f.active);
+    const filterBtn = document.createElement('button');
+    filterBtn.type = 'button';
+    filterBtn.className = activeFilters.length ? 'chip chip-active' : 'chip';
+    filterBtn.setAttribute('aria-haspopup', 'menu');
+    filterBtn.setAttribute('aria-expanded', 'false');
+    filterBtn.textContent = activeFilters.length
+      ? t('manga.details.filter.active', { count: activeFilters.length })
+      : t('manga.details.filter.label');
+    filterBtn.title = activeFilters.length
+      ? activeFilters.map(f => f.label).join(', ')
+      : t('manga.details.filter.label.title');
+    controls.appendChild(filterBtn);
+
+    let filterMenu = /** @type {HTMLElement|null} */ (null);
+    filterBtn.addEventListener('click', () => {
+      if (filterMenu) { render(null, filterMenu); filterMenu.remove(); filterMenu = null; filterBtn.setAttribute('aria-expanded', 'false'); return; }
+      filterMenu = document.createElement('div');
+      document.body.appendChild(filterMenu);
+      filterBtn.setAttribute('aria-expanded', 'true');
+      const close = () => {
+        if (!filterMenu) return;
+        render(null, filterMenu); filterMenu.remove(); filterMenu = null;
+        filterBtn.setAttribute('aria-expanded', 'false');
+      };
+      render(
+        html`<${ContextMenu}
+          items=${filterDefs.map(f => ({
+            label: f.active ? t('manga.details.filter.on', { name: f.label }) : f.label,
+            action: () => f.toggle(),
+          }))}
+          trigger=${{ current: filterBtn }}
+          onClose=${close}
+        />`,
+        filterMenu,
+      );
+    });
 
     if (_availableScanlators.length > 1) {
       mountControl(html`<${Select}
@@ -1231,8 +1285,11 @@ async function _fetchChapters(sectionEl) {
     }
   }
 
-  header.appendChild(controls);
-  sectionEl.appendChild(header);
+  // Only mount the local header when the controls are not already in the tab row.
+  if (!_chapterControlsSlot) {
+    header.appendChild(controls);
+    sectionEl.appendChild(header);
+  }
 
   const listEl = document.createElement('div');
   sectionEl.appendChild(listEl);
@@ -1305,8 +1362,9 @@ async function _fetchChapters(sectionEl) {
   const totalCount = _isLocal
     ? (typeof result?.total === 'number' ? result.total : null)
     : (_allRemoteChapters !== null ? _allRemoteChapters.length : null);
-  if (totalCount != null && totalCount > 0) {
-    headerTitle.textContent = t('manga.details.chapter_count', { count: totalCount, s: totalCount === 1 ? '' : 's' });
+  if (totalCount != null && totalCount > 0 && totalCount !== _chapterTotal) {
+    _chapterTotal = totalCount;
+    _tabsHandle?.update(_activeTab, _tabDefs());
   }
 
   if (infinite) {
