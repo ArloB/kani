@@ -145,7 +145,24 @@ export async function logout() {
   clearSWRCache();
   // Dynamic import: session.js imports this module, so a static one would cycle.
   await import('./session.js').then((m) => m.clearRememberedPermissions()).catch(() => {});
+  await _forgetOfflinePages();
   return _req('POST', '/auth/logout');
+}
+
+/**
+ * Drop cached chapter images on the way out.
+ *
+ * The service worker serves `/rest/chapter/{id}/page/{n}` cache-first, which
+ * means a cached page is returned *without* a session — verified: after clearing
+ * every cookie, a cached page still came back 200 with the full JPEG. On a
+ * shared browser profile that leaves one account's reading readable by the next
+ * person, so signing out clears it. The cost is that offline chapters must be
+ * re-cached after signing back in; Settings → Offline lists them.
+ */
+async function _forgetOfflinePages() {
+  try {
+    if ('caches' in window) await caches.delete('kani-pages-v1');
+  } catch { /* nothing cached, or storage unavailable */ }
 }
 
 /** @param {string} currentPassword @param {string} newPassword */
@@ -158,6 +175,7 @@ export async function changePassword(currentPassword, newPassword) {
 export async function logoutEverywhere() {
   clearSWRCache();
   await import('./session.js').then((m) => m.clearRememberedPermissions()).catch(() => {});
+  await _forgetOfflinePages();
   return _req('POST', '/auth/logout_everywhere');
 }
 

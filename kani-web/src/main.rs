@@ -200,15 +200,47 @@ async fn main() {
     // API: enough for normal UI use while protecting against abuse.
     // Proxy: much more permissive — the reader fires many concurrent image
     // requests; the per-host semaphore in rest.rs already throttles upstream.
-    const API_RATE_PER_SECOND: u64 = 5;
-    const API_BURST_SIZE: u32 = 200;
-    const PROXY_RATE_PER_SECOND: u64 = 30;
-    const PROXY_BURST_SIZE: u32 = 600;
+    //
+    // A debug build raises both by an order of magnitude. Automated browsing —
+    // a Playwright sweep, a load of the whole settings tree — drains the release
+    // budget in seconds, and every subsequent call 429s, which reads as a pile
+    // of application bugs rather than the limiter doing its job. The release
+    // defaults are what ships; `KANI_API_RATE_PER_SECOND` and friends override
+    // either build.
+    let dev_build = cfg!(debug_assertions);
+    let env_u64 = |name: &str, default: u64| -> u64 {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(default)
+    };
+    let env_u32 = |name: &str, default: u32| -> u32 {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(default)
+    };
+
+    let api_rate_per_second = env_u64("KANI_API_RATE_PER_SECOND", if dev_build { 50 } else { 5 });
+    let api_burst_size = env_u32("KANI_API_BURST_SIZE", if dev_build { 2000 } else { 200 });
+    let proxy_rate_per_second = env_u64(
+        "KANI_PROXY_RATE_PER_SECOND",
+        if dev_build { 300 } else { 30 },
+    );
+    let proxy_burst_size = env_u32("KANI_PROXY_BURST_SIZE", if dev_build { 6000 } else { 600 });
+
+    if dev_build {
+        tracing::info!(
+            api_rate_per_second,
+            api_burst_size,
+            "Debug build: rate limits relaxed for local development"
+        );
+    }
 
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(API_RATE_PER_SECOND)
-            .burst_size(API_BURST_SIZE)
+            .per_second(api_rate_per_second)
+            .burst_size(api_burst_size)
             // Bucket bearer traffic per token, so a busy integration cannot
             // spend its owner's browsing budget.
             .key_extractor(kani_web::rate_limit_key::TokenOrPeerIp)
@@ -216,14 +248,14 @@ async fn main() {
             // budget can only retry blindly, which makes congestion worse.
             .use_headers()
             .finish()
-            .expect("API_RATE_PER_SECOND/API_BURST_SIZE constants are valid"),
+            .expect("api rate/burst values are valid"),
     );
     let proxy_governor_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(PROXY_RATE_PER_SECOND)
-            .burst_size(PROXY_BURST_SIZE)
+            .per_second(proxy_rate_per_second)
+            .burst_size(proxy_burst_size)
             .finish()
-            .expect("PROXY_RATE_PER_SECOND/PROXY_BURST_SIZE constants are valid"),
+            .expect("proxy rate/burst values are valid"),
     );
 
     let cors_layer = {
