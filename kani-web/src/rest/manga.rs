@@ -355,6 +355,10 @@ pub(crate) async fn get_local_manga_details(
         "source_authors":              d.source_authors,
         "source_artists":              d.source_artists,
         "source_tags":                 d.source_tags,
+        "chapter_count":               d.chapter_count,
+        // RFC 3339 — time's default serde emits an array `new Date()` cannot parse.
+        "added_at":                    d.manga.created_at
+            .format(&time::format_description::well_known::Rfc3339).ok(),
     })))
 }
 

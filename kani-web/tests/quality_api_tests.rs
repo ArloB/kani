@@ -277,3 +277,70 @@ async fn auto_replace_toggle_round_trips() {
          initialise from it"
     );
 }
+
+#[tokio::test]
+async fn the_details_projection_carries_the_rail_facts() {
+    // `/details` is hand-built with json!({...}) rather than serialised from the
+    // model, so a field exists on the struct and is still invisible to the page.
+    // The rail reads both of these; neither had ever left the database.
+    let state = test_state().await;
+    let db = state.service.db.clone();
+
+    let source_id: i64 =
+        sqlx::query_scalar("INSERT INTO sources (name, version) VALUES ('s', '1') RETURNING id")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    let manga: i64 = sqlx::query_scalar(
+        "INSERT INTO manga (source_id, source_manga_id, name, status) \
+         VALUES (?, 'm1', 'Vagabond', 0) RETURNING id",
+    )
+    .bind(source_id)
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    for n in 1..=3 {
+        sqlx::query(
+            "INSERT INTO chapters (manga_id, source_chapter_id, chapter_number, language, name) \
+             VALUES (?, ?, ?, 'en', 'c')",
+        )
+        .bind(manga)
+        .bind(format!("c{n}"))
+        .bind(n as f64)
+        .execute(&db)
+        .await
+        .unwrap();
+    }
+    // An orphan is held for the reader but is not part of the series' count.
+    sqlx::query(
+        "INSERT INTO chapters (manga_id, source_chapter_id, chapter_number, language, name, is_orphaned) \
+         VALUES (?, 'old', 99.0, 'en', 'kept', 1)",
+    )
+    .bind(manga)
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let body = common::body_json(
+        app.oneshot(authed_get(&format!("/rest/manga/{manga}/details"), &cookie))
+            .await
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(
+        body["chapter_count"], 3,
+        "the rail states the series' chapters, and a migration's orphans are not among them"
+    );
+
+    let added = body["added_at"].as_str().unwrap_or_default();
+    assert!(!added.is_empty(), "added_at must reach the client: {body}");
+    assert!(
+        time::OffsetDateTime::parse(added, &time::format_description::well_known::Rfc3339).is_ok(),
+        "must be RFC 3339 — time's default serde emits an array `new Date()` cannot parse: {added}"
+    );
+}

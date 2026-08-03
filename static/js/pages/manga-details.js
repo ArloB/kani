@@ -219,6 +219,8 @@ export async function init(container, params) {
         info.local_authors      = res.local_authors ?? [];
         info.local_artists      = res.local_artists ?? [];
         info.local_tags         = res.local_tags ?? [];
+        info.chapter_count      = res.chapter_count ?? null;
+        info.added_at           = res.added_at ?? null;
         info.has_local_people   = res.has_local_people ?? false;
         info.has_local_tags     = res.has_local_tags ?? false;
         info.source_name        = res.source_name ?? info.title;

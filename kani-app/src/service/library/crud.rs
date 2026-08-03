@@ -413,6 +413,13 @@ impl AppService {
             local_tags: loc_tags,
             has_local_people: record.has_local_people,
             has_local_tags: record.has_local_tags,
+            chapter_count: sqlx::query_scalar!(
+                "SELECT COUNT(*) FROM chapters WHERE manga_id = ? AND is_orphaned = FALSE",
+                id
+            )
+            .fetch_one(&self.db_read)
+            .await
+            .unwrap_or(0) as i64,
         })
     }
 

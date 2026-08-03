@@ -302,6 +302,9 @@ pub struct LocalMangaDetails {
     pub local_tags: Vec<String>,
     pub has_local_people: bool,
     pub has_local_tags: bool,
+    /// Chapters currently held for this series, excluding ones a migration
+    /// orphaned. The rail states it; the chapter list's own count is filtered.
+    pub chapter_count: i64,
 }
 
 /// Orphaned manga — the source they came from has been soft-deleted.

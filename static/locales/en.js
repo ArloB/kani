@@ -1137,6 +1137,8 @@ export default {
   'manga.header.external_link.body': 'This link will open outside the app:',
   'manga.header.external_link.dont_ask': "Don't ask again",
   'manga.header.external_link.open': 'Open link',
+  'manga.header.chapters': 'Chapters',
+  'manga.header.added': 'Added',
   'manga.header.role.story_art': 'Story & art',
   'manga.header.role.story': 'Story',
   'manga.header.role.art': 'Art',

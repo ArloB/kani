@@ -7,7 +7,7 @@ import { t } from '../../i18n.js';
 import { hasPermission } from '../../session.js';
 import { getState, subscribe } from '../../cache.js';
 import { navigate } from '../../router.js';
-import { getLocal, setLocal, escapeHtml } from '../../utils.js';
+import { getLocal, setLocal, escapeHtml, formatRelativeTime } from '../../utils.js';
 import { createCoverImage } from '../cover-image.js';
 import { showToast, showApiError } from '../toast.js';
 import { iconSpinner } from '../../icons.js';
@@ -279,6 +279,19 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
     const val = mkFact(t('manga.header.status'),
       `<a href="/?status=${statusVal}" class="${META_LINK_CLS}">${escapeHtml(statusDisplay)}</a>`, sealCls);
     val.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); navigate(`/?status=${statusVal}`); });
+  }
+
+  if (isLocal && Number.isFinite(Number(info?.chapter_count))) {
+    mkFact(t('manga.header.chapters'), String(Number(info.chapter_count)));
+  }
+
+  // When the series entered the library. Held in manga.created_at since the
+  // beginning and shown nowhere until now.
+  if (isLocal && info?.added_at) {
+    const when = new Date(info.added_at);
+    if (!Number.isNaN(when.getTime())) {
+      mkFact(t('manga.header.added'), escapeHtml(formatRelativeTime(info.added_at)));
+    }
   }
 
   if (factCount) {
