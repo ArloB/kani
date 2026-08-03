@@ -126,8 +126,15 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
   // ── Cover ──
   const coverInner = document.createElement('div');
-  coverInner.className = 'rail-cover-slot aspect-[2/3] rounded-xl overflow-hidden bg-surface-2 cursor-pointer shadow-card'; /* justified: manga cover aspect ratio */
+  coverInner.className = 'rail-cover-slot rounded-xl overflow-hidden bg-surface-2 cursor-pointer shadow-card';
   coverInner.appendChild(createCoverImage({ url: coverUrl, alt: info?.title ?? '' }));
+
+  // The frame the cover is cropped into. Its height is what changes with the
+  // viewport — in steps, see .rail-cover-box — while the width stays the
+  // rail's, so the jacket's edges keep meeting the controls below it.
+  const coverBox = document.createElement('div');
+  coverBox.className = 'rail-cover-box';
+  coverBox.appendChild(coverInner);
 
   // Cover lightbox
   coverInner.addEventListener('click', () => {
@@ -419,7 +426,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
       coverInner.style.marginRight = '';
       // Pull meta/description out of the desktop panel back to their mobile homes.
       if (!titleMetaCard.contains(meta)) titleMetaCard.appendChild(meta);
-      if (!heroRow.contains(coverInner)) heroRow.insertBefore(coverInner, heroRow.firstChild);
+      if (!heroRow.contains(coverBox)) heroRow.insertBefore(coverBox, heroRow.firstChild);
       if (!heroRow.contains(titleMetaCard)) heroRow.appendChild(titleMetaCard);
       if (heroRow.contains(contentCard)) heroRow.removeChild(contentCard);
       titleMetaCard.style.flex = '1 1 0%';
@@ -438,7 +445,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
       heroRow.style.cssText = 'display:flex;flex-direction:column;gap:1rem;flex:1 1 auto;min-height:0';
       btnGroupEl.style.paddingTop = '';
       btnGroupEl.style.paddingBottom = '';
-      if (!heroRow.contains(coverInner)) heroRow.insertBefore(coverInner, heroRow.firstChild);
+      if (!heroRow.contains(coverBox)) heroRow.insertBefore(coverBox, heroRow.firstChild);
       if (!heroRow.contains(contentCard)) heroRow.appendChild(contentCard);
       if (heroRow.contains(titleMetaCard)) heroRow.removeChild(titleMetaCard);
       // Order: actions (free) then the reference panel (metadata + description).
@@ -446,7 +453,10 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
       if (!metaPanel.contains(meta)) metaPanel.insertBefore(meta, metaPanel.firstChild);
       if (descWrap && !metaPanel.contains(descWrap)) metaPanel.appendChild(descWrap);
       if (!contentCard.contains(metaPanel)) contentCard.appendChild(metaPanel);
-      coverInner.style.width = '100%';
+      // Width comes from the 2:3 ratio against the box's flexed height, so it
+      // must not be pinned here — an inline width beats the stylesheet and was
+      // what kept the jacket 280 px wide while its height collapsed.
+      coverInner.style.width = '';
       coverInner.style.marginLeft = '';
       coverInner.style.marginRight = '';
     }

@@ -1935,6 +1935,9 @@
     grid-template-columns: 1fr 1fr;
     gap: 0.85rem 1rem;
   }
+  /* An odd last fact has an empty cell beside it anyway, so let it take the
+     width — at 390 px "2 months ago" was truncating in half a column. */
+  .rail-facts > *:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .rail-fact-k {
     font-size: 0.6875rem;
     font-weight: 400;
@@ -1992,7 +1995,7 @@
      leaving should get out of the way, not perform. */
   .rail-cover-slot { transition: none; }
   @media (prefers-reduced-motion: no-preference) {
-    .rail-cover-slot { transition: height 220ms cubic-bezier(0.2, 0, 0, 1); }
+    .rail-cover-box { transition: height 220ms cubic-bezier(0.2, 0, 0, 1); }
     .rail--reading .rail-desc { animation: rail-desc-in 220ms cubic-bezier(0.2, 0, 0, 1); }
     @keyframes rail-desc-in {
       from { opacity: 0.35; }
@@ -2000,11 +2003,32 @@
     }
   }
 
-  .rail--reading .rail-cover-slot {
-    /* Crops rather than scales: the artwork keeps its size and loses its
+  /* The frame only exists on the two-column layout. On mobile the cover is
+     itself the flex item beside the title, so the wrapper gets out of the way. */
+  .rail-cover-box { display: contents; }
+  .rail-cover-slot { aspect-ratio: 2 / 3; }
+
+  @media (min-width: 1024px) {
+    .rail-cover-box {
+      display: block;
+      flex: none;
+      width: 100%;
+      height: 26.25rem;           /* 2:3 jacket at 280 px */
+    }
+    .rail-cover-slot {
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      aspect-ratio: auto;
+      flex: none;
+    }
+    .rail-cover-slot img { object-fit: cover; object-position: top center; }
+  }
+
+  .rail--reading .rail-cover-box {
+    /* Crops rather than scales: the artwork keeps its width and loses its
        lower half, which is what "covering the bottom of the cover" looked
        like when it was an overlay. */
-    aspect-ratio: auto;
     height: 8.5rem;
   }
   .rail--reading .rail-cover-slot img { object-fit: cover; object-position: top center; }
@@ -2033,18 +2057,32 @@
        still do its job. Left fixed, a 420 px cover on a 768 px screen pushed
        the description off the bottom entirely, which is the one thing in the
        rail people actually read. */
-    .rail-cover-slot {
-      flex: 1 1 auto;
-      min-height: 7rem;
-      max-height: 42vh;
-    }
-    /* Crops from the bottom: a cover's title and the character's face live at
-       the top, so that is the part worth keeping when height is short. */
-    .rail-cover-slot img { object-fit: cover; object-position: top center; }
+    /* Height flexes and the width follows from the 2:3 ratio, so the jacket
+       gets smaller rather than letterboxed. Cropping kept the frame 280 px
+       wide and squashed it to a 2.5:1 strip, which stops reading as a cover
+       at all. Centred, because a narrower cover in a 280 px rail should look
+       placed rather than left-aligned by accident. */
+    /* The cover always spans the rail. Its edges line up with the Read button,
+       the facts and the synopsis, because a column whose widest element wanders
+       is the most visible kind of wrong.
 
-    /* Actions, credits, facts and the synopsis take the height they need and
-       refuse to shrink, so the cover above them absorbs the whole squeeze
-       rather than the two splitting it and the description losing either way. */
+       What changes with height is the crop, and it changes in steps rather than
+       continuously: a jacket, a plate, a band. Sliding through every ratio in
+       between is what read as broken — no single frame looked chosen. Three
+       fixed ratios each look deliberate, and all three keep the top of the
+       artwork, where the title and the character are. */
+  }
+
+  /* Not enough height for the full jacket: a square plate. */
+  @media (min-width: 1024px) and (min-height: 700px) and (max-height: 1009px) {
+    .rail-cover-box { height: 17.5rem; }
+  }
+  /* Shorter still: a band, the shape a chapter header would use. */
+  @media (min-width: 1024px) and (min-height: 700px) and (max-height: 859px) {
+    .rail-cover-box { height: 8.5rem; }
+  }
+
+  @media (min-width: 1024px) and (min-height: 700px) {
     .rail-content { flex: 0 0 auto; min-height: 0; }
 
     /* Sized to what it holds, so it is never the thing that gets squeezed;
