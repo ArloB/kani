@@ -487,8 +487,21 @@ fn record_bandwidth(
         .fetch_add(bytes, Ordering::Relaxed);
 }
 
-async fn image_proxy(
-    AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
+#[utoipa::path(
+    get, path = "/rest/image_proxy",
+    params(("token" = String, Query, description = "Sealed proxy token naming the upstream URL"), ("w" = Option<u32>, Query, description = "Target width in pixels, up to 4096"), ("transform" = Option<String>, Query, description = "Source-specific transform hint")),
+    responses(
+        (status = 200, description = "The upstream image, re-encoded and resized as requested"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 400, description = "Invalid or expired proxy token"),
+        (status = 502, description = "The upstream image could not be fetched"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn image_proxy(
+    _: AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     headers: HeaderMap,
     ValidatedQuery(query): ValidatedQuery<ProxyQuery>,
@@ -895,13 +908,26 @@ pub(crate) struct SaveToLibraryQuery {
 }
 
 #[derive(serde::Deserialize, Default)]
-struct CoverQuery {
+pub(crate) struct CoverQuery {
     size: Option<String>,
     h: Option<String>,
 }
 
-async fn serve_manga_cover(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/cover",
+    params(("id" = i64, Path, description = "Manga id"), ("size" = Option<String>, Query, description = "One of xs, sm, md, lg; full size when omitted")),
+    responses(
+        (status = 200, description = "The cover image, at the requested size"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 304, description = "Not modified"),
+        (status = 404, description = "No cover stored for this manga"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn serve_manga_cover(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<MangaId>,
     headers: HeaderMap,
@@ -1143,8 +1169,21 @@ fn map_refresh_request(
 
 // ── Chapter CBZ reader ────────────────────────────────────────────────────────
 
-async fn serve_chapter_page(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/chapter/{id}/page/{page_num}",
+    params(("id" = i64, Path, description = "Chapter id"), ("page_num" = i64, Path, description = "Zero-based page index")),
+    responses(
+        (status = 200, description = "One page image out of the downloaded CBZ"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 304, description = "Not modified"),
+        (status = 404, description = "The chapter is not downloaded, or has no such page"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn serve_chapter_page(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path((id, page_num)): Path<(ChapterId, usize)>,
     headers: HeaderMap,

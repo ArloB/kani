@@ -551,6 +551,18 @@ pub(crate) async fn run_maintenance(
 /// Generic manual trigger for any recurring-job kind. Submits the kind's job
 /// immediately without disturbing its schedule; returns the job id (or a
 /// conflict if a singleton kind is already running, or 404 for an unknown kind).
+#[utoipa::path(
+    post, path = "/rest/admin/recurring/{kind}/run",
+    params(("kind" = String, Path, description = "Recurring job kind")),
+    responses(
+        (status = 200, description = "Recurring job triggered out of schedule"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such recurring job kind"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn trigger_recurring(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
@@ -1268,8 +1280,18 @@ pub(crate) async fn delete_blocked_repo_handler(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get, path = "/rest/admin/proxy/stats",
+    responses(
+        (status = 200, description = "Bytes proxied per upstream host since boot"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn proxy_bandwidth_stats(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::ServerManage>,
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     use std::sync::atomic::Ordering;
@@ -1290,15 +1312,36 @@ pub(crate) async fn proxy_bandwidth_stats(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    get, path = "/rest/admin/sources/circuits",
+    responses(
+        (status = 200, description = "Circuit-breaker state per upstream host"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn list_source_circuits(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::ServerManage>,
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     Ok(Json(state.smart_client.list_circuits()))
 }
 
+#[utoipa::path(
+    post, path = "/rest/admin/sources/circuits/{host}/reset",
+    params(("host" = String, Path, description = "Upstream host")),
+    responses(
+        (status = 204, description = "Circuit breaker closed for that host"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn reset_source_circuit(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::ServerManage>,
+    _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
     Path(host): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -1382,6 +1425,16 @@ pub(crate) async fn admin_backup_run_now(
     Ok(Json(json!({ "job_id": job_id })))
 }
 
+#[utoipa::path(
+    get, path = "/rest/admin/storage/stats",
+    responses(
+        (status = 200, description = "Disk usage by library, covers and chapters, with free space"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn admin_storage_stats(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
@@ -1390,6 +1443,16 @@ pub(crate) async fn admin_storage_stats(
     Ok(Json(stats))
 }
 
+#[utoipa::path(
+    get, path = "/rest/admin/storage/stats/history",
+    responses(
+        (status = 200, description = "Recorded storage samples over time, for the usage chart"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn admin_storage_stats_history(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
@@ -1434,6 +1497,17 @@ pub(crate) struct ScrubBody {
     pub fix: bool,
 }
 
+#[utoipa::path(
+    post, path = "/rest/admin/library/scrub",
+    request_body(content = inline(serde_json::Value), description = "Scrub depth: quick or deep"),
+    responses(
+        (status = 202, description = "Integrity scrub started; responds with the job id"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn admin_library_scrub(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
@@ -1459,6 +1533,16 @@ pub(crate) async fn admin_library_scrub(
     ))
 }
 
+#[utoipa::path(
+    get, path = "/rest/admin/library/scrub/last",
+    responses(
+        (status = 200, description = "The most recent scrub report, or null if none has run"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn admin_library_scrub_last(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
@@ -1486,6 +1570,17 @@ fn default_true() -> bool {
 
 /// Deletion is its own endpoint, never a mode of the scrub: a scheduled scrub
 /// must not be able to remove files, and the caller must name what goes.
+#[utoipa::path(
+    post, path = "/rest/admin/library/orphans/delete",
+    request_body(content = inline(serde_json::Value), description = "Paths to remove, and whether this is a dry run"),
+    responses(
+        (status = 200, description = "Orphaned files deleted, or counted when dry_run is set"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn admin_delete_orphans(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
@@ -1510,6 +1605,17 @@ pub(crate) struct ArchiveBody {
     pub include_viewer: bool,
 }
 
+#[utoipa::path(
+    post, path = "/rest/admin/library/archive",
+    request_body(content = inline(serde_json::Value), description = "Manga ids to archive, or empty for the whole library"),
+    responses(
+        (status = 202, description = "Archive export started; responds with the job id"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn admin_archive_export(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
@@ -1538,6 +1644,18 @@ pub(crate) async fn admin_archive_export(
 /// Streams the zip a completed export produced. The path comes from the job's
 /// own result, never from the caller, and is re-checked against `_archives`
 /// before anything is read.
+#[utoipa::path(
+    get, path = "/rest/admin/library/archive/{job_id}/download",
+    params(("job_id" = String, Path, description = "Archive job id (UUID)")),
+    responses(
+        (status = 200, description = "The archive produced by a completed export job"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such job, or it has not produced an archive"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn admin_archive_download(
     _: AuthGuard<crate::permissions::guards::AdminManage>,
     State(state): State<AppState>,
@@ -1578,6 +1696,16 @@ pub(crate) async fn admin_archive_download(
         .map_err(|e| AppError::InternalServerError(e.to_string()))
 }
 
+#[utoipa::path(
+    get, path = "/rest/admin/diagnostics",
+    responses(
+        (status = 200, description = "Runtime diagnostics: versions, paths, pool and cache state, recent error count"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn admin_diagnostics(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,
@@ -1590,6 +1718,16 @@ pub(crate) async fn admin_diagnostics(
     Ok(Json(payload))
 }
 
+#[utoipa::path(
+    get, path = "/rest/admin/support-bundle",
+    responses(
+        (status = 200, description = "A zip of logs and diagnostics for bug reports"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn admin_support_bundle(
     _: AuthGuard<crate::permissions::guards::ServerManage>,
     State(state): State<AppState>,

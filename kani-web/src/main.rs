@@ -601,6 +601,19 @@ async fn main() {
             }),
         );
 
+    // Swagger UI, debug builds only. Merged here rather than inside the chain
+    // above so it sits outside the auth layers — the UI is a plain static page
+    // that fetches the spec, and an auth redirect would break it. `build_app`
+    // mounts its own copy for tests; this is the one the server actually serves.
+    #[cfg(debug_assertions)]
+    let app = {
+        use utoipa::OpenApi;
+        app.merge(utoipa_swagger_ui::SwaggerUi::new("/api-docs").url(
+            "/api-docs/openapi.json",
+            kani_web::openapi::ApiDoc::openapi(),
+        ))
+    };
+
     // Cache-Control for static assets: immutable in release, no-cache in debug.
     let app = app
         .layer(axum::middleware::from_fn(cache_control_middleware))

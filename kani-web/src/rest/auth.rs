@@ -526,7 +526,7 @@ pub(crate) async fn totp_disable(
 }
 
 #[utoipa::path(
-    post, path = "/rest/auth/totp/backup-codes/regenerate",
+    post, path = "/rest/auth/totp/backup-codes",
     request_body = TotpCodeRequest,
     responses(
         (status = 200, description = "New backup codes generated"),

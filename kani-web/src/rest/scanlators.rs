@@ -217,6 +217,16 @@ mod tests {
 
 // ── Library-wide defaults ────────────────────────────────────────────────────
 
+#[utoipa::path(
+    get, path = "/rest/scanlator_preferences/global",
+    responses(
+        (status = 200, description = "Library-wide scanlator priorities and blocks"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
 pub(crate) async fn get_global_prefs(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
@@ -233,6 +243,17 @@ pub(crate) struct GlobalPrefBody {
     pub blocked: bool,
 }
 
+#[utoipa::path(
+    post, path = "/rest/scanlator_preferences/global",
+    request_body(content = inline(serde_json::Value), description = "Scanlator name, priority and blocked flag"),
+    responses(
+        (status = 200, description = "Global scanlator preference saved"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
 pub(crate) async fn set_global_pref(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
@@ -247,6 +268,16 @@ pub(crate) async fn set_global_pref(
 
 /// Scanlators seen in the library, commonest first, so the UI can offer real
 /// names instead of a free-text box.
+#[utoipa::path(
+    get, path = "/rest/scanlator_preferences/known",
+    responses(
+        (status = 200, description = "Scanlators seen in the library, commonest first, with their chapter counts"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
 pub(crate) async fn get_known_scanlators(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,

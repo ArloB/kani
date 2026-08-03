@@ -79,8 +79,18 @@ impl Drop for SseClientGuard {
     }
 }
 
-async fn get_boot_id(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/boot_id",
+    responses(
+        (status = 200, description = "This server process's boot id, which clients compare to detect a restart"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "system"
+)]
+pub(crate) async fn get_boot_id(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     Json(json!({ "boot_id": state.boot_id }))

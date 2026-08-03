@@ -32,6 +32,17 @@ fn parse_statuses(raw: Option<&str>) -> Vec<String> {
     .unwrap_or_default()
 }
 
+#[utoipa::path(
+    get, path = "/rest/jobs",
+    params(("job_type" = Option<String>, Query, description = "Restrict to one job type"), ("status" = Option<String>, Query, description = "Comma-separated status group, e.g. pending,running"), ("limit" = Option<i64>, Query, description = "Page size, clamped to 1..=200 (default 50)"), ("offset" = Option<i64>, Query, description = "Rows to skip")),
+    responses(
+        (status = 200, description = "A page of background jobs"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn list_jobs(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,
@@ -48,6 +59,18 @@ pub(crate) async fn list_jobs(
     Ok(Json(page))
 }
 
+#[utoipa::path(
+    get, path = "/rest/jobs/{id}",
+    params(("id" = String, Path, description = "Job id (UUID)")),
+    responses(
+        (status = 200, description = "One job's status and progress"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such job"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn get_job(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,
@@ -57,6 +80,18 @@ pub(crate) async fn get_job(
     Ok(Json(status))
 }
 
+#[utoipa::path(
+    delete, path = "/rest/jobs/{id}",
+    params(("id" = String, Path, description = "Job id (UUID)")),
+    responses(
+        (status = 200, description = "Job cancelled"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such job"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn cancel_job(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,
@@ -66,6 +101,18 @@ pub(crate) async fn cancel_job(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[utoipa::path(
+    post, path = "/rest/jobs/{id}/pause",
+    params(("id" = String, Path, description = "Job id (UUID)")),
+    responses(
+        (status = 200, description = "Job paused"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such job"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn pause_job(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,
@@ -75,6 +122,18 @@ pub(crate) async fn pause_job(
     Ok(Json(json!({ "ok": true })))
 }
 
+#[utoipa::path(
+    post, path = "/rest/jobs/{id}/resume",
+    params(("id" = String, Path, description = "Job id (UUID)")),
+    responses(
+        (status = 200, description = "Job resumed"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such job"),
+    ),
+    security(("session" = [])),
+    tag = "admin"
+)]
 pub(crate) async fn resume_job(
     _: AuthGuard<crate::permissions::guards::AdminJobs>,
     State(svc): State<Arc<dyn JobDomain>>,

@@ -22,6 +22,16 @@ pub(crate) struct CollectionBody {
     pub sort_order: i64,
 }
 
+#[utoipa::path(
+    get, path = "/rest/collections",
+    responses(
+        (status = 200, description = "Smart collections, with their rules"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub(crate) async fn list_collections(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
@@ -29,6 +39,18 @@ pub(crate) async fn list_collections(
     Ok(Json(state.service.list_collections().await?))
 }
 
+#[utoipa::path(
+    post, path = "/rest/collections",
+    request_body(content = inline(serde_json::Value), description = "Name, smart-collection rule and sort order"),
+    responses(
+        (status = 201, description = "Collection created"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 422, description = "Malformed rule"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub(crate) async fn create_collection(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
@@ -41,6 +63,19 @@ pub(crate) async fn create_collection(
     Ok((StatusCode::CREATED, Json(col)))
 }
 
+#[utoipa::path(
+    put, path = "/rest/collections/{id}",
+    params(("id" = i64, Path, description = "Collection id")),
+    request_body(content = inline(serde_json::Value), description = "Replacement name, rule and sort order"),
+    responses(
+        (status = 200, description = "Collection updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such collection"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub(crate) async fn update_collection(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
@@ -54,6 +89,17 @@ pub(crate) async fn update_collection(
     Ok(Json(col))
 }
 
+#[utoipa::path(
+    delete, path = "/rest/collections/{id}",
+    params(("id" = i64, Path, description = "Collection id")),
+    responses(
+        (status = 204, description = "Collection deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub(crate) async fn delete_collection(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
@@ -63,6 +109,18 @@ pub(crate) async fn delete_collection(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    get, path = "/rest/collections/{id}/manga",
+    params(("id" = i64, Path, description = "Collection id")),
+    responses(
+        (status = 200, description = "Manga ids the collection's rule currently selects"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such collection"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub(crate) async fn get_collection_manga(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
