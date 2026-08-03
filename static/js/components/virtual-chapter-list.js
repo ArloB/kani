@@ -14,7 +14,7 @@ import { navigate } from '../router.js';
 import { downloadChapter, deleteChapter, cancelDownload, setChapterReadStatus, markChaptersUpTo, retryChapterDownload } from '../api.js';
 import * as api from '../api.js';
 import { Modal } from './modal.js';
-import { iconCheck, iconDownload, iconCloud, iconCloudCheck, iconPencil} from '../icons.js';
+import { iconCheck, iconDownload, iconCloud, iconCloudCheck, iconPencil, iconEllipsisVertical } from '../icons.js';
 import { Icon } from './icon.js';
 import { ContextMenu } from './menu.js';
 import { BulkBar } from './bulk-bar.js';
@@ -269,7 +269,7 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, onAssignVolu
         aria-expanded=${menuOpen}
         tabindex="-1"
         onClick=${(e) => { e.preventDefault(); e.stopPropagation(); setMenuOpen(o => !o); }}
-      >⋮</button>
+      ><${Icon} svg=${iconEllipsisVertical} class="icon-sm" /></button>
       ${menuOpen && html`<${ContextMenu} items=${menuItems} trigger=${btnRef} onClose=${() => setMenuOpen(false)} />`}
     </div>
   ` : null;

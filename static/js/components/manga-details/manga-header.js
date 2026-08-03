@@ -120,7 +120,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
   // ── Cover ──
   const coverInner = document.createElement('div');
-  coverInner.className = 'aspect-[2/3] rounded-xl overflow-hidden bg-surface-2 shrink-0 cursor-pointer shadow-lg'; /* justified: manga cover aspect ratio */
+  coverInner.className = 'aspect-[2/3] rounded-xl overflow-hidden bg-surface-2 shrink-0 cursor-pointer shadow-card'; /* justified: manga cover aspect ratio */
   coverInner.appendChild(createCoverImage({ url: coverUrl, alt: info?.title ?? '' }));
 
   // Cover lightbox
