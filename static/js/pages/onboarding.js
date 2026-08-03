@@ -2,7 +2,7 @@
 // First-run onboarding wizard — shown only to admins on a fresh installation.
 
 import * as api from '../api.js';
-import { hasPermission } from '../session.js';
+import { hasPermission, getState } from '../session.js';
 import { navigate, consumeIntendedDestination } from '../router.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { showApiError } from '../components/toast.js';
@@ -142,6 +142,15 @@ export async function init(container) {
       btn.disabled = true;
       try {
         await api.changePassword(inCurrent.value, inNew.value);
+        // Changing a password invalidates the session, which used to strand the
+        // wizard: the final step's "first run complete" call 401'd silently, the
+        // flag was never set, and signing back in returned the user to
+        // onboarding. Re-authenticate with the password just chosen so the rest
+        // of the wizard runs with a live session.
+        const username = getState('user')?.username;
+        if (username) {
+          await api.login(username, inNew.value).catch(() => {});
+        }
         step = 3;
         _render();
       } catch (e) {
@@ -178,6 +187,9 @@ export async function init(container) {
         await api.markFirstRunComplete();
         navigate(consumeIntendedDestination() ?? '/');
       } catch (e) {
+        // A dead session here means the wizard cannot record that setup is
+        // done, and the user would be walked through it again on next sign-in.
+        // Say which it is rather than failing mutely.
         showApiError(e);
         btn.disabled = false;
       }
