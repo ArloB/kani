@@ -527,8 +527,9 @@ export async function init(container, params) {
 
 function _renderTabs(wrap) {
   const tabContent = document.createElement('div');
-  // The chapter list is its own scroll region so the page never scrolls.
-  tabContent.className = 'md:flex-1 md:min-h-0 md:overflow-y-auto';
+  // A flex column: the chapter list scrolls inside it and the pager stays put
+  // at the bottom rather than floating below the last row.
+  tabContent.className = 'md:flex-1 md:min-h-0 md:flex md:flex-col';
   _contentSection = tabContent;
 
   // The tab row carries the chapter controls on its right. They used to sit on
@@ -1129,7 +1130,7 @@ async function _fetchChapters(sectionEl) {
 
   if (_page === 1) { _chapters = []; _chaptersHasMore = false; _chaptersLoading = false; }
 
-  sectionEl.className = 'flex flex-col gap-3';
+  sectionEl.className = 'flex flex-col gap-3 md:flex-1 md:min-h-0';
   sectionEl.innerHTML = '';
   startLoading();
 
@@ -1298,9 +1299,13 @@ async function _fetchChapters(sectionEl) {
   }
 
   const listEl = document.createElement('div');
+  listEl.className = 'md:flex-1 md:min-h-0 md:overflow-y-auto';
   sectionEl.appendChild(listEl);
 
+  // The pager is the column's footer: it sits on the bottom edge with its own
+  // padding instead of trailing the last row wherever that happens to land.
   const paginEl = document.createElement('div');
+  paginEl.className = 'md:shrink-0 md:pt-3 md:border-t md:border-border-subtle';
   if (!infinite) sectionEl.appendChild(paginEl);
 
   // Show skeleton rows while chapters load
