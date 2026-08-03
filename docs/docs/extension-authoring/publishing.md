@@ -54,9 +54,10 @@ This produces two files per invocation:
 | `maintainer.pub` | Public key (base64 Ed25519) | No — share this |
 
 !!! warning "Key file security"
-    Private key files are stored as plaintext base64. Protect them with filesystem
-    permissions (`chmod 600`) and do not commit them to version control.
-    Passphrase encryption (`--passphrase-env`) is not yet implemented.
+    Private key files are stored as plaintext base64. `kani-cli keygen` writes them
+    `0600` on Unix; on Windows, restrict the file yourself. Never commit one to
+    version control. There is no passphrase encryption — treat the file itself as
+    the secret.
 
 !!! warning "Back up your private key"
     Loss of the maintainer private key means you cannot update the repository index.
@@ -209,13 +210,10 @@ jobs:
       - name: Install kani-cli
         run: cargo install kani-cli
       - name: Publish extension
-        env:
-          KANI_KEY_PASSPHRASE: ${{ secrets.MAINTAINER_KEY_PASSPHRASE }}
         run: |
           kani-cli publish \
             --sign-key ./keys/maintainer.key \
             --repo-sign-key ./keys/maintainer.key \
-            --passphrase-env KANI_KEY_PASSPHRASE \
             ./my-source.yaml
           kani-cli repo verify --repo-key ./keys/maintainer.pub
       - uses: peaceiris/actions-gh-pages@v4

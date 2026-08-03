@@ -116,9 +116,6 @@ pub enum Command {
         /// Base name for the generated files (e.g. "author" → author.pub + author.key)
         #[arg(long, default_value = "author")]
         name: String,
-        /// Environment variable holding the passphrase for key encryption (not yet implemented)
-        #[arg(long, value_name = "ENV_VAR")]
-        passphrase_env: Option<String>,
     },
     /// Sign an extension and publish it to a local repository
     Publish {
@@ -342,11 +339,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             scripts,
         } => dsl_cmd::run(&expression, scripts.as_deref()),
         Command::Lint => lint::run(),
-        Command::Keygen {
-            out_dir,
-            name,
-            passphrase_env,
-        } => keygen::run(&out_dir, &name, passphrase_env.as_deref()),
+        Command::Keygen { out_dir, name } => keygen::run(&out_dir, &name),
         Command::Publish {
             file,
             sign_key,
