@@ -45,3 +45,14 @@ install-updater = false
 github-build-setup = "build-setup.yml"
 # Multi-arch image build + keyless cosign signing, as a reusable workflow.
 publish-jobs = ["./docker"]
+# release.yml is hand-edited: `custom-docker` is passed a `publish` input dist
+# does not generate, so a PR rehearsal builds the image and throws it away
+# instead of pushing it. Without this, `dist host` fails the "workflow is out of
+# date" check on the first step of a real tag and the release never starts.
+allow-dirty = ["ci"]
+# A prerelease tag has to exercise the image build, push and signing too — that
+# is the whole point of rehearsing with an rc. Without this, `custom-docker` is
+# skipped for any tag with a suffix, so the rehearsal would prove nothing about
+# the one workflow that has never run. The rc still never moves `latest`;
+# docker.yml decides that from the tag shape.
+publish-prereleases = true
