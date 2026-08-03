@@ -130,8 +130,8 @@ async fn main() {
     let auth_backend = AuthBackend::new(state.db.clone());
     let auth_layer = AuthManagerLayerBuilder::new(auth_backend.clone(), session_layer).build();
 
-    if let Err(e) = ensure_default_user(&auth_backend).await {
-        tracing::error!("Failed to ensure default user: {}", e);
+    if let Err(e) = announce_first_run(&auth_backend).await {
+        tracing::error!("Failed to check for a first-run instance: {}", e);
     }
 
     kani_web::HTTP_LOGGING_ENABLED.store(
@@ -658,61 +658,25 @@ async fn main() {
     .unwrap_or_else(|e| panic!("Server error: {e}"));
 }
 
-fn write_admin_file(
-    user: &kani_web::types::User,
-    password: &str,
-) -> Result<(), kani_web::error::AppError> {
-    use std::fs::OpenOptions;
-    use std::io::Write;
-    #[cfg(unix)]
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let path = kani_web::auth::admin_password_path();
-
-    let content = format!(
-        "Username: {}\nEmail: {}\nPassword: {}",
-        user.username, user.email, password
-    );
-
-    let mut options = OpenOptions::new();
-    options.create(true).write(true).truncate(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-
-    options.open(&path)
-        .and_then(|mut f| f.write_all(content.as_bytes()))
-        .inspect(|_| tracing::info!("No users found - admin password written to: {}\n\nPlease change this password immediately after logging in!\n\n", path.display()))
-        .map_err(|e| {
-            // The account has already been created at this point, so a failure
-            // here strands the deployment: the password exists only in memory.
-            // Say so explicitly rather than leaving an operator to guess.
-            tracing::error!(
-                "Failed to write admin password to {:?}: {}. The 'admin' account \
-                 was created but its password could not be saved — delete the \
-                 database and restart, or set KANI_DATA_DIR to a writable path.",
-                path,
-                e
-            );
-            kani_web::error::AppError::InternalServerError(e.to_string())
-        })
-}
-
-async fn ensure_default_user(
+/// A fresh instance has no accounts and no generated password: the first person
+/// to reach it over the local network creates the administrator through the
+/// in-app setup screen (`POST /rest/auth/setup`), which closes the moment that
+/// account exists.
+///
+/// This replaced a generated `admin` password written to the data directory. The
+/// file had to be found and copy-pasted, and the wizard then made the operator
+/// change it — which invalidated their session mid-setup — so the first
+/// experience was two logins and a file hunt.
+async fn announce_first_run(
     backend: &kani_web::auth::AuthBackend,
 ) -> Result<(), kani_web::error::AppError> {
     if backend.user_count().await? == 0 {
-        use argon2::password_hash::rand_core::{OsRng, RngCore};
-
-        let mut bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut bytes);
-        let password = hex::encode(bytes);
-
-        let user = backend
-            .create_user("admin", "admin@localhost", &password)
-            .await?;
-        write_admin_file(&user, &password)?;
-        backend.grant_role(user.id, "admin", None).await?;
+        tracing::info!(
+            "No accounts yet — open Kani in a browser on this machine or your local \
+             network to create the administrator. Setup closes as soon as that \
+             account exists. Set KANI_ALLOW_REMOTE_SETUP=true if you must do it \
+             over the internet."
+        );
     }
-
     Ok(())
 }

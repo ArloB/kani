@@ -661,6 +661,7 @@ pub async fn auth_guard(auth: AuthSession, request: Request, next: Next) -> Resp
 /// Returns `true` for paths that are always accessible without a session.
 fn is_public_path(path: &str) -> bool {
     path == "/login"
+        || path == "/setup"
         || path == "/register"
         || path == "/forgot-password"
         || path == "/reset-password"
@@ -821,6 +822,10 @@ mod tests {
     #[test]
     fn auth_pages_are_public() {
         assert!(is_public_path("/register"));
+        assert!(
+            is_public_path("/setup"),
+            "first-run setup is reached before any account exists, so it cannot require a session"
+        );
         assert!(is_public_path("/forgot-password"));
         assert!(is_public_path("/reset-password"));
         assert!(is_public_path("/verify-email"));

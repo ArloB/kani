@@ -291,6 +291,38 @@ pub(crate) struct TotpCodeRequest {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// The client's socket address, when the server was started with connect info.
+///
+/// Never fails: a synthetic request in a test simply has none, which callers
+/// treat as "not a local client".
+pub(crate) struct PeerAddr(pub(crate) Option<std::net::SocketAddr>);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for PeerAddr {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(PeerAddr(
+            parts
+                .extensions
+                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .map(|c| c.0),
+        ))
+    }
+}
+
+/// First-run account creation. No captcha: the endpoint exists only while the
+/// instance has no users, so there is nothing to spam.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub(crate) struct SetupRequest {
+    pub(crate) username: String,
+    #[serde(default)]
+    pub(crate) email: String,
+    pub(crate) password: String,
+}
+
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 pub(crate) struct RegisterRequest {
     pub(crate) username: String,

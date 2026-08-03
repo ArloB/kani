@@ -3,6 +3,7 @@
 
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
+import { navigate } from '../router.js';
 import htm from 'htm';
 import { getPasswordResetEnabled, getRegistrationEnabled } from '../api.js';
 import { AuthCard, AuthError, AuthField } from '../components/auth-card.js';
@@ -19,6 +20,13 @@ function LoginPage() {
   const { busy, run } = useBusy();
 
   useEffect(() => {
+    // Every signed-out entry point lands here, including the very first visit to
+    // a brand-new server. There is no account to sign in with yet, so forward to
+    // the screen that creates one.
+    fetch('/rest/auth/setup-state', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => { if (d?.needs_setup && d?.allowed_from_here) navigate('/setup'); })
+      .catch(() => { /* an unreachable server is the login form's own problem */ });
     getRegistrationEnabled().then(d => setCanRegister(!!d?.enabled)).catch(() => {});
     getPasswordResetEnabled().then(d => setCanReset(!!d?.enabled)).catch(() => {});
   }, []);

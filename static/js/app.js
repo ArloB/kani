@@ -26,12 +26,13 @@ import { openCommandPalette } from './components/command-palette.js';
 (async () => {
   initTheme();
 
-  if (location.pathname === '/login' || location.pathname === '/register') {
+  if (['/login', '/register', '/setup'].includes(location.pathname)) {
     const appEl = document.getElementById('app');
     if (appEl) initRouter(appEl);
     _hideChrome();
     return;
   }
+
 
   await initPermissions();
   syncServerThemes().catch(() => { /* the cached theme stays applied */ });
@@ -145,7 +146,7 @@ function _renderDesktopNav(el) {
   _updateDesktopActive(el, location.pathname);
 
   onNavigate(path => {
-    if (path === '/login' || path === '/register') { _hideChrome(); return; }
+    if (['/login', '/register', '/setup'].includes(path)) { _hideChrome(); return; }
     _showChrome();
     _updateDesktopActive(el, path);
   });
@@ -289,7 +290,7 @@ function _renderBottomNav(el) {
   _updateTabActive(el, location.pathname);
 
   onNavigate(path => {
-    if (path === '/login' || path === '/register') { el.style.display = 'none'; return; }
+    if (['/login', '/register', '/setup'].includes(path)) { el.style.display = 'none'; return; }
     el.style.display = '';
     _updateTabActive(el, path);
   });

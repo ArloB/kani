@@ -27,6 +27,8 @@ pub fn router() -> Router<AppState> {
         .route("/features", get(get_features))
         .route("/auth/permissions", get(get_my_permissions))
         .route("/auth/registration-enabled", get(get_registration_enabled))
+        .route("/auth/setup-state", get(setup_state))
+        .route("/auth/setup", post(auth_setup))
         .route("/auth/captcha", get(get_captcha))
         .route("/auth/register", post(auth_register))
         .route(
@@ -627,6 +629,96 @@ pub(crate) async fn get_registration_enabled(
 ) -> Result<impl IntoResponse, AppError> {
     let enabled = state.get_settings().await.registration_enabled;
     Ok(Json(json!({ "enabled": enabled })))
+}
+
+/// Whether this instance still needs its first account, and whether the caller
+/// may create it.
+///
+/// The window is open only while the `users` table is empty; the first
+/// successful setup closes it permanently. It is additionally restricted to
+/// clients on a loopback or private address, so an instance exposed to the
+/// internet before its owner reaches it cannot be claimed by a passer-by. Set
+/// `KANI_ALLOW_REMOTE_SETUP=true` when the first account must be created over
+/// the internet — for a VPS reached directly rather than over a tunnel.
+#[utoipa::path(
+    get, path = "/rest/auth/setup-state",
+    responses((status = 200, description = "Whether first-run setup is available")),
+    tag = "auth"
+)]
+pub(crate) async fn setup_state(
+    State(state): State<AppState>,
+    PeerAddr(peer): PeerAddr,
+) -> Result<impl IntoResponse, AppError> {
+    let backend = crate::auth::AuthBackend::new(state.db.clone());
+    let needs_setup = backend.user_count().await? == 0;
+    Ok(Json(json!({
+        "needs_setup": needs_setup,
+        "allowed_from_here": setup_allowed_from(peer),
+    })))
+}
+
+fn setup_allowed_from(peer: Option<std::net::SocketAddr>) -> bool {
+    if std::env::var("KANI_ALLOW_REMOTE_SETUP")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    // `is_forbidden_ip` is the SSRF predicate — "not a public address" — which
+    // is exactly the set we want to *allow* here.
+    peer.map(|addr| kani_core::network::is_forbidden_ip(addr.ip()))
+        .unwrap_or(false)
+}
+
+/// Creates the instance's first account and makes it the administrator.
+#[utoipa::path(
+    post, path = "/rest/auth/setup",
+    responses(
+        (status = 200, description = "First account created"),
+        (status = 403, description = "Setup is closed, or not permitted from this address"),
+        (status = 422, description = "Invalid username or password"),
+    ),
+    tag = "auth"
+)]
+pub(crate) async fn auth_setup(
+    auth: AuthSession,
+    State(state): State<AppState>,
+    PeerAddr(peer): PeerAddr,
+    Json(body): Json<SetupRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    if !setup_allowed_from(peer) {
+        return Err(AppError::Forbidden(
+            "First-run setup must be performed from the local network. Set \
+             KANI_ALLOW_REMOTE_SETUP=true to allow it from anywhere."
+                .into(),
+        ));
+    }
+
+    // The window is the empty users table, so this check *is* the lock: the
+    // account created below closes it for good.
+    if auth.backend.user_count().await? != 0 {
+        return Err(AppError::Forbidden(
+            "This instance has already been set up.".into(),
+        ));
+    }
+
+    if body.username.trim().is_empty() || body.password.len() < 8 {
+        return Err(AppError::ValidationError(
+            "Username required and password must be at least 8 characters.".into(),
+        ));
+    }
+
+    let user = auth
+        .backend
+        .create_user(&body.username, &body.email, &body.password)
+        .await?;
+    auth.backend.grant_role(user.id, "admin", None).await?;
+    state
+        .audit(Some(user.id), "auth.first_run_setup", None, None)
+        .await;
+    tracing::info!(username = %user.username, "First account created via first-run setup");
+
+    Ok(Json(json!({ "ok": true })))
 }
 
 #[utoipa::path(

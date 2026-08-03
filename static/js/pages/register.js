@@ -1,5 +1,11 @@
 // @ts-check
-// Registration page — public account creation with math captcha.
+// Account creation. Two modes over one form, because they differ only in where
+// the account goes and what guards it:
+//   register — public sign-up, gated by the registration setting and a captcha
+//   setup    — the instance's first account, which becomes the administrator.
+//              No captcha: the endpoint only exists while there are no users, so
+//              there is nothing to spam, and the server also requires the caller
+//              to be on the local network.
 
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
@@ -11,7 +17,8 @@ import { useBusy } from '../hooks/use-busy.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
-function RegisterPage() {
+/** @param {{ setup?: boolean }} props */
+function RegisterPage({ setup = false }) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -30,12 +37,24 @@ function RegisterPage() {
   }
 
   useEffect(() => {
+    if (setup) {
+      // Only offer the form while the instance genuinely has no account and this
+      // client may create it; otherwise the login page is the right place.
+      fetch('/rest/auth/setup-state', { credentials: 'include' })
+        .then(res => res.json().catch(() => ({})))
+        .then(data => {
+          if (data?.needs_setup && data?.allowed_from_here) setReady(true);
+          else navigate('/login');
+        })
+        .catch(() => navigate('/login'));
+      return;
+    }
     fetch('/rest/auth/registration-enabled', { credentials: 'include' })
       .then(res => res.json().catch(() => ({})))
       .then(data => { data?.enabled ? setReady(true) : navigate('/login'); })
       .catch(() => navigate('/login'));
     loadCaptcha();
-  }, []);
+  }, [setup]);
 
   const submit = (/** @type {Event} */ e) => {
     e.preventDefault();
@@ -44,26 +63,44 @@ function RegisterPage() {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(new DOMException('Request timed out', 'TimeoutError')), 15_000);
       try {
-        const res = await fetch('/rest/auth/register', {
+        const res = await fetch(setup ? '/rest/auth/setup' : '/rest/auth/register', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: username.trim(),
-            email: email.trim(),
-            password,
-            captcha_id: captcha.id,
-            captcha_answer: Number(captchaAnswer),
-          }),
+          body: JSON.stringify(setup
+            ? { username: username.trim(), email: email.trim(), password }
+            : {
+              username: username.trim(),
+              email: email.trim(),
+              password,
+              captcha_id: captcha.id,
+              captcha_answer: Number(captchaAnswer),
+            }),
           signal: ctrl.signal,
         });
         if (res.ok) {
-          navigate('/login');
+          if (!setup) {
+            navigate('/login');
+            return;
+          }
+          // Sign the operator straight in with what they just chose: making them
+          // retype it is the double login this flow exists to remove.
+          const signedIn = await fetch('/rest/auth/login', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: username.trim(), password }),
+          }).then(r => r.ok).catch(() => false);
+          // A full load, not an SPA navigate: the shell booted in its
+          // signed-out mode for this page, so permissions were never fetched
+          // and the wizard's own guard would bounce a freshly-made admin
+          // straight back out.
+          location.href = signedIn ? '/onboarding' : '/login';
           return;
         }
         const data = await res.json().catch(() => ({}));
         setError(data.error ?? t('auth.register.error.failed'));
-        await loadCaptcha();
+        if (!setup) await loadCaptcha();
       } catch (/** @type {any} */ err) {
         setError(err?.name === 'TimeoutError'
           ? t('auth.error.server_slow')
@@ -77,7 +114,7 @@ function RegisterPage() {
   if (!ready) return null;
 
   return html`
-    <${AuthCard} title="Kani" subtitle=${t('auth.register.subtitle')}>
+    <${AuthCard} title="Kani" subtitle=${t(setup ? 'auth.setup.subtitle' : 'auth.register.subtitle')}>
       <${AuthError} message=${error} id="reg-error" />
       <form class="flex flex-col gap-4" novalidate onSubmit=${submit}>
         <${AuthField}
@@ -109,7 +146,7 @@ function RegisterPage() {
           />
           <${PasswordStrength} password=${password} identity=${username} />
         </div>
-        <${AuthField}
+        ${!setup && html`<${AuthField}
           id="reg-captcha"
           label=${captcha.prompt || t('common.loading')}
           type="number"
@@ -117,14 +154,14 @@ function RegisterPage() {
           value=${captchaAnswer}
           onInput=${setCaptchaAnswer}
           required=${true}
-        />
+        />`}
         <button type="submit" class="btn-primary w-full h-11 mt-2" disabled=${busy}>
-          ${busy ? t('auth.register.submitting') : t('auth.register.submit')}
+          ${busy ? t('auth.register.submitting') : t(setup ? 'auth.setup.submit' : 'auth.register.submit')}
         </button>
       </form>
-      <p class="text-center text-sm text-text-muted">
+      ${!setup && html`<p class="text-center text-sm text-text-muted">
         ${t('auth.register.have_account')} <a href="/login" class="text-text-muted underline hover:text-text">${t('auth.register.sign_in')}</a>
-      </p>
+      </p>`}
     </${AuthCard}>
   `;
 }
@@ -133,6 +170,12 @@ function RegisterPage() {
 export function init(container) {
   document.title = t('auth.register.page_title');
   render(html`<${RegisterPage} />`, container);
+}
+
+/** The same form, creating the instance's first (administrator) account. */
+export function initSetup(container) {
+  document.title = t('auth.setup.page_title');
+  render(html`<${RegisterPage} setup=${true} />`, container);
 }
 
 /** @param {HTMLElement} container */

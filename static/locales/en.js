@@ -1350,6 +1350,9 @@ export default {
   'auth.login.error.unknown': 'Something went wrong. Please try again.',
 
   'auth.register.page_title': 'Create Account - Kani',
+  'auth.setup.subtitle': 'Create the administrator account for this server.',
+  'auth.setup.submit': 'Create account',
+  'auth.setup.page_title': 'Set up Kani',
   'auth.register.subtitle': 'Create an account',
   'auth.register.email': 'Email',
   'auth.register.submit': 'Create account',

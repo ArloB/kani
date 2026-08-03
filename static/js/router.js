@@ -14,6 +14,7 @@ import { t } from './i18n.js';
 const _routes = [
   { path: '/login',                     load: () => import('./pages/login.js') },
   { path: '/register',                  load: () => import('./pages/register.js') },
+  { path: '/setup',                     load: () => import('./pages/setup.js') },
   { path: '/forgot-password',           load: () => import('./pages/forgot-password.js') },
   { path: '/reset-password',            load: () => import('./pages/reset-password.js') },
   { path: '/verify-email',              load: () => import('./pages/verify-email.js') },

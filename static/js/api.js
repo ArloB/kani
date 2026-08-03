@@ -16,6 +16,25 @@ async function _parseBody(res) {
  * @param {string} path
  * @param {{ body?: any, params?: Record<string, any>, signal?: AbortSignal, timeoutMs?: number }} [opts]
  */
+/**
+ * Pages a signed-out visitor is *meant* to be on. A 401 there is the expected
+ * answer, not a reason to bounce them to the login form — which is what used to
+ * happen on /setup and /register, kicking the operator off the first-run screen
+ * before it could render.
+ */
+const UNAUTHENTICATED_PAGES = [
+  '/login',
+  '/setup',
+  '/register',
+  '/forgot-password',
+  '/reset-password',
+  '/verify-email',
+];
+
+function _onUnauthenticatedPage() {
+  return UNAUTHENTICATED_PAGES.includes(location.pathname);
+}
+
 async function _req(method, path, opts = {}) {
   let url = `/rest${path}`;
 
@@ -61,7 +80,7 @@ async function _req(method, path, opts = {}) {
   }
 
   if (res.status === 401) {
-    if (location.pathname !== '/login') window.location.href = '/login';
+    if (!_onUnauthenticatedPage()) window.location.href = '/login';
     throw Object.assign(new Error('Unauthorized'), { status: 401 });
   }
 
@@ -372,7 +391,7 @@ export async function uploadWasm(id, file) {
     body,
   });
   if (res.status === 401) {
-    if (location.pathname !== '/login') window.location.href = '/login';
+    if (!_onUnauthenticatedPage()) window.location.href = '/login';
     throw Object.assign(new Error('Unauthorized'), { status: 401 });
   }
   if (!res.ok) {
@@ -754,7 +773,7 @@ export async function uploadMangaCover(id, file) {
   body.append('file', file);
   const res = await fetch(`/rest/manga/${id}/cover`, { method: 'POST', credentials: 'include', body });
   if (res.status === 401) {
-    if (location.pathname !== '/login') window.location.href = '/login';
+    if (!_onUnauthenticatedPage()) window.location.href = '/login';
     throw Object.assign(new Error('Unauthorized'), { status: 401 });
   }
   if (!res.ok) {
