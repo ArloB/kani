@@ -2347,6 +2347,7 @@ export default {
   'folder_picker.new_folder_placeholder': 'New folder name',
   'folder_picker.new_folder': '+ New folder',
   'folder_picker.creating': 'Creating…',
+  'folder_picker.breadcrumb': 'Folder path',
   'folder_picker.selected': 'Selected:',
   'folder_picker.error.read_dir': 'Could not read directory',
   'folder_picker.error.create_folder': 'Could not create folder',
