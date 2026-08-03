@@ -13,6 +13,9 @@ import { showToast, showApiError } from '../toast.js';
 import { iconSpinner } from '../../icons.js';
 import { subscribeJob } from '../../sse.js';
 
+/** Tears down an open description panel when the hero is rebuilt. */
+let _destroyDesc = /** @type {(() => void)|null} */ (null);
+
 // ── Source filter URL builder ──────────────────────────────────────────────────
 
 /** @type {Map<string|number, Promise<any[]>>} */
@@ -315,8 +318,13 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
   if (info?.description_html || info?.description) {
     descWrap = document.createElement('div');
+    descWrap.className = 'relative';
     desc = document.createElement('div');
-    desc.className = 'text-sm text-text-muted leading-relaxed line-clamp-3';
+    desc.className = 'text-sm text-text-muted leading-relaxed desc-collapsed';
+    desc.setAttribute('role', 'button');
+    desc.setAttribute('tabindex', '0');
+    desc.setAttribute('aria-expanded', 'false');
+    desc.setAttribute('aria-label', t('manga.header.show_more'));
     desc.innerHTML = info.description_html ?? `<p>${escapeHtml(info.description)}</p>`;
 
     desc.querySelectorAll('a[href]').forEach(link => {
@@ -324,6 +332,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
       link.setAttribute('target', '_blank');
       link.setAttribute('rel', 'noopener noreferrer');
       link.addEventListener('click', (e) => {
+        e.stopPropagation();
         if (getLocal('kani_skip_external_warning') === 'true') return;
         e.preventDefault();
         _showExternalLinkDialog(/** @type {HTMLAnchorElement} */(link).href);
@@ -332,38 +341,81 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
     descWrap.appendChild(desc);
 
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'text-xs text-text-muted underline underline-offset-2 decoration-border hover:text-accent text-left mt-1 self-start';
-    toggle.textContent = t('manga.header.show_more');
-    toggle.style.display = 'none';
-    toggle.setAttribute('aria-expanded', 'false');
-    descWrap.appendChild(toggle);
+    /** @type {HTMLElement|null} */ let panel = null;
+    /** @type {(() => void)|null} */ let teardown = null;
 
-    // Only offer the toggle when there is something behind the clamp.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (!desc) return;
-        if (desc.scrollHeight > desc.offsetHeight + 2) {
-          toggle.style.display = '';
-          desc.classList.add('desc-fade');
-        }
-      });
-    });
+    // The panel is anchored to where the collapsed text sits and grows upward
+    // over the facts and the lower cover. Fixed positioning because the rail is
+    // a scroll container on desktop and would otherwise clip it.
+    const place = () => {
+      if (!panel || !desc) return;
+      const r = desc.getBoundingClientRect();
+      panel.style.left = `${Math.round(r.left)}px`;
+      panel.style.width = `${Math.round(r.width)}px`;
+      panel.style.bottom = `${Math.round(window.innerHeight - r.bottom)}px`;
+    };
 
-    // Clamp on, clamp off. No measuring, no tween, no timers — the height of a
-    // paragraph is not worth animating, and the mask makes the cut read as
-    // deliberate rather than clipped. A long synopsis is capped by CSS and
-    // scrolls inside itself instead of running down the page.
-    toggle.addEventListener('click', () => {
+    const collapse = () => {
+      expanded = false;
+      teardown?.();
+      teardown = null;
+      panel?.remove();
+      panel = null;
       if (!desc) return;
-      expanded = !expanded;
-      toggle.textContent = expanded ? t('manga.header.show_less') : t('manga.header.show_more');
-      toggle.setAttribute('aria-expanded', String(expanded));
-      desc.classList.toggle('line-clamp-3', !expanded);
-      desc.classList.toggle('desc-fade', !expanded);
-      desc.classList.toggle('desc-open', expanded);
+      desc.classList.add('desc-collapsed');
+      desc.style.visibility = '';
+      desc.setAttribute('aria-expanded', 'false');
+      desc.setAttribute('aria-label', t('manga.header.show_more'));
+    };
+
+    const expand = () => {
+      if (!desc || expanded) return;
+      expanded = true;
+      panel = document.createElement('div');
+      panel.className = 'desc-panel text-sm text-text-muted leading-relaxed';
+      panel.innerHTML = desc.innerHTML;
+      panel.querySelectorAll('a[href]').forEach(link => {
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener noreferrer');
+      });
+
+      const closeBar = document.createElement('div');
+      closeBar.className = 'desc-panel-close';
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'text-xs text-text-muted underline underline-offset-2 decoration-border hover:text-accent';
+      closeBtn.textContent = t('manga.header.show_less');
+      closeBtn.addEventListener('click', (e) => { e.stopPropagation(); collapse(); });
+      closeBar.appendChild(closeBtn);
+      panel.appendChild(closeBar);
+
+      document.body.appendChild(panel);
+      // Keep the collapsed block's space reserved so nothing below it moves.
+      desc.style.visibility = 'hidden';
+      desc.classList.add('desc-collapsed');
+      desc.setAttribute('aria-expanded', 'true');
+      place();
+
+      const onKey = (/** @type {KeyboardEvent} */ e) => { if (e.key === 'Escape') collapse(); };
+      const onDown = (/** @type {MouseEvent} */ e) => {
+        if (panel && !panel.contains(/** @type {Node} */(e.target))) collapse();
+      };
+      window.addEventListener('resize', place);
+      window.addEventListener('keydown', onKey);
+      // Deferred so the click that opened it does not immediately close it.
+      setTimeout(() => document.addEventListener('mousedown', onDown), 0);
+      teardown = () => {
+        window.removeEventListener('resize', place);
+        window.removeEventListener('keydown', onKey);
+        document.removeEventListener('mousedown', onDown);
+      };
+    };
+
+    desc.addEventListener('click', () => { if (!expanded) expand(); });
+    desc.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!expanded) expand(); }
     });
+    _destroyDesc = collapse;
   }
 
   // ── Layout containers ──
@@ -435,7 +487,11 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   window.addEventListener('resize', applyHeroLayout);
 
   return {
-    destroy() { window.removeEventListener('resize', applyHeroLayout); },
+    destroy() {
+      window.removeEventListener('resize', applyHeroLayout);
+      _destroyDesc?.();
+      _destroyDesc = null;
+    },
     coverEl: coverInner,
   };
 }

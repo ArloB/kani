@@ -1964,17 +1964,43 @@
      lines to animate text height, which reads worse than simply revealing it.
      The mask makes the cut deliberate; the cap keeps a long synopsis from
      running off the page. */
-  /* Fades the tail of the last clamped line only. At 55% it swallowed most of
-     the third line, which read as the text being cut off rather than as a
-     signal that there is more. */
-  .desc-fade {
-    mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
+  /* Collapsed: a fixed three-line window with the last line fading out, and the
+     whole block is the target that opens it. 55% swallowed the third line and
+     read as truncation; 82% was so faint it read as nothing at all. */
+  .desc-collapsed {
+    height: 4.4rem;
+    overflow: hidden;
+    cursor: pointer;
+    mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
   }
-  .desc-open {
-    max-height: min(55vh, 32rem);
+  .desc-collapsed:hover { color: var(--color-text); }
+
+  /* Expanded: a panel of fixed height that grows upward from where the
+     collapsed text sat, covering the facts and the lower part of the cover.
+     Positioned fixed so no scroll container in the rail can clip it, which is
+     the whole point — it has to rise past them. Anything longer scrolls
+     inside. */
+  .desc-panel {
+    position: fixed;
+    z-index: var(--z-popover, 50);
+    height: min(26rem, 58vh);
     overflow-y: auto;
     scrollbar-width: thin;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-popover);
+    padding: 0.85rem 1rem 2.6rem;
+  }
+  /* The collapse control rides the bottom of the panel so it is in the same
+     place the "Show more" it replaced was. */
+  .desc-panel-close {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: 0.5rem 1rem 0.7rem;
+    background: linear-gradient(to top, var(--color-surface) 70%, transparent);
+    text-align: left;
   }
 
   /* ── Floating bulk bar ──
