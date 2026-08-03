@@ -30,6 +30,10 @@ const html = htm.bind(h);
  * comfortable, denser in compact mode). Read per mount: `.chapter-row` in CSS
  * consumes the same token, so JS offsets and rendered heights stay in lockstep.
  */
+export function readChapterRowHeight() {
+  return _readRowH();
+}
+
 function _readRowH() {
   const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chapter-row-h'), 10);
   return Number.isFinite(v) && v > 0 ? v : 56;

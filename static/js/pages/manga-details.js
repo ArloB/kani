@@ -9,7 +9,7 @@ import { hasPermission } from '../session.js';
 import { navigate } from '../router.js';
 import { getLocal, getLocalInt, setLocal, formatChapterTitle, hasNextPage, isChapterDownloaded } from '../utils.js';
 import { replaceState } from '../url-params.js';
-import { VirtualChapterList } from '../components/virtual-chapter-list.js';
+import { VirtualChapterList, readChapterRowHeight } from '../components/virtual-chapter-list.js';
 import { renderPagination } from '../components/pagination.js';
 import { Select } from '../components/form/select.js';
 import { PageSizeSelect } from '../components/page-size-select.js';
@@ -539,6 +539,7 @@ function _renderTabs(wrap) {
   tabRow.className = 'chapter-tabrow flex items-end justify-between gap-4 flex-wrap';
 
   const tabBar = document.createElement('div');
+  tabBar.className = 'chapter-tabs';
   const tabsHandle = renderTabs(tabBar, {
     tabs: _tabDefs(),
     activeId: _activeTab,
@@ -1301,7 +1302,11 @@ async function _fetchChapters(sectionEl) {
   }
 
   const listEl = document.createElement('div');
-  listEl.className = 'md:flex-1 md:min-h-0 md:overflow-y-auto';
+  // flex-initial, not flex-1: a three-chapter series should not stretch its
+  // list over 486 px of empty column with the pager stranded at the bottom.
+  // The list takes the height it needs, shrinks when there is more than fits,
+  // and the pager follows the rows either way.
+  listEl.className = 'md:flex-initial md:min-h-0 md:overflow-y-auto';
   sectionEl.appendChild(listEl);
 
   // The pager is the column's footer: it sits on the bottom edge with its own
@@ -1420,11 +1425,26 @@ function _renderChapterList() {
   const readerHrefFn = (ch) => _isLocal
     ? `/reader/${ch.id}`
     : `/source/${_sid}/manga/${encodeURIComponent(_mangaId)}/chapter/${encodeURIComponent(ch.source_chapter_id ?? ch.id)}`;
-  const paginH = _paginEl ? (_paginEl.offsetHeight + 12) : 0;
-  const height = window.innerWidth >= 768
-    ? Math.max(200, window.innerHeight - _listContainerEl.getBoundingClientRect().top - 48 - paginH - 12)
-    : undefined;
   const displayChapters = _filterCached ? _chapters.filter(ch => _cachedChapterIds.has(ch.id)) : _chapters;
+  const paginH = _paginEl ? (_paginEl.offsetHeight + 12) : 0;
+  // The windowed list needs a pixel height, but it should be the smaller of
+  // what is available and what the rows actually need. Claiming the whole
+  // column regardless left a three-chapter series with ~490 px of empty
+  // scroller under it and the pager stranded at the bottom of the page.
+  const height = window.innerWidth >= 768
+    ? (() => {
+        // Measure against the column the list actually lives in, not the
+        // window with a magic 48 px of slack: the section already ends where
+        // the layout says it should.
+        const section = _listContainerEl.parentElement;
+        const bottom = section
+          ? section.getBoundingClientRect().bottom
+          : window.innerHeight - 48;
+        const available = Math.max(200, bottom - _listContainerEl.getBoundingClientRect().top - paginH - 12);
+        const needed = displayChapters.length * readChapterRowHeight() + (_chaptersHasMore ? 48 : 0);
+        return Math.min(available, Math.max(needed, 120));
+      })()
+    : undefined;
   render(html`<${VirtualChapterList}
     chapters=${displayChapters}
     readerHrefFn=${readerHrefFn}

@@ -2027,6 +2027,13 @@
      Manage tab stranded at the top of the document. Sticking the row keeps
      them a thumb away. Desktop does not need it; nothing scrolls there. */
   @media (max-width: 767px) {
+    /* Full width, split evenly: two tabs sharing a phone's width read as a
+       segmented control, which is what they are. The controls wrap beneath —
+       vertical space is the cheap axis here. */
+    .chapter-tabs { width: 100%; }
+    .chapter-tabs [role="tab"] { flex: 1 1 0; justify-content: center; text-align: center; }
+    .chapter-tabrow > * { width: 100%; }
+
     .chapter-tabrow {
       position: sticky;
       /* Zero, not the header height: #page-content is the scroll container and
