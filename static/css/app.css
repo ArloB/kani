@@ -1964,9 +1964,12 @@
      lines to animate text height, which reads worse than simply revealing it.
      The mask makes the cut deliberate; the cap keeps a long synopsis from
      running off the page. */
+  /* Fades the tail of the last clamped line only. At 55% it swallowed most of
+     the third line, which read as the text being cut off rather than as a
+     signal that there is more. */
   .desc-fade {
-    mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
-    -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
   }
   .desc-open {
     max-height: min(55vh, 32rem);
