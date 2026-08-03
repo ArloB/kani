@@ -115,6 +115,7 @@ export function ContextMenu({ items, trigger, onClose }) {
             type="button"
             role="menuitem"
             disabled=${!!item.disabled}
+            aria-disabled=${item.disabled ? 'true' : undefined}
             class=${[
               'w-full text-left px-4 py-2 text-sm transition-colors',
               item.danger ? 'text-danger hover:bg-danger/10' : 'text-text hover:bg-surface-2',

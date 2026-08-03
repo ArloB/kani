@@ -108,6 +108,7 @@ export default {
   'chapter.bulk.select_all': 'Select all',
   'chapter.bulk.flip': 'Flip',
   'chapter.bulk.undownloaded': 'Undownloaded',
+  'bulk.select': 'Select',
   'chapter.bulk.orphaned': 'Orphaned',
   'chapter.bulk.orphaned.title': 'Select the {count} chapter(s) kept from a previous source',
   'chapter.bulk.orphaned.none': 'No chapters were kept from a previous source',
