@@ -143,6 +143,8 @@ export async function login(username, password) {
 
 export async function logout() {
   clearSWRCache();
+  // Dynamic import: session.js imports this module, so a static one would cycle.
+  await import('./session.js').then((m) => m.clearRememberedPermissions()).catch(() => {});
   return _req('POST', '/auth/logout');
 }
 
@@ -155,6 +157,7 @@ export async function changePassword(currentPassword, newPassword) {
 
 export async function logoutEverywhere() {
   clearSWRCache();
+  await import('./session.js').then((m) => m.clearRememberedPermissions()).catch(() => {});
   return _req('POST', '/auth/logout_everywhere');
 }
 
