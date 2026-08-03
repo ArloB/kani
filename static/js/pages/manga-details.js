@@ -360,7 +360,7 @@ export async function init(container, params) {
   wrap.appendChild(layout);
 
   const leftCol = document.createElement('div');
-  leftCol.className = 'w-full flex flex-col md:w-1/4 md:shrink-0 md:min-h-0';
+  leftCol.className = 'manga-rail w-full flex flex-col md:w-1/4 md:shrink-0 md:min-h-0';
   layout.appendChild(leftCol);
 
   const rightCol = document.createElement('div');

@@ -123,7 +123,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
   // ── Cover ──
   const coverInner = document.createElement('div');
-  coverInner.className = 'aspect-[2/3] rounded-xl overflow-hidden bg-surface-2 shrink-0 cursor-pointer shadow-card'; /* justified: manga cover aspect ratio */
+  coverInner.className = 'rail-cover-slot aspect-[2/3] rounded-xl overflow-hidden bg-surface-2 shrink-0 cursor-pointer shadow-card'; /* justified: manga cover aspect ratio */
   coverInner.appendChild(createCoverImage({ url: coverUrl, alt: info?.title ?? '' }));
 
   // Cover lightbox
@@ -167,7 +167,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
   // ── Meta rows ──
   const meta = document.createElement('div');
-  meta.className = 'flex flex-col gap-3';
+  meta.className = 'rail-meta flex flex-col gap-3';
 
   const META_LINK_CLS = 'text-text hover:text-accent hover:underline underline-offset-4 transition-colors focus-visible:outline-none focus-visible:text-accent';
 
@@ -318,9 +318,9 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
 
   if (info?.description_html || info?.description) {
     descWrap = document.createElement('div');
-    descWrap.className = 'relative';
+    descWrap.className = 'flex flex-col gap-1.5 min-h-0 md:flex-1 md:pb-1';
     desc = document.createElement('div');
-    desc.className = 'text-sm text-text-muted leading-relaxed desc-collapsed';
+    desc.className = 'text-sm text-text-muted leading-relaxed rail-desc';
     desc.setAttribute('role', 'button');
     desc.setAttribute('tabindex', '0');
     desc.setAttribute('aria-expanded', 'false');
@@ -339,83 +339,67 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
       });
     });
 
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'text-xs text-text-muted underline underline-offset-2 decoration-border hover:text-accent text-left self-start shrink-0 py-1';
+    toggle.textContent = t('manga.header.show_less');
+    toggle.hidden = true;
+
     descWrap.appendChild(desc);
+    descWrap.appendChild(toggle);
 
-    /** @type {HTMLElement|null} */ let panel = null;
-    /** @type {(() => void)|null} */ let teardown = null;
+    /** The rail root: ancestor of both the cover and the facts, since reading
+     *  state restyles both. */
+    const railRoot = () => desc?.closest('.manga-rail') ?? null;
 
-    // The panel is anchored to where the collapsed text sits and grows upward
-    // over the facts and the lower cover. Fixed positioning because the rail is
-    // a scroll container on desktop and would otherwise clip it.
-    const place = () => {
-      if (!panel || !desc) return;
-      const r = desc.getBoundingClientRect();
-      panel.style.left = `${Math.round(r.left)}px`;
-      panel.style.width = `${Math.round(r.width)}px`;
-      panel.style.bottom = `${Math.round(window.innerHeight - r.bottom)}px`;
-    };
-
-    const collapse = () => {
-      expanded = false;
-      teardown?.();
-      teardown = null;
-      panel?.remove();
-      panel = null;
+    const setReading = (/** @type {boolean} */ on) => {
       if (!desc) return;
-      desc.classList.add('desc-collapsed');
-      desc.style.visibility = '';
-      desc.setAttribute('aria-expanded', 'false');
-      desc.setAttribute('aria-label', t('manga.header.show_more'));
+      expanded = on;
+      railRoot()?.classList.toggle('rail--reading', on);
+      // Tailwind's own utility rather than a descendant rule: the utilities
+      // layer wins on order, so `.rail--reading .rail-meta { display:none }`
+      // never beat the `flex` class already on this element.
+      meta.classList.toggle('hidden', on);
+      // Expanded, the text is just text: the button role and its label belong
+      // to the collapse control alone. Leaving them on produced two controls
+      // with the same accessible name, which is ambiguous to a screen reader
+      // and picked the wrong one under test.
+      if (on) {
+        desc.removeAttribute('role');
+        desc.removeAttribute('tabindex');
+        desc.removeAttribute('aria-label');
+        desc.removeAttribute('aria-expanded');
+      } else {
+        desc.setAttribute('role', 'button');
+        desc.setAttribute('tabindex', '0');
+        desc.setAttribute('aria-label', t('manga.header.show_more'));
+        desc.setAttribute('aria-expanded', 'false');
+      }
+      toggle.hidden = !on;
     };
 
-    const expand = () => {
-      if (!desc || expanded) return;
-      expanded = true;
-      panel = document.createElement('div');
-      panel.className = 'desc-panel text-sm text-text-muted leading-relaxed';
-      panel.innerHTML = desc.innerHTML;
-      panel.querySelectorAll('a[href]').forEach(link => {
-        link.setAttribute('target', '_blank');
-        link.setAttribute('rel', 'noopener noreferrer');
+    // Only offer it when there is more than the three lines already showing.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (desc && desc.scrollHeight <= desc.clientHeight + 2) {
+          desc.classList.remove('rail-desc');
+          desc.removeAttribute('role');
+          desc.removeAttribute('tabindex');
+          desc.removeAttribute('aria-expanded');
+          desc.removeAttribute('aria-label');
+        }
       });
-
-      const closeBar = document.createElement('div');
-      closeBar.className = 'desc-panel-close';
-      const closeBtn = document.createElement('button');
-      closeBtn.type = 'button';
-      closeBtn.className = 'text-xs text-text-muted underline underline-offset-2 decoration-border hover:text-accent';
-      closeBtn.textContent = t('manga.header.show_less');
-      closeBtn.addEventListener('click', (e) => { e.stopPropagation(); collapse(); });
-      closeBar.appendChild(closeBtn);
-      panel.appendChild(closeBar);
-
-      document.body.appendChild(panel);
-      // Keep the collapsed block's space reserved so nothing below it moves.
-      desc.style.visibility = 'hidden';
-      desc.classList.add('desc-collapsed');
-      desc.setAttribute('aria-expanded', 'true');
-      place();
-
-      const onKey = (/** @type {KeyboardEvent} */ e) => { if (e.key === 'Escape') collapse(); };
-      const onDown = (/** @type {MouseEvent} */ e) => {
-        if (panel && !panel.contains(/** @type {Node} */(e.target))) collapse();
-      };
-      window.addEventListener('resize', place);
-      window.addEventListener('keydown', onKey);
-      // Deferred so the click that opened it does not immediately close it.
-      setTimeout(() => document.addEventListener('mousedown', onDown), 0);
-      teardown = () => {
-        window.removeEventListener('resize', place);
-        window.removeEventListener('keydown', onKey);
-        document.removeEventListener('mousedown', onDown);
-      };
-    };
-
-    desc.addEventListener('click', () => { if (!expanded) expand(); });
-    desc.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!expanded) expand(); }
     });
-    _destroyDesc = collapse;
+
+    desc.addEventListener('click', () => { if (!expanded && desc?.classList.contains('rail-desc')) setReading(true); });
+    desc.addEventListener('keydown', (e) => {
+      if ((e.key === 'Enter' || e.key === ' ') && !expanded && desc?.classList.contains('rail-desc')) {
+        e.preventDefault();
+        setReading(true);
+      }
+    });
+    toggle.addEventListener('click', () => setReading(false));
+    _destroyDesc = () => setReading(false);
   }
 
   // ── Layout containers ──
@@ -435,7 +419,7 @@ export function mountMangaHeader(leftCol, info, source, ctx) {
   // The scroll boundary sits below the actions: the cover and Read/Download/Scan
   // hold their place, and only the credits, facts and description move. Putting
   // it any higher scrolled the primary actions out of reach.
-  metaPanel.className = 'flex flex-col gap-3 min-w-0 pt-1 md:flex-1 md:min-h-0 md:overflow-y-auto';
+  metaPanel.className = 'rail-metapanel flex flex-col gap-3 min-w-0 pt-1 md:flex-1 md:min-h-0 md:overflow-y-auto';
 
   const heroRow = document.createElement('div');
   leftCol.appendChild(heroRow);

@@ -1964,47 +1964,51 @@
      lines to animate text height, which reads worse than simply revealing it.
      The mask makes the cut deliberate; the cap keeps a long synopsis from
      running off the page. */
-  /* Collapsed: a fixed three-line window with the last line fading out, and the
-     whole block is the target that opens it. 55% swallowed the third line and
-     read as truncation; 82% was so faint it read as nothing at all. */
-  .desc-collapsed {
+  /* ── Description: the rail re-composes, nothing overlays ──
+     Expanding used to raise a panel over the column. Anything that covers
+     other content needs its own opaque fill, which is precisely what makes it
+     read as a pasted-on surface. So nothing covers anything: the artwork crops
+     from the bottom, the credits and facts step aside, and the description
+     takes the space they vacate. One ground throughout, no border, no shadow,
+     no second plane — the column simply shows something else.
+
+     The exchange is even: what the cover and facts give up, the description
+     takes, so the rail's height never changes and nothing below it moves. */
+  .rail-desc {
+    /* flex: none or the rail's column squeezes the three-line window shut. */
+    flex: none;
     height: 4.4rem;
     overflow: hidden;
     cursor: pointer;
     mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
     -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
   }
-  .desc-collapsed:hover { color: var(--color-text); }
+  .rail-desc:hover { color: var(--color-text); }
 
-  /* Expanded: a panel of fixed height that grows upward from where the
-     collapsed text sat, covering the facts and the lower part of the cover.
-     Positioned fixed so no scroll container in the rail can clip it, which is
-     the whole point — it has to rise past them. Anything longer scrolls
-     inside. */
-  /* A sheet of the page rising over the artwork, not a card floating above it:
-     the ground colour rather than a raised surface, square to the column's
-     edges, one hairline where it meets what it covers, and a shadow that falls
-     only upward from that edge. A bordered, rounded, all-round-shadowed box
-     read as a popover pasted onto the rail. */
-  .desc-panel {
-    position: fixed;
-    z-index: var(--z-popover, 50);
-    height: min(26rem, 58vh);
+  .rail-cover-slot,
+  .rail-meta { transition: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .rail-cover-slot { transition: height 220ms cubic-bezier(0.2, 0, 0, 1); }
+  }
+
+  .rail--reading .rail-cover-slot {
+    /* Crops rather than scales: the artwork keeps its size and loses its
+       lower half, which is what "covering the bottom of the cover" looked
+       like when it was an overlay. */
+    aspect-ratio: auto;
+    height: 8.5rem;
+  }
+  .rail--reading .rail-cover-slot img { object-fit: cover; object-position: top center; }
+  .rail--reading .rail-metapanel { overflow: hidden; }
+  .rail--reading .rail-desc {
+    height: auto;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     scrollbar-width: thin;
-    background: var(--color-bg);
-    border-top: 1px solid var(--color-border-subtle);
-    box-shadow: 0 -10px 24px -12px rgba(0, 0, 0, 0.28);
-    padding: 0.85rem 0 2.6rem;
-  }
-  /* The collapse control rides the bottom of the panel so it is in the same
-     place the "Show more" it replaced was. */
-  .desc-panel-close {
-    position: absolute;
-    left: 0; right: 0; bottom: 0;
-    padding: 0.5rem 0 0.7rem;
-    background: linear-gradient(to top, var(--color-bg) 70%, transparent);
-    text-align: left;
+    cursor: default;
+    mask-image: none;
+    -webkit-mask-image: none;
   }
 
   /* ── Floating bulk bar ──
