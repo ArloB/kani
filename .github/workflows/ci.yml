@@ -56,6 +56,15 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
+    # Same reasoning as the test job. Clippy builds dev rlibs with `debug = 1`,
+    # and `cargo bench --no-run` uses [profile.bench], which inherits release
+    # and then re-adds `debug = 1` — the one release profile that is not
+    # stripped. Neither needs debuginfo to answer "does it compile".
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_BENCH_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "4"
     steps:
       - uses: actions/checkout@v6
 
@@ -239,6 +248,10 @@ jobs:
   js:
     name: JS
     needs: changes
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "4"
     if: needs.changes.outputs.js == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -293,6 +306,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      # pip resolves and downloads mkdocs-material and its dependency tree on
+      # every run otherwise. There is no requirements file for setup-python's
+      # own cache to key on, so cache the wheel directory directly.
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-mkdocs-material
 
       - name: Install mkdocs-material
         run: pip install mkdocs-material
