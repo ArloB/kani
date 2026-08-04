@@ -66,9 +66,10 @@ export async function init(container) {
   _unsubProgress = null;
   setPageHeader({ crumbs: [{ label: t('updates.crumb') }] });
 
+  container.classList.add('page-fixed');
   container.innerHTML = `
-    <div class="max-w-page mx-auto w-full overflow-x-hidden px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6">
-      <div class="js-list flex flex-col gap-6 min-w-0" aria-live="polite" aria-busy="true"></div>
+    <div class="max-w-page mx-auto w-full overflow-x-hidden px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6 page-body-host page-col">
+      <div class="js-list page-body flex flex-col gap-6 min-w-0" aria-live="polite" aria-busy="true"></div>
       <div class="js-pagination"></div>
     </div>
   `;

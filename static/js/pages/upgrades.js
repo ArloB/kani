@@ -122,7 +122,7 @@ function UpgradesPage() {
   }
 
   return html`
-    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-4 md:py-6 flex flex-col gap-3">
+    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-4 md:py-6 flex flex-col gap-3 page-body-host page-col">
       <div class="flex items-baseline justify-between gap-3">
         <p class="text-sm text-text-muted">${t('upgrades.count', { n: entries.length })}</p>
         ${canManage && bulkable.length > 0
@@ -139,7 +139,7 @@ function UpgradesPage() {
           : null}
       </div>
 
-      <div class="flex flex-col">
+      <div class="flex flex-col page-body--fit">
         ${entries.map(
           (entry) => html`
             <${UpgradeRow}
@@ -166,6 +166,7 @@ function UpgradesPage() {
 /** @param {HTMLElement} container */
 export async function init(container) {
   setPageHeader({ crumbs: [{ label: t('upgrades.crumb') }] });
+  container.classList.add('page-fixed');
   render(html`<${UpgradesPage} />`, container);
 }
 

@@ -231,7 +231,7 @@ function JobsPage() {
   }[tab];
 
   return html`
-    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-6 flex flex-col gap-4">
+    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-6 flex flex-col gap-4 page-body-host page-col">
       <${Tabs}
         tabs=${[
           { id: 'active',    name: t('jobs.tab.active') },
@@ -254,7 +254,7 @@ function JobsPage() {
         `}
       </div>
 
-      <div class=${'bg-surface border border-border rounded-xl overflow-hidden' + (loading ? ' opacity-60' : '')}>
+      <div class=${'bg-surface border border-border rounded-xl overflow-x-hidden page-body--fit' + (loading ? ' opacity-60' : '')}>
         ${jobs.length === 0 && !loading
           ? html`<${EmptyState} icon=${emptyFor.icon} title=${emptyFor.title} subtitle=${emptyFor.subtitle} />`
           : jobs.map(j => {
@@ -289,6 +289,7 @@ export async function init(container) {
   }
 
   setPageHeader({ crumbs: [{ label: t('jobs.title') }] });
+  container.classList.add('page-fixed');
   render(html`<${JobsPage} />`, container);
 }
 
