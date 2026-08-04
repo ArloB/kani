@@ -51,8 +51,9 @@ export async function init(container) {
     return;
   }
 
+  container.classList.add('page-fixed');
   container.innerHTML = `
-    <div class="w-full overflow-x-hidden px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4">
+    <div class="w-full overflow-x-hidden px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4 page-body-host page-col">
       <!-- Large centered search bar -->
       <div class="flex flex-col items-center gap-4 py-4 md:py-8">
         <div class="js-search-slot w-full max-w-2xl"></div>
@@ -61,7 +62,7 @@ export async function init(container) {
       </div>
 
       <!-- Results -->
-      <div id="search-results" aria-live="polite" aria-busy="false"></div>
+      <div id="search-results" class="page-body" aria-live="polite" aria-busy="false"></div>
     </div>
   `;
 
