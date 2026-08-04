@@ -83,6 +83,45 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --no-deps -- -D warnings
 
+      # `cargo bench --no-run` below is the first *release*-profile build in this
+      # job, and kani-web's build.rs bundles JS only on release (build.rs:30) —
+      # so this is the one step in the whole workflow that needs the asset
+      # toolchain, and it panics without it. Clippy above builds debug and never
+      # noticed. Provisioned rather than skipped: the panic is what stops a
+      # release shipping without its JS, and CI should build the way a release
+      # does.
+      - name: Restore asset toolchain
+        uses: actions/cache/restore@v5
+        id: tools-cache
+        with:
+          path: tools
+          key: kani-tools-${{ runner.os }}-${{ hashFiles('kani-cli/src/commands/setup.rs') }}
+
+      - name: Restore kani-cli binary
+        uses: actions/cache/restore@v5
+        id: lint-kani-cli-cache
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        with:
+          path: target/release/kani-cli
+          key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
+
+      - name: Download esbuild and the Tailwind CLI
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        run: |
+          if [ ! -x target/release/kani-cli ]; then
+            cargo build --release -p kani-cli
+          fi
+          ./target/release/kani-cli setup --esbuild --tailwind
+        env:
+          SQLX_OFFLINE: "true"
+
+      - name: Save asset toolchain
+        uses: actions/cache/save@v5
+        if: always() && steps.tools-cache.outputs.cache-hit != 'true'
+        with:
+          path: tools
+          key: kani-tools-${{ runner.os }}-${{ hashFiles('kani-cli/src/commands/setup.rs') }}
+
       # Benches are not run in CI (a shared runner gives meaningless numbers), but
       # they must keep compiling. No --workspace: kani-extensions/* are WASM-only.
       - name: Check benchmarks compile
