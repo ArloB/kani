@@ -65,10 +65,12 @@ pub enum Command {
         /// Override the version embedded in the WASM (e.g. 1.2.3)
         #[arg(long, value_name = "SEMVER")]
         set_version: Option<String>,
-        /// Directory containing extension crates (default: kani-extensions)
+        /// Directory containing extension crates. Falls back to $KANI_EXT_DIR,
+        /// then kani-extensions/, then ../kani-extensions/
         #[arg(long, value_name = "PATH")]
         ext_dir: Option<String>,
-        /// Output directory for compiled .wasm files (default: wasm_sources)
+        /// Output directory for compiled .wasm files. Falls back to
+        /// $KANI_OUT_DIR, then wasm_sources/
         #[arg(long, value_name = "PATH")]
         out_dir: Option<String>,
         /// Build with debug info (larger binary, readable WASM backtraces)
