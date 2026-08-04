@@ -298,8 +298,14 @@ jobs:
       plan: ${{ needs.plan.outputs.val }}
       publish: ${{ fromJson(needs.plan.outputs.publishing) }}
     secrets: inherit
-    # publish jobs get escalated permissions
+    # publish jobs get escalated permissions.
+    #
+    # `contents: read` is not decoration: job-level permissions replace the
+    # workflow-level grant rather than adding to it, and a called workflow may
+    # not request more than its caller holds. docker.yml asks for contents:read
+    # to check out the repo, so omitting it here fails the run at startup.
     permissions:
+      "contents": "read"
       "id-token": "write"
       "packages": "write"
 

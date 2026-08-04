@@ -1,5 +1,9 @@
 name: Publish Docker image
 
+# Every input this workflow references has to be defined under *both* triggers.
+# `inputs.tag` and `inputs.plan` are each read unconditionally below, and an
+# `inputs.x` that the active trigger does not define is a workflow-validation
+# error, not an empty string — the run fails at startup with no job to inspect.
 on:
   workflow_call:
     inputs:
@@ -11,12 +15,27 @@ on:
         required: false
         default: false
         type: boolean
+      tag:
+        description: "Unused when called; defined so `inputs.tag` resolves."
+        required: false
+        default: ""
+        type: string
   workflow_dispatch:
     inputs:
       tag:
         description: "Tag to build and publish (e.g. v0.9.0)"
         required: true
         type: string
+      plan:
+        description: "Unused when dispatched; defined so `inputs.plan` resolves."
+        required: false
+        default: ""
+        type: string
+      publish:
+        description: "Push and sign the image."
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   docker:
