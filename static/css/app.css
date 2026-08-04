@@ -1516,10 +1516,16 @@
     display: flex;
     flex-direction: column;
     @media (max-width: 767px) { margin-left: 0; }
-    @media (min-width: 768px) and (max-width: 1023px) {
-      margin-left: 200px;
-    }
   }
+
+  /* ── Sidebar width ──
+     Every offset in the app — the shell, the full-bleed banners, the bulk bar —
+     reads this one value, so collapsing is a single token change rather than a
+     class on each of them. The tablet step is narrower because 234 px of a
+     1024 px screen is a lot to spend on navigation; the collapsed rail keeps
+     the icons and drops everything else. */
+  @media (min-width: 768px) and (max-width: 1023px) { :root { --sidebar-w: 200px; } }
+  html[data-sidebar="collapsed"] { --sidebar-w: 60px; }
   #page-content {
     flex: 1;
     min-height: 0;
@@ -1554,11 +1560,8 @@
     overflow-y: auto;
     z-index: var(--z-sidebar);
     @media (max-width: 767px) { display: none; }
-    /* On tablets, the full 234px sidebar eats too much horizontal real estate.
-       Shrink to 200px between md and lg breakpoints. */
-    @media (min-width: 768px) and (max-width: 1023px) {
-      width: 200px;
-    }
+    transition: width 160ms cubic-bezier(0.2, 0, 0, 1);
+    @media (prefers-reduced-motion: reduce) { transition: none; }
   }
   .sidebar-brand {
     display: flex; align-items: center; gap: 10px;
@@ -1600,6 +1603,12 @@
     color: var(--color-text);
   }
   .sidebar-nav { padding: 10px 8px; flex: 1; }
+  .sidebar-user-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
   .sidebar-footer {
     border-top: 1px solid var(--color-border-subtle);
     padding: 10px 12px;
@@ -1630,6 +1639,47 @@
     &.active,
     &[aria-current="page"] { background: var(--color-accent-dim); color: var(--color-accent); }
   }
+  /* ── Collapsed rail ──
+     60 px of icons. Everything that needs width to be legible — labels, section
+     headings, the user's name — is removed rather than squeezed, and the icons
+     centre so the rail reads as a deliberate second state and not a clipped
+     first one. Labels come back as tooltips, set on the anchors by the toggle. */
+  html[data-sidebar="collapsed"] {
+    & .sidebar-title,
+    & .sidebar-mark,
+    & .nav-item > span:not(.nav-badge),
+    & .sidebar-user-text { display: none; }
+
+    /* The section heading still divides the rail, just without its word. Height
+       0 with overflow hidden rather than `display: none` — the boundary is the
+       point, and a screen reader should still hear "Admin". */
+    & .nav-section {
+      height: 0;
+      padding: 0;
+      margin: 10px 10px 9px;
+      overflow: hidden;
+      border-top: 1px solid var(--color-border-subtle);
+    }
+
+    & .sidebar-brand { justify-content: center; padding-inline: 8px; }
+    & .sidebar-nav { padding-inline: 6px; }
+    & .nav-item { justify-content: center; padding-inline: 0; gap: 0; }
+    & .nav-badge {
+      position: absolute; top: 2px; right: 4px;
+      margin-left: 0; padding: 0 4px;
+    }
+    & .sidebar-footer { flex-direction: column; gap: 8px; padding-inline: 6px; }
+  }
+  html[data-sidebar="collapsed"] .nav-item { position: relative; }
+
+  .sidebar-toggle { margin-left: auto; flex-shrink: 0; }
+  html[data-sidebar="collapsed"] .sidebar-toggle { margin-left: 0; }
+  .sidebar-toggle .icon-sm { transition: transform 160ms cubic-bezier(0.2, 0, 0, 1); }
+  html[data-sidebar="collapsed"] .sidebar-toggle .icon-sm { transform: rotate(180deg); }
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-toggle .icon-sm { transition: none; }
+  }
+
   .nav-badge {
     margin-left: auto;
     font-size: var(--text-2xs); font-family: var(--font-mono);
@@ -2209,19 +2259,23 @@
     /* Above the mobile tab bar (h-16), not underneath it. */
     bottom: 4rem;
     @media (min-width: 768px) {
-      left: 200px;
+      left: var(--sidebar-w);
       bottom: 1.5rem;
       margin-inline: auto;
       width: fit-content;
       max-width: calc(100vw - 2rem);
     }
-    @media (min-width: 1024px) { left: var(--sidebar-w); }
   }
 
   /* ── Sidebar offset (for full-bleed banners on desktop) ── */
+  /* Owns `left` at every width. It cannot merely override at md and up: the
+     `left-0` utility this used to be paired with lives in Tailwind's utilities
+     layer and outranks anything declared here, so the banners never actually
+     cleared the sidebar. The utility is gone from the markup; this is the only
+     rule setting their left edge now. */
   .md\:left-sidebar {
-    @media (min-width: 768px) and (max-width: 1023px) { left: 200px; }
-    @media (min-width: 1024px) { left: var(--sidebar-w); }
+    left: 0;
+    @media (min-width: 768px) { left: var(--sidebar-w); }
   }
 
   /* ── Safe-area padding ── */

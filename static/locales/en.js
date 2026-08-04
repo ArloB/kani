@@ -721,6 +721,8 @@ export default {
   'nav.accounts': 'Accounts',
   'nav.logs': 'Logs',
   'nav.main.aria': 'Main navigation',
+  'nav.sidebar.collapse': 'Collapse sidebar',
+  'nav.sidebar.expand': 'Expand sidebar',
   'nav.user_fallback': 'User',
   'nav.sign_out': 'Sign out',
   'restart.waiting': 'Waiting…',
