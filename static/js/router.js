@@ -183,6 +183,12 @@ async function _route(path, fromPopstate = false) {
   _activePage = null;
   _currentParams = params;
 
+  // A page opts into the fixed-viewport layout by adding `page-fixed` to the
+  // shared container; the router takes it back off on the way out. Left on, it
+  // applies `overflow: hidden` to the next page too — statistics lost 615 px
+  // with no way to scroll to it after any visit to a manga.
+  _container.classList.remove('page-fixed');
+
   if (!matched) {
     _container.innerHTML = `<div style="padding:2rem;text-align:center;color:var(--color-text-muted)">${t('router.not_found')}</div>`;
     document.title = t('router.not_found.title');

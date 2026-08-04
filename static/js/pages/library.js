@@ -195,8 +195,12 @@ export async function init(container) {
   if (refreshBtn) _hdrActions.push(refreshBtn);
   setPageHeader({ crumbs: [{ label: t('library.nav.title') }], actions: _hdrActions.length ? _hdrActions : null });
 
+  // Desktop and tablet fill the shell exactly: the tabs, filters and pager
+  // hold their place and only the grid moves. Mobile scrolls the document.
+  container.classList.add('page-fixed');
+
   container.innerHTML = `
-    <div class="max-w-page mx-auto w-full px-3 sm:px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4">
+    <div class="max-w-page mx-auto w-full px-3 sm:px-4 md:px-6 py-4 md:py-6 flex flex-col gap-4 page-body-host page-col">
 
       <!-- Category tabs (horizontal scroll on mobile) -->
       <div class="js-tabs overflow-x-auto [scrollbar-width:none] [-webkit-overflow-scrolling:touch]"></div>
@@ -241,11 +245,16 @@ export async function init(container) {
         </div>
       </div>
 
-      <!-- Continue Reading shelf (component owns its internals) -->
-      <div class="js-shelf"></div>
+      <!-- The scrolling region. The shelf scrolls with the grid rather than
+           pinning: on a 720 px screen a pinned shelf would leave the grid a
+           single row deep. -->
+      <div class="js-scroll page-body flex flex-col gap-4 min-w-0">
+        <!-- Continue Reading shelf (component owns its internals) -->
+        <div class="js-shelf"></div>
 
-      <!-- Grid -->
-      <div class="js-grid" aria-live="polite" aria-busy="false"></div>
+        <!-- Grid -->
+        <div class="js-grid" aria-live="polite" aria-busy="false"></div>
+      </div>
 
       <!-- Pagination -->
       <div class="js-pagination"></div>
@@ -706,6 +715,7 @@ function _fetchLibrary() {
   if (!_gridEl || !_paginEl) return;
   const infinite = getLocal('kani_library_pagination') === 'infinite';
   const isAppend = infinite && _page > 1;
+  _placePagination(infinite);
 
   _abort?.abort();
   _abort = new AbortController();
@@ -851,6 +861,24 @@ function _appendMangaCards(gridEl, items) {
 /** @param {{ resume?: { chapter_id: number } | null }} manga */
 function _onResumeClick(manga) {
   if (manga.resume) navigate(`/reader/${manga.resume.chapter_id}`);
+}
+
+/**
+ * Puts the pagination slot on the right side of the scroll boundary.
+ *
+ * A pager is chrome and pins below the grid. The infinite-scroll sentinel
+ * lives in the same slot, and a pinned sentinel is permanently on screen —
+ * the observer would fire, fetch, and fire again until it had loaded every
+ * page in the library. In infinite mode the slot goes back inside the
+ * scroller, where reaching it means the reader actually reached the end.
+ *
+ * @param {boolean} infinite
+ */
+function _placePagination(infinite) {
+  if (!_paginEl) return;
+  const scroller = _paginEl.closest('.page-col')?.querySelector('.js-scroll');
+  const wanted = infinite ? scroller : scroller?.parentElement;
+  if (wanted && _paginEl.parentElement !== wanted) wanted.appendChild(_paginEl);
 }
 
 /** Sets up (or clears) the IntersectionObserver sentinel for infinite scroll. */
