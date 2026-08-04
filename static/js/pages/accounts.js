@@ -63,7 +63,7 @@ export async function init(container) {
 
   // Content area — full height master-detail (below global header)
   const contentEl = document.createElement('div');
-  contentEl.style.cssText = 'display:flex;flex-direction:column;overflow:hidden;height:calc(100dvh - var(--header-h));';
+  contentEl.style.cssText = 'display:flex;flex-direction:column;overflow:hidden;height:100%;min-height:0;';
 
   container.innerHTML = '';
   container.appendChild(contentEl);

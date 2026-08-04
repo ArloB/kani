@@ -96,7 +96,7 @@ export async function init(container) {
 
     <!-- Repos view (hidden initially). Flex column with a bounded height so the
          repo-manager master-detail stretches its list pane to the bottom. -->
-    <div class="js-repos-view hidden flex flex-col" style="height:calc(100dvh - var(--header-h));"></div>
+    <div class="js-repos-view hidden flex flex-col h-full min-h-0"></div>
   `;
 
   const sourcesView = /** @type {HTMLElement} */ (container.querySelector('.js-sources-view'));
