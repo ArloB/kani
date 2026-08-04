@@ -140,6 +140,23 @@ jobs:
   test:
     name: Test
     needs: changes
+    # Debuginfo is what filled the runner's disk. `[profile.dev] debug = 1`
+    # applies to every test target and dependency rlib, and this workspace links
+    # roughly sixty test binaries that each statically pull in BoringSSL, SQLite
+    # and zstd. Measured on one target: 514 MB -> 200 MB per binary, 5.6 GB ->
+    # 2.9 GB of target/, and 11% less build time. Backtraces keep their function
+    # names (that is the symbol table, not debuginfo); they lose line numbers,
+    # which is the price of the job finishing at all. Local builds are untouched.
+    #
+    # `.cargo/config.toml` sets `jobs = 8` for an 8-core desktop, and that
+    # applies here too — on a 4-vCPU runner it oversubscribes, which costs both
+    # contention and peak disk, since every extra rustc holds its own object
+    # files open. Match the runner instead.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "4"
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
