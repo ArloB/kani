@@ -5,9 +5,87 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 
+// ── Network ──────────────────────────────────────────────────────────────────
+//
+// Every asset here comes from a third party — unpkg, the npm registry, GitHub
+// releases — and a single unanswered request used to fail the whole build. That
+// is not hypothetical: a release-matrix run lost its macOS target to one
+// unreachable unpkg.com, having compiled nothing. The same fetch runs in the
+// Dockerfile and in CI, so one hiccup anywhere fails a release.
+
+const MAX_ATTEMPTS: u32 = 4;
+const FIRST_BACKOFF_MS: u64 = 500;
+const MAX_BACKOFF_MS: u64 = 4_000;
+
+/// Whether a failed attempt is worth repeating.
+///
+/// `None` means the request never produced a response at all — DNS failure,
+/// TLS handshake, connection reset — which is exactly the transient class worth
+/// retrying. A 404 will not improve by asking again; a 429 or a 5xx might.
+const fn is_retryable(status: Option<u16>) -> bool {
+    match status {
+        None => true,
+        Some(429) => true,
+        Some(s) => s >= 500,
+    }
+}
+
+/// Exponential backoff, capped so a hard outage fails in seconds not minutes.
+const fn backoff_ms(attempt: u32) -> u64 {
+    let shift = if attempt > 4 { 4 } else { attempt - 1 };
+    let ms = FIRST_BACKOFF_MS << shift;
+    if ms > MAX_BACKOFF_MS {
+        MAX_BACKOFF_MS
+    } else {
+        ms
+    }
+}
+
+/// GET a URL, retrying the failures that are worth retrying.
+///
+/// `error_for_status` is deliberate: the previous code took whatever bytes came
+/// back, so a 404 page would have been written out as the "binary" and only
+/// surfaced later as a confusing exec-format error.
+fn get_bytes(client: &Client, url: &str) -> Result<Vec<u8>, CliError> {
+    get_bytes_as(client, url, None)
+}
+
+/// As `get_bytes`, with a User-Agent. Google Fonts serves a different stylesheet
+/// per browser, so that request cannot go out with the default agent.
+fn get_bytes_as(client: &Client, url: &str, user_agent: Option<&str>) -> Result<Vec<u8>, CliError> {
+    let mut attempt = 1;
+    loop {
+        let req = match user_agent {
+            Some(ua) => client.get(url).header("User-Agent", ua),
+            None => client.get(url),
+        };
+        match req
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+        {
+            Ok(resp) => return Ok(resp.bytes()?.to_vec()),
+            Err(e) => {
+                let status = e.status().map(|s| s.as_u16());
+                if attempt >= MAX_ATTEMPTS || !is_retryable(status) {
+                    return Err(CliError::Other(format!(
+                        "failed to fetch {url} after {attempt} attempt(s): {e}"
+                    )));
+                }
+                let wait = backoff_ms(attempt);
+                eprintln!("  {url}: {e} — retrying in {wait}ms ({attempt}/{MAX_ATTEMPTS})");
+                std::thread::sleep(std::time::Duration::from_millis(wait));
+                attempt += 1;
+            }
+        }
+    }
+}
+
 pub fn run(vendors: bool, tailwind: bool, esbuild: bool) -> Result<(), CliError> {
     let run_all = !vendors && !tailwind && !esbuild;
-    let client = Client::new();
+    let client = Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?;
 
     if run_all || vendors {
         fetch_vendors(&client)?;
@@ -100,7 +178,7 @@ fn fetch_vendors(client: &Client) -> Result<(), CliError> {
 
     for (url, filename) in &files {
         println!("Downloading {filename}...");
-        let bytes = client.get(*url).send()?.bytes()?;
+        let bytes = get_bytes(client, url)?;
         fs::write(vendor_dir.join(filename), &bytes)?;
 
         // Compute SHA-256 for subresource integrity tracking.
@@ -141,15 +219,15 @@ fn fetch_fonts(client: &Client) -> Result<(), CliError> {
     let css_url = "https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&family=Zen+Kaku+Gothic+New:wght@700;900&display=swap";
 
     println!("Fetching font stylesheet...");
-    let css_text = client
-        .get(css_url)
-        .header(
-            "User-Agent",
+    let css_bytes = get_bytes_as(
+        client,
+        css_url,
+        Some(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
              (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        )
-        .send()?
-        .text()?;
+        ),
+    )?;
+    let css_text = String::from_utf8_lossy(&css_bytes).into_owned();
 
     let url_re = regex::Regex::new(r"url\((https://fonts\.gstatic\.com/[^)]+)\)")
         .map_err(|e| CliError::Other(format!("font URL regex: {e}")))?;
@@ -163,7 +241,7 @@ fn fetch_fonts(client: &Client) -> Result<(), CliError> {
             .ok_or_else(|| CliError::Other(format!("unexpected font URL: {remote_url}")))?;
 
         println!("Downloading font {filename}...");
-        let bytes = client.get(remote_url).send()?.bytes()?;
+        let bytes = get_bytes(client, remote_url)?;
         fs::write(fonts_dir.join(filename), &bytes)?;
 
         localized_css = localized_css.replace(remote_url, &format!("./{filename}"));
@@ -189,7 +267,7 @@ fn fetch_tailwind(client: &Client) -> Result<(), CliError> {
     fs::create_dir_all("tools")?;
     println!("Downloading Tailwind CSS CLI ({platform})...");
 
-    let bytes = client.get(&url).send()?.bytes()?;
+    let bytes = get_bytes(client, &url)?;
     fs::write(out, &bytes)?;
     make_executable(Path::new(out))?;
 
@@ -206,7 +284,8 @@ fn fetch_esbuild(client: &Client) -> Result<(), CliError> {
     };
 
     let registry_url = format!("https://registry.npmjs.org/@esbuild/{npm_pkg}/latest");
-    let json: serde_json::Value = client.get(&registry_url).send()?.json()?;
+    let json: serde_json::Value = serde_json::from_slice(&get_bytes(client, &registry_url)?)
+        .map_err(|e| CliError::Other(format!("npm registry returned invalid JSON: {e}")))?;
 
     let tarball_url = json["dist"]["tarball"]
         .as_str()
@@ -216,7 +295,7 @@ fn fetch_esbuild(client: &Client) -> Result<(), CliError> {
     fs::create_dir_all("tools")?;
     println!("Downloading esbuild ({npm_pkg})...");
 
-    let bytes = client.get(&tarball_url).send()?.bytes()?;
+    let bytes = get_bytes(client, &tarball_url)?;
 
     let cursor = std::io::Cursor::new(&bytes);
     let gz = flate2::read::GzDecoder::new(cursor);
@@ -283,4 +362,51 @@ fn make_executable(path: &Path) -> Result<(), CliError> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::{MAX_ATTEMPTS, MAX_BACKOFF_MS, backoff_ms, is_retryable};
+
+    #[test]
+    fn a_request_that_never_got_a_response_is_retried() {
+        // The unpkg failure that lost a macOS build was this case: no status,
+        // because the connection never produced one.
+        assert!(is_retryable(None));
+    }
+
+    #[test]
+    fn upstream_faults_and_throttling_are_retried() {
+        assert!(is_retryable(Some(429)));
+        assert!(is_retryable(Some(500)));
+        assert!(is_retryable(Some(502)));
+        assert!(is_retryable(Some(503)));
+    }
+
+    #[test]
+    fn a_wrong_url_is_not_retried() {
+        // Asking four times does not make a 404 into a file.
+        assert!(!is_retryable(Some(404)));
+        assert!(!is_retryable(Some(400)));
+        assert!(!is_retryable(Some(403)));
+    }
+
+    #[test]
+    fn backoff_grows_then_stops_growing() {
+        assert_eq!(backoff_ms(1), 500);
+        assert_eq!(backoff_ms(2), 1_000);
+        assert_eq!(backoff_ms(3), 2_000);
+        assert_eq!(backoff_ms(4), 4_000);
+        // Capped, and never shifts far enough to overflow.
+        assert_eq!(backoff_ms(5), MAX_BACKOFF_MS);
+        assert_eq!(backoff_ms(64), MAX_BACKOFF_MS);
+    }
+
+    #[test]
+    fn a_total_outage_gives_up_in_seconds_not_minutes() {
+        // A developer waiting on a dead network should not wait minutes for the
+        // verdict, and neither should a build runner.
+        let total: u64 = (1..MAX_ATTEMPTS).map(backoff_ms).sum();
+        assert!(total <= 10_000, "worst-case wait was {total}ms");
+    }
 }
