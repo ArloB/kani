@@ -27,6 +27,61 @@ async fn cache_control_middleware(
     response
 }
 
+/// The interval at which the limiter replenishes one request, for a given rate.
+///
+/// `GovernorConfigBuilder::per_second` is named for the unit of its argument,
+/// not for what the argument means: it sets the replenishment *period*. Passing
+/// a requests-per-second figure to it therefore inverts the limit — the larger
+/// the intended rate, the slower the actual one.
+fn replenish_period(requests_per_second: u64) -> std::time::Duration {
+    const NANOS_PER_SEC: u64 = 1_000_000_000;
+    std::time::Duration::from_nanos(NANOS_PER_SEC / requests_per_second.max(1))
+}
+
+#[cfg(test)]
+mod rate_limit_config_tests {
+    use super::replenish_period;
+    use std::time::Duration;
+
+    #[test]
+    fn a_rate_becomes_its_reciprocal() {
+        assert_eq!(replenish_period(1), Duration::from_secs(1));
+        assert_eq!(replenish_period(5), Duration::from_millis(200));
+        assert_eq!(replenish_period(50), Duration::from_millis(20));
+        assert_eq!(replenish_period(500), Duration::from_millis(2));
+    }
+
+    #[test]
+    fn a_higher_rate_is_never_a_stricter_limit() {
+        // The bug this replaced: `per_second(50)` was ten times harsher than
+        // `per_second(5)`, so the debug build throttled harder than release.
+        let mut previous = replenish_period(1);
+        for rate in [2, 5, 30, 50, 300, 500, 20_000] {
+            let period = replenish_period(rate);
+            assert!(
+                period < previous,
+                "rate {rate} produced period {period:?}, not shorter than {previous:?}"
+            );
+            previous = period;
+        }
+    }
+
+    #[test]
+    fn zero_does_not_divide_by_zero() {
+        assert_eq!(replenish_period(0), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn the_shipped_defaults_sustain_ordinary_browsing() {
+        // A page load costs tens of requests; a release default that cannot
+        // replenish faster than one every few seconds 429s real users.
+        let release = replenish_period(5);
+        assert!(release <= Duration::from_millis(200), "{release:?}");
+        // Debug must be looser than release, which is the whole point of it.
+        assert!(replenish_period(50) < release);
+    }
+}
+
 #[tokio::main]
 async fn main() {
     use axum::Router;
@@ -229,6 +284,15 @@ async fn main() {
     );
     let proxy_burst_size = env_u32("KANI_PROXY_BURST_SIZE", if dev_build { 6000 } else { 600 });
 
+    // These are rates — requests per second — and every name here says so. The
+    // builder's `per_second` takes the opposite: the *interval* at which one
+    // cell is replenished. Passing a rate to it inverted the whole scheme, so
+    // release replenished one request every five seconds (0.2/s, not 5/s) and
+    // the "relaxed" debug build replenished one every fifty, ten times stricter
+    // than the build it was meant to loosen. Convert once, here.
+    let api_period = replenish_period(api_rate_per_second);
+    let proxy_period = replenish_period(proxy_rate_per_second);
+
     if dev_build {
         tracing::info!(
             api_rate_per_second,
@@ -239,7 +303,7 @@ async fn main() {
 
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(api_rate_per_second)
+            .period(api_period)
             .burst_size(api_burst_size)
             // Bucket bearer traffic per token, so a busy integration cannot
             // spend its owner's browsing budget.
@@ -252,7 +316,7 @@ async fn main() {
     );
     let proxy_governor_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(proxy_rate_per_second)
+            .period(proxy_period)
             .burst_size(proxy_burst_size)
             .finish()
             .expect("proxy rate/burst values are valid"),
