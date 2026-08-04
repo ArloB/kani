@@ -8,7 +8,7 @@ services:
         GIT_SHA: "${GIT_SHA:-}"
 
         #   Uncomment to include Chromium + puppeteer-core (~250 MB extra).
-        #   Required for browser-based extensions such as kani-comix.
+        #   Required for browser-based extensions (see the kani-extensions repository).
         #   INSTALL_BROWSER: "true"
 
         #   Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.

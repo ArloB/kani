@@ -53,7 +53,7 @@ pub enum Command {
     },
     /// Compile extension(s) to WASM
     Build {
-        /// Extension crate name (e.g. kani-weebcentral)
+        /// Extension crate name (e.g. kani-example, or kani-weebcentral with --ext-dir)
         #[arg(conflicts_with_all = ["all", "dev"])]
         extension: Option<String>,
         /// Build all production extensions (excludes dev/test extensions)

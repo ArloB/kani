@@ -2,7 +2,7 @@
 # Kani Declarative Extension: Mangapill
 # =============================================================================
 # This is a complete YAML extension definition for the Mangapill source.
-# It is a 1:1 equivalent of kani-extensions/kani-mangapill/src/lib.rs and
+# It is a 1:1 equivalent of the mangapill extension (kani-extensions repository) and
 # can be compiled to an identical WASM binary via `kani-cli generate`.
 #
 # Compare this file (~150 lines) to the hand-written Rust (~378 lines) to

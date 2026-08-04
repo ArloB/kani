@@ -87,7 +87,9 @@ pub fn run(
         && (ext_arg.ends_with(".yaml") || ext_arg.ends_with(".yml"))
     {
         let (out_dir, _) = resolve_dir(out_dir, "KANI_OUT_DIR", "wasm_sources", &|_| true);
-        return build_factory_yaml(ext_arg, set_version, &out_dir, debug);
+        let (ext_root, _) =
+            resolve_dir(ext_dir, "KANI_EXT_DIR", "kani-extensions", &|p| p.exists());
+        return build_factory_yaml(ext_arg, &ext_root, set_version, &out_dir, debug);
     }
 
     let (extensions_dir, from) =
@@ -111,9 +113,14 @@ pub fn run(
 
     let (out_dir, _) = resolve_dir(out_dir, "KANI_OUT_DIR", "wasm_sources", &|_| true);
 
+    // An extension directory is one holding a Cargo.toml. When extensions lived
+    // inside the server tree this could assume every subdirectory was a crate;
+    // an external checkout is a repository root, so it also contains .git, and
+    // target/ once anything has been built there.
     let dirs: Vec<String> = fs::read_dir(&extensions_dir)?
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| e.path().join("Cargo.toml").is_file())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
 
@@ -139,7 +146,13 @@ pub fn run(
     };
 
     for name in &to_build {
-        build_one(name, set_version, &out_dir, debug)?;
+        build_one(
+            name,
+            &extensions_dir.join(name),
+            set_version,
+            &out_dir,
+            debug,
+        )?;
     }
 
     Ok(())
@@ -147,6 +160,7 @@ pub fn run(
 
 fn build_factory_yaml(
     yaml_path: &str,
+    ext_root: &Path,
     set_version: Option<&str>,
     out_dir: &Path,
     debug: bool,
@@ -181,13 +195,6 @@ fn build_factory_yaml(
     let base_value: serde_yaml::Value = serde_yaml::from_str(&source)
         .map_err(|e| CliError::Other(format!("YAML re-parse error: {e}")))?;
 
-    let workspace_root = path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .ancestors()
-        .find(|p| p.join("Cargo.toml").exists())
-        .unwrap_or(Path::new("."));
-
     let sources = factory.sources.clone();
     for source_def in &sources {
         println!("── Factory source: {}", source_def.id);
@@ -221,9 +228,7 @@ fn build_factory_yaml(
 
         let generated = crate::codegen::generate(&validated, false);
 
-        let crate_dir = workspace_root
-            .join("kani-extensions")
-            .join(format!("kani-{}", generated.id));
+        let crate_dir = ext_root.join(format!("kani-{}", generated.id));
 
         fs::create_dir_all(crate_dir.join("src"))?;
         fs::write(crate_dir.join("Cargo.toml"), &generated.cargo_toml)?;
@@ -241,7 +246,7 @@ fn build_factory_yaml(
         println!("   Generated: {}", crate_dir.display());
 
         let crate_name = format!("kani-{}", generated.id);
-        build_one(&crate_name, set_version, out_dir, debug)?;
+        build_one(&crate_name, &crate_dir, set_version, out_dir, debug)?;
     }
 
     Ok(())
@@ -321,8 +326,17 @@ fn set_dot_path(root: &mut serde_yaml::Value, path: &str, value: serde_yaml::Val
     }
 }
 
+/// Compile one extension crate to a WASM component.
+///
+/// `crate_dir` matters: extensions live in their own repository now, so the
+/// crate is usually *not* a member of the workspace kani-cli was invoked from.
+/// `cargo build -p <name>` would resolve against the caller's workspace and
+/// fail with "package not found" — every cargo call here is anchored to the
+/// crate's own manifest instead, and the artifact is located through the
+/// `target_directory` cargo reports rather than assuming `./target`.
 fn build_one(
     name: &str,
+    crate_dir: &Path,
     set_version: Option<&str>,
     out_dir: &Path,
     debug: bool,
@@ -330,14 +344,23 @@ fn build_one(
     let profile = if debug { "wasm-debug" } else { "wasm-release" };
     println!("── Building {name} [{profile}]");
 
+    let manifest = crate_dir.join("Cargo.toml");
+    if !manifest.exists() {
+        return Err(CliError::Other(format!(
+            "{} not found — is {name} an extension crate?",
+            manifest.display()
+        )));
+    }
+    let manifest_str = manifest.to_string_lossy().into_owned();
+
     let mut cargo_args = vec![
         "build",
         "--target",
         "wasm32-unknown-unknown",
         "--profile",
         profile,
-        "-p",
-        name,
+        "--manifest-path",
+        &manifest_str,
     ];
     // Temporary storage so the string outlives the vec push
     let version_config;
@@ -352,30 +375,42 @@ fn build_one(
     }
 
     let metadata_output = Command::new("cargo")
-        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--manifest-path",
+            &manifest_str,
+        ])
         .output()?;
 
     let mut ext_id = name.to_string();
+    let mut target_dir = PathBuf::from("target");
 
     if metadata_output.status.success()
         && let Ok(json) = serde_json::from_slice::<serde_json::Value>(&metadata_output.stdout)
-        && let Some(pkg) = json["packages"]
+    {
+        if let Some(dir) = json["target_directory"].as_str() {
+            target_dir = PathBuf::from(dir);
+        }
+        if let Some(pkg) = json["packages"]
             .as_array()
             .and_then(|pkgs| pkgs.iter().find(|p| p["name"] == name))
-        && let Some(id) = pkg["metadata"]["id"]
-            .as_str()
-            .or_else(|| pkg["metadata"]["kani"]["id"].as_str())
-    {
-        ext_id = id.to_string();
+            && let Some(id) = pkg["metadata"]["id"]
+                .as_str()
+                .or_else(|| pkg["metadata"]["kani"]["id"].as_str())
+        {
+            ext_id = id.to_string();
+        }
     }
 
     fs::create_dir_all(out_dir)?;
 
-    let src = PathBuf::from(format!(
-        "target/wasm32-unknown-unknown/{}/{}.wasm",
-        profile,
-        name.replace('-', "_"),
-    ));
+    let src = target_dir
+        .join("wasm32-unknown-unknown")
+        .join(profile)
+        .join(format!("{}.wasm", name.replace('-', "_")));
 
     let dest = out_dir.join(format!("{ext_id}.wasm"));
     fs::copy(&src, &dest)?;
