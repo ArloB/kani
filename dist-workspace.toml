@@ -42,7 +42,14 @@ hosting = "github"
 install-updater = false
 # kani-web's build.rs shells out to node (esbuild) and the tailwind CLI, so every
 # build runner needs node available before cargo runs.
-github-build-setup = "build-setup.yml"
+#
+# It lives in a subdirectory because it is a *fragment* — a bare sequence of
+# steps that dist splices into release.yml, not a workflow. GitHub parses every
+# .yml at the top level of .github/workflows as a workflow and rejected this one
+# outright ("A sequence was not expected"), which fails the whole repo's Actions
+# config. GitHub does not scan subdirectories; dist resolves this path relative
+# to .github/workflows either way.
+github-build-setup = "fragments/build-setup.yml"
 # Multi-arch image build + keyless cosign signing, as a reusable workflow.
 publish-jobs = ["./docker"]
 # release.yml is hand-edited: `custom-docker` is passed a `publish` input dist
