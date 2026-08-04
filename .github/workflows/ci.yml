@@ -103,7 +103,13 @@ jobs:
         uses: actions/cache/restore@v5
         id: tools-cache
         with:
-          path: tools
+          # esbuild and the Tailwind CLI, plus the vendored JS and fonts they
+          # bundle. All four are gitignored, so a fresh checkout has none of
+          # them and build.rs cannot resolve its `preact` alias without them.
+          path: |
+            tools
+            static/js/vendor
+            static/fonts
           key: kani-tools-${{ runner.os }}-${{ hashFiles('kani-cli/src/commands/setup.rs') }}
 
       - name: Restore kani-cli binary
@@ -114,21 +120,30 @@ jobs:
           path: target/release/kani-cli
           key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
 
-      - name: Download esbuild and the Tailwind CLI
+      - name: Download the asset toolchain
         if: steps.tools-cache.outputs.cache-hit != 'true'
         run: |
           if [ ! -x target/release/kani-cli ]; then
             cargo build --release -p kani-cli
           fi
-          ./target/release/kani-cli setup --esbuild --tailwind
+          # --vendors is not optional: build.rs aliases `preact` and friends to
+          # static/js/vendor, so esbuild resolves nothing without it. Naming all
+          # three flags also skips the icon and git-hook steps a bare `setup`
+          # would run, which CI has no use for.
+          ./target/release/kani-cli setup --vendors --esbuild --tailwind
         env:
           SQLX_OFFLINE: "true"
 
+      # Only on success. `always()` here cached a half-populated directory once
+      # already, and a later run then took the hit and skipped the download.
       - name: Save asset toolchain
         uses: actions/cache/save@v5
-        if: always() && steps.tools-cache.outputs.cache-hit != 'true'
+        if: success() && steps.tools-cache.outputs.cache-hit != 'true'
         with:
-          path: tools
+          path: |
+            tools
+            static/js/vendor
+            static/fonts
           key: kani-tools-${{ runner.os }}-${{ hashFiles('kani-cli/src/commands/setup.rs') }}
 
       # Benches are not run in CI (a shared runner gives meaningless numbers), but
