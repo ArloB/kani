@@ -84,6 +84,12 @@ RUN groupadd -g 1000 kani && useradd -u 1000 -g kani -d /app -M kani
 WORKDIR /app
 COPY --from=builder --chown=kani:kani /build/target/release/kani-web ./kani-web
 COPY --from=builder --chown=kani:kani /build/static/ ./static/
+# Ship the bundle, not the sources it was built from. index.prod.html loads
+# only /js/dist/app.js, but `/js` is a ServeDir over the whole tree, so every
+# unbundled module was publicly fetchable from a release image — /js/router.js
+# and /js/pages/reader.js both answered 200. esbuild inlines vendor/ into the
+# bundle, so that goes too; nothing under js/ but dist/ is reachable at runtime.
+RUN find ./static/js -mindepth 1 -maxdepth 1 ! -name dist -exec rm -rf {} +
 COPY --chown=kani:kani entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
