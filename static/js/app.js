@@ -118,8 +118,20 @@ async function _maybeShowWhatsNew(appEl) {
 
 const SIDEBAR_KEY = 'kani_sidebar_collapsed';
 
+/**
+ * Whether the rail is collapsed, and if the reader has never said, a default
+ * taken from the viewport.
+ *
+ * Below lg the sidebar costs a fifth of the screen — 200 of 1024, and more of a
+ * 768 px tablet — on a layout that is already down to one column. Starting
+ * collapsed there hands that width back. A stored preference always wins, at
+ * every size: this only decides for someone who has not chosen yet.
+ */
 function _sidebarCollapsed() {
-  return getLocal(SIDEBAR_KEY) === '1';
+  const stored = getLocal(SIDEBAR_KEY);
+  if (stored === '1') return true;
+  if (stored === '0') return false;
+  return window.innerWidth < 1024;
 }
 
 /**
@@ -186,6 +198,17 @@ function _renderDesktopNav(el) {
   const toggleEl = /** @type {HTMLButtonElement|null} */ (el.querySelector('#sidebar-toggle'));
   toggleEl?.addEventListener('click', () => _setSidebarCollapsed(!_sidebarCollapsed()));
   _applySidebarCollapsed(el);
+
+  // Crossing lg re-decides the default, but only while it is still a default —
+  // once the reader has chosen, dragging a window must not undo the choice.
+  let resizeTimer = 0;
+  window.addEventListener('resize', () => {
+    // getLocal returns '' for an absent key, never null.
+    const chosen = getLocal(SIDEBAR_KEY);
+    if (chosen === '1' || chosen === '0') return;
+    clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => _applySidebarCollapsed(el), 120);
+  });
 
   el.querySelector('#nav-logout')?.addEventListener('click', async () => {
     try { await logout(); } catch { /* ignore */ }

@@ -33,6 +33,18 @@ async fn cache_control_middleware(
 /// not for what the argument means: it sets the replenishment *period*. Passing
 /// a requests-per-second figure to it therefore inverts the limit — the larger
 /// the intended rate, the slower the actual one.
+/// Sustained requests per second, and the burst above it, for each bucket.
+/// The tests below assert against these rather than repeating the numbers, so a
+/// default cannot be lowered without the assertion that guards it moving too.
+const API_RATE_RELEASE: u64 = 20;
+const API_RATE_DEBUG: u64 = 200;
+const API_BURST_RELEASE: u32 = 300;
+const API_BURST_DEBUG: u32 = 4000;
+const PROXY_RATE_RELEASE: u64 = 30;
+const PROXY_RATE_DEBUG: u64 = 300;
+const PROXY_BURST_RELEASE: u32 = 600;
+const PROXY_BURST_DEBUG: u32 = 6000;
+
 fn replenish_period(requests_per_second: u64) -> std::time::Duration {
     const NANOS_PER_SEC: u64 = 1_000_000_000;
     std::time::Duration::from_nanos(NANOS_PER_SEC / requests_per_second.max(1))
@@ -73,12 +85,37 @@ mod rate_limit_config_tests {
 
     #[test]
     fn the_shipped_defaults_sustain_ordinary_browsing() {
-        // A page load costs tens of requests; a release default that cannot
-        // replenish faster than one every few seconds 429s real users.
-        let release = replenish_period(5);
-        assert!(release <= Duration::from_millis(200), "{release:?}");
+        // Measured: a library page costs 21 REST calls, a manga page 24, both
+        // arriving at about 7/s while the page settles. The sustained release
+        // rate has to clear that or the bucket drains faster than it fills.
+        const OBSERVED_PEAK_PER_SECOND: u64 = 8;
+        assert!(
+            super::API_RATE_RELEASE > OBSERVED_PEAK_PER_SECOND,
+            "release rate {} does not clear observed browsing at {OBSERVED_PEAK_PER_SECOND}/s",
+            super::API_RATE_RELEASE
+        );
+
+        // A login plus eight navigations cost 148 calls; the burst must absorb
+        // a session like that without the sustained rate having to keep up.
+        const OBSERVED_SESSION_CALLS: u32 = 148;
+        assert!(
+            super::API_BURST_RELEASE > OBSERVED_SESSION_CALLS,
+            "release burst {} cannot absorb a {OBSERVED_SESSION_CALLS}-call session",
+            super::API_BURST_RELEASE
+        );
+
         // Debug must be looser than release, which is the whole point of it.
-        assert!(replenish_period(50) < release);
+        assert!(
+            replenish_period(super::API_RATE_DEBUG) < replenish_period(super::API_RATE_RELEASE)
+        );
+        assert!(super::API_BURST_DEBUG > super::API_BURST_RELEASE);
+        assert!(
+            replenish_period(super::PROXY_RATE_DEBUG) < replenish_period(super::PROXY_RATE_RELEASE)
+        );
+
+        // The reader pulls images far harder than the UI pulls JSON.
+        assert!(super::PROXY_RATE_RELEASE > super::API_RATE_RELEASE / 2);
+        let _ = Duration::from_secs(1);
     }
 }
 
@@ -252,7 +289,14 @@ async fn main() {
     kani_app::jobs::recurring::spawn_recurring_scheduler(&state);
 
     // Rate limiter settings.
-    // API: enough for normal UI use while protecting against abuse.
+    // API: enough for normal UI use while protecting against abuse. Measured
+    // rather than guessed — a library page costs 21 REST calls and a manga page
+    // 24, both arriving at 7/s while the page settles, and a login plus eight
+    // navigations costs 148. A 5/s sustained rate is therefore *below* what
+    // ordinary browsing draws: the bucket drains faster than it fills and the
+    // burst is three-quarters gone after eight page views. 20/s leaves real
+    // headroom over that while still capping a single token or address at
+    // 1200 requests a minute.
     // Proxy: much more permissive — the reader fires many concurrent image
     // requests; the per-host semaphore in rest.rs already throttles upstream.
     //
@@ -276,13 +320,38 @@ async fn main() {
             .unwrap_or(default)
     };
 
-    let api_rate_per_second = env_u64("KANI_API_RATE_PER_SECOND", if dev_build { 50 } else { 5 });
-    let api_burst_size = env_u32("KANI_API_BURST_SIZE", if dev_build { 2000 } else { 200 });
+    let api_rate_per_second = env_u64(
+        "KANI_API_RATE_PER_SECOND",
+        if dev_build {
+            API_RATE_DEBUG
+        } else {
+            API_RATE_RELEASE
+        },
+    );
+    let api_burst_size = env_u32(
+        "KANI_API_BURST_SIZE",
+        if dev_build {
+            API_BURST_DEBUG
+        } else {
+            API_BURST_RELEASE
+        },
+    );
     let proxy_rate_per_second = env_u64(
         "KANI_PROXY_RATE_PER_SECOND",
-        if dev_build { 300 } else { 30 },
+        if dev_build {
+            PROXY_RATE_DEBUG
+        } else {
+            PROXY_RATE_RELEASE
+        },
     );
-    let proxy_burst_size = env_u32("KANI_PROXY_BURST_SIZE", if dev_build { 6000 } else { 600 });
+    let proxy_burst_size = env_u32(
+        "KANI_PROXY_BURST_SIZE",
+        if dev_build {
+            PROXY_BURST_DEBUG
+        } else {
+            PROXY_BURST_RELEASE
+        },
+    );
 
     // These are rates — requests per second — and every name here says so. The
     // builder's `per_second` takes the opposite: the *interval* at which one
