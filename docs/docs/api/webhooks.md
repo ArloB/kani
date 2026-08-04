@@ -1,36 +1,88 @@
 # Webhooks API
 
-See also: [Admin guide — Webhooks](../admin/webhooks.md).
+See [Webhooks](../admin/webhooks.md) for configuration and operations.
 
-!!! note "TODO"
-    Full webhook payload schemas coming soon.
+## Envelope
 
-## Payload envelope
-
-All webhook payloads share the same envelope:
+Every delivery uses this shape:
 
 ```json
 {
-  "event": "<event-type>",
-  "timestamp": "2026-01-01T00:00:00Z",
-  "data": { ... }
+  "event": "<event type>",
+  "timestamp": "<RFC3339 timestamp>",
+  "data": {}
 }
 ```
 
-## Signature verification
+The enum variant is serialized inside `data` using snake-case field names. Receivers should ignore
+unknown extra fields for forward compatibility and route on the top-level event name.
 
-If a secret is configured for a webhook endpoint, Kani sets:
+## Event schemas
+
+### `chapter.new`
+
+```json
+{
+  "manga_id": 7,
+  "manga_name": "Example Manga",
+  "chapter_count": 2,
+  "chapter_ids": [41, 42],
+  "chapter_names": ["Chapter 1", "Chapter 2"]
+}
+```
+
+### `manga.added`
+
+```json
+{
+  "manga_id": 7,
+  "manga_name": "Example Manga",
+  "source_id": 3
+}
+```
+
+### `manga.deleted`
+
+```json
+{
+  "manga_id": 7,
+  "manga_name": "Example Manga"
+}
+```
+
+### `chapter.downloaded`
+
+```json
+{
+  "chapter_id": 42,
+  "manga_id": 7,
+  "manga_name": "Example Manga",
+  "chapter_name": "Chapter 1"
+}
+```
+
+### `scan.completed`
+
+```json
+{
+  "total_scanned": 12,
+  "failed_count": 1
+}
+```
+
+## Verify the signature
+
+With a configured secret, the request includes:
 
 ```http
 X-Kani-Signature: sha256=<hex-digest>
 ```
 
-The digest is HMAC-SHA256 of the raw request body using the configured secret as the key.
-
-Verification example (Python):
+The digest is HMAC-SHA256 over the exact raw body. Verify before JSON parsing:
 
 ```python
-import hashlib, hmac
+import hashlib
+import hmac
 
 def verify(secret: str, body: bytes, header: str) -> bool:
     expected = "sha256=" + hmac.new(
@@ -39,12 +91,6 @@ def verify(secret: str, body: bytes, header: str) -> bool:
     return hmac.compare_digest(expected, header)
 ```
 
-## Event types
-
-| Event | Trigger |
-|-------|---------|
-| `chapter.downloaded` | A chapter download completed successfully |
-| `chapter.failed` | A chapter download failed after all retries |
-| `library.updated` | Library metadata was refreshed |
-
-<!-- TODO: document full data schemas for each event type -->
+Reject a request when the secret is expected and the header is absent, malformed, or mismatched.
+Store an idempotency record based on stable payload fields if processing the same event twice would
+be harmful; retries can follow ambiguous network failures.

@@ -1,57 +1,70 @@
 # API Overview
 
-Kani exposes a REST API under `/rest/`. Debug builds also serve an interactive
-Swagger UI at `/api-docs`; release builds — including the published Docker
-image — do not, so treat this page and the OpenAPI document itself as the
-reference.
+Kani's application API is mounted under `/rest`. OPDS, image and chapter delivery, health,
+readiness, metrics, and the frontend have separate top-level routes.
 
-## Base URL
+## Source of truth
 
-```text
-http://localhost:8242/rest
+Route request and response schemas are generated from the Rust handlers with `utoipa`. CI checks
+that the REST router and OpenAPI document cover the same surface. Use that document for the exact
+endpoint inventory instead of copying a hand-written list from this guide.
+
+Debug builds serve Swagger UI and the document at `/api-docs`; release builds, including normal
+production images, do not mount them. To inspect the current checkout:
+
+```bash
+cargo run -p kani-web
 ```
 
-## Authentication
+Then open `http://localhost:8242/api-docs`. A document generated from a different commit may not
+describe the server you operate.
 
-All endpoints except the ones listed below require an authenticated session. See [Authentication](auth.md) for details.
+## Authentication modes
 
-### Public endpoints
+- The web application uses an HTTP-only session cookie and CSRF protection.
+- General API tokens use `Authorization: Bearer <token>` and explicit permission scopes.
+- OPDS reader tokens are accepted only by the OPDS surface.
+- OPDS can also support client-specific HTTP authentication behavior documented by its generated
+  route contract.
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /rest/system/info` | Server version and first-run state |
-| `GET /rest/auth/*` | The whole auth surface: login, registration, password reset, e-mail verification, captcha, and first-run setup |
-| `GET /health`, `/healthz`, `/ready`, `/readyz` | Liveness and readiness probes |
-| `GET /metrics` | Prometheus metrics |
-| `GET /opds/*` | OPDS catalog (authenticates per-handler, and accepts HTTP Basic) |
+See [Authentication](auth.md). A path bypassing global cookie middleware is not necessarily
+anonymous: metrics and OPDS perform their own authentication.
 
-## Response format
+## Content types and errors
 
-All responses return JSON. Successful responses use the `2xx` range. Errors use the appropriate
-`4xx` / `5xx` code with a JSON body:
+Most REST requests and responses use JSON. Upload, backup, archive, image, SSE, and export routes
+use other media types described in OpenAPI.
 
-```json
-{
-  "error": "Unauthorized",
-  "message": "Session required"
-}
-```
+Errors use an appropriate HTTP status and a JSON body, commonly with `error` and sometimes
+`message` or structured details. Clients must branch on status and machine-readable fields rather
+than matching an English message.
+
+Common classes are:
+
+| Status | Meaning |
+|---|---|
+| `400` / `422` | Invalid request or validation failure |
+| `401` | Missing or invalid authentication |
+| `403` | Authentication succeeded but permission, CSRF, or policy denied the action |
+| `404` | Resource not found or not visible |
+| `409` | Current state conflicts with the requested change |
+| `429` | Rate or login-attempt limit; inspect `Retry-After` where supplied |
 
 ## Pagination
 
-List endpoints accept `page` and `page_size` query parameters and return a paginated envelope:
+Pagination is not globally uniform. Some endpoints use query parameters, some source routes carry
+page and page-size in the path, and some lists use a simple limit. Responses may expose
+`items`, `has_next_page`, `total_pages`, `total`, or domain-specific field names. Follow the schema
+for the endpoint being called.
 
-```json
-{
-  "items": [...],
-  "total": 100,
-  "page": 1,
-  "page_size": 20
-}
-```
+## Live updates
 
-## Interactive docs
+The web client consumes Server-Sent Events for download progress, jobs, scans, invalidation, and
+other live state. Reconnecting clients must tolerate missed transient events and refresh the
+corresponding REST resource rather than treating SSE as a durable event log.
 
-Debug builds serve the full Swagger UI at `/api-docs`, with live request
-testing. A release build does not mount it — build from source with
-`cargo run -p kani-web` if you want to explore the surface interactively.
+## Compatibility
+
+API stability and migration guarantees are defined by the release's published stability policy.
+Do not infer compatibility from an unreleased branch or from a route that happens to appear in one
+OpenAPI document.

@@ -49,11 +49,20 @@ nav:
     - Install with Docker: getting-started/install-docker.md
     - Install from binary: getting-started/install-binary.md
     - Reverse proxy: getting-started/reverse-proxy.md
+  - User Guide:
+    - Library & discovery: user/library.md
+    - Manga & chapters: user/manga-chapters.md
+    - Reading & offline use: user/reading-offline.md
+    - Downloads & exports: user/downloads-exports.md
+    - Importing & migration: user/import-migration.md
+    - Settings guide: user/settings.md
   - Admin Guide:
+    - Configuration: admin/configuration.md
     - Backup & restore: admin/backup-restore.md
     - Users & roles: admin/users-roles.md
     - Security hardening: admin/security-hardening.md
     - Observability: admin/observability.md
+    - Jobs & maintenance: admin/jobs-maintenance.md
     - Storage: admin/storage.md
     - Upgrades: admin/upgrade.md
     - Sources: admin/sources.md
@@ -65,6 +74,7 @@ nav:
     - YAML schema: extension-authoring/yaml-schema.md
     - DSL grammar: extension-authoring/dsl-grammar.md
     - Rhai hooks: extension-authoring/rhai-hooks.md
+    - Rust extensions: extension-authoring/rust-extensions.md
     - Publishing & Distribution: extension-authoring/publishing.md
   - Developer Guide:
     - Architecture: developer/architecture.md

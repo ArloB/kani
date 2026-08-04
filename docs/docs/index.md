@@ -1,31 +1,33 @@
 # Kani
 
-Kani is a self-hosted manga and comics server. It downloads chapters from online sources, organises
-your library, and serves a reading interface to every device on your network.
+Kani is a self-hosted manga and comics server. It organises a multi-user library, downloads
+chapters through sandboxed source extensions, and provides a responsive web reader and OPDS
+catalogue.
+
+![Kani library showing fictional manga with plain-colour covers](img/screenshots/library-desktop.png)
 
 ## Highlights
 
-- **Extension system** — content sources are WASM plugins; install community extensions or write
-  your own in Rust or the declarative YAML DSL.
-- **Automatic downloads** — schedule chapter downloads; Kani polls for new releases and queues them
-  without manual intervention.
-- **CBZ / ComicInfo** — imports existing CBZ archives; writes ComicInfo.xml metadata for compatibility with other readers.
-- **Tracker sync** — links progress to AniList and MAL so your reading history stays in one place.
-- **OPDS catalog** — browse and download from any OPDS-capable reader app.
-- **Role-based access** — multiple users with per-user permissions; optional OIDC single sign-on.
-- **Webhooks & email** — notify external services or your inbox when new chapters arrive.
+- **Extension system** — install signed WASM or declarative YAML sources, or write your own.
+- **Library automation** — scan followed titles and apply download rules for language, scanlator,
+  volume, and other conditions.
+- **CBZ and ComicInfo** — import existing archives and preserve portable metadata.
+- **Reader and offline access** — track progress by page, cache chapters in the browser, or connect
+  an OPDS-capable reader.
+- **Tracker sync** — link reading progress to AniList and MyAnimeList.
+- **Multi-user security** — inherited roles, granular permissions, scoped API tokens, session
+  management, and optional two-factor authentication.
+- **Operations** — scheduled backups, background-job tracking, diagnostics, Prometheus metrics,
+  email, and signed webhooks.
 
-## Quick links
+## Start here
 
-- [Quickstart](getting-started/quickstart.md) — up and running with Docker in five minutes.
-- [Install with Docker](getting-started/install-docker.md) — full Docker reference.
-- [Install from binary](getting-started/install-binary.md) — run the server directly.
-- [Architecture](developer/architecture.md) — how the crates fit together.
-- [Extension authoring](extension-authoring/yaml-schema.md) — write a source extension.
-
-## Screenshots
-
-*Screenshots coming soon.*
+- [Quickstart](getting-started/quickstart.md) — build and run Kani with Docker Compose.
+- [Library guide](user/library.md) — browse, organise, and search your collection.
+- [Settings guide](user/settings.md) — find account and server controls.
+- [Administration](admin/configuration.md) — configure and operate an instance.
+- [Extension authoring](extension-authoring/yaml-schema.md) — create a source extension.
+- [Architecture](developer/architecture.md) — understand the host, services, and WASM boundary.
 
 ## License
 

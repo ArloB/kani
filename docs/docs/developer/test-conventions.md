@@ -1,85 +1,70 @@
 # Test Conventions
 
-## Test types
+## Test placement
 
-| Kind | Location | When to write |
-|------|----------|--------------|
-| Unit (pure, no I/O) | `#[cfg(test)] mod tests` in source file | Any new pure function |
-| Integration (DB-backed) | `kani-app/tests/<area>_tests.rs` | New service methods touching SQLite |
-| REST API | `kani-web/tests/<area>_api_tests.rs` | New HTTP endpoints |
-| CLI / codegen | `kani-cli/tests/` | YAML rules, DSL changes, codegen output |
+| Kind | Location | Use |
+|---|---|---|
+| Pure unit | `#[cfg(test)] mod tests` beside the code | New deterministic logic |
+| Service integration | `kani-app/tests/<area>_tests.rs` | SQLite-backed service behavior |
+| REST contract | `kani-web/tests/<area>_api_tests.rs` | Routing, auth, validation, and serialization |
+| CLI/YAML | `kani-cli/tests` and `kani-yaml` tests | Schema, DSL, generation, and commands |
+| ABI/runtime | `kani-core/tests` | WIT, WASM host, extraction, and network behavior |
+| Browser contract | repository scripts | Permission-gated and responsive UI workflows |
 
-## Rules
+Standalone test files begin with `#![allow(clippy::unwrap_used)]`. Commit accepted Insta snapshots
+and never commit `.snap.new` files.
 
-- Every new pure function: at least one happy-path test and one edge/error test.
-- New service methods taking `SqlitePool` or `&AppService`: integration test using `common::test_service()`.
-- New REST endpoints: test triplet — 200 authed, 401 unauthed, 4xx invalid.
-- All test files start with `#![allow(clippy::unwrap_used)]`.
-- Snapshots (insta): commit `.snap` files; never commit `.snap.new`.
+## Minimum behavior coverage
 
-## REST test helpers (`kani-web/tests/common/mod.rs`)
+- Give every new pure function a happy path and an edge or error case.
+- Test DB-backed service methods through the shared test service.
+- Give a new REST endpoint authenticated success, unauthenticated failure, and invalid-input
+  coverage, plus permission denial where authentication alone is insufficient.
+- Test what a shared-path change displaces: rename, delete, restore, retry, migration, re-download,
+  and rollback paths are common hidden consumers.
+- Use deterministic local HTTP origins or recorded fixtures instead of making unit tests depend on
+  a live content site.
 
-| Helper | Purpose |
-|--------|---------|
-| `test_state()` | Create an `AppState` backed by an in-memory SQLite DB |
-| `build_test_app(state)` | Build the Axum test router |
-| `create_admin(app)` | Register an admin user, return credentials |
-| `login(app, username, password)` | POST `/rest/auth/login`, return session cookie |
-| `get_req(app, path, cookie)` | Authenticated GET, return `Response` |
-| `post_json(app, path, body)` | Unauthenticated POST with JSON body |
-| `authed_post(app, path, cookie, body)` | Authenticated POST with JSON body |
-| `body_json(response)` | Extract `serde_json::Value` from response body |
+## REST helpers
+
+`kani-web/tests/common/mod.rs` builds an `AppState`, router, administrator, login cookie, JSON
+requests, and response decoding for integration tests. Read the current helper signatures before
+using them; do not reproduce a second test harness in each file.
+
+OpenAPI route coverage is a separate contract: adding or removing a REST route requires the
+generated document and its coverage test to change together.
 
 ## Trace a signal to a pixel
 
-The recurring failure in this codebase is a mechanism that is built and never
-connected: a probe with no caller, a column never selected into its listing, a
-setting validated and persisted but read by nothing. Each looks complete in
-isolation and each ships a feature that does nothing.
+For a new value, identify every hop:
 
-Follow a new value the whole way — computed → stored → selected → serialised →
-rendered — and name the file at each hop before calling it done. Two traps this
-project has hit repeatedly:
+```text
+compute -> persist -> select -> serialize -> client cache -> render
+```
 
-- **Hand-built JSON projections.** `/rest/manga/{id}/details` builds its
-  response with `json!({...})` rather than serialising the model, so a field can
-  exist on the struct, be returned by `/rest/manga/{id}`, and still be invisible
-  to the page that renders the control.
-- **State atoms are not pixels.** Adding an SSE handler that updates a store is
-  the same defect one layer further out, unless something reads the store.
+Tests should fail when any required hop is disconnected. Pay special attention to hand-built JSON
+objects, queries that omit new columns, settings saved but never read, and SSE handlers that update
+state no component consumes.
 
-If a step is deliberately deferred, say so in the commit — silence reads as
-wired.
+## Permissions
 
-## Permission-gated UI
-
-The frontend hides whole surfaces behind `hasPermission(...)`, so the number of
-possible layouts is combinatorial. Two checks cover it without enumerating
-combinations:
-
-- `kani-web/tests/permission_contract_tests.rs` — every `'resource:action'`
-  literal the UI gates on parses as a server `Permission`. A typo there hides a
-  feature silently and forever, with no error anywhere.
-- `scripts/verify-permission-matrix.mjs` — per *permission* rather than per
-  combination: for each one, an account that holds it and an account that does
-  not, asserting the surfaces it gates appear in the first case and not the
-  second. Expectations are read out of `static/js/app.js`,
-  `static/js/pages/settings/index.js` and `static/locales/en.js`, so it cannot
-  drift from the app.
+The server contract test ensures every frontend permission literal parses. The permission-matrix
+browser script then checks each gated surface with an account that has and lacks that permission.
+Run it against a disposable instance because it creates roles and accounts:
 
 ```bash
 node scripts/verify-permission-matrix.mjs http://127.0.0.1:8299 admin '<password>'
 ```
 
-It needs Playwright and an instance you may create users on — it makes
-`permmatrix-*` roles and accounts. Point it at a throwaway instance, and raise
-`KANI_API_RATE_PER_SECOND` / `KANI_API_BURST_SIZE` on it: the sweep is heavy
-enough to drain the limiter otherwise.
+Install Playwright in a scratch environment and raise development rate limits for the sweep.
 
-## Database path
-
-Integration tests use `sqlite:kani.db`. Run kani-app tests with `--features test-util`:
+## Commands
 
 ```bash
-cargo test -p kani-app --features test-util
+cargo test
+cargo clippy --locked --no-deps -- -D warnings
+cargo fmt --all --check
 ```
+
+Do not use `--workspace`; extension members are WASM-only. Use focused package/test filters while
+iterating, then run the default-member suite before handoff.
