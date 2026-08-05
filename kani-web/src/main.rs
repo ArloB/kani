@@ -99,6 +99,42 @@ fn replenish_period(requests_per_second: u64) -> std::time::Duration {
     std::time::Duration::from_nanos(NANOS_PER_SEC / requests_per_second.max(1))
 }
 
+/// Serves one asset tree under `/<prefix>/...`.
+///
+/// Replaces a `ServeDir` mount. The wildcard capture is the path *within* the
+/// tree, so `/js/dist/app.js` resolves the asset `js/dist/app.js` whether that
+/// comes from disk or from the binary.
+fn asset_routes(prefix: &'static str, assets: &kani_web::assets::Assets) -> axum::Router {
+    let a = assets.clone();
+    axum::Router::new().route(
+        &format!("/{prefix}/{{*path}}"),
+        axum::routing::get(
+            move |axum::extract::Path(path): axum::extract::Path<String>,
+                  headers: axum::http::HeaderMap| {
+                let a = a.clone();
+                async move { kani_web::assets::serve_prefixed(prefix, a, path, headers).await }
+            },
+        ),
+    )
+}
+
+/// Serves a single named asset, for the SPA shell and the changelog.
+fn named_asset(
+    assets: &kani_web::assets::Assets,
+    name: &'static str,
+) -> impl Fn(
+    axum::http::HeaderMap,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = axum::response::Response> + Send>>
++ Clone
++ Send
++ 'static {
+    let a = assets.clone();
+    move |headers: axum::http::HeaderMap| {
+        let a = a.clone();
+        Box::pin(async move { kani_web::assets::serve_named(name, a, headers).await })
+    }
+}
+
 #[tokio::main]
 async fn main() {
     use axum::Router;
@@ -114,7 +150,6 @@ async fn main() {
     use tower_http::{
         compression::CompressionLayer,
         cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer},
-        services::{ServeDir, ServeFile},
         set_header::SetResponseHeaderLayer,
         trace::TraceLayer,
     };
@@ -549,67 +584,77 @@ async fn main() {
         });
     }
 
-    let static_dir = std::env::var("KANI_STATIC_DIR").unwrap_or_else(|_| "static".to_string());
-    tracing::info!("Serving static files from: {static_dir}");
+    // Resolved once: KANI_STATIC_DIR, else the copy embedded in a release
+    // binary, else ./static on a debug build. `Assets::resolve` logs which,
+    // because "every page 404s" is otherwise hard to attribute.
+    let assets = kani_web::assets::Assets::resolve();
 
     // Release builds serve the production bundle (bundled/minified JS, no import map).
     // Debug builds serve raw source files so changes are picked up without rebuilding.
-    let index_html = if cfg!(debug_assertions) {
-        format!("{static_dir}/index.html")
+    // Debug serves raw modules through an import map; release serves the bundle.
+    let index_name = if cfg!(debug_assertions) {
+        "index.html"
     } else {
-        format!("{static_dir}/index.prod.html")
+        "index.prod.html"
     };
-
-    let manifest_path = format!("{static_dir}/manifest.webmanifest");
-    let sw_path = format!("{static_dir}/sw.js");
 
     let app = Router::new()
         // PWA — manifest and service worker need explicit Content-Type headers
         .route(
             "/manifest.webmanifest",
-            axum::routing::get(move || {
-                let p = manifest_path.clone();
-                async move {
-                    match tokio::fs::read(&p).await {
-                        Ok(b) => (
-                            [(
-                                header::CONTENT_TYPE,
-                                "application/manifest+json; charset=utf-8",
-                            )],
-                            b,
-                        )
-                            .into_response(),
-                        Err(_) => StatusCode::NOT_FOUND.into_response(),
+            axum::routing::get({
+                let a = assets.clone();
+                move || {
+                    let a = a.clone();
+                    async move {
+                        // Explicit content type: the manifest needs
+                        // application/manifest+json, which mime_guess will not infer.
+                        match a.get("manifest.webmanifest") {
+                            Some(asset) => (
+                                [(
+                                    header::CONTENT_TYPE,
+                                    "application/manifest+json; charset=utf-8",
+                                )],
+                                asset.bytes.into_owned(),
+                            )
+                                .into_response(),
+                            None => StatusCode::NOT_FOUND.into_response(),
+                        }
                     }
                 }
             }),
         )
         .route(
             "/sw.js",
-            axum::routing::get(move || {
-                let p = sw_path.clone();
-                async move {
-                    match tokio::fs::read(&p).await {
-                        Ok(b) => {
-                            let mut h = axum::http::HeaderMap::new();
-                            h.insert(
-                                header::CONTENT_TYPE,
-                                header::HeaderValue::from_static(
-                                    "application/javascript; charset=utf-8",
-                                ),
-                            );
-                            h.insert(
-                                header::HeaderName::from_static("service-worker-allowed"),
-                                header::HeaderValue::from_static("/"),
-                            );
-                            (StatusCode::OK, h, b).into_response()
+            axum::routing::get({
+                let a = assets.clone();
+                move || {
+                    let a = a.clone();
+                    async move {
+                        // Service-Worker-Allowed lets a worker served from /sw.js
+                        // claim the whole origin; without it the scope is /.
+                        match a.get("sw.js") {
+                            Some(asset) => {
+                                let mut h = axum::http::HeaderMap::new();
+                                h.insert(
+                                    header::CONTENT_TYPE,
+                                    header::HeaderValue::from_static(
+                                        "application/javascript; charset=utf-8",
+                                    ),
+                                );
+                                h.insert(
+                                    header::HeaderName::from_static("service-worker-allowed"),
+                                    header::HeaderValue::from_static("/"),
+                                );
+                                (StatusCode::OK, h, asset.bytes.into_owned()).into_response()
+                            }
+                            None => StatusCode::NOT_FOUND.into_response(),
                         }
-                        Err(_) => StatusCode::NOT_FOUND.into_response(),
                     }
                 }
             }),
         )
-        .nest_service("/icons", ServeDir::new(format!("{static_dir}/icons")))
+        .merge(asset_routes("icons", &assets))
         // OPDS catalog — auth is handled per-handler (supports Basic auth)
         .nest("/opds", opds_router)
         .merge(
@@ -628,15 +673,13 @@ async fn main() {
         )
         .merge(health_router)
         .merge(metrics_router)
-        .nest_service("/js", ServeDir::new(format!("{static_dir}/js")))
-        .nest_service("/css", ServeDir::new(format!("{static_dir}/css")))
-        .nest_service("/locales", ServeDir::new(format!("{static_dir}/locales")))
-        .nest_service("/fonts", ServeDir::new(format!("{static_dir}/fonts")))
-        .route_service(
-            "/changelog.md",
-            ServeFile::new(format!("{static_dir}/changelog.md")),
-        )
-        .fallback_service(ServeFile::new(index_html))
+        .merge(asset_routes("js", &assets))
+        .merge(asset_routes("css", &assets))
+        .merge(asset_routes("locales", &assets))
+        .merge(asset_routes("fonts", &assets))
+        .route("/changelog.md", axum::routing::get(named_asset(&assets, "changelog.md")))
+        // Anything unmatched is a client-side route, so the SPA shell answers.
+        .fallback(named_asset(&assets, index_name))
         .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

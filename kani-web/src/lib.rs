@@ -1,6 +1,7 @@
 pub const KANI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod app;
+pub mod assets;
 pub mod auth;
 pub mod cache;
 pub mod csrf;

@@ -70,6 +70,10 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 semver = "1"
 axum-prometheus = "0.10.0"
 metrics = "0.24"
+# interpolate-folder-path expands $OUT_DIR in the #[folder] attribute, which is
+# how the embed reads the assets build.rs stages rather than the source tree.
+rust-embed = { version = "8.12.0", features = ["mime-guess", "interpolate-folder-path"] }
+mime_guess = "2.0.5"
 
 [dev-dependencies]
 tempfile = "3.27.0"
