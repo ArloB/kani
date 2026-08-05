@@ -36,3 +36,4 @@ tools/
 *.key
 .codegraph/
 docs/site/
+.wasm_cache/

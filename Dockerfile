@@ -1,7 +1,12 @@
 # ─── Stage 1: Builder ────────────────────────────────────────────────────────
-FROM rust:bookworm AS builder
-
+#
+# Split into a dependency layer and a source layer via cargo-chef. Without it
+# `COPY . .` precedes the build, so *any* source change invalidates the layer
+# and BoringSSL, SQLite and zstd are all recompiled from scratch — which is
+# most of the build time, on every commit, on every architecture.
+FROM rust:bookworm AS chef
 WORKDIR /build
+RUN cargo install cargo-chef --locked
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
@@ -18,8 +23,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the full workspace
+FROM chef AS planner
 COPY . .
+# Records only the dependency graph, so this layer's cache key does not move
+# when application source changes.
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /build/recipe.json recipe.json
+# cargo-chef carries .cargo/config.toml into the cook stage, and that config
+# points the linker at scripts/fast-linker.sh. Without the script every build
+# script fails to link, which is a confusing way to discover the dependency.
+COPY scripts/fast-linker.sh scripts/fast-linker.sh
 
 # .dockerignore excludes .git/, so the build cannot derive the commit itself.
 # Pass it in (docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD))
@@ -32,13 +47,20 @@ ENV GIT_SHA=$GIT_SHA
 # Run `cargo sqlx prepare --workspace` locally to regenerate after schema changes.
 ENV SQLX_OFFLINE=true
 
-# Build kani-cli first, then use it to fetch JS vendor files and build tools.
-# build.rs detects the PROFILE=release and automatically runs tailwind --minify
-# and esbuild to produce static/css/main.css and static/js/dist/.
+# Compile every dependency. This is the expensive layer and it is reused for as
+# long as Cargo.lock and the manifests are unchanged.
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Now the workspace itself. Changes here rebuild only first-party crates.
+COPY . .
+
+# kani-cli first, then use it to fetch the JS vendor files and build tools.
+# build.rs sees PROFILE=release and runs tailwind --minify and esbuild to
+# produce static/css/main.css and static/js/dist/.
 RUN cargo build --release -p kani-cli \
     && ./target/release/kani-cli setup
 
-# Build the release binary (triggers build.rs which bundles CSS and JS).
+# The release binary (build.rs bundles CSS and JS).
 RUN cargo build --release -p kani-web
 
 
