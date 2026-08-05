@@ -355,3 +355,29 @@ jobs:
       # mirror drifts from the Rust sanitiser it misreports what gets saved.
       - name: CSS sanitiser parity check
         run: node scripts/check-sanitize-css-parity.mjs
+
+  # The one check branch protection should require. Every job above is gated on
+  # a path filter, and a required check that is *skipped* never reports — so
+  # requiring `Lint` directly would block a docs-only pull request forever.
+  # `always()` makes this run regardless, and it fails only on genuine failure:
+  # skipped is a pass.
+  ci:
+    name: CI
+    needs: [changes, lint, test, js, docs]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any job failed or was cancelled
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              failure|cancelled)
+                echo "::error::a required job reported '$r'"
+                exit 1
+                ;;
+            esac
+          done
+          echo "all jobs succeeded or were skipped"
