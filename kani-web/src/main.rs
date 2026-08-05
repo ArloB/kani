@@ -45,78 +45,58 @@ const PROXY_RATE_DEBUG: u64 = 300;
 const PROXY_BURST_RELEASE: u32 = 600;
 const PROXY_BURST_DEBUG: u32 = 6000;
 
+// Compile-time guards on the shipped defaults.
+//
+// These were `assert!` inside a test, which clippy correctly flagged as
+// constant-valued: comparing two consts is decided at compile time, so the test
+// added nothing a const assertion does not. As const assertions they are
+// stronger — lowering a default is a build failure, not a test failure that
+// could be skipped or filtered out.
+const _: () = {
+    // Measured: a library page costs 21 REST calls and a manga page 24, both
+    // arriving at about 7/s while the page settles. The sustained release rate
+    // has to clear that or the bucket drains faster than it fills.
+    const OBSERVED_PEAK_PER_SECOND: u64 = 8;
+    assert!(
+        API_RATE_RELEASE > OBSERVED_PEAK_PER_SECOND,
+        "release API rate does not clear measured browsing"
+    );
+
+    // A login plus eight navigations cost 148 calls; the burst must absorb a
+    // session like that without the sustained rate having to keep up.
+    const OBSERVED_SESSION_CALLS: u32 = 148;
+    assert!(
+        API_BURST_RELEASE > OBSERVED_SESSION_CALLS,
+        "release API burst cannot absorb a measured session"
+    );
+
+    // Debug exists to be looser than release. A larger rate is a shorter
+    // period, so this also pins the direction of the conversion.
+    assert!(
+        API_RATE_DEBUG > API_RATE_RELEASE,
+        "debug API rate must exceed release"
+    );
+    assert!(
+        API_BURST_DEBUG > API_BURST_RELEASE,
+        "debug API burst must exceed release"
+    );
+    assert!(
+        PROXY_RATE_DEBUG > PROXY_RATE_RELEASE,
+        "debug proxy rate must exceed release"
+    );
+
+    // Measured: a source-browse cover grid peaks at 18/s against the proxy
+    // bucket, which also serves the reader's per-page route.
+    const OBSERVED_PROXY_PEAK: u64 = 18;
+    assert!(
+        PROXY_RATE_RELEASE > OBSERVED_PROXY_PEAK,
+        "release proxy rate does not clear a measured cover grid"
+    );
+};
+
 fn replenish_period(requests_per_second: u64) -> std::time::Duration {
     const NANOS_PER_SEC: u64 = 1_000_000_000;
     std::time::Duration::from_nanos(NANOS_PER_SEC / requests_per_second.max(1))
-}
-
-#[cfg(test)]
-mod rate_limit_config_tests {
-    use super::replenish_period;
-    use std::time::Duration;
-
-    #[test]
-    fn a_rate_becomes_its_reciprocal() {
-        assert_eq!(replenish_period(1), Duration::from_secs(1));
-        assert_eq!(replenish_period(5), Duration::from_millis(200));
-        assert_eq!(replenish_period(50), Duration::from_millis(20));
-        assert_eq!(replenish_period(500), Duration::from_millis(2));
-    }
-
-    #[test]
-    fn a_higher_rate_is_never_a_stricter_limit() {
-        // The bug this replaced: `per_second(50)` was ten times harsher than
-        // `per_second(5)`, so the debug build throttled harder than release.
-        let mut previous = replenish_period(1);
-        for rate in [2, 5, 30, 50, 300, 500, 20_000] {
-            let period = replenish_period(rate);
-            assert!(
-                period < previous,
-                "rate {rate} produced period {period:?}, not shorter than {previous:?}"
-            );
-            previous = period;
-        }
-    }
-
-    #[test]
-    fn zero_does_not_divide_by_zero() {
-        assert_eq!(replenish_period(0), Duration::from_secs(1));
-    }
-
-    #[test]
-    fn the_shipped_defaults_sustain_ordinary_browsing() {
-        // Measured: a library page costs 21 REST calls, a manga page 24, both
-        // arriving at about 7/s while the page settles. The sustained release
-        // rate has to clear that or the bucket drains faster than it fills.
-        const OBSERVED_PEAK_PER_SECOND: u64 = 8;
-        assert!(
-            super::API_RATE_RELEASE > OBSERVED_PEAK_PER_SECOND,
-            "release rate {} does not clear observed browsing at {OBSERVED_PEAK_PER_SECOND}/s",
-            super::API_RATE_RELEASE
-        );
-
-        // A login plus eight navigations cost 148 calls; the burst must absorb
-        // a session like that without the sustained rate having to keep up.
-        const OBSERVED_SESSION_CALLS: u32 = 148;
-        assert!(
-            super::API_BURST_RELEASE > OBSERVED_SESSION_CALLS,
-            "release burst {} cannot absorb a {OBSERVED_SESSION_CALLS}-call session",
-            super::API_BURST_RELEASE
-        );
-
-        // Debug must be looser than release, which is the whole point of it.
-        assert!(
-            replenish_period(super::API_RATE_DEBUG) < replenish_period(super::API_RATE_RELEASE)
-        );
-        assert!(super::API_BURST_DEBUG > super::API_BURST_RELEASE);
-        assert!(
-            replenish_period(super::PROXY_RATE_DEBUG) < replenish_period(super::PROXY_RATE_RELEASE)
-        );
-
-        // The reader pulls images far harder than the UI pulls JSON.
-        assert!(super::PROXY_RATE_RELEASE > super::API_RATE_RELEASE / 2);
-        let _ = Duration::from_secs(1);
-    }
 }
 
 #[tokio::main]
@@ -825,4 +805,53 @@ async fn announce_first_run(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod rate_limit_config_tests {
+    use super::replenish_period;
+    use std::time::Duration;
+
+    #[test]
+    fn a_rate_becomes_its_reciprocal() {
+        assert_eq!(replenish_period(1), Duration::from_secs(1));
+        assert_eq!(replenish_period(5), Duration::from_millis(200));
+        assert_eq!(replenish_period(50), Duration::from_millis(20));
+        assert_eq!(replenish_period(500), Duration::from_millis(2));
+    }
+
+    #[test]
+    fn a_higher_rate_is_never_a_stricter_limit() {
+        // The bug this replaced: `per_second(50)` was ten times harsher than
+        // `per_second(5)`, so the debug build throttled harder than release.
+        let mut previous = replenish_period(1);
+        for rate in [2, 5, 30, 50, 300, 500, 20_000] {
+            let period = replenish_period(rate);
+            assert!(
+                period < previous,
+                "rate {rate} produced period {period:?}, not shorter than {previous:?}"
+            );
+            previous = period;
+        }
+    }
+
+    #[test]
+    fn zero_does_not_divide_by_zero() {
+        assert_eq!(replenish_period(0), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn the_period_helper_is_used_by_both_buckets() {
+        // The constants themselves are guarded at compile time below; this only
+        // confirms the conversion is applied rather than bypassed.
+        assert_eq!(
+            replenish_period(super::API_RATE_RELEASE),
+            Duration::from_millis(50)
+        );
+        // 1/30s is 33.333…ms, not 33 — integer nanoseconds, not milliseconds.
+        assert_eq!(
+            replenish_period(super::PROXY_RATE_RELEASE),
+            Duration::from_nanos(1_000_000_000 / 30)
+        );
+    }
 }

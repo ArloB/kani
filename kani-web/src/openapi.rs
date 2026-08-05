@@ -189,6 +189,7 @@ use utoipa::OpenApi;
         crate::rest::sources::append_pref_list_item,
         crate::rest::sources::remove_pref_list_item,
         crate::rest::sources::toggle_pref_select_item,
+        crate::rest::sources::get_all_capabilities,
         crate::rest::sources::get_capabilities,
         crate::rest::sources::install_from_repo_handler,
         crate::rest::sources::list_repos_handler,
