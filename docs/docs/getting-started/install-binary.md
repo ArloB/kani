@@ -10,6 +10,10 @@ before extracting it.
 The server executable is named `kani-web`. Releases may also contain `kani-cli`, which is used for
 extension and development workflows rather than for running the service.
 
+The web interface is built into `kani-web`; there is no separate asset download and nothing else to
+place on disk. To serve a modified frontend instead, point `KANI_STATIC_DIR` at a directory holding
+it — otherwise leave the variable unset.
+
 ## Configure directories
 
 Kani uses environment variables for boot and infrastructure concerns and the web settings UI for

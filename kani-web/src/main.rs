@@ -40,8 +40,8 @@ const API_RATE_RELEASE: u64 = 20;
 const API_RATE_DEBUG: u64 = 200;
 const API_BURST_RELEASE: u32 = 300;
 const API_BURST_DEBUG: u32 = 4000;
-const PROXY_RATE_RELEASE: u64 = 30;
-const PROXY_RATE_DEBUG: u64 = 300;
+const PROXY_RATE_RELEASE: u64 = 45;
+const PROXY_RATE_DEBUG: u64 = 450;
 const PROXY_BURST_RELEASE: u32 = 600;
 const PROXY_BURST_DEBUG: u32 = 6000;
 
@@ -85,12 +85,30 @@ const _: () = {
         "debug proxy rate must exceed release"
     );
 
-    // Measured: a source-browse cover grid peaks at 18/s against the proxy
-    // bucket, which also serves the reader's per-page route.
+    // Measured against the proxy bucket, which serves image_proxy, the reader's
+    // per-page route and manga covers — three routes, one budget, which is not
+    // obvious from their names:
+    //
+    //     library grid          2 requests, peak  2/s
+    //     source browse        18 requests, peak 18/s   <- the peak
+    //     reading, paging      19 requests, peak  7/s
+    //     fast scrubbing       36 requests, peak 12/s
+    //
+    // The cover grid dominates because a page of covers arrives at once, while
+    // reader pages serialise behind decode and network.
     const OBSERVED_PROXY_PEAK: u64 = 18;
+
+    // Both buckets clear their measured peak with the same margin. Stating the
+    // rule rather than the numbers is what stops one bucket being tuned to a
+    // different standard than the other by accident.
+    const HEADROOM: u64 = 2;
     assert!(
-        PROXY_RATE_RELEASE > OBSERVED_PROXY_PEAK,
-        "release proxy rate does not clear a measured cover grid"
+        API_RATE_RELEASE >= OBSERVED_PEAK_PER_SECOND * HEADROOM,
+        "release API rate leaves less headroom over measured browsing than the proxy does"
+    );
+    assert!(
+        PROXY_RATE_RELEASE >= OBSERVED_PROXY_PEAK * HEADROOM,
+        "release proxy rate leaves less headroom over a measured cover grid than the API does"
     );
 };
 
@@ -887,14 +905,19 @@ mod rate_limit_config_tests {
     fn the_period_helper_is_used_by_both_buckets() {
         // The constants themselves are guarded at compile time below; this only
         // confirms the conversion is applied rather than bypassed.
-        assert_eq!(
-            replenish_period(super::API_RATE_RELEASE),
-            Duration::from_millis(50)
-        );
-        // 1/30s is 33.333…ms, not 33 — integer nanoseconds, not milliseconds.
-        assert_eq!(
-            replenish_period(super::PROXY_RATE_RELEASE),
-            Duration::from_nanos(1_000_000_000 / 30)
+        // Derived from the constants rather than written out. Hard-coding the
+        // expected period meant this went stale the moment a rate moved, and
+        // then failed for a reason unrelated to the behaviour it guards.
+        for rate in [super::API_RATE_RELEASE, super::PROXY_RATE_RELEASE] {
+            assert_eq!(
+                replenish_period(rate),
+                Duration::from_nanos(1_000_000_000 / rate),
+                "the period must be the reciprocal of the rate"
+            );
+        }
+        // A rate is requests per second, so a higher rate is a shorter period.
+        assert!(
+            replenish_period(super::PROXY_RATE_RELEASE) < replenish_period(super::API_RATE_RELEASE)
         );
     }
 }

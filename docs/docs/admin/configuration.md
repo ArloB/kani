@@ -15,7 +15,7 @@ Do not create a `kani.toml`; Kani does not read one.
 | `KANI_BIND` | `0.0.0.0:8242` | Listen address and port |
 | `KANI_DATA_DIR` | process working directory | Location of `kani.db` and generated keys |
 | `KANI_LIBRARY_DIR` | stored setting | Startup override for the library directory |
-| `KANI_STATIC_DIR` | `static` | Static frontend directory for a binary deployment |
+| `KANI_STATIC_DIR` | *(unset)* | Serve the frontend from this directory instead of the copy embedded in the binary |
 | `KANI_CORS_ORIGIN` | request origin | Allowed browser origin |
 | `KANI_SECURE_COOKIES` | `false` | Mark session cookies Secure |
 

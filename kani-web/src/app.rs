@@ -44,19 +44,22 @@ pub async fn build_app(state: AppState) -> Router {
     let auth_backend = AuthBackend::new(state.db.clone());
     let auth_layer = AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
 
-    let mut router = Router::new()
+    let router = Router::new()
         .nest("/rest", rest::routes(state))
         .route("/changelog.md", axum::routing::get(serve_changelog));
 
+    // Shadowed rather than reassigned through a `mut`: the Swagger UI exists
+    // only on debug builds, so a `mut` binding is unused on release — a warning
+    // that never appeared in CI, which lints without --release.
     #[cfg(debug_assertions)]
-    {
+    let router = {
         use utoipa::OpenApi;
         use utoipa_swagger_ui::SwaggerUi;
-        router = router.merge(
+        router.merge(
             SwaggerUi::new("/api-docs")
                 .url("/api-docs/openapi.json", crate::openapi::ApiDoc::openapi()),
-        );
-    }
+        )
+    };
 
     router
         .layer(axum::middleware::from_fn_with_state(

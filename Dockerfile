@@ -102,16 +102,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # host user just works with no chown at all.
 RUN groupadd -g 1000 kani && useradd -u 1000 -g kani -d /app -M kani
 
-# Copy the compiled binary and static web assets (CSS and JS already built by build.rs).
+# Copy the compiled binary. The frontend is embedded in it, so there is no
+# static directory to ship: the image carried one only because the server used
+# to read assets from disk, and keeping both would leave two copies of the same
+# files and two ways for them to disagree.
 WORKDIR /app
 COPY --from=builder --chown=kani:kani /build/target/release/kani-web ./kani-web
-COPY --from=builder --chown=kani:kani /build/static/ ./static/
-# Ship the bundle, not the sources it was built from. index.prod.html loads
-# only /js/dist/app.js, but `/js` is a ServeDir over the whole tree, so every
-# unbundled module was publicly fetchable from a release image — /js/router.js
-# and /js/pages/reader.js both answered 200. esbuild inlines vendor/ into the
-# bundle, so that goes too; nothing under js/ but dist/ is reachable at runtime.
-RUN find ./static/js -mindepth 1 -maxdepth 1 ! -name dist -exec rm -rf {} +
 COPY --chown=kani:kani entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
@@ -132,8 +128,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8242/health || exit 1
 
 ENV KANI_BIND=0.0.0.0:8242
-# Static assets are at the fixed /app/static path regardless of working directory
-ENV KANI_STATIC_DIR=/app/static
+# KANI_STATIC_DIR is deliberately unset: the binary serves its embedded copy.
+# Set it at runtime to override with a bind-mounted directory.
 # Library images live in their own volume so they can be on a separate drive/filesystem
 ENV KANI_LIBRARY_DIR=/library
 
