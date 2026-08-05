@@ -77,7 +77,7 @@ Commit `.sqlx` changes. Build without a live database with `SQLX_OFFLINE=true`.
 node scripts/check-i18n-keys.js
 node scripts/check-untranslated-strings.js
 node scripts/check-sanitize-css-parity.mjs
-cargo run -p kani-cli -- audit-tokens --check --max 0
+node scripts/audit-tokens.mjs --check --max 0
 ```
 
 Visible strings use `t("key")`; English values live in `static/locales/en.js`. Color, radius,

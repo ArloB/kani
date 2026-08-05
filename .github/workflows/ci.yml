@@ -278,36 +278,19 @@ jobs:
       - name: Unit tests (pure JS modules)
         run: node --test "static/js/**/*.test.js"
 
-      - name: Restore kani-cli binary
-        uses: actions/cache/restore@v5
-        id: kani-cli-cache
-        with:
-          path: target/release/kani-cli
-          key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
-
-      - name: Install mold linker
-        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
-        run: sudo apt-get install -y mold
-
-      - uses: dtolnay/rust-toolchain@stable
-        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
-
-      - uses: Swatinem/rust-cache@v2
-        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
-        with:
-          shared-key: "ci"
-          cache-on-failure: true
-
-      - name: Build kani-cli
-        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
-        run: cargo build --release -p kani-cli
-
       # Zero-tolerance: the semantic-colour migration is complete, so any new
       # hard-coded colour literal fails CI. Intentional literals (the pure-black
       # reader, scrims, contrast text) carry a `// audit-ignore` directive, and
       # the colour-palette module uses `audit-ignore-file`.
+      #
+      # A Node script rather than a kani-cli subcommand: it is a text scan
+      # needing none of the workspace's types, and in Rust it made this job
+      # install a toolchain and compile kani-cli in release just to lint colours.
       - name: Audit hard-coded colour tokens
-        run: ./target/release/kani-cli audit-tokens --check --max 0
+        run: node scripts/audit-tokens.mjs --check --max 0
+
+      - name: Test the audit scanner itself
+        run: node --test scripts/audit-tokens.test.mjs
 
   docs:
     name: Docs & i18n

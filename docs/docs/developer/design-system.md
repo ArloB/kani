@@ -2,7 +2,7 @@
 
 The single source of truth for how Kani's UI looks and behaves. Tokens live in
 the `@theme` block of `static/css/app.css`; this page codifies the rules around
-them. CI enforces the token rule (`kani-cli audit-tokens --check --max 0`), the
+them. CI enforces the token rule (`node scripts/audit-tokens.mjs --check --max 0`), the
 i18n key rule (`scripts/check-i18n-keys.js`), and the untranslated-literal rule
 (`scripts/check-untranslated-strings.js`).
 
