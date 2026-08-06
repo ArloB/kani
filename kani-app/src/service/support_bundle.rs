@@ -66,10 +66,21 @@ impl AppService {
             .collect::<Vec<_>>()
             .join(";\n\n");
 
+        // `_sqlx_migrations` is sqlx's own bookkeeping table, so it is queried through the
+        // runtime API rather than the checked macro, matching `migration_checksums`.
+        let db_schema_version: Option<i64> = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(version) FROM _sqlx_migrations WHERE success = TRUE",
+        )
+        .fetch_one(&self.db_read)
+        .await
+        .ok()
+        .flatten();
+
         let kani_info = serde_json::json!({
             "version": diagnostics.version,
             "git_sha": diagnostics.git_sha,
             "uptime_secs": diagnostics.uptime_secs,
+            "db_schema_version": db_schema_version,
             "os": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
         });
