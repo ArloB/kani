@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Library section (categories with drag reorder + import/export).
 
 import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
@@ -16,7 +15,6 @@ import { FolderPicker } from '../../components/folder-picker.js';
 
 const html = htm.bind(h);
 
-// ── Categories ────────────────────────────────────────────────────────────────
 
 function CategoryRow({ cat, onDragStart, onDrop, onRename, onDelete }) {
   const [editing, setEditing] = useState(false);
@@ -192,7 +190,6 @@ function CategoriesGroup({ initialCategories }) {
   `;
 }
 
-// ── Import & Export ───────────────────────────────────────────────────────────
 
 function ActionCard({ title, desc, children }) {
   return html`
@@ -230,8 +227,7 @@ function useImportProgress(loading, origin) {
       const d = /** @type {any} */ (e).detail;
       if (d?.origin !== origin) return;
       if (d.type === 'import_started') {
-        // Without this the panel is blank until the first item lands, so a
-        // slow import is indistinguishable from a hung one.
+        // Show liveness before the first imported item reports progress.
         setProgress({ completed: 0, total: d.total, title: null });
       } else if (d.type === 'import_progress') {
         setProgress({ completed: d.completed, total: d.total, title: d.title });
@@ -518,7 +514,6 @@ function ImportExport() {
   `;
 }
 
-// ── Scheduled backup ──────────────────────────────────────────────────────────
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -675,7 +670,6 @@ function ScheduledBackup() {
   `;
 }
 
-// Local copy of the busy hook (avoids extra import churn for two buttons).
 function useBusyImport() {
   const [busy, setBusy] = useState(false);
   const run = async (/** @type {() => Promise<any>} */ fn) => {

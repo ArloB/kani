@@ -9,8 +9,6 @@ use common::{
 use serde_json::json;
 use tower::ServiceExt;
 
-// ── GET /rest/saved-searches ──────────────────────────────────────────────────
-
 #[tokio::test]
 async fn list_saved_searches_returns_200_for_authed_user() {
     let state = test_state().await;
@@ -35,8 +33,6 @@ async fn list_saved_searches_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── POST /rest/saved-searches ─────────────────────────────────────────────────
 
 #[tokio::test]
 async fn create_saved_search_returns_201_for_authed_user() {
@@ -77,8 +73,6 @@ async fn create_saved_search_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── DELETE /rest/saved-searches/:id ──────────────────────────────────────────
 
 #[tokio::test]
 async fn delete_saved_search_returns_404_for_missing_id() {

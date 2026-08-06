@@ -1,3 +1,5 @@
+//! Manga identifier encoding shared by declarative codegen and runtime decoding.
+
 use crate::ast::IdEncoding;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 

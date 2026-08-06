@@ -127,7 +127,6 @@ async fn reorder_categories_updates_sort_order() {
     svc.reorder_categories(vec![id_b, id_a]).await.unwrap();
 
     let cats = svc.list_categories().await.unwrap();
-    // list_categories orders by sort_order ASC, name ASC
     assert_eq!(cats[0].id, id_b);
     assert_eq!(cats[1].id, id_a);
 }

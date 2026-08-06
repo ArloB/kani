@@ -113,8 +113,6 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    // ── sanitize_filename ────────────────────────────────────────────────────
-
     #[test]
     fn normal_text_is_unchanged() {
         assert_eq!(sanitize_filename("My Manga Vol 1"), "My Manga Vol 1");
@@ -177,8 +175,6 @@ mod tests {
         assert_eq!(sanitize_filename("Berserk 全集"), "Berserk 全集");
     }
 
-    // ── assert_within_root ───────────────────────────────────────────────────
-
     #[test]
     fn allows_existing_file_within_root() {
         let dir = tempdir().unwrap();
@@ -193,7 +189,6 @@ mod tests {
     fn allows_new_file_whose_parent_is_root() {
         let dir = tempdir().unwrap();
         let new_file = dir.path().join("new_file.txt");
-        // File doesn't exist yet but parent does.
         let result = assert_within_root(dir.path(), &new_file);
         assert!(result.is_ok());
     }
@@ -214,7 +209,6 @@ mod tests {
     fn rejects_path_that_escapes_root() {
         let root = tempdir().unwrap();
         let other = tempdir().unwrap();
-        // A file that lives outside root entirely.
         let outside = other.path().join("escape.txt");
         fs::write(&outside, b"").unwrap();
 
@@ -231,8 +225,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // ── parse_date_flexible ──────────────────────────────────────────────────
-
     #[test]
     fn parse_date_datetime_format() {
         let ts = parse_date_flexible(
@@ -245,14 +237,12 @@ mod tests {
 
     #[test]
     fn parse_date_date_only_format() {
-        // format is date-only; PrimitiveDateTime parse fails, Date parse succeeds
         let ts = parse_date_flexible("2024-06-01", "[year]-[month]-[day]").unwrap();
         assert!(ts > 0);
     }
 
     #[test]
     fn parse_date_known_epoch_value() {
-        // 1970-01-01 00:00:00 UTC → Unix timestamp 0
         let ts = parse_date_flexible(
             "1970-01-01 00:00:00",
             "[year]-[month]-[day] [hour]:[minute]:[second]",
@@ -263,14 +253,12 @@ mod tests {
 
     #[test]
     fn parse_date_date_only_known_value() {
-        // 1970-01-02 (midnight UTC) → 86400 seconds
         let ts = parse_date_flexible("1970-01-02", "[year]-[month]-[day]").unwrap();
         assert_eq!(ts, 86400);
     }
 
     #[test]
     fn parse_date_invalid_format_string() {
-        // strftime-style format — not valid time crate syntax; date won't match
         assert!(parse_date_flexible("2024-01-15", "%Y-%m-%d").is_err());
     }
 
@@ -286,7 +274,6 @@ mod tests {
 
     #[test]
     fn parse_date_wrong_format_for_value_returns_err() {
-        // format expects time component; date-only string doesn't satisfy it
         assert!(
             parse_date_flexible(
                 "2024-01-15",
@@ -295,8 +282,6 @@ mod tests {
             .is_err()
         );
     }
-
-    // ── relative_within_root ─────────────────────────────────────────────────
 
     #[test]
     fn a_path_under_the_root_becomes_a_relative_string() {
@@ -339,8 +324,6 @@ mod tests {
         let link = dir.path().join("library-link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
-        // This is the shape the bug took in production: `assert_within_root`
-        // returns the canonical path while the configured root is the symlink.
         assert_eq!(
             relative_within_root(&link, &cbz).as_deref(),
             Some("0001.cbz")

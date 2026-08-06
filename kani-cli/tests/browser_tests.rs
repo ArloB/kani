@@ -59,10 +59,6 @@ fn browser_payload_codegen_emits_capture_page_payload() {
 
 #[test]
 fn browser_payload_full_covers_all_endpoint_kinds() {
-    // Every endpoint kind declared `via: browser_payload` must emit a real browser
-    // fetch — the guest `v8_context::capture_page_payload` + `JsonHandle::parse` +
-    // `extract::json` — and never the old `unimplemented!()` stub. This fixture is the
-    // one that gets wasm-compiled in the plan's compiled-tier smoke.
     let validated = load_and_validate("browser_payload_full.yaml");
     let generated = codegen::generate(&validated, false);
     let src = &generated.lib_rs;
@@ -71,7 +67,6 @@ fn browser_payload_full_covers_all_endpoint_kinds() {
         !src.contains("unimplemented"),
         "browser codegen must not emit unimplemented!(): {src}"
     );
-    // One capture per browser endpoint (popular, search, details, chapters, pages).
     assert_eq!(
         src.matches("capture_page_payload").count(),
         5,

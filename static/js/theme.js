@@ -1,8 +1,6 @@
 // @ts-check
 import { sanitizeCss } from './sanitize-css.js';
-// audit-ignore-file: this module is the colour-palette source (accent swatches,
-// default accent, accent-derivation math, meta theme-colours) — its literals
-// ARE the token source values, not hard-coded UI styling.
+// audit-ignore-file: built-in theme palette source.
 
 /** @type {ReadonlyArray<{color: string, label: string}>} */
 export const ACCENT_SWATCHES = [
@@ -110,7 +108,7 @@ export function getCurrentTheme() {
 }
 
 /**
- * Compute accent-hover (darkened ~16%) and accent-dim (15% opacity) from a hex.
+ * Derive the hover and translucent accent variants from a hex colour.
  * @param {string} hex
  * @returns {{ color: string, hover: string, dim: string }}
  */
@@ -126,12 +124,9 @@ export function accentFromHex(hex) {
 function _applyRaw(theme, density, accent) {
   const h = document.documentElement;
 
-  // Clear any inline token overrides from a previously-applied custom theme
-  // (or from a previous accent override — the accent branch below re-sets as needed)
   for (const t of _ALL_THEME_TOKENS) h.style.removeProperty(t);
   applyCustomCss(undefined);
 
-  // ── Custom named theme ─────────────────────────────────────────────────────
   if (theme && theme.startsWith('custom:')) {
     const id = theme.slice(7);
     const custom = getCustomThemes().find(c => c.id === id);
@@ -151,10 +146,8 @@ function _applyRaw(theme, density, accent) {
       }
       return;
     }
-    // Custom theme not found — fall through to dark default
   }
 
-  // ── Preset themes ──────────────────────────────────────────────────────────
   if (theme === 'system') {
     const light = window.matchMedia('(prefers-color-scheme: light)').matches;
     if (light) h.setAttribute('data-theme', 'light');

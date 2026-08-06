@@ -1,11 +1,8 @@
 //! Guest-safe request construction shared by both YAML execution engines.
 //!
-//! The interpreted `YamlSource` and `kani-cli`'s codegen both take the same
-//! declarative endpoint and must build the same HTTP request from it. Historically
-//! each had its own copy of that logic, and they drifted (filter mapping missing on
-//! one side, no placeholder encoding, literal `$page$` in URLs). This module is the
-//! single implementation both lower into: it is `wasm32`-clean so the generated
-//! guest code can call it directly, and native so the interpreter can.
+//! The interpreted `YamlSource` and `kani-cli` codegen both lower declarative
+//! endpoints through this implementation. It remains `wasm32`-clean for generated
+//! guest code and native-compatible for the interpreter.
 //!
 //! It covers the request *envelope* — URL substitution, static queries, and filter
 //! mapping. Pagination offsets are added by the evaluator, and the extraction
@@ -166,9 +163,8 @@ pub fn build_queries(
         .collect()
 }
 
-/// Map active filters onto query parameters per the endpoint's `filter_mapping`
-/// and `filter_format`. The reference both engines share (was A1: absent from the
-/// interpreter, re-emitted by codegen).
+/// Maps active filters onto query parameters using the endpoint mapping and
+/// formatting contract shared by both execution engines.
 pub fn apply_filters(
     filter_mapping: &[(String, FilterMapping)],
     filter_format: Option<&FilterFormat>,

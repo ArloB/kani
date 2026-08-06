@@ -1,5 +1,4 @@
 // @ts-check
-// StatRow — icon + label + value triplet (downloads queue rows, notifications, etc.)
 
 import { h } from 'preact';
 import htm from 'htm';

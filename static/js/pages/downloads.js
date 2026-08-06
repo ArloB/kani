@@ -1,5 +1,4 @@
 // @ts-check
-// Downloads page — active queue and history, split into tabs.
 
 import { h, render } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
@@ -29,7 +28,7 @@ function ActiveRow({ entry, selected, onToggle }) {
     : 0;
 
   async function handleCancel() {
-    try { await cancelDownload(entry.id); } catch { /* ignore */ }
+    try { await cancelDownload(entry.id); } catch { }
   }
 
   return html`
@@ -135,7 +134,6 @@ function DownloadsPage() {
     if (failed.length > 0) showApiError(/** @type {any} */ (failed[0]).reason);
   }, [bulkFailed]);
 
-  // Sync active downloads from chaptersProgress state
   useEffect(() => {
     function syncActive() {
       /** @type {Map<number, ChapterProgress>} */

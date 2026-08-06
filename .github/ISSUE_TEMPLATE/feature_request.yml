@@ -6,7 +6,7 @@ body:
     id: problem
     attributes:
       label: What problem does this solve?
-      description: A clear description of the problem or gap you've encountered.
+      description: Describe the problem or capability gap.
     validations:
       required: true
 
@@ -14,7 +14,7 @@ body:
     id: solution
     attributes:
       label: Proposed solution
-      description: How would you like this to work?
+      description: Describe the proposed behaviour.
     validations:
       required: true
 
@@ -22,10 +22,10 @@ body:
     id: alternatives
     attributes:
       label: Alternatives considered
-      description: Any other approaches or workarounds you've tried.
+      description: Describe other approaches or current workarounds.
 
   - type: textarea
     id: context
     attributes:
       label: Additional context
-      description: Screenshots, mockups, links, or anything else relevant.
+      description: Add relevant screenshots, mockups, or links.

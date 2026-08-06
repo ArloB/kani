@@ -1,3 +1,5 @@
+//! Guest implementation contract, typed extension failures, and extension metadata.
+
 use crate::{
     types::ActiveFilter,
     wit_types::{
@@ -13,8 +15,7 @@ pub type ExtensionResult<T> = Result<T, ExtensionError>;
 /// evaluator that produces it (kani-core) and the two backends that consume it:
 /// the interpreted-YAML source host-side and the WASM guest's extraction
 /// wrappers. Keeping it here — the lowest shared crate — lets both classify the
-/// same way, so a 429/5xx reported by a compiled source is not silently
-/// downgraded to a bare error the way it was before.
+/// same way across interpreted and compiled sources.
 pub const HTTP_STATUS_ERR_PREFIX: &str = "__http_status__:";
 
 /// Decodes an [`HTTP_STATUS_ERR_PREFIX`] marker into a typed [`ExtensionError`],
@@ -37,6 +38,7 @@ pub fn classify_status_error(msg: &str) -> Option<ExtensionError> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Stable error categories carried across the component boundary.
 pub enum ExtensionErrorKind {
     Network,
     Parse,
@@ -70,6 +72,10 @@ impl std::fmt::Display for ExtensionErrorKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Structured failure returned by an extension to the host.
+///
+/// `source_url` identifies the failed upstream request when known, and
+/// `retry_after_secs` is meaningful for retryable conditions such as rate limiting.
 pub struct ExtensionError {
     pub kind: ExtensionErrorKind,
     pub message: String,
@@ -235,6 +241,11 @@ impl From<String> for ExtensionError {
     }
 }
 
+/// Synchronous source-provider contract implemented by extension logic.
+///
+/// The WIT guest export delegates to one process-wide implementation. Methods may call
+/// host-imported capabilities synchronously; Wasmtime suspends the guest while their async host
+/// work completes. Page numbers are source-listing pages, not archive page indices.
 pub trait MangaExtension {
     fn name(&self) -> &str;
 
@@ -326,14 +337,19 @@ pub fn bridge_chapter_list_stream<E: MangaExtension + Sync + 'static>(
     any(feature = "host", feature = "builder", feature = "meta"),
     derive(serde::Serialize, serde::Deserialize)
 )]
+/// Host-enforced request budget declared by an extension.
 pub struct RateLimitConfig {
+    /// Sustained requests permitted per second.
     pub requests_per_second: f32,
+    /// Requests permitted to exceed the sustained rate in one burst.
     pub burst: u32,
+    /// Maximum upstream requests in flight for this extension.
     pub max_concurrent: u32,
     #[cfg_attr(
         any(feature = "host", feature = "builder", feature = "meta"),
         serde(default = "default_max_hook_requests")
     )]
+    /// Maximum extra requests an `on_status` hook may issue for one original request.
     pub max_hook_requests: u32,
 }
 
@@ -357,6 +373,7 @@ impl Default for RateLimitConfig {
     any(feature = "host", feature = "builder", feature = "meta"),
     derive(serde::Serialize, serde::Deserialize)
 )]
+/// A named content section exposed by a source, optionally restricted as adult content.
 pub struct Section {
     pub id: String,
     pub name: String,
@@ -372,6 +389,10 @@ pub struct Section {
     any(feature = "host", feature = "builder", feature = "meta"),
     derive(serde::Serialize, serde::Deserialize)
 )]
+/// Installation and capability metadata published by an extension.
+///
+/// Schema and minimum-version fields let the host reject incompatible guests before invoking
+/// provider operations. Missing optional collections deserialize as empty for older extensions.
 pub struct ExtensionMetadata {
     pub id: String,
     pub name: String,
@@ -536,7 +557,6 @@ mod tests {
     #[test]
     fn classify_status_error_ignores_non_sentinel_errors() {
         assert!(classify_status_error("selector matched nothing").is_none());
-        // 404 is never emitted with the sentinel, so it never reaches here.
         assert!(classify_status_error("HTTP 404").is_none());
     }
 

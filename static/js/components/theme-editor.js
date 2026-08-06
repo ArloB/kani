@@ -1,5 +1,4 @@
 // @ts-check
-// Theme editor modal — create and edit named custom themes.
 
 import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
@@ -27,11 +26,11 @@ const html = htm.bind(h);
 
 // Fallback values used only when a theme token is unset — these ARE token source
 // values (see static/js/theme.js's audit-ignore-file header), not app UI styling.
-const DEFAULT_SWATCH_COLOR = '#000000'; // audit-ignore
-const DEFAULT_PREVIEW_BG = '#0f0f17'; // audit-ignore
-const DEFAULT_PREVIEW_SURFACE = '#18181f'; // audit-ignore
-const DEFAULT_ACCENT_COLOR = '#e8545a'; // audit-ignore
-const DEFAULT_PREVIEW_TEXT = '#ddddf0'; // audit-ignore
+const DEFAULT_SWATCH_COLOR = '#000000'; // audit-ignore: fallback token source
+const DEFAULT_PREVIEW_BG = '#0f0f17'; // audit-ignore: fallback token source
+const DEFAULT_PREVIEW_SURFACE = '#18181f'; // audit-ignore: fallback token source
+const DEFAULT_ACCENT_COLOR = '#e8545a'; // audit-ignore: fallback token source
+const DEFAULT_PREVIEW_TEXT = '#ddddf0'; // audit-ignore: fallback token source
 
 /** @type {ReadonlyArray<{ label: string, tokens: ReadonlyArray<{ key: string, label: string }> }>} */
 const TOKEN_GROUPS = [
@@ -194,7 +193,6 @@ export function ThemeEditor({ themeId, onClose, onSave }) {
     return snapshotCurrentTokens();
   });
 
-  // Apply all tokens on mount for live preview; restore original theme on unmount.
   useEffect(() => {
     const el = document.documentElement;
     for (const k of CORE_TOKENS) {

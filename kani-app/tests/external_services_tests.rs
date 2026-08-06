@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group N — external advisory services (HIBP breach check, GitHub update
+//! External advisory services (HIBP breach check and GitHub update
 //! check) driven against a TestOrigin via the base-URL seams. Both are
 //! advisory: a failure must degrade silently, never block the caller.
 
@@ -11,12 +11,8 @@ use kani_app::service::update_check::check_for_update_at;
 use kani_core::http::SmartClient;
 use kani_shared_test::origin::{Response, TestOrigin};
 
-// A strong, non-identity password so the check reaches the HIBP stage rather
-// than failing on length/entropy first.
 const STRONG_PW: &str = "correcthorsebatterystaple9!";
 
-// N3 — a breached password (its suffix present in the HIBP range response) is
-// rejected with the reported count.
 #[tokio::test]
 async fn a_breached_password_is_rejected() {
     let hash = sha1_hex_upper(STRONG_PW);
@@ -38,8 +34,6 @@ async fn a_breached_password_is_rejected() {
     );
 }
 
-// N1 — a breach-check failure does not block registration: a strong password
-// still passes when the HIBP endpoint is down.
 #[tokio::test]
 async fn a_breach_check_failure_does_not_block_registration() {
     let hash = sha1_hex_upper(STRONG_PW);
@@ -56,17 +50,12 @@ async fn a_breach_check_failure_does_not_block_registration() {
     );
 }
 
-// N4 — a hostile breach response is bounded. The breach check runs during
-// registration on an unauthenticated request, so an unbounded read here is a
-// memory-exhaustion lever. An oversized body must be abandoned, and (because
-// the check is advisory) a strong password must still be accepted.
 #[tokio::test]
 async fn a_hostile_breach_response_is_bounded() {
     let hash = sha1_hex_upper(STRONG_PW);
     let (prefix, _) = hash.split_at(5);
 
     let origin = TestOrigin::start().await;
-    // 4 MB of junk, well past the 1 MB ceiling.
     origin.set(
         &format!("/range/{prefix}"),
         Response::ok(vec![b'A'; 4 * 1024 * 1024]),
@@ -87,8 +76,6 @@ async fn a_hostile_breach_response_is_bounded() {
     );
 }
 
-// N5 — an update-check failure is silent and harmless: a 500 and malformed JSON
-// both yield no update info, never a panic or error.
 #[tokio::test]
 async fn an_update_check_failure_is_silent_and_harmless() {
     let origin = TestOrigin::start().await;
@@ -114,7 +101,6 @@ async fn an_update_check_failure_is_silent_and_harmless() {
     );
 }
 
-// N6-adjacent — a newer published tag is detected and surfaced.
 #[tokio::test]
 async fn a_newer_release_tag_is_detected() {
     let origin = TestOrigin::start().await;

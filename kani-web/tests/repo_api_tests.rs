@@ -20,8 +20,7 @@ fn pk_b64(key: &SigningKey) -> String {
     pubkey_b64(key)
 }
 
-/// Insert a repo row directly — bypasses the HTTP fetch in `add_repo` and
-/// the HTTPS-only URL validator. Used to seed test state for GET/DELETE/etc.
+/// Seeds trusted repository state without exercising repository enrollment.
 async fn seed_repo(state: &kani_web::state::AppState, url: &str, name: &str, pk: &str) -> i64 {
     let index_json = serde_json::json!({"name": name, "maintainer_key": pk, "extensions": []});
     let index_str = serde_json::to_string(&index_json).unwrap();
@@ -33,8 +32,6 @@ async fn seed_repo(state: &kani_web::state::AppState, url: &str, name: &str, pk:
     .await
     .unwrap()
 }
-
-// ── /sources/repos — auth triplets ───────────────────────────────────────────
 
 #[tokio::test]
 async fn list_repos_returns_401_without_auth() {
@@ -166,8 +163,6 @@ async fn list_repo_extensions_returns_401_without_auth() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
-// ── /admin/sources/blocked-repos — auth triplets ─────────────────────────────
-
 #[tokio::test]
 async fn list_blocked_repos_returns_401_without_auth() {
     let state = test_state().await;
@@ -236,8 +231,6 @@ async fn block_repo_returns_403_for_regular_user() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
-// ── /sources/install — auth triplets ─────────────────────────────────────────
-
 #[tokio::test]
 async fn install_from_repo_returns_401_without_auth() {
     let state = test_state().await;
@@ -269,8 +262,6 @@ async fn install_from_repo_returns_403_for_regular_user() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
-// ── Blocked repo at REST layer ────────────────────────────────────────────────
-
 #[tokio::test]
 async fn add_blocked_repo_returns_403() {
     let state = test_state().await;
@@ -278,7 +269,6 @@ async fn add_blocked_repo_returns_403() {
     let app = build_test_app(state.clone()).await;
     let cookie = login(&app, username, password).await;
 
-    // block_repo bypasses URL validation — just needs the URL to be in DB.
     state
         .service
         .block_repo("https://evil-repo.example.com", "blocked in test", None)
@@ -296,8 +286,6 @@ async fn add_blocked_repo_returns_403() {
 
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
-
-// ── Add-repo URL validation ───────────────────────────────────────────────────
 
 #[tokio::test]
 async fn add_repo_with_non_https_url_returns_400() {
@@ -317,8 +305,6 @@ async fn add_repo_with_non_https_url_returns_400() {
 
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
-
-// ── GET/DELETE/REFRESH with seeded repo ──────────────────────────────────────
 
 #[tokio::test]
 async fn get_repo_returns_200_for_seeded_repo() {
@@ -396,8 +382,6 @@ async fn list_repo_extensions_returns_empty_for_seeded_repo() {
     let body = body_json(res).await;
     assert!(body.as_array().map(|a| a.is_empty()).unwrap_or(false));
 }
-
-// ── admin block/unblock CRUD ─────────────────────────────────────────────────
 
 #[tokio::test]
 async fn admin_block_and_delete_blocked_repo() {

@@ -45,8 +45,6 @@ fn write_cbz(path: &std::path::Path, pages: &[Vec<u8>]) {
     w.finish().unwrap();
 }
 
-// ── Minimal Atom reading, as a client would do it ─────────────────────────────
-
 #[derive(Debug)]
 struct Link {
     rel: String,
@@ -70,12 +68,8 @@ fn parse_feed(xml: &str) -> Feed {
     let mut reader = quick_xml::Reader::from_str(xml);
     let mut feed = Feed::default();
     let mut buf = Vec::new();
-    // Depth-aware: `<title>` appears on the feed and again on every entry.
     let mut in_entry = false;
     let mut capture_title = false;
-    // An entity reference splits the surrounding character data into separate
-    // Text events, so a title containing `&` or `<` arrives in pieces. A real
-    // reader concatenates them; so must this one.
     let mut current_title = String::new();
 
     loop {
@@ -129,14 +123,10 @@ fn parse_feed(xml: &str) -> Feed {
                     _ => {}
                 }
             }
-            // `xml_content` is what turns `&amp;` back into `&`. If the server
-            // had failed to escape, parsing would already have blown up above.
             Ok(Event::Text(t)) if capture_title => {
                 current_title.push_str(&t.xml_content().unwrap_or_default());
             }
             Ok(Event::GeneralRef(r)) if capture_title => {
-                // Numeric refs resolve directly; the five predefined XML
-                // entities arrive by name and a reader resolves them itself.
                 if let Some(ch) = r.resolve_char_ref().ok().flatten() {
                     current_title.push(ch);
                 } else {
@@ -209,8 +199,6 @@ async fn seed_downloaded_chapter(state: &AppState, manga_title: &str) -> i64 {
     manga.0
 }
 
-// A reader starts at the root and walks to the pages purely by following links.
-// Nothing here hardcodes a path beyond `/opds` itself.
 #[tokio::test]
 async fn a_client_can_navigate_from_the_root_feed_to_every_page() {
     let state = test_state().await;
@@ -219,7 +207,6 @@ async fn a_client_can_navigate_from_the_root_feed_to_every_page() {
     let app = build_test_app_with_opds(state).await;
     let cookie = login(&app, u, p).await;
 
-    // Root → find the catalogue link by rel, as a reader does.
     let (status, xml) = get_text(&app, "/opds", &cookie).await;
     assert_eq!(status, StatusCode::OK);
     let root = parse_feed(&xml);
@@ -229,7 +216,6 @@ async fn a_client_can_navigate_from_the_root_feed_to_every_page() {
         .find(|l| l.href.contains("/catalogue"))
         .expect("the root feed must advertise a catalogue link");
 
-    // Catalogue → the library listing.
     let (status, xml) = get_text(&app, &to_path(&catalogue.href), &cookie).await;
     assert_eq!(
         status,
@@ -243,20 +229,15 @@ async fn a_client_can_navigate_from_the_root_feed_to_every_page() {
         cat.entry_titles
     );
 
-    // Manga feed → the chapter entry's acquisition link.
     let (status, xml) = get_text(&app, &format!("/opds/manga/{manga_id}"), &cookie).await;
     assert_eq!(status, StatusCode::OK);
     let manga_feed = parse_feed(&xml);
-    // Select by `rel`, as a reader must: the same entry also carries an
-    // acquisition link to the CBZ, and picking that one would download an
-    // archive instead of navigating.
     let chapter_link = manga_feed
         .links
         .iter()
         .find(|l| l.rel == "subsection")
         .expect("the manga feed must advertise a subsection link to the chapter");
 
-    // Chapter feed → the PSE stream template and its page count.
     let (status, xml) = get_text(&app, &to_path(&chapter_link.href), &cookie).await;
     assert_eq!(
         status,
@@ -276,14 +257,6 @@ async fn a_client_can_navigate_from_the_root_feed_to_every_page() {
     let count = stream.pse_count.unwrap();
     assert_eq!(count, 3, "pse:count must match the pages in the archive");
 
-    // The decisive step: substitute {pageNumber} and actually fetch every page
-    // the feed claims exists. A template that resolves to nothing passes every
-    // substring assertion but breaks every reader.
-    //
-    // Pages are 1-based, so `pse:count=3` means 1,2,3 — what a reader derives
-    // from the count. This previously indexed from 0, which meant page `count`
-    // (the last one) did not resolve at all; walking the full inclusive range is
-    // what catches that.
     for page in 1..=count {
         let href = to_path(&stream.href).replace("{pageNumber}", &page.to_string());
         let res = app.clone().oneshot(authed(&href, &cookie)).await.unwrap();
@@ -299,8 +272,6 @@ async fn a_client_can_navigate_from_the_root_feed_to_every_page() {
         );
     }
 
-    // And the count is honest at the boundary: with 1-based numbering `count` is
-    // the last valid page, so `count + 1` is the first that must not resolve.
     let past = count + 1;
     let href = to_path(&stream.href).replace("{pageNumber}", &past.to_string());
     let res = app.clone().oneshot(authed(&href, &cookie)).await.unwrap();
@@ -310,9 +281,6 @@ async fn a_client_can_navigate_from_the_root_feed_to_every_page() {
     );
 }
 
-// XML-hostile characters in a title are the classic way a feed stops being
-// parseable. `contains()` assertions cannot catch it — the substrings are still
-// there in a broken document — but a reader parsing the feed fails outright.
 #[tokio::test]
 async fn a_title_with_xml_metacharacters_still_produces_a_parseable_feed() {
     const NASTY: &str = r#"Fullmetal & <Alchemist> "Brotherhood" 'ova' -- <![CDATA[x]]>"#;
@@ -326,7 +294,6 @@ async fn a_title_with_xml_metacharacters_still_produces_a_parseable_feed() {
     for uri in ["/opds/catalogue", &format!("/opds/manga/{manga_id}")] {
         let (status, xml) = get_text(&app, uri, &cookie).await;
         assert_eq!(status, StatusCode::OK);
-        // parse_feed panics on malformed XML, which is the assertion.
         let feed = parse_feed(&xml);
         let seen = feed
             .entry_titles

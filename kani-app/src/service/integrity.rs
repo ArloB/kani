@@ -130,12 +130,6 @@ impl AppService {
         let disk_files = collect_cbz_files(&library_path).await;
         let disk_set: HashSet<PathBuf> = disk_files.iter().cloned().collect();
 
-        // `file_verified_at` was written by every scrub and read by none, so
-        // each run re-hashed the entire library. The window skips only the
-        // *hashing*: existence, path drift and orphan detection are cheap stats
-        // and still run for every chapter, or a file deleted an hour after a
-        // successful scrub would go unnoticed for a month. Zero, or `full`,
-        // disables the skip.
         let verified_cutoff = if full || revalidate_days <= 0 {
             i64::MAX
         } else {
@@ -180,10 +174,9 @@ impl AppService {
 
         for r in &rows {
             let derived = derived_path(&library_path, r);
-            // `file_path` is stored relative to the library root, while the disk
-            // walk and the derived path are both rooted. Comparing the stored
-            // string directly would match nothing and report every chapter as
-            // drifted.
+            // `file_path` is stored relative to the library root, while the disk walk and the
+            // derived path are both rooted. Comparing the stored string directly would match
+            // nothing and report every chapter as drifted.
             let stored = r
                 .file_path
                 .as_deref()

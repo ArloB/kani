@@ -1,3 +1,8 @@
+//! Narrow service-domain traits used by interface adapters and test doubles.
+//!
+//! [`AppService`] implements these traits without changing authorization semantics; callers remain
+//! responsible for enforcing permissions before entering the application layer.
+
 use crate::error::Result;
 use crate::ids::{ChapterId, MangaId, UserId};
 use crate::models::{
@@ -18,6 +23,7 @@ use kani_shared::types::{
 };
 
 #[async_trait::async_trait]
+/// Source installation, configuration, discovery, and provider-call boundary.
 pub trait SourceDomain: Send + Sync {
     async fn list_sources(&self) -> Result<Vec<Source>>;
     async fn get_source(&self, id: i64) -> Result<Source>;
@@ -186,9 +192,8 @@ impl SourceDomain for AppService {
     }
 }
 
-// ── DownloadDomain ─────────────────────────────────────────────────────────────
-
 #[async_trait::async_trait]
+/// Chapter download submission, cancellation, history, and local-file boundary.
 pub trait DownloadDomain: Send + Sync {
     async fn download_chapter(&self, chapter_id: ChapterId) -> Result<uuid::Uuid>;
     async fn retry_chapter_download(&self, chapter_id: ChapterId) -> Result<uuid::Uuid>;
@@ -230,11 +235,10 @@ impl DownloadDomain for AppService {
     }
 }
 
-// ── JobDomain ──────────────────────────────────────────────────────────────────
-
 pub use crate::jobs::manager::{JobListFilter, JobListPage, JobStatus, JobSummary};
 
 #[async_trait::async_trait]
+/// Background-job query and control boundary.
 pub trait JobDomain: Send + Sync {
     async fn list_jobs(&self, filter: JobListFilter) -> Result<JobListPage>;
     async fn get_job_status(&self, id: uuid::Uuid) -> Result<JobStatus>;
@@ -271,9 +275,8 @@ impl JobDomain for AppService {
     }
 }
 
-// ── ChapterDomain ──────────────────────────────────────────────────────────────
-
 #[async_trait::async_trait]
+/// Chapter listing, progress, annotation, and page-manifest boundary.
 pub trait ChapterDomain: Send + Sync {
     async fn get_chapter_page_manifest(
         &self,
@@ -412,9 +415,8 @@ impl ChapterDomain for AppService {
     }
 }
 
-// ── LibraryDomain ──────────────────────────────────────────────────────────────
-
 #[async_trait::async_trait]
+/// Library listing, scanning, import, backup, and duplicate-management boundary.
 pub trait LibraryDomain: Send + Sync {
     async fn scan_all_manga(&self) -> Result<uuid::Uuid>;
     async fn scan_manga_ids(&self, ids: Vec<MangaId>) -> Result<uuid::Uuid>;
@@ -555,9 +557,8 @@ impl LibraryDomain for AppService {
     }
 }
 
-// ── MangaDomain ────────────────────────────────────────────────────────────────
-
 #[async_trait::async_trait]
+/// Per-manga metadata, rules, migration, upgrades, and trash boundary.
 pub trait MangaDomain: Send + Sync {
     async fn get_manga_by_id(&self, id: MangaId) -> Result<Manga>;
     async fn delete_manga(&self, id: MangaId, user_id: UserId) -> Result<()>;
@@ -897,9 +898,8 @@ impl MangaDomain for AppService {
     }
 }
 
-// ── TrackerDomain ──────────────────────────────────────────────────────────────
-
 #[async_trait::async_trait]
+/// Tracker configuration, mapping, search, and synchronization boundary.
 pub trait TrackerDomain: Send + Sync {
     async fn list_trackers_status(&self, user_id: UserId) -> Result<Vec<TrackerStatusItem>>;
     async fn get_tracker_auth_url(&self, tracker_id: i64, redirect_uri: &str) -> Result<String>;
@@ -1125,9 +1125,8 @@ impl TrackerDomain for AppService {
     }
 }
 
-// ── CategoryDomain ─────────────────────────────────────────────────────────────
-
 #[async_trait::async_trait]
+/// Category administration and manga-membership boundary.
 pub trait CategoryDomain: Send + Sync {
     async fn list_categories(&self) -> Result<Vec<Category>>;
     async fn create_category(&self, name: &str, sort_order: i64) -> Result<i64>;
@@ -1163,9 +1162,8 @@ impl CategoryDomain for AppService {
     }
 }
 
-// ── ScanlatorDomain ────────────────────────────────────────────────────────────
-
 #[async_trait::async_trait]
+/// Global and per-manga scanlator preference boundary.
 pub trait ScanlatorDomain: Send + Sync {
     async fn get_scanlator_prefs(&self, manga_id: MangaId) -> Result<Vec<ScanlatorPreference>>;
     async fn set_scanlator_pref(
@@ -1210,9 +1208,8 @@ impl ScanlatorDomain for AppService {
     }
 }
 
-// ── SettingsDomain ─────────────────────────────────────────────────────────────
-
 #[async_trait::async_trait]
+/// Application settings read and update boundary.
 pub trait SettingsDomain: Send + Sync {
     async fn get_settings(&self) -> AppSettings;
     async fn update_settings(&self, update: SettingsUpdate, user_id: UserId) -> Result<()>;

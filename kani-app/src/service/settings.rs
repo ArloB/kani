@@ -368,7 +368,7 @@ impl AppService {
                     let mut settings = self.settings.write().await;
                     settings.email_enabled = s.email_enabled;
                     settings.email_provider = s.email_provider.clone();
-                    settings.email_provider_config = config_plain; // always plaintext in memory
+                    settings.email_provider_config = config_plain;
                     settings.email_from_address = s.email_from_address;
                     settings.app_url = s.app_url;
                     settings.password_reset_enabled = s.password_reset_enabled;

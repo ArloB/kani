@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Webhooks section.
 
 import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';

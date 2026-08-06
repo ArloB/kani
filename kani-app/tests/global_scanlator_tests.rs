@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Library-wide scanlator defaults: per-manga still wins, and the defaults must
-// actually reach the code that decides what to download.
 
 mod common;
 use common::{insert_chapter, insert_manga, insert_source, test_service};
@@ -119,7 +117,6 @@ async fn a_global_default_reaches_upgrade_detection() {
         .await
         .unwrap();
 
-    // Only global preferences exist — no per-manga rules at all.
     svc.set_global_scanlator_pref("Low", 1, false)
         .await
         .unwrap();
@@ -158,8 +155,6 @@ async fn scanlators_by_usage_ranks_by_how_much_you_hold() {
     assert_eq!(ranked[1], ("B".to_string(), 1));
 }
 
-// ── A12: the rule preview must match what auto-download actually grabs ─────────
-
 async fn set_scanlator(
     svc: &kani_app::service::AppService,
     chapter: kani_app::ids::ChapterId,
@@ -179,7 +174,6 @@ async fn preview_count_matches_filter_under_scanlator_priority_dedup() {
     let src = insert_source(&svc.db, "s").await;
     let manga = insert_manga(&svc.db, src, "m", "M").await;
 
-    // Two chapters share number 1.0 from different groups; number 2.0 is unique.
     let ch1 = insert_chapter(&svc.db, manga, "c1", 1.0).await;
     let ch2 = insert_chapter(&svc.db, manga, "c2", 1.0).await;
     let ch3 = insert_chapter(&svc.db, manga, "c3", 2.0).await;
@@ -187,8 +181,6 @@ async fn preview_count_matches_filter_under_scanlator_priority_dedup() {
     set_scanlator(&svc, ch2, "GroupB").await;
     set_scanlator(&svc, ch3, "GroupA").await;
 
-    // Priority mode: GroupA outranks GroupB, so the number-1.0 duplicate collapses
-    // to GroupA — auto-download would grab 2 of the 3 chapters.
     svc.set_scanlator_pref(manga, "GroupA", 10, false)
         .await
         .unwrap();
@@ -196,7 +188,6 @@ async fn preview_count_matches_filter_under_scanlator_priority_dedup() {
         .await
         .unwrap();
 
-    // No download rules → the preview must still reflect the scanlator dedup.
     let (matching, total) = svc.preview_download_rules(manga, vec![]).await.unwrap();
     assert_eq!(total, 3);
     assert_eq!(
@@ -204,7 +195,6 @@ async fn preview_count_matches_filter_under_scanlator_priority_dedup() {
         "preview must count the deduped set (GroupA wins number 1.0), not all 3"
     );
 
-    // And it must equal exactly what the real filter returns.
     let filtered = svc
         .filter_chapters_by_rules(manga, vec![ch1, ch2, ch3])
         .await;

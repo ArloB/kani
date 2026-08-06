@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Verifies that each `AppError` variant surfaces the correct HTTP status code
-// and a JSON body containing a machine-readable `code` field.
 
 mod common;
 use axum::http::StatusCode;
@@ -12,8 +10,6 @@ use common::{
 use kani_app::ServiceError;
 use kani_web::error::AppError;
 use tower::ServiceExt;
-
-// ── ServiceError → AppError → HTTP status mapping ────────────────────────────
 
 #[test]
 fn service_conflict_maps_to_409() {
@@ -32,8 +28,6 @@ fn service_not_found_maps_to_404() {
     let resp = AppError::from(ServiceError::NotFound("manga 1".into())).into_response();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
-
-// ── 404 Not Found ────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn missing_manga_returns_404_with_json_code() {
@@ -70,8 +64,6 @@ async fn missing_source_returns_404_with_json_code() {
     assert_eq!(body["code"], serde_json::json!("not_found"));
 }
 
-// ── 401 Unauthorized ─────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn unauthenticated_library_request_returns_401_with_json() {
     let state = test_state().await;
@@ -81,7 +73,6 @@ async fn unauthenticated_library_request_returns_401_with_json() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     let body = body_json(res).await;
-    // auth_guard returns {"error": "..."}; code field may or may not be present.
     assert!(body["error"].is_string());
 }
 
@@ -102,8 +93,6 @@ async fn invalid_login_returns_401_with_json_error() {
     let body = body_json(res).await;
     assert!(body["error"].is_string());
 }
-
-// ── 403 Forbidden ────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn regular_user_accessing_admin_endpoint_returns_403() {
@@ -126,14 +115,11 @@ async fn regular_user_accessing_admin_endpoint_returns_403() {
     );
 }
 
-// ── 400 Bad Request / Validation ─────────────────────────────────────────────
-
 #[tokio::test]
 async fn malformed_login_body_returns_400() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
-    // Missing "password" field → deserialization error.
     let res = app
         .oneshot(post_json(
             "/rest/auth/login",
@@ -142,8 +128,6 @@ async fn malformed_login_body_returns_400() {
         .await
         .unwrap();
 
-    // 422 Unprocessable Entity from axum's Json extractor, or 400 from our
-    // ValidationError mapping — either is acceptable.
     assert!(
         res.status().is_client_error(),
         "malformed body should return 4xx, got {}",

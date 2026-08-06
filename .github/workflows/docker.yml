@@ -1,7 +1,3 @@
-# Every input this workflow references has to be defined under *both* triggers.
-# `inputs.tag` and `inputs.plan` are each read unconditionally below, and an
-# `inputs.x` that the active trigger does not define is a workflow-validation
-# error, not an empty string — the run fails at startup with no job to inspect.
 name: Publish Docker image
 
 on:
@@ -73,10 +69,6 @@ jobs:
             *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
           esac
 
-  # One job per architecture, each on a runner of that architecture. This used
-  # to be a single job emulating arm64 through QEMU, which runs a full Rust and
-  # BoringSSL compile at roughly a tenth of native speed — hours rather than
-  # tens of minutes. Native arm64 runners are free on public repositories.
   build:
     needs: version
     strategy:
@@ -129,8 +121,6 @@ jobs:
           provenance: true
           sbom: true
 
-      # Job outputs are last-writer-wins across a matrix, so the digests travel
-      # as artifacts instead — the documented pattern for this.
       - name: Record the digest
         if: needs.version.outputs.publish == 'true'
         run: |

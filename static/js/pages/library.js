@@ -1,5 +1,4 @@
 // @ts-check
-// Library page — main landing page with filters, category tabs, refresh.
 
 import { h, render } from 'preact';
 import htm from 'htm';
@@ -36,7 +35,6 @@ import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
-// ── Module state ──────────────────────────────────────────────────────────────
 
 let _search = '';
 let _statusFilter = /** @type {string|null} */ (null);
@@ -82,7 +80,6 @@ let _scanInProgress = false;
 /** @type {(() => void)|null} */   let _updateFilterCountFn = null;
 /** @type {(() => void)|null} */   let _cancelInitSkeleton = null;
 
-// ── Select mode state ──
 let _selectMode = false;
 /** @type {Set<number>} */ let _selected = new Set();
 /** @type {HTMLElement|null} */ let _bulkBarEl = null;
@@ -91,13 +88,10 @@ let _selectMode = false;
 // One-shot flag: absorbs the click that fires on pointer-up after a long-press
 // entered select mode. Set by the long-press timer; consumed by the first onCardClick.
 let _absorbNextCardClick = false;
-// Timestamp of the last _enterSelectMode call — used by the contextmenu guard to absorb
-// the OS long-press contextmenu that fires ~100-300ms after the app's 400ms timer.
 let _selectModeEnteredAt = 0;
-// Long-press timer for manga cards
+const CONTEXT_MENU_AFTER_LONG_PRESS_GUARD_MS = 500;
 /** @type {ReturnType<typeof setTimeout>|null} */ let _lpTimer = null;
 
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 function _hasActiveFilters() {
   return !!(_search || _statusFilter || _readingStatusFilter != null ||
@@ -119,7 +113,6 @@ function _clearAllFilters() {
   _page = 1;
   if (_container) {
     for (const el of _container.querySelectorAll('.js-search')) /** @type {HTMLInputElement} */ (el).value = '';
-    // Re-mount comboboxes and filter controls with cleared values (includes tags)
     _mountComboboxesFn?.();
     _renderFilterControlsFn?.();
     _updateFilterCountFn?.();
@@ -148,7 +141,6 @@ export async function init(container) {
   _hideCompletedStatus = getParam('hide_completed') === '1';
   _sortOrder  = getParam('sort') ?? 'updated_desc';
 
-  // Build refresh button for the global header
   let refreshBtn = /** @type {HTMLButtonElement|null} */ (null);
 
   if (hasPermission('library:refresh')) {
@@ -301,11 +293,9 @@ export async function init(container) {
     e.preventDefault();
     const id = parseInt(card.dataset.mangaId ?? '', 10);
     if (isNaN(id)) return;
-    // In select mode, right-click toggles selection like a left-click.
-    // Guard absorbs the OS contextmenu that fires ~100-300ms after a long-press that
-    // already entered select mode (the timer fires at 400ms; OS fires at ~500-700ms).
+    // A contextmenu emitted by the completed long-press must not toggle the new selection.
     if (_selectMode) {
-      if (Date.now() - _selectModeEnteredAt < 500) return;
+      if (Date.now() - _selectModeEnteredAt < CONTEXT_MENU_AFTER_LONG_PRESS_GUARD_MS) return;
       _toggleMangaSelected(id, card);
       return;
     }
@@ -378,7 +368,6 @@ export async function init(container) {
   // Show skeleton only if data takes > 150 ms
   _cancelInitSkeleton = deferredSkeleton(() => { if (_gridEl) _gridEl.innerHTML = skeletonGrid(_pageSize); });
 
-  // ── Fetch filter options in parallel ──
   const [tags, authors, artists, categories, collectionsRaw] = await Promise.allSettled([
     api.getTags(), api.getAuthors(), api.getArtists(), api.getCategories(),
     api.listCollections(),
@@ -387,7 +376,6 @@ export async function init(container) {
   const catList = Array.isArray(categories) ? categories : [];
   const collectionList = Array.isArray(collectionsRaw) ? collectionsRaw : [];
 
-  // Tab IDs: positive = category_id, negative = -(collection_id), null = All
   const tabItems = [
     { id: null, name: t('library.tab.all') },
     ...catList.map(c => ({ id: c.id, name: c.name })),
@@ -457,15 +445,12 @@ export async function init(container) {
   _mountComboboxesFn = _mountComboboxes;
   _mountComboboxes();
 
-  // ── Saved searches ──
   _savedSearchesEl = /** @type {HTMLElement|null} */ (container.querySelector('.js-saved-searches'));
   if (_savedSearchesEl) mountSavedSearches(_savedSearchesEl, { getCurrentFilters: _currentFiltersForSavedSearch, onApply: _applySearchQuery });
 
-  // ── Wire events ──
   for (const searchEl of searchEls) {
     searchEl.addEventListener('input', debounce(() => {
       _search = searchEl.value.trim();
-      // Keep the other input in sync
       for (const other of searchEls) { if (other !== searchEl) other.value = searchEl.value; }
       _page = 1;
       _updateUrl(true);
@@ -565,29 +550,23 @@ export async function init(container) {
     }
   });
 
-  // ── Refresh state subscription ──
 
   function _applyRefreshState(state) {
     const isRunning = state.type === 'running';
     const pct = isRunning && state.total > 0 ? Math.round((state.completed / state.total) * 100) : 0;
 
     if (_scanInProgress) {
-      // A scan is running — progress indicator belongs in Scan All, not Refresh All.
       if (scanAllBtn) {
         if (isRunning) {
           const label = pct > 0 ? `${pct}%` : t('library.scanning');
           scanAllBtn.innerHTML = `<span class="icon-sm shrink-0 animate-spin">${iconRefresh}</span><span>${label}</span>`;
-          // disabled was already set by the click handler; keep it set.
         }
-        // Reset on done/idle is handled by _unsubScanResult; no action needed here.
       }
-      // Keep Refresh All in its normal enabled state during a scan.
       if (refreshBtn) {
         refreshBtn.disabled = false;
         refreshBtn.innerHTML = `<span class="icon-sm shrink-0">${iconRefresh}</span><span>${t('library.refresh_all')}</span>`;
       }
     } else {
-      // A refresh is running (or idle) — progress indicator belongs in Refresh All.
       if (!refreshBtn) return;
       if (isRunning) {
         refreshBtn.disabled = true;
@@ -603,7 +582,6 @@ export async function init(container) {
   _unsubRefresh = subscribe('refreshState', _applyRefreshState);
   _applyRefreshState(getState('refreshState'));
 
-  // ── Library invalidation subscription (SSE scan/refresh complete) ──
   let _lastInvalidation = getState('libraryInvalidation');
   _unsubInvalidation = subscribe('libraryInvalidation', (val) => {
     if (val !== _lastInvalidation) {
@@ -612,7 +590,6 @@ export async function init(container) {
     }
   });
 
-  // ── Scan spinner subscription ──
   let _prevScanningIds = /** @type {Set<number>} */ (new Set());
   _unsubScanning = subscribe('scanningMangaIds', (/** @type {Set<number>} */ ids) => {
     if (!_gridEl) return;
@@ -625,10 +602,8 @@ export async function init(container) {
     _prevScanningIds = ids;
   });
 
-  // ── Per-manga download progress subscription ──
   _unsubDownloads = subscribe('chaptersProgress', (/** @type {Map<number, import('../cache.js').ChapterProgress>} */ map) => {
     if (!_gridEl) return;
-    // Aggregate progress by manga: sum pages of in-progress chapters.
     /** @type {Map<number, { completed: number, total: number }>} */
     const byManga = new Map();
     for (const ch of map.values()) {
@@ -639,7 +614,6 @@ export async function init(container) {
         total: cur.total + ch.totalPages,
       });
     }
-    // Apply or remove progress bars on visible cards.
     for (const card of /** @type {NodeListOf<HTMLElement>} */ (_gridEl.querySelectorAll('[data-manga-id]'))) {
       const id = Number(card.dataset.mangaId);
       const prog = byManga.get(id);
@@ -651,7 +625,6 @@ export async function init(container) {
     }
   });
 
-  // ── Scan result subscription (shows toast + badges on SSE 'completed') ──
   _unsubScanResult = subscribe('scanResult', (/** @type {{ total: number, failed: number, newChapters: number, perManga: Map<number, number> } | null} */ result) => {
     if (!result || !_scanInProgress) return;
     _scanInProgress = false;
@@ -660,14 +633,12 @@ export async function init(container) {
       scanAllBtn.textContent = t('library.scan_all');
     }
 
-    // Show completion toast
     const parts = [t('library.scan.result', { count: result.total })];
     if (result.newChapters > 0) parts.push(t('library.scan.new_chapters', { count: result.newChapters }));
     else parts.push(t('library.scan.no_new_chapters'));
     if (result.failed > 0) parts.push(t('library.scan.failed', { count: result.failed }));
     showToast(parts.join(' — '), { type: result.failed > 0 ? 'warn' : 'success' });
 
-    // Apply new-chapter badges to visible cards
     if (_gridEl && result.perManga.size > 0) {
       for (const [mangaId, count] of result.perManga) {
         setNewChapterCount(mangaId, count, _gridEl);
@@ -675,20 +646,17 @@ export async function init(container) {
     }
   });
 
-  // ── Continue-reading shelf ──
   if (shelfEl) {
     _shelfHandle = mountContinueShelf(shelfEl, {
       loadItems: () => api.getContinueReadingShelf(12),
     });
   }
 
-  // Initial fetch
   _fetchLibrary();
 
   _removePullToRefresh = addPullToRefresh(document.documentElement, _fetchLibrary);
 }
 
-// ── URL sync ──────────────────────────────────────────────────────────────────
 
 function _updateUrl(replace = false) {
   const params = {
@@ -709,7 +677,6 @@ function _updateUrl(replace = false) {
   else pushState(params);
 }
 
-// ── Fetch ─────────────────────────────────────────────────────────────────────
 
 function _fetchLibrary() {
   if (!_gridEl || !_paginEl) return;
@@ -727,7 +694,6 @@ function _fetchLibrary() {
   _paginEl.innerHTML = '';
 
   if (isAppend) {
-    // Show a loading skeleton at the bottom during append
     _paginEl.innerHTML = '<div class="h-14 mx-3 my-2 skeleton rounded-lg"></div>';
   } else {
     _gridEl.classList.add('opacity-50', 'pointer-events-none');
@@ -902,7 +868,6 @@ function _setupSentinel(hasNext) {
   _sentinelObserver.observe(sentinel);
 }
 
-// ── Select mode ───────────────────────────────────────────────────────────────
 
 /**
  * Per-card click handler — handles both navigation (normal mode) and selection toggling
@@ -937,7 +902,6 @@ function _enterSelectMode() {
 function _exitSelectMode() {
   _selectMode = false;
   _selected.clear();
-  // Remove selection overlays from all cards
   _gridEl?.querySelectorAll('[data-manga-id]').forEach(card => {
     card.classList.remove('ring-2', 'ring-accent');
     card.querySelector('.js-select-overlay')?.remove();
@@ -988,7 +952,7 @@ function _renderBulkBar() {
     const ids = [..._selected];
     let done = 0;
     for (const id of ids) {
-      try { await api.downloadAll(id); } catch { /* ignore */ }
+      try { await api.downloadAll(id); } catch { }
       done++;
     }
     showToast(t('library.bulk.toast.downloaded', { count: done }));
@@ -1015,7 +979,7 @@ function _renderBulkBar() {
     const ids = [..._selected];
     let done = 0;
     for (const id of ids) {
-      try { await api.markChaptersUpTo(id, 99999, true); done++; } catch { /* ignore */ }
+      try { await api.markChaptersUpTo(id, 99999, true); done++; } catch { }
     }
     showToast(t('library.bulk.toast.read', { count: done }));
     _exitSelectMode();
@@ -1025,7 +989,7 @@ function _renderBulkBar() {
     const ids = [..._selected];
     let done = 0;
     for (const id of ids) {
-      try { await api.markChaptersUpTo(id, 99999, false); done++; } catch { /* ignore */ }
+      try { await api.markChaptersUpTo(id, 99999, false); done++; } catch { }
     }
     showToast(t('library.bulk.toast.unread', { count: done }));
     _exitSelectMode();
@@ -1043,7 +1007,7 @@ function _renderBulkBar() {
     _exitSelectMode();
     let done = 0;
     for (const id of ids) {
-      try { await api.deleteManga(id); done++; } catch { /* ignore */ }
+      try { await api.deleteManga(id); done++; } catch { }
     }
     showToast(t('library.bulk.toast.deleted', { count: done }));
     _page = 1;
@@ -1127,7 +1091,6 @@ function _showBulkCategoryModal(mangaIds) {
   });
 }
 
-// ── Destroy ───────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export function destroy(container) {
@@ -1189,7 +1152,6 @@ export function destroy(container) {
   container.innerHTML = '';
 }
 
-// ── Saved searches ────────────────────────────────────────────────────────────
 
 /** @param {string} queryJson */
 function _applySearchQuery(queryJson) {
@@ -1212,7 +1174,7 @@ function _applySearchQuery(queryJson) {
     _updateFilterCountFn?.();
     _updateUrl(true);
     _fetchLibrary();
-  } catch { /* ignore invalid JSON */ }
+  } catch { }
 }
 
 function _currentFiltersForSavedSearch() {

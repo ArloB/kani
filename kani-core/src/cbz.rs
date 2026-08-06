@@ -146,10 +146,6 @@ pub fn read_cbz_page_transcoded(
     }
 }
 
-// ---------------------------------------------------------------------------
-// ComicInfo.xml helpers
-// ---------------------------------------------------------------------------
-
 /// Read the raw UTF-8 content of `ComicInfo.xml` from a CBZ archive, if present.
 pub fn read_cbz_comic_info(path: &Path) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
@@ -177,10 +173,6 @@ pub fn read_double_page_flags(path: &Path) -> (HashSet<usize>, bool) {
         .collect();
     (flags, analysed)
 }
-
-// ---------------------------------------------------------------------------
-// Spread detection (CBZ creation time)
-// ---------------------------------------------------------------------------
 
 const STRIP_W: u32 = 32;
 const SAMPLE_H: u32 = 64;
@@ -316,7 +308,6 @@ mod tests {
     use tempfile::TempDir;
     use zip::write::SimpleFileOptions;
 
-    /// Builds a CBZ at `dir/name.cbz` containing the given entries (name → bytes).
     fn make_cbz(dir: &TempDir, name: &str, entries: &[(&str, &[u8])]) -> PathBuf {
         let path = dir.path().join(name);
         let file = std::fs::File::create(&path).unwrap();
@@ -330,7 +321,6 @@ mod tests {
         path
     }
 
-    /// Encode a solid-colour RGB image to PNG bytes.
     fn make_png(w: u32, h: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
         let img = image::ImageBuffer::from_pixel(w, h, image::Rgb([r, g, b]));
         let mut buf = std::io::Cursor::new(Vec::new());
@@ -340,11 +330,7 @@ mod tests {
         buf.into_inner()
     }
 
-    /// Encode a vertical gradient (row-varying colour) to PNG bytes.
-    /// Top row ≈ (0,0,128), bottom row ≈ (255,0,128).  The red channel varies
-    /// per row but is uniform per column, so the right edge of any left-half
-    /// crop and the left edge of any right-half crop are identical — zero diff,
-    /// high variance (spread over the full 0-255 range).
+    /// Produces high variance while keeping the two center-edge strips identical.
     fn make_gradient_png(w: u32, h: u32) -> Vec<u8> {
         let img = image::ImageBuffer::from_fn(w, h, |_x, y| {
             let v = (y * 255 / h.max(1)) as u8;
@@ -357,21 +343,11 @@ mod tests {
         buf.into_inner()
     }
 
-    /// Encode a vertical gradient with per-pixel random noise of the given
-    /// amplitude added to every channel.  The base gradient provides high
-    /// variance so the variance guard passes; the noise simulates the
-    /// compression artefacts present in real JPEG scans.
-    ///
-    /// After splitting this image in half, adjacent edge strips differ only by
-    /// noise — average diff ≈ amplitude * 4/3 (expected value for |U[-A,A] -
-    /// U[-A,A]| summed across independent per-pixel samples).  With amplitude=8
-    /// the expected per-channel diff is ~10.7, comfortably below the threshold
-    /// of 20, so the split should still be detected as a spread.
+    /// Adds deterministic compression-like noise without crossing the spread threshold.
     fn make_noisy_gradient_png(w: u32, h: u32, amplitude: u8) -> Vec<u8> {
         let a = amplitude as i16;
         let range = (2 * a + 1) as u64;
         let img = image::ImageBuffer::from_fn(w, h, |x, y| {
-            // Finalised splitmix64 hash — good avalanche, deterministic per (x, y).
             let mut v = 0xdead_beef_cafe_babeu64
                 .wrapping_add((x as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
                 .wrapping_add((y as u64).wrapping_mul(0x6c62_272e_07bb_0142));
@@ -381,13 +357,13 @@ mod tests {
             v = v.wrapping_mul(0x94d0_49bb_1331_11eb);
             v ^= v >> 31;
             let noise = |bits: u64| -> i16 { (bits % range) as i16 - a };
-            let base_r = (y * 255 / h.max(1)) as i16; // gradient
-            let base_g = 128i16; // constant mid-grey
-            let base_b = 128i16;
+            let gradient_r = (y * 255 / h.max(1)) as i16;
+            let mid_g = 128i16;
+            let mid_b = 128i16;
             image::Rgb([
-                (base_r + noise(v)).clamp(0, 255) as u8,
-                (base_g + noise(v >> 8)).clamp(0, 255) as u8,
-                (base_b + noise(v >> 16)).clamp(0, 255) as u8,
+                (gradient_r + noise(v)).clamp(0, 255) as u8,
+                (mid_g + noise(v >> 8)).clamp(0, 255) as u8,
+                (mid_b + noise(v >> 16)).clamp(0, 255) as u8,
             ])
         });
         let mut buf = std::io::Cursor::new(Vec::new());
@@ -419,10 +395,6 @@ mod tests {
             .unwrap();
         buf.into_inner()
     }
-
-    // -----------------------------------------------------------------------
-    // list_cbz_pages
-    // -----------------------------------------------------------------------
 
     #[test]
     fn lists_only_image_entries() {
@@ -509,10 +481,6 @@ mod tests {
         assert_eq!(pages.len(), 3);
     }
 
-    // -----------------------------------------------------------------------
-    // read_cbz_page_transcoded / content_type_for_ext
-    // -----------------------------------------------------------------------
-
     #[test]
     fn transcode_passthrough_matches_raw_read() {
         let dir = TempDir::new().unwrap();
@@ -540,7 +508,6 @@ mod tests {
             "width should be clamped: {}",
             out.width()
         );
-        // 400x300 → 200x150, aspect preserved.
         assert_eq!(out.height(), 150);
     }
 
@@ -587,10 +554,6 @@ mod tests {
         assert_eq!(content_type_for_ext("avif"), "image/avif");
         assert_eq!(content_type_for_ext("bin"), "application/octet-stream");
     }
-
-    // -----------------------------------------------------------------------
-    // read_cbz_comic_info / read_double_page_flags
-    // -----------------------------------------------------------------------
 
     #[test]
     fn reads_comic_info_xml_from_cbz() {
@@ -666,16 +629,10 @@ mod tests {
         assert!(flags.is_empty());
     }
 
-    // -----------------------------------------------------------------------
-    // detect_spread_pages
-    // -----------------------------------------------------------------------
-
     #[test]
     fn landscape_images_are_flagged() {
         let dir = TempDir::new().unwrap();
-        // 132×100 → ratio 1.32, typical manga double-page spread
         let wide = make_png(132, 100, 128, 128, 128);
-        // 100×150 → portrait
         let portrait = make_png(100, 150, 64, 64, 64);
 
         let p0 = dir.path().join("0001.png");
@@ -699,7 +656,6 @@ mod tests {
 
     #[test]
     fn uniform_portrait_pages_not_paired() {
-        // Solid colour pages have near-zero variance → variance guard rejects.
         let dir = TempDir::new().unwrap();
         let page = make_png(720, 1080, 255, 255, 255);
         let paths: Vec<PathBuf> = (0..4)
@@ -719,14 +675,11 @@ mod tests {
 
     #[test]
     fn split_gradient_image_detected_as_spread() {
-        // Create a gradient image twice as wide as it is tall → split it.
-        // Right edge of left half ≈ left edge of right half (neighbouring columns).
         let dir = TempDir::new().unwrap();
         let full_w: u32 = 200;
         let h: u32 = 150;
         let gradient = make_gradient_png(full_w, h);
 
-        // Load, split into halves, save as two portrait pages.
         let full_img = image::load_from_memory(&gradient).unwrap();
         let half_w = full_w / 2;
 
@@ -758,15 +711,9 @@ mod tests {
 
     #[test]
     fn independent_noise_pages_not_paired() {
-        // Two independently-seeded noise images have high variance but
-        // unrelated edges → NOT detected as a spread.  This covers the
-        // diff-check code path that the solid-white test (which hits the
-        // variance guard early-exit) does not exercise.  Simulates digital
-        // manga chapters where every page is the same pixel size but contains
-        // completely different artwork.
         let dir = TempDir::new().unwrap();
         let page_a = make_noise_png(100, 150, 0xdead_beef_cafe_babe);
-        let page_b = make_noise_png(100, 150, 0x1234_5678_9abc_def0); // different seed
+        let page_b = make_noise_png(100, 150, 0x1234_5678_9abc_def0);
         let p0 = dir.path().join("0001.png");
         let p1 = dir.path().join("0002.png");
         std::fs::write(&p0, &page_a).unwrap();
@@ -780,10 +727,6 @@ mod tests {
 
     #[test]
     fn split_scan_with_compression_noise_detected() {
-        // A split scan with amplitude-8 noise (simulating JPEG quality ~85
-        // compression artefacts) should still be detected as a spread pair.
-        // Expected per-channel diff at the join edge ≈ amplitude * 4/3 ≈ 10.7,
-        // comfortably below the DIFF_THRESHOLD of 20.
         let dir = TempDir::new().unwrap();
         let full_w: u32 = 200;
         let h: u32 = 150;

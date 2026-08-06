@@ -1,17 +1,17 @@
-name: Extension broken
-description: An extension is failing to fetch manga, chapters, or pages
+name: Extension failure
+description: Report an extension that cannot fetch manga, chapters, or pages
 labels: ["extension", "bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Extensions talk to external websites. If the website changed its structure, the extension may need to be updated — this is usually not a Kani bug.
+        Extensions depend on external websites. Upstream changes may require an extension update rather than a Kani change.
 
   - type: input
     id: extension
     attributes:
       label: Extension name
-      placeholder: e.g. kani-weebcentral (from the kani-extensions repository)
+      placeholder: For example, kani-weebcentral from the kani-extensions repository
     validations:
       required: true
 
@@ -40,7 +40,7 @@ body:
     id: description
     attributes:
       label: What happens?
-      description: Describe the failure — error message, empty results, timeout, etc.
+      description: Describe the failure, including errors, empty results, or timeouts.
     validations:
       required: true
 
@@ -48,5 +48,5 @@ body:
     id: logs
     attributes:
       label: Server logs (optional)
-      description: Paste relevant lines from Settings → Admin → Logs.
+      description: Paste relevant lines from Settings → Admin → Logs after removing sensitive data.
       render: text

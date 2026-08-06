@@ -1,21 +1,4 @@
--- Two hard-coded guesses become measured, tunable settings.
---
--- scan_barren_page_tolerance (was MAX_BARREN_PAGES = 3): consecutive all-known
--- chapter-list pages a scan tolerates before concluding it has caught up.
--- Measured against real sources, the guard is usually inert — cubari and
--- weebcentral each return a whole chapter list in one response, so a scan of a
--- ~200-chapter series makes two requests and has_next_page ends the loop long
--- before the tolerance does. It binds only on page-granular sources, where too
--- low a value silently misses every chapter beyond a short run of known pages,
--- and each extra unit costs at most one request per manga per scan. 3 stays the
--- default, now raisable without a rebuild.
---
--- global_search_timeout_secs (was 12): how long one source may take before a
--- global search gives up on it and ships everyone else's results. Measured over
--- 30 anonymous searches across five installed sources: median 0.46s, p90 1.05s,
--- slowest 1.46s; a Cloudflare-blocked source fails in 0.47s. 12s was ~8x the
--- slowest observed; 6s keeps ~4x headroom while halving the worst-case wait one
--- unresponsive source can impose. Raisable for slow links or challenge-heavy
--- sources.
+-- Make scan pagination tolerance and per-source global-search timeout adjustable.
+-- Defaults preserve three barren pages and use the measured six-second search bound.
 ALTER TABLE settings ADD COLUMN scan_barren_page_tolerance INTEGER NOT NULL DEFAULT 3;
 ALTER TABLE settings ADD COLUMN global_search_timeout_secs INTEGER NOT NULL DEFAULT 6;

@@ -30,10 +30,7 @@ pub struct TrackerMappingItem {
     pub tracker_manga_id: Option<String>,
     /// When this mapping last synced. `None` while it never has.
     pub last_synced_at: Option<time::OffsetDateTime>,
-    /// An id this series is already known by on that catalogue, offered when
-    /// the user has not mapped it yet. Comes from metadata enrichment, and from
-    /// the `anilist_id` / `mal_id` columns migration `20260614000002` folded
-    /// into `manga_external_ids`.
+    /// Catalogue ID inferred from metadata enrichment when no user mapping exists.
     pub suggested_manga_id: Option<String>,
 }
 
@@ -192,7 +189,7 @@ impl AppService {
         Ok(results)
     }
 
-    /// Get tracker mappings for a manga (all configured trackers).
+    /// Includes an entry for every configured tracker, even when no mapping exists.
     pub async fn get_tracker_mappings(
         &self,
         user_id: UserId,
@@ -232,7 +229,7 @@ impl AppService {
         Ok(mappings)
     }
 
-    /// Get tracker app config (client_id + whether secret is set). Never returns the secret.
+    /// Returns the client ID and whether a secret is set, never the secret itself.
     pub async fn get_tracker_config(&self, tracker_id: i64) -> Result<Option<(String, bool)>> {
         get_tracker_app_config(&self.db, tracker_id).await
     }

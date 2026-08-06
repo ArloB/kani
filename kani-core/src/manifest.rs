@@ -1,3 +1,5 @@
+//! Portable per-page chapter manifests and archive-integrity verification.
+
 use std::path::Path;
 
 /// Serialises `perceptual_hash` as 16 hex chars. JSON consumers lose precision on
@@ -16,16 +18,20 @@ mod phash_hex {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+/// Integrity and quality metadata for one CBZ and each page it contains.
 pub struct ChapterManifest {
     pub schema: u32,
     pub archive_hash: String,
     pub page_count: u32,
     pub pages: Vec<PageDigest>,
+    /// Total uncompressed page bytes recorded in the archive.
     pub total_bytes: u64,
+    /// Manifest creation time as a Unix timestamp in seconds.
     pub created_at: i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+/// Content identity and image measurements for one archive page.
 pub struct PageDigest {
     pub name: String,
     pub bytes: u64,
@@ -34,17 +40,18 @@ pub struct PageDigest {
     pub perceptual_hash: u64,
     pub width: Option<u32>,
     pub height: Option<u32>,
-    /// Whether the decoded pixels actually carry colour. Absent on manifests
-    /// written before this was captured; `ManifestBackfillJob` fills those in.
+    /// Whether decoded pixels carry colour. `None` requires manifest backfill.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colour: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encoder_quality: Option<u8>,
 }
 
+/// Current serialized chapter-manifest schema.
 pub const MANIFEST_SCHEMA: u32 = 1;
 
 #[derive(Debug)]
+/// Failure while reading an archive or constructing its manifest.
 pub enum ManifestError {
     Io(std::io::Error),
     Archive(String),
@@ -68,6 +75,7 @@ impl From<std::io::Error> for ManifestError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Outcome of comparing an archive against a stored [`ChapterManifest`].
 pub enum VerifyOutcome {
     Ok,
     ArchiveHashMismatch,
@@ -421,8 +429,6 @@ mod tests {
 
     #[test]
     fn unknown_future_fields_do_not_break_deserialisation() {
-        // Mesh and external tooling read this format; a v2 writer adding fields
-        // must not make a v1 reader fail.
         let json = r#"{
             "schema": 2,
             "archive_hash": "a",

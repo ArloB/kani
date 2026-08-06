@@ -178,7 +178,6 @@ impl AppService {
         Ok(())
     }
 
-    /// Returns the distinct scanlator names for chapters of a manga.
     pub async fn get_chapter_scanlators(&self, manga_id: MangaId) -> Result<Vec<String>> {
         let rows = sqlx::query_scalar!(
             "SELECT DISTINCT scanlator FROM chapters WHERE manga_id = ? AND scanlator IS NOT NULL ORDER BY scanlator",
@@ -189,7 +188,6 @@ impl AppService {
         Ok(rows.into_iter().flatten().collect())
     }
 
-    /// Returns the distinct language codes for chapters of a manga.
     pub async fn get_chapter_languages(&self, manga_id: MangaId) -> Result<Vec<String>> {
         let rows = sqlx::query_scalar!(
             "SELECT DISTINCT language FROM chapters WHERE manga_id = ? ORDER BY language",

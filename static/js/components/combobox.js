@@ -1,6 +1,4 @@
 // @ts-check
-// Combobox — searchable select with virtual scrolling.
-// Supports single-select (default) and multi-select (multiple={true}) modes.
 
 import { h, render } from 'preact';
 import { useState, useEffect, useRef, useMemo } from 'preact/hooks';
@@ -64,7 +62,6 @@ export function Combobox({ options, value, onChange, placeholder = 'Select…', 
   />`;
 }
 
-// ── Single-select ─────────────────────────────────────────────────────────────
 
 function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
   const [inputText, setInputText] = useState(() => {
@@ -81,7 +78,6 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
   const dropdownRef = useRef(/** @type {HTMLDivElement | null} */(null));
   const wrapRef = useRef(/** @type {HTMLDivElement | null} */(null));
 
-  // Sync input text and selectedIdRef from value prop when not typing
   useEffect(() => {
     selectedIdRef.current = value;
     if (isTyping.current) return;
@@ -95,10 +91,8 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
     return options.filter(o => o.name.toLowerCase().includes(q));
   }, [inputText, options]);
 
-  // Reset highlight when filtered list changes
   useEffect(() => { setHighlighted(0); }, [filtered]);
 
-  // Close on outside click — checks both wrapRef and the portaled dropdownRef
   useOutsideClose(open, [wrapRef, dropdownRef], _close);
 
   // Portal the dropdown into #popover-root so it escapes overflow:hidden in modals.
@@ -163,7 +157,6 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
     `);
   }, [open, filtered, highlighted, scrollTop]);
 
-  // Clear portal on unmount
   useEffect(() => () => renderPopover(null), []);
 
   function _close() {
@@ -252,7 +245,6 @@ function SingleCombobox({ options, value, onChange, placeholder, disabled }) {
   `;
 }
 
-// ── Multi-select ──────────────────────────────────────────────────────────────
 
 function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
   const [selectedIds, setSelectedIds] = useState(/** @type {number[]} */ (Array.isArray(value) ? value : []));
@@ -277,10 +269,8 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
 
   useEffect(() => { setHighlighted(0); }, [filtered]);
 
-  // Close on outside click — checks both wrapRef and the portaled dropdownRef
   useOutsideClose(open, [wrapRef, dropdownRef], () => { setOpen(false); setInputText(''); });
 
-  // Portal the dropdown into #popover-root
   useEffect(() => {
     if (!open || !filtered.length || !wrapRef.current) {
       renderPopover(null);
@@ -349,7 +339,6 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
     `);
   }, [open, filtered, highlighted, scrollTop, selectedIds]);
 
-  // Clear portal on unmount
   useEffect(() => () => renderPopover(null), []);
 
   function _toggle(opt) {
@@ -371,7 +360,6 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
   /** @param {KeyboardEvent} e */
   function _onKeyDown(e) {
     if (e.key === 'Backspace' && inputText === '' && selectedIds.length > 0) {
-      // Remove last pill on backspace when search is empty
       const next = selectedIds.slice(0, -1);
       setSelectedIds(next);
       onChange(/** @type {any} */ (next));
@@ -432,9 +420,6 @@ function MultiCombobox({ options, value, onChange, placeholder, disabled }) {
   `;
 }
 
-// ── Creatable multi-select ────────────────────────────────────────────────────
-// value/onChange operate on string[] (names), not number[] (ids).
-// Options are suggestions from the DB; users can also type and add free-form entries.
 
 const _CREATE_ID = '__create__';
 
@@ -449,8 +434,6 @@ function CreatableMultiCombobox({ options, value, onChange, placeholder, disable
   const wrapRef = useRef(/** @type {HTMLDivElement | null} */(null));
   const inputRef = useRef(/** @type {HTMLInputElement | null} */(null));
 
-  // Build the visible drop list: filtered existing options (excluding already-selected)
-  // plus an optional "Add '…'" row at the bottom when the input is a novel value.
   const dropItems = useMemo(() => {
     const q = inputText.trim().toLowerCase();
     const filtered = options.filter(o => {

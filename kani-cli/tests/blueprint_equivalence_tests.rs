@@ -1,10 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Both the interpreted YAML tier (`kani_yaml::build_blueprint`) and the compiled-extension
-// codegen path (`kani_cli::codegen::blueprint::emit_blueprint_bytes`) now delegate their
-// field/scalar/binding/pagination assembly to the single shared `kani_yaml::build_blueprint_core`.
-// This test proves the two entry points still agree byte-for-byte on real fixtures — including
-// the `for_each`/`then` sub-fetch chaining that used to be hand-duplicated in three places —
-// so a future edit to only one of them fails loudly instead of silently drifting.
 
 use kani_cli::{
     codegen::blueprint::emit_blueprint_bytes,
@@ -65,8 +59,6 @@ fn codegen_bytes_and_interpreter_blueprint_agree_for_each_step() {
     let interpreter_bp = kani_yaml::build_blueprint(ep, &ext, "search", req);
 
     assert_equivalent_modulo_request(&codegen_bp, &interpreter_bp);
-    // The for_each step's sub-fetch (the previously hand-duplicated logic) must have made it
-    // into both paths identically.
     assert!(
         codegen_bp
             .fields

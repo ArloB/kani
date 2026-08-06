@@ -1,3 +1,9 @@
+//! Authoritative parser, validator, and lowering pipeline for declarative Kani extensions.
+//!
+//! YAML input is first deserialized into [`YamlExtension`], validated and compiled into
+//! [`ValidatedExtension`], then lowered into the same extraction blueprints consumed by generated
+//! WASM guests and the interpreted runtime.
+
 pub mod dsl;
 pub mod error;
 pub mod yaml;
@@ -108,8 +114,7 @@ pub fn build_blueprint_core(
     builder
 }
 
-/// Build a sub-`Blueprint` from a `ValidatedEndpoint` (no request, no chaining steps).
-/// Used to embed sub-blueprints inside `Expr::Fetch` nodes for `then`/`for_each` steps.
+/// Build a request-free, non-chaining sub-blueprint for `then` and `for_each` fetch expressions.
 pub fn build_sub_blueprint(ep: &yaml::model::ValidatedEndpoint) -> kani_shared::ast::Blueprint {
     use kani_shared::ast::BlueprintBuilder;
     use yaml::model::FieldSource;
@@ -234,12 +239,8 @@ pub fn resolve_composite_ids(
 /// Maps active filters onto query parameters, per an endpoint's `filter_mapping`
 /// and `filter_format`.
 ///
-/// This is the reference implementation for both execution paths. It previously
-/// existed only inside `kani-cli`'s codegen, which meant an interpreted YAML
-/// source rendered the filter panel, accepted a selection and then sent an
-/// unfiltered request — the same `.yaml` behaved differently depending on
-/// whether it had been compiled. The conformance suite (`kani-fixture-source`)
-/// exists to catch that class of divergence.
+/// This is the reference implementation for compiled and interpreted YAML sources. The
+/// `kani-fixture-source` conformance suite requires both paths to emit equivalent requests.
 pub fn apply_filters(
     filter_mapping: &[(String, yaml::schema::FilterMappingEntry)],
     filter_format: Option<&yaml::schema::FilterFormatCfg>,
@@ -327,8 +328,6 @@ mod url_tests {
 
     #[test]
     fn a_source_supplied_id_cannot_rewrite_the_path() {
-        // A10: a traversal, a query, or a space in the id must be percent-encoded
-        // into a single path segment, not smuggled into the request structure.
         let url = build_url_with_args(
             "https://src.example",
             "/manga/$manga_id$/details",
@@ -356,7 +355,6 @@ mod url_tests {
 
     #[test]
     fn an_unresolved_placeholder_is_an_error_not_a_literal() {
-        // A11: a route slot with no argument must fail, never send `$page$`.
         let err = build_url_with_args(
             "https://src.example",
             "/list/$page$",

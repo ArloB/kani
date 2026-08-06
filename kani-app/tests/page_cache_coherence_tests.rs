@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group G (G1/G2) — cache coherence for the page set. The reader reads a
+//! Page-set cache coherence. The reader reads a
 //! chapter's pages through the service `pages` cache; the quality/downloader
 //! path (`candidate_page_urls`) deliberately bypasses that cache to see what the
 //! source offers *now*. For an unchanged source the two must agree, and the
@@ -98,10 +98,6 @@ fn urls_from_json(json: &str) -> Vec<String> {
         .collect()
 }
 
-// G1 — the reader (cached `pages`) and the downloader/quality path (direct
-// `backend.get_pages`) agree on the page set, and the cache is transparent: a
-// second reader call is served from cache (no extra origin hit) yet still
-// matches the uncached direct read of the same source state.
 #[tokio::test]
 async fn the_reader_and_the_downloader_agree_on_the_page_set() {
     let origin = TestOrigin::start().await;
@@ -109,7 +105,6 @@ async fn the_reader_and_the_downloader_agree_on_the_page_set() {
     let svc = test_service().await;
     let source_id = wire_pages_source(&svc, &origin).await;
 
-    // Reader path: reads through the service page cache.
     let reader_json = svc.get_pages(source_id, "m1", "ch-1").await.unwrap();
     let reader_urls = urls_from_json(&reader_json);
     assert_eq!(reader_urls.len(), 3);
@@ -119,7 +114,6 @@ async fn the_reader_and_the_downloader_agree_on_the_page_set() {
         "reader hit the origin once"
     );
 
-    // A repeat reader call is served from cache — no new origin hit.
     let reader_again = svc.get_pages(source_id, "m1", "ch-1").await.unwrap();
     assert_eq!(
         origin.hits("/chapter/ch-1"),
@@ -128,7 +122,6 @@ async fn the_reader_and_the_downloader_agree_on_the_page_set() {
     );
     assert_eq!(urls_from_json(&reader_again), reader_urls);
 
-    // Downloader/quality path: bypasses the cache and reads the source directly.
     let backend = svc.sources.get_backend(source_id).unwrap();
     let direct = backend.get_pages("m1", "ch-1").await.unwrap();
     let direct_urls: Vec<String> = direct.pages.iter().map(|p| p.url.clone()).collect();

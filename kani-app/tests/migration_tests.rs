@@ -32,6 +32,5 @@ async fn all_migrations_apply_to_empty_schema() {
 async fn migrations_are_idempotent_on_rerun() {
     let pool = empty_pool().await;
     sqlx::migrate!("../migrations").run(&pool).await.unwrap();
-    // Re-applying against the already-migrated database must succeed, not error.
     sqlx::migrate!("../migrations").run(&pool).await.unwrap();
 }

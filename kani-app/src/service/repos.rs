@@ -192,15 +192,6 @@ impl AppService {
             let parsed: RepoIndex = serde_json::from_slice(&index_bytes)
                 .map_err(|e| ServiceError::Validation(format!("Invalid index.json: {e}")))?;
 
-            // Anchor to the PINNED key before trusting — or caching — anything.
-            // The fetched index carries its own maintainer_key, so verifying
-            // against parsed.maintainer_key only proves the index is
-            // self-consistent, which any attacker can arrange. A rotated or
-            // MITM'd key must force a re-add (out-of-band fingerprint confirm);
-            // it must never self-certify. Critically this runs BEFORE the
-            // index_cache write below: the old code wrote the cache first and
-            // checked the key afterwards, so a returned error still left the
-            // poisoned index in place for install_source_from_repo to trust.
             if parsed.maintainer_key != repo.maintainer_key {
                 return Err(ServiceError::Validation(
                     "Repository maintainer key changed since last trust — re-add the repo to confirm the new key.".to_string(),

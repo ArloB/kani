@@ -390,8 +390,6 @@ impl TryFrom<DownloadRuleRow> for DownloadRule {
     }
 }
 
-// ── Repository trust ──────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct RepoRow {
     pub id: i64,
@@ -412,8 +410,6 @@ pub struct BlockedRepo {
     pub created_at: String,
 }
 
-// ── Audit log ─────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct AuditEntry {
     pub id: i64,
@@ -424,8 +420,6 @@ pub struct AuditEntry {
     pub details: Option<String>,
     pub created_at: String,
 }
-
-// ── Reading statistics ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct DailyActivity {

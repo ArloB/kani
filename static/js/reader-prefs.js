@@ -1,14 +1,3 @@
-// @ts-check
-// Per-manga reader preferences with cross-device sync.
-//
-// Precedence (lowest → highest):
-//   hardcoded defaults → global localStorage → per-manga server prefs
-//
-// Usage:
-//   const prefs = await loadReaderPrefs(mangaId);
-//   prefs.mode  // resolved value
-//
-//   setReaderPref(prefs, 'mode', 'webtoon');  // persists locally + syncs server
 
 import * as api from './api.js';
 import { getLocal, setLocal, getLocalJson, setLocalJson } from './utils.js';
@@ -78,7 +67,7 @@ const DEFAULTS = /** @type {ReaderPrefs} */ ({
   cropBottom:  0,
   cropLeft:    0,
   cropRight:   0,
-  cropV2:      true,  // sentinel: crop values are percentages (0–50)
+  cropV2:      true,
   pageOverlay: false,
   tapLeft:     'prev',
   tapCenter:   'menu',
@@ -125,7 +114,6 @@ function _fromLocalStorage() {
   if (getLocal(LS_MAP.doublePage)   === 'true')  p.doublePage   = true;
   if (getLocal(LS_MAP.autoSpread)   === 'false') p.autoSpread   = false;
 
-  // Extended prefs stored directly under per-key names (set by setReaderPref).
   const ext = getLocalJson('kani_reader_prefs_global');
   if (ext && typeof ext === 'object') Object.assign(p, ext);
 
@@ -158,16 +146,14 @@ export async function loadReaderPrefs(mangaId) {
         Object.assign(base, serverPrefs);
       }
     }
-    // reading_direction is stored separately; it wins over reader_prefs.direction.
     if (tracking?.reading_direction === 'ltr' || tracking?.reading_direction === 'rtl') {
       base.direction = tracking.reading_direction;
     }
-  } catch { /* network unavailable — use local defaults */ }
+  } catch { }
 
   base.mangaId = mangaId;
 
-  // Migrate legacy px crop values → percentage zeroes (cropV2 sentinel).
-  // If cropV2 is absent/false the old values were pixels; reset to 0 to avoid large jumps.
+  // Absence of cropV2 identifies pixel-based crop values that cannot be reused as percentages.
   if (!base.cropV2) {
     base.cropTop = 0; base.cropBottom = 0; base.cropLeft = 0; base.cropRight = 0;
     base.cropV2 = true;
@@ -186,16 +172,15 @@ export async function loadReaderPrefs(mangaId) {
  * @param {*} value
  */
 export function setReaderPref(prefs, key, value) {
-  // @ts-ignore — dynamic key
+  // @ts-ignore: ReaderPrefs is indexed by a validated dynamic preference key.
   prefs[key] = value;
 
-  // Keep the old global localStorage keys in sync for backward-compat.
+  // Global keys remain part of the reader-preference compatibility contract.
   if (key in LS_MAP) {
-    // @ts-ignore
+    // @ts-ignore: LS_MAP is indexed only after the membership check.
     setLocal(LS_MAP[key], String(value));
   }
 
-  // Also persist the full set of extended prefs globally (new keys not in LS_MAP).
   _persistGlobalExtended(prefs);
 
   // Sync to server (debounced).
@@ -214,7 +199,7 @@ function _persistGlobalExtended(prefs) {
   for (const key of Object.keys(DEFAULTS)) {
     if (key === 'mangaId') continue;
     if (!(key in LS_MAP)) {
-      // @ts-ignore
+      // @ts-ignore: DEFAULTS supplies keys shared with ReaderPrefs.
       ext[key] = prefs[key];
     }
   }
@@ -234,18 +219,16 @@ function _scheduleSyncToServer(prefs) {
   _syncTimers.set(mangaId, setTimeout(() => {
     _syncTimers.delete(mangaId);
 
-    // Build the blob — omit mangaId and the legacy direction key (it has its own column).
     /** @type {Record<string,*>} */
     const blob = {};
     for (const key of Object.keys(DEFAULTS)) {
       if (key === 'mangaId' || key === 'direction') continue;
-      // @ts-ignore
+      // @ts-ignore: DEFAULTS supplies keys shared with ReaderPrefs.
       blob[key] = prefs[key];
     }
 
     api.setMangaTracking(mangaId, { reader_prefs: JSON.stringify(blob) }).catch(() => {});
 
-    // direction is persisted via its own tracking column (existing behaviour).
     api.setMangaTracking(mangaId, { reading_direction: prefs.direction }).catch(() => {});
   }, 800));
 }

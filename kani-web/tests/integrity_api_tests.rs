@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// The scrub REST surface: report retrieval and the explicit orphan deletion
-// that replaced `integrity-check?fix=true`.
 
 mod common;
 use axum::http::StatusCode;
@@ -22,8 +20,6 @@ fn post(
     }
     b.body(axum::body::Body::from(body.to_string())).unwrap()
 }
-
-// ── GET /rest/admin/library/scrub/last ───────────────────────────────────────
 
 #[tokio::test]
 async fn last_scrub_is_null_before_any_run() {
@@ -94,8 +90,6 @@ async fn last_scrub_requires_admin() {
         .unwrap();
     assert_eq!(plain.status(), StatusCode::FORBIDDEN);
 }
-
-// ── POST /rest/admin/library/orphans/delete ──────────────────────────────────
 
 #[tokio::test]
 async fn orphan_delete_requires_admin() {
@@ -187,8 +181,6 @@ async fn orphan_delete_removes_only_what_it_is_given() {
         "deletion must be scoped to the listed paths"
     );
 }
-
-// ── POST /rest/admin/library/archive ─────────────────────────────────────────
 
 #[tokio::test]
 async fn archive_export_returns_202_for_admin() {

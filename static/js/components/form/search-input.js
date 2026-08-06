@@ -1,12 +1,3 @@
-// @ts-check
-// SearchInput — the search field: icon + input in one frame with a clear
-// affordance. Replaces the hand-rolled icon + pl-9 pattern that had drifted
-// into several per-page variants. Ships in both flavours: Preact `SearchInput`
-// and vanilla `createSearchInput`.
-//
-// The clear button's visibility is pure CSS (`:placeholder-shown`), so values
-// set programmatically (clear-all-filters, applying a saved search) keep it in
-// sync without any wiring.
 
 import { h } from 'preact';
 import htm from 'htm';

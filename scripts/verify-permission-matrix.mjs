@@ -110,8 +110,7 @@ const TEST_PW = 'PermMatrixPassword123!';
 async function ensureUserWith(cookie, slug, perms) {
   const role = `permmatrix-${slug}`;
   const username = `permmatrix-${slug}`;
-  // Create, or correct an existing one: a role left over from an earlier run
-  // with a different permission set would silently invalidate the whole matrix.
+  // Reused roles must exactly match the permission set under test.
   const roleRes = await adminFetch(cookie, '/rest/admin/roles', {
     method: 'POST',
     body: JSON.stringify({ slug: role, description: 'per-permission UI matrix', permissions: perms }),
@@ -191,9 +190,7 @@ console.log(`Checking ${permissions.length} permissions over ${surfaces.length} 
 // it missing, every section reads as "hidden" and the run says nothing.
 const BASELINE_PERMS = ['settings:view'];
 
-// Two "without" cases: one holding the baseline (what most permissions are
-// measured against) and one holding nothing, used when the permission under
-// test *is* the baseline.
+// Use the baseline for most negative cases and no permissions when testing the baseline itself.
 const baseline = await visibleSurfaces(browser, await ensureUserWith(cookie, 'baseline', BASELINE_PERMS));
 const nothing = await visibleSurfaces(browser, await ensureUserWith(cookie, 'nothing', []));
 

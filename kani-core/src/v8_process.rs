@@ -1,3 +1,5 @@
+//! Lifecycle and newline-delimited protocol for the shared Node.js browser worker.
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -405,9 +407,6 @@ mod tests {
         new_handle()
     }
 
-    // Serialise tests that mutate KANI_BROWSER_ENABLED to prevent races. An
-    // async-aware mutex since the guard must stay held across the `.await`
-    // calls below.
     static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     /// Both "false" and "0" values are tested in a single serialised block to
@@ -418,7 +417,6 @@ mod tests {
         let handle = null_handle();
 
         for val in &["false", "0"] {
-            // SAFETY: tests hold ENV_LOCK; no other test mutates this var concurrently.
             unsafe { std::env::set_var("KANI_BROWSER_ENABLED", val) };
             let result = capture_url_param(
                 &handle,
@@ -511,8 +509,6 @@ mod tests {
 
     #[tokio::test]
     async fn v8_context_does_not_exist_for_unknown_name() {
-        // Whether or not Node.js is installed: a context with this name is never created,
-        // so v8_context_exists must return false.
         let handle = null_handle();
         let exists = v8_context_exists(&handle, "no-such-ctx-test-only").await;
         assert!(!exists);

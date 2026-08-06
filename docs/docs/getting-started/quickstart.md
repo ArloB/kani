@@ -35,7 +35,7 @@ When the health check passes, open [http://localhost:8242](http://localhost:8242
 A new database has no accounts. The setup page asks you to choose the first administrator's
 username, email address, and password, then signs you in.
 
-Setup closes permanently as soon as the first account exists. It is accepted only from a loopback
+Setup closes after the first account is created. It is accepted only from a loopback
 or private address unless `KANI_ALLOW_REMOTE_SETUP=true` is set. Prefer a LAN connection or SSH
 tunnel. If the override is unavoidable, remove it immediately after creating the account and
 restart Kani.

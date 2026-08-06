@@ -1,15 +1,4 @@
 #!/usr/bin/env node
-// Checks static/js/sanitize-css.js against the same fixtures the Rust
-// sanitiser is pinned to, in kani-app/src/service/ui_ext.rs
-// (`the_client_mirror_fixtures_produce_exactly_these_outputs`).
-//
-// The client mirror exists so the theme editor can preview what the server will
-// store. If the two implementations drift, the editor lies about what is saved —
-// it shows CSS surviving that the server strips, or vice versa. Both sides are
-// therefore pinned to these exact strings; change one and this fails until the
-// other is updated to match.
-//
-// Run: node scripts/check-sanitize-css-parity.mjs
 
 import { sanitizeCss } from '../static/js/sanitize-css.js';
 
@@ -63,12 +52,6 @@ for (const [name, input, wantCss, wantStripped] of CASES) {
   }
 }
 
-// Scoping is deliberately NOT idempotent: sanitising already-scoped CSS scopes
-// it a second time, producing a descendant selector that matches nothing. Stored
-// CSS is sanitised server-side, so `applyCustomCss` in static/js/theme.js must
-// only re-sanitise text the user is still typing (`{ raw: true }`). This shipped
-// once and disabled every custom rule silently, so it is pinned here: if someone
-// makes scoping idempotent, this fails and the `raw` flag should go with it.
 {
   const once = sanitizeCss('.btn { color: red }').css;
   const twice = sanitizeCss(once).css;

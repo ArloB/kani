@@ -82,7 +82,7 @@ async fn get_local_chapters_paging_works() {
         .unwrap();
     assert_eq!(page1.len(), 3);
     assert!(has_next1);
-    assert_eq!(total1, Some(2)); // ceil(5/3) = 2
+    assert_eq!(total1, Some(2));
 
     let (page2, has_next2, _, _) = svc
         .get_local_chapters(
@@ -109,7 +109,6 @@ async fn download_status_filter_works() {
     let manga_id = insert_manga(&svc.db, src, "m1", "Manga").await;
     let ch_id = insert_chapter(&svc.db, manga_id, "ch1", 1.0).await;
 
-    // Set download_status = 2 (downloaded)
     sqlx::query("UPDATE chapters SET download_status = 2 WHERE id = ?")
         .bind(ch_id)
         .execute(&svc.db)
@@ -228,10 +227,6 @@ async fn the_orphaned_filter_returns_only_the_kept_chapters() {
 
 #[tokio::test]
 async fn an_orphan_and_a_live_chapter_can_share_a_number() {
-    // A migration keeps the old source's chapter alongside the target's own
-    // chapter of the same number: the uniqueness constraint is on
-    // (manga_id, source_chapter_id), so both rows coexist and each listing
-    // shows exactly one of them.
     let svc = test_service().await;
     let src = insert_source(&svc.db, "src").await;
     let manga_id = insert_manga(&svc.db, src, "m1", "Manga").await;
@@ -280,9 +275,6 @@ async fn an_orphan_and_a_live_chapter_can_share_a_number() {
 
 #[tokio::test]
 async fn chapter_ids_expose_orphans_only_on_request() {
-    // Bulk download and preferred-version selection both read this. Reaching a
-    // chapter the current source does not carry would fail every fetch, so the
-    // default must stay orphan-free; only an explicit ask returns them.
     let svc = test_service().await;
     let src = insert_source(&svc.db, "src").await;
     let manga_id = insert_manga(&svc.db, src, "m1", "Manga").await;
@@ -331,10 +323,6 @@ async fn chapter_ids_expose_orphans_only_on_request() {
 
 #[tokio::test]
 async fn chapter_ids_are_scoped_to_the_manga_not_the_user() {
-    // Regression: the binds were one out of step, so `? IS NULL` received
-    // manga_id and the scanlator guard rejected every row, while the manga
-    // filter matched on user_id. Every fixture used manga_id == user_id == 1,
-    // which made the swap invisible. Distinct ids are the whole point here.
     let svc = test_service().await;
     let src = insert_source(&svc.db, "src").await;
     let first = insert_manga(&svc.db, src, "m1", "First").await;

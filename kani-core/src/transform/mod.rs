@@ -1,9 +1,9 @@
-//! Kind-parameterized content transforms (plan 04). Extensions declare a per-page
+//! Kind-parameterized content transforms. Extensions declare a per-page
 //! `transform` hint; the registry resolves it — while upstream headers are live —
 //! to a [`ResolvedTransform`] that carries the parsed parameters plus the output
 //! format, so a caller can decide buffer-vs-stream and extension/content-type
 //! before reading the body. Resolution is lenient: an unknown or unparseable hint
-//! returns `None` (passthrough), matching the shipped behavior.
+//! returns `None` for passthrough.
 
 use rquest::header::HeaderMap;
 use std::collections::HashMap;

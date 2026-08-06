@@ -129,7 +129,6 @@ export const iconPlay = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24
 /** Horizontal ellipsis — "More" affordance */
 export const iconEllipsisHorizontal = `<svg ${_attrs}><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z"/></svg>`;
 
-// ── Reader control icons (R5) — mode / fit / direction / tabs / spread ──────
 /** Reading mode: continuous scroll */
 export const iconReaderScroll = `<svg ${_attrs}><path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h16M4 17h16"/></svg>`;
 /** Reading mode: single page */

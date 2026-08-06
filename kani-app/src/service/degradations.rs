@@ -2,9 +2,7 @@
 //!
 //! Kani prefers to keep serving when a part of it fails: a missing `secret.key`
 //! disables encrypted settings rather than refusing to boot, an unwritable cache
-//! directory costs speed rather than correctness. That is the right call, but it
-//! used to be recorded only as a `warn!` in the log — so an instance could run
-//! for months with email quietly broken and nothing anywhere said so.
+//! directory costs speed rather than correctness.
 //!
 //! Anything that degrades instead of failing registers here, and the registry is
 //! surfaced in Settings → Diagnostics and (for `Error`) in an admin banner.
@@ -16,6 +14,7 @@ use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
+/// Operator-visible impact level of a subsystem degradation.
 pub enum Severity {
     /// Working, but worse — slower, or with a feature unavailable.
     Warn,
@@ -43,6 +42,7 @@ pub mod ids {
 }
 
 #[derive(Debug, Clone, Serialize)]
+/// Current reduced-service condition with an operator-facing remedy.
 pub struct Degradation {
     pub id: String,
     pub severity: Severity,
@@ -58,6 +58,8 @@ pub struct Degradation {
 }
 
 #[derive(Debug, Default)]
+/// Thread-safe registry keyed by stable degradation identifier.
+/// Re-registering an identifier replaces its details; recovery removes it.
 pub struct DegradationRegistry {
     entries: RwLock<BTreeMap<String, Degradation>>,
 }
@@ -69,9 +71,7 @@ impl DegradationRegistry {
 
     /// Record a degradation, replacing any previous entry with the same id.
     ///
-    /// Also logs at the matching level: the log line is what an operator tailing
-    /// journalctl sees, and it was previously too quiet for conditions that
-    /// disable a whole feature.
+    /// Also logs at the matching level for operators monitoring the journal.
     pub fn register(
         &self,
         id: &str,

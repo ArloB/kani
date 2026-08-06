@@ -1,19 +1,20 @@
-//! Kani Shared - Shared types and traits for the Kani manga downloader.
+//! Contracts shared by Kani's native host and WASM extension guests.
 //!
-//! This crate contains:
-//! - Shared data types (MangaInfo, Chapter, etc.) used across the host and WASM extensions
-//! - The MangaExtension trait that all extensions must implement
-//! - Host ABI definitions for WASM-to-host communication
-//! - Error types for extension operations
+//! Feature gates keep guest builds free of host-only serialization and runtime dependencies. The
+//! WIT package is the authoritative component boundary; the Rust APIs provide domain types,
+//! extension traits, request construction, extraction unpacking, and safe wrappers around it.
 
 pub mod types;
 pub use types::*;
 
+/// Generated Rust bindings for the `kani-extension` WIT world.
+///
+/// Host builds add Serde derives to shared WIT values; guest builds retain the dependency-minimal
+/// component bindings.
 pub mod bindings {
-    // When the `host` feature is enabled (kani-app, kani-core) the generated WIT
-    // types get serde derives so the service layer can serialize/deserialize them
-    // for the JSON cache.  WASM extension crates never enable `host`, so they
-    // compile without any serde dependency.
+    // When the `host` feature is enabled (kani-app, kani-core) the generated WIT types get serde
+    // derives so the service layer can serialize/deserialize them for the JSON cache. WASM
+    // extension crates never enable `host`, so they compile without any serde dependency.
     #[cfg(feature = "host")]
     wit_bindgen::generate!({
         path: "../kani-core/wit/kani.wit",
@@ -72,6 +73,10 @@ pub use filter_fetch::FilterFetchDef;
 pub use talc::TalckWasm as __TalckWasm;
 
 #[macro_export]
+/// Installs Kani's WASM allocator for an extension guest.
+///
+/// Invoke this once at crate scope. It expands to a global allocator only for a WASM target and
+/// has no effect in native builds.
 macro_rules! guest_alloc {
     () => {
         #[cfg(target_family = "wasm")]

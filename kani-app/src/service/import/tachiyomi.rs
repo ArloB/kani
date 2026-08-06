@@ -13,11 +13,7 @@ use crate::service::backup::{BackupChapterProgress, BackupMangaTracking};
 
 use super::tachiyomi_sources::{tachiyomi_source_to_kani_name, tachiyomi_sync_id_to_tracker_name};
 
-// ── Generated protobuf types ──────────────────────────────────────────────────
-
 include!(concat!(env!("OUT_DIR"), "/tachiyomi.rs"));
-
-// ── Preview ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
 pub struct TachiyomiPreview {
@@ -36,8 +32,6 @@ pub struct TachiyomiSourceSummary {
     pub manga_count: u32,
     pub found: bool,
 }
-
-// ── Import options + result ───────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 pub struct TachiyomiImportOptions {
@@ -68,8 +62,6 @@ pub struct TachiyomiImportResult {
     pub warnings: Vec<String>,
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 /// Resolve a Mihon/Tachiyomi source ID to a Kani source.
 ///
 /// First queries the DB for a source with a matching `mihon_source_id` (set when a
@@ -81,7 +73,6 @@ async fn resolve_kani_source(
     db: &sqlx::SqlitePool,
     mihon_id: i64,
 ) -> Result<(Option<i64>, Option<String>)> {
-    // Primary: match by the mihon_source_id column stored in the sources table.
     let by_mihon = sqlx::query!(
         "SELECT id, name FROM sources WHERE mihon_source_id = ? AND deleted_at IS NULL",
         mihon_id
@@ -93,7 +84,6 @@ async fn resolve_kani_source(
         return Ok((Some(row.id), Some(row.name)));
     }
 
-    // Fallback: hardcoded name map for sources without a mihon_source_id yet.
     let kani_name = tachiyomi_source_to_kani_name(mihon_id);
     if let Some(name) = kani_name {
         let id = sqlx::query_scalar!(
@@ -120,10 +110,16 @@ fn decode_backup(data: &[u8]) -> Result<Backup> {
 
 /// Map Tachiyomi manga publication status (BackupManga.status) to Kani's manga.status.
 fn map_publication_status(tachi_status: i32) -> i64 {
+    const TACHI_ONGOING: i32 = 1;
+    const TACHI_COMPLETED: i32 = 2;
+    const KANI_UNKNOWN: i64 = 0;
+    const KANI_ONGOING: i64 = 1;
+    const KANI_COMPLETED: i64 = 2;
+
     match tachi_status {
-        1 => 1, // Ongoing
-        2 => 2, // Completed
-        _ => 0, // Unknown
+        TACHI_ONGOING => KANI_ONGOING,
+        TACHI_COMPLETED => KANI_COMPLETED,
+        _ => KANI_UNKNOWN,
     }
 }
 
@@ -141,8 +137,6 @@ fn map_reading_status(tachi_status: i32) -> i64 {
         _ => 0,
     }
 }
-
-// ── AppService methods ────────────────────────────────────────────────────────
 
 impl AppService {
     pub async fn preview_tachiyomi_backup(&self, data: &[u8]) -> Result<TachiyomiPreview> {
@@ -425,7 +419,6 @@ impl AppService {
                     continue;
                 };
 
-                // Check the new 'media_id' first, fallback to the deprecated 'media_id_int' if it's 0
                 let remote_id_val = if t.media_id != 0 {
                     t.media_id
                 } else {
@@ -449,7 +442,6 @@ impl AppService {
                     continue;
                 }
 
-                // Ensure the tracker row exists (it may not if the admin hasn't configured it)
                 sqlx::query!(
                     "INSERT OR IGNORE INTO trackers (name) VALUES (?)",
                     tracker_name
@@ -477,8 +469,6 @@ impl AppService {
                 }
             }
 
-            // reading direction: viewer_flags (field 103, Mihon) takes priority over viewer (field 14, legacy)
-            // Lower 3 bits of viewer_flags: 1=LTR, 2=RTL. viewer field: 1=LTR, 2=RTL.
             let reading_dir = if m.viewer_flags != 0 {
                 match m.viewer_flags & 0x07 {
                     1 => Some("ltr"),

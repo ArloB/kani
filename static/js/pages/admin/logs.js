@@ -1,5 +1,4 @@
 // @ts-check
-// Admin logs page — Application Logs and Audit Log tabs.
 
 import { h, render } from 'preact';
 import htm from 'htm';
@@ -20,7 +19,6 @@ import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
 
-// ── Constants ─────────────────────────────────────────────────────────────────
 
 const LOG_LEVELS = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
 // Semantic severity only: red means error, amber means warning. INFO is ordinary
@@ -36,7 +34,6 @@ const LEVEL_CLASSES = {
 const PAGE_SIZE = 100;
 const MAX_LIVE_ROWS = 500;
 
-// ── Module state ──────────────────────────────────────────────────────────────
 
 /** @type {HTMLElement | null} */    let _container = null;
 /** @type {(() => void) | null} */  let _destroyTabs = null;
@@ -44,7 +41,6 @@ const MAX_LIVE_ROWS = 500;
 /** @type {'app' | 'audit'} */      let _activeTab = 'app';
 /** @type {EventSource | null} */   let _sse = null;
 
-// ── Init / Destroy ────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export async function init(container) {
@@ -121,7 +117,6 @@ export function destroy(_container) {
   clearPageHeader();
 }
 
-// ── Tab rendering ─────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} content */
 function _renderTab(content) {
@@ -137,7 +132,6 @@ function _renderTab(content) {
   }
 }
 
-// ── Application logs tab ──────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container @returns {() => void} */
 function _mountAppLogsTab(container) {
@@ -150,7 +144,6 @@ function _mountAppLogsTab(container) {
   root.className = 'flex flex-col flex-1 overflow-hidden';
   container.appendChild(root);
 
-  // Filter bar
   const filterBar = document.createElement('div');
   filterBar.className = 'flex flex-wrap items-center gap-2 px-4 md:px-6 py-3 border-b border-border shrink-0';
   filterBar.innerHTML = `
@@ -192,7 +185,6 @@ function _mountAppLogsTab(container) {
   };
   _renderDates();
 
-  // Scrollable log area
   const tableWrap = document.createElement('div');
   tableWrap.className = 'flex-1 overflow-auto font-mono text-xs';
   root.appendChild(tableWrap);
@@ -202,12 +194,10 @@ function _mountAppLogsTab(container) {
   logList.className = 'flex flex-col';
   tableWrap.appendChild(logList);
 
-  // Pagination
   const paginEl = document.createElement('div');
   paginEl.className = 'px-4 md:px-6 py-3 shrink-0';
   root.appendChild(paginEl);
 
-  // Wire up filter controls
   const searchEl = /** @type {HTMLInputElement} */ (filterBar.querySelector('#log-search'));
   const liveEl   = /** @type {HTMLInputElement} */ (filterBar.querySelector('#log-live'));
 
@@ -235,7 +225,7 @@ function _mountAppLogsTab(container) {
         while (logList.children.length > MAX_LIVE_ROWS) {
           logList.removeChild(logList.lastChild);
         }
-      } catch { /* malformed */ }
+      } catch { }
     });
     _sse.onerror = () => {
       if (_sse?.readyState === EventSource.CLOSED) {
@@ -309,8 +299,6 @@ function _buildLogRow(entry) {
   const row = document.createElement('div');
   const lvl = (entry.level ?? 'INFO').toUpperCase();
   const levelCls = LEVEL_CLASSES[lvl] ?? 'text-text-muted';
-  // Single-line entries: the list scrolls horizontally (overflow-auto parent)
-  // rather than wrapping, which clipped on narrow screens.
   row.className = 'flex items-baseline gap-2 px-4 py-0.5 hover:bg-surface-2 border-b border-border/30 w-max min-w-full';
   row.innerHTML = `
     <span class="shrink-0 text-text-muted/60 whitespace-nowrap">${escapeHtml(entry.timestamp ?? '')}</span>
@@ -321,7 +309,6 @@ function _buildLogRow(entry) {
   return row;
 }
 
-// ── Audit log tab ─────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container @returns {() => void} */
 function _mountAuditTab(container) {
@@ -333,7 +320,6 @@ function _mountAuditTab(container) {
   root.className = 'flex flex-col flex-1 overflow-hidden';
   container.appendChild(root);
 
-  // Filter bar
   const filterBar = document.createElement('div');
   filterBar.className = 'flex flex-wrap items-center gap-2 px-4 md:px-6 py-3 border-b border-border shrink-0';
   filterBar.innerHTML = `
@@ -444,7 +430,6 @@ function _buildAuditRow(entry) {
   return row;
 }
 
-// ── Download handler ──────────────────────────────────────────────────────────
 
 async function _handlePurge() {
   const ok = await showConfirm(t('logs.purge.confirm'), {
@@ -473,7 +458,6 @@ function _handleDownload() {
   }
 }
 
-// ── SSE cleanup ───────────────────────────────────────────────────────────────
 
 function _stopSse() {
   if (_sse) {

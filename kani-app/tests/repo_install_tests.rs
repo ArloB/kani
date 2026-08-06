@@ -227,8 +227,6 @@ async fn start_mock_server_etag(routes: Arc<HashMap<String, Vec<u8>>>) -> u16 {
     port
 }
 
-// ── Blocked-repo tests (no HTTP) ──────────────────────────────────────────────
-
 #[tokio::test]
 async fn list_blocked_repos_empty_on_fresh_db() {
     let svc = test_service().await;
@@ -266,16 +264,12 @@ async fn delete_nonexistent_blocked_repo_returns_error() {
     assert!(result.is_err());
 }
 
-// ── List repos (no HTTP) ──────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn list_repos_empty_on_fresh_db() {
     let svc = test_service().await;
     let result = svc.list_repos().await.unwrap();
     assert!(result.is_empty());
 }
-
-// ── TOFU add-repo flow ────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn add_repo_without_confirmation_returns_required() {
@@ -367,7 +361,6 @@ async fn add_repo_key_changed_returns_key_changed() {
     let svc = test_service().await;
     svc.add_repo(&url, Some(&fp_old), None).await.unwrap();
 
-    // A different maintainer key now signs the same URL.
     let new_repo = TestRepo::new(&ext_id);
     let port_new = start_mock_server(new_repo.build_routes("New Repo")).await;
     let url_new = format!("http://127.0.0.1:{port_new}");
@@ -375,9 +368,6 @@ async fn add_repo_key_changed_returns_key_changed() {
         .await
         .unwrap();
 
-    // Simulate key change by pointing the original URL at the new key.
-    // Re-add the original URL after inserting the "old" row with the old key;
-    // `add_repo` when the existing row has a different key should return KeyChanged.
     let result = svc.add_repo(&url, None, None).await.unwrap();
     assert!(
         matches!(result, RepoAddResult::Added { .. }),
@@ -400,8 +390,6 @@ async fn blocked_url_prevents_add_repo_even_with_confirmation() {
     let result = svc.add_repo(&url, Some(&fp), None).await;
     assert!(result.is_err(), "blocked URL must return an error");
 }
-
-// ── Refresh ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn refresh_repo_succeeds_with_same_key() {
@@ -437,12 +425,10 @@ async fn refresh_repo_304_preserves_index_cache_updates_timestamp() {
         panic!("expected Added");
     };
 
-    // First refresh: cond_cache is empty → no If-None-Match → 200 → primes cond_cache.
     svc.refresh_repo(id, None).await.unwrap();
     let after_first = svc.get_repo(id).await.unwrap();
     let index_cache_after_first = after_first.index_cache.clone().unwrap();
 
-    // Second refresh: cond_cache has ETag → sends If-None-Match → server returns 304.
     svc.refresh_repo(id, None).await.unwrap();
     let after_second = svc.get_repo(id).await.unwrap();
 
@@ -456,8 +442,6 @@ async fn refresh_repo_304_preserves_index_cache_updates_timestamp() {
         "304 must still update last_refreshed_at"
     );
 }
-
-// ── Install ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn install_yaml_extension_from_repo_succeeds() {
@@ -508,8 +492,6 @@ async fn install_tampered_artifact_is_rejected() {
     );
 }
 
-// ── Bootstrap ─────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn bootstrap_official_repo_sets_trusted_level_official() {
     let ext_id = unique_ext_id();
@@ -559,8 +541,6 @@ async fn bootstrap_wrong_key_is_skipped_without_error() {
         "mismatched key must not add repo"
     );
 }
-
-// ── A2 regression: refresh must not poison the cache with an unpinned key ──────
 
 type SharedRoutes = Arc<tokio::sync::RwLock<Arc<HashMap<String, Vec<u8>>>>>;
 
@@ -615,8 +595,6 @@ async fn refresh_with_rotated_maintainer_key_does_not_poison_the_cache() {
     let ext_id = unique_ext_id();
     let original = TestRepo::new(&ext_id);
 
-    // An attacker serving the same URL: a fresh, self-consistent index signed by
-    // a key the attacker controls, advertising a malicious artifact.
     let mut attacker = TestRepo::new(&ext_id);
     attacker.artifact_yaml = format!(
         "id: {ext_id}\nname: Pwned\nversion: \"0.1.0\"\nbase_url: \"https://evil.example\"\n"
@@ -632,7 +610,6 @@ async fn refresh_with_rotated_maintainer_key_does_not_poison_the_cache() {
         panic!("add_repo must return Added");
     };
 
-    // The repo host is now compromised: it serves the attacker's index.
     *shared.write().await = attacker.build_routes("Good Repo");
 
     let err = svc
@@ -644,8 +621,6 @@ async fn refresh_with_rotated_maintainer_key_does_not_poison_the_cache() {
         "expected a validation error, got {err:?}"
     );
 
-    // The pinned key is unchanged and the cached index was NOT overwritten with
-    // the attacker's — install still reads the original author key + digest.
     let repo = svc.get_repo(id).await.unwrap();
     assert_eq!(
         repo.maintainer_key,

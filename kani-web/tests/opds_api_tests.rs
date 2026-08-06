@@ -1,8 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for OPDS catalog endpoints mounted at /opds.
-// OPDS uses per-handler auth (session cookie OR HTTP Basic auth).
-// Endpoints: GET /opds, /opds/catalogue, /opds/manga/{id},
-//            /opds/search, /opds/opensearch.
 
 mod common;
 use axum::http::StatusCode;
@@ -13,8 +9,6 @@ use common::{
 };
 use http_body_util::BodyExt as _;
 use tower::ServiceExt;
-
-// ── Helper builders ────────────────────────────────────────────────────────────
 
 fn opds_req(uri: &str) -> Request<Body> {
     Request::builder()
@@ -42,8 +36,6 @@ fn opds_basic_auth_req(uri: &str, username: &str, password: &str) -> Request<Bod
         .unwrap()
 }
 
-// ── GET /opds (root feed) ─────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn opds_root_returns_401_without_auth() {
     let state = test_state().await;
@@ -52,7 +44,6 @@ async fn opds_root_returns_401_without_auth() {
     let res = app.oneshot(opds_req("/opds")).await.unwrap();
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
-    // OPDS 401 must advertise Basic auth realm
     let www_auth = res
         .headers()
         .get("www-authenticate")
@@ -116,8 +107,6 @@ async fn opds_root_returns_401_with_wrong_basic_auth() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
-// ── GET /opds/catalogue ───────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn opds_catalogue_returns_200_for_empty_library() {
     let state = test_state().await;
@@ -158,7 +147,6 @@ async fn opds_catalogue_includes_seeded_manga() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
-    // The Atom feed XML must mention the manga title
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let xml = std::str::from_utf8(&bytes).unwrap();
     assert!(
@@ -166,8 +154,6 @@ async fn opds_catalogue_includes_seeded_manga() {
         "Feed should contain seeded manga title"
     );
 }
-
-// ── GET /opds/manga/{id} ──────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn opds_manga_returns_404_for_missing_id() {
@@ -181,7 +167,6 @@ async fn opds_manga_returns_404_for_missing_id() {
         .await
         .unwrap();
 
-    // Service returns NotFound which maps to 404
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
@@ -212,8 +197,6 @@ async fn opds_manga_returns_401_without_auth() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
-// ── GET /opds/search ──────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn opds_search_returns_200_with_auth() {
     let state = test_state().await;
@@ -238,8 +221,6 @@ async fn opds_search_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── GET /opds/opensearch ──────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn opds_opensearch_returns_200_with_auth() {
@@ -275,8 +256,6 @@ async fn opds_opensearch_returns_401_without_auth() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
-// ── Feed shape assertions ─────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn opds_root_feed_contains_catalogue_link() {
     let state = test_state().await;
@@ -301,12 +280,6 @@ async fn opds_root_feed_contains_catalogue_link() {
     );
 }
 
-// ── K9. The feed reflects what the source actually returned ───────────────────
-
-// Every other OPDS test seeds chapter rows by hand, so none of them prove the
-// feed matches what a *source* served. This drives the whole path — a live
-// origin, a real scan through `AppService`, then the rendered feed — so a break
-// anywhere between the source response and the XML shows up here.
 #[tokio::test]
 async fn opds_reflects_what_the_source_actually_returned() {
     use kani_app::source::{SourceBackend, YamlSource};
@@ -397,9 +370,6 @@ async fn opds_reflects_what_the_source_actually_returned() {
         .await
         .unwrap();
 
-    // The feed lists downloaded chapters only — it exists to serve files — so
-    // mark them as the downloader would. Their titles and numbers still come
-    // from the source response, which is what this asserts on.
     sqlx::query("UPDATE chapters SET download_status = 2 WHERE manga_id = ?")
         .bind(manga.0)
         .execute(&state.db)

@@ -1,8 +1,3 @@
-// @ts-check
-// Shared popover plumbing. Every popover-style component (Combobox, Select,
-// DisplayMenu, …) needs the same two pieces: a portal into #popover-root so
-// the panel escapes overflow:hidden ancestors, and an outside-click closer.
-// Both were being copy-pasted per component; this is the single home.
 
 import { render } from 'preact';
 import { useEffect } from 'preact/hooks';

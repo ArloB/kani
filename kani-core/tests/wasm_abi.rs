@@ -21,8 +21,6 @@ use std::task::{Context, Poll};
 use wasmtime::StoreContextMut;
 use wasmtime::component::{Source, StreamConsumer, StreamResult};
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 fn workspace_root() -> std::path::PathBuf {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest.parent().unwrap().to_path_buf()
@@ -72,8 +70,6 @@ async fn make_instance(
     (rt, store, instance)
 }
 
-// ── test_abi: html host imports ───────────────────────────────────────────────
-
 #[tokio::test]
 async fn abi_html_imports_return_extracted_attr_and_text() {
     let bytes = skip_if_missing!("kani-test-abi");
@@ -88,13 +84,10 @@ async fn abi_html_imports_return_extracted_attr_and_text() {
 
     assert_eq!(result.manga.len(), 1, "html test should return 1 item");
     let m = &result.manga[0];
-    // id = data-id attribute ("42"), title = text of .title child ("Hello World")
     assert_eq!(m.id, "42", "html attr extraction");
     assert_eq!(m.title, "Hello World", "html text extraction");
     assert_eq!(m.cover_url.as_deref(), Some("html-ok"), "html sentinel");
 }
-
-// ── test_abi: json host imports ───────────────────────────────────────────────
 
 #[tokio::test]
 async fn abi_json_imports_return_extracted_fields() {
@@ -110,7 +103,6 @@ async fn abi_json_imports_return_extracted_fields() {
 
     assert_eq!(result.manga.len(), 1, "json test should return 1 item");
     let m = &result.manga[0];
-    // id = get_str("/name"), title = get_i64("/age").to_string()
     assert_eq!(m.id, "Alice", "json get_str");
     assert_eq!(m.title, "30", "json get_i64");
     assert_eq!(
@@ -119,8 +111,6 @@ async fn abi_json_imports_return_extracted_fields() {
         "json sentinel: active/score/tags/keys all verified"
     );
 }
-
-// ── test_abi: utility host imports ───────────────────────────────────────────
 
 #[tokio::test]
 async fn abi_utility_imports_return_decoded_string_and_query_param() {
@@ -137,17 +127,13 @@ async fn abi_utility_imports_return_decoded_string_and_query_param() {
     assert_eq!(result.manga.len(), 1, "utility test should return 1 item");
     let m = &result.manga[0];
     assert_eq!(m.id, "util-ok", "utility sentinel");
-    // title = url_decode("hello%20world") = "hello world"
     assert_eq!(m.title, "hello world", "url_encode+decode round-trip");
-    // cover_url = get_query_param(built_url, "pg") = "5"
     assert_eq!(
         m.cover_url.as_deref(),
         Some("5"),
         "get_query_param from build_url result"
     );
 }
-
-// ── test_abi: prefs host imports ──────────────────────────────────────────────
 
 #[tokio::test]
 async fn abi_prefs_get_value_returns_injected_preferences() {
@@ -172,9 +158,7 @@ async fn abi_prefs_get_value_returns_injected_preferences() {
 
     assert_eq!(result.manga.len(), 1, "prefs test should return 1 item");
     let m = &result.manga[0];
-    // id = prefs::get_str("test_str") = "injected_value"
     assert_eq!(m.id, "injected_value", "prefs get_str");
-    // title = prefs::get_bool("test_bool").to_string() = "true"
     assert_eq!(m.title, "true", "prefs get_bool");
     assert_eq!(
         m.cover_url.as_deref(),
@@ -182,8 +166,6 @@ async fn abi_prefs_get_value_returns_injected_preferences() {
         "prefs sentinel: raw/missing checks passed"
     );
 }
-
-// ── test_abi: extraction::extract_html ───────────────────────────────────────
 
 #[tokio::test]
 async fn abi_extract_html_returns_rows_from_blueprint() {
@@ -204,8 +186,6 @@ async fn abi_extract_html_returns_rows_from_blueprint() {
     assert_eq!(result.manga[1].title, "Beta");
 }
 
-// ── test_abi: extraction::extract_json ───────────────────────────────────────
-
 #[tokio::test]
 async fn abi_extract_json_returns_rows_from_blueprint() {
     let bytes = skip_if_missing!("kani-test-abi");
@@ -225,8 +205,6 @@ async fn abi_extract_json_returns_rows_from_blueprint() {
     assert_eq!(result.manga[1].title, "JsonBeta");
 }
 
-// ── test_abi: error paths ─────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn abi_invalid_handles_return_errors() {
     let bytes = skip_if_missing!("kani-test-abi");
@@ -245,8 +223,6 @@ async fn abi_invalid_handles_return_errors() {
         "all invalid-handle ABI calls must return Err"
     );
 }
-
-// ── test_abi: get_metadata ────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn abi_get_metadata_returns_correct_extension_info() {
@@ -268,8 +244,6 @@ async fn abi_get_metadata_returns_correct_extension_info() {
     assert!(!meta.unrestricted_http);
     assert_eq!(meta.language, "en");
 }
-
-// ── test_abi: empty returns (other pages/queries) ─────────────────────────────
 
 #[tokio::test]
 async fn abi_unknown_page_returns_empty_list() {
@@ -347,8 +321,6 @@ async fn abi_get_preferences_returns_empty() {
     assert!(result.is_empty());
 }
 
-// ── test_abi: handle cleanup (no leaks between calls) ────────────────────────
-
 #[tokio::test]
 async fn abi_handles_are_cleaned_up_after_each_call() {
     let bytes = skip_if_missing!("kani-test-abi");
@@ -356,14 +328,12 @@ async fn abi_handles_are_cleaned_up_after_each_call() {
 
     let provider = instance.kani_extension_manga_provider();
 
-    // Run the HTML test (allocates several handles internally)
     provider
         .call_get_popular_manga(&mut store, 1, 20, &[])
         .await
         .unwrap()
         .unwrap();
 
-    // After the call, no handles should remain (the extension drops them all)
     let state = store.data();
     assert!(
         state.html_docs.is_empty(),
@@ -386,8 +356,6 @@ async fn abi_handles_are_cleaned_up_after_each_call() {
         "json_docs should be empty after JSON test"
     );
 }
-
-// ── test_abi: get_chapter_list_stream (CM_ASYNC stream<chapter-info>) ────────
 
 type ChapterStreamItem =
     Result<ChapterInfo, kani_core::wasm::kani::extension::types::ExtensionError>;

@@ -19,8 +19,6 @@ fn make_state(allowed: AllowedHost) -> HostState {
     .unwrap()
 }
 
-// ── JSON Fetch: list → detail ─────────────────────────────────────────────────
-
 #[tokio::test]
 async fn json_fetch_list_then_detail() {
     let server = MockServer::start().await;
@@ -85,8 +83,6 @@ async fn json_fetch_list_then_detail() {
     assert_eq!(state.io_count, 4, "1 list fetch + 3 detail fetches = 4");
 }
 
-// ── HTML Fetch: single sub-fetch ──────────────────────────────────────────────
-
 #[tokio::test]
 async fn html_fetch_sub_blueprint() {
     let server = MockServer::start().await;
@@ -147,8 +143,6 @@ async fn html_fetch_sub_blueprint() {
     assert_eq!(state.io_count, 3, "1 list + 2 detail fetches = 3");
 }
 
-// ── Disallowed host rejected ──────────────────────────────────────────────────
-
 #[tokio::test]
 async fn fetch_disallowed_host_is_rejected() {
     let server = MockServer::start().await;
@@ -185,8 +179,6 @@ async fn fetch_disallowed_host_is_rejected() {
         "expected host restriction error, got: {err}"
     );
 }
-
-// ── Nested Fetch rejected ─────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn nested_fetch_is_rejected() {
@@ -230,8 +222,6 @@ async fn nested_fetch_is_rejected() {
         "expected nested Fetch error, got: {err}"
     );
 }
-
-// ── I/O budget: 33rd sub-fetch trips the limit ───────────────────────────────
 
 #[tokio::test]
 async fn fetch_budget_exceeded_after_32_requests() {
@@ -285,8 +275,6 @@ async fn fetch_budget_exceeded_after_32_requests() {
         "expected budget exceeded error, got: {err}"
     );
 }
-
-// ── OnFailurePolicy tests ─────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn on_failure_skip_produces_null() {
@@ -416,8 +404,6 @@ async fn on_failure_use_evaluates_fallback() {
     assert_eq!(rows[0]["detail"], "fallback_value");
 }
 
-// ── Concurrent fan-out ─────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn html_sub_fetches_run_concurrently_not_sequentially() {
     use std::time::Duration;
@@ -493,8 +479,6 @@ async fn html_sub_fetches_run_concurrently_not_sequentially() {
         "1 list fetch + N detail fetches"
     );
 
-    // Sequential would take at least N * DELAY_MS; concurrent fan-out should
-    // finish well under that even accounting for CI scheduling jitter.
     assert!(
         elapsed < Duration::from_millis(DELAY_MS * (N as u64) / 2),
         "expected concurrent fan-out to run in well under {}ms, took {:?}",

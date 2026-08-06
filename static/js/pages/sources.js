@@ -132,7 +132,6 @@ export async function init(container) {
   // Show skeleton only if sources take > 150 ms to load
   const cancelSkeleton = deferredSkeleton(() => { if (_mobileEl) _mobileEl.innerHTML = skeletonSourceList(5); });
 
-  // ── Sidebar component ────────────────────────────────────────────────────
 
   /** Mounts/updates the source list into both the desktop aside and the mobile slot. */
   function _mountSourceList() {
@@ -141,7 +140,6 @@ export async function init(container) {
     if (_mobileEl) render(html`<${SourcesSidebar} sources=${allSources} onCreated=${_refresh} />`, _mobileEl);
   }
 
-  // ── Fetch ────────────────────────────────────────────────────────────────
 
   async function _refresh() {
     try {
@@ -150,7 +148,7 @@ export async function init(container) {
         allSources = updated;
         _mountSourceList();
       }
-    } catch { /* ignore refresh failures */ }
+    } catch { }
   }
 
   let sources;
@@ -169,7 +167,6 @@ export async function init(container) {
   allSources = Array.isArray(sources) ? sources : [];
   _mountSourceList();
 
-  // ── Add source modal ─────────────────────────────────────────────────────
 
   // Mount once per click and close via the returned cleanup — mountIntoModalRoot
   // gives each call its own container, so re-mounting with open=false would stack

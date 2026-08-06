@@ -11,16 +11,7 @@ async function _parseBody(res) {
 }
 
 /**
- * Internal fetch wrapper.
- * @param {string} method
- * @param {string} path
- * @param {{ body?: any, params?: Record<string, any>, signal?: AbortSignal, timeoutMs?: number }} [opts]
- */
-/**
- * Pages a signed-out visitor is *meant* to be on. A 401 there is the expected
- * answer, not a reason to bounce them to the login form — which is what used to
- * happen on /setup and /register, kicking the operator off the first-run screen
- * before it could render.
+ * Pages where a 401 is expected and must not trigger a login redirect.
  */
 const UNAUTHENTICATED_PAGES = [
   '/login',
@@ -35,6 +26,11 @@ function _onUnauthenticatedPage() {
   return UNAUTHENTICATED_PAGES.includes(location.pathname);
 }
 
+/**
+ * @param {string} method
+ * @param {string} path
+ * @param {{ body?: any, params?: Record<string, any>, signal?: AbortSignal, timeoutMs?: number }} [opts]
+ */
 async function _req(method, path, opts = {}) {
   let url = `/rest${path}`;
 
@@ -52,7 +48,7 @@ async function _req(method, path, opts = {}) {
   /** @type {RequestInit} */
   const init = { method, credentials: 'include', headers: {} };
   if (opts.body != null) {
-    // @ts-ignore
+    // @ts-ignore: RequestInit.headers is a union but this instance is a plain object.
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(opts.body);
   }
@@ -100,7 +96,6 @@ async function _req(method, path, opts = {}) {
   return _parseBody(res);
 }
 
-// ── SWR cache ────────────────────────────────────────────────────────────────
 
 /** @type {Map<string, { data: any, ts: number, revalidating: boolean }>} */
 const _swrCache = new Map();
@@ -141,7 +136,6 @@ export function clearSWRCache() {
   _swrCache.clear();
 }
 
-// ── Auth ─────────────────────────────────────────────────────────────────────
 
 /**
  * Returns the authenticated user's permission list as an array of strings.
@@ -168,20 +162,11 @@ export async function logout() {
   return _req('POST', '/auth/logout');
 }
 
-/**
- * Drop cached chapter images on the way out.
- *
- * The service worker serves `/rest/chapter/{id}/page/{n}` cache-first, which
- * means a cached page is returned *without* a session — verified: after clearing
- * every cookie, a cached page still came back 200 with the full JPEG. On a
- * shared browser profile that leaves one account's reading readable by the next
- * person, so signing out clears it. The cost is that offline chapters must be
- * re-cached after signing back in; Settings → Offline lists them.
- */
+/** Cached chapter pages are account data, so sign-out must remove the shared browser cache. */
 async function _forgetOfflinePages() {
   try {
     if ('caches' in window) await caches.delete('kani-pages-v1');
-  } catch { /* nothing cached, or storage unavailable */ }
+  } catch { }
 }
 
 /** @param {string} currentPassword @param {string} newPassword */
@@ -202,7 +187,6 @@ export async function getPasswordResetEnabled() {
   return _req('GET', '/auth/password-reset-enabled');
 }
 
-// ── API tokens (OPDS / third-party clients) ──────────────────────────────────
 
 export async function listApiTokens() {
   return _req('GET', '/me/api-tokens');
@@ -261,14 +245,12 @@ export async function adminTriggerPasswordReset(userId) {
   return _req('POST', `/admin/users/${userId}/password-reset`);
 }
 
-// ── Boot / SSE ────────────────────────────────────────────────────────────────
 
 /** @returns {Promise<{ boot_id: string }>} */
 export async function getBootId() {
   return _req('GET', '/boot_id');
 }
 
-// ── Sources ───────────────────────────────────────────────────────────────────
 
 export async function getSources() {
   return _req('GET', '/sources');
@@ -519,7 +501,6 @@ export async function getActiveSourceIds() {
   return _req('GET', '/sources/active_ids');
 }
 
-// ── Source Repositories ───────────────────────────────────────────────────────
 
 export async function listRepos() {
   return _req('GET', '/sources/repos');
@@ -568,7 +549,6 @@ export async function updateFromRepo(repoId, extensionId, sourceId) {
   return _req('POST', `/sources/${sourceId}/update`, { body: { repo_id: repoId, extension_id: extensionId } });
 }
 
-// ── Source Preferences ────────────────────────────────────────────────────────
 
 /** @param {number} sid */
 export async function getPreferenceSchema(sid) {
@@ -600,7 +580,6 @@ export async function togglePreferenceSelect(sid, key, item, selected) {
   return _req('POST', `/sources/${sid}/preferences/${encodeURIComponent(key)}/toggle_select`, { body: { item, selected } });
 }
 
-// ── Library ───────────────────────────────────────────────────────────────────
 
 /**
  * @param {{ page: number, page_size: number, search?: string, status_filter?: number|null,
@@ -626,7 +605,6 @@ export async function getRecentUpdates(page, signal) {
  * @param {AbortSignal} [signal]
  */
 export async function globalSearch(query, scope, page, pageSize, signal) {
-  // Unit variants pass as plain strings; Sources variant as JSON-encoded object.
   const scopeParam = typeof scope === 'string' ? scope : JSON.stringify(scope);
   return _req('GET', '/global_search', {
     params: { query, scope: scopeParam, page, page_size: pageSize },
@@ -634,7 +612,6 @@ export async function globalSearch(query, scope, page, pageSize, signal) {
   });
 }
 
-// ── Manga ─────────────────────────────────────────────────────────────────────
 
 /** @param {number} id */
 export async function deleteManga(id) {
@@ -829,7 +806,6 @@ export async function migrateManga(id, targetSourceId, targetMangaId, keepOrphan
   });
 }
 
-// ── Download Rules ────────────────────────────────────────────────────────────
 
 /** @param {number} mangaId */
 export async function getDownloadRules(mangaId) {
@@ -874,7 +850,6 @@ export async function previewDownloadRules(mangaId, kinds) {
   return _req('POST', `/manga/${mangaId}/download_rules/preview`, { body: { kinds } });
 }
 
-// ── Scanlator Preferences ─────────────────────────────────────────────────────
 
 /** @param {number} mangaId */
 export async function getScanlatorPrefs(mangaId) {
@@ -906,7 +881,6 @@ export async function getChapterLanguages(mangaId) {
   return _req('GET', `/manga/${mangaId}/languages`);
 }
 
-// ── Chapters ──────────────────────────────────────────────────────────────────
 
 /** @param {number} id */
 export async function downloadChapter(id) {
@@ -923,7 +897,6 @@ export async function cancelDownload(id) {
   return _req('POST', `/chapter/${id}/cancel`);
 }
 
-// ── Progress Tracking ────────────────────────────────────────────────────
 
 /** @param {number} chapterId @param {number} page */
 export async function setChapterProgress(chapterId, page) {
@@ -948,7 +921,6 @@ export async function setMangaTracking(mangaId, data) {
   return _req('PUT', `/manga/${mangaId}/tracking`, { body: data });
 }
 
-// ── Filters ───────────────────────────────────────────────────────────────────
 
 export async function getTags() {
   return _req('GET', '/filters/tags');
@@ -962,7 +934,6 @@ export async function getArtists() {
   return _req('GET', '/filters/artists');
 }
 
-// ── Categories ────────────────────────────────────────────────────────────────
 
 export async function getCategories() {
   return _req('GET', '/categories');
@@ -998,7 +969,6 @@ export async function setMangaCategories(mangaId, categoryIds) {
   return _req('PUT', `/manga/${mangaId}/categories`, { body: { category_ids: categoryIds } });
 }
 
-// ── Settings ──────────────────────────────────────────────────────────────────
 
 export async function getSettings() {
   return _req('GET', '/settings');
@@ -1047,7 +1017,6 @@ export async function cancelAllGlobalDownloads() {
   return _req('DELETE', '/downloads/active');
 }
 
-// ── External Trackers ────────────────────────────────────────────────────
 
 export async function getTrackers() {
   return _req('GET', '/trackers');
@@ -1112,7 +1081,6 @@ export async function syncMangaTrackers(mangaId) {
   return _req('POST', `/manga/${mangaId}/sync`);
 }
 
-// ── Continue reading ──────────────────────────────────────────────────────────
 
 /** @param {number} mangaId */
 export async function getContinueReading(mangaId) {
@@ -1135,7 +1103,6 @@ export async function markChaptersUpTo(mangaId, chapterNumber, isRead) {
   });
 }
 
-// ── Admin — user management ───────────────────────────────────────────────────
 
 export async function adminListUsers() {
   return _req('GET', '/admin/users');
@@ -1217,7 +1184,6 @@ export async function getDownloadHistory(limit) {
   return _req('GET', '/downloads/history', limit ? { params: { limit } } : {});
 }
 
-// ── Admin logs ────────────────────────────────────────────────────────────────
 
 /**
  * @param {{ level?: string, source?: string, from?: string, to?: string,
@@ -1235,14 +1201,12 @@ export async function getAdminAuditLog(params = {}) {
   return _req('GET', '/admin/audit-log', { params });
 }
 
-// ── Reading stats ─────────────────────────────────────────────────────────────
 
 /** @param {number} [period] Number of days for the activity window (default 90). */
 export async function getReadingStats(period) {
   return _req('GET', '/stats', period ? { params: { period } } : {});
 }
 
-// ── Backup / Restore ──────────────────────────────────────────────────────────
 
 /** Fetch as a File download (navigates browser). */
 export function downloadBackup(includeChapterProgress = false) {
@@ -1273,7 +1237,6 @@ export async function importTachiyomiBackup(file, opts = {}) {
   return res.json();
 }
 
-// ── Admin: database maintenance ──────────────────────────────────────────────
 
 /** @returns {Promise<{db_size_bytes:number, wal_size_bytes:number}>} */
 export async function getDbStats() {
@@ -1293,7 +1256,6 @@ export async function triggerRecurring(kind) {
   return _req('POST', `/admin/recurring/${encodeURIComponent(kind)}/run`);
 }
 
-// ── Pending imports ───────────────────────────────────────────────────────────
 
 export async function getPendingImports() {
   return _req('GET', '/library/pending-imports');
@@ -1309,13 +1271,11 @@ export async function resolvePendingImport(id, sourceId, sourceMangaId) {
   return _req('POST', `/library/pending-imports/${id}/resolve`, { body: { source_id: sourceId, source_manga_id: sourceMangaId } });
 }
 
-// ── Orphaned manga ────────────────────────────────────────────────────────────
 
 export async function getOrphanedManga() {
   return _req('GET', '/library/orphaned');
 }
 
-// ── Duplicates ────────────────────────────────────────────────────────────────
 
 export async function getDuplicates() {
   return _req('GET', '/library/duplicates');
@@ -1336,7 +1296,6 @@ export async function mergeDuplicate(keepId, discardId) {
   return _req('POST', '/library/duplicates/merge', { body: { keep_id: keepId, discard_id: discardId } });
 }
 
-// ── Filesystem browser ────────────────────────────────────────────────────────
 
 /** @param {string} path */
 export async function fsBrowse(path) {
@@ -1348,7 +1307,6 @@ export async function fsMkdir(path, name) {
   return _req('POST', '/admin/fs/mkdir', { body: { path, name } });
 }
 
-// ── Path migration ────────────────────────────────────────────────────────────
 
 /** @param {'library_path'|'wasm_storage_path'} field @param {string} newPath */
 export async function estimatePathMigration(field, newPath) {
@@ -1360,7 +1318,6 @@ export async function startPathMigration(field, newPath) {
   return _req('POST', '/admin/path/migrate', { body: { field, new_path: newPath } });
 }
 
-// ── Webhooks ──────────────────────────────────────────────────────────────────
 
 export async function listWebhooks() {
   return _req('GET', '/webhooks');
@@ -1401,7 +1358,6 @@ export async function setMangaWebhookNotify(mangaId, enabled) {
   return _req('PUT', `/manga/${mangaId}/webhook-notify`, { body: { enabled } });
 }
 
-// ── Bookmarks (#14) ───────────────────────────────────────────────────────────
 
 /** @param {number} chapterId @returns {Promise<number[]>} */
 export async function getBookmarks(chapterId) {
@@ -1413,7 +1369,6 @@ export async function toggleBookmark(chapterId, pageIndex) {
   return _req('POST', `/chapter/${chapterId}/bookmarks`, { body: { page_index: pageIndex } });
 }
 
-// ── Per-chapter notes (#31) ───────────────────────────────────────────────────
 
 /**
  * Returns chapter notes for a manga: `{ notes: [{chapter_id, chapter_number, note}] }`.
@@ -1436,9 +1391,7 @@ export async function setChapterNote(chapterId, note) {
   return _req('PUT', `/chapter/${chapterId}/note`, { body: { note } });
 }
 
-// ── Reading-pace history (#34) ────────────────────────────────────────────────
 
-// ── Security — sessions ───────────────────────────────────────────────────────
 
 /** @returns {Promise<{sessions: Array<{id:string,created_at:number,last_seen_at:number,user_agent:string|null,ip_addr:string|null,is_current:boolean}>}>} */
 export async function getSessions() {
@@ -1454,7 +1407,6 @@ export async function revokeOtherSessions() {
   return _req('DELETE', '/auth/sessions');
 }
 
-// ── Security — TOTP ───────────────────────────────────────────────────────────
 
 /** @returns {Promise<{secret:string,otpauth_uri:string,qr_data_url:string}>} */
 export async function beginTotpSetup() {
@@ -1481,14 +1433,12 @@ export async function regenerateBackupCodes(code) {
   return _req('POST', '/auth/totp/backup-codes', { body: { totp_code: code } });
 }
 
-// ── Security — password strength ─────────────────────────────────────────────
 
 /** @param {string} password @param {string} [identity] */
 export async function checkPasswordStrength(password, identity = '') {
   return _req('POST', '/auth/password-strength', { body: { password, identity } });
 }
 
-// ── System info ───────────────────────────────────────────────────────────────
 
 /**
  * @returns {Promise<{version:string,first_run:boolean,oidc_available:boolean,registration_enabled:boolean}>}
@@ -1507,27 +1457,23 @@ export async function markFirstRunComplete() {
   return _req('POST', '/system/first-run-complete');
 }
 
-// ── Security — features ───────────────────────────────────────────────────────
 
 /** @returns {Promise<{public_instance:boolean,totp_enabled:boolean}>} */
 export async function getFeatures() {
   return _req('GET', '/features');
 }
 
-// ── Admin logs ────────────────────────────────────────────────────────────────
 
 export async function purgeAdminLogs() {
   return _req('POST', '/admin/logs/purge');
 }
 
-// ── Source capabilities ───────────────────────────────────────────────────────
 
 /** @param {number} sourceId @returns {Promise<{streaming_chapters:boolean}>} */
 export async function getSourceCapabilities(sourceId) {
   return _req('GET', `/sources/${sourceId}/capabilities`);
 }
 
-// ── Metadata providers ────────────────────────────────────────────────────────
 
 /** @returns {Promise<Array<{id:string,name:string}>>} */
 export async function listMetadataProviders() {
@@ -1543,7 +1489,6 @@ export async function enrichMangaMetadata(mangaId, provider) {
   return _req('POST', `/manga/${mangaId}/enrich-metadata`, { body: { provider } });
 }
 
-// ── Jobs ──────────────────────────────────────────────────────────────────────
 
 /** @param {{ job_type?: string, status?: string, limit?: number, offset?: number }} [params] */
 export async function getJobs(params) {
@@ -1575,7 +1520,6 @@ export async function retryChapterDownload(id) {
   return _req('POST', `/chapter/${id}/download/retry`);
 }
 
-// ── Trash ─────────────────────────────────────────────────────────────────────
 
 export async function listTrash() {
   return _req('GET', '/trash');
@@ -1600,7 +1544,6 @@ export async function purgeTrashOne(id) {
   return _req('DELETE', `/trash/${id}`);
 }
 
-// ── Volumes ───────────────────────────────────────────────────────────────────
 
 /** @param {number} mangaId */
 export async function listVolumes(mangaId) {
@@ -1627,7 +1570,6 @@ export async function assignChapterVolume(mangaId, chapterId, volumeId) {
   return _req('PUT', `/manga/${mangaId}/chapters/${chapterId}/volume`, { body: { volume_id: volumeId } });
 }
 
-// ── Smart collections ─────────────────────────────────────────────────────────
 
 export async function listCollections() {
   return _req('GET', '/collections');
@@ -1653,7 +1595,6 @@ export async function getCollectionManga(id) {
   return _req('GET', `/collections/${id}/manga`);
 }
 
-// ── Saved searches ────────────────────────────────────────────────────────────
 
 export async function listSavedSearches() {
   return _req('GET', '/saved-searches');
@@ -1674,7 +1615,6 @@ export async function deleteSavedSearch(id) {
   return _req('DELETE', `/saved-searches/${id}`);
 }
 
-// ── Admin — storage stats ─────────────────────────────────────────────────────
 
 export async function getAdminStorageStats() {
   return _req('GET', '/admin/storage/stats');
@@ -1684,7 +1624,6 @@ export async function getAdminStorageStatsHistory() {
   return _req('GET', '/admin/storage/stats/history');
 }
 
-// ── Chapter upgrades ─────────────────────────────────────────────────────────
 
 /** @returns {Promise<{muted:number[]}>} */
 export async function getNotifyPrefs() {
@@ -1710,7 +1649,6 @@ export async function setUpgradeAutoReplace(mangaId, enabled) {
   return _req('PUT', `/manga/${mangaId}/upgrade-auto-replace`, { body: { enabled } });
 }
 
-// ── Admin — archive export ───────────────────────────────────────────────────
 
 /** @param {{ manga_ids?: number[]|null, zip?: boolean, include_viewer?: boolean }} spec */
 export async function exportArchive(spec) {
@@ -1722,7 +1660,6 @@ export function archiveDownloadUrl(jobId) {
   return `/rest/admin/library/archive/${jobId}/download`;
 }
 
-// ── Scanlator preferences (library-wide defaults) ────────────────────────────
 
 export async function getGlobalScanlatorPrefs() {
   return _req('GET', '/scanlator_preferences/global');
@@ -1739,7 +1676,6 @@ export async function getKnownScanlators() {
   return _req('GET', '/scanlator_preferences/known');
 }
 
-// ── Admin — integrity scrub ───────────────────────────────────────────────────
 
 /**
  * @param {'quick'|'deep'} depth
@@ -1761,7 +1697,6 @@ export async function deleteOrphans(paths, dryRun) {
   return _req('POST', '/admin/library/orphans/delete', { body: { paths, dry_run: dryRun } });
 }
 
-// ── Admin — backup schedule ───────────────────────────────────────────────────
 
 export async function getBackupSchedule() {
   return _req('GET', '/admin/backup/schedule');

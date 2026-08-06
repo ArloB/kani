@@ -58,8 +58,6 @@ impl EmailService {
     }
 }
 
-// ── SMTP backend ──────────────────────────────────────────────────────────────
-
 struct SmtpEmailTransport {
     inner: AsyncSmtpTransport<Tokio1Executor>,
 }
@@ -162,8 +160,6 @@ impl EmailTransport for SmtpEmailTransport {
             .map_err(|e| e.to_string())
     }
 }
-
-// ── Token generation (shared by password_reset and email_verification) ────────
 
 /// Generates a (raw_token, sha256_hash) pair.
 /// `raw_token` is sent to the user; only `sha256_hash` is stored in the DB.

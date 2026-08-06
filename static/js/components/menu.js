@@ -1,5 +1,4 @@
 // @ts-check
-// Reusable context/dropdown menu component.
 
 import { h, render } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
@@ -45,7 +44,6 @@ export function ContextMenu({ items, trigger, onClose, id }) {
     let right = /** @type {number|null} */ (null);
 
     if ('current' in trigger) {
-      // Button-anchored dropdown
       const el = trigger.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
@@ -59,7 +57,6 @@ export function ContextMenu({ items, trigger, onClose, id }) {
       right = vw - rect.right;
       if (vw - right - menuW < MARGIN) right = vw - menuW - MARGIN;
     } else {
-      // Context menu at pointer coordinates
       left = trigger.x;
       top = trigger.y;
       if (left + menuW > vw - MARGIN) left = vw - menuW - MARGIN;

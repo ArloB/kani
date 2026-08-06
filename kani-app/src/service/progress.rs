@@ -25,10 +25,7 @@ impl ReadProgressBuffer {
 impl AppService {
     /// Manga this user has muted new-chapter notifications for.
     ///
-    /// Only the muted ones: the default is to notify, so the exceptions are the
-    /// short list. The client previously learned this per-manga, and only for
-    /// manga whose detail page happened to be opened in the current session —
-    /// so the toggle silently stopped working after a reload.
+    /// Returns only exceptions because notification is enabled by default.
     pub async fn muted_manga_ids(&self, user_id: UserId) -> Result<Vec<i64>> {
         Ok(sqlx::query_scalar!(
             "SELECT manga_id FROM user_manga_tracking \
@@ -205,7 +202,7 @@ impl AppService {
         Ok(row.map(|r| (r.last_page_read, r.is_read)))
     }
 
-    /// Like [`get_chapter_progress`] but also returns the last-read timestamp
+    /// Like [`Self::get_chapter_progress`] but also returns the last-read timestamp
     /// formatted as RFC 3339 (for the OPDS-PSE `pse:lastReadDate` attribute).
     pub async fn get_chapter_progress_full(
         &self,
@@ -436,7 +433,6 @@ impl AppService {
         user_id: UserId,
         manga_id: MangaId,
     ) -> Result<Option<kani_shared::types::ContinueReadingChapter>> {
-        // Step 1: in-progress chapter (is_read=false but last_page_read > 0).
         let in_progress = sqlx::query!(
             r#"
             SELECT c.id as "id: i64", c.chapter_number as "chapter_number: f64",
@@ -475,8 +471,6 @@ impl AppService {
             }));
         }
 
-        // Step 2: lowest unread chapter number (considering all scanlator versions).
-        // A number is "read" if ANY version of it is marked read for this user.
         let next_number = sqlx::query_scalar!(
             r#"
             SELECT MIN(c.chapter_number) as "num: f64"
@@ -509,10 +503,9 @@ impl AppService {
         .await?;
 
         let Some(chapter_number) = next_number else {
-            return Ok(None); // all chapters read
+            return Ok(None);
         };
 
-        // Step 3: pick the preferred scanlator version for that number.
         let chapter = sqlx::query!(
             r#"
             SELECT c.id as "id: i64", COALESCE(c.page_count, 0) as "page_count!: i64"
@@ -563,8 +556,6 @@ impl AppService {
         Ok(ids.into_iter().map(ChapterId).collect())
     }
 
-    // ── Bookmarks (#14) ───────────────────────────────────────────────────────
-
     pub async fn get_bookmarks(&self, user_id: UserId, chapter_id: ChapterId) -> Result<Vec<i64>> {
         let pages = sqlx::query_scalar!(
             r#"SELECT page_index as "page_index: i64" FROM user_page_bookmarks
@@ -606,8 +597,6 @@ impl AppService {
         .await?;
         Ok(true)
     }
-
-    // ── Per-chapter notes (#31) ────────────────────────────────────────────────
 
     pub async fn get_chapter_note(
         &self,

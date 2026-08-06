@@ -150,11 +150,6 @@ impl AppService {
                 .and_then(|j| serde_json::from_str(j).ok())
                 .unwrap_or_default();
 
-            // The score is pre-computed at download time, so the common path
-            // reads four columns rather than parsing the whole manifest. On a
-            // large library that is one avoided JSON parse per downloaded
-            // chapter per scan. Rows written before the columns existed fall
-            // back to the manifest, which is also what backfills them.
             let held_score = stored_score(
                 held.quality_long_edge,
                 held.quality_bytes_per_mp,
@@ -177,20 +172,12 @@ impl AppService {
 
             let mut candidates: Vec<UpgradeCandidate> = Vec::new();
 
-            // (a) The same chapter, re-listed with a different page count.
-            //
-            // `source_page_count` is what the listing said at the last scan;
-            // `held_pages` is what our archive actually holds. Comparing those
-            // two is the whole point — comparing against `page_count` (which
-            // `manifest_capture` writes from that same archive) could only ever
-            // compare a value against itself.
             if let (Some(hp), Some(lp)) = (held_pages, held.source_page_count)
                 && hp != lp
             {
-                // Page count alone cannot tell better from worse — a longer
-                // listing may be the same scan re-split. Spend a confirmation
-                // probe where the budget allows, reading page headers rather
-                // than downloading anything.
+                // Page count alone cannot tell better from worse — a longer listing may be the
+                // same scan re-split. Spend a confirmation probe where the budget allows,
+                // reading page headers rather than downloading anything.
                 let mut kind = if lp > hp {
                     UpgradeKind::QualityReupload
                 } else {
@@ -268,11 +255,6 @@ impl AppService {
                     None => true,
                 };
                 if better {
-                    // A sibling from another group is a different release, not
-                    // a re-encode, so its quality is worth measuring even though
-                    // the ranking alone already justifies offering it. If it is
-                    // already downloaded its manifest is free; otherwise spend a
-                    // probe where the budget allows.
                     let mut candidate_score = stored_score(
                         other.quality_long_edge,
                         other.quality_bytes_per_mp,
@@ -431,10 +413,9 @@ impl AppService {
             UpgradeKind::SourceDowngraded => false,
             UpgradeKind::PreferredScanlator => allowed.iter().any(|r| r == "preferred_scanlator"),
             UpgradeKind::QualityReupload => {
-                // A re-upload only auto-replaces on a reason we actually
-                // measured. An unconfirmed candidate — no probe, so no verdict —
-                // is a page-count difference and nothing more, which is not
-                // enough to rewrite a file unattended.
+                // A re-upload only auto-replaces on a reason we actually measured. An
+                // unconfirmed candidate — no probe, so no verdict — is a page-count difference
+                // and nothing more, which is not enough to rewrite a file unattended.
                 let Some(QualityVerdict::Better(reason)) = candidate.verdict else {
                     return false;
                 };
@@ -645,10 +626,6 @@ impl AppService {
         source_manga_id: &str,
         source_chapter_id: &str,
     ) -> Option<Vec<String>> {
-        // Deliberately not `get_pages`, which reads through the page cache.
-        // The whole job here is to confirm what the source offers *now*; a
-        // cached listing is the very thing being checked, and confirming
-        // against it would attribute a stale measurement to a fresh candidate.
         let backend = self.sources.get_backend(source_id)?;
         let decoded_manga = crate::utils::decode_manga_id(source_manga_id);
         let decoded_chapter = crate::utils::decode_manga_id(source_chapter_id);
@@ -670,9 +647,8 @@ impl AppService {
     /// Reads dimensions, size and encoding of a few pages without downloading
     /// them, by range-requesting each page's header.
     ///
-    /// This is what makes a genuine pre-download comparison possible: a source
-    /// listing carries page counts and URLs, never dimensions, so before this
-    /// the only signal was "the count changed".
+    /// Source listings expose page counts and URLs but not the sampled quality
+    /// axes required for a pre-download comparison.
     pub async fn probe_page_quality(
         &self,
         page_urls: &[String],
@@ -696,11 +672,6 @@ impl AppService {
             let Ok(resp) = self.smart_client.safe_get(url, Some(headers)).await else {
                 continue;
             };
-            // A server that ignores Range answers 200 with the whole file, so
-            // this must take a prefix and walk away rather than demand the body
-            // fit the cap — `bytes_limited` rejects an oversized response
-            // outright, which silently reduced the probe to nothing against
-            // every such host.
             let total = content_range_total(resp.headers());
             let Ok(bytes) = resp.bytes_prefix(PROBE_PREFIX_BYTES).await else {
                 continue;
@@ -822,7 +793,6 @@ mod tests {
 
     #[test]
     fn a_longer_reupload_scales_the_position() {
-        // Halfway through 20 pages is halfway through 40.
         assert_eq!(remap_progress(10, 20, 40), 20);
     }
 

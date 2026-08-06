@@ -1,13 +1,12 @@
 # Disclaimer
 
-Kani is infrastructure software — it ships no content.
+Kani does not include or distribute content.
 
-Extensions are third-party integrations with external websites, installed by the user at runtime.
-Extension files (`.wasm`) are not included in Kani releases and are not distributed by this
-project. Kani does not endorse, provide, or maintain any third-party content source.
+Extensions are user-installed third-party integrations. Kani releases do not include extension
+files, and the project does not provide, endorse, or maintain external content sources.
 
-You are solely responsible for ensuring your use of Kani and any content sources you connect to
-complies with applicable laws and the terms of service of those sources.
+You are responsible for complying with applicable laws and the terms of any services you access
+through Kani.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
 SEE [LICENSE](LICENSE) FOR DETAILS.

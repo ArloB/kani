@@ -12,7 +12,6 @@ impl AppService {
         .map_err(Into::into)
     }
 
-    /// Creates a category and returns the new row id.
     pub async fn create_category(&self, name: &str, sort_order: i64) -> Result<i64> {
         let name = name.trim();
         if name.is_empty() {

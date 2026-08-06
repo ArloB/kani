@@ -1,6 +1,6 @@
 ## Summary
 
-<!-- What does this PR do? Why? (1-3 bullet points) -->
+<!-- Summarise the change and its purpose in 1–3 bullet points. -->
 
 -
 
@@ -14,11 +14,12 @@
 
 ## Checklist
 
-- [ ] Tests added / updated (`cargo nextest run` passes)
+- [ ] Tests added or updated; `cargo nextest run` passes
 - [ ] `cargo clippy -- -D warnings` passes
-- [ ] SQL schema changes: `cargo sqlx prepare --workspace` run and `.sqlx/` committed
-- [ ] Frontend: new user-visible strings use `t("key")` from `i18n.js` and key added to `static/locales/en.js`
-- [ ] User-visible change: entry added under `## [Unreleased]` in `CHANGELOG.md` (release notes are assembled from it)
+- [ ] Comments state necessary current constraints; durable findings are documented separately
+- [ ] SQL schema changes include updated `.sqlx/` metadata from `cargo sqlx prepare --workspace`
+- [ ] New frontend copy uses `t("key")`, with English values added to `static/locales/en.js`
+- [ ] User-visible changes are documented under `## [Unreleased]` in `CHANGELOG.md`
 
 ## Screenshots (if UI changes)
 

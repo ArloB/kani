@@ -8,8 +8,6 @@ use super::AppService;
 use crate::error::{Result, ServiceError};
 use crate::ids::ChapterId;
 
-// ─── Device profiles ─────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeviceProfile {
     Standard,
@@ -70,8 +68,6 @@ impl std::str::FromStr for DeviceProfile {
     }
 }
 
-// ─── KCC options ─────────────────────────────────────────────────────────────
-
 pub enum KccFormat {
     Epub,
     Mobi,
@@ -120,8 +116,6 @@ pub struct KccOptions {
     pub profile: String,
     pub manga_mode: bool,
 }
-
-// ─── Service methods ─────────────────────────────────────────────────────────
 
 impl AppService {
     /// Export a downloaded chapter as an EPUB3 file, optionally with device-specific
@@ -240,8 +234,6 @@ impl AppService {
         Some(raw.trim().to_string())
     }
 }
-
-// ─── EPUB builder ────────────────────────────────────────────────────────────
 
 struct ComicInfo {
     writer: Option<String>,
@@ -410,8 +402,6 @@ fn build_epub_zip(
     Ok(output)
 }
 
-// ─── Image processing ────────────────────────────────────────────────────────
-
 fn process_image(bytes: &[u8], profile: &DeviceProfile) -> Result<Vec<u8>> {
     let img = image::load_from_memory(bytes)
         .map_err(|e| ServiceError::Internal(format!("Decode image: {e}")))?;
@@ -472,8 +462,6 @@ fn apply_gamma(img: DynamicImage, gamma: f32) -> DynamicImage {
     }
     DynamicImage::ImageRgba8(out)
 }
-
-// ─── KEPUB transform ─────────────────────────────────────────────────────────
 
 fn kepub_transform(epub_bytes: Vec<u8>, profile: &DeviceProfile) -> Result<Vec<u8>> {
     use zip::{ZipArchive, ZipWriter, write::FileOptions};
@@ -547,8 +535,6 @@ fn patch_xhtml(bytes: &[u8], viewport_meta: &str) -> Vec<u8> {
     }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 fn is_image(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
     l.ends_with(".jpg")
@@ -562,8 +548,6 @@ fn is_image(name: &str) -> bool {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-
-    // ── DeviceProfile ────────────────────────────────────────────────────────
 
     #[test]
     fn standard_has_no_dimensions() {
@@ -628,8 +612,6 @@ mod tests {
         assert_eq!(p, DeviceProfile::Standard);
     }
 
-    // ── KccFormat ────────────────────────────────────────────────────────────
-
     #[test]
     fn kcc_epub_mime_and_ext() {
         assert_eq!(KccFormat::Epub.mime(), "application/epub+zip");
@@ -654,8 +636,6 @@ mod tests {
         assert_eq!(KccFormat::Mobi.as_str(), "MOBI");
         assert_eq!(KccFormat::Cbz.as_str(), "CBZ");
     }
-
-    // ── is_image ─────────────────────────────────────────────────────────────
 
     #[test]
     fn jpg_is_image() {
@@ -703,8 +683,6 @@ mod tests {
         assert!(!is_image(""));
     }
 
-    // ── patch_opf ────────────────────────────────────────────────────────────
-
     #[test]
     fn patch_opf_injects_fixed_layout_meta() {
         let opf = b"<metadata></metadata>";
@@ -718,13 +696,10 @@ mod tests {
 
     #[test]
     fn patch_opf_no_metadata_tag_unchanged_length() {
-        // If there is no </metadata>, replacen replaces nothing — should not panic.
         let opf = b"<package><manifest/></package>";
         let patched = patch_opf(opf);
         assert_eq!(patched, opf);
     }
-
-    // ── patch_xhtml ──────────────────────────────────────────────────────────
 
     #[test]
     fn patch_xhtml_adds_epub_namespace() {
@@ -749,11 +724,8 @@ mod tests {
         let xhtml = b"<html xmlns=\"http://www.w3.org/1999/xhtml\"><head></head></html>";
         let patched = patch_xhtml(xhtml, "");
         let s = std::str::from_utf8(&patched).unwrap();
-        // Namespace added, but no extra meta tag injected before </head>
         assert!(!s.contains("viewport"));
     }
-
-    // ── parse_comic_info ─────────────────────────────────────────────────────
 
     #[test]
     fn parse_comic_info_extracts_writer() {

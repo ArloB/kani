@@ -9,12 +9,8 @@
 use super::kani::extension::{html, json, utility};
 use super::{AllowedHost, HostState, SendHtml, StoredNode};
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
 const SIMPLE_HTML: &str = r#"<html><body><div class="card" data-id="42"><p>Hello</p><span>World</span></div></body></html>"#;
 const SIMPLE_JSON: &[u8] = br#"{"name":"Alice","age":30,"scores":[10,20,30],"active":true}"#;
-
-// ── HostState: handle capacity ───────────────────────────────────────────────
 
 #[tokio::test]
 async fn handle_capacity_ok_when_empty() {
@@ -36,11 +32,8 @@ async fn handle_capacity_counts_all_types() {
     let mut state = HostState::default();
     state.json_docs.insert(1, serde_json::Value::Null);
     state.html_lists.insert(2, vec![]);
-    // 2 handles → well below max
     assert!(state.check_handle_capacity().is_ok());
 }
-
-// ── HostState: AllowedHost enforcement ───────────────────────────────────────
 
 #[test]
 fn restricted_allows_matching_host() {
@@ -71,8 +64,6 @@ fn metadata_only_rejects_all() {
     let err = state.check_allowed_host("example.com").unwrap_err();
     assert!(err.contains("not permitted"));
 }
-
-// ── HostState: get_json / get_html_doc ───────────────────────────────────────
 
 #[test]
 fn get_json_returns_value_for_valid_handle() {
@@ -109,8 +100,6 @@ fn get_html_doc_errors_on_missing_handle() {
     assert!(state.get_html_doc(999).is_err());
 }
 
-// ── HostState: selector cache ─────────────────────────────────────────────────
-
 #[test]
 fn selector_cache_miss_then_hit() {
     let mut state = HostState::default();
@@ -125,8 +114,6 @@ fn invalid_selector_returns_error() {
     assert!(state.get_or_parse_selector("::invalid:::").is_err());
 }
 
-// ── HostState: clear_all ─────────────────────────────────────────────────────
-
 #[test]
 fn clear_all_removes_all_handles_and_resets_counter() {
     let mut state = HostState::default();
@@ -139,8 +126,6 @@ fn clear_all_removes_all_handles_and_resets_counter() {
     assert!(state.html_lists.is_empty());
     assert_eq!(state.next_doc_handle, 1);
 }
-
-// ── html::Host ───────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn html_parse_returns_positive_handle() {
@@ -196,7 +181,6 @@ async fn html_inner_html_returns_content() {
     let mut state = HostState::default();
     let doc = html::Host::parse(&mut state, "<div><p>inner</p></div>".to_string()).unwrap();
     let inner = html::Host::inner_html(&mut state, doc).unwrap();
-    // The root element's inner HTML contains the full tree
     assert!(inner.is_some());
 }
 
@@ -225,7 +209,7 @@ async fn html_children_returns_list() {
         .unwrap();
     let children = html::Host::children(&mut state, card).unwrap();
     let len = html::Host::list_len(&mut state, children).unwrap();
-    assert_eq!(len, 2); // <p> and <span>
+    assert_eq!(len, 2);
 }
 
 #[tokio::test]
@@ -263,8 +247,6 @@ async fn html_drop_list_removes_handle() {
     html::Host::drop_list(&mut state, list);
     assert!(!state.html_lists.contains_key(&list));
 }
-
-// ── json::Host ────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn json_parse_returns_positive_handle() {
@@ -373,8 +355,6 @@ async fn json_to_string_serializes_value() {
     let reparsed: serde_json::Value = serde_json::from_str(&s).unwrap();
     assert_eq!(reparsed["a"], 1);
 }
-
-// ── utility::Host ─────────────────────────────────────────────────────────────
 
 #[test]
 fn utility_date_parse_rfc3339_epoch() {

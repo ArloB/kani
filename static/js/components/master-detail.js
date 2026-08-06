@@ -1,13 +1,8 @@
 // @ts-check
-// MasterDetail — CSS-grid two-pane layout (list left, detail right).
-// On desktop, both panes show side-by-side and scroll independently.
-// On mobile (<768px), only one pane is visible at a time; callers control
-// which via setView('list' | 'detail').
 
 /**
- * Builds a master-detail shell and mounts it into `el`.
- * Returns references to the list and detail pane containers plus a
- * setView helper for switching active pane on mobile.
+ * Shows independently scrolling panes side by side on desktop and exposes
+ * `setView` to select the single visible pane on mobile.
  *
  * @param {HTMLElement} el
  * @param {{ listWidth?: number }} [opts]

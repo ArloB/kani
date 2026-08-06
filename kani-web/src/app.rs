@@ -48,9 +48,7 @@ pub async fn build_app(state: AppState) -> Router {
         .nest("/rest", rest::routes(state))
         .route("/changelog.md", axum::routing::get(serve_changelog));
 
-    // Shadowed rather than reassigned through a `mut`: the Swagger UI exists
-    // only on debug builds, so a `mut` binding is unused on release — a warning
-    // that never appeared in CI, which lints without --release.
+    // Shadowing keeps the release build free of a debug-only mutable binding.
     #[cfg(debug_assertions)]
     let router = {
         use utoipa::OpenApi;

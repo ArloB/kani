@@ -18,8 +18,6 @@ fn load_wasm(name: &str) -> Option<Vec<u8>> {
     std::fs::read(&path).ok()
 }
 
-// ── cache logic tests (no WASM binary required) ───────────────────────────────
-
 #[test]
 fn corrupt_cwasm_falls_back_gracefully() {
     let dir = tempfile::tempdir().unwrap();
@@ -81,8 +79,6 @@ fn sha256_hex_is_deterministic_and_64_chars() {
     assert_eq!(h1.len(), 64);
     assert!(h1.chars().all(|c| c.is_ascii_hexdigit()));
 }
-
-// ── warm-hit timing test (skipped if WASM binary not built) ──────────────────
 
 #[test]
 fn warm_hit_is_significantly_faster_than_cold() {

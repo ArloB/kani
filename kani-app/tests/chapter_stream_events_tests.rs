@@ -167,7 +167,6 @@ async fn scan_for_new_chapters_emits_partial_then_complete_with_correct_counts()
         "complete event should report the correct final total"
     );
 
-    // NewChapters is broadcast last by scan_for_new_chapters.
     let new_chapters = rx.try_recv().expect("NewChapters should have fired");
     assert!(
         matches!(new_chapters, AppEvent::NewChapters { manga_id: id, count: 2, .. } if id == manga_id)
@@ -176,7 +175,6 @@ async fn scan_for_new_chapters_emits_partial_then_complete_with_correct_counts()
 
 #[tokio::test]
 async fn scan_for_new_chapters_emits_error_event_on_fetch_failure() {
-    // Bind and immediately drop a listener to obtain a port nothing is listening on.
     let dead_port = {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         listener.local_addr().unwrap().port()

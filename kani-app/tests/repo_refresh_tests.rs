@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group C — repo index refresh under a conditional-GET 304. `refresh_repo` uses
-//! `safe_get_conditional`; a 304 must reuse the cached index (C7) and, with no
-//! cache to fall back on, must error rather than treat the repo as empty (C8).
+//! Repository index refresh under a conditional-GET 304. `refresh_repo` uses
+//! `safe_get_conditional`; a 304 must reuse the cached index and must fail when
+//! no cached index exists.
 
 mod common;
 use common::test_service;
@@ -23,7 +23,6 @@ async fn seed_repo(svc: &AppService, url: &str, index_cache: Option<&str>) -> i6
     .unwrap()
 }
 
-// C7 — a 304 reuses the cached index unchanged and bumps the refresh timestamp.
 #[tokio::test]
 async fn a_304_yields_the_cached_index() {
     let origin = TestOrigin::start().await;
@@ -53,7 +52,6 @@ async fn a_304_yields_the_cached_index() {
     assert!(refreshed.is_some(), "the refresh timestamp advanced");
 }
 
-// C8 — a 304 with no cached index is an error, not a silent empty index.
 #[tokio::test]
 async fn a_304_with_no_cached_index_is_an_error() {
     let origin = TestOrigin::start().await;
@@ -69,8 +67,6 @@ async fn a_304_with_no_cached_index_is_an_error() {
     );
 }
 
-// ── Group E — repo signature / failure handling ──────────────────────────────
-
 use base64::Engine as _;
 
 fn valid_pubkey_b64() -> String {
@@ -79,8 +75,6 @@ fn valid_pubkey_b64() -> String {
     base64::engine::general_purpose::STANDARD.encode(sk.verifying_key().to_bytes())
 }
 
-// E6 — an index whose detached signature is missing (.sig 404) is refused, even
-// though the index parses and its self-declared key matches the pinned one.
 #[tokio::test]
 async fn an_index_with_no_signature_is_refused() {
     let key = valid_pubkey_b64();
@@ -107,8 +101,6 @@ async fn an_index_with_no_signature_is_refused() {
     );
 }
 
-// E7 — a repo that starts failing (index fetch 500) keeps its previously-cached
-// index rather than clobbering it with an error/empty.
 #[tokio::test]
 async fn a_repo_that_starts_failing_does_not_lose_its_cached_index() {
     let origin = TestOrigin::start().await;

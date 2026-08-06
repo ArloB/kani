@@ -1,5 +1,4 @@
 // @ts-check
-// Global search page — search manga across multiple sources with scope filtering.
 
 import * as api from '../api.js';
 import { hasPermission } from '../session.js';
@@ -16,7 +15,6 @@ import { iconSearch, iconChevronLeft, iconChevronRight } from '../icons.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 import { t } from '../i18n.js';
 
-// ── Module state ──────────────────────────────────────────────────────────────
 
 let _query = '';
 /** @type {'FavouritedOnly'|'AllEnabled'|{Sources: number[]}} */
@@ -29,7 +27,6 @@ let _sourcePages = new Map();
 /** @type {Map<number, IntersectionObserver>} */
 let _sourceObservers = new Map();
 
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export async function init(container) {
@@ -80,7 +77,6 @@ export async function init(container) {
   const chipsEl     = /** @type {HTMLElement} */ (container.querySelector('#scope-chips'));
   const resultsEl   = /** @type {HTMLElement} */ (container.querySelector('#search-results'));
 
-  // Load sources for scope chips
   try {
     const all = await api.getSources();
     _sources = (Array.isArray(all) ? all : []).filter(s => s.enabled);
@@ -173,7 +169,6 @@ function _renderPreQueryState(resultsEl) {
   }));
 }
 
-// ── Fetch ─────────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} resultsEl */
 async function _fetchSearch(resultsEl) {
@@ -218,7 +213,6 @@ async function _fetchSearch(resultsEl) {
     return;
   }
 
-  // Initialise per-source page tracking from the fresh global search (page 1)
   _sourcePages = new Map();
   for (const sr of sourceResults) {
     _sourcePages.set(sr.source_id, { page: 1, hasNext: sr.has_next_page ?? false, loading: false });
@@ -234,7 +228,6 @@ async function _fetchSearch(resultsEl) {
     section.className = 'flex flex-col gap-3';
     section.setAttribute('role', 'listitem');
 
-    // Source header + see-all link
     const header = document.createElement('div');
     header.className = 'flex items-center justify-between gap-3';
     header.innerHTML = `
@@ -329,7 +322,6 @@ async function _fetchSearch(resultsEl) {
   resultsEl.appendChild(wrap);
 }
 
-// ── Per-row infinite scroll ────────────────────────────────────────────────────
 
 /**
  * @param {HTMLElement} row
@@ -392,7 +384,6 @@ function _observeRow(row, sentinel, sid, onUpdate) {
   _sourceObservers.set(sid, observer);
 }
 
-// ── Destroy ───────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export function destroy(container) {

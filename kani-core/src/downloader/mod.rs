@@ -1,3 +1,5 @@
+//! Concurrent, resumable chapter download orchestration and CBZ assembly.
+
 use crate::error::{self, Result};
 use crate::http::{SmartClient, SmartResponse};
 use crate::utilities::{assert_within_root, sanitize_filename};
@@ -33,9 +35,7 @@ pub enum DownloadError {
     Extension {
         kind: kani_shared::extension::ExtensionErrorKind,
         message: String,
-        /// From the extension's `ExtensionError` — a source's own `Retry-After`
-        /// when it reported RateLimited. Dropped here before, so the retry
-        /// policy could not honour it.
+        /// Source-provided `Retry-After` used by the host retry policy.
         retry_after_secs: Option<u32>,
     },
     Cancelled,
@@ -84,6 +84,8 @@ const PROGRESS_CHANNEL_CAPACITY: usize = 512;
 const TERMINAL_STATE_TTL_SECS: u64 = 30;
 
 #[async_trait::async_trait]
+/// Supplies a chapter's remote page list and base URL to the downloader.
+/// Implementations may cross the extension boundary and must preserve source page order.
 pub trait PageListFetcher: Send + Sync {
     async fn fetch_page_list(
         &self,
@@ -92,6 +94,7 @@ pub trait PageListFetcher: Send + Sync {
     ) -> Result<(crate::wasm::kani::extension::types::Chapter, String)>;
 }
 
+/// Complete input required to download and assemble one chapter.
 pub struct DownloadTask {
     pub chapter_id: i64,
     pub manga_id: i64,
@@ -106,6 +109,7 @@ pub struct DownloadTask {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
+/// Snapshot broadcast while a chapter download is active or briefly retained after termination.
 pub struct ActiveDownloadState {
     pub chapter_id: i64,
     pub chapter_name: String,
@@ -118,6 +122,7 @@ pub struct ActiveDownloadState {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
+/// Observable lifecycle state of an active or recently terminated download.
 pub enum ActiveDownloadStatus {
     InProgress,
     Completed,
@@ -126,6 +131,8 @@ pub enum ActiveDownloadStatus {
 }
 
 #[derive(Clone)]
+/// Coordinates chapter downloads and broadcasts progress snapshots.
+/// Terminal entries remain observable for a short TTL before removal.
 pub struct DownloaderManager {
     progress_tx: broadcast::Sender<DownloadProgressEvent>,
     active: Arc<tokio::sync::RwLock<HashMap<i64, ActiveDownloadState>>>,
@@ -143,12 +150,17 @@ impl DownloaderManager {
 
 pub const DEFAULT_CONCURRENT_PAGES: usize = 4;
 pub const DEFAULT_MAX_ATTEMPTS: i64 = 3;
+/// Default delay before the first page retry, in milliseconds.
 pub const DEFAULT_INITIAL_RETRY_DELAY_MS: i64 = 1_000;
 
 #[derive(Debug, Clone)]
+/// Page-level concurrency and retry policy for a [`DownloaderManager`].
 pub struct DownloaderConfig {
+    /// Maximum page requests in flight within one chapter download.
     pub concurrent_pages: usize,
+    /// Maximum attempts per page, including the initial request.
     pub max_attempts: i64,
+    /// Delay before the first retry, in milliseconds; later retries back off exponentially.
     pub initial_retry_delay_ms: i64,
 }
 
@@ -181,10 +193,6 @@ impl DownloaderManager {
         self.active.read().await.values().cloned().collect()
     }
 
-    // ============================================================
-    // Internal helpers
-    // ============================================================
-
     /// Send an event on the progress broadcast channel.
     fn send_event(tx: &broadcast::Sender<DownloadProgressEvent>, event: DownloadProgressEvent) {
         let _ = tx.send(event);
@@ -195,13 +203,9 @@ impl DownloaderManager {
         mut staged_pages: Vec<(PathBuf, String)>,
         comic_info: Option<crate::comic_info::ComicInfo>,
     ) -> Result<()> {
-        // Sort by destination filename so pages are in display order for both
-        // the zip entries and the spread-detection pass below.
+        // Zip entry order and spread detection must use the same display order.
         staged_pages.sort_unstable_by(|a, b| a.1.cmp(&b.1));
 
-        // Run spread detection and embed the results in ComicInfo.xml.
-        // Only executed when we have a ComicInfo to write results into; skipped
-        // for downloads where the caller passed None.
         let comic_info = if let Some(mut info) = comic_info {
             let paths: Vec<PathBuf> = staged_pages.iter().map(|(p, _)| p.clone()).collect();
             let spread_flags =
@@ -247,10 +251,6 @@ impl DownloaderManager {
                 .map_err(|e| crate::error::Error::Other(format!("Zip error: {}", e)))?;
         }
 
-        // close() writes the central directory + EOCD into tokio::fs::File's write
-        // buffer, but does not call flush() on the underlying writer. tokio::fs::File
-        // Drop schedules the OS close on a thread pool without blocking, so those bytes
-        // can be lost before the caller reads the file back. Flush explicitly here.
         let mut file = zip_writer
             .close()
             .await
@@ -302,10 +302,8 @@ impl DownloaderManager {
             {
                 Ok(data) => return Ok(data),
                 Err(e) => {
-                    // A page that is gone, forbidden or malformed will still be
-                    // gone on the third attempt. Retrying it burns the whole
-                    // backoff schedule — up to 30s a step — per page, turning a
-                    // chapter with one dead image into a multi-minute stall.
+                    // Permanent HTTP failures bypass retries so one bad page cannot amplify
+                    // the per-attempt backoff across the entire chapter.
                     if Self::is_permanent_http(&e) {
                         tracing::warn!("Page {page_index} failed permanently: {e}");
                         return Err(e);
@@ -436,12 +434,6 @@ impl DownloaderManager {
             (ext, format!("{:04}.{}", page, ext))
         };
         let tmp_file_path = staging_dir.join(format!("{:04}.{}.tmp", page, extension));
-        // Written under `.part` and renamed only once the body is complete.
-        // `.tmp` is what a resumed download treats as "already fetched", so a
-        // file must never carry that name until it is whole — an interrupted
-        // transfer used to leave a truncated `.tmp` behind, and the next run
-        // sealed it into the CBZ without re-fetching, then recorded its hash as
-        // correct. Silent and permanent.
         let part_file_path = staging_dir.join(format!("{:04}.{}.part", page, extension));
 
         if let Some(r) = &resolved {
@@ -657,12 +649,6 @@ impl DownloaderManager {
         let pages = chapter_data.0.pages;
         let base_url = chapter_data.1;
 
-        // A chapter with zero pages is never legitimate — it means a challenge
-        // page, a transient block, or an extraction miss returned an empty list.
-        // Without this guard the download loop below runs over nothing, no page
-        // error fires, and create_cbz seals a 0-page archive that is then marked
-        // Completed: the user sees a "downloaded" chapter that cannot be read.
-        // Fail instead (retryable, so a transient empty response is re-attempted).
         if pages.is_empty() {
             Self::send_event(
                 &self.progress_tx,
@@ -679,7 +665,6 @@ impl DownloaderManager {
 
         let total_pages = pages.len() as u64;
 
-        // Count already-staged pages for resume reporting.
         let already_staged = Self::collect_staged_indices(&staging_dir).await;
         let pre_completed = already_staged.len() as u64;
 
@@ -1044,7 +1029,7 @@ mod tests {
             chapter_id: 1,
             manga_id: 1,
             manga_title: "M".to_string(),
-            source_manager: MockPageListFetcher::succeeding(0, 0), // empty page list
+            source_manager: MockPageListFetcher::succeeding(0, 0),
             source_manga_id: "m".to_string(),
             source_chapter_id: "c".to_string(),
             name: "Chapter 1".to_string(),
@@ -1062,7 +1047,6 @@ mod tests {
             Err(other) => panic!("expected PageFetch error, got {other:?}"),
             Ok(_) => panic!("an empty page list must fail, not seal a CBZ"),
         }
-        // And crucially no .cbz was sealed.
         assert!(
             !save_path.join("Chapter 1.cbz").exists(),
             "a zero-page CBZ must not be written"
@@ -1126,8 +1110,6 @@ mod tests {
         assert!(mgr.snapshot().await.is_empty());
     }
 
-    // ── subscribe ────────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn subscribe_returns_receiver() {
         let mgr = make_manager().await;
@@ -1150,8 +1132,6 @@ mod tests {
         assert!(rx1.recv().await.is_ok());
         assert!(rx2.recv().await.is_ok());
     }
-
-    // ── get_image_extension ──────────────────────────────────────────────────
 
     fn buffered_resp_with_ct(content_type: &'static str) -> SmartResponse {
         let mut headers = rquest::header::HeaderMap::new();
@@ -1218,8 +1198,6 @@ mod tests {
         assert_eq!(DownloaderManager::get_image_extension(&resp, "x"), "gif");
     }
 
-    // ── create_cbz ───────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn create_cbz_produces_valid_zip_with_pages() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -1276,12 +1254,6 @@ mod tests {
             "ComicInfo.xml not found: {entry_names:?}"
         );
     }
-
-    // ── Group P — the ComicInfo.xml a consumer actually reads ────────────────
-    //
-    // Komga, Kavita, Calibre and Jellyfin parse this sidecar. The tests above
-    // only assert the *entry exists*; these read it back out of the archive and
-    // parse it, so a document that is present but unusable cannot pass.
 
     fn full_info() -> crate::comic_info::ComicInfo {
         crate::comic_info::ComicInfo {
@@ -1372,7 +1344,6 @@ mod tests {
         seen.then_some(out)
     }
 
-    // P1/P2 — the sidecar parses, and every field round-trips.
     #[tokio::test]
     async fn a_written_cbz_contains_parseable_comicinfo_that_round_trips() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -1393,9 +1364,6 @@ mod tests {
         );
     }
 
-    // P3 — XML-hostile metadata must not produce a document readers choke on.
-    // A `contains()` assertion cannot catch this: the substrings survive in a
-    // broken document.
     #[tokio::test]
     async fn xml_hostile_metadata_still_parses() {
         const NASTY: &str = r#"Tom & Jerry <vol "1"> 'x' ]]> --"#;
@@ -1413,8 +1381,6 @@ mod tests {
         assert_eq!(xml_field(&xml, "Summary").as_deref(), Some(NASTY));
     }
 
-    // P4 — element names are the ComicRack names consumers match on. A rename
-    // compiles and ships, and every consumer silently loses that field.
     #[tokio::test]
     async fn comicinfo_element_names_match_the_schema() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -1438,8 +1404,6 @@ mod tests {
         }
     }
 
-    // P5 — an absent optional is omitted, not emitted empty. A reader that sees
-    // `<Writer></Writer>` records a writer whose name is the empty string.
     #[tokio::test]
     async fn absent_optional_metadata_is_omitted_not_emitted_empty() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -1462,12 +1426,9 @@ mod tests {
                 "<{tag}> was absent and must be omitted entirely, not emitted empty"
             );
         }
-        // The required fields are still there.
         assert_eq!(xml_field(&xml, "Series").as_deref(), Some("Berserk"));
     }
 
-    // P6 — the Pages block describes the images actually in the archive. Drift
-    // here is the classic sidecar-vs-payload mismatch.
     #[tokio::test]
     async fn page_metadata_matches_the_images_actually_in_the_archive() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -1520,8 +1481,6 @@ mod tests {
             "unexpected ComicInfo.xml"
         );
     }
-
-    // ── ext_retry_params ─────────────────────────────────────────────────────
 
     #[test]
     fn not_found_no_retry() {

@@ -1,5 +1,4 @@
 // @ts-check
-// Source settings card — enable/star/configure/install/delete a source extension.
 
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
@@ -26,7 +25,7 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
   const [enabled, setEnabled] = useState(source.enabled ?? false);
   const [starred, setStarred] = useState(source.favourited ?? false);
   const [browserEnabled, setBrowserEnabled] = useState(source.browser_enabled ?? true);
-  const [confirming, setConfirming] = useState(false);       // unsafe enable confirm
+  const [confirmingUnsafeEnable, setConfirmingUnsafeEnable] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -38,7 +37,6 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
   const [liveValues, setLiveValues] = useState(/** @type {Record<string,any>} */ ({}));
   const [prefsLoading, setPrefsLoading] = useState(false);
 
-  // Load prefs when modal opens
   useEffect(() => {
     if (!modalOpen) return;
     setPrefsLoading(true);
@@ -52,11 +50,11 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
   }, [modalOpen, sid]);
 
   async function toggleEnabled(val) {
-    if (val && source.unrestricted_http && !confirming) {
-      setConfirming(true);
+    if (val && source.unrestricted_http && !confirmingUnsafeEnable) {
+      setConfirmingUnsafeEnable(true);
       return;
     }
-    setConfirming(false);
+    setConfirmingUnsafeEnable(false);
     try {
       await api.toggleSourceEnabled(sid, val);
       setEnabled(val);
@@ -69,7 +67,7 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
     try {
       await api.toggleSourceFavourite(sid, val);
       setStarred(val);
-    } catch { /* ignore */ }
+    } catch { }
   }
 
   async function handleDelete() {
@@ -107,7 +105,6 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
 
   const isActive = activeIds.has(sid);
 
-  // Group schema by group name
   /** @type {Map<string, any[]>} */
   const groups = new Map();
   for (const d of schema) {
@@ -210,13 +207,13 @@ export function SourceSettingsCard({ source, activeIds, onDeleted }) {
         </div>
       </div>
 
-      ${confirming && html`
+      ${confirmingUnsafeEnable && html`
         <div class="rounded-lg bg-warn/10 border border-warn/30 p-3 flex flex-col gap-2">
           <p class="text-sm text-warn">
             ${t('source.card.unsafe.warning')}
           </p>
           <div class="flex items-center gap-2 justify-end">
-            <button class="btn-ghost btn-sm" onClick=${() => setConfirming(false)}>${t('common.cancel')}</button>
+            <button class="btn-ghost btn-sm" onClick=${() => setConfirmingUnsafeEnable(false)}>${t('common.cancel')}</button>
             <button class="btn-danger btn-sm" onClick=${() => toggleEnabled(true)}>${t('source.card.unsafe.enable')}</button>
           </div>
         </div>

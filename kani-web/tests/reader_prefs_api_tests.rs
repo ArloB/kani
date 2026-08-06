@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests for reader_prefs field on PUT /rest/manga/{id}/tracking.
 
 mod common;
 use axum::http::StatusCode;
@@ -114,7 +113,6 @@ async fn put_reader_prefs_rejects_non_object_json() {
         .await
         .unwrap();
 
-    // Validation error → AppError::ValidationError → 422 Unprocessable Entity.
     assert!(
         res.status().is_client_error(),
         "non-object JSON must be rejected with a 4xx, got {}",

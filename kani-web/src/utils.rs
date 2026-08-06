@@ -40,7 +40,6 @@ mod tests {
 
     #[test]
     fn plain_id_falls_back_to_original() {
-        // A simple slug that is not valid base64url decodes — returned as-is.
         assert_eq!(decode_manga_id("my-manga-slug"), "my-manga-slug");
     }
 
@@ -57,7 +56,6 @@ mod tests {
 
     #[test]
     fn valid_base64_non_utf8_falls_back() {
-        // Bytes that are valid base64url but produce invalid UTF-8.
         let bad_utf8 = URL_SAFE_NO_PAD.encode([0xFF, 0xFE]);
         assert_eq!(decode_manga_id(&bad_utf8), bad_utf8);
     }

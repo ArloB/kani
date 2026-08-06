@@ -1,3 +1,5 @@
+//! Hot and persistent caching for compiled Wasmtime components.
+
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -6,6 +8,8 @@ use wasmtime::component::Component;
 
 use crate::error::Error;
 
+/// Two-level cache of compiled WASM components, keyed by the source component's SHA-256 digest.
+/// Entries are held in memory and persisted as Wasmtime serialized components.
 pub struct WasmModuleCache {
     cache_dir: PathBuf,
     hot: HashMap<String, Component>,
@@ -21,11 +25,6 @@ impl WasmModuleCache {
     }
 
     /// Resolve the cache directory for a given data directory.
-    ///
-    /// The default used to be a hard-coded `/data/.wasm_cache`, which is only
-    /// correct inside the Docker image. Every native install therefore failed to
-    /// create it, silently disabled the cache, and recompiled every extension on
-    /// every load. The data directory is the one path that is always right.
     pub fn resolve_dir(data_dir: &std::path::Path) -> PathBuf {
         std::env::var("KANI_WASM_MODULE_CACHE_DIR")
             .ok()

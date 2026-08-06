@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Manga Management: Pending Imports | Duplicates | Orphaned Manga
 
 import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
@@ -60,10 +59,7 @@ function NavLink({ href, cls, label }) {
 /**
  * Picks the real series a pending import refers to, and links them.
  *
- * The panel could previously only *find* (navigate away to a source search) or
- * *dismiss*. `resolvePendingImport` had no caller, so an import that could not
- * be matched automatically had no resolution path — it could only be thrown
- * away.
+ * Resolution links a pending import to the selected existing series.
  */
 function ResolveDialog({ item, onClose, onResolved }) {
   const [query, setQuery] = useState(item?.title ?? '');

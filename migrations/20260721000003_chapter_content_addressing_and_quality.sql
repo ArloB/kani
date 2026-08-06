@@ -1,10 +1,6 @@
--- Content addressing + quality tracking for downloaded chapters.
---
--- file_path is stored RELATIVE to library_path so relocating the library (or
--- path_migration.rs rewriting it) never invalidates these rows. Today the
--- on-disk path is re-derived from the manga title at read time, which means
--- renaming a manga silently orphans its files; a stored path removes that
--- entire failure class.
+-- Store paths relative to library_path so library relocation and manga renames do not
+-- orphan downloaded files. The remaining columns capture content identity, integrity,
+-- and quality without reopening the archive.
 ALTER TABLE chapters ADD COLUMN file_path TEXT;
 ALTER TABLE chapters ADD COLUMN content_hash TEXT;
 ALTER TABLE chapters ADD COLUMN manifest_json TEXT;

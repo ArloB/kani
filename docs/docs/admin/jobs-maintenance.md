@@ -31,8 +31,7 @@ the relevant settings section rather than creating an external cron loop:
 - Retention, audit pruning, integrity, thumbnails, and related work under
   **Settings → Maintenance**.
 
-The displayed schedule and time zone are authoritative. Scheduled backup hours are expressed in
-UTC.
+The displayed schedule uses the time zone shown in the interface. Scheduled backup hours use UTC.
 
 ## Storage maintenance
 

@@ -1,7 +1,5 @@
 // @ts-check
-// Mobile "More" sheet — the destinations that don't earn a permanent tab slot.
-// Without this, Downloads / Statistics / Accounts / Logs / Jobs are unreachable
-// on a phone: the bottom nav only has five slots.
+// Mobile navigation for permitted destinations beyond the five permanent tab slots.
 
 import { h } from 'preact';
 import htm from 'htm';

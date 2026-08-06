@@ -78,8 +78,6 @@ function buildSections(settings, categories, bootId) {
     { id: 'server', perm: 'server:manage', group: g.server, C: ServerSection, props: {} },
     {
       id: 'sources-health',
-      // Mirrors the guard on GET /rest/sources/health (SourceBrowse), not the
-      // stricter one on the reload action the section offers.
       perm: 'source:browse',
       group: g.server,
       C: SourcesHealthSection,
@@ -191,7 +189,6 @@ function SettingsPage({ settings, categories, bootId }) {
   const dirty = formDirty.value;
   const q = query.trim().toLowerCase();
 
-  // Cross-section search hits.
   const sectionHits = useMemo(() => {
     /** @type {Map<string, any[]>} */
     const m = new Map();
@@ -214,7 +211,6 @@ function SettingsPage({ settings, categories, bootId }) {
 
   const activeSection = sections.find((s) => s.id === active) ?? null;
 
-  // Page-header crumbs follow the active view.
   useEffect(() => {
     if (q) {
       setPageHeader({ crumbs: [{ label: t('settings.crumb') }] });
@@ -227,7 +223,6 @@ function SettingsPage({ settings, categories, bootId }) {
     }
   }, [active, q, activeSection]);
 
-  // Unsaved-changes navigation guard.
   useEffect(() => {
     setBeforeNavigate(async () => {
       if (formDirty.value && !(await confirmDiscard(t('settings.unsaved.page.message')))) return false;
@@ -236,7 +231,6 @@ function SettingsPage({ settings, categories, bootId }) {
     return () => clearBeforeNavigate();
   }, []);
 
-  // Re-run highlight as async section content streams in.
   useEffect(() => {
     if (!highlight && !q) return;
     const term = (highlight ?? q).toLowerCase();
@@ -274,7 +268,6 @@ function SettingsPage({ settings, categories, bootId }) {
     setHighlight(null);
   };
 
-  // ── Nav renderers ───────────────────────────────────────────────────────────
   const desktopNav = () => {
     if (filteredSections.length === 0) {
       return html`<div class="px-2 py-2 text-xs text-text-faint">${t('settings.search.empty')}</div>`;
@@ -324,7 +317,6 @@ function SettingsPage({ settings, categories, bootId }) {
       `;
     });
 
-  // ── Content ─────────────────────────────────────────────────────────────────
   const content = () => {
     if (q) {
       if (sectionHits.size === 0) {

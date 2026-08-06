@@ -1,9 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group L — tracker HTTP flows (MyAnimeList) driven against a TestOrigin via
+//! MyAnimeList HTTP flows driven against a `TestOrigin` via
 //! the `with_test_base` seam, which also shortens the client timeout so a
-//! stalled origin resolves quickly. Exercises the OAuth/refresh/status paths
-//! that previously only ever hit the real provider.
+//! stalled origin resolves quickly. Exercises the OAuth, refresh, and status paths.
 
 use kani_app::service::trackers::ExternalTracker;
 use kani_app::service::trackers::mal::MalTracker;
@@ -14,8 +13,6 @@ fn mal(origin: &TestOrigin) -> MalTracker {
     MalTracker::new("test-client".into()).with_test_base(&origin.base())
 }
 
-// L8 — an OAuth code exchange that gets a provider error surfaces an error, not
-// a silent success with an empty token.
 #[tokio::test]
 async fn the_oauth_code_exchange_surfaces_a_provider_error() {
     let origin = TestOrigin::start().await;
@@ -33,8 +30,6 @@ async fn the_oauth_code_exchange_surfaces_a_provider_error() {
     );
 }
 
-// L5 — a stalled tracker does not hang the sync: the client timeout fires and
-// the call returns an error promptly.
 #[tokio::test]
 async fn a_tracker_that_stalls_does_not_hang_the_sync_job() {
     let origin = TestOrigin::start().await;
@@ -56,12 +51,9 @@ async fn a_tracker_that_stalls_does_not_hang_the_sync_job() {
     );
 }
 
-// L6 — a malformed tracker response is a parse error, not silently-corrupted
-// progress.
 #[tokio::test]
 async fn a_malformed_tracker_response_does_not_corrupt_progress() {
     let origin = TestOrigin::start().await;
-    // get_status GETs {api}/manga/{id}; serve non-JSON garbage.
     origin.set("/manga/123", Response::html("<html>not json at all</html>"));
 
     let res = mal(&origin).get_status("token", "123").await;
@@ -71,9 +63,6 @@ async fn a_malformed_tracker_response_does_not_corrupt_progress() {
     );
 }
 
-// L1 (mechanism) — a token refresh returns the new credential pair the caller
-// then persists. (The proactive-before-the-call wiring is the service-level
-// get_valid_access_token path; this covers the client half.)
 #[tokio::test]
 async fn a_token_refresh_yields_the_new_credentials() {
     let origin = TestOrigin::start().await;

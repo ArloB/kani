@@ -58,7 +58,7 @@ export function mountContinueShelf(container, { loadItems }) {
     row.addEventListener('scroll', updateFade, { passive: true });
     removeFade = () => row.removeEventListener('scroll', updateFade);
     requestAnimationFrame(updateFade);
-  }).catch(() => { /* shelf is optional; stay hidden */ });
+  }).catch(() => { });
 
   return {
     destroy() {
@@ -80,7 +80,7 @@ function _mkShelfCard(item) {
   card.addEventListener('click', e => { e.preventDefault(); navigate(`/reader/${item.chapter_id}`); });
 
   const cover = document.createElement('div');
-  cover.className = 'relative w-full aspect-[2/3] rounded bg-surface-2 overflow-hidden'; /* justified: manga cover ratio */
+  cover.className = 'relative w-full aspect-[2/3] rounded bg-surface-2 overflow-hidden';
   const coverSrc = item.local_cover_path
     ? `/rest/manga/${item.manga_id}/cover?size=sm`
     : item.cover_url ?? null;

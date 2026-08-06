@@ -215,8 +215,6 @@ mod tests {
     }
 }
 
-// ── Library-wide defaults ────────────────────────────────────────────────────
-
 #[utoipa::path(
     get, path = "/rest/scanlator_preferences/global",
     responses(

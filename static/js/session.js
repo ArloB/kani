@@ -24,19 +24,14 @@ export function hasPermission(permission) {
   return getState('permissions').has(permission);
 }
 
-/**
- * Last-known permissions, so the shell can still be navigated when the server
- * cannot be reached. These decide what UI to *show*, never what is allowed —
- * every request is authorised server-side — so a stale set can at worst offer a
- * link that 403s, which is what offline reading needs to work at all.
- */
+/** Cached permissions control offline UI visibility only; the server authorises every request. */
 const PERMS_CACHE_KEY = 'kani_permissions';
 
 /** @param {Set<string>} perms */
 function _rememberPermissions(perms) {
   try {
     localStorage.setItem(PERMS_CACHE_KEY, JSON.stringify([...perms]));
-  } catch { /* storage full or blocked — the live set still works this session */ }
+  } catch { }
 }
 
 /** @returns {Set<string>|null} */
@@ -54,7 +49,7 @@ function _recallPermissions() {
 export function clearRememberedPermissions() {
   try {
     localStorage.removeItem(PERMS_CACHE_KEY);
-  } catch { /* nothing to clear */ }
+  } catch { }
 }
 
 export async function initPermissions() {
@@ -87,17 +82,13 @@ export async function initPermissions() {
     }
     console.error('Failed to load permissions:', err);
 
-    // Without this the set stays empty, every hasPermission() is false, and the
-    // navigation empties out — which offline made obvious: the shell booted and
-    // cached chapters were served, but there was no way to navigate to one.
+    // Preserve navigation visibility during transient outages; authorization remains server-side.
     const remembered = _recallPermissions();
     if (remembered) {
       setState('permissions', remembered);
       return;
     }
 
-    // Nothing remembered (a first load that failed) — a stripped-down UI with
-    // no explanation reads as "the feature is gone", not "reload me".
     const { showToast } = await import('./components/toast.js');
     const { t } = await import('./i18n.js');
     showToast(t('session.permissions_failed'), { type: 'error' });

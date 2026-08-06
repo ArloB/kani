@@ -111,8 +111,6 @@ async fn a_cover_whose_directory_is_missing_is_not_found_not_a_server_error() {
     let src = insert_source(&svc.db, "src").await;
     let manga_id = insert_manga(&svc.db, src, "m1", "Gone Cover").await;
 
-    // A row pointing at a cover under a directory that does not exist — the
-    // shape left behind by a library-path change or a partial restore.
     sqlx::query("UPDATE manga SET local_cover_path = 'no-such-dir/cover.jpg' WHERE id = ?")
         .bind(manga_id)
         .execute(&svc.db)

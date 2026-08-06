@@ -1,11 +1,3 @@
-// @ts-check
-// Shared fetch/render mechanics for a paged (or infinite-append) manga grid:
-// skeleton, fetch, card rendering, empty/error states. The caller still owns
-// its own AbortController (create it, abort the previous one, pass a fetch
-// thunk that closes over the new signal) — that state persists across calls
-// and a page's destroy() needs to reach it, so it can't live inside here.
-// Pagination vs. infinite-scroll wiring also stays with the caller; it
-// diverges too much between consumers to be worth forcing into one shape.
 
 import { skeletonGrid } from './skeletons.js';
 import { createEmptyState } from './empty-state.js';
@@ -51,7 +43,6 @@ export async function fetchPagedGrid(opts) {
   const { gridEl, pageSize, append = false, fetchPage, mapItems, renderCard, emptyIcon, emptyTitle, errorMessage, onError, onRetry } = opts;
 
   if (append) {
-    // Caller is responsible for showing its own append-mode loading affordance.
   } else {
     gridEl.innerHTML = skeletonGrid(pageSize);
     gridEl.setAttribute('aria-busy', 'true');

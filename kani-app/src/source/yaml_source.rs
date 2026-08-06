@@ -190,11 +190,6 @@ impl YamlSource {
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
         let mut state = self.make_host_state().map_err(|e| e.to_string())?;
 
-        // A paginated endpoint must go through the paginated extractor — the same
-        // one codegen invokes — so the offset param (e.g. `page=1`) reaches the
-        // wire and multi-page stitching happens. The plain extractor ignores the
-        // blueprint's pagination config entirely, so an interpreted paginated
-        // source diverged from the compiled one on both request and results.
         if ep.pagination.is_some() {
             let page = args.get("page").and_then(|p| p.parse().ok()).unwrap_or(1);
             let page_size = args
@@ -683,14 +678,8 @@ impl YamlSource {
     }
 }
 
-/// Turns an evaluator error string into a typed `ExtensionError`.
-///
-/// The evaluator marks HTTP failures whose body is not extraction-worthy
-/// (`__http_status__:429:120`); everything else is a genuine parse/extraction
-/// failure. Without this every interpreted-source failure collapsed to
-/// `ExtensionErrorKind::Parse`, so a rate-limited source could never report
-/// `RateLimited` (and honour `Retry-After`) and a 5xx could not be marked
-/// retryable distinctly.
+/// Preserves retry and rate-limit semantics encoded in evaluator HTTP-status errors.
+/// Unmarked failures are classified as extraction errors.
 fn classify_eval_error(e: String) -> kani_shared::extension::ExtensionError {
     kani_shared::extension::classify_status_error(&e)
         .unwrap_or_else(|| kani_shared::extension::ExtensionError::parse(e))

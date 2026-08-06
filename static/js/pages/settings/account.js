@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — My Account section (password modal, sessions).
 
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';

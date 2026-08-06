@@ -1,9 +1,12 @@
+//! Pluggable metadata enrichment providers and their application registry.
+
 use crate::error::{Result, ServiceError};
 use crate::ids::{MangaId, UserId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Partial metadata returned by a provider; absent scalar fields leave local values unchanged.
 pub struct FullMetadata {
     pub title: Option<String>,
     pub description: Option<String>,
@@ -15,18 +18,22 @@ pub struct FullMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Provider-attributed metadata result.
 pub struct MetadataResult {
     pub provider: String,
     pub metadata: FullMetadata,
 }
 
 #[async_trait::async_trait]
+/// External metadata lookup implemented by each registered provider.
+/// `Ok(None)` means the provider found no match rather than failing.
 pub trait MetadataProvider: Send + Sync {
     fn id(&self) -> &'static str;
     fn name(&self) -> &'static str;
     async fn fetch(&self, title: &str) -> Result<Option<FullMetadata>>;
 }
 
+/// Runtime registry keyed by stable provider identifier.
 pub struct MetadataProviderRegistry {
     pub providers: HashMap<String, Box<dyn MetadataProvider>>,
 }
@@ -64,6 +71,7 @@ impl Default for MetadataProviderRegistry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Provider identity exposed to clients selecting an enrichment source.
 pub struct ProviderInfo {
     pub id: String,
     pub name: String,

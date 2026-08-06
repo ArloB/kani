@@ -1,11 +1,3 @@
-// @ts-check
-// Client mirror of `sanitize_custom_css` in kani-app/src/service/ui_ext.rs.
-//
-// This exists for live editor feedback — showing what will be stripped as the
-// user types. It is NOT a security boundary: the server sanitises independently
-// and stores its own output, so anything this misses is still removed before
-// storage. Keep the two rule lists textually identical; if they drift, the
-// editor lies about what will be saved.
 
 /** At-rules a theme may keep. Everything else is dropped. */
 const ALLOWED_AT_RULES = ['@media', '@supports', '@keyframes'];

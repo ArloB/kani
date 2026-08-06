@@ -7,17 +7,11 @@
     <style>
       :root {
         color-scheme: light dark;
-        --ink: #1b1b1b;
-        --paper: #faf8f5;
-        --muted: #6b6b6b;
-        --line: #e0dcd6;
+        -- ink: #1b1b1b; paper: #faf8f5; muted: #6b6b6b; line: #e0dcd6;
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --ink: #e8e4de;
-          --paper: #161513;
-          --muted: #9a958d;
-          --line: #2e2c29;
+          -- ink: #e8e4de; paper: #161513; muted: #9a958d; line: #2e2c29;
         }
       }
       * { box-sizing: border-box; }
@@ -91,10 +85,6 @@
     </div>
 
     <script>
-      // A minimal reader for stored/deflated zip entries. Deflate is handled by
-      // DecompressionStream where available, which every current browser has;
-      // stored entries need no decompression at all, so an archive written with
-      // stored CBZs stays readable even without it.
       const EOCD = 0x06054b50;
       const CEN = 0x02014b50;
 

@@ -208,10 +208,6 @@ impl MangaExtension for Example {
     }
 }
 
-// ============================================================
-// WASM Exports
-// ============================================================
-
 use std::sync::OnceLock;
 
 static EXTENSION: OnceLock<Example> = OnceLock::new();

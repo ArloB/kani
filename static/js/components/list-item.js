@@ -1,5 +1,4 @@
 // @ts-check
-// ListItem — single row in the master-detail list pane.
 
 import { h } from 'preact';
 import htm from 'htm';

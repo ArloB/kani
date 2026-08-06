@@ -1,8 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Tests cover DB-level tracker operations: credential storage, PKCE state,
-// mappings, config management, and unlink.
-// Network-dependent operations (search, status push, OAuth exchange) require
-// the tracker URL to be overridable; that refactor is deferred to a later phase.
 
 mod common;
 use common::{insert_manga, insert_source, insert_user, test_service};
@@ -44,7 +40,6 @@ async fn list_trackers_status_returns_anilist_and_mal_unconfigured() {
     let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
     assert!(names.contains(&"AniList"));
     assert!(names.contains(&"MyAnimeList"));
-    // Without env vars or DB config, none are configured or linked.
     assert!(items.iter().all(|i| !i.configured));
     assert!(items.iter().all(|i| !i.linked));
 }
@@ -71,7 +66,6 @@ async fn pkce_state_store_and_consume_is_single_use() {
     assert_eq!(pkce.tracker_id, tid);
     assert_eq!(pkce.redirect_uri, "https://app/cb");
 
-    // Consuming again must return None — the state is single-use.
     let again = consume_pkce_state(&svc.db, "csrf-abc").await.unwrap();
     assert!(again.is_none());
 }
@@ -204,10 +198,6 @@ async fn set_and_get_tracker_config_round_trips() {
 
 #[tokio::test]
 async fn an_external_id_is_offered_as_a_link_suggestion() {
-    // `manga_external_ids` had a writer and no readers: migration
-    // 20260614000002 folded manga.anilist_id / mal_id into it and dropped both
-    // columns, so ids users already had became unreachable. The tracker panel
-    // now offers them.
     let svc = test_service().await;
     let user = insert_user(&svc.db, "reader").await;
     let src = insert_source(&svc.db, "src").await;

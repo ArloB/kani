@@ -28,11 +28,9 @@ async fn set_reader_prefs_rejects_non_object_json() {
     let src = insert_source(&svc.db, "src").await;
     let manga_id = insert_manga(&svc.db, src, "m2", "Manga2").await;
 
-    // An array is valid JSON but not an object.
     let err = svc.set_reader_prefs(user_id, manga_id, r#"[1,2,3]"#).await;
     assert!(err.is_err(), "array JSON should be rejected");
 
-    // A bare string is also invalid.
     let err2 = svc.set_reader_prefs(user_id, manga_id, r#""hello""#).await;
     assert!(err2.is_err(), "string JSON should be rejected");
 }
@@ -44,12 +42,10 @@ async fn set_reader_prefs_upserts_on_existing_tracking_row() {
     let src = insert_source(&svc.db, "src").await;
     let manga_id = insert_manga(&svc.db, src, "m3", "Manga3").await;
 
-    // Create a tracking row via reading direction first.
     svc.set_reading_direction(user_id, manga_id, "ltr")
         .await
         .unwrap();
 
-    // Then upsert reader_prefs — must not clobber reading_direction.
     svc.set_reader_prefs(user_id, manga_id, r#"{"fit":"width"}"#)
         .await
         .unwrap();

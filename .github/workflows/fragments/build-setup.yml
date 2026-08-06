@@ -1,9 +1,4 @@
 - name: Install NASM (BoringSSL assembles with it on MSVC)
-  # rquest links BoringSSL, whose CMakeLists enables the NASM language on
-  # Windows. The runner ships MSVC and cmake but not NASM, so the very first
-  # cargo invocation on this target died in boring-sys2's build script with
-  # "No CMAKE_ASM_NASM_COMPILER could be found". Unix hosts use their system
-  # assembler and need nothing.
   if: runner.os == 'Windows'
   shell: pwsh
   run: |

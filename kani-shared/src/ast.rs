@@ -1,8 +1,14 @@
+//! Declarative extraction blueprint AST and its guest-safe builder API.
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     any(feature = "host", feature = "builder"),
     derive(serde::Serialize, serde::Deserialize)
 )]
+/// Expression evaluated by the host against an HTML or JSON extraction context.
+///
+/// Expressions are serialized into a [`Blueprint`]; variants describe data access and pure
+/// transformations except [`Expr::Fetch`], which performs a bounded sub-request.
 pub enum Expr {
     /// The current iteration element (inside a container loop)
     SelfRef,
@@ -61,7 +67,7 @@ pub enum Expr {
         selector: String,
     },
 
-    /// .split("delim") - split string, returning a List<String>
+    /// `.split("delim")` splits a string, returning a `List<String>`.
     Split {
         target: Box<Expr>,
         delimiter: String,
@@ -168,7 +174,7 @@ pub enum Expr {
         class: String,
     },
 
-    /// .children() - direct child elements as a List<Element>
+    /// `.children()` returns direct child elements as a `List<Element>`.
     Children {
         target: Box<Expr>,
     },
@@ -274,7 +280,7 @@ pub enum Expr {
         target: Box<Expr>,
     },
 
-    /// .join("delim") — join a List<String> into a single string with a delimiter; Null items skipped
+    /// `.join("delim")` joins a `List<String>` with a delimiter, skipping null items.
     Join {
         target: Box<Expr>,
         delimiter: String,
@@ -286,7 +292,7 @@ pub enum Expr {
         key: Box<Expr>,
     },
 
-    /// .find(key, value) — find the first element in a JSON array where obj[key] == value
+    /// `.find(key, value)` finds the first JSON array element whose object key equals the value.
     JsonFind {
         target: Box<Expr>,
         key: Box<Expr>,
@@ -296,8 +302,9 @@ pub enum Expr {
     /// json_array([a, b, ...]) — construct a JSON array from N evaluated expressions
     JsonArray(Vec<Expr>),
 
-    /// .json_fold() — reduce all elements of a JSON array via merge
-    /// e.g. [{"en":"A"},{"ja":"B"}] → {"en":"A","ja":"B"}; [[1,2],[3,4]] → [1,2,3,4]
+    /// `.json_fold()` reduces a JSON array through merge.
+    ///
+    /// Objects merge by key and nested arrays flatten by one level.
     JsonFold {
         target: Box<Expr>,
     },
@@ -399,6 +406,7 @@ pub enum Expr {
     any(feature = "host", feature = "builder"),
     derive(serde::Serialize, serde::Deserialize)
 )]
+/// Binary operator used by [`Expr::BinaryOperation`].
 pub enum Op {
     Add,
     Sub,
@@ -497,6 +505,7 @@ pub enum IdEncoding {
     Hex,
 }
 
+/// Current serialized blueprint schema understood by codegen and the host evaluator.
 pub const DSL_SCHEMA_VERSION: u32 = 5;
 
 /// Declares that a source paginates in fixed-size chunks, so the framework can
@@ -522,13 +531,11 @@ pub struct PaginationConfig {
 )]
 #[must_use = "a Blueprint is built to be evaluated or serialized; discarding it does nothing"]
 pub struct Blueprint {
-    /// HTTP Request
     pub request: Option<RequestDef>,
 
     /// CSS selector (HTML) or JSON Pointer (JSON) for the repeating container
     pub container: String,
 
-    /// Fields to extract from each container element
     pub fields: Vec<FieldDef>,
 
     /// Variables bound before iteration (e.g., from document-level selectors)
@@ -546,11 +553,10 @@ pub struct Blueprint {
     any(feature = "host", feature = "builder"),
     derive(serde::Serialize, serde::Deserialize)
 )]
+/// Named expression emitted as one field in each extraction row or scalar result.
 pub struct FieldDef {
-    /// The output field name (e.g., "id", "title", "cover_url")
     pub name: String,
 
-    /// The extraction expression tree
     pub expr: Expr,
 
     /// Whether this field is optional (null allowed in output)
@@ -562,6 +568,7 @@ pub struct FieldDef {
     any(feature = "host", feature = "builder"),
     derive(serde::Serialize, serde::Deserialize)
 )]
+/// Named expression evaluated before row iteration and made available to later expressions.
 pub struct Binding {
     pub name: String,
     pub expr: Expr,
@@ -572,6 +579,7 @@ pub struct Binding {
     any(feature = "host", feature = "builder"),
     derive(serde::Serialize, serde::Deserialize)
 )]
+/// Upstream request optionally carried inside a serialized [`Blueprint`].
 pub struct RequestDef {
     pub url: String,
     pub method: String,
@@ -581,15 +589,9 @@ pub struct RequestDef {
     pub endpoint_id: Option<String>,
 }
 
-// ============================================================
-// Builder API — enabled by the `builder` feature flag.
-// All methods are #[inline] so they compile to zero overhead.
-// ============================================================
-
 #[cfg(feature = "builder")]
 #[allow(clippy::should_implement_trait)]
 impl Expr {
-    // ── Leaf constructors ────────────────────────────────────────────────────
     #[inline]
     pub fn self_ref() -> Self {
         Expr::SelfRef
@@ -635,7 +637,6 @@ impl Expr {
         Expr::Json(pointer.into())
     }
 
-    // ── HTML methods ─────────────────────────────────────────────────────────
     #[inline]
     pub fn attr(self, name: impl Into<String>) -> Self {
         Expr::Attr {
@@ -683,7 +684,6 @@ impl Expr {
         }
     }
 
-    // ── String methods ───────────────────────────────────────────────────────
     #[inline]
     pub fn split(self, delimiter: impl Into<String>) -> Self {
         Expr::Split {
@@ -777,7 +777,6 @@ impl Expr {
         self.prepend(Expr::Literal(s.into()))
     }
 
-    // ── Parse / type conversion ──────────────────────────────────────────────
     #[inline]
     pub fn parse_float(self) -> Self {
         Expr::ParseFloat {
@@ -810,7 +809,6 @@ impl Expr {
         }
     }
 
-    // ── Control flow ─────────────────────────────────────────────────────────
     #[inline]
     pub fn fallback(self, default: Expr) -> Self {
         Expr::Fallback {
@@ -849,7 +847,6 @@ impl Expr {
         }
     }
 
-    // ── List / collection methods ────────────────────────────────────────────
     #[inline]
     pub fn map(self, transform: Expr) -> Self {
         Expr::Map {
@@ -902,7 +899,6 @@ impl Expr {
         Expr::Concat(parts)
     }
 
-    // ── JSON-specific ────────────────────────────────────────────────────────
     #[inline]
     pub fn ptr(self, pointer: impl Into<String>) -> Self {
         Expr::JsonPtr {
@@ -992,19 +988,16 @@ impl Expr {
         })
     }
 
-    // ── List merging ─────────────────────────────────────────────────────────
     #[inline]
     pub fn merge(lists: Vec<Expr>) -> Self {
         Expr::Merge(lists)
     }
 
-    // ── Preferences ─────────────────────────────────────────────────────────
     #[inline]
     pub fn pref(key: impl Into<String>) -> Self {
         Expr::Pref(key.into())
     }
 
-    // ── String formatting ────────────────────────────────────────────────────
     #[inline]
     pub fn format(template: impl Into<String>, args: Vec<Expr>) -> Self {
         Expr::Format {
@@ -1013,7 +1006,6 @@ impl Expr {
         }
     }
 
-    // ── Boolean / string extras ──────────────────────────────────────────────
     #[inline]
     pub fn not(self) -> Self {
         Expr::Not {
@@ -1035,7 +1027,6 @@ impl Expr {
         }
     }
 
-    // ── List operations (v2) ─────────────────────────────────────────────────
     #[inline]
     pub fn split_n(self, delimiter: impl Into<String>, n: usize) -> Self {
         Expr::SplitN {
@@ -1078,7 +1069,6 @@ impl Expr {
         }
     }
 
-    // ── URL encoding (v2) ────────────────────────────────────────────────────
     #[inline]
     pub fn url_encode(self) -> Self {
         Expr::UrlEncode {
@@ -1092,7 +1082,6 @@ impl Expr {
         }
     }
 
-    // ── Padded formatting (v2) ───────────────────────────────────────────────
     #[inline]
     pub fn format_padded(self, width: usize, fill: char, align: PadAlign) -> Self {
         Expr::FormatPadded {
@@ -1103,13 +1092,11 @@ impl Expr {
         }
     }
 
-    // ── Scalar access (v2) ───────────────────────────────────────────────────
     #[inline]
     pub fn scalar(name: impl Into<String>) -> Self {
         Expr::ScalarOverride { name: name.into() }
     }
 
-    // ── Sub-blueprint fetch ──────────────────────────────────────────────────
     #[inline]
     pub fn fetch_html(url_expr: Expr, blueprint: Blueprint) -> Self {
         Expr::Fetch {
@@ -1229,7 +1216,6 @@ impl Expr {
             other => other,
         }
     }
-    // ── Binary operators ─────────────────────────────────────────────────────
     #[inline]
     pub fn eq(self, rhs: Expr) -> Self {
         Expr::BinaryOperation {
@@ -1470,8 +1456,6 @@ mod tests {
         let back: Expr = postcard::from_bytes(&bytes).unwrap();
         assert_eq!(*expr, back);
     }
-
-    // ── Expr variants — postcard round-trip ──────────────────────────────────
 
     #[test]
     fn expr_postcard_round_trip_leaf_variants() {
@@ -1751,8 +1735,6 @@ mod tests {
         }
     }
 
-    // ── DSL v2 variants — postcard round-trip ────────────────────────────────
-
     #[test]
     fn expr_postcard_round_trip_v2_list_ops() {
         for e in &[
@@ -1835,8 +1817,6 @@ mod tests {
         let (version, _): (u32, &[u8]) = postcard::take_from_bytes(&bytes).unwrap();
         assert_eq!(version, DSL_SCHEMA_VERSION);
     }
-
-    // ── Blueprint round-trip and builder ─────────────────────────────────────
 
     #[test]
     fn blueprint_postcard_round_trip_all_fields_populated() {
@@ -1950,8 +1930,6 @@ mod tests {
         let pg = bp2.pagination.as_ref().unwrap();
         assert_eq!(pg.offset_type, OffsetType::PageNumber { start: 1 });
     }
-
-    // ── PaginationConfig postcard round-trip ──────────────────────────────────
 
     #[test]
     fn pagination_config_postcard_round_trip_both_offset_types() {

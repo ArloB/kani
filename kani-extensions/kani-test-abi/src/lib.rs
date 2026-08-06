@@ -105,8 +105,6 @@ fn list(items: Vec<MangaListItem>) -> MangaList {
     }
 }
 
-// ── HTML host imports (page = 1) ─────────────────────────────────────────────
-
 const HTML_DOC: &str = r#"<html><body>
   <div class="card" data-id="42">
     <p class="title">Hello World</p>
@@ -163,8 +161,6 @@ fn test_html_imports() -> ExtensionResult<MangaList> {
     };
     Ok(list(vec![item(&id_val, &title_val, Some(cover))]))
 }
-
-// ── JSON host imports (page = 2) ─────────────────────────────────────────────
 
 const JSON_DOC: &[u8] = br#"{
   "name": "Alice",
@@ -231,8 +227,6 @@ fn test_json_imports() -> ExtensionResult<MangaList> {
     Ok(list(vec![item(&name, &age.to_string(), Some(cover))]))
 }
 
-// ── Utility host imports (page = 3) ──────────────────────────────────────────
-
 fn test_utility_imports() -> ExtensionResult<MangaList> {
     let ts1 = utility::date_parse("2024-01-15", "[year]-[month]-[day]")
         .map_err(ExtensionError::unknown)?;
@@ -274,8 +268,6 @@ fn test_utility_imports() -> ExtensionResult<MangaList> {
     Ok(list(vec![item("util-ok", &decoded, pg_val.as_deref())]))
 }
 
-// ── Prefs host imports (query = "prefs") ─────────────────────────────────────
-
 fn test_prefs_imports() -> ExtensionResult<MangaList> {
     let raw_str = prefs_raw::get_value("test_str");
     let raw_missing = prefs_raw::get_value("missing_key");
@@ -296,8 +288,6 @@ fn test_prefs_imports() -> ExtensionResult<MangaList> {
 
     Ok(list(vec![item(&str_val, &bool_val.to_string(), cover)]))
 }
-
-// ── extraction::extract_html (query = "extract-html") ────────────────────────
 
 const EXTRACT_HTML: &str = r#"<html><body>
   <ul>
@@ -335,8 +325,6 @@ fn test_extract_html() -> ExtensionResult<MangaList> {
     Ok(list(items))
 }
 
-// ── extraction::extract_json (query = "extract-json") ────────────────────────
-
 const EXTRACT_JSON: &[u8] = br#"{
   "items": [
     {"manga_id": "j1", "manga_title": "JsonAlpha"},
@@ -372,8 +360,6 @@ fn test_extract_json() -> ExtensionResult<MangaList> {
 
     Ok(list(items))
 }
-
-// ── Native stream<chapter-info> override (manga_id = "native-stream") ────────
 
 fn test_native_chapter_list_stream()
 -> kani_shared::StreamReader<Result<wit_types::ChapterInfo, wit_types::ExtensionError>> {
@@ -417,8 +403,6 @@ fn test_native_chapter_list_stream()
     });
     rx
 }
-
-// ── Error-path verification (manga_id = "error-paths") ───────────────────────
 
 fn test_error_paths() -> ExtensionResult<MangaInfo> {
     let invalid_list: i32 = 9999;
@@ -481,8 +465,6 @@ fn test_error_paths() -> ExtensionResult<MangaInfo> {
     })
 }
 
-// ── Multi-page chapter list (manga_id = "paginated-stream") ──────────────────
-
 fn test_paginated_chapter_list(page: i32) -> ChapterList {
     fn chapter(id: &str, number: f64) -> wit_types::ChapterInfo {
         wit_types::ChapterInfo {
@@ -515,8 +497,6 @@ fn test_paginated_chapter_list(page: i32) -> ChapterList {
     }
 }
 
-// ── Error kind round-trip (manga_id = "error-*") ─────────────────────────────
-
 fn test_error_kind(manga_id: &str) -> ExtensionResult<ChapterList> {
     match manga_id {
         "error-network" => Err(ExtensionError::network("connection refused".into())
@@ -534,8 +514,6 @@ fn test_error_kind(manga_id: &str) -> ExtensionResult<ChapterList> {
         }),
     }
 }
-
-// ── Guest trait (WIT boundary) ───────────────────────────────────────────────
 
 impl Guest for TestAbi {
     fn get_metadata() -> Result<String, WitError> {
@@ -623,8 +601,6 @@ impl Guest for TestAbi {
     }
 }
 
-// ── MangaExtension trait ─────────────────────────────────────────────────────
-
 impl MangaExtension for TestAbi {
     fn name(&self) -> &str {
         "TestAbi"
@@ -703,8 +679,6 @@ impl MangaExtension for TestAbi {
         Ok(vec![])
     }
 }
-
-// ── Singleton and WASM export ─────────────────────────────────────────────────
 
 use std::sync::OnceLock;
 

@@ -1,15 +1,4 @@
 #!/usr/bin/env node
-// @ts-check
-// Scans static/js/**/*.js for bare user-visible string literals that should
-// instead go through t("key") — text nodes inside htm `html\`...\`` template
-// literals, and raw string assignments to `.textContent`.
-//
-// Exceptions: trail a line with `// i18n-ignore` to suppress it, or add the
-// whole file to EXEMPT_FILES below (matches CLAUDE.md's documented i18n
-// exceptions: pages/admin/ui-showcase.js and console.* diagnostics, the
-// latter already excluded by only scanning .textContent/htm text nodes).
-//
-// Usage: node scripts/check-untranslated-strings.js
 
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, extname, relative } from 'path';
@@ -53,10 +42,9 @@ function isSuspicious(text) {
   // Bare technical tokens: single all-caps word (DEBUG, OK-as-acronym-ish),
   // or a single word with no spaces that's 3 chars or fewer (icons, units).
   if (/^[A-Z0-9_-]{2,12}$/.test(trimmed) && !trimmed.includes(' ')) return false;
-  // Single-character initials (avatar/logo placeholders, aria-hidden) —
-  // can't be wrapped in t() without becoming a translated single letter,
-  // and can't carry a trailing `// i18n-ignore` since they live inside a
-  // multi-line HTML template literal where a `//` would render as text.
+  // Single-character initials (avatar/logo placeholders, aria-hidden) — can't be wrapped in t()
+  // without becoming a translated single letter, and can't carry a trailing `// i18n-ignore`
+  // since they live inside a multi-line HTML template literal where a `//` would render as text.
   if (trimmed.length === 1) return false;
   // A lowercase-`v` version prefix, e.g. `v${version}` — formatting
   // convention, not prose.

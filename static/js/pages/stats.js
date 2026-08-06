@@ -1,6 +1,4 @@
 // @ts-check
-// Reading Statistics dashboard — widget registry pattern for extensibility.
-// New stat blocks: implement a widget object and append it to WIDGETS.
 
 import * as api from '../api.js';
 import { navigate } from '../router.js';
@@ -11,10 +9,8 @@ import { createErrorState } from '../components/error-state.js';
 import { createEmptyState } from '../components/empty-state.js';
 import { t } from '../i18n.js';
 
-// A real CLI command — not translatable prose.
 const _SETUP_CMD = 'kani-cli setup';
 
-// ── CSS variable resolver ─────────────────────────────────────────────────────
 // Chart.js renders on <canvas> and cannot read CSS custom properties.
 
 /** @param {string} varName e.g. '--color-text-muted' */
@@ -35,11 +31,9 @@ function chartColor(varName, alpha = 1) {
   return `rgba(${r},${g},${b},${alpha})`; // audit-ignore: built from a resolved token, not a literal colour
 }
 
-// ── Widget registry ───────────────────────────────────────────────────────────
-// Each widget: { id: string, pinned?: boolean, render(container, data) → { destroy() } }
-// Adding a new widget requires only appending to WIDGETS — no other changes.
-// A pinned widget sits above the scroll boundary and stays on screen while
-// the charts below it move.
+// Each widget: { id: string, pinned?: boolean, render(container, data) → { destroy() } } Adding
+// a new widget requires only appending to WIDGETS — no other changes. A pinned widget sits above
+// the scroll boundary and stays on screen while the charts below it move.
 
 const WIDGETS = [
   summaryWidget(),
@@ -49,7 +43,6 @@ const WIDGETS = [
   genreBreakdownWidget(),
 ];
 
-// ── Module state ──────────────────────────────────────────────────────────────
 
 /** @type {AbortController | null} */       let _abort = null;
 /** @type {Array<{ destroy(): void }>} */   let _widgetInstances = [];
@@ -57,7 +50,6 @@ const WIDGETS = [
 /** @type {HTMLElement | null} */           let _contentEl = null;
 /** @type {HTMLElement | null} */           let _pinnedEl = null;
 
-// ── Init / Destroy ────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export async function init(container) {
@@ -65,7 +57,6 @@ export async function init(container) {
   _period = 90;
   _widgetInstances = [];
 
-  // Period picker action
   const picker = document.createElement('select');
   picker.className = 'input input-sm w-28';
   for (const [v, l] of [[30, t('stats.period.30d')], [90, t('stats.period.90d')], [180, t('stats.period.180d')], [365, t('stats.period.1y')]]) {
@@ -105,7 +96,6 @@ export function destroy(_c) {
   clearPageHeader();
 }
 
-// ── Load ──────────────────────────────────────────────────────────────────────
 
 async function _load() {
   if (!_contentEl) return;
@@ -151,7 +141,7 @@ function _renderWidgets(stats) {
 
 function _destroyWidgets() {
   for (const inst of _widgetInstances) {
-    try { inst.destroy(); } catch { /* ignore */ }
+    try { inst.destroy(); } catch { }
   }
   _widgetInstances = [];
 }
@@ -171,7 +161,6 @@ function _buildSkeleton() {
   `;
 }
 
-// ── Widget: Summary cards ─────────────────────────────────────────────────────
 
 function summaryWidget() {
   return {
@@ -186,8 +175,6 @@ function summaryWidget() {
         {
           label: t('stats.card.streak'),
           value: `${data.current_streak ?? 0}d`,
-          // Longest streak is context for the current one, not a stat of its own —
-          // it belongs in this card, not floating beneath the grid.
           note: data.longest_streak
             ? t('stats.summary.longest_streak_note', { days: data.longest_streak })
             : null,
@@ -231,7 +218,6 @@ function _zeroFillDays(rows, key) {
   return out;
 }
 
-// ── Widget: Reading-pace line chart (#34) ─────────────────────────────────────
 
 function readingPaceWidget() {
   /** @type {any} */ let _chart = null;
@@ -299,7 +285,6 @@ function readingPaceWidget() {
   };
 }
 
-// ── Widget: Daily activity bar chart ──────────────────────────────────────────
 
 function dailyActivityWidget() {
   /** @type {any} */ let _chart = null;
@@ -325,7 +310,6 @@ function dailyActivityWidget() {
 
       const canvas = /** @type {HTMLCanvasElement} */ (container.querySelector('#chart-daily'));
 
-      // Lazy-load Chart.js (vendored)
       _loadChartJs().then(Chart => {
         if (!canvas.isConnected) return;
         _chart = new Chart(canvas.getContext('2d'), {
@@ -367,7 +351,6 @@ function dailyActivityWidget() {
   };
 }
 
-// ── Widget: Top manga horizontal bars ─────────────────────────────────────────
 
 function topMangaWidget() {
   /** @type {any} */ let _chart = null;
@@ -455,7 +438,6 @@ function topMangaWidget() {
   };
 }
 
-// ── Widget: Genre breakdown doughnut ──────────────────────────────────────────
 
 function genreBreakdownWidget() {
   /** @type {any} */ let _chart = null;
@@ -538,9 +520,6 @@ function genreBreakdownWidget() {
   };
 }
 
-// ── Chart.js loader ───────────────────────────────────────────────────────────
-// Chart.js ships as a UMD bundle (sets window.Chart), not an ES module.
-// We inject a script tag once and resolve when it fires onload.
 
 /** @type {Promise<any> | null} */ let _chartJsPromise = null;
 
@@ -550,7 +529,6 @@ function _loadChartJs() {
       if (window.Chart) { resolve(window.Chart); return; }
       const existing = document.querySelector('script[data-chartjs]');
       if (existing) {
-        // Script already injected by a previous load — wait for it
         existing.addEventListener('load',  () => resolve(window.Chart));
         existing.addEventListener('error', reject);
         return;

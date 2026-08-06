@@ -4,7 +4,7 @@
 [![codecov](https://codecov.io/gh/arlob/kani/graph/badge.svg?token=MGPR4JQ8IO)](https://codecov.io/gh/arlob/kani)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Self-hosted manga library server written in Rust with a WebAssembly-based extension system.
+Kani is a self-hosted manga library server written in Rust with a WebAssembly extension system.
 Inspired by [Tachiyomi/Mihon](https://mihon.app/) and [Komga](https://komga.org/).
 
 <!--screenshot: docs/screenshots/library.png — library grid view with category tabs and filters-->
@@ -71,14 +71,12 @@ cd kani
 docker compose up --build
 ```
 
-Open <http://localhost:8242>. A new server has no accounts, so it shows a setup screen where you
-create the administrator — pick your own username and password. Setup closes permanently as soon as
-that account exists.
+Open <http://localhost:8242> and create the administrator account. Setup closes after the account
+is created.
 
-For safety it is only accepted from a loopback or private address, so an instance published to the
-internet before you reach it cannot be claimed by someone else. If you must complete setup over the
-internet (a VPS reached directly rather than through a tunnel or reverse proxy), start the server
-with `KANI_ALLOW_REMOTE_SETUP=true`.
+Setup accepts requests from loopback and private addresses only. To set up a directly exposed
+server, set `KANI_ALLOW_REMOTE_SETUP=true`; use this option only when a tunnel or reverse proxy is
+unavailable.
 
 Data is persisted in two directories created alongside `docker-compose.yml`:
 
@@ -134,8 +132,7 @@ Extensions are WebAssembly Components compiled against a [WIT](kani-core/wit/kan
 The host provides HTTP, HTML/JSON extraction, utilities, and preferences; the extension exports a
 `manga-provider` implementation. Extensions are sandboxed — they can only reach the host APIs.
 
-New extensions can be authored in YAML using a declarative schema and a small DSL for field
-extraction, with no raw Rust required:
+Extensions can be defined in YAML with a declarative schema and extraction DSL:
 
 ```bash
 cargo run -p kani-cli -- new my-source           # scaffold a YAML template
@@ -157,7 +154,7 @@ cargo clippy -- -D warnings
 cargo fmt --check
 ```
 
-`unwrap_used` is denied workspace-wide — use `?`, `expect`, or an explicit match instead.
+`unwrap_used` is denied workspace-wide. Use `?`, `expect`, or an explicit match.
 
 ### Architecture
 
@@ -173,8 +170,8 @@ The workspace has six crates:
 | `kani-extensions/*` | Individual extension WASM modules |
 
 Extensions are sandboxed WASM Components built against a WIT interface (`kani-core/wit/kani.wit`).
-Instead of driving DOM traversal via many FFI calls, extensions submit a declarative `Blueprint`
-across the boundary in one call; the host evaluates it natively against parsed HTML or JSON.
+Extensions submit a declarative `Blueprint` in one FFI call. The host evaluates it against parsed
+HTML or JSON.
 See `SPECIFICATION.md` for the full extension authoring reference.
 
 ### Testing
@@ -186,8 +183,8 @@ See `SPECIFICATION.md` for the full extension authoring reference.
 | REST API | `kani-web/tests/<area>_api_tests.rs` | New HTTP endpoints |
 | CLI / codegen | `kani-cli/tests/` | YAML validation rules, DSL changes, codegen output |
 
-Every new pure function gets a happy-path test and at least one edge/error case. New REST endpoints
-get a test triplet: 200 for an authenticated user, 401 without auth, and 4xx for invalid input.
+Every new pure function requires a happy-path test and at least one edge or error case. New REST
+endpoints require tests for an authenticated `200`, unauthenticated `401`, and invalid-input `4xx`.
 Use `common::test_state()` + `common::build_test_app()` + `common::create_admin()` from
 `kani-web/tests/common/mod.rs`; this wires the full auth stack against an in-memory SQLite DB.
 
@@ -197,22 +194,15 @@ cache before it reaches CI, provided `sqlx-cli` is installed (`cargo binstall sq
 
 ### Contributing
 
-Branch new work off `develop` (`git checkout -b feature/<name> develop`) and open a PR back into
-`develop` before starting the next feature. Keep each branch to one feature or a set of tightly
-related changes. `main` is updated from `develop` at release points only.
+Branch from `develop` (`git checkout -b feature/<name> develop`) and open a PR into `develop`. Keep
+each branch focused on one feature or a closely related set of changes. Update `main` from
+`develop` only for releases.
 
 ---
 
 ## Legal
 
-Kani is infrastructure software — it ships no content.
-
-Extensions are third-party integrations with external websites, installed by the user at runtime.
-Extension files (`.wasm`) are not included in Kani releases and are not distributed by this
-project. Kani does not endorse, provide, or maintain any third-party content source.
-
-You are solely responsible for ensuring your use of Kani and any content sources you connect to
-complies with applicable laws and the terms of service of those sources.
+Kani does not distribute content or third-party extensions. See the [Disclaimer](DISCLAIMER.md).
 
 ---
 

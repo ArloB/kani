@@ -189,7 +189,7 @@ async fn copy_tree(
     .await
 }
 
-// Box::pin required to make async recursion compile
+// Recursive async calls require an indirection boundary.
 #[allow(clippy::too_many_arguments)]
 fn copy_dir<'a>(
     service: &'a AppService,

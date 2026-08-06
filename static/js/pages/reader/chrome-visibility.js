@@ -86,7 +86,6 @@ export function createChromeVisibility({
     backdrop.classList.add('hidden');
     if (panelTrigger instanceof HTMLElement && document.contains(panelTrigger)) panelTrigger.focus();
     panelTrigger = null;
-    // On fine-pointer, restart hide timer if not hovering.
     if (isFinePointer() && !isHovering && barsVisible) hideTimer = setTimeout(hideBars, 1500);
   }
 
@@ -107,7 +106,6 @@ export function createChromeVisibility({
     miniStrip.addEventListener('click', (e) => { e.stopPropagation(); toggleBars(); });
   }
 
-  // ── Three-zone tap ─────────────────────────────────────────────────────────
   function triggerZoneAction(/** @type {string} */ action) {
     switch (action) {
       case 'prev': engine.goPage(state.direction === 'rtl' ? 1 : -1); break;
@@ -122,7 +120,7 @@ export function createChromeVisibility({
   pagesEl.addEventListener('click', (e) => {
     const target = /** @type {HTMLElement} */ (e.target);
     if (target.closest('button') || target.closest('a')) return;
-    if (engine.isZoomed()) return; // suppress nav while zoomed
+    if (engine.isZoomed()) return;
 
     const rect = pagesEl.getBoundingClientRect();
     const x = e.clientX - rect.left;

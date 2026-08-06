@@ -63,7 +63,6 @@ async fn delete_source_is_idempotent() {
     let svc = test_service().await;
     let id = svc.add_source("del", UserId(1)).await.unwrap();
     svc.delete_source(id, UserId(1)).await.unwrap();
-    // delete_source is a no-op when the source is already soft-deleted
     svc.delete_source(id, UserId(1)).await.unwrap();
     assert!(svc.list_sources().await.unwrap().is_empty());
 }

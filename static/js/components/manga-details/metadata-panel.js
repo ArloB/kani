@@ -1,5 +1,4 @@
 // @ts-check
-// Manage tab — "Edit Metadata" button that opens a modal for local overrides.
 
 import { h, render } from 'preact';
 import { useState, useRef, useEffect } from 'preact/hooks';
@@ -17,7 +16,6 @@ import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
 
-// ── Constants ─────────────────────────────────────────────────────────────────
 
 const STATUS_OPTIONS = () => [
   { value: '', label: t('manga.status.use_source') },
@@ -28,7 +26,6 @@ const STATUS_OPTIONS = () => [
   { value: 4, label: t('manga.status.cancelled') },
 ];
 
-// ── SaveStatus ────────────────────────────────────────────────────────────────
 
 /** @param {{ status: string|null }} props */
 function SaveStatus({ status }) {
@@ -43,7 +40,6 @@ function OverrideDot() {
   return html`<span class="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-accent align-middle" title=${t('manga.meta.override_active')}></span>`;
 }
 
-// ── MetadataEditModal ─────────────────────────────────────────────────────────
 
 /**
  * @param {{
@@ -54,7 +50,6 @@ function OverrideDot() {
  * }} props
  */
 function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
-  // Filter options for creatable comboboxes (fetched once on mount)
   const [authorOptions, setAuthorOptions] = useState(/** @type {Array<{id:number,name:string}>} */([]));
   const [artistOptions, setArtistOptions] = useState(/** @type {Array<{id:number,name:string}>} */([]));
   const [tagOptions, setTagOptions] = useState(/** @type {Array<{id:number,name:string}>} */([]));
@@ -64,28 +59,23 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     api.getFilterTags().then(setTagOptions).catch(() => {});
   }, []);
 
-  // Cover
   const [coverOverridden, setCoverOverridden] = useState(d.cover_overridden ?? false);
   const [coverTs, setCoverTs] = useState(Date.now());
   const [coverStatus, setCoverStatus] = useState(/** @type {string|null} */(null));
   const fileInputRef = useRef(/** @type {HTMLInputElement|null} */(null));
 
-  // Title
   const [localName, setLocalName] = useState(d.local_name ?? '');
   const [titleStatus, setTitleStatus] = useState(/** @type {string|null} */(null));
   const savedName = useRef(d.local_name ?? '');
 
-  // Description
   const [localDesc, setLocalDesc] = useState(d.local_description ?? '');
   const [descStatus, setDescStatus] = useState(/** @type {string|null} */(null));
   const descTimer = useRef(/** @type {ReturnType<typeof setTimeout>|null} */(null));
   const descMounted = useRef(false);
 
-  // Status
   const [localStatus, setLocalStatus] = useState(d.local_status != null ? String(d.local_status) : '');
   const [statusStatus, setStatusStatus] = useState(/** @type {string|null} */(null));
 
-  // People — prefer source_authors/artists (explicit); fall back to info.authors/artists (always present)
   /** @param {any} arr @returns {string[]} */
   const toNames = (arr) => (Array.isArray(arr) ? arr : []).map(a => typeof a === 'string' ? a : (a?.name ?? ''));
   const srcAuthors = toNames(d.source_authors?.length ? d.source_authors : d.authors);
@@ -95,13 +85,11 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
   const [hasLocalPeople, setHasLocalPeople] = useState(d.has_local_people ?? false);
   const [peopleStatus, setPeopleStatus] = useState(/** @type {string|null} */(null));
 
-  // Tags — prefer source_tags; fall back to info.tags
   const srcTags = toNames(d.source_tags?.length ? d.source_tags : d.tags);
   const [tags, setTags] = useState(/** @type {string[]} */(d.has_local_tags ? toNames(d.local_tags) : srcTags));
   const [hasLocalTags, setHasLocalTags] = useState(d.has_local_tags ?? false);
   const [tagsStatus, setTagsStatus] = useState(/** @type {string|null} */(null));
 
-  // Refresh-from-source state
   const canRefresh = hasPermission('library:refresh');
   const [redownloadCover, setRedownloadCover] = useState(() => getLocal('kani.refreshOpts.cover') !== 'false');
   const [refreshStatus, setRefreshStatus] = useState(/** @type {string|null} */(null));
@@ -113,7 +101,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     setTimeout(() => setter(null), 2500);
   }
 
-  // ── Cover handlers ────────────────────────────────────────────────────────
 
   async function handleCoverFile(/** @type {Event} */ e) {
     const file = /** @type {HTMLInputElement} */(e.target).files?.[0];
@@ -143,7 +130,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     }
   }
 
-  // ── Title handlers ────────────────────────────────────────────────────────
 
   async function saveTitle() {
     const val = localName.trim() || null;
@@ -167,7 +153,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     } catch { flash(setTitleStatus, 'error'); }
   }
 
-  // ── Description handlers ──────────────────────────────────────────────────
 
   useEffect(() => {
     if (!descMounted.current) { descMounted.current = true; return; }
@@ -194,7 +179,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     } catch { flash(setDescStatus, 'error'); }
   }
 
-  // ── Status handlers ───────────────────────────────────────────────────────
 
   async function handleStatusChange(/** @type {Event} */ e) {
     const raw = /** @type {HTMLSelectElement} */(e.target).value;
@@ -216,7 +200,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     } catch { flash(setStatusStatus, 'error'); }
   }
 
-  // ── People handlers ───────────────────────────────────────────────────────
 
   async function savePeople(nextAuthors = authors, nextArtists = artists) {
     setAuthors(nextAuthors);
@@ -240,7 +223,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     } catch { flash(setPeopleStatus, 'error'); }
   }
 
-  // ── Tags handlers ─────────────────────────────────────────────────────────
 
   async function saveTags(next) {
     setTags(next);
@@ -262,7 +244,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     } catch { flash(setTagsStatus, 'error'); }
   }
 
-  // ── Refresh-from-source handlers ──────────────────────────────────────────
 
   async function handleRefreshAll() {
     flash(setRefreshStatus, 'refreshing');
@@ -343,7 +324,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     }
   }
 
-  // ── Derived booleans ──────────────────────────────────────────────────────
 
   const titleOverridden = d.local_name != null || !!localName;
   const descOverridden = d.local_description != null || !!localDesc;
@@ -356,7 +336,6 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
     ? d.source_description.slice(0, 120) + (d.source_description.length > 120 ? '…' : '')
     : t('manga.meta.desc.placeholder');
 
-  // ── Render ────────────────────────────────────────────────────────────────
 
   return html`
     <${Modal} open=${true} onClose=${onClose} title=${t('manga.meta.title')} wide=${true}
@@ -650,12 +629,10 @@ function MetadataEditModal({ onClose, dbId, initialData: d, onFieldSaved }) {
   `;
 }
 
-// ── Module-level live data (survives modal open/close within a page view) ─────
 
 /** @type {any} */
 let _liveData = null;
 
-// ── Public mount function ─────────────────────────────────────────────────────
 
 /**
  * Creates a compact "Edit metadata" row in the Manage tab that opens the modal on click.

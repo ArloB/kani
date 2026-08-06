@@ -933,10 +933,6 @@ async fn browser_payload_endpoint_missing_script_returns_clear_error() {
 async fn browser_payload_endpoint_reaches_capture_page_payload() {
     use kani_yaml::yaml::schema::EndpointVia;
 
-    // Deterministic, environment-independent short-circuit inside
-    // v8_process::capture_page_payload — proves arg resolution and script
-    // lookup succeeded and the call reached the browser-runtime boundary,
-    // without needing a real headless browser available in the test env.
     unsafe {
         std::env::set_var("KANI_BROWSER_ENABLED", "false");
     }
@@ -1172,7 +1168,6 @@ async fn yaml_hot_swap_in_flight_call_completes_with_old_config() {
         ))),
     );
 
-    // Simulate a handler that already holds a reference to the old backend.
     let old_backend = registry.get_backend(1).unwrap();
 
     registry
@@ -1261,13 +1256,11 @@ endpoints:
         .try_get("id")
         .unwrap();
 
-    // Disable, then re-enable — the path that used to only ever read a .wasm.
     svc.toggle_source_enabled(id, false).await.unwrap();
     svc.toggle_source_enabled(id, true)
         .await
         .expect("re-enabling a YAML source must not fail reading a nonexistent .wasm");
 
-    // The proof it is live again: a search reaches the source.
     let result = svc.search_manga(id, "anything", 1, 20, None).await;
     assert!(
         result.is_ok(),
@@ -1316,10 +1309,6 @@ fn extension_error(err: kani_core::error::Error) -> kani_shared::extension::Exte
 async fn yaml_source_429_classifies_as_rate_limited_with_retry_after() {
     use kani_shared::extension::ExtensionErrorKind;
 
-    // Retry-After larger than the request's own timeout: before A16 the client
-    // slept on it in-request (capped, ×MAX_RETRIES) and overran the 90s outer
-    // timeout, so this surfaced as a misleading ParseError/timeout. Now the 429
-    // is returned immediately and classifies as RateLimited carrying the hint.
     let port = start_status_server("429 Too Many Requests", "Retry-After: 120\r\n").await;
     let base_url = format!("http://127.0.0.1:{port}");
 
@@ -1404,10 +1393,6 @@ async fn yaml_source_404_is_not_surfaced_as_a_typed_http_error() {
         },
     );
 
-    // 404 is deliberately excluded from the typed-error guard: sources return it
-    // to signal "no more pages", so the body is extracted (matching nothing here)
-    // and the endpoint returns an empty list rather than a RateLimited/Network
-    // error. That keeps the pagination loop's terminate-on-empty semantics.
     let result = src
         .get_popular_manga(1, 20, &[])
         .await
@@ -1415,16 +1400,11 @@ async fn yaml_source_404_is_not_surfaced_as_a_typed_http_error() {
     assert!(result.manga.is_empty());
 }
 
-// ── A10 / A11: route placeholder safety ───────────────────────────────────────
-
 #[tokio::test]
 async fn a_source_supplied_id_cannot_rewrite_the_request_path() {
     use kani_shared_test::origin::{Response, TestOrigin};
 
     let origin = TestOrigin::start().await;
-    // Substituted raw, `../admin` would make the path /manga/../admin — a
-    // traversal. Percent-encoded, it is a single literal segment the origin sees
-    // verbatim. We register only the encoded path; a traversal would miss it.
     origin.set("/manga/..%2Fadmin", Response::html("<html></html>"));
 
     let details_ep = ValidatedEndpoint {
@@ -1448,8 +1428,6 @@ async fn a_source_supplied_id_cannot_rewrite_the_request_path() {
         },
     );
 
-    // Extraction finds nothing in the empty doc; all we assert is where the
-    // request landed.
     let _ = src.get_manga_details("../admin").await;
 
     assert_eq!(
@@ -1466,7 +1444,6 @@ async fn an_unresolved_route_placeholder_is_an_error_not_a_literal() {
     let origin = TestOrigin::start().await;
     origin.set("/list", Response::html("<html></html>"));
 
-    // `$missing$` is never supplied by get_popular_manga.
     let ep = ValidatedEndpoint {
         route: "/list/$missing$".into(),
         ..list_endpoint("/list/$missing$", ".item")

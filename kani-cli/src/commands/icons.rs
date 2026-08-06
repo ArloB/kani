@@ -12,10 +12,9 @@ fn seal_bleed() -> tiny_skia::Color {
 pub fn run() -> Result<(), CliError> {
     let svg_path = Path::new("static/icons/kani-mark.svg");
     let out_dir = Path::new("static/icons");
-    // `static/icons/` is gitignored, so a clean checkout (CI, Docker, a fresh
-    // clone) has no source SVG. Icon generation is polish, not a build step —
-    // hard-failing here broke `kani-cli setup`, and with it the Docker image
-    // build, for anyone who did not already have the file locally.
+    // `static/icons/` is gitignored, so a clean checkout (CI, Docker, a fresh clone) has no source
+    // SVG. Icon generation is polish, not a build step — hard-failing here broke `kani-cli setup`,
+    // and with it the Docker image build, for anyone who did not already have the file locally.
     if !svg_path.exists() {
         eprintln!(
             "note: {} not found — skipping PWA icon generation. \
@@ -46,10 +45,9 @@ pub fn generate_icons(svg_path: &Path, out_dir: &Path) -> Result<(), CliError> {
 
     render_at_size(&tree, 192, out_dir.join("icon-192.png"), 0.0, None)?;
     render_at_size(&tree, 512, out_dir.join("icon-512.png"), 0.0, None)?;
-    // A maskable icon must be full-bleed: the launcher crops it to a shape of
-    // its choosing, so transparent padding shows through as clipped corners.
-    // Fill the canvas with the mark's seal colour and let the safe zone hold
-    // the artwork.
+    // A maskable icon must be full-bleed: the launcher crops it to a shape of its choosing, so
+    // transparent padding shows through as clipped corners. Fill the canvas with the mark's seal
+    // colour and let the safe zone hold the artwork.
     render_at_size(
         &tree,
         512,

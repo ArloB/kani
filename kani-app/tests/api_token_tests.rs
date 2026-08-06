@@ -8,8 +8,6 @@ use kani_app::permissions::{Opds, Permission};
 async fn create_then_authenticate_succeeds() {
     let svc = test_service().await;
     let user_id = insert_user(&svc.db, "alice").await;
-    // Scopes are intersected with what the owner holds, so a token is only
-    // useful to a user who actually has the underlying permissions.
     sqlx::query("INSERT OR IGNORE INTO user_roles (user_id, role_slug) VALUES (?, 'user')")
         .bind(user_id)
         .execute(&svc.db)
@@ -64,7 +62,6 @@ async fn list_never_exposes_raw_token_or_hash() {
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].name, "reader");
     assert_eq!(tokens[0].id, created.token.id);
-    // ApiToken carries no raw token or hash field — nothing to leak by construction.
 }
 
 #[tokio::test]
@@ -148,7 +145,6 @@ async fn wrong_user_revoke_is_not_found() {
         .unwrap_err();
     assert!(matches!(err, kani_app::error::ServiceError::NotFound(_)));
 
-    // Owner's token still authenticates.
     assert!(
         svc.authenticate_api_token(&created.raw_token)
             .await
@@ -173,8 +169,6 @@ async fn garbage_token_returns_ok_none() {
             .is_none()
     );
 }
-
-// ── API-token kind, scoping and the use-time intersection ────────────────────
 
 use kani_app::service::api_tokens::TokenKind;
 
@@ -283,7 +277,6 @@ async fn losing_a_role_after_minting_strips_the_scope_from_the_token() {
         "granted while the role held"
     );
 
-    // The owner is downgraded after the token was minted.
     revoke_role(&svc.db, user.0, "admin").await;
 
     let after = svc
@@ -337,9 +330,6 @@ async fn token_count_and_lifetime_are_bounded() {
     assert!(over.is_err(), "per-user token cap should be enforced");
 }
 
-/// opds_allowed checks only the token's scopes and never re-checks the owner, so
-/// before the intersection a reader token kept working after its owner lost
-/// library:view. Closing that is the whole point of intersecting at use time.
 #[tokio::test]
 async fn an_opds_token_stops_working_once_its_owner_loses_the_permission() {
     let svc = test_service().await;

@@ -306,12 +306,7 @@ impl AppService {
         let kind = TokenKind::parse(&row.kind).unwrap_or(TokenKind::Opds);
         let declared = parse_scopes(&row.scopes);
 
-        // Both kinds are intersected with what the owner holds *now*. Validating
-        // at creation is not enough: tokens are long-lived, so a role downgrade
-        // afterwards would otherwise leave a token more privileged than its
-        // owner. This matters for OPDS too — opds_allowed checks only the
-        // token's scopes and never re-checks the owner, so without this a reader
-        // token kept working after its owner lost library:view.
+        // Effective scopes cannot exceed the owner's current permissions after a role change.
         let held = self.user_permissions(owner).await?;
         let scopes: Vec<Permission> = declared.into_iter().filter(|p| held.contains(p)).collect();
 

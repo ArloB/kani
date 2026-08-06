@@ -52,8 +52,8 @@ the release notes only after the publishing job proves them.
   release command.
 - Complete first-run setup, check `/ready`, and exercise login, a source load, a job, and backup
   creation.
-- Confirm release notes, supported targets, image coordinates, migration policy, and documentation
-  all describe the artifacts that actually exist.
+- Confirm that release notes, supported targets, image coordinates, migration policy, and
+  documentation describe the published artifacts.
 
 If verification fails, do not repair a release by silently moving tags or replacing signed assets.
 Follow the published correction or withdrawal policy.

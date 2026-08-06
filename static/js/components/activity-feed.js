@@ -1,5 +1,4 @@
 // @ts-check
-// ActivityFeed — timestamped event list with load-more and empty state.
 
 import { h } from 'preact';
 import htm from 'htm';

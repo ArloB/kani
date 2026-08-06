@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group K (covers) — the cover download path (`save_to_library` →
+//! Cover download behavior across `save_to_library` and
 //! `download_and_store_cover`). A cover fetch failure is swallowed (the library
 //! entry is still saved and a retry scheduled), so the observable is that
 //! `local_cover_path` stays NULL — the bad bytes are never stored.
@@ -97,13 +97,10 @@ async fn cover_path(svc: &AppService, manga: kani_app::ids::MangaId) -> Option<S
         .unwrap()
 }
 
-// K7 — a cover served as HTML is rejected by the Content-Type gate and never
-// stored: the library entry is saved but local_cover_path stays NULL.
 #[tokio::test]
 async fn a_cover_served_as_html_is_rejected() {
     let origin = TestOrigin::start().await;
     origin.set("/manga/m1", Response::html(DETAILS_HTML));
-    // The cover URL answers with text/html, not an image.
     origin.set(
         "/cover",
         Response::html("<html>definitely not an image</html>"),
@@ -121,9 +118,6 @@ async fn a_cover_served_as_html_is_rejected() {
     );
 }
 
-// A CDN serving a genuine image as `application/octet-stream` is common, and a
-// gate on the declared type refused it — the cover never stored, and the image
-// proxy answered 500. Observed against a real source.
 #[tokio::test]
 async fn a_cover_served_as_octet_stream_is_still_stored() {
     let origin = TestOrigin::start().await;
@@ -146,8 +140,6 @@ async fn a_cover_served_as_octet_stream_is_still_stored() {
     );
 }
 
-// The other direction, and the reason the gate exists: a label cannot buy
-// passage for something that is not an image.
 #[tokio::test]
 async fn a_page_labelled_as_an_image_is_still_rejected() {
     let origin = TestOrigin::start().await;
@@ -170,13 +162,10 @@ async fn a_page_labelled_as_an_image_is_still_rejected() {
     );
 }
 
-// K6 — a cover larger than the 10 MB cap is rejected even with a valid image
-// content-type: bytes_limited stops the download, so nothing is stored.
 #[tokio::test]
 async fn a_cover_larger_than_the_cap_is_rejected() {
     let origin = TestOrigin::start().await;
     origin.set("/manga/m1", Response::html(DETAILS_HTML));
-    // 11 MB, image content-type — passes the type gate, overruns the size cap.
     origin.set("/cover", Response::image(vec![0u8; 11 * 1024 * 1024]));
 
     let svc = test_service().await;
@@ -191,10 +180,6 @@ async fn a_cover_larger_than_the_cap_is_rejected() {
     );
 }
 
-// K8 — a cover the origin refuses is queued for the retry sweep, and the sweep's
-// per-manga retry then succeeds once the origin recovers. Driving
-// `retry_single_cover` directly rather than waiting out the sweep's interval
-// exercises both halves: the enqueue on failure and the recovery on retry.
 #[tokio::test]
 async fn a_failed_cover_is_retried_by_the_sweep() {
     let origin = TestOrigin::start().await;
@@ -215,7 +200,6 @@ async fn a_failed_cover_is_retried_by_the_sweep() {
         "a failed cover must be queued for the retry sweep, not forgotten"
     );
 
-    // The origin recovers; the sweep's retry stores the cover.
     origin.set(
         "/cover",
         Response::image(kani_shared_test::origin::jpeg_page(64, 96, false, 80)),
@@ -228,7 +212,6 @@ async fn a_failed_cover_is_retried_by_the_sweep() {
     );
 }
 
-// K7b — the same gate accepts a real image: the cover is stored.
 #[tokio::test]
 async fn a_valid_image_cover_is_stored() {
     let origin = TestOrigin::start().await;

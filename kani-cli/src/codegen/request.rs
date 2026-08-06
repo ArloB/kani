@@ -59,9 +59,8 @@ pub fn emit_request_block(
 }
 
 /// Emit a call to the shared `kani_shared::request::apply_filters`, with the
-/// endpoint's mapping and format rendered as literals. Replaces the previously
-/// hand-emitted per-group match — codegen no longer carries its own copy of the
-/// filter-mapping logic, so it can't drift from the interpreter's (A1).
+/// endpoint's mapping and format rendered as literals so codegen and interpretation share the
+/// same filter semantics.
 fn emit_filter_apply(
     filter_mapping: &[(String, FilterMappingEntry)],
     filter_format: Option<&FilterFormatCfg>,

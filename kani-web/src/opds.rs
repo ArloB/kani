@@ -381,8 +381,6 @@ async fn opds_set_progress(
     }
 }
 
-// ─── Auth ────────────────────────────────────────────────────────────────────
-
 struct OpdsIdentity {
     user: User,
     scopes: OpdsScopes,
@@ -518,8 +516,6 @@ fn parse_byte_range(header: &str, len: u64) -> Option<(u64, u64)> {
     }
     Some((start, end))
 }
-
-// ─── Response helpers ─────────────────────────────────────────────────────────
 
 fn atom_response(body: String) -> Response {
     (StatusCode::OK, [(header::CONTENT_TYPE, ATOM_XML)], body).into_response()

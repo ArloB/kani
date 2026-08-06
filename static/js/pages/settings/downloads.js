@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Downloads section.
 
 import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';

@@ -24,7 +24,6 @@ import { PanelAccordion, NoteBody, BookmarksBody, ScanlatorBody } from '../../co
  * }} deps
  */
 export function mountPanelData({ panelScroll, data, chapterId, mangaId, state, engine, closePanel, panelOpenCallbacks, cleanup }) {
-  // ── Dual-scanlator comparison ────────────────────────────────────────────
   const alts = data?.scanlator_alternatives ?? [];
   if (alts.length > 0) {
     const _primaryPages = state.pages.slice();
@@ -86,7 +85,6 @@ export function mountPanelData({ panelScroll, data, chapterId, mangaId, state, e
     ), container)));
   }
 
-  // ── Bookmarks ────────────────────────────────────────────────────────────
   if (mangaId) {
     const bookmarksSignal = signal(/** @type {number[]} */ ([]));
     // Bumped on panel open so the Add/Remove label re-evaluates against the
@@ -99,7 +97,7 @@ export function mountPanelData({ panelScroll, data, chapterId, mangaId, state, e
         const set = new Set(bookmarksSignal.value);
         if (res.bookmarked) set.add(state.currentPage); else set.delete(state.currentPage);
         bookmarksSignal.value = [...set].sort((a, b) => a - b);
-      } catch { /* ignore */ }
+      } catch { }
     };
     const _onJump = (/** @type {number} */ pg) => { state.currentPage = pg; engine.render(); closePanel(); };
 
@@ -121,7 +119,6 @@ export function mountPanelData({ panelScroll, data, chapterId, mangaId, state, e
     }));
   }
 
-  // ── Per-chapter note ─────────────────────────────────────────────────────
   {
     const noteSignal = signal('');
     const _saveNote = debounce(() => api.setChapterNote(chapterId, noteSignal.value).catch(() => {}), 1000);

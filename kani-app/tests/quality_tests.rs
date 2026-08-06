@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// Upgrade detection: what gets flagged, what deliberately does not, and the
-// reversibility of applying one.
 
 mod common;
 use common::{insert_chapter, insert_manga, insert_source, test_service};
@@ -89,7 +87,6 @@ async fn a_longer_relisting_is_flagged_as_a_reupload() {
     let manga = seed_manga(&svc, "Reupload").await;
     let chapter = held_chapter(&svc, manga, "Reupload", 1.0, 2).await;
 
-    // The source now advertises more pages than the copy on disk.
     sqlx::query("UPDATE chapters SET source_page_count = 5 WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
@@ -150,7 +147,6 @@ async fn a_better_ranked_scanlator_is_flagged() {
         .await
         .unwrap();
 
-    // A sibling at the same chapter number from another group.
     let rival = insert_chapter(&svc.db, manga, "rival", 1.0).await;
     sqlx::query("UPDATE chapters SET scanlator = 'High', page_count = 3 WHERE id = ?")
         .bind(rival)
@@ -256,7 +252,6 @@ async fn dismissing_prevents_the_same_candidate_returning() {
     svc.dismiss_upgrade(chapter).await.unwrap();
     assert_eq!(pending_badges(&svc, manga).await, 0);
 
-    // The whole point: a re-scan must not raise it again.
     assert!(
         svc.evaluate_upgrades(manga).await.unwrap().is_empty(),
         "a dismissed candidate that returns on the next scan is worse than \
@@ -290,8 +285,6 @@ async fn applying_an_upgrade_keeps_the_old_file() {
     let old_path = svc.chapter_cbz_path(chapter).await.unwrap().path;
     let library = { svc.settings.read().await.library_path.clone() };
 
-    // The download will fail (no real source), but the file must already be
-    // preserved by then.
     let _ = svc
         .apply_upgrade(chapter, Some(kani_app::ids::UserId(1)))
         .await;
@@ -368,9 +361,6 @@ async fn a_drifting_archive_count_alone_flags_nothing() {
     let manga = seed_manga(&svc, "ArchiveDrift").await;
     let chapter = held_chapter(&svc, manga, "ArchiveDrift", 1.0, 2).await;
 
-    // `page_count` is what our own download produced; `manifest_capture` writes
-    // it from the same archive the manifest describes. Detection must never key
-    // off it, or it is comparing a value against itself.
     sqlx::query("UPDATE chapters SET page_count = 5 WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
@@ -410,8 +400,6 @@ async fn a_candidate_carries_the_measurements_of_the_copy_on_disk() {
         "the fixture pages are greyscale and the manifest now records that"
     );
 
-    // Nothing probed the candidate — there is no reachable backend — so the
-    // dialogue must be able to tell "not measured" from "measured as zero".
     assert!(found[0].candidate_score.is_none());
     assert!(found[0].verdict.is_none());
 }
@@ -456,7 +444,6 @@ async fn a_confirmation_that_cannot_reach_the_source_keeps_the_count_verdict() {
         s.upgrade_confirm_fetches = 3;
     }
 
-    // The seeded source has no backend, so the probe cannot run.
     let found = svc.evaluate_upgrades(manga).await.unwrap();
     assert_eq!(
         found.len(),
@@ -502,8 +489,6 @@ async fn a_candidate_names_both_sides_of_the_comparison() {
     );
     assert_eq!(c.candidate_scanlator.as_deref(), Some("Rival Group"));
 }
-
-// ── Auto-replace, and hiding reassurance from the library-wide list ──────────
 
 async fn set_auto_replace_reasons(svc: &kani_app::service::AppService, reasons: &str) {
     let mut s = svc.settings.write().await;
@@ -611,7 +596,6 @@ async fn auto_replace_ignores_a_reason_that_is_not_configured() {
         .await
         .unwrap();
     svc.set_upgrade_auto_replace(manga, true).await.unwrap();
-    // Everything except the kind this candidate actually is.
     set_auto_replace_reasons(&svc, "resolution,colour").await;
 
     svc.evaluate_upgrades(manga).await.unwrap();
@@ -689,8 +673,6 @@ async fn the_library_wide_list_hides_reassurance_by_default() {
     );
 }
 
-// ── The pre-computed quality columns ────────────────────────────────────────
-
 #[tokio::test]
 async fn the_stored_quality_columns_are_populated_by_a_download() {
     let svc = test_service().await;
@@ -727,7 +709,6 @@ async fn the_stored_quality_columns_are_populated_by_a_download() {
         "colour must be stored, not just computed — the comparator needs it and \
          cannot get it from the older columns"
     );
-    // PNG fixtures carry no JPEG quantisation table, so this is legitimately null.
     assert!(row.quality_encoder.is_none());
 }
 
@@ -742,8 +723,6 @@ async fn detection_reads_the_columns_rather_than_the_manifest() {
         .await
         .unwrap();
 
-    // Corrupt the manifest JSON. If detection still produces a score, it did
-    // not parse it — which is the whole point of the columns.
     sqlx::query("UPDATE chapters SET manifest_json = 'not json at all' WHERE id = ?")
         .bind(chapter.0)
         .execute(&svc.db)
@@ -770,7 +749,6 @@ async fn a_row_without_the_columns_falls_back_to_the_manifest() {
         .await
         .unwrap();
 
-    // A row written before the columns existed.
     sqlx::query(
         "UPDATE chapters SET quality_long_edge = NULL, quality_bytes_per_mp = NULL, \
          quality_encoder = NULL, quality_colour = NULL WHERE id = ?",

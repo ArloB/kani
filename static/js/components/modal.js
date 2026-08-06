@@ -119,14 +119,6 @@ export function Modal({ open, onClose, title, wide = false, sheet = false, foote
   `;
 }
 
-// ── Signal-driven modal host ───────────────────────────────────────────────────
-//
-// A single persistent <ModalHost> owns every imperatively-opened dialog: each
-// mount pushes onto a signal-backed stack, and the host portals the stack into
-// #modal-root via createPortal — one Preact reconciler root for all dialogs
-// instead of N ad-hoc render() containers. Keyed entries stack (a confirm opened
-// from inside a dialog no longer replaces it) and reconcile without remounting
-// siblings.
 
 /** @type {import('@preact/signals').Signal<{ id: number, vnode: any }[]>} */
 const _modalStack = signal([]);
@@ -143,10 +135,6 @@ function ModalHost({ stack }) {
   );
 }
 
-// Mount the host once (lazily, on first use) into a neutral container; its DOM
-// lives in #modal-root via the portal. Effect-driven render keeps the host in
-// sync with the stack signal — component auto-subscription is unreliable in this
-// vanilla-hosted island setup, so we re-render with a plain snapshot.
 function ensureModalHost() {
   if (_hostMounted) return;
   _hostMounted = true;
@@ -159,7 +147,7 @@ function ensureModalHost() {
 
 /**
  * Imperatively open a Preact tree as a modal. Returns a cleanup function that
- * closes it. Dialogs stack; passing null closes everything (legacy teardown).
+ * closes it. Dialogs stack; passing null closes the entire stack.
  * @param {any} vnode
  * @returns {() => void}
  */
@@ -179,7 +167,6 @@ export function mountIntoModalRoot(vnode) {
   };
 }
 
-// ── Confirm dialog ────────────────────────────────────────────────────────────
 
 /**
  * @param {{
@@ -283,7 +270,6 @@ export function showConfirm(message, opts = {}) {
   });
 }
 
-// ── Alert dialog ──────────────────────────────────────────────────────────────
 
 /**
  * @param {{ message: string, title?: string, closeLabel?: string, onClose: () => void }} props

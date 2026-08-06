@@ -221,11 +221,10 @@ where
     use kani_shared::SearchScope;
     use serde::Deserialize;
     let s = String::deserialize(deserializer)?;
-    // Try to parse as JSON first (handles {"Sources":[1,2]})
+    // Accept both structured JSON and the legacy bare unit-variant representation.
     if let Ok(scope) = serde_json::from_str::<SearchScope>(&s) {
         return Ok(scope);
     }
-    // Fall back to unit variant name (handles FavouritedOnly, AllEnabled)
     serde_json::from_str::<SearchScope>(&format!("\"{}\"", s)).map_err(serde::de::Error::custom)
 }
 
@@ -465,8 +464,6 @@ fn default_shelf_limit() -> i64 {
     12
 }
 
-// ── Admin / user-management request types ─────────────────────────────────────
-
 #[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct AdminCreateUserRequest {
     pub username: String,
@@ -504,8 +501,6 @@ pub struct AdminUpdateRoleRequest {
     pub description: Option<String>,
     pub permissions: Option<Vec<String>>,
 }
-
-// ── Admin logs queries ────────────────────────────────────────────────────────
 
 #[derive(garde::Validate, serde::Deserialize, Debug, Default, utoipa::ToSchema)]
 pub struct LogsQuery {
@@ -551,8 +546,6 @@ pub struct AuditLogQuery {
     pub format: Option<String>,
 }
 
-// ── Password reset / email verification request types ─────────────────────────
-
 #[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct PasswordResetRequestBody {
     pub email: String,
@@ -574,8 +567,6 @@ pub struct SendTestEmailBody {
     pub to: String,
 }
 
-// ── Reading stats query ───────────────────────────────────────────────────────
-
 #[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct StatsQuery {
     /// Number of days for the daily_activity window. Default 90.
@@ -585,8 +576,6 @@ pub struct StatsQuery {
     #[garde(skip)]
     pub metrics: Option<String>,
 }
-
-// ── Filesystem browser ────────────────────────────────────────────────────────
 
 #[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct FsBrowseQuery {
@@ -613,8 +602,6 @@ pub struct FsMkdirResponse {
     pub path: String,
 }
 
-// ── Path migration ────────────────────────────────────────────────────────────
-
 #[derive(serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct PathMigrateBody {
     pub field: String,
@@ -628,8 +615,6 @@ pub struct PathMigrateEstimateResponse {
     pub can_migrate: bool,
     pub reason: Option<String>,
 }
-
-// ── Repository management ─────────────────────────────────────────────────────
 
 #[derive(garde::Validate, serde::Deserialize, Debug, utoipa::ToSchema)]
 pub struct AddRepoRequest {

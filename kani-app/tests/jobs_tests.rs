@@ -22,7 +22,6 @@ async fn test_job_submits_and_completes() {
     let job = TestJob::new("hello");
     let job_id = svc.job_manager.submit(job).await.unwrap();
 
-    // Poll until the job reaches a terminal state (should be near-instant).
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let status = svc.job_manager.status(job_id).await.unwrap();
@@ -49,7 +48,6 @@ async fn slow_job_cancel_transitions_to_cancelled() {
     let job = SlowTestJob::new(Duration::from_secs(60));
     let job_id = svc.job_manager.submit(job).await.unwrap();
 
-    // Wait for the job to start running.
     let start_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let status = svc.job_manager.status(job_id).await.unwrap();
@@ -67,7 +65,6 @@ async fn slow_job_cancel_transitions_to_cancelled() {
 
     svc.job_manager.cancel(job_id).await.unwrap();
 
-    // Wait for the job to reach the cancelled state.
     let cancel_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let status = svc.job_manager.status(job_id).await.unwrap();
@@ -94,7 +91,6 @@ async fn slow_job_cancel_transitions_to_cancelled() {
 async fn crashed_running_job_recovers_to_pending_on_startup() {
     let db = common::test_db().await;
 
-    // Manually insert a job stuck in the 'running' state (simulating a crash).
     let job = TestJob::new("recovery-payload");
     let job_id = job.id().to_string();
     let params = serde_json::to_string(&job).unwrap();
@@ -108,10 +104,8 @@ async fn crashed_running_job_recovers_to_pending_on_startup() {
     .await
     .unwrap();
 
-    // Creating a new AppService against this DB triggers startup recovery.
     let svc = kani_app::service::AppService::new_for_test(db).await;
 
-    // The recovered job should eventually run and complete.
     let recovered_id = uuid::Uuid::parse_str(&job_id).unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
@@ -317,14 +311,11 @@ async fn manga_download_all_job_cancel_reverts_chapters_to_pending() {
     let ch2 = insert_chapter(&svc.db, manga_id, "ch-2", 2.0).await;
     let ch3 = insert_chapter(&svc.db, manga_id, "ch-3", 3.0).await;
 
-    // 600 ms delay gives plenty of time to cancel before fetch_page_list returns.
-    // No real page server needed — we cancel before the mock returns.
     svc.register_mock_source(source_id, MockPageListFetcher::slow(600, 1, 0));
 
     let job = MangaDownloadAllJob::new(manga_id.0, "Manga".to_string(), source_id, false);
     let job_id = svc.job_manager.submit(job).await.unwrap();
 
-    // Wait until all chapters are claimed (InProgress = 1).
     let claim_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let statuses: Vec<i64> =
@@ -420,8 +411,6 @@ async fn chapter_download_full_pipeline_with_mock() {
     );
 }
 
-// ── Wrapper-job submit→terminal coverage ─────────────────────────────────────
-
 /// Polls a submitted job until it reaches a terminal state, returning that state.
 async fn await_terminal(svc: &AppService, job_id: JobId) -> String {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
@@ -489,9 +478,6 @@ async fn import_dedup_job_runs_to_completion() {
 #[tokio::test]
 async fn webhook_delivery_job_completes_on_2xx() {
     let svc = test_service().await;
-    // Delivery targets a loopback mock server, which the SSRF egress guard blocks
-    // in production; opt this test into private egress so it exercises the 2xx
-    // completion path rather than the (separately tested) refusal path.
     svc.webhook_service.allow_private_egress_for_test();
     let port = start_mock_page_server().await;
     let url = format!("http://127.0.0.1:{port}/");

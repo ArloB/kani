@@ -222,8 +222,6 @@ fn keygen_creates_pub_and_key_files() {
 #[cfg(unix)]
 #[test]
 fn keygen_writes_the_private_key_unreadable_to_other_accounts() {
-    // The key is plaintext base64, so the file mode is the only thing guarding
-    // it; the default umask would leave it world-readable.
     use std::os::unix::fs::PermissionsExt as _;
 
     let tmp = tempfile::tempdir().unwrap();

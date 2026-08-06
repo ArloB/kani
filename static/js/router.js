@@ -94,10 +94,6 @@ export async function navigate(path, opts = {}) {
   _route(path);
 }
 
-/**
- * Returns the params extracted from the current matched route.
- * @returns {Record<string, string>}
- */
 const INTENDED_KEY = 'kani-intended-destination';
 
 /**
@@ -128,6 +124,7 @@ export function consumeIntendedDestination() {
   }
 }
 
+/** @returns {Record<string, string>} A snapshot of the current route parameters. */
 export function getCurrentParams() {
   return { ..._currentParams };
 }
@@ -148,7 +145,6 @@ export function onNavigate(callback) {
   return () => _navCallbacks.delete(callback);
 }
 
-// ── Internal ─────────────────────────────────────────────────────────────────
 
 /**
  * @param {string} path
@@ -183,10 +179,9 @@ async function _route(path, fromPopstate = false) {
   _activePage = null;
   _currentParams = params;
 
-  // A page opts into the fixed-viewport layout by adding `page-fixed` to the
-  // shared container; the router takes it back off on the way out. Left on, it
-  // applies `overflow: hidden` to the next page too — statistics lost 615 px
-  // with no way to scroll to it after any visit to a manga.
+  // A page opts into the fixed-viewport layout by adding `page-fixed` to the shared container;
+  // the router takes it back off on the way out. Left on, it applies `overflow: hidden` to the
+  // next page too — statistics lost 615 px with no way to scroll to it after any visit to a manga.
   _container.classList.remove('page-fixed');
 
   if (!matched) {
@@ -230,7 +225,6 @@ async function _route(path, fromPopstate = false) {
   }
   _isInitialRoute = false;
 
-  // Notify nav and other listeners
   for (const cb of _navCallbacks) {
     try { cb(pathname); } catch {}
   }
@@ -247,7 +241,6 @@ function _moveFocusToMain() {
 
 /** @param {MouseEvent} e */
 function _interceptLink(e) {
-  // Ignore modified clicks, non-left-button, and already-handled events
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
   if (e.defaultPrevented) return;
 
@@ -265,13 +258,12 @@ function _interceptLink(e) {
   navigate(href);
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Converts '/source/:id/manga/:manga_id' to a RegExp. */
 function _pathToRegex(path) {
   const escaped = path
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')  // escape special chars
-    .replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, '([^/]+)'); // :param → capture group
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, '([^/]+)');
   return new RegExp(`^${escaped}/?$`);
 }
 

@@ -5,14 +5,6 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 
-// ── Network ──────────────────────────────────────────────────────────────────
-//
-// Every asset here comes from a third party — unpkg, the npm registry, GitHub
-// releases — and a single unanswered request used to fail the whole build. That
-// is not hypothetical: a release-matrix run lost its macOS target to one
-// unreachable unpkg.com, having compiled nothing. The same fetch runs in the
-// Dockerfile and in CI, so one hiccup anywhere fails a release.
-
 const MAX_ATTEMPTS: u32 = 4;
 const FIRST_BACKOFF_MS: u64 = 500;
 const MAX_BACKOFF_MS: u64 = 4_000;
@@ -181,7 +173,6 @@ fn fetch_vendors(client: &Client) -> Result<(), CliError> {
         let bytes = get_bytes(client, url)?;
         fs::write(vendor_dir.join(filename), &bytes)?;
 
-        // Compute SHA-256 for subresource integrity tracking.
         let mut hasher = Sha256::new();
         hasher.update(&bytes);
         let digest = hasher.finalize();
@@ -192,7 +183,6 @@ fn fetch_vendors(client: &Client) -> Result<(), CliError> {
         );
     }
 
-    // Write sri.json so CI and build.rs can verify integrity.
     let sri_path = vendor_dir.join("sri.json");
     let sri_content = serde_json::to_string_pretty(&hashes)
         .map_err(|e| CliError::Other(format!("sri.json serialise: {e}")))?;
@@ -370,8 +360,6 @@ mod retry_tests {
 
     #[test]
     fn a_request_that_never_got_a_response_is_retried() {
-        // The unpkg failure that lost a macOS build was this case: no status,
-        // because the connection never produced one.
         assert!(is_retryable(None));
     }
 
@@ -385,7 +373,6 @@ mod retry_tests {
 
     #[test]
     fn a_wrong_url_is_not_retried() {
-        // Asking four times does not make a 404 into a file.
         assert!(!is_retryable(Some(404)));
         assert!(!is_retryable(Some(400)));
         assert!(!is_retryable(Some(403)));
@@ -397,15 +384,12 @@ mod retry_tests {
         assert_eq!(backoff_ms(2), 1_000);
         assert_eq!(backoff_ms(3), 2_000);
         assert_eq!(backoff_ms(4), 4_000);
-        // Capped, and never shifts far enough to overflow.
         assert_eq!(backoff_ms(5), MAX_BACKOFF_MS);
         assert_eq!(backoff_ms(64), MAX_BACKOFF_MS);
     }
 
     #[test]
     fn a_total_outage_gives_up_in_seconds_not_minutes() {
-        // A developer waiting on a dead network should not wait minutes for the
-        // verdict, and neither should a build runner.
         let total: u64 = (1..MAX_ATTEMPTS).map(backoff_ms).sum();
         assert!(total <= 10_000, "worst-case wait was {total}ms");
     }

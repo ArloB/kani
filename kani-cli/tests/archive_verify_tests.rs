@@ -1,13 +1,8 @@
 #![allow(clippy::unwrap_used)]
-// `kani-cli archive-verify` is the proof that an export outlives Kani: it must
-// pass on an intact archive and fail loudly on a damaged one.
 
 use std::io::Write;
 use std::path::Path;
 
-// The manifest tolerates undecodable pages (width/height/phash fall back to
-// None), so a CBZ of raw bytes is enough to exercise verification without
-// pulling the image crate into the CLI's test deps.
 fn write_cbz(path: &Path) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());

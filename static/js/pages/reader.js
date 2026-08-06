@@ -181,9 +181,7 @@ export async function init(container, { id }) {
   const _storedFit = getLocal('kani_reader_fit') ?? '';
 
   /**
-   * Shared reader/engine state (Wave 10 R2/R4). The engine and the vanilla
-   * chrome both read and write these fields; keeping them in one object lets
-   * the render/nav cluster migrate into the engine without desyncing.
+   * Shared state written by both the reader engine and the vanilla chrome.
    * @type {{
    *   pages: string[], currentPage: number,
    *   mode: import('../reader-prefs.js').ReadingMode,
@@ -200,11 +198,6 @@ export async function init(container, { id }) {
    *   cachedPreloadN: number|null,
    * }}
    */
-  // Reader-state store. The scalar reader fields are signal-backed (transparent
-  // getters/setters) so the engine mutates them imperatively as before while the
-  // chrome (indicator, page overlay) reacts via effects — no onSegments bridge.
-  // `loadVersion` is the notification channel for the in-place-mutated loaded/
-  // failed Sets (which signals can't observe directly).
   const _sig = {
     pages:        signal(/** @type {string[]} */ ([])),
     currentPage:  signal(0),
@@ -214,7 +207,7 @@ export async function init(container, { id }) {
     doublePage:   signal(getLocal('kani_reader_double') === 'true'),
     direction:    signal(/** @type {'rtl'|'ltr'} */ (getLocal('kani_reader_direction') === 'ltr' ? 'ltr' : 'rtl')),
     fit:          signal(/** @type {'both'|'width'|'height'} */ (['both', 'width', 'height'].includes(_storedFit) ? _storedFit : 'both')),
-    autoSpread:   signal(getLocal('kani_reader_spread') !== 'false'), // default true
+    autoSpread:   signal(getLocal('kani_reader_spread') !== 'false'),
     loadVersion:  signal(0),
   };
   const state = {
@@ -297,7 +290,6 @@ export async function init(container, { id }) {
 
   _cleanup.push(() => { if (_progressTimer) clearTimeout(_progressTimer); });
 
-  // ── Presentation ─────────────────────────────────────────────────────────
 
   function _applyPresentation() { _engine.applyPresentation(); }
 
@@ -305,7 +297,6 @@ export async function init(container, { id }) {
 
   function _updatePageOverlay() { _engine.updatePageOverlay(); }
 
-  // Bottom progress strip mode: full segments / page-count text / off.
   function _applyMiniStrip() {
     const mode = _prefs?.miniStrip ?? 'full';
     miniStrip.style.display = mode === 'full' ? '' : 'none';
@@ -317,7 +308,6 @@ export async function init(container, { id }) {
   }
 
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
 
   const _isDesktop     = () => window.matchMedia('(min-width: 768px)').matches;
   const _isFinePointer = () => window.matchMedia('(pointer:fine)').matches;
@@ -347,7 +337,7 @@ export async function init(container, { id }) {
       }
     }
 
-    try { await api.downloadChapter(chId); } catch { /* already queued or downloading */ }
+    try { await api.downloadChapter(chId); } catch { }
 
     let _dlDone = false;
 
@@ -398,7 +388,7 @@ export async function init(container, { id }) {
       const _onDlCancel = () => { _done = true; unsub(); reject(new Error('cancelled')); _navigateToManga(); };
       const _showDl = (/** @type {any} */ p) => _dlOverlay.showLoading({ progress: p, onCancel: _onDlCancel });
 
-      api.downloadChapter(chapterId).catch(() => { /* already queued or downloading */ });
+      api.downloadChapter(chapterId).catch(() => { });
       _showDl(/** @type {any} */ (getState('chaptersProgress').get(chapterId)) ?? null);
 
       const unsub = subscribe('chaptersProgress', (/** @type {Map<number,any>} */ map) => {
@@ -428,12 +418,10 @@ export async function init(container, { id }) {
     });
   }
 
-  // ── Side panel ───────────────────────────────────────────────────────────
 
   /** Callbacks invoked each time the side panel opens — avoids MutationObserver hacks. */
   const _panelOpenCallbacks = /** @type {Array<() => void>} */ ([]);
 
-  // Bars / drawer / hover / three-zone tap — one cohesive visibility unit.
   const _chrome = createChromeVisibility({
     fullBar, segsEl, topBar, sidePanel, backdrop, miniStrip, barHover, pagesEl,
     state, engine: _engine, getPrefs: () => _prefs,
@@ -443,11 +431,10 @@ export async function init(container, { id }) {
   const _openPanel  = () => _chrome.openPanel();
   const _closePanel = () => _chrome.closePanel();
 
-  // ── Chapter dropdown lazy load ─────────────────────────────────────────────
 
   async function _loadChapterList() {
     if (!_mangaId || _allChapters !== null) return;
-    _allChapters = []; // mark as loading (prevents duplicate requests)
+    _allChapters = [];
     try {
       // page_size is capped at 200 by the API; paginate to collect all chapters.
       const PAGE_SIZE = 200;
@@ -467,7 +454,7 @@ export async function init(container, { id }) {
         is_read:        ch.is_read ?? ch.read ?? false,
       }));
       _populateChapterSelect();
-    } catch { _allChapters = null; /* allow retry on next panel open */ }
+    } catch { _allChapters = null; }
   }
 
   function _populateChapterSelect() {
@@ -478,7 +465,6 @@ export async function init(container, { id }) {
     });
   }
 
-  // ── Jump to page ──────────────────────────────────────────────────────────
 
   segLeft.style.cursor        = 'pointer';
   segLeft.style.pointerEvents = 'auto';
@@ -509,23 +495,17 @@ export async function init(container, { id }) {
   });
 
   function _applyDoublePageVisibility() {
-    // Webtoon: hide direction control (reading is always top-to-bottom).
     dirRow.style.display = state.mode === 'webtoon' ? 'none' : '';
   }
 
-  // ── Dir / Fit / Mode segmented controls ──────────────────────────────────
   // Built post-prefs-load (after the await below) so `selected` reflects the
   // loaded preference. Mount points are injected here; rows are appended there.
 
-  // ── Segment rendering ─────────────────────────────────────────────────────
 
   const _indicator = createIndicatorBar({ miniStrip, segsEl, segLeft, segRight, onSegClick: _onSegClick });
   _cleanup.push(() => _indicator.destroy());
 
-  // Reactive chrome sync: re-runs when currentPage / pages change (the
-  // signal-backed reads below subscribe) or when loaded/failed change (via the
-  // loadVersion bump the engine emits at load/error). Replaces the old
-  // imperative onSegments/_renderSegments bridge.
+  // Signal reads subscribe the chrome to page state; loadVersion also covers load failures.
   _cleanup.push(effect(() => {
     void state.loadVersion;
     _updatePageOverlay();
@@ -568,7 +548,6 @@ export async function init(container, { id }) {
   }
 
 
-  // ── Fullscreen ───────────────────────────────────────────────────────────
 
   function _toggleFullscreen() {
     if (document.fullscreenElement) {
@@ -578,7 +557,6 @@ export async function init(container, { id }) {
     }
   }
 
-  // ── Slideshow + inactivity ────────────────────────────────────────────────
   const _slideshow = createSlideshow({
     state, pagesEl, engine: _engine,
     getPrefs: () => _prefs,
@@ -588,7 +566,6 @@ export async function init(container, { id }) {
   });
   _cleanup.push(() => _slideshow.destroy());
 
-  // ── Volume-key navigation ─────────────────────────────────────────────────
 
   // keydown: browser doesn't normally fire for hardware volume, but PWA/some
   // Android WebViews do surface AudioVolume* keys.
@@ -599,21 +576,19 @@ export async function init(container, { id }) {
   document.addEventListener('keydown', _onVolumeKey);
   _cleanup.push(() => document.removeEventListener('keydown', _onVolumeKey));
 
-  // MediaSession: fires from Bluetooth / headset media buttons.
   if ('mediaSession' in navigator) {
     try {
       navigator.mediaSession.setActionHandler('previoustrack', () => { if (!_chrome.isPanelOpen()) _engine.goPage(-1); });
       navigator.mediaSession.setActionHandler('nexttrack',     () => { if (!_chrome.isPanelOpen()) _engine.goPage(1);  });
-    } catch { /* unsupported action */ }
+    } catch { }
     _cleanup.push(() => {
       try {
         navigator.mediaSession.setActionHandler('previoustrack', null);
         navigator.mediaSession.setActionHandler('nexttrack',     null);
-      } catch { /* ignore */ }
+      } catch { }
     });
   }
 
-  // ── Keyboard ─────────────────────────────────────────────────────────────
 
   function _onPanelKeyDown(/** @type {KeyboardEvent} */ e) {
     if (_chrome.isPanelOpen() && e.key === 'Escape') { e.preventDefault(); _closePanel(); }
@@ -634,13 +609,10 @@ export async function init(container, { id }) {
   // the desktop default position on mobile before the JS takes effect.
   _chrome.positionPanel();
 
-  // ── Landscape-aware double-page ───────────────────────────────────────────
   const _landscapeMQ = window.matchMedia('(orientation: landscape) and (max-height: 600px)');
   const _onLandscapeChange = (/** @type {MediaQueryListEvent|MediaQueryList} */ mq) => {
     if (state.mode !== 'paged') return;
-    // Landscape mobile forces double-page on EPHEMERALLY (state only, never
-    // persisted); portrait restores the user's saved doublePage preference so
-    // rotation can't clobber their explicit choice (D8).
+    // Landscape mobile changes only live state; portrait restores the persisted choice.
     const target = mq.matches ? true : (_prefs?.doublePage ?? false);
     if (state.doublePage !== target) {
       state.doublePage = target;
@@ -677,12 +649,11 @@ export async function init(container, { id }) {
       a.download = `page-${state.currentPage + 1}.${ext}`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch { /* network error — ignore */ }
+    } catch { }
   };
 
   const _modalOpenCallbacks = /** @type {Array<() => void>} */ ([]);
 
-  // ── Display state (fullscreen / wake-lock / orientation) ─────────────────
   // Side effects stay imperative here; fullscreen feeds the sidebar quick action,
   // wake-lock/orientation feed the settings-modal Controls tab, via these signals.
   const fullscreenLabelSignal = signal(t('reader.settings.fullscreen'));
@@ -717,7 +688,7 @@ export async function init(container, { id }) {
         try {
           _wakeLock = await navigator.wakeLock.request('screen');
           _wakeLock.addEventListener('release', () => { _wakeLock = null; });
-        } catch { /* best-effort */ }
+        } catch { }
       }
     };
     document.addEventListener('visibilitychange', _onVisibility);
@@ -740,12 +711,11 @@ export async function init(container, { id }) {
         if (v === 'auto') screen.orientation.unlock();
         // @ts-ignore — OrientationLockType not in all TS libs
         else await screen.orientation.lock(v);
-      } catch { /* best-effort; unsupported outside fullscreen on some browsers */ }
+      } catch { }
     };
-    _cleanup.push(() => { try { screen.orientation.unlock(); } catch { /* ignore */ } });
+    _cleanup.push(() => { try { screen.orientation.unlock(); } catch { } });
   }
 
-  // ── Load chapter ──────────────────────────────────────────────────────────
 
   try {
     let data;
@@ -794,7 +764,6 @@ export async function init(container, { id }) {
     _applyTint();
     _applyMiniStrip();
 
-    // ── Layout-tab handlers (state mutation + engine calls stay in reader) ──
     const _layoutHandlers = {
       smooth: (/** @type {boolean} */ v) => {
         state.smoothScroll = v;
@@ -816,14 +785,11 @@ export async function init(container, { id }) {
       },
     };
 
-    // ── Fit / Dir / Mode segmented controls (single source of truth: state.*) ─
-    // Controls read/write state.* directly (E12); a primed effect per key
-    // persists it, skipping the initial loaded value so opening a chapter is
-    // not itself a write.
+    // Priming prevents the initially loaded value from being persisted as a user change.
     for (const key of /** @type {const} */ (['mode', 'fit', 'direction'])) {
       let primed = false;
       _cleanup.push(effect(() => {
-        const v = state[key]; // subscribe to the signal-backed field
+        const v = state[key];
         if (primed) { if (_prefs) setReaderPref(_prefs, key, v); }
         else primed = true;
       }));
@@ -887,7 +853,6 @@ export async function init(container, { id }) {
       onClick: () => _toggleFullscreen(),
     }), fsMountEl)));
 
-    // ── Tap zones (guard keeps ≥1 zone on 'menu') ─────────────────────────
     const _onZone = (/** @type {string} */ key, /** @type {string} */ val) => {
       if (!_prefs) return;
       const other1 = key === 'tapLeft'  ? _prefs.tapCenter : _prefs.tapLeft;
@@ -904,7 +869,6 @@ export async function init(container, { id }) {
     };
     const _shortcuts = getShortcuts('reader');
 
-    // ── Data-driven panel accordions (scanlators / bookmarks / note) ────────
     mountPanelData({
       panelScroll, data, chapterId, mangaId: _mangaId,
       state, engine: _engine, closePanel: _closePanel,
@@ -943,7 +907,6 @@ export async function init(container, { id }) {
     };
     _modalOpenCallbacks.push(_updateStats);
 
-    // ── Settings modal (shared Modal + Tabs, signal-driven) ─────────────────
     // null = closed; otherwise the active tab id.
     const settingsTabSignal = signal(/** @type {string|null} */ (null));
 
@@ -1038,7 +1001,7 @@ export async function init(container, { id }) {
       for (let i = 0; i < aheadCount && nextId; i++) {
         try {
           await api.downloadChapter(nextId);
-        } catch { /* already downloading/downloaded — ignore */ }
+        } catch { }
         if (i < aheadCount - 1) {
           try {
             const nextManifest = await api.getChapterPages(nextId);

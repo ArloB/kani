@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group B — extension-driven workflows. A rescan that finds *new* chapters is
+//! Extension-driven scan workflows. A rescan that finds *new* chapters is
 //! only reachable when the listing grows between scans, which a static fixture
 //! can't express. `TestOrigin.script()` serves response N then N+1, so the second
 //! scan sees a grown listing.
@@ -22,8 +22,6 @@ use kani_yaml::yaml::model::{
     ValidatedTotalPages,
 };
 use kani_yaml::yaml::schema::ResponseType;
-
-// ── Listings the origin serves across scans ───────────────────────────────────
 
 const LISTING_2: &str = r#"<html><body>
     <div class="ch" data-id="ch-1"><span class="title">Chapter 1</span></div>
@@ -60,8 +58,6 @@ fn chapter_list_endpoint() -> ValidatedEndpoint {
             field("title", Expr::self_ref().first(".title").text()),
         ],
         scalars: vec![],
-        // Static false → the scan makes exactly one request per pass, so the
-        // scripted origin advances one listing per scan.
         has_next_page: ValidatedHnp::Static(false),
         total_pages: ValidatedTotalPages::None,
         pagination: None,
@@ -151,8 +147,6 @@ fn drain_new_chapter_counts(rx: &mut tokio::sync::broadcast::Receiver<AppEvent>)
     counts
 }
 
-// ── B1.1 ───────────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn a_grown_listing_emits_new_chapters_once_with_the_right_count() {
     let origin = TestOrigin::start().await;
@@ -177,11 +171,6 @@ async fn a_grown_listing_emits_new_chapters_once_with_the_right_count() {
     );
 }
 
-// ── M2 ─────────────────────────────────────────────────────────────────────────
-
-// M2 — a webhook target that never responds must not hold up the action that
-// triggered it. Delivery is a background job, so the scan must finish promptly
-// while the delivery is still hanging.
 #[tokio::test]
 async fn a_failing_webhook_does_not_block_the_triggering_action() {
     let origin = TestOrigin::start().await;
@@ -189,7 +178,6 @@ async fn a_failing_webhook_does_not_block_the_triggering_action() {
     let svc = test_service().await;
     let manga_id = wire_source(&svc, &origin).await;
 
-    // A webhook pointed at a socket that accepts and then never answers.
     svc.webhook_service.allow_private_egress_for_test();
     let hook = TestOrigin::start().await;
     hook.set(
@@ -214,11 +202,6 @@ async fn a_failing_webhook_does_not_block_the_triggering_action() {
     );
 }
 
-// ── F8 ─────────────────────────────────────────────────────────────────────────
-
-// F8 — a listing that repeats the same chapter id must not create two rows.
-// Dedup is insert-level (`INSERT OR IGNORE` on the unique key), so this proves
-// the guarantee where it actually lives rather than in unpack.
 #[tokio::test]
 async fn a_duplicate_chapter_id_in_one_listing_is_deduplicated() {
     let origin = TestOrigin::start().await;
@@ -254,24 +237,13 @@ async fn a_duplicate_chapter_id_in_one_listing_is_deduplicated() {
     assert_eq!(total, 2, "the distinct chapters both survive");
 }
 
-// ── H8 ─────────────────────────────────────────────────────────────────────────
-
-// H8 — a chapter-list pagination that fails on a later page is reported as an
-// error, never silently completed with only the pages fetched so far. Page 1
-// lists chapters and declares more pages (has_next_page = true); page 2 fails
-// extraction (a `.ch` row missing its required id). The scan must surface the
-// failure rather than treat page 1's chapters as the whole, complete list.
 #[tokio::test]
 async fn a_chapter_list_page_failure_is_reported_not_silently_completed() {
     let origin = TestOrigin::start().await;
     origin.script(
         "/manga/m1/chapters",
         vec![
-            // Page 1: two valid chapters; the source claims there is more.
             Response::html(LISTING_2),
-            // Page 2: a `.ch` element with no data-id → the required `id` field
-            // is null → extraction errors, rather than yielding an empty page
-            // that the loop would read as "done".
             Response::html(
                 r#"<html><body><div class="ch"><span class="title">broken</span></div></body></html>"#,
             ),
@@ -307,10 +279,6 @@ async fn scan_stops_after_the_configured_run_of_known_pages() {
     assert_eq!(origin.hits("/manga/m1/chapters"), 2);
 }
 
-/// The write pool holds a single connection. A transaction opened around the
-/// page-fetch loop is therefore held across every HTTP round trip, and no other
-/// writer in the process can proceed until the scan finishes — measured on a
-/// real library as a 28.8 s acquire and one failed recurring job.
 #[tokio::test]
 async fn a_slow_source_does_not_block_other_writers_during_a_scan() {
     let origin = TestOrigin::start().await;
@@ -318,9 +286,6 @@ async fn a_slow_source_does_not_block_other_writers_during_a_scan() {
         "/manga/m1/chapters",
         vec![Response::html(LISTING_2).delay(std::time::Duration::from_millis(1500))],
     );
-    // Production's write pool is `max_connections(1)`; the shared test pool is
-    // not, so a default `test_service()` cannot observe this at all — the test
-    // passed against the buggy code until the pool matched production.
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -333,7 +298,6 @@ async fn a_slow_source_does_not_block_other_writers_during_a_scan() {
     let scanner = svc.clone();
     let scan = tokio::spawn(async move { scanner.fetch_and_store_chapters_silent(manga_id).await });
 
-    // Give the scan time to be mid-fetch rather than still starting up.
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
     let started = std::time::Instant::now();
@@ -352,9 +316,6 @@ async fn a_slow_source_does_not_block_other_writers_during_a_scan() {
     scan.await.unwrap().unwrap();
 }
 
-/// The other half of the tolerance, and the reason it is not 1: a run of known
-/// pages shorter than the tolerance must not end the scan, or every chapter
-/// beyond it is missed on every future run. Page 3 carries the new chapter.
 #[tokio::test]
 async fn a_run_of_known_pages_shorter_than_the_tolerance_does_not_end_the_scan() {
     let origin = TestOrigin::start().await;
@@ -387,8 +348,6 @@ async fn a_run_of_known_pages_shorter_than_the_tolerance_does_not_end_the_scan()
     );
 }
 
-// ── B1.2 ───────────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn a_rescan_with_no_change_emits_nothing() {
     let origin = TestOrigin::start().await;
@@ -413,11 +372,8 @@ async fn a_rescan_with_no_change_emits_nothing() {
     );
 }
 
-// ── B1.4 ───────────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn a_chapter_that_disappears_from_the_listing_is_not_deleted() {
-    // A flaky source drops ch-3 on the second scan; the row must survive.
     let origin = TestOrigin::start().await;
     origin.script(
         "/manga/m1/chapters",
@@ -447,12 +403,8 @@ async fn a_chapter_that_disappears_from_the_listing_is_not_deleted() {
     );
 }
 
-// ── B1.5 ───────────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn a_relisted_chapter_keeps_its_row_identity() {
-    // Re-listing the same chapter ids must not create duplicate rows or change a
-    // chapter's row id (its stable identity across scans).
     let origin = TestOrigin::start().await;
     origin.script(
         "/manga/m1/chapters",
@@ -491,8 +443,6 @@ async fn a_relisted_chapter_keeps_its_row_identity() {
     );
 }
 
-// ── B1.3 ───────────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn a_new_chapter_fires_the_configured_webhook() {
     let origin = TestOrigin::start().await;
@@ -500,16 +450,12 @@ async fn a_new_chapter_fires_the_configured_webhook() {
     let svc = test_service().await;
     let manga_id = wire_source(&svc, &origin).await;
 
-    // A wildcard webhook. Delivery to a non-resolving host fails on the network,
-    // but the attempt (with its payload) is still recorded — which is what proves
-    // the event fired and carried the right data.
     sqlx::query("INSERT INTO webhooks (url, events, enabled) VALUES ('https://hook.invalid/x', '[\"*\"]', 1)")
         .execute(&svc.db)
         .await
         .unwrap();
 
     svc.spawn_webhook_listener();
-    // First discovery of 2 chapters → NewChapters → listener → webhook.
     svc.scan_for_new_chapters(manga_id).await.unwrap();
 
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
@@ -538,8 +484,6 @@ async fn a_new_chapter_fires_the_configured_webhook() {
         "payload names a chapter: {payload}"
     );
 }
-
-// ── B2 · auto-download chain (run_auto_scan_once) ─────────────────────────────
 
 /// Count chapter-download jobs submitted (rows persist through terminal status).
 async fn download_job_count(svc: &AppService) -> i64 {
@@ -575,7 +519,6 @@ async fn enable_global_auto_scan(svc: &AppService) {
     svc.settings.write().await.auto_scan = true;
 }
 
-// B2.1
 #[tokio::test]
 async fn a_new_chapter_is_enqueued_when_auto_download_is_on() {
     let origin = TestOrigin::start().await;
@@ -601,18 +544,16 @@ async fn a_new_chapter_is_enqueued_when_auto_download_is_on() {
     }
 }
 
-// B2.2
 #[tokio::test]
 async fn a_new_chapter_is_not_enqueued_when_auto_download_is_off() {
     let origin = TestOrigin::start().await;
     origin.set("/manga/m1/chapters", Response::html(LISTING_2));
     let svc = test_service().await;
-    let _manga_id = wire_source(&svc, &origin).await; // auto_download defaults off
+    let _manga_id = wire_source(&svc, &origin).await;
     enable_global_auto_scan(&svc).await;
 
     svc.run_auto_scan_once().await;
 
-    // The chapters are discovered (scanned) but nothing is queued.
     let chapters: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapters")
         .fetch_one(&svc.db)
         .await
@@ -625,16 +566,14 @@ async fn a_new_chapter_is_not_enqueued_when_auto_download_is_off() {
     );
 }
 
-// B2.3
 #[tokio::test]
 async fn category_membership_enables_auto_download() {
     let origin = TestOrigin::start().await;
     origin.set("/manga/m1/chapters", Response::html(LISTING_2));
     let svc = test_service().await;
-    let manga_id = wire_source(&svc, &origin).await; // auto_download off on the manga
+    let manga_id = wire_source(&svc, &origin).await;
     enable_global_auto_scan(&svc).await;
 
-    // A category the manga belongs to, marked as an auto-download category.
     let cat_id: i64 =
         sqlx::query_scalar("INSERT INTO categories (name) VALUES ('Follows') RETURNING id")
             .fetch_one(&svc.db)
@@ -660,7 +599,6 @@ async fn category_membership_enables_auto_download() {
     }
 }
 
-// B2.4
 #[tokio::test]
 async fn auto_download_respects_download_rules() {
     let origin = TestOrigin::start().await;
@@ -673,8 +611,6 @@ async fn auto_download_respects_download_rules() {
         .execute(&svc.db)
         .await
         .unwrap();
-    // A rule that admits only a language none of the chapters have — everything
-    // is filtered out, so nothing should be enqueued.
     sqlx::query("INSERT INTO download_rules (manga_id, rule_type, value) VALUES (?, 'language_include', 'zz')")
         .bind(manga_id.0)
         .execute(&svc.db)
@@ -695,13 +631,12 @@ async fn auto_download_respects_download_rules() {
     );
 }
 
-// B2.5 — a scan that lets any chapter through clears the suppressed signal.
 #[tokio::test]
 async fn a_passing_scan_clears_the_suppressed_signal() {
     let origin = TestOrigin::start().await;
     origin.set("/manga/m1/chapters", Response::html(LISTING_2));
     let svc = test_service().await;
-    let manga_id = wire_source(&svc, &origin).await; // no download rules → all pass
+    let manga_id = wire_source(&svc, &origin).await;
     enable_global_auto_scan(&svc).await;
     sqlx::query("UPDATE manga SET auto_download = 1, suppressed_chapter_count = 5 WHERE id = ?")
         .bind(manga_id.0)
@@ -718,7 +653,6 @@ async fn a_passing_scan_clears_the_suppressed_signal() {
     );
 }
 
-// B2.5 — dismissal zeroes the signal.
 #[tokio::test]
 async fn dismissing_suppressed_chapters_zeroes_the_signal() {
     let origin = TestOrigin::start().await;
@@ -738,7 +672,6 @@ async fn dismissing_suppressed_chapters_zeroes_the_signal() {
     );
 }
 
-// B2.6
 #[tokio::test]
 async fn auto_download_skips_a_manga_with_auto_scan_off() {
     let origin = TestOrigin::start().await;
@@ -764,8 +697,6 @@ async fn auto_download_skips_a_manga_with_auto_scan_off() {
     );
     assert_eq!(download_job_count(&svc).await, 0, "and nothing is enqueued");
 }
-
-// ── B4 · metadata refresh (refresh_manga_with_options) ────────────────────────
 
 use kani_app::models::{RefreshFields, RefreshOptions};
 
@@ -874,8 +805,6 @@ where
         .unwrap()
 }
 
-// B4.1 — DATA-LOSS: a user's custom cover survives a refresh that doesn't clear
-// overrides.
 #[tokio::test]
 async fn refresh_does_not_overwrite_a_pinned_cover() {
     let origin = TestOrigin::start().await;
@@ -914,7 +843,6 @@ async fn refresh_does_not_overwrite_a_pinned_cover() {
     );
 }
 
-// B4.2 — title only.
 #[tokio::test]
 async fn refresh_title_touches_only_the_title() {
     let origin = TestOrigin::start().await;
@@ -949,7 +877,6 @@ async fn refresh_title_touches_only_the_title() {
     assert_eq!(manga_scalar::<i64>(&svc, id, "status").await, 3);
 }
 
-// B4.3 — description only.
 #[tokio::test]
 async fn refresh_description_touches_only_the_description() {
     let origin = TestOrigin::start().await;
@@ -978,7 +905,6 @@ async fn refresh_description_touches_only_the_description() {
     assert_eq!(manga_scalar::<String>(&svc, id, "name").await, before);
 }
 
-// B4.4 — status only.
 #[tokio::test]
 async fn refresh_status_touches_only_the_status() {
     let origin = TestOrigin::start().await;
@@ -1004,11 +930,9 @@ async fn refresh_status_touches_only_the_status() {
     .await
     .unwrap();
 
-    // "ongoing" == MangaStatus::Ongoing == 0.
     assert_eq!(manga_scalar::<i64>(&svc, id, "status").await, 0);
 }
 
-// B4.5 — clearing overrides on the cover field re-enables source ownership.
 #[tokio::test]
 async fn refresh_cover_with_clear_overrides_drops_the_pin() {
     let origin = TestOrigin::start().await;
@@ -1044,7 +968,6 @@ async fn refresh_cover_with_clear_overrides_drops_the_pin() {
     assert!(!manga_scalar::<bool>(&svc, id, "cover_overridden").await);
 }
 
-// B4.6 — people replaced from the source.
 #[tokio::test]
 async fn refresh_people_replaces_the_people_set() {
     let origin = TestOrigin::start().await;
@@ -1073,7 +996,6 @@ async fn refresh_people_replaces_the_people_set() {
     assert_eq!(people, 2, "Alice and Bob are synced from the source");
 }
 
-// B4.7 — tags replaced from the source.
 #[tokio::test]
 async fn refresh_tags_replaces_the_tag_set() {
     let origin = TestOrigin::start().await;
@@ -1102,7 +1024,6 @@ async fn refresh_tags_replaces_the_tag_set() {
     assert_eq!(tags, 2, "Action and Drama are synced from the source");
 }
 
-// B4.8 — clearing overrides nulls the text overrides for the selected fields.
 #[tokio::test]
 async fn refresh_with_clear_overrides_nulls_text_overrides() {
     let origin = TestOrigin::start().await;
@@ -1146,8 +1067,6 @@ async fn refresh_with_clear_overrides_nulls_text_overrides() {
     );
 }
 
-// B4.9 — DATA-LOSS: a failed fetch leaves existing metadata intact (the mutation
-// happens in one transaction opened only after the fetch succeeds).
 #[tokio::test]
 async fn a_failed_fetch_leaves_metadata_intact() {
     let origin = TestOrigin::start().await;
@@ -1175,7 +1094,6 @@ async fn a_failed_fetch_leaves_metadata_intact() {
     assert_eq!(manga_scalar::<i64>(&svc, id, "status").await, 1);
 }
 
-// B4.10 — a single-field refresh leaves every other source scalar as it was.
 #[tokio::test]
 async fn refresh_preserves_unselected_source_scalars() {
     let origin = TestOrigin::start().await;

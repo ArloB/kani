@@ -48,7 +48,6 @@ function _showRestartOverlay() {
         window.location.reload();
       }
     } catch {
-      /* still down */
     }
   }, 2000);
 

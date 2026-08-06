@@ -233,8 +233,6 @@ mod tests {
 
     #[test]
     fn url_hostname_is_left_to_the_resolver() {
-        // A hostname is not an IP literal, so this guard returns false and the
-        // ValidatingResolver handles it at resolve time.
         assert!(!is_forbidden_url_host("https://example.com/hook"));
         assert!(!is_forbidden_url_host("https://localhost/hook"));
     }

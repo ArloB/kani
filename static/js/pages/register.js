@@ -1,11 +1,3 @@
-// @ts-check
-// Account creation. Two modes over one form, because they differ only in where
-// the account goes and what guards it:
-//   register — public sign-up, gated by the registration setting and a captcha
-//   setup    — the instance's first account, which becomes the administrator.
-//              No captcha: the endpoint only exists while there are no users, so
-//              there is nothing to spam, and the server also requires the caller
-//              to be on the local network.
 
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
@@ -33,7 +25,7 @@ function RegisterPage({ setup = false }) {
       const res = await fetch('/rest/auth/captcha', { credentials: 'include' });
       const data = await res.json();
       setCaptcha({ id: data.id ?? '', prompt: data.prompt ?? '' });
-    } catch { /* ignore */ }
+    } catch { }
   }
 
   useEffect(() => {
@@ -83,18 +75,15 @@ function RegisterPage({ setup = false }) {
             navigate('/login');
             return;
           }
-          // Sign the operator straight in with what they just chose: making them
-          // retype it is the double login this flow exists to remove.
           const signedIn = await fetch('/rest/auth/login', {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: username.trim(), password }),
           }).then(r => r.ok).catch(() => false);
-          // A full load, not an SPA navigate: the shell booted in its
-          // signed-out mode for this page, so permissions were never fetched
-          // and the wizard's own guard would bounce a freshly-made admin
-          // straight back out.
+          // A full load, not an SPA navigate: the shell booted in its signed-out mode for this
+          // page, so permissions were never fetched and the wizard's own guard would bounce a
+          // freshly-made admin straight back out.
           location.href = signedIn ? '/onboarding' : '/login';
           return;
         }

@@ -1,7 +1,4 @@
 // @ts-check
-// Pill — a small labelled badge. When onDismiss is provided the whole pill is
-// rendered as a button; clicking it removes the item (no separate X icon).
-// Reusable wherever compact, removable tags are needed.
 
 import { h } from 'preact';
 import htm from 'htm';

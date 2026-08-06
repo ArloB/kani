@@ -54,7 +54,6 @@ pub fn router() -> Router<AppState> {
         .route("/global_search", get(global_search_handler))
 }
 
-// cross-domain: sign_image_url requires proxy_secret from AppState
 #[utoipa::path(
     get,
     path = "/rest/library",
@@ -190,7 +189,6 @@ pub(crate) async fn scan_manga_multiple(
     }
 }
 
-// cross-domain: sign_image_url requires proxy_secret from AppState
 #[utoipa::path(
     get, path = "/rest/library/continue_reading",
     params(("limit" = Option<i64>, Query, description = "Max items to return (default 12)")),

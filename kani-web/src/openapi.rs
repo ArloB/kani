@@ -384,4 +384,5 @@ use utoipa::OpenApi;
         (name = "ui", description = "Client-side themes and presentation preferences"),
     ),
 )]
+/// Generated OpenAPI document for every registered REST operation and schema.
 pub struct ApiDoc;

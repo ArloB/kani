@@ -1,5 +1,4 @@
 // @ts-check
-// Forgot password page — submits an email address to request a reset link.
 
 import { h, render } from 'preact';
 import { useState } from 'preact/hooks';

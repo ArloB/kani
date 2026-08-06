@@ -1,11 +1,11 @@
 //! Per-identity and per-IP rate limiting for auth endpoints.
 //!
-//! Two-phase design — no recording on pre-check:
+//! Two-phase design:
 //!   1. `check_lockout` — read-only: is this identity/IP already locked?
 //!   2. `record_and_check` — write then read: record actual outcome, return new lockout state.
 //!
-//! This avoids the correctness bug of recording a "failure" before the auth attempt,
-//! which would cause lockout after N *successful* logins within the window.
+//! The pre-check must remain read-only so successful authentication never contributes
+//! to the failure window.
 //!
 //! Identity is stored as SHA-256 hex — the plaintext username/email is never persisted.
 
@@ -62,7 +62,7 @@ impl AuthRateLimiter {
         format!("{:x}", hasher.finalize())
     }
 
-    /// Phase 1 — read-only pre-flight check before performing authentication.
+    /// Read-only lockout check performed before authentication.
     ///
     /// Does NOT write to the database. Returns `Locked*` if the identity or IP
     /// is already within a lockout window from prior failures.
@@ -74,8 +74,7 @@ impl AuthRateLimiter {
             .await
     }
 
-    /// Phase 2 — record the actual auth outcome (success or failure) and return
-    /// the new lockout state.
+    /// Records the authentication outcome and returns the resulting lockout state.
     ///
     /// Call this AFTER authentication completes. On success the row is recorded
     /// with `succeeded = 1` and `Allowed` is returned. On failure the row is

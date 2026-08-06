@@ -1,8 +1,3 @@
-// @ts-check
-// Builds the settings-search index shared by the settings page's own search
-// (static/js/pages/settings/index.js) and the command palette
-// (static/js/components/command-palette.js) — an individual-setting result
-// deep-links into a section and highlights the matching row there.
 
 import catalog from '../locales/en.js';
 

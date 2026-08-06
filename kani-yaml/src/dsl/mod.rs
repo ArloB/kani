@@ -1,3 +1,5 @@
+//! Parser for the declarative extraction expression language.
+
 mod parseexpr;
 
 use crate::dsl::parseexpr::ParseExpr;
@@ -8,6 +10,7 @@ pub use self::parseexpr::SpannedParseExpr;
 
 type ParserError<'a> = extra::Err<Rich<'a, char>>;
 
+/// Builds a parser that preserves source spans for conversion and validation diagnostics.
 pub fn parser<'a>() -> impl Parser<'a, &'a str, SpannedParseExpr, ParserError<'a>> {
     let hws = || {
         any::<&str, ParserError>()

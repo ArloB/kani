@@ -1,5 +1,4 @@
 // @ts-check
-// Download progress overlay — fixed bottom-right panel showing active downloads.
 
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
@@ -71,7 +70,6 @@ function DownloadOverlay() {
       const visible = [...map.values()].filter(
         e => e.status !== 'deleted' && e.status !== 'completed_hidden'
       );
-      // Sort: in_progress first, then by id
       visible.sort((a, b) => {
         if (a.status === 'in_progress' && b.status !== 'in_progress') return -1;
         if (b.status === 'in_progress' && a.status !== 'in_progress') return 1;

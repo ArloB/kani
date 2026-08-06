@@ -1,5 +1,4 @@
 // @ts-check
-// Notifications panel — dropdown showing scan notifications and download activity.
 
 import { h, render } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';
@@ -87,7 +86,6 @@ function NotificationsPanel() {
 
   const hasAnyDismissable = notifications.length > 0 || completedDownloads.length > 0;
 
-  // Merged feed: completed downloads first, then scan notifications
   /** @type {Array<{ type: 'download', dl: ChapterProgress } | { type: 'scan', n: ScanNotification }>} */
   const feed = [
     ...completedDownloads.map(dl => ({ type: /** @type {'download'} */ ('download'), dl })),

@@ -1,5 +1,4 @@
 // @ts-check
-// Recent updates page — paginated list of newly added chapters grouped by date then manga.
 
 import * as api from '../api.js';
 import { hasPermission } from '../session.js';
@@ -18,7 +17,6 @@ import { getState as getCache, subscribe } from '../cache.js';
 import { getState as getUiState, updateState as updateUiState } from '../ui-state.js';
 import { setPageHeader, clearPageHeader } from '../components/app-header.js';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
  * Returns the download control HTML for a chapter row.
@@ -41,7 +39,6 @@ function _fmtNum(n) {
   return String(n);
 }
 
-// ── Module state ──────────────────────────────────────────────────────────────
 
 let _page = 1;
 /** @type {AbortController | null} */
@@ -55,7 +52,6 @@ let _removePullToRefresh = null;
 /** @type {HTMLElement | null} */
 let _listEl = null;
 
-// ── Init ──────────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export async function init(container) {
@@ -77,7 +73,6 @@ export async function init(container) {
   _listEl = /** @type {HTMLElement} */ (container.querySelector('.js-list'));
   const paginEl = /** @type {HTMLElement} */ (container.querySelector('.js-pagination'));
 
-  // Subscribe to download progress to update button states
   _unsubProgress = subscribe('chaptersProgress', _onProgressUpdate);
 
   await _fetch(_listEl, paginEl);
@@ -85,13 +80,11 @@ export async function init(container) {
   _removePullToRefresh = addPullToRefresh(document.documentElement, () => _fetch(_listEl, paginEl));
 }
 
-// ── URL state ─────────────────────────────────────────────────────────────────
 
 function _updateUrl() {
   urlReplaceState(_page > 1 ? { page: _page } : {});
 }
 
-// ── Fetch ─────────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} listEl @param {HTMLElement} paginEl */
 async function _fetch(listEl, paginEl) {
@@ -141,7 +134,6 @@ async function _fetch(listEl, paginEl) {
     return;
   }
 
-  // Group by date, then by manga
   /** @type {Map<string, Map<number, { manga_id: number, manga_title: string, chapters: any[] }>>} */
   const byDate = new Map();
   /** Tracks the newest timestamp seen for each dateKey so we can sort groups newest-first. */
@@ -162,7 +154,6 @@ async function _fetch(listEl, paginEl) {
       date_uploaded: rawDate,
       is_downloaded: item.is_downloaded ?? false,
     });
-    // Track newest raw timestamp per date group for sort ordering.
     const ts = rawDate ? new Date(rawDate).getTime() : 0;
     if (!rawDates.has(dateKey) || ts > /** @type {number} */ (rawDates.get(dateKey))) {
       rawDates.set(dateKey, ts);
@@ -189,12 +180,10 @@ async function _fetch(listEl, paginEl) {
     dayItems.className = 'update-day__items';
     daySection.appendChild(dayItems);
 
-    // Manga groups within date
     for (const group of mangaMap.values()) {
       const groupEl = document.createElement('div');
       groupEl.className = 'update-group';
 
-      // Header: cover + title + chapter-count subtitle (a lone title reads hollow)
       const coverUrl = getMangaCoverUrl(group.manga_id, 'sm');
       const mangaHref = `/manga/${group.manga_id}`;
       const n = group.chapters.length;
@@ -221,8 +210,6 @@ async function _fetch(listEl, paginEl) {
         </a>`;
 
       if (n === 1) {
-        // Single new chapter: one line — cover, title, chapter, control. A
-        // group header plus a one-row list repeats the same information.
         const ch = group.chapters[0];
         groupEl.innerHTML = `
           <div class="flex items-center gap-3 min-w-0">
@@ -248,7 +235,6 @@ async function _fetch(listEl, paginEl) {
         </div>
       `;
 
-      // Chapter list
       const chList = document.createElement('ul');
       chList.className = 'update-group__chapters';
       chList.setAttribute('role', 'list');
@@ -272,7 +258,6 @@ async function _fetch(listEl, paginEl) {
     listEl.appendChild(daySection);
   }
 
-  // Wire download buttons with in-flight guard
   if (canDownload) {
     for (const btn of /** @type {NodeListOf<HTMLButtonElement>} */ (listEl.querySelectorAll('button[data-chapter-id]'))) {
       const id = Number(btn.dataset.chapterId);
@@ -296,7 +281,6 @@ async function _fetch(listEl, paginEl) {
     }
   }
 
-  // Sync any already-in-progress downloads on render
   _onProgressUpdate(getCache('chaptersProgress'));
 
   const hasNext = hasNextPage(result);
@@ -311,7 +295,6 @@ async function _fetch(listEl, paginEl) {
   }
 }
 
-// ── Progress tracking ─────────────────────────────────────────────────────────
 
 /**
  * Called whenever chaptersProgress state changes.
@@ -340,7 +323,6 @@ function _onProgressUpdate(progress) {
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** @param {string} dateStr */
 function _relativeDate(dateStr) {
@@ -356,7 +338,6 @@ function _relativeDate(dateStr) {
   }
 }
 
-// ── Destroy ───────────────────────────────────────────────────────────────────
 
 /** @param {HTMLElement} container */
 export function destroy(container) {

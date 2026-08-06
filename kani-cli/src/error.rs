@@ -1,4 +1,7 @@
+//! CLI failure types and source-span diagnostic rendering.
+
 #[derive(thiserror::Error, Debug)]
+/// Failure returned by command orchestration and extension tooling.
 pub enum CliError {
     #[error("build failed for `{0}`")]
     BuildFailed(String),

@@ -1,12 +1,8 @@
 // @ts-check
-// Shared drag-and-drop sortable list component.
-// Extracted from manga-details/scanlator-prefs-panel.js for reuse.
 
 import { iconDragHandle } from '../icons.js';
 
 /**
- * Mounts a drag-sortable list into `container`.
- *
  * @template T
  * @param {HTMLElement} container
  * @param {{

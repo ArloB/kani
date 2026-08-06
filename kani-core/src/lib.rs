@@ -1,7 +1,8 @@
-//! Kani Core - Manga downloader core functionality.
+//! Host-runtime and content-processing primitives for Kani.
 //!
-//! This crate provides the core business logic for the Kani manga downloader,
-//! including WASM extension hosting, download management, and source handling.
+//! This crate owns the WASM component host, constrained upstream networking, declarative
+//! extraction, chapter downloading, archive and image processing, and script sandboxes. It does
+//! not own persistence or HTTP routing; those boundaries live in `kani-app` and `kani-web`.
 
 pub mod archive;
 pub mod cache;

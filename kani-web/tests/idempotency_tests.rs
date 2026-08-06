@@ -1,6 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// `Idempotency-Key` on writes: a retried request must replay its original
-// response rather than perform the write a second time.
 
 mod common;
 use axum::http::StatusCode;
@@ -196,7 +194,6 @@ async fn a_get_is_never_recorded() {
     assert_eq!(res.status(), StatusCode::OK);
     assert!(res.headers().get("x-idempotent-replay").is_none());
 
-    // The key was not consumed, so a later write may still use it.
     let write = app
         .clone()
         .oneshot(post(&cookie, Some("g1"), token_body("bot")))

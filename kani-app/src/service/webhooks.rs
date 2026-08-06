@@ -13,8 +13,6 @@ fn now_rfc3339() -> String {
         .unwrap_or_default()
 }
 
-// ── Service ───────────────────────────────────────────────────────────────────
-
 #[derive(Clone)]
 pub struct WebhookService {
     pub db: SqlitePool,
@@ -53,8 +51,6 @@ impl WebhookService {
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
-
-// ── Payload types ─────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -116,8 +112,6 @@ struct Envelope<'a> {
     data: &'a WebhookPayload,
 }
 
-// ── Row types ─────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Serialize)]
 pub struct WebhookRow {
     pub id: i64,
@@ -142,8 +136,6 @@ pub struct DeliveryRow {
     pub delivered_at: time::OffsetDateTime,
 }
 
-// ── Request/response types for the REST layer ─────────────────────────────────
-
 #[derive(Deserialize)]
 pub struct CreateWebhookBody {
     pub url: String,
@@ -159,8 +151,6 @@ pub struct UpdateWebhookBody {
     pub events: Option<String>,
     pub enabled: Option<bool>,
 }
-
-// ── Core firing logic ─────────────────────────────────────────────────────────
 
 impl WebhookService {
     /// Build the delivery envelope and resolve the webhooks that should receive it.
@@ -324,8 +314,6 @@ impl WebhookService {
             .collect())
     }
 
-    // ── CRUD ──────────────────────────────────────────────────────────────────
-
     pub async fn list_webhooks(&self) -> Result<Vec<WebhookRow>> {
         let rows = sqlx::query_as!(
             WebhookRow,
@@ -430,12 +418,8 @@ impl WebhookService {
         Ok(rows)
     }
 
-    // ── Per-manga notify flag ─────────────────────────────────────────────────
-
-    /// Returns whether webhook notifications are enabled globally for a manga.
-    /// True = enabled (no global opt-out row), False = opted out.
+    /// Absence of a global opt-out means notifications are enabled.
     pub async fn get_manga_notify(&self, manga_id: MangaId) -> Result<bool> {
-        // An opt-out row (webhook_id=0, enabled=FALSE) means notifications are disabled.
         let opted_out: i64 = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM webhook_manga_overrides \
              WHERE webhook_id = 0 AND manga_id = ? AND enabled = FALSE",
@@ -446,7 +430,6 @@ impl WebhookService {
         Ok(opted_out == 0)
     }
 
-    /// Set the global per-manga webhook notify flag.
     pub async fn set_manga_notify(&self, manga_id: MangaId, enabled: bool) -> Result<()> {
         if enabled {
             // Remove the opt-out row so the default (enabled) applies.
@@ -469,8 +452,6 @@ impl WebhookService {
         Ok(())
     }
 }
-
-// ── Job-based fan-out ─────────────────────────────────────────────────────────
 
 impl crate::service::AppService {
     /// Resolve applicable webhooks for an event and submit one delivery job per webhook.
@@ -497,8 +478,6 @@ impl crate::service::AppService {
         }
     }
 }
-
-// ── Validation helpers ────────────────────────────────────────────────────────
 
 fn validate_url(url: &str) -> Result<()> {
     if !url.starts_with("http://") && !url.starts_with("https://") {

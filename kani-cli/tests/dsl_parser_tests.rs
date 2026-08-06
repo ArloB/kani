@@ -1,5 +1,4 @@
 #![allow(clippy::unwrap_used)]
-// DSL parser tests: parse expressions, check resulting Expr structure, error cases.
 
 use chumsky::Parser;
 use kani_cli::dsl::parser;
@@ -17,8 +16,6 @@ fn parse_ok(input: &str) -> Expr {
 fn parse_err(input: &str) -> bool {
     parser().parse(input).has_errors()
 }
-
-// ── Primitive literals ───────────────────────────────────────────────────────
 
 #[test]
 fn parse_string_literal() {
@@ -65,8 +62,6 @@ fn parse_self_ref() {
     assert_eq!(parse_ok("self"), Expr::SelfRef);
 }
 
-// ── Built-in constructors ────────────────────────────────────────────────────
-
 #[test]
 fn parse_dom() {
     assert_eq!(parse_ok(r#"dom("h1")"#), Expr::Dom("h1".into()));
@@ -92,8 +87,6 @@ fn parse_pref() {
 fn parse_var() {
     assert_eq!(parse_ok("$manga_id"), Expr::Var("$manga_id".into()));
 }
-
-// ── Method chains ────────────────────────────────────────────────────────────
 
 #[test]
 fn parse_text_method() {
@@ -376,8 +369,6 @@ fn parse_lookup_method() {
     );
 }
 
-// ── JSON accessors ────────────────────────────────────────────────────────────
-
 #[test]
 fn parse_json_str() {
     let expr = parse_ok(r#"json("/data/id").str()"#);
@@ -411,8 +402,6 @@ fn parse_json_ptr() {
         }
     );
 }
-
-// ── Binary operators ──────────────────────────────────────────────────────────
 
 #[test]
 fn parse_binary_add() {
@@ -466,8 +455,6 @@ fn parse_binary_or() {
     );
 }
 
-// ── Control flow ─────────────────────────────────────────────────────────────
-
 #[test]
 fn parse_if_then_else() {
     let expr = parse_ok(r#"if true then "yes" else "no""#);
@@ -483,7 +470,6 @@ fn parse_if_then_else() {
 
 #[test]
 fn parse_let_binding() {
-    // let uses ';' or '\n' as terminator; use ';' in direct parser tests
     let expr = parse_ok("let $x = \"hello\"; $x");
     assert_eq!(
         expr,
@@ -494,8 +480,6 @@ fn parse_let_binding() {
         }
     );
 }
-
-// ── Composite expressions ─────────────────────────────────────────────────────
 
 #[test]
 fn parse_format_expr() {
@@ -536,8 +520,6 @@ fn parse_list_literal() {
     );
 }
 
-// ── Error cases ───────────────────────────────────────────────────────────────
-
 #[test]
 fn parse_error_unclosed_paren() {
     assert!(parse_err("self.text("));
@@ -552,8 +534,6 @@ fn parse_error_trailing_junk() {
 fn parse_error_empty_input() {
     assert!(parse_err(""));
 }
-
-// ── Conversion errors ─────────────────────────────────────────────────────────
 
 #[test]
 fn convert_error_unknown_method() {
@@ -581,8 +561,6 @@ fn convert_error_map_literal_outside_lookup() {
         "lookup with map literal should succeed"
     );
 }
-
-// ── §9 methods ────────────────────────────────────────────────────────────────
 
 #[test]
 fn parse_split_n() {
@@ -814,8 +792,6 @@ fn convert_error_format_padded_empty_fill() {
         "got: {msg}"
     );
 }
-
-// ── User function calls (.user.name()) ───────────────────────────────────────
 
 #[test]
 fn parse_user_fn_no_extra_args() {

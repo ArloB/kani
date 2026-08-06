@@ -1152,8 +1152,6 @@ mod tests {
     }
 }
 
-// ── Upgrade detection ────────────────────────────────────────────────────────
-
 /// The manga this user has muted, so the client can honour the setting for
 /// every series rather than only those it happens to have loaded.
 #[utoipa::path(

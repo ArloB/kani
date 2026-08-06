@@ -10,6 +10,7 @@ use crate::error::CliError;
 pub const SUPPORTED_BACKUP_VERSION: u32 = 1;
 
 #[derive(Debug, PartialEq, Eq)]
+/// Compatibility result for a backup's declared format version.
 pub enum VersionCheck {
     Compatible(u32),
     TooNew { found: u32, supported: u32 },

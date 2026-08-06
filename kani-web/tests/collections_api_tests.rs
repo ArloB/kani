@@ -9,8 +9,6 @@ use common::{
 use serde_json::json;
 use tower::ServiceExt;
 
-// ── GET /rest/collections ─────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn list_collections_returns_200_for_authed_user() {
     let state = test_state().await;
@@ -35,8 +33,6 @@ async fn list_collections_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── POST /rest/collections ────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn create_collection_returns_201_for_admin() {
@@ -78,8 +74,6 @@ async fn create_collection_returns_401_without_auth() {
 
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
-
-// ── GET /rest/collections/:id/manga ──────────────────────────────────────────
 
 #[tokio::test]
 async fn get_collection_manga_returns_404_for_missing_collection() {

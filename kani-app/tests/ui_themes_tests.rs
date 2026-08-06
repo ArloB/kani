@@ -1,8 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-//! Plan 05 Phase 1 — server-persisted UI themes. Ownership is the whole point
-//! here: a theme is either one user's or the instance's, and the boundary
-//! between those is what stops one user restyling or deleting another's work.
+//! Theme ownership prevents users from restyling or deleting another user's work.
 
 mod common;
 use common::{insert_user, test_service};
@@ -64,7 +62,6 @@ async fn an_instance_theme_is_visible_to_every_user() {
     let alice = insert_user(&svc.db, "alice").await;
     let bob = insert_user(&svc.db, "bob").await;
 
-    // owner = None → published instance-wide.
     svc.upsert_ui_theme(None, body("House Style"))
         .await
         .unwrap();
@@ -182,8 +179,6 @@ async fn an_empty_name_is_refused() {
     assert!(svc.upsert_ui_theme(Some(user), body("   ")).await.is_err());
 }
 
-// The stored CSS is the *sanitised* output, so a client that skips its own
-// sanitiser gains nothing — this is the property the whole design rests on.
 #[tokio::test]
 async fn custom_css_is_stored_already_sanitised() {
     let svc = test_service().await;

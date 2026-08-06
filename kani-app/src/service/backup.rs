@@ -14,8 +14,6 @@ use kani_shared::types::{
     ScanSettings, SecuritySettings, SettingsUpdate, TrackingSettings,
 };
 
-// ── Serialisable backup structs ───────────────────────────────────────────────
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BackupData {
     pub version: u32,
@@ -87,12 +85,6 @@ pub struct BackupCategory {
 
 /// The settings carried in a backup.
 ///
-/// This used to be three loose fields against a settings row that has since
-/// grown to sixty-two, so a restore silently returned three of them and left
-/// the rest at whatever the target install happened to have. Enumerating all
-/// sixty-two here would only move the problem: the next setting added would be
-/// forgotten in exactly the same way.
-///
 /// Instead it carries the eight `SettingsUpdate` group structs, which between
 /// them cover sixty-one of the sixty-two fields — everything a user can edit.
 /// The sixty-second is `first_run_complete`, which must never be restored: it
@@ -136,8 +128,6 @@ pub struct BackupSettings {
     pub performance: Option<PerformanceSettings>,
 }
 
-// ── Preview (read-only, no DB writes) ────────────────────────────────────────
-
 #[derive(Debug, Serialize)]
 pub struct BackupPreview {
     pub version: u32,
@@ -159,8 +149,6 @@ pub struct BackupSourceSummary {
     pub manga_count: u32,
     pub found: bool,
 }
-
-// ── Restore options + result ──────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 pub struct RestoreOptions {
@@ -204,8 +192,6 @@ pub struct RestoreResult {
     pub pending_imports_added: u32,
     pub warnings: Vec<String>,
 }
-
-// ── Encryption ───────────────────────────────────────────────────────────────
 
 const BACKUP_V2_MAGIC: &[u8] = b"KANI-BACKUP-V2\n";
 
@@ -273,8 +259,6 @@ fn maybe_decrypt_backup<'a>(
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 fn parse_zip_backup(data: &[u8]) -> Result<BackupData> {
     let cursor = Cursor::new(data);
     let mut archive = ZipArchive::new(cursor)
@@ -324,8 +308,6 @@ fn build_zip(backup: &BackupData) -> Result<Vec<u8>> {
         .map_err(|e| ServiceError::Internal(e.to_string()))?;
     Ok(cursor.into_inner())
 }
-
-// ── AppService methods ────────────────────────────────────────────────────────
 
 impl AppService {
     pub async fn preview_backup(
@@ -685,7 +667,6 @@ impl AppService {
                 result.imported_categories += 1;
             }
         }
-        // Build map from existing categories (may include pre-existing ones in merge mode)
         let cats = sqlx::query!("SELECT id, name FROM categories")
             .fetch_all(&mut *tx)
             .await?;
@@ -884,13 +865,8 @@ impl AppService {
         if opts.import_settings
             && let Some(ref s) = backup.settings
         {
-            // Everything goes through `update_settings` rather than raw SQL.
-            // That is not tidiness: it validates the values (a hand-edited
-            // backup cannot write a 900-thread download concurrency), it
-            // refreshes the in-memory settings cache — the previous UPDATE did
-            // not, so a restore appeared to do nothing until the next restart —
-            // and for email it substitutes the stored credentials back in place
-            // of the masked ones the backup carries.
+            // Restore through validation and cache refresh, substituting stored email credentials
+            // for the masked values carried by the backup.
             let mut applied = false;
             if let Some(g) = s.download.clone() {
                 self.update_settings(SettingsUpdate::Download(g), user_id)
@@ -933,11 +909,7 @@ impl AppService {
                 applied = true;
             }
 
-            // A backup from before the group payloads carries only the three
-            // flat fields. Apply exactly those, by reading the current groups
-            // and overriding the three — so an old backup still changes only
-            // what it always changed, and still lands through the path that
-            // refreshes the cache.
+            // Legacy backups change only their three flat settings through the current update path.
             if !applied {
                 let cur = self.get_settings().await;
                 if s.scan_interval_minutes.is_some() || s.auto_scan.is_some() {

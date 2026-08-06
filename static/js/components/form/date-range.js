@@ -1,6 +1,4 @@
 // @ts-check
-// DateRange — a labelled from/to pair of DateInputs. Extracted from the logs
-// page, which mounted the identical block twice (app-log and audit-log tabs).
 
 import { h } from 'preact';
 import htm from 'htm';

@@ -19,8 +19,8 @@ Transient network and rate-limit failures may be retried by the job framework. A
 recorded in download history and diagnostics. Check the source health page before repeatedly
 retrying every failed chapter.
 
-If a download is left in a pending-delete state because a file is locked or unavailable, Kani uses
-tracked retry work rather than silently forgetting it.
+If a locked or unavailable file leaves a download pending deletion, Kani schedules a tracked
+retry.
 
 ## Export formats
 

@@ -1,3 +1,5 @@
+//! Persistent priority queue, recovery, retry, and concurrency enforcement for background jobs.
+
 use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,10 +14,6 @@ use crate::jobs::error::JobError;
 use crate::jobs::framework::{
     BackgroundJob, JobConcurrencySnapshot, JobContext, JobId, JobPriority, JobProgressReporter,
 };
-
-// ---------------------------------------------------------------------------
-// ErasedJob — the object-safe queue-facing trait
-// ---------------------------------------------------------------------------
 
 #[async_trait::async_trait]
 pub(crate) trait ErasedJob: Send + Sync + 'static {
@@ -65,14 +63,11 @@ where
     }
 }
 
-// ---------------------------------------------------------------------------
-// JobRegistry — deserialisation factory for startup recovery
-// ---------------------------------------------------------------------------
-
 type JobFactory =
     Box<dyn Fn(serde_json::Value) -> Result<Box<dyn ErasedJob>, serde_json::Error> + Send + Sync>;
 
 #[derive(Default)]
+/// Deserialization registry used to reconstruct persisted jobs during startup recovery.
 pub struct JobRegistry {
     factories: HashMap<&'static str, JobFactory>,
 }
@@ -110,10 +105,7 @@ impl JobRegistry {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Queue entry
-// ---------------------------------------------------------------------------
-
+/// Queue entry ordered by descending priority and then oldest submission first.
 pub struct QueuedJob {
     pub priority: JobPriority,
     pub created_at: Instant,
@@ -142,10 +134,7 @@ impl PartialOrd for QueuedJob {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Active job handle
-// ---------------------------------------------------------------------------
-
+/// Cancellation and progress controls retained while one job is running.
 pub struct ActiveJobHandle {
     pub job_id: JobId,
     pub job_type: &'static str,
@@ -154,19 +143,13 @@ pub struct ActiveJobHandle {
     pub progress: JobProgressReporter,
 }
 
-// ---------------------------------------------------------------------------
-// Per-type concurrency config
-// ---------------------------------------------------------------------------
-
+/// Concurrency gate for one registered job type.
 pub struct JobTypeConfig {
     pub max_concurrent: usize,
     pub semaphore: Arc<Semaphore>,
 }
 
-// ---------------------------------------------------------------------------
-// JobManager config
-// ---------------------------------------------------------------------------
-
+/// Startup configuration and recovery registry for a [`JobManager`].
 pub struct JobManagerConfig {
     pub global_max_concurrent: usize,
     pub job_shutdown_timeout: Duration,
@@ -177,17 +160,15 @@ pub struct JobManagerConfig {
     pub svc_cell: crate::jobs::framework::ServiceCell,
 }
 
+/// Live concurrency limits propagated into each [`JobContext`].
 pub struct ConcurrencyConfig {
     pub page_concurrency: usize,
     pub per_source_download_concurrency: usize,
     pub scan_concurrency: usize,
 }
 
-// ---------------------------------------------------------------------------
-// Status types for queries
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, serde::Serialize)]
+/// Detailed persisted state for one job lookup.
 pub struct JobStatus {
     pub id: String,
     pub status: String,
@@ -198,6 +179,7 @@ pub struct JobStatus {
 }
 
 #[derive(Debug, Default)]
+/// Database filters and pagination applied when listing job history.
 pub struct JobListFilter {
     pub job_type: Option<String>,
     /// Match any of these statuses. Empty means "no status filter" — the jobs UI
@@ -221,6 +203,8 @@ pub struct JobListPage {
 }
 
 #[derive(Debug, serde::Serialize)]
+/// API-facing summary of one current or historical job.
+/// Timestamp fields are Unix seconds.
 pub struct JobSummary {
     pub id: String,
     pub job_type: String,
@@ -235,11 +219,11 @@ pub struct JobSummary {
     pub user_id: Option<i64>,
 }
 
-// ---------------------------------------------------------------------------
-// JobManager
-// ---------------------------------------------------------------------------
-
 #[derive(Clone)]
+/// Persistent background-work scheduler shared by service and HTTP layers.
+///
+/// It enforces global, per-type, and per-source concurrency; records lifecycle state; reconstructs
+/// interrupted work at startup; and owns retry and circuit-breaker decisions.
 pub struct JobManager {
     pool: sqlx::sqlite::SqlitePool,
     sse_tx: tokio::sync::broadcast::Sender<AppEvent>,
@@ -287,7 +271,6 @@ impl JobManager {
         let registry = Arc::new(config.registry);
         let queue = Arc::new(Mutex::new(BinaryHeap::<QueuedJob>::new()));
 
-        // Load pending jobs from DB using the registry.
         let pending = sqlx::query!(
             "SELECT id, job_type, priority, description, params_json FROM jobs \
              WHERE status = 'pending' ORDER BY priority DESC, created_at ASC"
@@ -335,7 +318,6 @@ impl JobManager {
             }
         }
 
-        // Load circuit breaker states from DB.
         let circuit_breakers: Arc<DashMap<i64, crate::jobs::circuit_breaker::CircuitBreaker>> =
             Arc::new(DashMap::new());
         let cb_rows = sqlx::query!(
@@ -489,7 +471,6 @@ impl JobManager {
             let retry_params_opt = queued.job.retry_params();
             let attempt = queued.job.attempt_count();
 
-            // Check per-type semaphore (non-blocking).
             let type_permit = if let Some(cfg) = type_configs.get(job_type) {
                 match cfg.semaphore.clone().try_acquire_owned() {
                     Ok(p) => Some(p),
@@ -508,7 +489,6 @@ impl JobManager {
                 None
             };
 
-            // Check circuit breaker — fail fast if open.
             if let Some(sid) = source_id {
                 let now = unix_now();
                 let is_open = {
@@ -548,7 +528,6 @@ impl JobManager {
                 }
             }
 
-            // Check per-source semaphore (non-blocking).
             let src_permit = if let Some(sid) = source_id {
                 let sem = {
                     if let Some(s) = per_source_semaphores.get(&sid) {
@@ -650,7 +629,6 @@ impl JobManager {
 
                 match result {
                     Ok(value) => {
-                        // Record success in circuit breaker.
                         if let Some(sid) = source_id
                             && let Some(mut cb) = cb_t.get_mut(&sid)
                         {
@@ -708,7 +686,6 @@ impl JobManager {
                         });
                     }
                     Err(e) => {
-                        // Record failure in circuit breaker.
                         if let (Some(sid), JobError::Download(kind)) = (source_id, &e) {
                             let mut entry = cb_t.entry(sid).or_insert_with(|| {
                                 crate::jobs::circuit_breaker::CircuitBreaker::new(sid)
@@ -737,7 +714,6 @@ impl JobManager {
                             .await;
                         }
 
-                        // Determine if we should schedule a retry.
                         let retry_scheduled = if let JobError::Download(kind) = &e {
                             if let (Some(params), Some(policy)) =
                                 (retry_params_opt, kind.retry_policy())
@@ -835,7 +811,6 @@ impl JobManager {
                 let _ = completion_t.send(job_id);
                 notify_t.notify_one();
 
-                // Prune old history.
                 let max = max_history as i64;
                 let _ = sqlx::query!(
                     "DELETE FROM jobs \
@@ -864,12 +839,10 @@ impl JobManager {
             return;
         }
 
-        // Cancel all running jobs.
         for entry in active.iter() {
             entry.value().cancel.cancel();
         }
 
-        // Wait for completions up to the timeout.
         let mut rx = completion_tx.subscribe();
         let mut remaining = count;
         let deadline = tokio::time::Instant::now() + timeout;
@@ -891,10 +864,6 @@ impl JobManager {
             }
         }
     }
-
-    // -----------------------------------------------------------------------
-    // Public API
-    // -----------------------------------------------------------------------
 
     pub async fn submit<J>(&self, job: J) -> Result<JobId>
     where
@@ -941,9 +910,6 @@ impl JobManager {
     /// cancelling it, and `cancel` deliberately nulls `params_json`, so there
     /// would be nothing left to resume from. Refusing is honest — the caller
     /// can cancel and re-submit if that is what they meant.
-    ///
-    /// `'paused'` has been permitted by the `jobs.status` CHECK constraint
-    /// since the table was created; it was simply never written.
     pub async fn pause(&self, job_id: JobId) -> Result<()> {
         if self.active.contains_key(&job_id) {
             return Err(ServiceError::Conflict(format!(
@@ -1023,13 +989,11 @@ impl JobManager {
     }
 
     pub async fn cancel(&self, job_id: JobId) -> Result<()> {
-        // Cancel if currently running.
         if let Some(handle) = self.active.get(&job_id) {
             handle.cancel.cancel();
             return Ok(());
         }
 
-        // Remove from queue if pending.
         let mut q = self.queue.lock().await;
         let heap = std::mem::take(&mut *q);
         let mut cancelled_job: Option<Box<dyn ErasedJob>> = None;
@@ -1062,7 +1026,6 @@ impl JobManager {
             return Ok(());
         }
 
-        // Not found in memory — check the DB.
         let row = sqlx::query!("SELECT status FROM jobs WHERE id = ?", job_id_str)
             .fetch_optional(&self.pool)
             .await?;
@@ -1091,7 +1054,6 @@ impl JobManager {
     }
 
     pub async fn status(&self, job_id: JobId) -> Result<JobStatus> {
-        // Check live progress from active map first.
         let live_progress = if let Some(handle) = self.active.get(&job_id) {
             let progress = handle.progress.clone();
             drop(handle);
@@ -1256,10 +1218,6 @@ impl JobManager {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests (unit)
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -1330,7 +1288,6 @@ mod tests {
         assert_eq!(heap.pop().unwrap().priority, JobPriority::Low);
     }
 
-    // Minimal no-op job for ordering tests.
     struct NoopJob {
         id: JobId,
         name: &'static str,

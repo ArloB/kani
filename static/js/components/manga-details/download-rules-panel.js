@@ -13,7 +13,6 @@ import { Combobox } from '../combobox.js';
 import { iconX, iconPencil, iconCheck } from '../../icons.js';
 const html = htm.bind(h);
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function _ruleLabel(kind) {
   if (typeof kind === 'string') return kind;
@@ -42,7 +41,6 @@ function _epochToDateInput(epoch) {
   return new Date(epoch * 1000).toISOString().slice(0, 10);
 }
 
-// ── Mount ─────────────────────────────────────────────────────────────────────
 
 /**
  * @param {HTMLElement} bodyEl
@@ -55,7 +53,6 @@ export function mountDownloadRulesPanel(bodyEl, initialRules, dbId) {
   render(html`<${DownloadRulesPanel} initialRules=${initialRules} dbId=${dbId} />`, mount);
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
 
 function DownloadRulesPanel({ initialRules, dbId }) {
   const [rules, setRules] = useState(/** @type {any[]} */ (Array.isArray(initialRules) ? [...initialRules] : []));
@@ -130,7 +127,7 @@ function DownloadRulesPanel({ initialRules, dbId }) {
     try {
       await api.deleteDownloadRule(ruleId);
       setRules(prev => prev.filter(r => r.id !== ruleId));
-    } catch { /* ignore */ }
+    } catch { }
   }
 
   function handleDragStart(idx) {
@@ -155,7 +152,7 @@ function DownloadRulesPanel({ initialRules, dbId }) {
     dragFromIdx.current = null;
     try {
       await api.reorderDownloadRules(dbId, rulesRef.current.map(r => r.id));
-    } catch { /* best-effort */ }
+    } catch { }
   }
 
   return html`
@@ -188,7 +185,6 @@ function DownloadRulesPanel({ initialRules, dbId }) {
   `;
 }
 
-// ── Rule row ──────────────────────────────────────────────────────────────────
 
 function RuleRow({ rule, idx, editing, langOptions, onEdit, onCancel, onSave, onDelete, onDragStart, onDragOver, onDrop, onDragEnd }) {
   return html`
@@ -215,7 +211,6 @@ function RuleRow({ rule, idx, editing, langOptions, onEdit, onCancel, onSave, on
   `;
 }
 
-// ── Edit form ─────────────────────────────────────────────────────────────────
 
 function EditRuleForm({ rule, langOptions, onSave, onCancel }) {
   const ruleType = typeof rule.kind === 'string' ? rule.kind : Object.keys(rule.kind)[0];
@@ -235,7 +230,6 @@ function EditRuleForm({ rule, langOptions, onSave, onCancel }) {
   />`;
 }
 
-// ── Add form ──────────────────────────────────────────────────────────────────
 
 function AddRuleForm({ langOptions, onAdd }) {
   return html`<${RuleForm}
@@ -249,7 +243,6 @@ function AddRuleForm({ langOptions, onAdd }) {
   />`;
 }
 
-// ── Shared rule form ──────────────────────────────────────────────────────────
 
 function RuleForm({ initType, initValue, initLangVal, langOptions, onSubmit, onCancel, submitLabel }) {
   const [type, setType] = useState(initType);
@@ -272,7 +265,7 @@ function RuleForm({ initType, initValue, initLangVal, langOptions, onSubmit, onC
         setLangVal('');
         setType('LanguageInclude');
       }
-    } catch { /* error already shown by onSubmit */ }
+    } catch { }
   }
 
   return html`

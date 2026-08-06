@@ -1,9 +1,6 @@
--- A NULL manga_id means "applies to the whole library". Per-manga rows still
--- win; globals only fill the gaps.
---
--- SQLite cannot relax NOT NULL in place, so the table is rebuilt. The original
--- UNIQUE(manga_id, scanlator) does not constrain globals at all — SQLite treats
--- NULLs as distinct — so globals get their own partial unique index.
+-- A NULL manga_id represents a library-wide default overridden by per-manga rows.
+-- SQLite requires a table rebuild to relax NOT NULL, and NULLs bypass the existing
+-- composite uniqueness constraint, so global rows receive a partial unique index.
 CREATE TABLE scanlator_preferences_new (
     id         INTEGER PRIMARY KEY NOT NULL,
     manga_id   INTEGER REFERENCES manga(id) ON DELETE CASCADE,

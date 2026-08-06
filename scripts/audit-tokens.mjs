@@ -1,16 +1,4 @@
 #!/usr/bin/env node
-// Fails on hard-coded colour literals in the frontend source.
-//
-// Design tokens live in the `@theme` block of static/css/app.css; nothing in
-// static/js should name a colour directly. Intentional exceptions carry a
-// trailing `// audit-ignore`, and modules that are definitionally colour
-// sources (the theme palette) carry `audit-ignore-file`.
-//
-// This was a kani-cli subcommand. It needs none of the workspace's types — it
-// is a text scan — and having it in Rust meant CI compiled kani-cli in release
-// purely to run a lint. It sits beside the other checkers now.
-//
-//   node scripts/audit-tokens.mjs [--dir static/js] [--check] [--max 0]
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';

@@ -1,5 +1,4 @@
 // @ts-check
-// DetailCard — a card with a labelled head + optional action + body slot.
 
 import { h } from 'preact';
 import htm from 'htm';

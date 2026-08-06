@@ -179,7 +179,6 @@ async fn a_queued_job_can_be_paused_and_resumed() {
     let (u, p) = common::create_admin(&state).await;
     let db = state.db.clone();
 
-    // A pending job with params the registry can rebuild from.
     let id = uuid::Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO jobs (id, job_type, status, priority, description, params_json, created_at) \

@@ -2,8 +2,6 @@ use super::super::*;
 use crate::ids::MangaId;
 use futures::stream::{FuturesUnordered, StreamExt};
 
-// Library scanning, refresh, chapter fetch/store and metadata sync.
-
 /// Consecutive all-known listing pages tolerated before a scan concludes it has
 /// caught up. More than one, because hitting a page of already-held chapters is
 /// routine at a pagination boundary and says nothing about what follows.
@@ -510,15 +508,8 @@ impl AppService {
             .get_backend(ids.source_id)
             .ok_or_else(|| ServiceError::NotFound(format!("Source {} not found", ids.source_id)))?;
 
-        // The write pool holds exactly one connection, so a transaction opened
-        // here would be held across every page fetch — each with its retries,
-        // backoff and possible challenge solve — starving every other writer in
-        // the process. A scan of a real library was measured blocking a
-        // recurring job for 28.8 s that way. Pages are collected first and
-        // written once, after all network I/O is done.
-        //
-        // Deciding "new on this page" without writing needs the ids already
-        // held, which is what the barren-page guard counts.
+        // Collect pages before taking the single write connection; see the engineering
+        // constraints register.
         let mut known_ids: std::collections::HashSet<String> = sqlx::query_scalar!(
             "SELECT source_chapter_id FROM chapters WHERE manga_id = ?",
             manga_row_id
@@ -580,17 +571,8 @@ impl AppService {
                 });
             }
 
-            // A page of entirely-known chapters is not proof that nothing new
-            // lies beyond it. That only holds for a strictly newest-first,
-            // strictly monotonic listing; oldest-first ordering, listings
-            // interleaved by upload date across scanlators, and sources that
-            // re-list a batch of old chapters all break it, and the scan then
-            // reports "no new chapters" on every subsequent run because the
-            // shape never changes.
-            //
-            // The guard still exists — an unbounded loop over a source that
-            // always claims another page would grow the DB forever — but it now
-            // takes a run of barren pages, not one.
+            // Stop only after the configured run of barren pages; see the engineering
+            // constraints register.
             if new_on_page == 0 {
                 barren_pages += 1;
             } else {
@@ -611,10 +593,7 @@ impl AppService {
             .insert_chapters_batch(&mut tx, manga_row_id, &collected)
             .await?;
 
-        // `INSERT OR IGNORE` leaves already-known rows untouched, so a re-listed
-        // chapter whose page count changed would keep the count it was first
-        // discovered with. Refreshing it here is what turns re-upload detection
-        // from theoretical into something that can fire.
+        // Refresh known rows because batch insertion intentionally ignores them.
         self.refresh_source_page_counts(&mut tx, manga_row_id, &collected)
             .await?;
         tx.commit().await?;

@@ -1,19 +1,8 @@
-//! Lease/drain coordination for a hot-swappable source backend, isolated in its
-//! own leaf crate so its one piece of hand-rolled lock-free logic can be
-//! model-checked with `loom` without dragging tokio's dependency graph (which
-//! breaks under a global `--cfg loom`) into the model build.
+//! Lease/drain coordination for a hot-swappable source backend.
 //!
 //! `draining` and the lease `count` are packed into a **single** atomic word, and
-//! a lease is taken with `compare_exchange`. This is the key to correctness: with
-//! two separate atomics the lease/drain paths form a StoreLoad pair that only a
-//! `SeqCst` total order makes safe — and `loom` cannot verify that (it does not
-//! fully model `SeqCst`, treating it as Acquire/Release, so a correct `SeqCst`
-//! fix reports a false positive). A single-location CAS needs no cross-location
-//! ordering: the atomic's own modification order is the total order, which `loom`
-//! models precisely. The model below passes.
-//!
-//! Run the model with:
-//!   RUSTFLAGS="--cfg loom" cargo test -p kani-lease
+//! a lease is taken with `compare_exchange`. The atomic's modification order
+//! ensures that acquisition and draining cannot both succeed.
 
 #[cfg(loom)]
 use loom::sync::atomic::AtomicUsize;
@@ -66,6 +55,10 @@ impl LeaseCoordinator {
         }
     }
 
+    /// Releases one successfully acquired lease.
+    ///
+    /// Each successful [`Self::try_acquire`] must call this exactly once. Calling
+    /// it without a matching acquisition corrupts the packed lease count.
     pub fn release(&self) {
         self.state.fetch_sub(1, Ordering::AcqRel);
     }
@@ -108,9 +101,7 @@ mod loom_tests {
     use super::LeaseCoordinator;
     use loom::sync::Arc;
 
-    // The invariant: if a lease is granted and still live, a concurrent drain must
-    // observe it (never sees zero and swaps out a live lease). Fails on
-    // Acquire/Release, passes on SeqCst.
+    // A concurrent drain must observe any lease that was granted and remains live.
     #[test]
     fn drain_never_misses_a_concurrent_lease() {
         loom::model(|| {
@@ -119,7 +110,7 @@ mod loom_tests {
                 let c = Arc::clone(&coord);
                 loom::thread::spawn(move || {
                     c.start_drain();
-                    c.active() // the count the drain sees at its decision point
+                    c.active()
                 })
             };
 

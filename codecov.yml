@@ -1,16 +1,19 @@
 codecov:
   notify:
-    wait_for_ci: true   # post Codecov check only after other CI jobs finish
+    # Post the Codecov check only after other CI jobs finish.
+    wait_for_ci: true
 
 coverage:
   status:
     project:
       default:
-        target: auto    # must not drop below the base branch
-        threshold: 1%   # allow up to 1% drift before failing
+        # Do not drop below the base branch; tolerate at most 1% drift.
+        target: auto
+        threshold: 1%
     patch:
       default:
-        target: 50%     # new/changed lines in a PR should be ≥50% covered
+        # New and changed lines in a PR require at least 50% coverage.
+        target: 50%
 
 component_management:
   individual_components:
@@ -36,4 +39,5 @@ ignore:
 comment:
   layout: "header, diff, components, files"
   behavior: default
-  require_changes: true  # skip comment if coverage is unchanged
+  # Skip the report comment when coverage is unchanged.
+  require_changes: true

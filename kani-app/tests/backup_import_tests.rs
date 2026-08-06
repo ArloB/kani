@@ -218,22 +218,12 @@ async fn encrypted_backup_without_passphrase_is_rejected() {
     );
 }
 
-// ── Settings round-trip ───────────────────────────────────────────────────────
-//
-// The backup used to carry three settings against a row of sixty-two, so a
-// restore returned three and silently left the rest at whatever the target
-// install happened to hold. These pin the whole surface rather than a sample:
-// a setting added to any group is covered without touching this file, and a
-// setting that stops round-tripping fails here.
-
 use kani_shared::types::{MaintenanceSettings, SecuritySettings, SettingsUpdate};
 
 #[tokio::test]
 async fn backup_settings_round_trip_covers_every_group() {
     let svc = test_service().await;
 
-    // Move one value in each group away from its default, spread across the
-    // groups that the old three-field backup could not reach at all.
     let before = svc.get_settings().await;
     svc.update_settings(
         SettingsUpdate::Security(SecuritySettings {
@@ -265,7 +255,6 @@ async fn backup_settings_round_trip_covers_every_group() {
 
     let zip = svc.export_backup(UserId(1), false, None).await.unwrap();
 
-    // Put everything back to where it started, then restore.
     svc.update_settings(
         SettingsUpdate::Security(SecuritySettings {
             max_login_attempts: before.max_login_attempts,
@@ -304,8 +293,6 @@ async fn backup_settings_round_trip_covers_every_group() {
 
 #[tokio::test]
 async fn restoring_settings_refreshes_the_live_cache_not_just_the_row() {
-    // The old restore wrote SQL directly and left the cached copy untouched, so
-    // the change did not take effect until the process restarted.
     let svc = test_service().await;
     svc.update_settings(
         SettingsUpdate::Security(SecuritySettings {
@@ -340,7 +327,6 @@ async fn restoring_settings_refreshes_the_live_cache_not_just_the_row() {
         .await
         .unwrap();
 
-    // Read through the cache, without re-reading the database.
     assert_eq!(svc.get_settings().await.max_login_attempts, 13);
     assert_eq!(svc.get_settings().await.session_timeout_secs, 3600);
 }

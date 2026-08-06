@@ -20,6 +20,8 @@ use endpoints::{
 use macros::{emit_fetched_option_sets, emit_filter_list, emit_preference_list};
 use templates::MANGA_EXT_STUB_SORT;
 
+/// Complete generated crate content before it is written to disk.
+/// Script maps preserve deterministic filenames and ordering.
 pub struct GeneratedCrate {
     pub id: String,
     pub cargo_toml: String,
@@ -139,7 +141,7 @@ fn emit_lib_rs(ext: &ValidatedExtension, embedded_bytes: bool) -> String {
         emit_preference_list(&ext.preferences, &ext.option_sets)
     ));
 
-    parts.push("}".into()); // end MangaExtension impl
+    parts.push("}".into());
 
     parts.push(emit_guest_impl(ext));
 

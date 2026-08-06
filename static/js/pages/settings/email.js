@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Email / SMTP section.
 
 import { h } from 'preact';
 import { useState, useCallback } from 'preact/hooks';

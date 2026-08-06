@@ -1,3 +1,5 @@
+//! Page-derived quality signals and policy-driven chapter replacement decisions.
+
 use crate::manifest::ChapterManifest;
 
 /// dHash: grayscale, resize to 9x8, compare each pixel with its right neighbour.
@@ -105,8 +107,11 @@ pub fn is_colour_image(decoded: &image::DynamicImage) -> bool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+/// Comparable image-quality measurements aggregated across a chapter.
 pub struct QualityScore {
+    /// Median longer image edge in pixels.
     pub median_long_edge_px: u32,
+    /// Encoded page bytes per megapixel of measured image area.
     pub bytes_per_megapixel: f32,
     pub page_count: u32,
     /// Median estimated encoder quality (1–100) across sampled pages, when the
@@ -196,6 +201,7 @@ impl QualityReason {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case", tag = "verdict", content = "reason")]
+/// Policy result for a candidate chapter relative to the held copy.
 pub enum QualityVerdict {
     Better(QualityReason),
     /// Measurably worse on some axis — never offered as an upgrade.
@@ -271,8 +277,7 @@ impl Default for QualityPolicy {
     }
 }
 
-/// Encoder-quality points that count as a real difference. Below this the
-/// estimate's own error (~8 points, see `probe::jpeg_quality`) dominates.
+/// Encoder-quality points that count as a real difference.
 const ENCODER_MARGIN: u8 = 12;
 /// Bytes-per-megapixel ratio that counts as a real difference at the same
 /// resolution. The margin is the noise guard that stops a trivially larger
@@ -411,8 +416,6 @@ mod tests {
 
     #[test]
     fn gradient_survives_a_rescale() {
-        // A downscale is the cheap stand-in for a re-encode: the perceptual hash
-        // should stay close, unlike a byte hash which changes completely.
         let mut img = image::GrayImage::new(90, 80);
         for (x, _y, p) in img.enumerate_pixels_mut() {
             *p = image::Luma([(x * 2) as u8]);
@@ -521,8 +524,6 @@ mod tests {
 
     #[test]
     fn an_accented_chapter_is_not_treated_as_a_colour_release() {
-        // Two of three probed pages colour = an opener and a closer, which is
-        // the ordinary shape of a monochrome chapter.
         assert_eq!(
             colour_profile_from_flags([true, false, true]),
             ColourProfile::ColourAccent
@@ -625,8 +626,6 @@ mod tests {
         ));
         assert!(!is_colour_image(&grey));
 
-        // A three-channel encoding of grey content — the case that makes the
-        // header probe useless and this function necessary.
         let grey_rgb = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
             32,
             32,
@@ -657,8 +656,6 @@ mod tests {
 
     #[test]
     fn colour_can_be_told_it_is_not_an_upgrade() {
-        // Some readers want the original monochrome scan, not a colourised
-        // re-release, so the axis has to be silenceable.
         let held = score(1600, 1000.0, None, ColourProfile::Monochrome);
         let cand = score(1600, 1000.0, None, ColourProfile::FullColour);
         let policy = QualityPolicy {

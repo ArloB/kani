@@ -56,10 +56,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    # Same reasoning as the test job. Clippy builds dev rlibs with `debug = 1`,
-    # and `cargo bench --no-run` uses [profile.bench], which inherits release
-    # and then re-adds `debug = 1` — the one release profile that is not
-    # stripped. Neither needs debuginfo to answer "does it compile".
+    # Same reasoning as the test job. Clippy builds dev rlibs with `debug = 1`, and `cargo bench
+    # --no-run` uses [profile.bench], which inherits release and then re-adds `debug = 1` — the
+    # one release profile that is not stripped. Neither needs debuginfo to answer "does it compile".
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_BENCH_DEBUG: "0"
@@ -92,13 +91,6 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --no-deps -- -D warnings
 
-      # `cargo bench --no-run` below is the first *release*-profile build in this
-      # job, and kani-web's build.rs bundles JS only on release (build.rs:30) —
-      # so this is the one step in the whole workflow that needs the asset
-      # toolchain, and it panics without it. Clippy above builds debug and never
-      # noticed. Provisioned rather than skipped: the panic is what stops a
-      # release shipping without its JS, and CI should build the way a release
-      # does.
       - name: Restore asset toolchain
         uses: actions/cache/restore@v5
         id: tools-cache
@@ -126,16 +118,14 @@ jobs:
           if [ ! -x target/release/kani-cli ]; then
             cargo build --release -p kani-cli
           fi
-          # --vendors is not optional: build.rs aliases `preact` and friends to
-          # static/js/vendor, so esbuild resolves nothing without it. Naming all
-          # three flags also skips the icon and git-hook steps a bare `setup`
-          # would run, which CI has no use for.
+          # --vendors is not optional: build.rs aliases `preact` and friends to static/js/vendor,
+          # so esbuild resolves nothing without it. Naming all three flags also skips the icon
+          # and git-hook steps a bare `setup` would run, which CI has no use for.
           ./target/release/kani-cli setup --vendors --esbuild --tailwind
         env:
           SQLX_OFFLINE: "true"
 
-      # Only on success. `always()` here cached a half-populated directory once
-      # already, and a later run then took the hit and skipped the download.
+      # Never cache a partially populated tool directory after a failed setup.
       - name: Save asset toolchain
         uses: actions/cache/save@v5
         if: success() && steps.tools-cache.outputs.cache-hit != 'true'
@@ -164,18 +154,6 @@ jobs:
   test:
     name: Test
     needs: changes
-    # Debuginfo is what filled the runner's disk. `[profile.dev] debug = 1`
-    # applies to every test target and dependency rlib, and this workspace links
-    # roughly sixty test binaries that each statically pull in BoringSSL, SQLite
-    # and zstd. Measured on one target: 514 MB -> 200 MB per binary, 5.6 GB ->
-    # 2.9 GB of target/, and 11% less build time. Backtraces keep their function
-    # names (that is the symbol table, not debuginfo); they lose line numbers,
-    # which is the price of the job finishing at all. Local builds are untouched.
-    #
-    # `.cargo/config.toml` sets `jobs = 8` for an 8-core desktop, and that
-    # applies here too — on a 4-vCPU runner it oversubscribes, which costs both
-    # contention and peak disk, since every extra rustc holds its own object
-    # files open. Match the runner instead.
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
@@ -278,14 +256,6 @@ jobs:
       - name: Unit tests (pure JS modules)
         run: node --test "static/js/**/*.test.js"
 
-      # Zero-tolerance: the semantic-colour migration is complete, so any new
-      # hard-coded colour literal fails CI. Intentional literals (the pure-black
-      # reader, scrims, contrast text) carry a `// audit-ignore` directive, and
-      # the colour-palette module uses `audit-ignore-file`.
-      #
-      # A Node script rather than a kani-cli subcommand: it is a text scan
-      # needing none of the workspace's types, and in Rust it made this job
-      # install a toolchain and compile kani-cli in release just to lint colours.
       - name: Audit hard-coded colour tokens
         run: node scripts/audit-tokens.mjs --check --max 0
 
@@ -339,11 +309,6 @@ jobs:
       - name: CSS sanitiser parity check
         run: node scripts/check-sanitize-css-parity.mjs
 
-  # The one check branch protection should require. Every job above is gated on
-  # a path filter, and a required check that is *skipped* never reports — so
-  # requiring `Lint` directly would block a docs-only pull request forever.
-  # `always()` makes this run regardless, and it fails only on genuine failure:
-  # skipped is a pass.
   ci:
     name: CI
     needs: [changes, lint, test, js, docs]

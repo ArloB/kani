@@ -1,7 +1,4 @@
 // @ts-check
-// NumberInput — themed number field with custom stepper buttons.
-// Native spinners are hidden globally (app.css); this provides the
-// hold-to-repeat steppers the design system uses instead.
 
 import { h } from 'preact';
 import { useRef } from 'preact/hooks';

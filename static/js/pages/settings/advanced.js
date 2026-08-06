@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Advanced section (FlareSolverr, library path, WASM instances).
 
 import { h } from 'preact';
 import { useState, useEffect, useCallback, useRef } from 'preact/hooks';

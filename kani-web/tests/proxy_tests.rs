@@ -7,8 +7,6 @@ use common::{authed_get, build_test_app, create_admin, login, test_state};
 use std::sync::Arc;
 use tower::ServiceExt;
 
-// ── range_response_status unit tests ─────────────────────────────────────────
-
 #[test]
 fn range_status_partial_content_maps_to_206() {
     use kani_web::proxy::range_response_status;
@@ -20,8 +18,6 @@ fn range_status_ok_maps_to_200() {
     use kani_web::proxy::range_response_status;
     assert_eq!(range_response_status(false), StatusCode::OK);
 }
-
-// ── build_range_response_headers unit tests ────────────────────────────────
 
 #[test]
 fn range_headers_relay_content_type_content_range_and_etag() {
@@ -53,8 +49,6 @@ fn range_headers_missing_content_range_leaves_it_absent() {
     assert!(out.get(axum::http::header::ETAG).is_some());
 }
 
-// ── 5xx-not-cached (documents the moka invariant the proxy relies on) ──────
-
 #[tokio::test]
 async fn proxy_coalesce_does_not_cache_errors() {
     use moka::future::Cache;
@@ -80,8 +74,6 @@ async fn proxy_coalesce_does_not_cache_errors() {
     );
 }
 
-// ── canonical_proxy_key unit tests ─────────────────────────────────────────
-
 #[test]
 fn canonical_key_strips_bust_params() {
     use kani_web::proxy::canonical_proxy_key;
@@ -105,8 +97,6 @@ fn canonical_key_no_bust_params_unchanged() {
     let url = "https://img.example.com/a.jpg?page=2";
     assert_eq!(canonical_proxy_key(url), url);
 }
-
-// ── /admin/proxy/stats endpoint tests ──────────────────────────────────────
 
 #[tokio::test]
 async fn proxy_stats_returns_200_for_admin() {

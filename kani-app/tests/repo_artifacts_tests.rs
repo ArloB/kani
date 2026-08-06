@@ -1,10 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group E — repo artifact integrity on install. `install_source_from_repo` reads
-//! the (already-trusted) cached index, then downloads the artifact and checks its
-//! size, sha256 and signature in that order. E1/E2/E5 exercise the rejections that
-//! fire *before* the signature check, so no real signing is needed — the index is
-//! seeded directly into `repo_trust`.
+//! Repository artifact integrity during installation.
+//!
+//! Size and digest checks precede signature verification, allowing those rejection
+//! paths to use a directly seeded trusted index without signing fixtures.
 
 mod common;
 use common::test_service;
@@ -13,8 +12,8 @@ use kani_app::service::AppService;
 use kani_shared_test::origin::{Body, Response, TestOrigin};
 
 /// Seed a repo whose cached index advertises one extension `ext1` at `artifact_url`
-/// with the given sha256 (author_key/signature are dummies — E1/E2/E5 never reach
-/// the signature check).
+/// with the given SHA-256. The key and signature are placeholders for checks that
+/// reject the artifact before signature verification.
 async fn seed_repo_with_entry(
     svc: &AppService,
     repo_url: &str,
@@ -47,8 +46,6 @@ async fn seed_repo_with_entry(
     .unwrap()
 }
 
-// E1 — an artifact whose declared size is past the cap is rejected before it is
-// downloaded (the cap is checked against Content-Length).
 #[tokio::test]
 async fn an_artifact_larger_than_the_cap_is_rejected() {
     let origin = TestOrigin::start().await;
@@ -58,7 +55,7 @@ async fn an_artifact_larger_than_the_cap_is_rejected() {
             .header("Content-Type", "application/wasm")
             .body(Body::Truncated {
                 bytes: vec![0u8; 16],
-                announced: 50 * 1024 * 1024, // > MAX_ARTIFACT_BYTES (10 MB)
+                announced: 50 * 1024 * 1024,
                 sent: 16,
             }),
     );
@@ -73,7 +70,6 @@ async fn an_artifact_larger_than_the_cap_is_rejected() {
     );
 }
 
-// E2 — an artifact whose bytes do not match the index's sha256 is rejected.
 #[tokio::test]
 async fn an_artifact_whose_hash_does_not_match_is_rejected() {
     let origin = TestOrigin::start().await;
@@ -84,7 +80,6 @@ async fn an_artifact_whose_hash_does_not_match_is_rejected() {
             .body(Body::Bytes(b"the real artifact bytes".to_vec())),
     );
     let svc = test_service().await;
-    // sha256 the index claims is not the sha256 of what the origin serves.
     let repo_id = seed_repo_with_entry(&svc, &origin.base(), "/ext1.wasm", &"00".repeat(32)).await;
 
     let res = svc.install_source_from_repo(repo_id, "ext1", None).await;
@@ -98,15 +93,10 @@ async fn an_artifact_whose_hash_does_not_match_is_rejected() {
     }
 }
 
-// E3 — an index entry whose artifact URL points at a different host than the
-// repository is refused before any request is made.
 #[tokio::test]
 async fn an_index_entry_url_cannot_point_at_another_host() {
     let origin = TestOrigin::start().await;
     let svc = test_service().await;
-    // Repo lives on the loopback origin; the entry points the artifact at a
-    // different (TEST-NET) host. The refusal is pre-fetch, so it is instant even
-    // though 192.0.2.0/24 is unroutable.
     let repo_id = seed_repo_with_entry(
         &svc,
         &origin.base(),
@@ -125,9 +115,3 @@ async fn an_index_entry_url_cannot_point_at_another_host() {
         other => panic!("expected a host-mismatch validation error, got {other:?}"),
     }
 }
-
-// E5 — redirect bounding during the artifact download is covered by the SmartClient
-// unit test `safe_get_too_many_redirects_returns_error` (install just calls
-// `safe_get`). A TestOrigin-based duplicate here hit a harness quirk (a redirect
-// *loop* hangs to the 35s client timeout instead of tripping MAX_REDIRECTS fast),
-// tracked separately; not re-asserted through the slow path.

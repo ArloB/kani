@@ -1,5 +1,4 @@
 // @ts-check
-// TOTP setup wizard — 3-step: Scan QR → Verify code → Save backup codes.
 
 import { h } from 'preact';
 import { useState, useEffect, useRef } from 'preact/hooks';

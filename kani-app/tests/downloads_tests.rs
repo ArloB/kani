@@ -1,12 +1,10 @@
 #![allow(clippy::unwrap_used)]
-//! Regression tests for download lifecycle error classification.
+//! Download lifecycle error classification.
 
 mod common;
 use common::{insert_chapter, insert_manga, insert_source, test_service};
 use kani_app::ServiceError;
 
-/// Requesting a download for a chapter that is already claimed (download_status = 1)
-/// must surface as a Conflict (HTTP 409), not an Internal error (HTTP 500).
 #[tokio::test]
 async fn download_chapter_already_in_progress_is_conflict() {
     let svc = test_service().await;
@@ -14,7 +12,6 @@ async fn download_chapter_already_in_progress_is_conflict() {
     let manga_id = insert_manga(&svc.db, source_id, "m1", "Manga").await;
     let chapter_id = insert_chapter(&svc.db, manga_id, "c1", 1.0).await;
 
-    // Mark the chapter as already in progress so the atomic claim fails.
     sqlx::query("UPDATE chapters SET download_status = 1 WHERE id = ?")
         .bind(chapter_id)
         .execute(&svc.db)

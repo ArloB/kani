@@ -66,17 +66,14 @@ async fn check_password_impl(
     http_client: &kani_core::http::SmartClient,
     hibp_base: &str,
 ) -> Result<PasswordStrength, PasswordPolicyError> {
-    // 1. Length.
     if password.len() < 10 {
         return Err(PasswordPolicyError::TooShort);
     }
 
-    // 2. Same-as-identity (case-insensitive).
     if password.to_lowercase() == identity.to_lowercase() {
         return Err(PasswordPolicyError::SameAsIdentity);
     }
 
-    // 3. zxcvbn entropy.
     let estimate = zxcvbn::zxcvbn(password, &[identity]);
     let score: u8 = estimate.score().into();
     if score < 2 {
@@ -98,7 +95,6 @@ async fn check_password_impl(
         })
         .unwrap_or_default();
 
-    // 4. HIBP k-anonymity (advisory; skip on error).
     let pwned_count = check_hibp(password, http_client, hibp_base).await;
 
     if let Some(count) = pwned_count
@@ -128,15 +124,13 @@ async fn check_hibp(
     http_client: &kani_core::http::SmartClient,
     hibp_base: &str,
 ) -> Option<u64> {
-    // 1. SHA-1 of the password.
     let mut hasher = Sha1::new();
     hasher.update(password.as_bytes());
-    let hash = format!("{:X}", hasher.finalize()); // uppercase hex
+    let hash = format!("{:X}", hasher.finalize());
 
     let prefix = &hash[..5];
     let suffix = &hash[5..];
 
-    // 2. k-anonymity API call — only the 5-character prefix is sent.
     let url = format!("{hibp_base}/range/{prefix}");
     let response = http_client.inner().get(&url).send().await.ok()?;
 
@@ -145,10 +139,6 @@ async fn check_hibp(
         return None;
     }
 
-    // A real range response is tens of KB. Read with a ceiling rather than
-    // `.text()`, which would buffer whatever a hostile or broken endpoint sent —
-    // this call sits in the registration path, so an unbounded body here is a
-    // memory-exhaustion lever on an unauthenticated request.
     const MAX_HIBP_BYTES: usize = 1024 * 1024;
     let mut buf: Vec<u8> = Vec::new();
     let mut response = response;
@@ -167,7 +157,6 @@ async fn check_hibp(
     }
     let body = String::from_utf8_lossy(&buf).into_owned();
 
-    // 3. Check locally whether our suffix matches any returned line.
     for line in body.lines() {
         if let Some((line_suffix, count_str)) = line.split_once(':')
             && line_suffix.eq_ignore_ascii_case(suffix)
@@ -176,7 +165,7 @@ async fn check_hibp(
         }
     }
 
-    Some(0) // hash prefix returned, our suffix not found → not pwned
+    Some(0)
 }
 
 #[cfg(test)]
@@ -186,8 +175,6 @@ mod tests {
 
     #[test]
     fn hibp_hash_prefix_for_password() {
-        // SHA-1("password") = 5BAA61E4C9B93F3F0682250B6CF8331B7EE68FD8
-        // First 5 chars = "5BAA6" — the k-anonymity prefix sent to HIBP.
         let hash = sha1_hex_upper("password");
         assert_eq!(
             &hash[..5],
@@ -218,7 +205,6 @@ mod tests {
 
     #[test]
     fn short_password_fails_length_check() {
-        // The first check in check_password is length; verify it would reject ≤9 chars.
         assert!(
             "shortpw!".len() < 10,
             "test precondition: password is < 10 chars"
@@ -227,7 +213,6 @@ mod tests {
 
     #[test]
     fn same_as_identity_check_is_case_insensitive() {
-        // The check is: password.to_lowercase() == identity.to_lowercase()
         assert_eq!("alice".to_lowercase(), "ALICE".to_lowercase());
     }
 }

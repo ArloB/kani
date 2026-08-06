@@ -1,44 +1,38 @@
-# Mihon / Suwayomi backup fixtures
+# Mihon and Suwayomi Backup Fixtures
 
-Both files derive from one real `.tachibk` backup exported by Suwayomi
-(`org.suwayomi.tachidesk`, 2026-05-07), produced by
-`scripts/anonymise-tachibk.py`.
+Both fixtures derive from a Suwayomi `.tachibk` backup (`org.suwayomi.tachidesk`, 2026-05-07) and
+were produced by `scripts/anonymise-tachibk.py`.
 
-That script walks the protobuf wire format directly instead of decoding through
-`kani-app/proto/tachiyomi_backup.proto`, so blocks Kani does not model survive
-byte-identical — the real backup carries top-level fields `101` (source list),
-`9000` (WebUI preferences) and `9001` (server settings) that our schema has no
-message for. A fixture re-encoded through our own `.proto` would have dropped
-them, and the import tests would then only prove that Kani can read what Kani
-writes.
+The script processes the protobuf wire format directly rather than decoding through
+`kani-app/proto/tachiyomi_backup.proto`. This preserves unsupported blocks byte-for-byte. The
+source backup contains top-level fields `101` (source list), `9000` (WebUI preferences), and
+`9001` (server settings), for which Kani has no message definitions. Re-encoding through Kani's
+schema would remove those fields and weaken the import tests.
 
 ## What was changed
 
-- Titles, series and chapter urls, authors, artists, descriptions, cover urls,
-  chapter names, scanlator names, category names and source display names are
+- Titles, series and chapter URLs, authors, artists, descriptions, cover URLs,
+  chapter names, scanlator names, category names, and source display names are
   replaced with synthetic values of the same shape.
-- Values in the `9001` server-settings block that looked like a host, url or
-  account name are redacted — the donor backup carried a LAN FlareSolverr
-  address and a login name there.
-- Genres, timestamps, source ids, status codes, field order and every wire type
+- Host, URL, and account-like values in the `9001` server-settings block are redacted.
+- Genres, timestamps, source IDs, status codes, field order, and wire types
   are untouched.
 - Truncated to the first 5 series (6 chapters each; 2 for the hostile variant).
 
 ## suwayomi-anonymised.tachibk
 
-The general-purpose fixture. Five series across three source ids
+General-purpose fixture containing five series across three source IDs
 (`2499283573021220255`, `2131019126180322627`, `2292947733994124621`), one
-category, chapters carrying real read / last-page-read state.
+category, and chapters with read and last-page-read state.
 
-**Two fields are synthetic additions** (`--augment-first`): the donor backup had
-no tracking entries and no series assigned to a category, so the first series
-gains `categories: [0]` and one `BackupTracking` (`syncId: 2` = AniList). Every
-other byte derives from the donor. Tests that depend on those two paths are
-therefore testing our schema understanding, not observed Mihon output — treat a
-future real backup with tracking as an upgrade worth taking.
+The `--augment-first` option adds two synthetic fields because the source backup had no tracking
+entries or category assignments. The first series receives `categories: [0]` and one
+`BackupTracking` entry (`syncId: 2`, AniList). Tests for these fields validate Kani's schema rather
+than observed Mihon output. Replace them with anonymised source data if a suitable backup becomes
+available.
 
 ## hostile-titles.tachibk
 
-The same five series with every title replaced by a path-traversal, NUL,
-RTL-override or astral-plane case (`--hostile-titles`). Used to prove a title
-from a foreign file cannot escape the library directory or corrupt a row.
+Contains the same series with titles replaced by path-traversal, NUL, RTL-override, and
+astral-plane cases (`--hostile-titles`). It verifies that imported titles cannot escape the
+library directory or corrupt database rows.

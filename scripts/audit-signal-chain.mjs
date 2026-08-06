@@ -2,39 +2,24 @@
 /**
  * Finds values that are written but cannot be read back.
  *
- * The 2026-07 sweep looked for *uncalled* code, which is a different defect:
- * `is_orphaned` had a writer, a serialiser, a client field and a rendered
- * badge, so every caller-count was healthy — and the feature was still dead,
- * because every SELECT filtered the written value out. A grep for dead code
- * cannot see that. This looks at the chain instead:
+ * Caller counts cannot detect a value discarded between persistence and the
+ * UI. This script inspects the chain:
  *
  *     written -> selected -> serialised -> rendered
  *
  * and reports the hop where a column falls off. It is a lead generator, not a
  * verdict: read the code before believing any row.
  *
- * Known blind spots, each confirmed by a false positive on the first run:
+ * Known blind spots:
  *
  *  - `SELECT *` hides every column, so a column read that way looks unselected.
- *    `manga.local_description` flagged for exactly this reason.
- *  - Coalescing done in Rust rather than SQL is invisible here. That same
- *    column is applied as `local_description.or(description)` in
- *    `kani-web/src/rest/manga.rs`, so it was never broken.
- *  - Long explicit SELECT lists: the settings singleton names ~64 columns in
- *    one ~1800-character statement, so a short lookahead misses everything past
- *    the first few. The window is 2400 chars for this reason — raise it again if
- *    a wider table starts flagging wholesale.
- *  - A column that is legitimately only ever a filter (`deleted_at`,
- *    `token_hash`) is correct usage, not a defect. So is a soft-hide flag whose
- *    `WHERE x = FALSE` *is* the read (`duplicate_pairs.dismissed`).
- *  - `DELETE ... RETURNING col` is a read this cannot see
- *    (`captcha_challenges.answer`).
- *  - A value threaded through a trait as a parameter rather than selected by
- *    name (`user_page_bookmarks.page_index`).
+ *  - Values combined outside SQL require manual verification.
+ *  - Explicit SELECT lists extending beyond the scan window look unselected.
+ *  - Filter-only columns are legitimate even though they are never selected.
+ *  - `DELETE ... RETURNING`, trait parameters, and other indirect reads are invisible.
  *
  * The signal worth chasing is a column written with a meaningful value whose
- * only reads exclude that value — which is what `chapters.is_orphaned` was
- * before commit 2e63b9c.
+ * only reads exclude that value.
  *
  * Usage: node scripts/audit-signal-chain.mjs [--all]
  */
@@ -44,6 +29,7 @@ import { join, extname } from 'path';
 
 const ROOT = process.env.KANI_ROOT ?? process.cwd();
 const SHOW_ALL = process.argv.includes('--all');
+const SELECT_LOOKAHEAD_CHARS = 2400;
 
 function walk(dir, out = [], skip = ['target', 'node_modules', 'dist', 'vendor', '.git', 'site']) {
   for (const entry of readdirSync(dir)) {
@@ -99,7 +85,7 @@ for (const [table, cols] of schema()) {
     const written = (sqlText.match(new RegExp(`(INSERT INTO[\\s\\S]{0,400}?\\b${col}\\b|SET[^;"]{0,200}\\b${col}\\b\\s*=)`, 'g')) ?? []).length;
     const mentions = (rustText.match(word) ?? []).length;
     // A SELECT that only ever appears inside a filter is not a read.
-    const selected = (sqlText.match(new RegExp(`SELECT[\\s\\S]{0,2400}?\\b${col}\\b`, 'g')) ?? []).length;
+    const selected = (sqlText.match(new RegExp(`SELECT[\\s\\S]{0,${SELECT_LOOKAHEAD_CHARS}}?\\b${col}\\b`, 'g')) ?? []).length;
     const filtered = (sqlText.match(new RegExp(`(WHERE|AND|OR)[^;"']{0,80}\\b${col}\\b\\s*(=|IS|!=|<>)`, 'g')) ?? []).length;
     const inJs = (jsText.match(word) ?? []).length;
 
@@ -108,12 +94,12 @@ for (const [table, cols] of schema()) {
 }
 
 const suspects = rows.filter((r) => {
-  if (r.written === 0 && r.mentions === 0) return false;         // schema-only, never used at all
-  if (r.inJs > 0 && r.selected > r.filtered) return false;        // reaches the client and is really read
-  return (
-    (r.written > 0 && r.selected === 0) ||                        // written, never selected
-    (r.written > 0 && r.filtered > 0 && r.selected <= r.filtered) // only ever used as a filter
-  );
+  const unusedSchemaColumn = r.written === 0 && r.mentions === 0;
+  const reachesClient = r.inJs > 0 && r.selected > r.filtered;
+  const neverSelected = r.written > 0 && r.selected === 0;
+  const usedOnlyAsFilter = r.written > 0 && r.filtered > 0 && r.selected <= r.filtered;
+  if (unusedSchemaColumn || reachesClient) return false;
+  return neverSelected || usedOnlyAsFilter;
 });
 
 const shown = SHOW_ALL ? rows : suspects;

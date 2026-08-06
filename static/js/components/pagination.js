@@ -1,7 +1,4 @@
 // @ts-check
-// Pagination — square 34×34 tile buttons.
-// When `total` pages is known: shows windowed numbered tiles with ellipsis.
-// When `total` is unknown: falls back to prev / current-page / next tiles.
 
 import { h, render } from 'preact';
 import htm from 'htm';

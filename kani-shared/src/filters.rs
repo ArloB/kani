@@ -1,3 +1,5 @@
+//! Fluent filter application for extension HTTP requests.
+
 use crate::host_abi::HttpRequest;
 use crate::{ActiveFilter, FilterState};
 use std::collections::HashMap;
@@ -105,8 +107,6 @@ impl ApplyFilters for HttpRequest {
     }
 }
 
-// ── FilterGroups ─────────────────────────────────────────────────────────────
-
 /// Pre-groups [`ActiveFilter`] values by their `group` component for structured custom dispatch.
 ///
 /// Used when filters cannot be applied 1:1 to query parameters — for example, when a single
@@ -125,7 +125,6 @@ pub struct FilterGroups<'a> {
 }
 
 impl<'a> FilterGroups<'a> {
-    /// Build a [`FilterGroups`] index from a slice of active filters.
     pub fn from(filters: &'a [ActiveFilter]) -> Self {
         let mut groups: HashMap<&'a str, Vec<&'a ActiveFilter>> = HashMap::new();
         for f in filters {
@@ -138,17 +137,14 @@ impl<'a> FilterGroups<'a> {
         Self { groups }
     }
 
-    /// All filters whose name belongs to `group`.
     pub fn get(&self, group: &str) -> &[&'a ActiveFilter] {
         self.groups.get(group).map_or(&[], Vec::as_slice)
     }
 
-    /// Returns `true` if any filter belongs to `group`.
     pub fn has_any(&self, group: &str) -> bool {
         self.groups.contains_key(group)
     }
 
-    /// Collects every value from [`FilterState::Multiselect`] filters in `group`.
     pub fn multiselect_values(&self, group: &str) -> Vec<&'a str> {
         self.get(group)
             .iter()
@@ -223,8 +219,6 @@ mod tests {
     fn queries(req: HttpRequest) -> Vec<(String, String)> {
         req.into_queries()
     }
-
-    // ── ApplyFilters ──────────────────────────────────────────────────────────
 
     #[test]
     fn multiselect_repeated() {
@@ -364,8 +358,6 @@ mod tests {
         );
         assert_eq!(q, vec![("sort".into(), "latest".into())]);
     }
-
-    // ── FilterGroups ──────────────────────────────────────────────────────────
 
     #[test]
     fn groups_has_any() {

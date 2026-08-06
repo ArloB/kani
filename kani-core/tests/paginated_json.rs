@@ -19,8 +19,6 @@ fn make_state(allowed: AllowedHost) -> HostState {
     .unwrap()
 }
 
-// ── Offset pagination: two pages → 40 rows ───────────────────────────────────
-
 #[tokio::test]
 async fn offset_pagination_two_pages() {
     let server = MockServer::start().await;
@@ -69,8 +67,6 @@ async fn offset_pagination_two_pages() {
     assert_eq!(result["scalars"]["has_next_page"], false);
 }
 
-// ── Page-number pagination ────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn page_number_pagination() {
     let server = MockServer::start().await;
@@ -110,8 +106,6 @@ async fn page_number_pagination() {
     assert_eq!(rows[0]["n"], 1);
     assert_eq!(rows[19]["n"], 20);
 }
-
-// ── Cursor-token pagination: 3 chunks → 30 rows ──────────────────────────────
 
 #[tokio::test]
 async fn cursor_token_pagination_three_chunks() {
@@ -171,8 +165,6 @@ async fn cursor_token_pagination_three_chunks() {
     assert_eq!(rows[29]["v"], 30);
     assert_eq!(result["scalars"]["has_next_page"], false);
 }
-
-// ── has_next_page scalar stops iteration early ────────────────────────────────
 
 #[tokio::test]
 async fn stops_when_has_next_page_false() {

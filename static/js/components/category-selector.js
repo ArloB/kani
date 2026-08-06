@@ -1,5 +1,4 @@
 // @ts-check
-// Category selector — manage which categories a manga belongs to.
 
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';

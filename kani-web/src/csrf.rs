@@ -63,11 +63,9 @@ pub async fn csrf_middleware(
     let is_read_only = matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS");
 
     if is_read_only {
-        // On read-only requests: inject the CSRF cookie if it's absent.
         let mut response = next.run(request).await;
 
-        // Derive a stable token from the session cookie value (or a random fallback).
-        // We use the raw cookie header for simplicity; axum-login sessions are opaque.
+        // The opaque session cookie is the only stable session material exposed here.
         let session_val = response
             .headers()
             .get(header::SET_COOKIE)
@@ -83,7 +81,6 @@ pub async fn csrf_middleware(
         return response;
     }
 
-    // State-changing request: validate the X-CSRF-Token header against the cookie.
     let cookie_token = request
         .headers()
         .get(header::COOKIE)

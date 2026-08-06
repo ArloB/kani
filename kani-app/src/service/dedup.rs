@@ -336,7 +336,7 @@ pub async fn scan_and_persist_duplicates(pool: &SqlitePool) -> Result<u32> {
             if !b.name.to_lowercase().contains(&first_word) {
                 continue;
             }
-            let key = (a.id, b.id); // a.id < b.id guaranteed by the guard above
+            let key = (a.id, b.id);
             if seen.contains(&key) {
                 continue;
             }

@@ -14,8 +14,6 @@
 
 use kani_core::wasm::WasmRuntime;
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 fn workspace_root() -> std::path::PathBuf {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest.parent().unwrap().to_path_buf()
@@ -62,8 +60,6 @@ async fn example_instance() -> (
     (rt, store, instance)
 }
 
-// ── lifecycle: compile + instantiate ─────────────────────────────────────────
-
 #[tokio::test]
 async fn example_wasm_compiles_and_instantiates() {
     let bytes = skip_if_missing!("kani-example");
@@ -71,11 +67,8 @@ async fn example_wasm_compiles_and_instantiates() {
     let component = rt.compile_component(&bytes).unwrap();
     let mut store = rt.create_store();
     store.set_epoch_deadline(EPOCH_TICKS);
-    // Just instantiate — no call needed; this exercises the full runtime init path.
     let _instance = rt.instantiate(&mut store, &component).await.unwrap();
 }
-
-// ── get_metadata ──────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn example_get_metadata_returns_correct_fields() {
@@ -101,8 +94,6 @@ async fn example_get_metadata_returns_correct_fields() {
     assert_eq!(meta.base_url, "https://example.com");
 }
 
-// ── get_popular_manga ─────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn example_get_popular_manga_returns_empty_list() {
     if load_wasm("kani-example").is_none() {
@@ -122,8 +113,6 @@ async fn example_get_popular_manga_returns_empty_list() {
     assert!(result.total_pages.is_none());
 }
 
-// ── search_manga ──────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn example_search_manga_returns_empty_list() {
     if load_wasm("kani-example").is_none() {
@@ -142,8 +131,6 @@ async fn example_search_manga_returns_empty_list() {
     assert!(!result.has_next_page);
 }
 
-// ── get_manga_details ─────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn example_get_manga_details_returns_hardcoded_info() {
     if load_wasm("kani-example").is_none() {
@@ -158,7 +145,6 @@ async fn example_get_manga_details_returns_hardcoded_info() {
         .expect("WASM call trapped")
         .expect("extension returned Err");
 
-    // kani-example returns a fixed MangaInfo regardless of id
     assert_eq!(info.id, "any-id");
     assert_eq!(info.title, "Example");
     assert_eq!(info.description.as_deref(), Some("Example"));
@@ -170,8 +156,6 @@ async fn example_get_manga_details_returns_hardcoded_info() {
     assert!(info.artists.is_empty());
     assert!(info.tags.is_empty());
 }
-
-// ── get_chapter_list ──────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn example_get_chapter_list_returns_empty() {
@@ -191,8 +175,6 @@ async fn example_get_chapter_list_returns_empty() {
     assert!(!result.has_next_page);
 }
 
-// ── get_pages ─────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn example_get_pages_returns_empty_chapter() {
     if load_wasm("kani-example").is_none() {
@@ -209,8 +191,6 @@ async fn example_get_pages_returns_empty_chapter() {
 
     assert!(chapter.pages.is_empty());
 }
-
-// ── get_filter_list ───────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn example_get_filter_list_returns_empty() {
@@ -229,8 +209,6 @@ async fn example_get_filter_list_returns_empty() {
     assert!(result.filters.is_empty());
 }
 
-// ── get_preferences ───────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn example_get_preferences_returns_empty() {
     if load_wasm("kani-example").is_none() {
@@ -248,8 +226,6 @@ async fn example_get_preferences_returns_empty() {
     assert!(result.is_empty());
 }
 
-// ── get_url ───────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn example_get_url_returns_default_not_implemented_error() {
     if load_wasm("kani-example").is_none() {
@@ -263,7 +239,6 @@ async fn example_get_url_returns_default_not_implemented_error() {
         .await
         .expect("WASM call trapped");
 
-    // kani-example inherits the default MangaExtension::get_url which returns Err
     assert!(
         result.is_err(),
         "kani-example should return Err for get_url"
@@ -275,8 +250,6 @@ async fn example_get_url_returns_default_not_implemented_error() {
         err
     );
 }
-
-// ── get_chapter_sort_list ─────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn example_get_chapter_sort_list_returns_empty() {
@@ -294,8 +267,6 @@ async fn example_get_chapter_sort_list_returns_empty() {
 
     assert!(result.is_empty());
 }
-
-// ── instantiate_pre (pooled-instance path) ────────────────────────────────────
 
 #[tokio::test]
 async fn example_instantiate_pre_and_call() {
@@ -327,8 +298,6 @@ async fn example_instantiate_pre_and_call() {
     assert_eq!(meta.id, "example");
 }
 
-// ── no handle leaks after calls ───────────────────────────────────────────────
-
 #[tokio::test]
 async fn example_no_handles_allocated_for_any_call() {
     if load_wasm("kani-example").is_none() {
@@ -337,7 +306,6 @@ async fn example_no_handles_allocated_for_any_call() {
     let (_rt, mut store, instance) = example_instance().await;
     let provider = instance.kani_extension_manga_provider();
 
-    // All kani-example calls use no host imports and allocate no handles
     provider
         .call_get_popular_manga(&mut store, 1, 20, &[])
         .await

@@ -1,4 +1,4 @@
-//! Server-persisted UI themes (plan 05 Phase 2).
+//! Server-persisted UI themes.
 //!
 //! Every route needs only an authenticated user — a user manages their own
 //! themes. The extra authority, `theme:publish`, is checked *inside* the
@@ -101,11 +101,6 @@ pub(crate) async fn upsert_theme(
     State(state): State<AppState>,
     Json(body): Json<UpsertUiThemeRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Changing an existing theme is governed by who owns it, not by the flag in
-    // the body — otherwise omitting `instance_wide` would be enough to edit the
-    // published theme. Resolving the owner from the row is only safe if a row
-    // belonging to somebody else is refused here: passing that owner down would
-    // otherwise authorise the write against the very row being overwritten.
     let owner = if let Some(ref id) = body.id {
         match state.service.ui_theme_owner(id).await? {
             None => {

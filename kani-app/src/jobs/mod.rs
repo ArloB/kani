@@ -1,3 +1,5 @@
+//! Persistent, observable background jobs with retry, cancellation, and concurrency control.
+
 pub mod archive_export;
 pub mod audit_prune;
 pub mod backup;
@@ -110,8 +112,7 @@ pub mod test_jobs {
         }
     }
 
-    /// A job that always fails with a Download error for a given source_id.
-    /// Used to test circuit breaker opening.
+    /// A download job that always fails, exercising the source circuit breaker.
     #[derive(serde::Serialize, serde::Deserialize, Clone)]
     pub struct FailingDownloadJob {
         id: JobId,

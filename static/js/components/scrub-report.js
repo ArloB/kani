@@ -1,5 +1,4 @@
 // @ts-check
-// Findings from an integrity scrub, grouped by what the user can do about them.
 
 import { h } from 'preact';
 import { useState } from 'preact/hooks';

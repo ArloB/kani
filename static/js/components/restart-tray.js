@@ -1,11 +1,3 @@
-// @ts-check
-// RestartTray — warn-tray showing pending restart fields, with a Restart button.
-// Replaces the old _renderRestartBanner in settings.js.
-//
-// Storage keys:
-//   kani_restart_needed  — '1' when a restart is required
-//   kani_restart_boot_id — boot_id at the time the flag was set
-//   kani_pending_fields  — JSON array of field names that require restart
 
 import { h, render } from 'preact';
 import { useState, useEffect } from 'preact/hooks';

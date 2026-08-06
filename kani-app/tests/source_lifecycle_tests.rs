@@ -1,9 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group D — source lifecycle. D5 (disabled vs not-found) and D6 (uninstall
-//! removes the backend and the artifact) are the DB/registry-driven cases; the
-//! in-flight / drain / hot-swap cases (D1–D4) need parked concurrent calls and
-//! are tracked separately.
+//! Database and registry source lifecycle behavior, including disabled-source
+//! classification and removal of the backend and installed artifact.
 
 mod common;
 use common::{insert_source, test_service};
@@ -44,9 +42,6 @@ fn yaml_backend(name: &str) -> SourceBackend {
     )))
 }
 
-// D5 — a disabled source reports "disabled", a missing one reports "not found".
-// `require_source_active` distinguishes them, but only once the backend is no
-// longer in the in-memory registry (it short-circuits Ok while present).
 #[tokio::test]
 async fn a_disabled_source_reports_disabled_not_not_found() {
     let svc = test_service().await;
@@ -56,8 +51,6 @@ async fn a_disabled_source_reports_disabled_not_not_found() {
         .execute(&svc.db)
         .await
         .unwrap();
-    // Not inserted into svc.sources — mirrors a disabled source after its backend
-    // was dropped from the registry.
 
     match svc.get_metadata(source_id).await {
         Err(ServiceError::SourceDisabled(id)) => assert_eq!(id, source_id),
@@ -70,8 +63,6 @@ async fn a_disabled_source_reports_disabled_not_not_found() {
     }
 }
 
-// D6 — uninstalling a source drops its backend from the registry, soft-deletes
-// the row, and removes the on-disk .wasm artifact.
 #[tokio::test]
 async fn uninstall_removes_the_backend_and_the_artifact() {
     let svc = test_service().await;
@@ -80,7 +71,6 @@ async fn uninstall_removes_the_backend_and_the_artifact() {
     let source_id = insert_source(&svc.db, name).await;
     svc.sources.insert(source_id, yaml_backend(name));
 
-    // Plant the artifact the uninstall must remove.
     let storage = svc.settings.read().await.wasm_storage_path.clone();
     let artifact = storage.join(format!("{name}.wasm"));
     tokio::fs::write(&artifact, b"fake wasm bytes")
@@ -108,10 +98,6 @@ async fn uninstall_removes_the_backend_and_the_artifact() {
     assert!(deleted_at.is_some(), "the row was soft-deleted");
 }
 
-// D2 — an in-flight request against a stalling origin does not hang, even when
-// the source is deleted mid-flight (YAML backends have no drain — the request's
-// own per-attempt timeout must bound it). Uses a short request_timeout + fast
-// retry so the bounded call resolves in well under a second.
 #[tokio::test]
 async fn a_deleted_source_does_not_hang_an_in_flight_request() {
     let origin = TestOrigin::start().await;
@@ -163,14 +149,9 @@ async fn a_deleted_source_does_not_hang_an_in_flight_request() {
     );
 }
 
-// D4 — two concurrent installs of the same extension serialise on the per-extension
-// lock: both complete (no deadlock) and return the same deterministic result, even
-// while one holds the lock across a slow artifact fetch.
 #[tokio::test]
 async fn concurrent_installs_of_the_same_extension_serialise() {
     let origin = TestOrigin::start().await;
-    // A slow artifact keeps install #1 in the critical section long enough that #2
-    // must wait; both ultimately fail the sha256 check (deterministic, no signing).
     origin.set(
         "/ext1.wasm",
         Response::status(200)
@@ -207,8 +188,6 @@ async fn concurrent_installs_of_the_same_extension_serialise() {
         (h1.await.unwrap(), h2.await.unwrap())
     };
 
-    // Both serialised through the lock and reached the same integrity failure —
-    // neither deadlocked nor raced into a different outcome.
     for res in [a, b] {
         match res {
             Err(ServiceError::Validation(msg)) => {

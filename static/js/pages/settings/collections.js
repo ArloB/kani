@@ -1,5 +1,4 @@
 // @ts-check
-// Settings — Collections: manage smart collections.
 
 import { h, Fragment } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';

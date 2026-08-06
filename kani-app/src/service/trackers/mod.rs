@@ -44,9 +44,7 @@ pub(crate) fn auth_expired_error(resp: &rquest::Response, provider: &str) -> Opt
     }
 }
 
-/// Reject a rate-limited or credential-rejected response *before* its body is
-/// parsed. Without this both surface as opaque JSON parse errors, which is why
-/// nothing could react to a revoked token.
+/// Classifies rate limits and rejected credentials before provider-specific body parsing.
 pub(crate) fn check_tracker_response(
     resp: rquest::Response,
     provider: &str,
@@ -98,9 +96,7 @@ pub struct TrackerMangaStatus {
     pub chapters_read: i64,
 }
 
-/// HTTP client for tracker API calls. A 30s timeout bounds a stalled provider
-/// so it cannot hang a sync job forever (the tracker clients previously had no
-/// timeout at all). Falls back to a plain client if the builder fails.
+/// HTTP client for tracker API calls with a 30-second bound on stalled providers.
 pub(super) fn tracker_http_client() -> rquest::Client {
     rquest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -253,8 +249,6 @@ impl TrackerRegistry {
     }
 }
 
-// ── Tracker app config helpers ───────────────────────────────────────────────
-
 /// Returns `(client_id, secret_is_configured)`. Never returns the secret value.
 pub async fn get_tracker_app_config(
     db: &SqlitePool,
@@ -319,8 +313,6 @@ pub async fn delete_tracker_app_config(db: &SqlitePool, tracker_id: i64) -> Resu
     Ok(())
 }
 
-// ── PKCE / CSRF state helpers ────────────────────────────────────────────────
-
 /// Persist a server-generated OAuth state token (and optional code_verifier for PKCE).
 pub async fn store_pkce_state(
     db: &SqlitePool,
@@ -329,7 +321,6 @@ pub async fn store_pkce_state(
     tracker_id: i64,
     redirect_uri: &str,
 ) -> Result<()> {
-    // Prune expired rows (older than 10 minutes) on each write.
     sqlx::query!("DELETE FROM oauth_pkce_state WHERE created_at < datetime('now', '-10 minutes')")
         .execute(db)
         .await?;
@@ -355,9 +346,8 @@ pub struct PkceState {
 }
 
 pub async fn consume_pkce_state(db: &SqlitePool, state: &str) -> Result<Option<PkceState>> {
-    // The expiry check is done in SQL against SQLite's native datetime so that the
-    // format comparison is always correct (the application-level RFC 3339 parse was
-    // unreliable because SQLite stores datetimes as "YYYY-MM-DD HH:MM:SS", not ISO 8601).
+    // Compare inside SQLite because this column uses SQLite's datetime text format,
+    // not the RFC 3339 representation used at API boundaries.
     let row = sqlx::query!(
         r#"SELECT code_verifier, tracker_id, redirect_uri
            FROM oauth_pkce_state
@@ -382,8 +372,6 @@ pub async fn consume_pkce_state(db: &SqlitePool, state: &str) -> Result<Option<P
         redirect_uri: row.redirect_uri,
     }))
 }
-
-// ── Credential helpers ───────────────────────────────────────────────────────
 
 /// Store OAuth tokens for a user+tracker. Encrypts tokens before storage if a cipher is provided.
 pub async fn store_credentials(
@@ -430,11 +418,6 @@ pub async fn get_access_token(
     tracker: &dyn ExternalTracker,
     cipher: Option<&CredentialCipher>,
 ) -> Result<String> {
-    // `expires_at` is read as TEXT on purpose: `store_credentials` writes an
-    // RFC3339 string, and letting sqlx decode the DATETIME column into a `time`
-    // type meant the old `exp.to_string()` produced a non-RFC3339 rendering that
-    // never re-parsed — so `needs_refresh` was silently always false and the
-    // proactive refresh never fired for anyone.
     let row = sqlx::query!(
         r#"SELECT access_token, refresh_token, expires_at AS "expires_at: String"
            FROM user_tracker_credentials WHERE user_id = ? AND tracker_id = ?"#,
@@ -502,8 +485,6 @@ pub async fn delete_credentials(db: &SqlitePool, user_id: UserId, tracker_id: i6
     .await?;
     Ok(())
 }
-
-// ── Mapping helpers ──────────────────────────────────────────────────────────
 
 pub async fn set_mapping(
     db: &SqlitePool,

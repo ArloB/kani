@@ -162,8 +162,6 @@ async fn thumbnail_submit_dedups_against_active_job() {
     let src = insert_source(&svc.db, "src").await;
     let manga_id = insert_manga(&svc.db, src, "m1", "Manga").await;
 
-    // Simulate a thumbnail job already in flight for this manga. A 'running' row
-    // is never picked up by the executor, so it stays active for the duration.
     sqlx::query(
         "INSERT INTO jobs (id, job_type, status, params_json) \
          VALUES ('thumb-dedup-test', 'thumbnail_generation', 'running', ?)",
@@ -173,7 +171,6 @@ async fn thumbnail_submit_dedups_against_active_job() {
     .await
     .unwrap();
 
-    // A second submit must be deduplicated against the active job (no new row).
     svc.spawn_thumbnail_generation(manga_id).await;
 
     let count: i64 =

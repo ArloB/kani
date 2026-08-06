@@ -62,8 +62,6 @@ async fn create_webhook_accepts_a_public_url() {
 #[tokio::test]
 async fn send_signed_refuses_a_forbidden_host_without_dialling() {
     let svc = test_service().await;
-    // Bypass validation (as a pre-existing DB row would) and hit the egress
-    // guard directly: it must refuse rather than POST to the internal address.
     let (status, error) = svc
         .webhook_service
         .send_signed("http://127.0.0.1:9/hook", None, "{}")

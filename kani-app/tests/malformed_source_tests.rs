@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-//! Group F — malformed and hostile source data against the interpreted
+//! Malformed and hostile source data against the interpreted
 //! `YamlSource` (yaml-only: exercises the evaluator's container/row handling and
 //! `unpack_*`). Drives a real popular endpoint against a `TestOrigin`.
 
@@ -102,8 +102,6 @@ fn items(n: usize) -> String {
     format!("<html><body>{rows}</body></html>")
 }
 
-// F6 — a listing with more rows than the cap is refused, not silently processed
-// or truncated. (Uses the injected EvalLimits so no giant fixture is needed.)
 #[tokio::test]
 async fn a_listing_past_the_row_cap_is_refused() {
     let origin = TestOrigin::start().await;
@@ -123,7 +121,6 @@ async fn a_listing_past_the_row_cap_is_refused() {
         res.map(|l| l.manga.len()).unwrap_or(0)
     );
 
-    // And a listing within the cap still works.
     origin.set("/popular", Response::html(&items(4)));
     let ok = source(
         &origin,
@@ -138,12 +135,9 @@ async fn a_listing_past_the_row_cap_is_refused() {
     );
 }
 
-// F7 — a required field that the row does not provide is an error, not a silent
-// empty/default row.
 #[tokio::test]
 async fn a_missing_required_field_is_an_error() {
     let origin = TestOrigin::start().await;
-    // An item with an id but no `.title` element — `title` is required.
     origin.set(
         "/popular",
         Response::html(r#"<html><body><div class="item" data-id="m1"></div></body></html>"#),
@@ -158,7 +152,6 @@ async fn a_missing_required_field_is_an_error() {
     );
 }
 
-// F5 — an astral-plane / multibyte id round-trips through extraction unchanged.
 #[tokio::test]
 async fn an_astral_plane_id_round_trips() {
     let origin = TestOrigin::start().await;
@@ -176,8 +169,6 @@ async fn an_astral_plane_id_round_trips() {
     assert_eq!(list.manga[0].id, id, "the multibyte id survived extraction");
 }
 
-// F4 — an enormous field value is refused, not extracted whole. (Driven with a
-// small max_string_length via the seam so no multi-MB fixture is needed.)
 #[tokio::test]
 async fn an_enormous_field_value_is_refused() {
     let origin = TestOrigin::start().await;
@@ -204,14 +195,9 @@ async fn an_enormous_field_value_is_refused() {
     );
 }
 
-// H7 — the DEFAULT max_string_length (the production 1 MB ceiling, not a
-// shortened seam) refuses an oversized field on a live response. F4 proves the
-// cap mechanism fires; this proves the production default is actually wired
-// into the YamlSource extraction path, so a real 2 MB field can't slip through.
 #[tokio::test]
 async fn the_default_max_string_length_is_enforced_on_a_live_response() {
     let origin = TestOrigin::start().await;
-    // 2 MB — comfortably over the 1 MB production default.
     let big = "x".repeat(2 * 1024 * 1024);
     origin.set(
         "/popular",
@@ -229,12 +215,9 @@ async fn the_default_max_string_length_is_enforced_on_a_live_response() {
     );
 }
 
-// F2 — a row missing the required id is reported, not silently dropped from the
-// listing.
 #[tokio::test]
 async fn a_row_missing_its_id_is_reported_not_dropped() {
     let origin = TestOrigin::start().await;
-    // First item has no data-id; a silent-drop bug would return only the second.
     origin.set(
         "/popular",
         Response::html(
@@ -253,8 +236,6 @@ async fn a_row_missing_its_id_is_reported_not_dropped() {
         res.map(|l| l.manga.len())
     );
 }
-
-// ── JSON + chapter_list variants for the remaining Group F cases ──────────────
 
 fn json_field(name: &str, ptr: &str) -> ValidatedField {
     ValidatedField {
@@ -326,7 +307,6 @@ fn chapter_source(origin: &TestOrigin) -> SourceBackend {
     )))
 }
 
-// F9 — a non-JSON body from a JSON endpoint is a parse error, not an empty list.
 #[tokio::test]
 async fn a_non_json_body_from_a_json_endpoint_is_an_error() {
     let origin = TestOrigin::start().await;
@@ -343,8 +323,6 @@ async fn a_non_json_body_from_a_json_endpoint_is_an_error() {
     );
 }
 
-// F1 — a container that is an object where a row array is expected is an error,
-// not a single bogus row.
 #[tokio::test]
 async fn a_container_object_where_an_array_is_expected_is_an_error() {
     let origin = TestOrigin::start().await;
@@ -359,10 +337,6 @@ async fn a_container_object_where_an_array_is_expected_is_an_error() {
     );
 }
 
-// F2 — a chapter whose id is a JSON number must not vanish. `get_str` only
-// accepts a JSON string, and `unpack_chapter_list` drops any row whose id fails
-// to resolve (`.ok()?` inside a `filter_map`), so a numeric id silently costs
-// the user a chapter.
 #[tokio::test]
 async fn a_chapter_with_a_numeric_id_is_reported_not_silently_dropped() {
     let origin = TestOrigin::start().await;
@@ -381,10 +355,6 @@ async fn a_chapter_with_a_numeric_id_is_reported_not_silently_dropped() {
     );
 }
 
-// F10 — a non-finite chapter number must never reach the database. "NaN" and
-// "inf" parse successfully through the string path (the one F3 added), and NaN
-// poisons everything downstream: NaN != NaN, so migration matching silently
-// finds nothing and sort order becomes inconsistent.
 #[tokio::test]
 async fn a_non_finite_chapter_number_is_rejected() {
     let origin = TestOrigin::start().await;
@@ -404,10 +374,6 @@ async fn a_non_finite_chapter_number_is_rejected() {
     );
 }
 
-// F10 (negative) — a negative number is *deliberately tolerated*: sources do use
-// 0 and occasionally negative positions for prologues/specials, and unlike NaN a
-// negative value only sorts early rather than corrupting comparisons. Documented
-// here so the allowance is a decision rather than an oversight.
 #[tokio::test]
 async fn a_negative_chapter_number_is_preserved_not_zeroed() {
     let origin = TestOrigin::start().await;
@@ -424,7 +390,6 @@ async fn a_negative_chapter_number_is_preserved_not_zeroed() {
     );
 }
 
-// F3 — a chapter number encoded as a JSON string is parsed, not silently zeroed.
 #[tokio::test]
 async fn a_string_encoded_chapter_number_is_parsed_not_zeroed() {
     let origin = TestOrigin::start().await;

@@ -2,11 +2,7 @@
 
 //! Paginated GETs must honour the contract their OpenAPI parameters advertise.
 //!
-//! Every paginated endpoint documents `page`/`page_size` as `Option<_>`, so a
-//! client generated from the spec sends neither. Four of them used to answer
-//! that request with 400 `missing field \`page\`` — the annotation said optional
-//! while the query struct had no serde default. The browser never noticed
-//! because the SPA always passes both.
+//! Generated clients may omit optional `page` and `page_size` parameters.
 //!
 //! These tests pin the documented shape: omitting paging must succeed. Assert on
 //! the *status*, not on the body, so they stay valid as the payloads evolve.
@@ -52,8 +48,6 @@ async fn paginated_endpoints_accept_a_request_with_no_paging_params() {
 
 #[tokio::test]
 async fn global_search_accepts_only_its_required_query_param() {
-    // `scope`, `page` and `page_size` are all documented optional; only `query`
-    // is required.
     let state = test_state().await;
     let (u, p) = create_admin(&state).await;
     let app = build_test_app(state).await;
@@ -77,8 +71,6 @@ async fn chapter_listing_defaults_its_page_when_omitted() {
     let app = build_test_app(state).await;
     let cookie = login(&app, u, p).await;
 
-    // No such manga, so 404 is the correct answer — the point is that it is not
-    // 400 for a missing `page`, which is what a spec-generated client would hit.
     let res = app
         .oneshot(authed_get("/rest/manga/1/chapters", &cookie))
         .await
@@ -90,8 +82,6 @@ async fn chapter_listing_defaults_its_page_when_omitted() {
     );
 }
 
-// Paging is still validated once supplied — the defaults must not turn a bad
-// value into a silent success.
 #[tokio::test]
 async fn an_explicitly_invalid_page_is_still_rejected() {
     let state = test_state().await;
