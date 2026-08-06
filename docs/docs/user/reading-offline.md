@@ -43,5 +43,5 @@ An OPDS token's effective access is intersected with the permissions its owner c
 Revoking library access or the token removes access without changing the reader application's
 saved URL.
 
-OPDS support is experimental. Test progress updates and downloads with the particular client you
-intend to use.
+OPDS 1.2 and the PSE page-streaming extension are supported surfaces. Client behaviour still
+varies, so confirm progress updates and downloads with the reader you intend to use.

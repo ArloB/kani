@@ -41,23 +41,52 @@ document.
 
 ## OPDS
 
-`/opds` is **not covered by either tier**. It is absent from the OpenAPI document, and the README
-describes the feed as experimental. Its conformance is pinned by `opds_client_tests.rs`, but no
-compatibility promise is published for 1.0.
+`/opds` is **stable**. It implements OPDS 1.2 with the
+[PSE page-streaming extension](http://vaemendis.net/opds-pse/2017), including `pse:count`,
+`pse:lastRead`, OpenSearch 1.1 description, and Range-capable acquisition.
+
+**It is deliberately absent from the OpenAPI document,** which is a statement about where the
+contract lives, not about its tier:
+
+- OPDS is self-describing. A reader discovers every feed by following links from the catalogue
+  root, and `opds_client_tests.rs` proves that navigation by parsing the feeds and walking the
+  links rather than asserting on strings.
+- The authoritative schema is the OPDS and PSE specifications. Restating an external standard in
+  our own document creates two definitions that can disagree.
+- No OPDS reader consumes OpenAPI. Describing nine Atom endpoints there would add maintenance
+  surface with no consumer.
+
+The route set is instead pinned directly by `kani-web/tests/opds_stability_tests.rs`, which fails
+if a stable OPDS path is removed or renamed. That is the same protection `x-stability` gives the
+REST surface, applied where the contract actually is.
+
+Page indexing follows Komga: PSE page numbers are 1-based, while stored progress remains a
+0-based index. `opds_page_to_index()` is the single conversion point, and the
+`opds_page_index_zero_based` setting exists for clients that expect the other convention.
 
 ## Command-line interface
 
-`kani-cli` splits the same way. The extension-authoring pipeline is stable:
+`kani-cli` splits the same way. Stable covers the extension-authoring pipeline and the two
+recovery tools:
 
 ```text
-kani-cli new        kani-cli validate
-kani-cli generate   kani-cli build
+kani-cli new        kani-cli validate    kani-cli archive-verify
+kani-cli generate   kani-cli build       kani-cli rollback
 ```
 
-Every other subcommand is repository plumbing or a diagnostic, and its `--help` text is marked
-`[unstable]`. That includes `setup`, `css` and `icons`, which exist to build this repository rather
-than to be a supported interface — which is what makes replacing them a later judgement call rather
-than a breaking change.
+`archive-verify` and `rollback` are stable because they are what a user runs when Kani itself will
+not start. `archive-verify` is designed to work without Kani at all, which makes it the executable
+half of the export promise; both have settled contracts and no open design questions.
+
+Every other subcommand is repository plumbing, a diagnostic, or an interface whose design is still
+open, and its `--help` text is marked `[unstable]`:
+
+| Subcommand | Reason |
+| --- | --- |
+| `setup`, `css`, `icons`, `lint` | Build this repository; not a supported interface. Keeping them unstable is what makes replacing them a later judgement call rather than a breaking change. |
+| `keygen`, `publish`, `repo` | Complete and tested, but the extension-repository hosting model is not settled. Promote them as one group once an index is actually served. |
+| `dsl`, `repl` | Print or manipulate internal representations such as the `Expr` AST, which is not a published schema. |
+| `manifest`, `quality`, `probe`, `phash-compare` | Diagnostics. `ChapterManifest` is itself a frozen schema, but the command's presentation of it is not. |
 
 The list is `STABLE_COMMANDS` in `kani-cli/src/commands/mod.rs`, checked against the help clap
 renders by `kani-cli/tests/command_stability_tests.rs`.

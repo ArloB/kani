@@ -44,7 +44,7 @@ Inspired by [Tachiyomi/Mihon](https://mihon.app/) and [Komga](https://komga.org/
 - Tracker sync: AniList and MyAnimeList (OAuth 2.0, read/write)
 - Outbound webhooks with per-manga overrides and a delivery log
 - SMTP email (password reset, email verification, test send)
-- OPDS feed for e-reader clients *(experimental)*
+- OPDS 1.2 feed with page streaming (PSE) for e-reader clients
 
 ### Multi-user
 

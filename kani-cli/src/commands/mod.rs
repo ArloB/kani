@@ -30,7 +30,14 @@ pub struct Cli {
 /// shape may gain optional additions but may not change meaning or be removed within a major
 /// version. Every other subcommand is repo plumbing or a diagnostic and carries no such promise,
 /// which its help text marks with `[unstable]`.
-pub const STABLE_COMMANDS: &[&str] = &["build", "generate", "new", "validate"];
+pub const STABLE_COMMANDS: &[&str] = &[
+    "archive-verify",
+    "build",
+    "generate",
+    "new",
+    "rollback",
+    "validate",
+];
 
 /// Marker appended to the help text of a subcommand outside [`STABLE_COMMANDS`].
 pub const UNSTABLE_MARKER: &str = "[unstable]";
@@ -152,7 +159,7 @@ pub enum Command {
     /// REPL: inspect, explain, test, replay, or record a YAML extension [unstable]
     #[command(subcommand)]
     Repl(ReplCommand),
-    /// Re-hash every file a Kani archive export claims, without needing Kani [unstable]
+    /// Re-hash every file a Kani archive export claims, without needing Kani
     ArchiveVerify {
         /// Path to the exported `kani-archive` directory
         #[arg(value_name = "ARCHIVE_DIR")]
@@ -185,7 +192,7 @@ pub enum Command {
         #[arg(value_name = "CBZ")]
         path: std::path::PathBuf,
     },
-    /// Verify a backup archive can be restored onto this build [unstable]
+    /// Verify a backup archive can be restored onto this build
     Rollback {
         /// Path to a backup .zip produced by Kani
         #[arg(value_name = "BACKUP_ZIP")]
