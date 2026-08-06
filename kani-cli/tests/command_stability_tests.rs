@@ -95,11 +95,9 @@ fn the_authoring_pipeline_stays_stable() {
 }
 
 #[test]
-fn the_recovery_tools_stay_stable() {
-    for name in ["archive-verify", "rollback"] {
-        assert!(
-            STABLE_COMMANDS.contains(&name),
-            "{name} is a recovery tool users reach for when Kani itself will not run"
-        );
-    }
+fn archive_verify_stays_stable() {
+    assert!(
+        STABLE_COMMANDS.contains(&"archive-verify"),
+        "archive-verify is the export promise users run when Kani itself will not start"
+    );
 }

@@ -66,17 +66,17 @@ Page indexing follows Komga: PSE page numbers are 1-based, while stored progress
 
 ## Command-line interface
 
-`kani-cli` splits the same way. Stable covers the extension-authoring pipeline and the two
-recovery tools:
+`kani-cli` splits the same way. Stable covers the extension-authoring pipeline and the one tool
+that works with no server at all:
 
 ```text
 kani-cli new        kani-cli validate    kani-cli archive-verify
-kani-cli generate   kani-cli build       kani-cli rollback
+kani-cli generate   kani-cli build
 ```
 
-`archive-verify` and `rollback` are stable because they are what a user runs when Kani itself will
-not start. `archive-verify` is designed to work without Kani at all, which makes it the executable
-half of the export promise; both have settled contracts and no open design questions.
+`archive-verify` is stable because it re-hashes every file `ARCHIVE.json` claims and exits
+non-zero on any mismatch, without Kani running. That makes it the executable half of the export
+promise.
 
 Every other subcommand is repository plumbing, a diagnostic, or an interface whose design is still
 open, and its `--help` text is marked `[unstable]`:
@@ -87,6 +87,7 @@ open, and its `--help` text is marked `[unstable]`:
 | `keygen`, `publish`, `repo` | Complete and tested, but the extension-repository hosting model is not settled. Promote them as one group once an index is actually served. |
 | `dsl`, `repl` | Print or manipulate internal representations such as the `Expr` AST, which is not a published schema. |
 | `manifest`, `quality`, `probe`, `phash-compare` | Diagnostics. `ChapterManifest` is itself a frozen schema, but the command's presentation of it is not. |
+| `rollback` | Performs no rollback. It reads the archive's `VERSION`, refuses a backup written by a newer build, prints entry counts, and directs the operator to Settings → Storage or `/rest/library/restore`. Freezing the name would make a future real rollback a breaking change; rename it before 1.0. |
 
 The list is `STABLE_COMMANDS` in `kani-cli/src/commands/mod.rs`, checked against the help clap
 renders by `kani-cli/tests/command_stability_tests.rs`.
