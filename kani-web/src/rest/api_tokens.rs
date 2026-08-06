@@ -18,9 +18,9 @@ pub(crate) struct TokenResponse {
     /// silently dropped at authentication time, so surfacing them is the only
     /// way a user can tell why their integration started returning 403.
     stale_scopes: Vec<String>,
-    created_at: i64,
-    last_used_at: Option<i64>,
-    expires_at: Option<i64>,
+    created_at: String,
+    last_used_at: Option<String>,
+    expires_at: Option<String>,
 }
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -29,9 +29,9 @@ pub(crate) struct CreatedTokenResponse {
     name: String,
     kind: String,
     scopes: String,
-    created_at: i64,
-    last_used_at: Option<i64>,
-    expires_at: Option<i64>,
+    created_at: String,
+    last_used_at: Option<String>,
+    expires_at: Option<String>,
     /// The raw token. Shown exactly once, at creation.
     raw_token: String,
 }
@@ -70,10 +70,19 @@ fn to_response(
         kind: t.kind,
         scopes: t.scopes,
         stale_scopes,
-        created_at: t.created_at,
-        last_used_at: t.last_used_at,
-        expires_at: t.expires_at,
+        created_at: rfc3339(t.created_at),
+        last_used_at: t.last_used_at.map(rfc3339),
+        expires_at: t.expires_at.map(rfc3339),
     }
+}
+
+/// Renders a stored Unix timestamp as RFC 3339, matching every other date the REST API emits.
+/// An out-of-range value degrades to the Unix epoch rather than dropping the field.
+fn rfc3339(secs: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(secs)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
 }
 
 #[utoipa::path(
@@ -177,9 +186,9 @@ pub(crate) async fn create_token(
         name: created.token.name,
         kind: created.token.kind,
         scopes: created.token.scopes,
-        created_at: created.token.created_at,
-        last_used_at: created.token.last_used_at,
-        expires_at: created.token.expires_at,
+        created_at: rfc3339(created.token.created_at),
+        last_used_at: created.token.last_used_at.map(rfc3339),
+        expires_at: created.token.expires_at.map(rfc3339),
         raw_token: created.raw_token,
     };
     Ok((StatusCode::CREATED, Json(resp)))

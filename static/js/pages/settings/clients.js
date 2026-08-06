@@ -23,7 +23,7 @@ function tokenMeta(tok) {
   const parts = [`${t('clients.created')} ${formatDate(tok.created_at)}`];
   parts.push(
     tok.last_used_at
-      ? `${t('clients.last_used')} ${formatRelativeTime(new Date(tok.last_used_at * 1000))}`
+      ? `${t('clients.last_used')} ${formatRelativeTime(new Date(tok.last_used_at))}`
       : t('clients.never_used'),
   );
   if (tok.expires_at) parts.push(`${t('clients.expires')} ${formatDate(tok.expires_at)}`);
