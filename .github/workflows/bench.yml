@@ -18,8 +18,7 @@ jobs:
     name: Criterion
     runs-on: ubuntu-latest
     steps:
-      # A scheduled run always checks out the default branch, and main is frozen until 1.0,
-      # so the cron has to name develop explicitly to measure the branch that moves.
+      # A scheduled run checks out the default branch, so the cron must name its target itself.
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'schedule' && 'develop' || github.ref }}
@@ -52,8 +51,8 @@ jobs:
             commit --quiet -m "chore: initialise benchmark history"
           git -C "$tmp" push --quiet origin benchmarks
 
-      # --output-format bencher emits libtest lines, the only shape the action's `cargo` tool
-      # parses. pipefail matters: without it tee's exit code would mask a failed bench run.
+      # --output-format bencher emits the libtest lines the action's `cargo` tool parses.
+      # pipefail is required: tee's exit code would otherwise mask a failed bench run.
       - name: Run benchmarks
         shell: bash
         run: |

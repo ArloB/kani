@@ -8,8 +8,8 @@ concurrency:
   group: cache-warmer
   cancel-in-progress: true
 
-# Must stay byte-identical to ci.yml's env block: rust-cache folds CARGO_*/RUST* into its key,
-# so any difference here hands the PR jobs a key this workflow never wrote.
+# rust-cache keys on CARGO_*/RUST* env, so this block must stay identical to ci.yml's or the
+# PR jobs resolve a cache this workflow never wrote.
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always

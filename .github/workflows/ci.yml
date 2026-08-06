@@ -12,9 +12,8 @@ permissions:
   contents: read
   pull-requests: read
 
-# rust-cache folds CARGO_*/RUST* env into its cache key, so these must be identical in every
-# job here and in cache-warmer.yml. Per-job values give each job a private cache and leave the
-# warm one on develop unreachable. Nothing here needs debuginfo to answer "does it compile".
+# rust-cache keys on CARGO_*/RUST* env, so this block must stay identical to cache-warmer.yml's
+# and must not be overridden per job, or each job resolves a cache the warmer never wrote.
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always
@@ -136,9 +135,7 @@ jobs:
             static/fonts
           key: kani-tools-${{ runner.os }}-${{ hashFiles('kani-cli/src/commands/setup.rs') }}
 
-      # bench.yml runs these weekly, so this only answers "do they still compile". `cargo check`
-      # does that in the dev profile and reuses the Clippy build, where `cargo bench --no-run`
-      # rebuilds the whole tree under [profile.bench]'s fat LTO. kani-extensions/* are WASM-only.
+      # No --workspace: kani-extensions/* are WASM-only and cannot compile natively.
       - name: Check benchmarks compile
         run: cargo check --locked --benches
         env:
