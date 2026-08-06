@@ -498,15 +498,16 @@ mod dir_resolution_tests {
     use super::{DirSource, resolve_dir};
     use std::path::{Path, PathBuf};
 
-    /// Env vars are process-global; these tests share one and must not run
-    /// concurrently with each other.
     fn with_env<T>(key: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
         let previous = std::env::var(key).ok();
+        // SAFETY: no other thread may access the environment during the write. These are the
+        // only env mutations in the crate and each test passes a distinct key.
         match value {
             Some(v) => unsafe { std::env::set_var(key, v) },
             None => unsafe { std::env::remove_var(key) },
         }
         let out = f();
+        // SAFETY: as above; restores the value observed before the write.
         match previous {
             Some(p) => unsafe { std::env::set_var(key, p) },
             None => unsafe { std::env::remove_var(key) },

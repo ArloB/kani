@@ -168,6 +168,68 @@ artifacts, rejects a missing digest, creates the multi-architecture manifest, an
 **Revalidate when.** GitHub Actions changes matrix-output semantics or the Docker workflow stops
 using separate architecture jobs.
 
+### rust-cache keys on Cargo environment variables
+
+**Constraint.** `Swatinem/rust-cache` folds `CARGO_*` and `RUST*` environment variables into its
+cache key, so `shared-key` alone does not make two jobs share a cache. Every job intended to share
+one must declare an identical environment block and toolchain setup.
+
+**Evidence.** Setting the profile-debug variables per job produced three separate caches for one
+lockfile: `v0-rust-ci-Linux-x64-{db7c195c,df7e546d,9be4e61c}-e650112a`, written by the cache
+warmer, the lint job and the test job respectively. The 1.5 GB warm cache on `develop` was
+unreachable from either pull-request job, and a lint run that normally takes 27 minutes took
+37 minutes 51 seconds.
+
+**Consequence.** Cache misses are silent. Jobs still succeed, so the only visible symptom is a
+build time that looks like a cold runner.
+
+**Enforcement.** The environment block and `dtolnay/rust-toolchain` inputs are identical in
+`ci.yml`'s lint and test jobs and in `cache-warmer.yml`, and are declared at workflow level so a
+job cannot override them locally.
+
+**Revalidate when.** rust-cache changes its key derivation, or a job adds a `CARGO_*`/`RUST*`
+variable.
+
+### Compiling benchmarks under the bench profile is not a compile check
+
+**Constraint.** `[profile.bench]` inherits `[profile.release]`, so `cargo bench --no-run` rebuilds
+the whole dependency tree at `opt-level = 3` with fat LTO and `codegen-units = 1`. Answering "do
+the benchmarks still compile" does not need that; `cargo check --benches` answers it in the dev
+profile and reuses the clippy build.
+
+**Evidence.** The step accounted for 988 seconds of a 27-minute lint job, against 253 seconds for
+clippy itself.
+
+**Consequence.** `cargo check` does not catch link-time or monomorphisation-time failures. The
+weekly benchmark workflow still performs a real bench-profile build, which is where those surface.
+
+**Enforcement.** `ci.yml` runs `cargo check --locked --benches`; `bench.yml` builds and runs the
+benchmarks for real.
+
+**Revalidate when.** A benchmark target starts depending on link-time behaviour, or the bench
+profile stops inheriting release.
+
+### Criterion reports a regression only against stored history
+
+**Constraint.** Criterion compares a run against a baseline under `target/criterion`, and
+rust-cache prunes non-dependency artifacts from `target/` before saving. A benchmark workflow that
+keeps its history only in the build directory has no baseline and cannot detect a regression.
+
+**Evidence.** Every scheduled run reported no previous run and uploaded an artifact that nothing
+compared. Scheduled runs additionally check out the default branch, so the workflow measured
+`main` while development continued on `develop`.
+
+**Consequence.** The benchmark degrades into a compile-and-execute smoke test while appearing to
+guard performance.
+
+**Enforcement.** `bench.yml` emits libtest lines via `--output-format bencher`, feeds
+`benchmark-action/github-action-benchmark`, stores history on the `benchmarks` orphan branch
+because `gh-pages` belongs to mike, fails past a 150% regression, and names its target branch
+explicitly rather than relying on the default-branch checkout.
+
+**Revalidate when.** The benchmark set changes, the alert threshold proves too noisy for a shared
+runner, or documentation deployment stops using `gh-pages`.
+
 ## Storage and recovery
 
 ### Lease coordination uses one atomic word for modelability
@@ -221,3 +283,25 @@ verify its retention purge separately.
 
 **Revalidate when.** Upgrade application, library paths, download replacement, trash retention, or
 recovery behavior changes.
+
+## Test execution
+
+### Environment mutation in tests is not serialised
+
+**Constraint.** `std::env::set_var` and `std::env::remove_var` require that no other thread access
+the environment for the duration of the call. The requirement is process-wide, not per-key, so
+using disjoint keys does not satisfy it. Rust's default test harness runs tests concurrently.
+
+**Evidence.** The `kani-web` library test binary mutates the environment from two tests on
+different keys, `KANI_PROXY_SECRET` in `proxy.rs` and `KANI_DATA_DIR` in `auth.rs`, with no
+serialisation between them. `kani-cli` mutates the environment only through one helper in
+`build.rs`, which passes a distinct key per test.
+
+**Consequence.** The mutation is unsound under the threaded harness rather than merely racy on a
+shared key. No failure has been observed, so the exposure is latent.
+
+**Enforcement.** Each unsafe block carries a `SAFETY:` note stating the requirement and the local
+facts that bound it, rather than asserting single-threadedness the harness does not provide.
+
+**Revalidate when.** A third environment-mutating test appears, a test starts reading the
+environment concurrently, or the crates adopt a serialisation guard.

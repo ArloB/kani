@@ -257,8 +257,11 @@ mod tests {
             URL_SAFE_NO_PAD.encode([0xAAu8; 32]),
         )
         .unwrap();
+        // SAFETY: no other thread may access the environment during the write. The harness does
+        // not serialise this against auth.rs's KANI_DATA_DIR test; the keys are disjoint.
         unsafe { std::env::set_var("KANI_PROXY_SECRET", &encoded) };
         let result = load_or_persist_secret(dir.path());
+        // SAFETY: as above; clears the key so later tests read the file instead.
         unsafe { std::env::remove_var("KANI_PROXY_SECRET") };
         assert_eq!(result, known, "env var must override the file");
     }

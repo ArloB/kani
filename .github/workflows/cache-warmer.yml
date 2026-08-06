@@ -8,10 +8,15 @@ concurrency:
   group: cache-warmer
   cancel-in-progress: true
 
+# rust-cache keys on CARGO_*/RUST* env, so this block must stay identical to ci.yml's or the
+# PR jobs resolve a cache this workflow never wrote.
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_BUILD_JOBS: "4"
 
 jobs:
   warm:
@@ -26,10 +31,11 @@ jobs:
           sudo docker image prune --all --force
           df -h
 
+      # Kept identical to ci.yml's lint and test jobs so all three resolve one cache key.
       - uses: dtolnay/rust-toolchain@stable
         with:
+          components: rustfmt, clippy
           targets: wasm32-unknown-unknown
-          components: rustfmt
 
       - name: Install mold linker
         run: sudo apt-get install -y mold
@@ -39,8 +45,9 @@ jobs:
           shared-key: "ci"
           cache-on-failure: true
 
+      # --benches warms criterion for the lint job's `cargo check --benches`.
       - name: Build workspace (populate cache)
-        run: cargo build --locked --tests
+        run: cargo build --locked --tests --benches
 
       - name: Cache kani-cli binary
         uses: actions/cache@v5
