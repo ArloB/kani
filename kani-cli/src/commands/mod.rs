@@ -26,6 +26,15 @@ pub struct Cli {
     pub command: Command,
 }
 
+/// Subcommands covered by the 1.x compatibility promise: their names, arguments and output
+/// shape may gain optional additions but may not change meaning or be removed within a major
+/// version. Every other subcommand is repo plumbing or a diagnostic and carries no such promise,
+/// which its help text marks with `[unstable]`.
+pub const STABLE_COMMANDS: &[&str] = &["build", "generate", "new", "validate"];
+
+/// Marker appended to the help text of a subcommand outside [`STABLE_COMMANDS`].
+pub const UNSTABLE_MARKER: &str = "[unstable]";
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Scaffold a new extension (YAML by default, or a Rust/WASM crate with --rust)
@@ -78,7 +87,7 @@ pub enum Command {
         #[arg(long)]
         debug: bool,
     },
-    /// Build the frontend CSS
+    /// Build the frontend CSS [unstable]
     Css {
         /// Rebuild automatically on file changes
         #[arg(long, conflicts_with = "prod")]
@@ -87,7 +96,7 @@ pub enum Command {
         #[arg(long, conflicts_with = "watch")]
         prod: bool,
     },
-    /// Download required build tools and JS vendor files
+    /// Download required build tools and JS vendor files [unstable]
     Setup {
         /// Download only the JS vendor files (Preact, htm)
         #[arg(long)]
@@ -99,9 +108,9 @@ pub enum Command {
         #[arg(long)]
         esbuild: bool,
     },
-    /// Generate PWA icon PNGs from static/icons/kani-mark.svg
+    /// Generate PWA icon PNGs from static/icons/kani-mark.svg [unstable]
     Icons,
-    /// Parse a DSL expression and print the resulting Expr AST
+    /// Parse a DSL expression and print the resulting Expr AST [unstable]
     Dsl {
         /// DSL expression string
         expression: String,
@@ -109,9 +118,9 @@ pub enum Command {
         #[arg(long, value_name = "FILE")]
         scripts: Option<std::path::PathBuf>,
     },
-    /// Run the workspace quality checks (clippy, machete, deny, fmt) in sequence
+    /// Run the workspace quality checks (clippy, machete, deny, fmt) in sequence [unstable]
     Lint,
-    /// Generate an Ed25519 signing keypair for extension authoring
+    /// Generate an Ed25519 signing keypair for extension authoring [unstable]
     Keygen {
         /// Directory to write the keypair files into (default: current directory)
         #[arg(long, value_name = "PATH", default_value = ".")]
@@ -120,7 +129,7 @@ pub enum Command {
         #[arg(long, default_value = "author")]
         name: String,
     },
-    /// Sign an extension and publish it to a local repository
+    /// Sign an extension and publish it to a local repository [unstable]
     Publish {
         /// Path to the extension file (.yaml or .wasm) to publish
         file: std::path::PathBuf,
@@ -137,31 +146,31 @@ pub enum Command {
         #[arg(long, value_name = "SEMVER")]
         min_kani_version: Option<String>,
     },
-    /// Manage a local extension repository
+    /// Manage a local extension repository [unstable]
     #[command(subcommand)]
     Repo(RepoCommand),
-    /// REPL: inspect, explain, test, replay, or record a YAML extension
+    /// REPL: inspect, explain, test, replay, or record a YAML extension [unstable]
     #[command(subcommand)]
     Repl(ReplCommand),
-    /// Re-hash every file a Kani archive export claims, without needing Kani
+    /// Re-hash every file a Kani archive export claims, without needing Kani [unstable]
     ArchiveVerify {
         /// Path to the exported `kani-archive` directory
         #[arg(value_name = "ARCHIVE_DIR")]
         path: std::path::PathBuf,
     },
-    /// Print the quality score and per-page dimensions for a CBZ
+    /// Print the quality score and per-page dimensions for a CBZ [unstable]
     Quality {
         /// Path to a .cbz file
         #[arg(value_name = "CBZ")]
         path: std::path::PathBuf,
     },
-    /// Show what a header probe learns from an image's first few kilobytes
+    /// Show what a header probe learns from an image's first few kilobytes [unstable]
     Probe {
         /// Path to an image file
         #[arg(value_name = "IMAGE")]
         path: std::path::PathBuf,
     },
-    /// Compare two CBZs page by page with perceptual hashes
+    /// Compare two CBZs page by page with perceptual hashes [unstable]
     PhashCompare {
         /// First .cbz
         #[arg(value_name = "A")]
@@ -170,13 +179,13 @@ pub enum Command {
         #[arg(value_name = "B")]
         b: std::path::PathBuf,
     },
-    /// Print the manifest computed from a CBZ on disk
+    /// Print the manifest computed from a CBZ on disk [unstable]
     Manifest {
         /// Path to a .cbz file
         #[arg(value_name = "CBZ")]
         path: std::path::PathBuf,
     },
-    /// Verify a backup archive can be restored onto this build
+    /// Verify a backup archive can be restored onto this build [unstable]
     Rollback {
         /// Path to a backup .zip produced by Kani
         #[arg(value_name = "BACKUP_ZIP")]

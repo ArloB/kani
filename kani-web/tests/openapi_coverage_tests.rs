@@ -266,3 +266,124 @@ fn every_operation_is_tagged_with_a_declared_tag() {
         problems.join("\n")
     );
 }
+
+fn documented_operations() -> Vec<(String, String, Option<String>)> {
+    let doc = kani_web::openapi::ApiDoc::openapi();
+    let mut out = Vec::new();
+    for (path, item) in doc.paths.paths.iter() {
+        let operations = [
+            ("get", &item.get),
+            ("post", &item.post),
+            ("put", &item.put),
+            ("patch", &item.patch),
+            ("delete", &item.delete),
+            ("head", &item.head),
+            ("options", &item.options),
+        ];
+        for (method, op) in operations {
+            let Some(op) = op else { continue };
+            let tier = op
+                .extensions
+                .as_ref()
+                .and_then(|e| e.get("x-stability"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            out.push((path.clone(), method.to_string(), tier));
+        }
+    }
+    out
+}
+
+#[test]
+fn every_operation_publishes_a_stability_tier() {
+    let mut problems: Vec<String> = documented_operations()
+        .into_iter()
+        .filter_map(|(path, method, tier)| match tier.as_deref() {
+            Some("stable") | Some("unstable") => None,
+            Some(other) => Some(format!(
+                "  {} {path} declares unknown tier \"{other}\"",
+                method.to_uppercase()
+            )),
+            None => Some(format!(
+                "  {} {path} has no x-stability extension",
+                method.to_uppercase()
+            )),
+        })
+        .collect();
+    problems.sort();
+
+    assert!(
+        problems.is_empty(),
+        "{} operation(s) are published without a usable compatibility tier:\n{}",
+        problems.len(),
+        problems.join("\n")
+    );
+}
+
+#[test]
+fn the_tier_split_is_not_vacuous() {
+    let ops = documented_operations();
+    let stable = ops
+        .iter()
+        .filter(|(_, _, t)| t.as_deref() == Some("stable"))
+        .count();
+    let unstable = ops
+        .iter()
+        .filter(|(_, _, t)| t.as_deref() == Some("unstable"))
+        .count();
+
+    assert!(
+        stable > 0 && unstable > 0,
+        "the tier table must partition the surface, got {stable} stable and {unstable} unstable"
+    );
+    assert!(
+        ops.len() > 200,
+        "only {} operations enumerated, so the scan is not reading the document",
+        ops.len()
+    );
+}
+
+#[test]
+fn administrative_and_internal_routes_are_never_promised_stable() {
+    let mut leaked: Vec<String> = documented_operations()
+        .into_iter()
+        .filter(|(path, _, tier)| {
+            let internal = path.starts_with("/rest/admin")
+                || path.starts_with("/rest/ui")
+                || path.starts_with("/rest/jobs")
+                || path.starts_with("/rest/server");
+            internal && tier.as_deref() != Some("unstable")
+        })
+        .map(|(path, method, tier)| format!("  {} {path} -> {:?}", method.to_uppercase(), tier))
+        .collect();
+    leaked.sort();
+
+    assert!(
+        leaked.is_empty(),
+        "{} internal operation(s) would be frozen by the 1.x promise:\n{}",
+        leaked.len(),
+        leaked.join("\n")
+    );
+}
+
+#[test]
+fn the_serialised_document_carries_the_tier() {
+    let json = kani_web::openapi::ApiDoc::openapi()
+        .to_json()
+        .expect("the document must serialise");
+    let doc: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    let admin = doc["paths"]["/rest/admin/users"]["get"]["x-stability"].as_str();
+    let library = doc["paths"]["/rest/library"]["get"]["x-stability"].as_str();
+
+    assert_eq!(
+        admin,
+        Some("unstable"),
+        "GET /rest/admin/users must reach clients marked unstable"
+    );
+    assert_eq!(
+        library,
+        Some("stable"),
+        "GET /rest/library must reach clients marked stable"
+    );
+}
