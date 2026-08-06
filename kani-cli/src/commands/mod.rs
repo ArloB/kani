@@ -1,6 +1,7 @@
 //! Clap command schema and top-level dispatch for `kani-cli`.
 
 pub mod archive;
+pub mod backup_verify;
 pub mod build;
 pub mod css;
 pub mod dsl_cmd;
@@ -12,7 +13,6 @@ pub mod new;
 pub mod publish;
 pub mod quality;
 pub mod repo;
-pub mod rollback;
 pub mod setup;
 pub mod validate;
 
@@ -186,7 +186,7 @@ pub enum Command {
         path: std::path::PathBuf,
     },
     /// Verify a backup archive can be restored onto this build [unstable]
-    Rollback {
+    BackupVerify {
         /// Path to a backup .zip produced by Kani
         #[arg(value_name = "BACKUP_ZIP")]
         path: std::path::PathBuf,
@@ -378,7 +378,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 repo::run_verify(&repo_dir, repo_key.as_deref())
             }
         },
-        Command::Rollback { path } => rollback::run(&path),
+        Command::BackupVerify { path } => backup_verify::run(&path),
         Command::Repl(repl_cmd) => match repl_cmd {
             ReplCommand::Inspect { file } => crate::repl::inspect::run(&file),
             ReplCommand::Explain { expression } => crate::repl::explain::run(&expression),

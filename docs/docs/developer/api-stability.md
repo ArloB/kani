@@ -87,7 +87,7 @@ open, and its `--help` text is marked `[unstable]`:
 | `keygen`, `publish`, `repo` | Complete and tested, but the extension-repository hosting model is not settled. Promote them as one group once an index is actually served. |
 | `dsl`, `repl` | Print or manipulate internal representations such as the `Expr` AST, which is not a published schema. |
 | `manifest`, `quality`, `probe`, `phash-compare` | Diagnostics. `ChapterManifest` is itself a frozen schema, but the command's presentation of it is not. |
-| `rollback` | Performs no rollback. It reads the archive's `VERSION`, refuses a backup written by a newer build, prints entry counts, and directs the operator to Settings → Storage or `/rest/library/restore`. Freezing the name would make a future real rollback a breaking change; rename it before 1.0. |
+| `backup-verify` | Reads the archive's `VERSION`, refuses a backup written by a newer build, prints entry counts, and directs the operator to Settings → Storage or `/rest/library/restore`. It restores nothing. Named `rollback` until 1.0; the old name is reserved for a command that actually rolls back, which needs the deferred `kani-cli` async restructure. |
 
 The list is `STABLE_COMMANDS` in `kani-cli/src/commands/mod.rs`, checked against the help clap
 renders by `kani-cli/tests/command_stability_tests.rs`.

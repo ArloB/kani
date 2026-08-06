@@ -95,7 +95,7 @@ cookie, OPDS token, or API token whose owner lost that permission is insufficien
 ## Backup or restore fails
 
 Check the backup job, destination permissions, free space, and encryption passphrase. A scheduled
-path inside an unmounted container layer is not durable. Use `kani-cli rollback <backup.zip>` to
+path inside an unmounted container layer is not durable. Use `kani-cli backup-verify <backup.zip>` to
 test whether the current build accepts an archive before attempting a production restore.
 
 ## Gather support information

@@ -6,6 +6,13 @@ Kani uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `kani-cli rollback` is renamed `kani-cli backup-verify`. Its behaviour is unchanged: it checks
+  whether a backup archive can be restored onto this build and performs no restore itself. The
+  name is freed for a command that actually rolls back, which needs the deferred `kani-cli` async
+  restructure.
+
 ## [0.9.0] - 2026-07-21
 
 Pre-1.0 stabilisation release focused on release processes, observability, and data safety.
