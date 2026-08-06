@@ -192,6 +192,21 @@ impl AppService {
             let parsed: RepoIndex = serde_json::from_slice(&index_bytes)
                 .map_err(|e| ServiceError::Validation(format!("Invalid index.json: {e}")))?;
 
+            // Anchor to the PINNED key before trusting — or caching — anything.
+            // The fetched index carries its own maintainer_key, so verifying
+            // against parsed.maintainer_key only proves the index is
+            // self-consistent, which any attacker can arrange. A rotated or
+            // MITM'd key must force a re-add (out-of-band fingerprint confirm);
+            // it must never self-certify. Critically this runs BEFORE the
+            // index_cache write below: the old code wrote the cache first and
+            // checked the key afterwards, so a returned error still left the
+            // poisoned index in place for install_source_from_repo to trust.
+            if parsed.maintainer_key != repo.maintainer_key {
+                return Err(ServiceError::Validation(
+                    "Repository maintainer key changed since last trust — re-add the repo to confirm the new key.".to_string(),
+                ));
+            }
+
             let sig_url = format!("{base}/index.json.sig");
             let sig_raw = self
                 .proxy_client
@@ -212,7 +227,7 @@ impl AppService {
                 .trim()
                 .to_string();
 
-            signing::verify_artifact(&index_bytes, &parsed.maintainer_key, &sig_b64)
+            signing::verify_artifact(&index_bytes, &repo.maintainer_key, &sig_b64)
                 .map_err(|e| ServiceError::Validation(format!("Index signature invalid: {e}")))?;
 
             let index_json = serde_json::to_string(&parsed)
@@ -229,12 +244,6 @@ impl AppService {
 
             parsed
         };
-
-        if index.maintainer_key != repo.maintainer_key {
-            return Err(ServiceError::Validation(
-                "Repository maintainer key changed since last trust — re-add the repo to confirm the new key.".to_string(),
-            ));
-        }
 
         self.audit(user_id, "repo.refresh", Some(&repo.url), None)
             .await;
@@ -334,14 +343,6 @@ impl AppService {
             Some(serde_json::json!({ "reason": reason })),
         )
         .await;
-        Ok(())
-    }
-
-    pub async fn unblock_repo(&self, url: &str, user_id: Option<crate::ids::UserId>) -> Result<()> {
-        sqlx::query!("DELETE FROM blocked_repos WHERE url = ?", url)
-            .execute(&self.db)
-            .await?;
-        self.audit(user_id, "repo.unblock", Some(url), None).await;
         Ok(())
     }
 
@@ -494,6 +495,14 @@ impl AppService {
         }
 
         let artifact_url = resolve_url(&repo.url, &entry.url);
+        // The repo is the trust anchor; its artifacts must live on its own host.
+        // A cross-host artifact URL is an SSRF/redirection vector (and would slip
+        // an IP-literal past the DNS-only resolver), so refuse it before dialling.
+        if url_authority(&artifact_url) != url_authority(&repo.url) {
+            return Err(ServiceError::Validation(format!(
+                "Extension artifact host does not match the repository host: {artifact_url}"
+            )));
+        }
         let artifact_bytes = self
             .proxy_client
             .safe_get(&artifact_url, None)
@@ -845,6 +854,14 @@ fn parse_index_cache(repo: &RepoRow) -> Result<RepoIndex> {
     })?;
     serde_json::from_str(json)
         .map_err(|e| ServiceError::Internal(format!("Failed to parse repo index: {e}")))
+}
+
+/// The `host[:port]` authority of an absolute URL, used to keep an extension
+/// artifact on the same host as the repository that vouches for it.
+fn url_authority(u: &str) -> Option<&str> {
+    let rest = u.split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    Some(authority.rsplit('@').next().unwrap_or(authority))
 }
 
 fn resolve_url(base: &str, artifact_url: &str) -> String {

@@ -1,0 +1,32 @@
+name: Benchmarks
+
+on:
+  schedule:
+    # Weekly, Monday 04:00 UTC. Criterion needs a quiet runner to be meaningful.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+jobs:
+  bench:
+    name: Criterion
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run benchmarks
+        run: cargo bench -p kani-core --bench blueprint_eval
+        env:
+          SQLX_OFFLINE: "true"
+
+      - name: Upload criterion reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-reports
+          path: target/criterion
+          retention-days: 90

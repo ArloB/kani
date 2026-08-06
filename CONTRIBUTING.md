@@ -31,7 +31,8 @@ cargo test -p kani-app --lib
 cargo clippy -- -D warnings
 
 # Build a WASM extension:
-cargo run -p kani-cli -- build kani-weebcentral
+cargo run -p kani-cli -- build kani-example
+cargo run -p kani-cli -- build kani-weebcentral --ext-dir ../kani-extensions
 cargo run -p kani-cli -- build --all
 ```
 

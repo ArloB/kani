@@ -2,13 +2,17 @@ services:
   kani:
     build:
       context: .
-      # args:
-      #   Uncomment to include Chromium + puppeteer-core (~250 MB extra).
-      #   Required for browser-based extensions such as kani-comix.
-      #   INSTALL_BROWSER: "true"
+      args:
+        # Stamps the image with its commit; .dockerignore excludes .git/, so the
+        # build cannot derive it. Export GIT_SHA=$(git rev-parse --short HEAD).
+        GIT_SHA: "${GIT_SHA:-}"
 
-      #   Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
-      #   INSTALL_KCC: "true"
+        #   Uncomment to include Chromium + puppeteer-core (~250 MB extra).
+        #   Required for browser-based extensions (see the kani-extensions repository).
+        #   INSTALL_BROWSER: "true"
+
+        #   Uncomment to include Kindle Comic Converter for MOBI/AZW3 export.
+        #   INSTALL_KCC: "true"
     image: kani:latest
     ports:
       - "8242:8242"
@@ -38,6 +42,16 @@ services:
 
       # Override the log level (error, warn, info, debug, trace).
       # RUST_LOG: "info"
+
+      # Emit structured JSON logs instead of human-readable text ("text" | "json").
+      # KANI_LOG_FORMAT: "json"
+
+      # Warn-log any SQL statement slower than this many milliseconds.
+      # KANI_SLOW_QUERY_THRESHOLD_MS: "100"
+
+      # Prometheus metrics at /metrics are disabled until a token is set, because
+      # they disclose extension names, upstream hosts and error counts. Set this
+      # and scrape with "Authorization: Bearer <token>".
 
       # Set to "false" to disable browser-based extension features at runtime,
       # even if Chromium is installed (e.g. to reclaim memory on idle servers).

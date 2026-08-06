@@ -11,6 +11,7 @@ import { Callout } from './form/callout.js';
 import { iconChevronRight } from '../icons.js';
 import { Icon } from './icon.js';
 import { t } from '../i18n.js';
+import { subscribeJob } from '../sse.js';
 const html = htm.bind(h);
 
 /** @typedef {'search'|'previewing'|'preview'|'confirming'|'done'} MigrationStep */
@@ -50,6 +51,11 @@ export function MigrationDialogue({
 
   const debounceRef = useRef(/** @type {ReturnType<typeof setTimeout>|null} */ (null));
   const abortRef = useRef(/** @type {AbortController|null} */ (null));
+  const unsubscribeRef = useRef(/** @type {(() => void)|null} */ (null));
+
+  // A migration outlives this dialogue: closing it must not leave a listener
+  // holding a setState on an unmounted tree.
+  useEffect(() => () => unsubscribeRef.current?.(), []);
 
   // Auto-search when query/scope changes
   useEffect(() => {
@@ -99,11 +105,36 @@ export function MigrationDialogue({
     setStep('confirming');
     setError(null);
     try {
-      const res = await api.migrateManga(dbId, targetSid, targetMid, keepOrphaned);
-      setResult(res);
-      setStep('done');
-    } catch {
-      setError(t('migration.error.migrate_failed'));
+      const { job_id: jobId } = await api.migrateManga(dbId, targetSid, targetMid, keepOrphaned);
+      if (!jobId) {
+        setError(t('migration.error.migrate_failed'));
+        setStep('preview');
+        return;
+      }
+      unsubscribeRef.current = subscribeJob(jobId, {
+        onComplete: async () => {
+          try {
+            const job = await api.getJob(jobId);
+            setResult(job?.result ?? null);
+            setStep('done');
+          } catch {
+            setError(t('migration.error.migrate_failed'));
+            setStep('preview');
+          }
+        },
+        onFailed: (/** @type {any} */ e) => {
+          setError(e?.message || t('migration.error.migrate_failed'));
+          setStep('preview');
+        },
+        onCancelled: () => {
+          setError(t('migration.error.migrate_cancelled'));
+          setStep('preview');
+        },
+      });
+    } catch (/** @type {any} */ e) {
+      setError(e?.status === 409
+        ? t('migration.error.already_running')
+        : t('migration.error.migrate_failed'));
       setStep('preview');
     }
   }

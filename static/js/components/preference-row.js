@@ -120,6 +120,7 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
         <input
           type=${isSecret ? 'password' : 'text'}
           class="input"
+          aria-label=${title}
           value=${textVal}
           onInput=${(e) => setTextVal(/** @type {HTMLInputElement} */ (e.target).value)}
         />
@@ -152,6 +153,7 @@ export function PreferenceRow({ sourceId, descriptor, currentValue, liveValues, 
           type="number"
           inputMode="numeric"
           class="input w-24"
+          aria-label=${title}
           value=${numVal}
           onInput=${(e) => setNumVal(/** @type {HTMLInputElement} */ (e.target).value)}
         />

@@ -22,8 +22,6 @@ async fn update_download_settings_round_trips() {
     svc.update_settings(
         SettingsUpdate::Download(DownloadSettings {
             concurrent_page_downloads: 8,
-            concurrent_manga_downloads: 4,
-            chapter_queue_size: 64,
             max_retries: 5,
             initial_retry_delay_ms: 200,
             auto_download_category_ids: vec![],
@@ -37,8 +35,6 @@ async fn update_download_settings_round_trips() {
 
     let s = svc.get_settings().await;
     assert_eq!(s.concurrent_page_downloads, 8);
-    assert_eq!(s.concurrent_manga_downloads, 4);
-    assert_eq!(s.chapter_queue_size, 64);
     assert_eq!(s.max_retries, 5);
     assert_eq!(s.initial_retry_delay_ms, 200);
 }
@@ -56,6 +52,9 @@ fn advanced_settings() -> AdvancedSettings {
         browser_max_memory_mb: 512,
         browser_max_instances: 2,
         browser_idle_timeout_s: 300,
+        update_check_enabled: true,
+        opds_page_index_zero_based: false,
+        global_search_timeout_secs: 6,
     }
 }
 
@@ -98,14 +97,62 @@ async fn update_advanced_settings_rejects_invalid_browser_caps() {
 }
 
 #[tokio::test]
+async fn global_search_timeout_defaults_and_round_trips() {
+    let svc = test_service().await;
+
+    assert_eq!(svc.get_settings().await.global_search_timeout_secs, 6);
+
+    svc.update_settings(
+        SettingsUpdate::Advanced(AdvancedSettings {
+            global_search_timeout_secs: 9,
+            ..advanced_settings()
+        }),
+        UserId(1),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(svc.get_settings().await.global_search_timeout_secs, 9);
+}
+
+#[tokio::test]
+async fn global_search_timeout_rejects_values_outside_its_bound() {
+    let svc = test_service().await;
+
+    let result = svc
+        .update_settings(
+            SettingsUpdate::Advanced(AdvancedSettings {
+                global_search_timeout_secs: 61,
+                ..advanced_settings()
+            }),
+            UserId(1),
+        )
+        .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
 async fn update_scan_settings_round_trips() {
     let svc = test_service().await;
+
+    assert_eq!(svc.get_settings().await.scan_barren_page_tolerance, 3);
 
     svc.update_settings(
         SettingsUpdate::Scan(ScanSettings {
             auto_scan: true,
             scan_interval_minutes: 30,
             scan_exclude_completed: true,
+            upgrade_detection_enabled: true,
+            upgrade_min_res_gain: 1.2,
+            upgrade_confirm_fetches: 3,
+            upgrade_axis_resolution: "both".into(),
+            upgrade_axis_colour: "both".into(),
+            upgrade_axis_encoder: "both".into(),
+            upgrade_axis_bitrate: "gain".into(),
+            upgrade_show_downgrades: false,
+            upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
+            scan_barren_page_tolerance: 4,
         }),
         UserId(1),
     )
@@ -116,6 +163,7 @@ async fn update_scan_settings_round_trips() {
     assert!(s.auto_scan);
     assert_eq!(s.scan_interval_minutes, 30);
     assert!(s.scan_exclude_completed);
+    assert_eq!(s.scan_barren_page_tolerance, 4);
 }
 
 #[tokio::test]
@@ -127,10 +175,48 @@ async fn update_scan_settings_rejects_short_interval() {
                 auto_scan: false,
                 scan_interval_minutes: 4, // below minimum of 5
                 scan_exclude_completed: false,
+                upgrade_detection_enabled: true,
+                upgrade_min_res_gain: 1.2,
+                upgrade_confirm_fetches: 3,
+                upgrade_axis_resolution: "both".into(),
+                upgrade_axis_colour: "both".into(),
+                upgrade_axis_encoder: "both".into(),
+                upgrade_axis_bitrate: "gain".into(),
+                upgrade_show_downgrades: false,
+                upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
+                scan_barren_page_tolerance: 3,
             }),
             UserId(1),
         )
         .await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn scan_barren_page_tolerance_rejects_values_outside_its_bound() {
+    let svc = test_service().await;
+
+    let result = svc
+        .update_settings(
+            SettingsUpdate::Scan(ScanSettings {
+                auto_scan: false,
+                scan_interval_minutes: 5,
+                scan_exclude_completed: false,
+                upgrade_detection_enabled: true,
+                upgrade_min_res_gain: 1.2,
+                upgrade_confirm_fetches: 3,
+                upgrade_axis_resolution: "both".into(),
+                upgrade_axis_colour: "both".into(),
+                upgrade_axis_encoder: "both".into(),
+                upgrade_axis_bitrate: "gain".into(),
+                upgrade_show_downgrades: false,
+                upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
+                scan_barren_page_tolerance: 21,
+            }),
+            UserId(1),
+        )
+        .await;
+
     assert!(result.is_err());
 }
 
@@ -141,8 +227,6 @@ async fn update_download_settings_rejects_invalid_page_concurrency() {
         .update_settings(
             SettingsUpdate::Download(DownloadSettings {
                 concurrent_page_downloads: 0, // below minimum of 1
-                concurrent_manga_downloads: 2,
-                chapter_queue_size: 32,
                 max_retries: 3,
                 initial_retry_delay_ms: 100,
                 auto_download_category_ids: vec![],
@@ -164,6 +248,16 @@ async fn update_settings_does_not_affect_unrelated_fields() {
             auto_scan: true,
             scan_interval_minutes: 30,
             scan_exclude_completed: false,
+            upgrade_detection_enabled: true,
+            upgrade_min_res_gain: 1.2,
+            upgrade_confirm_fetches: 3,
+            upgrade_axis_resolution: "both".into(),
+            upgrade_axis_colour: "both".into(),
+            upgrade_axis_encoder: "both".into(),
+            upgrade_axis_bitrate: "gain".into(),
+            upgrade_show_downgrades: false,
+            upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
+            scan_barren_page_tolerance: 3,
         }),
         UserId(1),
     )
@@ -174,8 +268,6 @@ async fn update_settings_does_not_affect_unrelated_fields() {
     svc.update_settings(
         SettingsUpdate::Download(DownloadSettings {
             concurrent_page_downloads: 8,
-            concurrent_manga_downloads: 2,
-            chapter_queue_size: 32,
             max_retries: 3,
             initial_retry_delay_ms: 100,
             auto_download_category_ids: vec![],
@@ -197,4 +289,94 @@ async fn update_settings_does_not_affect_unrelated_fields() {
         s.concurrent_page_downloads, 8,
         "download setting should be updated"
     );
+}
+
+#[tokio::test]
+async fn update_check_enabled_round_trips_and_defaults_on() {
+    let svc = test_service().await;
+
+    assert!(
+        svc.get_settings().await.update_check_enabled,
+        "update checking should be on by default"
+    );
+
+    let mut advanced = advanced_settings();
+    advanced.update_check_enabled = false;
+    svc.update_settings(SettingsUpdate::Advanced(advanced), UserId(1))
+        .await
+        .unwrap();
+
+    assert!(
+        !svc.get_settings().await.update_check_enabled,
+        "the toggle must persist through update_settings"
+    );
+}
+
+// ── Degraded subsystems ───────────────────────────────────────────────────────
+//
+// The registry exists so a reduced-but-running instance is visible somewhere
+// other than the log. That only holds if it reaches the diagnostics payload the
+// UI reads — the mechanism being correct in isolation is what this codebase
+// keeps shipping.
+
+#[tokio::test]
+async fn a_registered_degradation_reaches_the_diagnostics_payload() {
+    let svc = common::test_service().await;
+    assert!(
+        svc.get_diagnostics().await.unwrap().degradations.is_empty(),
+        "a healthy service reports nothing"
+    );
+
+    svc.degradations.register(
+        kani_app::service::degradations::ids::WASM_MODULE_CACHE,
+        kani_app::service::degradations::Severity::Warn,
+        "WASM module cache",
+        "not writable",
+        "make it writable",
+    );
+
+    let payload = svc.get_diagnostics().await.unwrap();
+    assert_eq!(payload.degradations.len(), 1);
+    let d = &payload.degradations[0];
+    assert_eq!(d.title, "WASM module cache");
+    assert_eq!(d.detail, "not writable");
+    assert!(!d.remedy.is_empty(), "every degradation carries a remedy");
+}
+
+#[tokio::test]
+async fn diagnostics_lists_errors_before_warnings() {
+    let svc = common::test_service().await;
+    use kani_app::service::degradations::{Severity, ids};
+
+    svc.degradations.register(
+        ids::WASM_MODULE_CACHE,
+        Severity::Warn,
+        "Cache",
+        "slow",
+        "fix",
+    );
+    svc.degradations.register(
+        ids::ENCRYPTED_SETTINGS,
+        Severity::Error,
+        "Encrypted settings",
+        "cannot decrypt",
+        "restore secret.key",
+    );
+
+    let payload = svc.get_diagnostics().await.unwrap();
+    assert_eq!(payload.degradations[0].severity, Severity::Error);
+    assert_eq!(payload.degradations[1].severity, Severity::Warn);
+}
+
+#[tokio::test]
+async fn a_recovered_subsystem_disappears_from_diagnostics() {
+    let svc = common::test_service().await;
+    use kani_app::service::degradations::{Severity, ids};
+
+    svc.degradations
+        .register(ids::LIBRARY_PATH, Severity::Warn, "Library", "gone", "fix");
+    assert_eq!(svc.get_diagnostics().await.unwrap().degradations.len(), 1);
+
+    svc.degradations.clear(ids::LIBRARY_PATH);
+    assert!(svc.get_diagnostics().await.unwrap().degradations.is_empty());
 }

@@ -2,7 +2,7 @@
 
 The single source of truth for how Kani's UI looks and behaves. Tokens live in
 the `@theme` block of `static/css/app.css`; this page codifies the rules around
-them. CI enforces the token rule (`kani-cli audit-tokens --check --max 0`), the
+them. CI enforces the token rule (`node scripts/audit-tokens.mjs --check --max 0`), the
 i18n key rule (`scripts/check-i18n-keys.js`), and the untranslated-literal rule
 (`scripts/check-untranslated-strings.js`).
 
@@ -111,9 +111,9 @@ Auth-style pages (centred card, error alert, labelled fields) compose
 `components/auth-card.js` (`AuthCard`/`AuthError`/`AuthSuccess`/`AuthField`)
 — don't rebuild that shell.
 
-New components are Preact/htm; the vanilla-DOM escape hatches are the fixed
-list documented in `CLAUDE.md`. Never mix both styles inside one component's
-render path.
+New components are Preact/htm; the vanilla-DOM escape hatches are limited to
+the established legacy and performance-sensitive surfaces. Never mix both
+styles inside one component's render path.
 
 **Grep `static/js/components/` before writing a "new" widget.** Several
 components exist in *both* a Preact and a vanilla flavour from the same file
@@ -265,7 +265,7 @@ SQLite text timestamps should be emitted as RFC3339 from SQL
 - Buttons name the action ("Save changes", not "Submit"); the same verb
   follows through to the toast ("Published" after "Publish").
 - Errors say what went wrong and what to do next; empty states invite the
-  first action. See the async-feedback contract in `CLAUDE.md`.
+  first action. Follow the async-feedback contract below.
 - CI runs `scripts/check-untranslated-strings.js` on every push, scanning
   `html\`...\`` text nodes and `.textContent`/`.innerHTML =` string literals.
   A genuinely non-translatable technical string (a version prefix `v${...}`,

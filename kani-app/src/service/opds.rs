@@ -189,6 +189,7 @@ impl AppService {
                 Some(true),
                 None,
                 None,
+                None,
             )
             .await?;
 
@@ -361,7 +362,12 @@ impl AppService {
         };
 
         let progress = self.get_chapter_progress_full(user_id, chapter_id).await?;
-        let last_read_str = progress.as_ref().map(|(lp, _, _)| lp.to_string());
+        // Progress is stored 0-based (it is an index into the page list), so it
+        // must be reported in whichever base the reader is being served.
+        let zero_based = self.settings.read().await.opds_page_index_zero_based;
+        let last_read_str = progress
+            .as_ref()
+            .map(|(lp, _, _)| if zero_based { *lp } else { lp + 1 }.to_string());
         let last_read_date = progress.as_ref().and_then(|(_, _, d)| d.clone());
 
         let updated = now_rfc3339();
@@ -433,19 +439,38 @@ impl AppService {
         Ok(w.finish())
     }
 
+    /// Translate the `page` an OPDS reader sent into a 0-based index.
+    ///
+    /// Readers substitute the PSE `{pageNumber}` template, and the prevailing
+    /// reading — the one Komga follows — is that the first page is 1. Kani used
+    /// to treat it as a raw 0-based index, so every page was off by one and the
+    /// last page 404'd. Operators whose reader really does send 0 first can set
+    /// `opds_page_index_zero_based`.
+    pub async fn opds_page_to_index(&self, page: usize) -> Result<usize> {
+        if self.settings.read().await.opds_page_index_zero_based {
+            return Ok(page);
+        }
+        page.checked_sub(1).ok_or_else(|| {
+            ServiceError::Validation("OPDS page numbers are 1-based; page 0 is not valid".into())
+        })
+    }
+
     /// Resolves and (optionally) transcodes a single chapter page for OPDS-PSE.
+    ///
+    /// `page` is as the reader sent it; see [`Self::opds_page_to_index`].
     pub async fn opds_chapter_page(
         &self,
         chapter_id: ChapterId,
-        page_index: usize,
+        page: usize,
         max_width: u32,
         format: Option<image::ImageFormat>,
     ) -> Result<(Vec<u8>, &'static str)> {
+        let page_index = self.opds_page_to_index(page).await?;
         let info = self.chapter_cbz_path(chapter_id).await?;
         let pages = self.cbz_page_index(chapter_id, &info.path).await?;
         if page_index >= pages.len() {
             return Err(ServiceError::NotFound(format!(
-                "Page {page_index} out of range ({} pages)",
+                "Page {page} out of range ({} pages)",
                 pages.len()
             )));
         }

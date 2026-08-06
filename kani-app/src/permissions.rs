@@ -152,6 +152,16 @@ permissions! {
         Read     => "read",
         Progress => "progress",
     },
+    Token => "token" {
+        CreateOpds => "create_opds",
+        CreateApi  => "create_api",
+    },
+    Metrics => "metrics" {
+        Read => "read",
+    },
+    Theme => "theme" {
+        Publish => "publish",
+    },
 }
 
 impl serde::Serialize for Permission {
@@ -232,6 +242,9 @@ mod tests {
             "repo:refresh",
             "opds:read",
             "opds:progress",
+            "token:create_opds",
+            "token:create_api",
+            "metrics:read",
         ];
         for raw in &perms {
             let parsed: Permission = raw.parse().expect(raw);

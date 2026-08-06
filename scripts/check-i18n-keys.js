@@ -20,12 +20,15 @@ const LOCALE_FILE = join(ROOT, 'static', 'locales', 'en.js');
 /**
  * @param {string} dir
  */
+const SKIP_DIRS = new Set(['dist', 'vendor']);
+
 function walk(dir) {
   /** @type {string[]} */
   const files = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
+      if (SKIP_DIRS.has(entry)) continue;
       files.push(...walk(full));
     } else if (extname(full) === '.js') {
       files.push(full);
@@ -50,6 +53,25 @@ for (const file of allFiles) {
     if (!catalogKeys.has(key)) {
       if (!missing.has(key)) missing.set(key, []);
       missing.get(key)?.push(file.replace(ROOT + '/', ''));
+    }
+  }
+}
+
+// The settings nav builds its labels from the section id via a template literal
+// (`settings.section.${id}.label`), which T_RE cannot see — so a section could be
+// registered with no catalog entry and CI stayed green while the nav rendered the
+// raw key. Derive the expected keys from the section ids instead.
+{
+  const idx = join(ROOT, 'static/js/pages/settings/index.js');
+  const src = readFileSync(idx, 'utf8');
+  const ids = new Set([...src.matchAll(/\{\s*id:\s*'([a-z0-9-]+)'/g)].map((m) => m[1]));
+  for (const id of ids) {
+    for (const suffix of ['label', 'desc']) {
+      const key = `settings.section.${id.replace(/-/g, '_')}.${suffix}`;
+      if (!catalogKeys.has(key)) {
+        if (!missing.has(key)) missing.set(key, []);
+        missing.get(key)?.push('static/js/pages/settings/index.js (settings section)');
+      }
     }
   }
 }

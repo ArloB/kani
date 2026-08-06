@@ -4,6 +4,8 @@ use crate::models::SourceHealthRow;
 use crate::source::loader;
 use sqlx::Row as _;
 
+const DEFAULT_GLOBAL_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
+
 pub(crate) fn compile_pure_registry(
     metadata: &kani_shared::ExtensionMetadata,
 ) -> Option<std::sync::Arc<kani_core::scripting::PureFunctionRegistry>> {
@@ -50,6 +52,8 @@ pub(crate) async fn resolve_option_set(
     cache: &dyn kani_core::cache::CacheBackend,
     client: &kani_core::http::SmartClient,
     source_id: i64,
+    base_url: &str,
+    unrestricted_http: bool,
     def: &kani_shared::FilterFetchDef,
 ) -> Option<Vec<(String, String)>> {
     use std::time::Duration;
@@ -59,7 +63,9 @@ pub(crate) async fn resolve_option_set(
     if let Some(cached) = cache.get(&cache_ns, cache_key).await {
         return Some(kani_shared::serde_json::from_slice(&cached).unwrap_or_default());
     }
-    match kani_core::option_set_fetcher::fetch_option_set(client, def).await {
+    match kani_core::option_set_fetcher::fetch_option_set(client, def, base_url, unrestricted_http)
+        .await
+    {
         Ok(opts) => {
             if let Ok(bytes) = kani_shared::serde_json::to_vec(&opts) {
                 cache.put(&cache_ns, cache_key, bytes, ttl).await;
@@ -268,12 +274,41 @@ impl AppService {
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
 
-            let wasm_path = self
-                .settings
-                .read()
-                .await
-                .wasm_storage_path
-                .join(format!("{}.wasm", source.name));
+            let wasm_storage_path = self.settings.read().await.wasm_storage_path.clone();
+
+            // Interpreted-YAML sources have no `.wasm` file. Re-enabling one used
+            // to fall straight into the WASM path below, fail to read a
+            // nonexistent `{name}.wasm`, and leave the registry empty — so every
+            // later call reported "Source not found". Rebuild the YAML backend
+            // the same way startup does.
+            let yaml_path = wasm_storage_path.join(format!("{}.yaml", source.name));
+            if yaml_path.exists() {
+                let text = tokio::fs::read_to_string(&yaml_path)
+                    .await
+                    .map_err(|e| ServiceError::Core(kani_core::Error::Io(e)))?;
+                let ext = kani_yaml::parse_and_validate(&text, &yaml_path).map_err(|errs| {
+                    ServiceError::Internal(
+                        errs.iter()
+                            .map(|e| e.to_string())
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    )
+                })?;
+                let prefs = self.load_pref_map(id).await?;
+                let browser_enabled = self.browser_enabled_flag(id).await;
+                let backend = loader::build_yaml_source(
+                    std::sync::Arc::new(ext),
+                    self.smart_client.clone(),
+                    std::sync::Arc::clone(&self.ext_cache),
+                    format!("{}:", source.name),
+                    prefs,
+                    browser_enabled,
+                );
+                self.sources.insert(id, backend);
+                return Ok(());
+            }
+
+            let wasm_path = wasm_storage_path.join(format!("{}.wasm", source.name));
 
             let bytes = tokio::fs::read(&wasm_path)
                 .await
@@ -414,17 +449,24 @@ impl AppService {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
         let sources = self.sources.clone();
+        let svc = self.clone();
 
         self.cache
             .get_or_fetch_popular_manga(id, page, page_size, filters_key, async move {
-                let backend = sources
-                    .get_backend(id)
-                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
-                let result = backend
-                    .get_popular_manga(page, page_size, &active_filters)
-                    .await?;
-                serde_json::to_string(&result)
-                    .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                let started = std::time::Instant::now();
+                let outcome = async {
+                    let backend = sources
+                        .get_backend(id)
+                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                    let result = backend
+                        .get_popular_manga(page, page_size, &active_filters)
+                        .await?;
+                    serde_json::to_string(&result)
+                        .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                }
+                .await;
+                svc.record_source_call(id, started, &outcome).await;
+                outcome
             })
             .await
             .map_err(unwrap_cache_err)
@@ -446,17 +488,24 @@ impl AppService {
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or_default();
         let sources = self.sources.clone();
+        let svc = self.clone();
         let q = query.to_string();
         self.cache
             .get_or_fetch_search_results(id, query, page, page_size, filters_key, async move {
-                let backend = sources
-                    .get_backend(id)
-                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
-                let result = backend
-                    .search_manga(&q, page, page_size, &active_filters)
-                    .await?;
-                serde_json::to_string(&result)
-                    .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                let started = std::time::Instant::now();
+                let outcome = async {
+                    let backend = sources
+                        .get_backend(id)
+                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                    let result = backend
+                        .search_manga(&q, page, page_size, &active_filters)
+                        .await?;
+                    serde_json::to_string(&result)
+                        .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                }
+                .await;
+                svc.record_source_call(id, started, &outcome).await;
+                outcome
             })
             .await
             .map_err(unwrap_cache_err)
@@ -495,9 +544,32 @@ impl AppService {
         mut filter_list: kani_core::WitFilterList,
         defs: &[kani_shared::FilterFetchDef],
     ) -> kani_core::WitFilterList {
+        // The source's own HTTP policy governs where an option-set may be
+        // fetched from — a fetched-option def must not escape the source's host
+        // (unless the source is unrestricted). Missing/failed lookup → treat as
+        // the safe default (restricted, empty base) so a bad def can't reach out.
+        let (base_url, unrestricted_http) = sqlx::query!(
+            "SELECT base_url, unrestricted_http AS \"unrestricted_http: bool\" \
+             FROM sources WHERE id = ?",
+            source_id
+        )
+        .fetch_optional(&self.db_read)
+        .await
+        .ok()
+        .flatten()
+        .map(|r| (r.base_url, r.unrestricted_http))
+        .unwrap_or_default();
+
         for def in defs {
-            let options =
-                resolve_option_set(&*self.ext_cache, &self.smart_client, source_id, def).await;
+            let options = resolve_option_set(
+                &*self.ext_cache,
+                &self.smart_client,
+                source_id,
+                &base_url,
+                unrestricted_http,
+                def,
+            )
+            .await;
             let Some(options) = options else { continue };
 
             if let Some(filter) = filter_list
@@ -554,17 +626,24 @@ impl AppService {
     pub async fn get_pages(&self, id: i64, manga_id: &str, chapter_id: &str) -> Result<String> {
         self.require_source_active(id).await?;
         let sources = self.sources.clone();
+        let svc = self.clone();
         let manga_id_d = decode_manga_id(manga_id);
         let chapter_id_d = decode_manga_id(chapter_id);
 
         self.cache
             .get_or_fetch_pages(id, &manga_id_d.clone(), &chapter_id_d.clone(), async move {
-                let backend = sources
-                    .get_backend(id)
-                    .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
-                let result = backend.get_pages(&manga_id_d, &chapter_id_d).await?;
-                serde_json::to_string(&result)
-                    .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                let started = std::time::Instant::now();
+                let outcome = async {
+                    let backend = sources
+                        .get_backend(id)
+                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
+                    let result = backend.get_pages(&manga_id_d, &chapter_id_d).await?;
+                    serde_json::to_string(&result)
+                        .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                }
+                .await;
+                svc.record_source_call(id, started, &outcome).await;
+                outcome
             })
             .await
             .map_err(unwrap_cache_err)
@@ -580,6 +659,7 @@ impl AppService {
     ) -> Result<String> {
         self.require_source_active(id).await?;
         let sources = self.sources.clone();
+        let svc = self.clone();
         let manga_id_d = decode_manga_id(manga_id);
         let sort_key = sort.clone().unwrap_or_default();
 
@@ -591,14 +671,20 @@ impl AppService {
                 page_size,
                 &sort_key,
                 async move {
-                    let backend = sources
-                        .get_backend(id)
-                        .ok_or_else(|| ServiceError::NotFound(format!("Source {id} not found")))?;
-                    let result = backend
-                        .get_chapter_list(&manga_id_d, page, Some(page_size), sort)
-                        .await?;
-                    serde_json::to_string(&result)
-                        .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                    let started = std::time::Instant::now();
+                    let outcome = async {
+                        let backend = sources.get_backend(id).ok_or_else(|| {
+                            ServiceError::NotFound(format!("Source {id} not found"))
+                        })?;
+                        let result = backend
+                            .get_chapter_list(&manga_id_d, page, Some(page_size), sort)
+                            .await?;
+                        serde_json::to_string(&result)
+                            .map_err(|e| ServiceError::Core(kani_core::Error::Json(e)))
+                    }
+                    .await;
+                    svc.record_source_call(id, started, &outcome).await;
+                    outcome
                 },
             )
             .await
@@ -664,6 +750,12 @@ impl AppService {
         .map(|r| (r.id, r.name))
         .collect();
 
+        let per_source_timeout =
+            u64::try_from(self.settings.read().await.global_search_timeout_secs)
+                .map(std::time::Duration::from_secs)
+                .unwrap_or(DEFAULT_GLOBAL_SEARCH_TIMEOUT)
+                .max(std::time::Duration::from_secs(1));
+
         let tasks: Vec<_> = ids_to_search
             .iter()
             .map(|(&source_id, source_name)| {
@@ -672,9 +764,25 @@ impl AppService {
                 let source_name = source_name.clone();
 
                 tokio::spawn(async move {
-                    let result = state
-                        .search_manga(source_id, &q, page, page_size, None)
-                        .await;
+                    // One unresponsive source must not hold the whole aggregate
+                    // hostage for the client's full timeout. Every other source
+                    // has already answered; this one reports as failed and the
+                    // results ship.
+                    let result = match tokio::time::timeout(
+                        per_source_timeout,
+                        state.search_manga(source_id, &q, page, page_size, None),
+                    )
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(_) => {
+                            state.record_source_error(source_id).await;
+                            Err(ServiceError::Internal(format!(
+                                "Source {source_id} did not answer within {}s",
+                                per_source_timeout.as_secs()
+                            )))
+                        }
+                    };
                     (source_id, source_name, result)
                 })
             })
@@ -737,6 +845,26 @@ impl AppService {
         .fetch_all(&self.db_read)
         .await?;
         Ok(rows)
+    }
+
+    /// Records health for a call whose result we already have.
+    ///
+    /// Only `get_metadata` and `get_filter_list` used to do this, so the health
+    /// panel was blind to search, page fetches and chapter listings — the paths
+    /// users actually exercise and the ones that actually break.
+    pub(crate) async fn record_source_call<T>(
+        &self,
+        source_id: i64,
+        started: std::time::Instant,
+        result: &Result<T>,
+    ) {
+        match result {
+            Ok(_) => {
+                self.record_source_success(source_id, started.elapsed().as_millis() as u64)
+                    .await
+            }
+            Err(_) => self.record_source_error(source_id).await,
+        }
     }
 
     pub async fn record_source_success(&self, source_id: i64, elapsed_ms: u64) {
@@ -1372,7 +1500,8 @@ mod tests {
             .await;
 
         let def = make_def(Some("genres-v1"));
-        let result = resolve_option_set(&*cache, &client, 1, &def).await;
+        let result =
+            resolve_option_set(&*cache, &client, 1, "https://example.invalid", false, &def).await;
 
         let result = result.expect("cache hit must return Some");
         assert_eq!(result.len(), 2);
@@ -1385,10 +1514,78 @@ mod tests {
         let cache = Arc::new(InMemoryCache::new());
         let client = kani_core::http::SmartClient::new(None).unwrap();
         let def = make_def(None);
-        let result = resolve_option_set(&*cache, &client, 1, &def).await;
+        let result =
+            resolve_option_set(&*cache, &client, 1, "https://example.invalid", false, &def).await;
         assert!(
             result.is_none(),
             "unreachable URL must return None (no cache, fetch fails)"
+        );
+    }
+
+    // Group G — a failed fetch must not be cached as a (successful) result. A
+    // poisoned cache would serve the failure/empty on the next call instead of
+    // re-fetching once the origin recovers. Driven with a 500 from a TestOrigin
+    // (fast, non-retryable) rather than an unresolvable host.
+    #[tokio::test]
+    async fn a_failed_option_set_fetch_does_not_write_the_cache() {
+        use kani_shared_test::origin::{Response, TestOrigin};
+        let origin = TestOrigin::start().await;
+        origin.set("/genres", Response::status(500));
+
+        let cache = Arc::new(InMemoryCache::new());
+        let client = kani_core::http::SmartClient::new(None).unwrap();
+        let mut def = make_def(Some("genres-v1"));
+        def.route = origin.url("/genres");
+
+        let result = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
+        assert!(result.is_none(), "a 500 fetch returns None");
+        assert!(
+            cache.get("fetched_opts:1", "genres-v1").await.is_none(),
+            "a failed fetch must leave the cache empty so the next call re-fetches"
+        );
+    }
+
+    // G2 — a declared option-set cache TTL is honoured end-to-end: within the
+    // TTL the cached values are served without re-hitting the origin; once it
+    // elapses the entry expires and the next resolve re-fetches. Driven through
+    // resolve_option_set with a 1s TTL against a TestOrigin.
+    #[tokio::test]
+    async fn a_declared_option_set_cache_ttl_is_honoured() {
+        use kani_shared_test::origin::{Response, TestOrigin};
+        let origin = TestOrigin::start().await;
+        origin.set(
+            "/genres",
+            Response::json(r#"[{"name":"Action","value":"action"}]"#),
+        );
+
+        let cache = Arc::new(InMemoryCache::new());
+        let client = kani_core::http::SmartClient::new(None).unwrap();
+        let mut def = make_def(Some("genres-v1"));
+        def.route = origin.url("/genres");
+        def.cache_ttl = 1;
+
+        // First resolve fetches and populates the cache.
+        let first = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
+        assert_eq!(first.expect("first fetch succeeds").len(), 1);
+        assert_eq!(origin.hits("/genres"), 1);
+
+        // Within the TTL: served from cache, no new origin hit.
+        let cached = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
+        assert_eq!(cached.expect("cache hit").len(), 1);
+        assert_eq!(
+            origin.hits("/genres"),
+            1,
+            "within the declared TTL the cache is honoured, no re-fetch"
+        );
+
+        // Past the TTL: the entry expires and the next resolve re-fetches.
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        let refetched = resolve_option_set(&*cache, &client, 1, &origin.base(), true, &def).await;
+        assert_eq!(refetched.expect("re-fetch succeeds").len(), 1);
+        assert_eq!(
+            origin.hits("/genres"),
+            2,
+            "once the declared TTL elapses the value is re-fetched"
         );
     }
 }

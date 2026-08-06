@@ -3,6 +3,7 @@
 //! This crate provides the core business logic for the Kani manga downloader,
 //! including WASM extension hosting, download management, and source handling.
 
+pub mod archive;
 pub mod cache;
 pub mod cbz;
 pub mod comic_info;
@@ -11,11 +12,14 @@ pub mod error;
 pub mod evaluator;
 pub mod file_storage;
 pub mod http;
-pub mod image_transform;
+pub mod manifest;
 pub mod network;
 pub mod option_set_fetcher;
+pub mod probe;
+pub mod quality;
 pub mod scripting;
 pub mod sources;
+pub mod transform;
 pub mod utilities;
 pub mod v8_process;
 pub mod wasm;

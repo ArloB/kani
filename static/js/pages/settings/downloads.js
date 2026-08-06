@@ -16,10 +16,8 @@ const html = htm.bind(h);
 
 const FIELDS = [
   { key: 'concurrent_page_downloads', label: 'settings.downloads.concurrent_pages', desc: 'settings.downloads.concurrent_pages.desc', min: 1 },
-  { key: 'concurrent_manga_downloads', label: 'settings.downloads.concurrent_manga', desc: 'settings.downloads.concurrent_manga.desc', min: 1 },
   { key: 'per_source_download_concurrency', label: 'settings.downloads.per_source_concurrency', desc: 'settings.downloads.per_source_concurrency.desc', min: 1 },
   { key: 'scan_concurrency', label: 'settings.downloads.scan_concurrency', desc: 'settings.downloads.scan_concurrency.desc', min: 1 },
-  { key: 'chapter_queue_size', label: 'settings.downloads.chapter_queue_size', desc: 'settings.downloads.chapter_queue_size.desc', min: 1, tooltip: 'settings.downloads.chapter_queue_size.tooltip' },
   { key: 'max_retries', label: 'settings.downloads.max_retries', desc: 'settings.downloads.max_retries.desc', min: 0 },
   { key: 'initial_retry_delay_ms', label: 'settings.downloads.initial_retry_delay', desc: 'settings.downloads.initial_retry_delay.desc', min: 0 },
 ];

@@ -36,8 +36,10 @@ function chartColor(varName, alpha = 1) {
 }
 
 // ── Widget registry ───────────────────────────────────────────────────────────
-// Each widget: { id: string, render(container, data) → { destroy() } }
+// Each widget: { id: string, pinned?: boolean, render(container, data) → { destroy() } }
 // Adding a new widget requires only appending to WIDGETS — no other changes.
+// A pinned widget sits above the scroll boundary and stays on screen while
+// the charts below it move.
 
 const WIDGETS = [
   summaryWidget(),
@@ -53,6 +55,7 @@ const WIDGETS = [
 /** @type {Array<{ destroy(): void }>} */   let _widgetInstances = [];
 /** @type {number} */                       let _period = 90;
 /** @type {HTMLElement | null} */           let _contentEl = null;
+/** @type {HTMLElement | null} */           let _pinnedEl = null;
 
 // ── Init / Destroy ────────────────────────────────────────────────────────────
 
@@ -80,12 +83,15 @@ export async function init(container) {
   setPageHeader({ crumbs: [{ label: t('stats.crumb') }], actions: picker });
 
   container.innerHTML = `
-    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-4 md:py-6">
-      <div id="stats-content"></div>
+    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-4 md:py-6 flex flex-col gap-6 page-body-host page-col">
+      <div id="stats-pinned" class="flex flex-col gap-6 empty:hidden"></div>
+      <div id="stats-content" class="page-body"></div>
     </div>
   `;
 
+  container.classList.add('page-fixed');
   _contentEl = /** @type {HTMLElement} */ (container.querySelector('#stats-content'));
+  _pinnedEl  = /** @type {HTMLElement} */ (container.querySelector('#stats-pinned'));
   await _load();
 }
 
@@ -94,6 +100,8 @@ export function destroy(_c) {
   _abort?.abort();
   _abort = null;
   _destroyWidgets();
+  _contentEl = null;
+  _pinnedEl = null;
   clearPageHeader();
 }
 
@@ -104,14 +112,17 @@ async function _load() {
   _abort?.abort();
   _abort = new AbortController();
   _destroyWidgets();
+  if (_pinnedEl) _pinnedEl.innerHTML = '';
   _contentEl.innerHTML = _buildSkeleton();
   startLoading();
 
   try {
     const stats = await api.getReadingStats(_period);
+    if (_pinnedEl) _pinnedEl.innerHTML = '';
     _contentEl.innerHTML = '';
     _renderWidgets(stats);
   } catch (err) {
+    if (_pinnedEl) _pinnedEl.innerHTML = '';
     _contentEl.innerHTML = '';
     _contentEl.appendChild(createErrorState({ message: err?.message ?? t('stats.error.load') }));
   } finally {
@@ -128,7 +139,7 @@ function _renderWidgets(stats) {
 
   for (const widget of WIDGETS) {
     const slot = document.createElement('div');
-    grid.appendChild(slot);
+    (widget.pinned && _pinnedEl ? _pinnedEl : grid).appendChild(slot);
     try {
       const instance = widget.render(slot, stats);
       _widgetInstances.push(instance);
@@ -165,6 +176,7 @@ function _buildSkeleton() {
 function summaryWidget() {
   return {
     id: 'summary',
+    pinned: true,
     /** @param {HTMLElement} container @param {any} data */
     render(container, data) {
       const cards = [

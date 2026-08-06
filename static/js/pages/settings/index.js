@@ -25,6 +25,7 @@ import { formDirty, runSave, runReset } from './form-bus.js';
 
 import { GeneralSection } from './general.js';
 import { LibrarySection } from './library.js';
+import { ScanlatorsSection } from './scanlators.js';
 import { CollectionsSection } from './collections.js';
 import { MangaManagementSection } from './manga-management.js';
 import { TrashSection } from './trash.js';
@@ -38,9 +39,11 @@ import { AdvancedSection } from './advanced.js';
 import { StorageSection } from './storage.js';
 import { MaintenanceSection } from './maintenance.js';
 import { ServerSection } from './server.js';
+import { SourcesHealthSection } from './sources-health.js';
 import { AccountSection } from './account.js';
 import { ClientsSection } from './clients.js';
 import { SecuritySection } from './security.js';
+import { DiagnosticsSection } from './diagnostics.js';
 
 const html = htm.bind(h);
 
@@ -61,6 +64,7 @@ function buildSections(settings, categories, bootId) {
     { id: 'library', perm: 'library:manage', C: LibrarySection, props: { categories } },
     { id: 'collections', perm: 'library:manage', C: CollectionsSection, props: {} },
     { id: 'manga-management', perm: 'library:manage', C: MangaManagementSection, props: {} },
+    { id: 'scanlators', perm: 'library:manage', C: ScanlatorsSection, props: {} },
     { id: 'trash', perm: 'library:view', C: TrashSection, props: {} },
     { id: 'downloads', perm: 'settings:edit_download', C: DownloadsSection, props: { settings } },
     { id: 'offline', perm: null, C: OfflineSection, props: {} },
@@ -72,6 +76,22 @@ function buildSections(settings, categories, bootId) {
     { id: 'storage', perm: 'admin:manage', group: g.server, C: StorageSection, props: {} },
     { id: 'maintenance', perm: 'settings:edit_advanced', group: g.server, C: MaintenanceSection, props: { settings } },
     { id: 'server', perm: 'server:manage', group: g.server, C: ServerSection, props: {} },
+    {
+      id: 'sources-health',
+      // Mirrors the guard on GET /rest/sources/health (SourceBrowse), not the
+      // stricter one on the reload action the section offers.
+      perm: 'source:browse',
+      group: g.server,
+      C: SourcesHealthSection,
+      props: {},
+    },
+    {
+      id: 'diagnostics',
+      perm: 'server:manage',
+      group: g.server,
+      C: DiagnosticsSection,
+      props: {},
+    },
     { id: 'account', perm: null, group: g.account, C: AccountSection, props: {} },
     { id: 'clients', perm: null, group: g.account, C: ClientsSection, props: {} },
     { id: 'security', perm: null, group: g.account, C: SecuritySection, props: {} },

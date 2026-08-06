@@ -665,11 +665,21 @@ pub mod extract {
     use crate::bindings::kani::extension::extraction;
     use crate::host_abi::JsonHandle;
 
+    /// Turn a host-side extraction error into a typed [`ExtensionError`]. When the
+    /// host marks it with the HTTP-status sentinel (a 429/5xx/auth the body was
+    /// never useful for), classify it so the compiled-WASM backend reports the
+    /// same kind the interpreted-YAML backend does; otherwise it is a genuine
+    /// extraction failure and stays `Unknown`.
+    fn classify_host_error(msg: String) -> ExtensionError {
+        crate::extension::classify_status_error(&msg)
+            .unwrap_or_else(|| ExtensionError::unknown(msg))
+    }
+
     /// Run a blueprint extraction over an HTML document handle.
     /// Returns a `JsonHandle` wrapping `[{field: value, ...}, ...]`.
     pub fn html(doc: Option<i32>, blueprint: &Blueprint) -> Result<JsonHandle, ExtensionError> {
         let bytes = blueprint.to_bytes();
-        let handle = extraction::extract_html(doc, &bytes).map_err(ExtensionError::unknown)?;
+        let handle = extraction::extract_html(doc, &bytes).map_err(classify_host_error)?;
         Ok(JsonHandle::from_raw(handle))
     }
 
@@ -678,7 +688,7 @@ pub mod extract {
     pub fn json(handle: Option<i32>, blueprint: &Blueprint) -> Result<JsonHandle, ExtensionError> {
         let bytes = blueprint.to_bytes();
         let result_handle =
-            extraction::extract_json(handle, &bytes).map_err(ExtensionError::unknown)?;
+            extraction::extract_json(handle, &bytes).map_err(classify_host_error)?;
         Ok(JsonHandle::from_raw(result_handle))
     }
 
@@ -691,7 +701,7 @@ pub mod extract {
     ) -> Result<JsonHandle, ExtensionError> {
         let bytes = blueprint.to_bytes();
         let handle = extraction::paginated_extract_html(page, page_size, &bytes)
-            .map_err(ExtensionError::unknown)?;
+            .map_err(classify_host_error)?;
         Ok(JsonHandle::from_raw(handle))
     }
 
@@ -705,7 +715,7 @@ pub mod extract {
     ) -> Result<JsonHandle, ExtensionError> {
         let bytes = blueprint.to_bytes();
         let handle = extraction::paginated_extract_json(page, page_size, &bytes)
-            .map_err(ExtensionError::unknown)?;
+            .map_err(classify_host_error)?;
         Ok(JsonHandle::from_raw(handle))
     }
 }

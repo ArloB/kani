@@ -4,6 +4,11 @@ use futures::stream::{FuturesUnordered, StreamExt};
 
 // Library scanning, refresh, chapter fetch/store and metadata sync.
 
+/// Consecutive all-known listing pages tolerated before a scan concludes it has
+/// caught up. More than one, because hitting a page of already-held chapters is
+/// routine at a pagination boundary and says nothing about what follows.
+const DEFAULT_BARREN_PAGE_TOLERANCE: usize = 3;
+
 impl AppService {
     /// `force` skips the fuzzy duplicate check (used after the user confirms "add anyway").
     pub async fn save_to_library(
@@ -400,6 +405,22 @@ impl AppService {
             }
         }
 
+        // Upgrade detection runs on freshly-upserted chapters. It is
+        // metadata-only and must never fail a refresh, so a problem here is
+        // logged rather than propagated.
+        match self.evaluate_upgrades(manga_row_id).await {
+            Ok(found) if !found.is_empty() => {
+                let _ = self
+                    .refresh_tx
+                    .send(crate::events::AppEvent::UpgradesFound {
+                        manga_id: manga_row_id.0,
+                        count: found.len() as u64,
+                    });
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Upgrade evaluation failed for {manga_row_id}: {e}"),
+        }
+
         Ok(())
     }
 
@@ -413,7 +434,7 @@ impl AppService {
         for chunk in chapters.chunks(100) {
             let mut qb = sqlx::QueryBuilder::new(
                 "INSERT OR IGNORE INTO chapters \
-                (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at, discovered_at) ",
+                (manga_id, source_chapter_id, name, chapter_number, language, volume, scanlator, uploaded_at, source_page_count, discovered_at) ",
             );
             qb.push_values(chunk, |mut b, ch| {
                 b.push_bind(manga_row_id)
@@ -423,7 +444,8 @@ impl AppService {
                     .push_bind(ch.language.clone())
                     .push_bind(ch.volume)
                     .push_bind(ch.scanlator.clone())
-                    .push_bind(ch.date_uploaded);
+                    .push_bind(ch.date_uploaded)
+                    .push_bind(ch.page_count.map(i64::from));
                 b.push("CURRENT_TIMESTAMP");
             });
             qb.push(" RETURNING id");
@@ -431,6 +453,32 @@ impl AppService {
             ids.append(&mut rows);
         }
         Ok(ids)
+    }
+
+    async fn refresh_source_page_counts(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        manga_row_id: MangaId,
+        chapters: &[wit_types::ChapterInfo],
+    ) -> Result<()> {
+        for ch in chapters {
+            let Some(count) = ch.page_count.map(i64::from) else {
+                continue;
+            };
+            let source_chapter_id = decode_manga_id(&ch.id);
+            sqlx::query!(
+                "UPDATE chapters SET source_page_count = ? \
+                 WHERE manga_id = ? AND source_chapter_id = ? \
+                 AND (source_page_count IS NULL OR source_page_count != ?)",
+                count,
+                manga_row_id,
+                source_chapter_id,
+                count
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+        Ok(())
     }
 
     /// Fetches chapters from the source and stores them without broadcasting any SSE events.
@@ -462,10 +510,32 @@ impl AppService {
             .get_backend(ids.source_id)
             .ok_or_else(|| ServiceError::NotFound(format!("Source {} not found", ids.source_id)))?;
 
-        let mut tx = self.db.begin().await?;
-        let mut new_chapter_ids = Vec::new();
+        // The write pool holds exactly one connection, so a transaction opened
+        // here would be held across every page fetch — each with its retries,
+        // backoff and possible challenge solve — starving every other writer in
+        // the process. A scan of a real library was measured blocking a
+        // recurring job for 28.8 s that way. Pages are collected first and
+        // written once, after all network I/O is done.
+        //
+        // Deciding "new on this page" without writing needs the ids already
+        // held, which is what the barren-page guard counts.
+        let mut known_ids: std::collections::HashSet<String> = sqlx::query_scalar!(
+            "SELECT source_chapter_id FROM chapters WHERE manga_id = ?",
+            manga_row_id
+        )
+        .fetch_all(&self.db_read)
+        .await?
+        .into_iter()
+        .collect();
+
+        let mut collected: Vec<wit_types::ChapterInfo> = Vec::new();
         let mut total_received = 0usize;
         let mut page = 1;
+        let mut barren_pages = 0usize;
+        let barren_tolerance =
+            usize::try_from(self.settings.read().await.scan_barren_page_tolerance)
+                .unwrap_or(DEFAULT_BARREN_PAGE_TOLERANCE)
+                .max(1);
 
         loop {
             let res = match backend
@@ -494,17 +564,14 @@ impl AppService {
                 break;
             }
 
-            let mut page_new_ids = Vec::new();
-            for chunk in chapter_list.chapters.chunks(100) {
-                let chunk_ids = self
-                    .insert_chapters_batch(&mut tx, manga_row_id, chunk)
-                    .await?;
-                page_new_ids.extend(chunk_ids);
-            }
+            let new_on_page = chapter_list
+                .chapters
+                .iter()
+                .filter(|ch| known_ids.insert(decode_manga_id(&ch.id)))
+                .count();
 
             total_received += chapter_list.chapters.len();
-            let new_on_page = page_new_ids.len();
-            new_chapter_ids.extend(page_new_ids);
+            collected.extend(chapter_list.chapters.iter().cloned());
 
             if emit_progress {
                 let _ = self.refresh_tx.send(AppEvent::ChapterListPartial {
@@ -513,13 +580,43 @@ impl AppService {
                 });
             }
 
-            if new_on_page == 0 || !chapter_list.has_next_page {
+            // A page of entirely-known chapters is not proof that nothing new
+            // lies beyond it. That only holds for a strictly newest-first,
+            // strictly monotonic listing; oldest-first ordering, listings
+            // interleaved by upload date across scanlators, and sources that
+            // re-list a batch of old chapters all break it, and the scan then
+            // reports "no new chapters" on every subsequent run because the
+            // shape never changes.
+            //
+            // The guard still exists — an unbounded loop over a source that
+            // always claims another page would grow the DB forever — but it now
+            // takes a run of barren pages, not one.
+            if new_on_page == 0 {
+                barren_pages += 1;
+            } else {
+                barren_pages = 0;
+            }
+            if barren_pages >= barren_tolerance || !chapter_list.has_next_page {
                 break;
             }
 
             page += 1;
         }
 
+        // One short checkout of the single write connection, with no network in
+        // scope. Still all-or-nothing: a page failure above returns before this
+        // runs, so a partial listing is never half-stored.
+        let mut tx = self.db.begin().await?;
+        let new_chapter_ids = self
+            .insert_chapters_batch(&mut tx, manga_row_id, &collected)
+            .await?;
+
+        // `INSERT OR IGNORE` leaves already-known rows untouched, so a re-listed
+        // chapter whose page count changed would keep the count it was first
+        // discovered with. Refreshing it here is what turns re-upload detection
+        // from theoretical into something that can fire.
+        self.refresh_source_page_counts(&mut tx, manga_row_id, &collected)
+            .await?;
         tx.commit().await?;
 
         if !new_chapter_ids.is_empty() {

@@ -5,7 +5,7 @@ import { h, render } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import htm from 'htm';
 import { hasPermission } from '../../session.js';
-import { getJobs, cancelJob } from '../../api.js';
+import { getJobs, cancelJob, pauseJob, resumeJob } from '../../api.js';
 import { showApiError, showToast } from '../../components/toast.js';
 import { setPageHeader, clearPageHeader } from '../../components/app-header.js';
 import { EmptyState } from '../../components/empty-state.js';
@@ -42,7 +42,7 @@ function _pct(job) {
 
 // ── Row components ─────────────────────────────────────────────────────────────
 
-function ActiveJobRow({ job, onCancel }) {
+function ActiveJobRow({ job, onCancel, onPause, onResume }) {
   const pct = _pct(job);
   const spinning = pct === 0 || job.status === 'pending';
   const circ = 75.4;
@@ -69,6 +69,16 @@ function ActiveJobRow({ job, onCancel }) {
         <span class=${'text-xs px-1.5 py-0.5 rounded-full font-medium shrink-0 ' + (job.status === 'running' ? 'bg-accent/15 text-accent' : 'bg-surface-2 text-text-muted')}>
           ${job.status}
         </span>
+        ${job.status === 'pending' && html`
+          <button class="btn-ghost btn-sm shrink-0" onClick=${() => onPause(job.id)} aria-label=${t('jobs.pause')}>
+            ${t('jobs.pause')}
+          </button>
+        `}
+        ${job.status === 'paused' && html`
+          <button class="btn-ghost btn-sm shrink-0" onClick=${() => onResume(job.id)} aria-label=${t('jobs.resume')}>
+            ${t('jobs.resume')}
+          </button>
+        `}
         <button class="btn-ghost btn-sm shrink-0 text-danger" onClick=${() => onCancel(job.id)} aria-label=${t('jobs.cancel')}>
           ${t('jobs.cancel')}
         </button>
@@ -132,7 +142,10 @@ const PAGE_SIZE = 25;
 
 /** Status groups per tab — the server accepts a comma-separated status list. */
 const TAB_STATUSES = {
-  active:    ['pending', 'running'],
+  // `paused` belongs here: a paused job is still outstanding work, and leaving
+  // it out made pausing look like the job vanished — with the Resume button
+  // unreachable, since it only renders on the row.
+  active:    ['pending', 'running', 'paused'],
   completed: ['completed'],
   failed:    ['failed', 'cancelled'],
 };
@@ -173,6 +186,26 @@ function JobsPage() {
     return () => window.removeEventListener('kani:sse', /** @type {any} */ (onSSE));
   }, [_load]);
 
+  async function handlePause(id) {
+    try {
+      await pauseJob(id);
+      showToast(t('jobs.action.paused'));
+      _load();
+    } catch (err) {
+      showApiError(err);
+    }
+  }
+
+  async function handleResume(id) {
+    try {
+      await resumeJob(id);
+      showToast(t('jobs.action.resumed'));
+      _load();
+    } catch (err) {
+      showApiError(err);
+    }
+  }
+
   async function handleCancel(id) {
     try {
       await cancelJob(id);
@@ -198,7 +231,7 @@ function JobsPage() {
   }[tab];
 
   return html`
-    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-6 flex flex-col gap-4">
+    <div class="max-w-page mx-auto w-full px-4 md:px-6 py-6 flex flex-col gap-4 page-body-host page-col">
       <${Tabs}
         tabs=${[
           { id: 'active',    name: t('jobs.tab.active') },
@@ -221,11 +254,11 @@ function JobsPage() {
         `}
       </div>
 
-      <div class=${'bg-surface border border-border rounded-xl overflow-hidden' + (loading ? ' opacity-60' : '')}>
+      <div class=${'bg-surface border border-border rounded-xl overflow-x-hidden page-body--fit' + (loading ? ' opacity-60' : '')}>
         ${jobs.length === 0 && !loading
           ? html`<${EmptyState} icon=${emptyFor.icon} title=${emptyFor.title} subtitle=${emptyFor.subtitle} />`
           : jobs.map(j => {
-              if (tab === 'active')    return html`<${ActiveJobRow}    key=${j.id} job=${j} onCancel=${handleCancel} />`;
+              if (tab === 'active')    return html`<${ActiveJobRow}    key=${j.id} job=${j} onCancel=${handleCancel} onPause=${handlePause} onResume=${handleResume} />`;
               if (tab === 'completed') return html`<${CompletedJobRow} key=${j.id} job=${j} />`;
               return html`<${FailedJobRow} key=${j.id} job=${j} />`;
             })
@@ -256,6 +289,7 @@ export async function init(container) {
   }
 
   setPageHeader({ crumbs: [{ label: t('jobs.title') }] });
+  container.classList.add('page-fixed');
   render(html`<${JobsPage} />`, container);
 }
 

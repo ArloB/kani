@@ -59,6 +59,8 @@ pub mod ast;
 pub use ast::{OffsetType, PaginationConfig};
 
 pub mod filters;
+pub mod request;
+pub mod unpack;
 pub use filters::{ApplyFilters, ArrayFormat, FilterGroups};
 
 #[cfg(any(feature = "host", feature = "builder", feature = "meta"))]

@@ -7,6 +7,9 @@ pub(super) struct MigrationContext {
     pub orphaned_ids: Vec<i64>,
     pub unmatched_new: Vec<wit_types::ChapterInfo>,
     pub downloaded_orphan_ids: Vec<i64>,
+    /// The target's listing hit the page ceiling, so "absent from the listing"
+    /// does not mean "does not exist on the target".
+    pub listing_truncated: bool,
 }
 
 impl AppService {
@@ -36,8 +39,8 @@ impl AppService {
         let new_details: wit_types::MangaInfo = serde_json::from_str(&raw)
             .map_err(|e| ServiceError::Internal(format!("Failed to parse manga details: {e}")))?;
 
-        let target_chapters = self
-            .fetch_all_chapter_pages(target_source_id, target_source_manga_id)
+        let (target_chapters, listing_truncated) = self
+            .fetch_all_chapter_pages_checked(target_source_id, target_source_manga_id)
             .await?;
 
         let existing_chapters = sqlx::query!(
@@ -67,6 +70,7 @@ impl AppService {
             orphaned_ids,
             unmatched_new,
             downloaded_orphan_ids,
+            listing_truncated,
         })
     }
 
@@ -114,9 +118,45 @@ impl AppService {
             orphaned_ids,
             unmatched_new,
             downloaded_orphan_ids,
+            listing_truncated,
         } = ctx;
 
         let new_count = unmatched_new.len();
+
+        // Guard against a degenerate target listing destroying downloads. A
+        // migration deletes the CBZs of chapters the target does not carry, on
+        // the assumption the target is an equivalent source. But a target that
+        // returns an empty listing, or one whose chapter numbers all collapse
+        // to 0.0 (e.g. the source changed to string numbers), matches nothing —
+        // so *every* existing chapter orphans and every download is deleted. A
+        // source hiccup must not cost the user their library. If the target
+        // matches none of the existing chapters yet downloads would be lost,
+        // refuse; the user can still migrate with keep-orphaned-downloads on,
+        // which preserves the files.
+        if !keep_orphaned_downloads && !downloaded_orphan_ids.is_empty() && matched.is_empty() {
+            return Err(ServiceError::Validation(format!(
+                "The target source matches none of this series' {} existing chapters, so \
+                 migrating would delete every download. Refused. If this is intentional, \
+                 migrate with 'keep downloaded chapters' enabled.",
+                downloaded_orphan_ids.len()
+            )));
+        }
+
+        // The same principle for a listing cut short by the page ceiling: a
+        // chapter missing from a *truncated* listing may exist on the target and
+        // simply never have been fetched. Orphaning on that basis deletes
+        // downloads over an artefact of pagination, so refuse while any download
+        // is at stake. Matching chapters still migrate once the user opts to
+        // keep the orphaned files.
+        if !keep_orphaned_downloads && !downloaded_orphan_ids.is_empty() && listing_truncated {
+            return Err(ServiceError::Validation(format!(
+                "The target source's chapter listing was cut short at the page ceiling, so \
+                 it cannot be told apart from a listing that genuinely lacks {} of this \
+                 series' downloaded chapters. Refused rather than risk deleting them. \
+                 Migrate with 'keep downloaded chapters' enabled to proceed.",
+                downloaded_orphan_ids.len()
+            )));
+        }
 
         let library_path = self.settings.read().await.library_path.clone();
         let old_dir_name = format!(
@@ -136,6 +176,12 @@ impl AppService {
             .filter(|id| !downloaded_orphan_ids.contains(id))
             .collect();
 
+        // Resolve the paths now — the chapter rows are deleted inside the
+        // transaction below, so their names are unavailable afterwards — but do
+        // not touch the filesystem yet. Deleting before the commit meant a
+        // transaction that later failed left the database rolled back and the
+        // user's downloads already destroyed, with nothing recording the loss.
+        let mut orphaned_cbz_paths: Vec<std::path::PathBuf> = Vec::new();
         if !keep_orphaned_downloads {
             for orphan_id in &downloaded_orphan_ids {
                 let ch = sqlx::query!(
@@ -147,15 +193,10 @@ impl AppService {
 
                 if let Some(ch) = ch {
                     let ch_name = chapter_name(ch.volume, ch.chapter_number, ch.name);
-                    let cbz_path = library_path.join(&old_dir_name).join(format!(
+                    orphaned_cbz_paths.push(library_path.join(&old_dir_name).join(format!(
                         "{}.cbz",
                         kani_core::utilities::sanitize_filename(&ch_name)
-                    ));
-                    if cbz_path.exists()
-                        && let Err(e) = tokio::fs::remove_file(&cbz_path).await
-                    {
-                        tracing::warn!("Failed to delete orphaned CBZ {:?}: {}", cbz_path, e);
-                    }
+                    )));
                 }
             }
         }
@@ -253,18 +294,56 @@ impl AppService {
 
         tx.commit().await?;
 
+        // Committed: the orphan rows are gone for good, so their files can go
+        // too. Any failure above returned early with every download intact.
+        for cbz_path in &orphaned_cbz_paths {
+            if cbz_path.exists()
+                && let Err(e) = tokio::fs::remove_file(cbz_path).await
+            {
+                tracing::warn!("Failed to delete orphaned CBZ {:?}: {}", cbz_path, e);
+            }
+        }
+
         if old_dir_name != new_dir_name {
             let old_path = library_path.join(&old_dir_name);
             let new_path = library_path.join(&new_dir_name);
-            if old_path.exists()
-                && let Err(e) = tokio::fs::rename(&old_path, &new_path).await
-            {
-                tracing::warn!(
-                    "Failed to rename library directory {:?} → {:?}: {}",
-                    old_path,
-                    new_path,
-                    e
-                );
+            if old_path.exists() {
+                match tokio::fs::rename(&old_path, &new_path).await {
+                    Ok(()) => {
+                        // Migration is the one flow that actually moves files on
+                        // disk, so stored paths have to follow. Exact-prefix
+                        // matching rather than LIKE: a manga name can contain
+                        // % or _, which LIKE would treat as wildcards.
+                        let old_prefix = format!("{old_dir_name}/");
+                        let new_prefix = format!("{new_dir_name}/");
+                        if let Err(e) = sqlx::query!(
+                            "UPDATE chapters \
+                             SET file_path = ? || substr(file_path, length(?) + 1) \
+                             WHERE manga_id = ? AND substr(file_path, 1, length(?)) = ?",
+                            new_prefix,
+                            old_prefix,
+                            manga_db_id,
+                            old_prefix,
+                            old_prefix,
+                        )
+                        .execute(&self.db)
+                        .await
+                        {
+                            tracing::warn!(
+                                "Renamed {:?} → {:?} but failed to repoint stored chapter paths: {}",
+                                old_path,
+                                new_path,
+                                e
+                            );
+                        }
+                    }
+                    Err(e) => tracing::warn!(
+                        "Failed to rename library directory {:?} → {:?}: {}",
+                        old_path,
+                        new_path,
+                        e
+                    ),
+                }
             }
         }
 
@@ -285,5 +364,48 @@ impl AppService {
             chapters_new: new_count,
             chapters_kept: kept_count,
         })
+    }
+
+    /// Queues a migration and returns the job id.
+    ///
+    /// Rejects a second migration of the same series while one is already
+    /// pending or running: the two would race over the same chapter rows and
+    /// CBZs, and the loser could delete files the winner had just re-matched.
+    pub async fn submit_migration(
+        &self,
+        manga_db_id: crate::ids::MangaId,
+        target_source_id: i64,
+        target_source_manga_id: String,
+        keep_orphaned_downloads: bool,
+    ) -> Result<crate::jobs::JobId> {
+        if self.migration_job_active(manga_db_id.0).await {
+            return Err(ServiceError::Conflict(
+                "A migration for this manga is already in progress".to_string(),
+            ));
+        }
+
+        let job = crate::jobs::migration::MigrationJob::new(
+            manga_db_id,
+            target_source_id,
+            target_source_manga_id,
+            keep_orphaned_downloads,
+        );
+        self.job_manager
+            .submit(job)
+            .await
+            .map_err(|e| ServiceError::Internal(e.to_string()))
+    }
+
+    async fn migration_job_active(&self, manga_id: i64) -> bool {
+        sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM jobs WHERE job_type = 'migration' \
+             AND status IN ('pending', 'running') \
+             AND json_extract(params_json, '$.manga_id') = ?",
+            manga_id
+        )
+        .fetch_one(&self.db_read)
+        .await
+        .map(|c| c > 0)
+        .unwrap_or(false)
     }
 }

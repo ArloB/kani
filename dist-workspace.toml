@@ -1,0 +1,65 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.32.0"
+# CI backends to support
+ci = "github"
+# Archives + checksums only. Kani is a server: a shell installer that drops a
+# binary into CARGO_HOME is the wrong shape for it.
+installers = []
+# Target platforms to build apps for (Rust target-triple syntax).
+#
+# All of these are built on native runners rather than cross-compiled. musl and
+# aarch64-unknown-linux-gnu are deliberately absent: rquest links BoringSSL (a
+# cmake/C++ dependency), which makes those the only genuinely risky targets.
+# Add them once a real tag has proven they build.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+# Build with `-p kani-web -p kani-cli` rather than `--workspace`. The
+# kani-extensions/* crates are WASM-only (gated behind target_family = "wasm")
+# and fail to compile natively, which is why default-members excludes them; a
+# --workspace build drags them in and breaks the release.
+precise-builds = true
+# Build the full artifact matrix on release-affecting PRs, without publishing
+# (release.yml gates publishing on `!github.event.pull_request`).
+#
+# The default, "plan", only computes what *would* be built — so the first real
+# execution of the pipeline would be the tag that is meant to ship. This repo has
+# never cut a tag, and the Docker image was unbuildable on the branch for weeks
+# without anyone noticing, because nothing ever exercised it. "upload" makes
+# every PR a rehearsal.
+pr-run-mode = "upload"
+# Where to host releases
+hosting = "github"
+# Whether to install an updater program
+install-updater = false
+# kani-web's build.rs shells out to node (esbuild) and the tailwind CLI, so every
+# build runner needs node available before cargo runs.
+#
+# It lives in a subdirectory because it is a *fragment* — a bare sequence of
+# steps that dist splices into release.yml, not a workflow. GitHub parses every
+# .yml at the top level of .github/workflows as a workflow and rejected this one
+# outright ("A sequence was not expected"), which fails the whole repo's Actions
+# config. GitHub does not scan subdirectories; dist resolves this path relative
+# to .github/workflows either way.
+github-build-setup = "fragments/build-setup.yml"
+# Multi-arch image build + keyless cosign signing, as a reusable workflow.
+publish-jobs = ["./docker"]
+# release.yml is hand-edited: `custom-docker` is passed a `publish` input dist
+# does not generate, so a PR rehearsal builds the image and throws it away
+# instead of pushing it. Without this, `dist host` fails the "workflow is out of
+# date" check on the first step of a real tag and the release never starts.
+allow-dirty = ["ci"]
+# A prerelease tag has to exercise the image build, push and signing too — that
+# is the whole point of rehearsing with an rc. Without this, `custom-docker` is
+# skipped for any tag with a suffix, so the rehearsal would prove nothing about
+# the one workflow that has never run. The rc still never moves `latest`;
+# docker.yml decides that from the tag shape.
+publish-prereleases = true

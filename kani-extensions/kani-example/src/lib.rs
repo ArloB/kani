@@ -1,3 +1,10 @@
+#[cfg(not(target_family = "wasm"))]
+compile_error!(
+    "kani-extensions/* are WASM-only -- build with `cargo run -p kani-cli -- build <name>`. \
+     If a tool triggered this, it is using --workspace (or defaulting to it); scope it to \
+     default-members instead -- clippy/nextest omit the flag, cargo-dist needs precise-builds."
+);
+
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::{
     ExtensionMetadata, ExtensionResult, MangaExtension, MangaStatus, bindings, ext_version,

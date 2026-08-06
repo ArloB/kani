@@ -246,6 +246,14 @@ impl HostState {
         })
     }
 
+    /// Replace the evaluator budget with one built from custom limits. Test seam
+    /// for tripping a cap (list size, string length, iterations, depth) without a
+    /// giant fixture; production keeps [`crate::evaluator::EvalLimits::default`].
+    pub fn set_eval_limits(&mut self, limits: crate::evaluator::EvalLimits) {
+        self.eval_budget =
+            std::sync::Arc::new(crate::evaluator::shared::EvalBudget::with_limits(limits));
+    }
+
     pub fn clear_all(&mut self) {
         self.html_docs.clear();
         self.html_lists.clear();
@@ -333,6 +341,18 @@ pub struct WasmRuntime {
 }
 
 impl WasmRuntime {
+    /// Enable the compiled-module cache, rooted at the instance's data
+    /// directory. Returns the directory and error if it could not be created,
+    /// so the caller can report it rather than silently running without a cache.
+    pub fn attach_module_cache(
+        &mut self,
+        data_dir: &std::path::Path,
+    ) -> std::result::Result<(), (std::path::PathBuf, std::io::Error)> {
+        let cache = cache::WasmModuleCache::open(data_dir)?;
+        self.module_cache = Some(std::sync::Mutex::new(cache));
+        Ok(())
+    }
+
     pub fn new(max_instances: u32) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model(true);
@@ -362,12 +382,10 @@ impl WasmRuntime {
 
         KaniExtension::add_to_linker::<_, HasSelf<HostState>>(&mut linker, |state| state)?;
 
-        let module_cache = cache::WasmModuleCache::from_env().map(std::sync::Mutex::new);
-
         Ok(Self {
             engine,
             linker,
-            module_cache,
+            module_cache: None,
         })
     }
 
@@ -486,6 +504,106 @@ pub mod filter_conversions {
                 state: f.state.clone().into(),
             })
             .collect()
+    }
+}
+
+/// Convert the shared (wit-bindgen) result types the interpreted `YamlSource`
+/// produces via `kani_shared::unpack::*` into the wasmtime component types
+/// `SourceBackend` returns. The two are structurally identical but distinct Rust
+/// types (wasmtime bindgen vs wit-bindgen); this is the one-way host-side hop.
+pub mod result_conversions {
+    use crate::wasm::kani::extension::types as wit;
+    use kani_shared::wit_types as gw;
+
+    impl From<kani_shared::types::MangaStatus> for wit::MangaStatus {
+        fn from(s: kani_shared::types::MangaStatus) -> Self {
+            use kani_shared::types::MangaStatus as S;
+            match s {
+                S::Ongoing => wit::MangaStatus::Ongoing,
+                S::Completed => wit::MangaStatus::Completed,
+                S::Hiatus => wit::MangaStatus::Hiatus,
+                S::Cancelled => wit::MangaStatus::Cancelled,
+                S::Unknown => wit::MangaStatus::Unknown,
+            }
+        }
+    }
+
+    impl From<gw::MangaListItem> for wit::MangaListItem {
+        fn from(m: gw::MangaListItem) -> Self {
+            wit::MangaListItem {
+                id: m.id,
+                title: m.title,
+                cover_url: m.cover_url,
+            }
+        }
+    }
+
+    impl From<gw::MangaList> for wit::MangaList {
+        fn from(m: gw::MangaList) -> Self {
+            wit::MangaList {
+                manga: m.manga.into_iter().map(Into::into).collect(),
+                has_next_page: m.has_next_page,
+                total_pages: m.total_pages,
+            }
+        }
+    }
+
+    impl From<gw::MangaInfo> for wit::MangaInfo {
+        fn from(m: gw::MangaInfo) -> Self {
+            wit::MangaInfo {
+                id: m.id,
+                title: m.title,
+                cover_url: m.cover_url,
+                description: m.description,
+                authors: m.authors,
+                artists: m.artists,
+                status: m.status.into(),
+                tags: m.tags,
+            }
+        }
+    }
+
+    impl From<gw::ChapterInfo> for wit::ChapterInfo {
+        fn from(c: gw::ChapterInfo) -> Self {
+            wit::ChapterInfo {
+                id: c.id,
+                number: c.number,
+                title: c.title,
+                volume: c.volume,
+                scanlator: c.scanlator,
+                date_uploaded: c.date_uploaded,
+                language: c.language,
+                page_count: c.page_count,
+            }
+        }
+    }
+
+    impl From<gw::ChapterList> for wit::ChapterList {
+        fn from(c: gw::ChapterList) -> Self {
+            wit::ChapterList {
+                chapters: c.chapters.into_iter().map(Into::into).collect(),
+                has_next_page: c.has_next_page,
+                total_pages: c.total_pages,
+            }
+        }
+    }
+
+    impl From<gw::Page> for wit::Page {
+        fn from(p: gw::Page) -> Self {
+            wit::Page {
+                index: p.index,
+                url: p.url,
+                transform: p.transform,
+            }
+        }
+    }
+
+    impl From<gw::Chapter> for wit::Chapter {
+        fn from(c: gw::Chapter) -> Self {
+            wit::Chapter {
+                pages: c.pages.into_iter().map(Into::into).collect(),
+            }
+        }
     }
 }
 

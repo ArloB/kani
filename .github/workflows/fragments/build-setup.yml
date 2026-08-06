@@ -1,0 +1,20 @@
+- name: Install NASM (BoringSSL assembles with it on MSVC)
+  # rquest links BoringSSL, whose CMakeLists enables the NASM language on
+  # Windows. The runner ships MSVC and cmake but not NASM, so the very first
+  # cargo invocation on this target died in boring-sys2's build script with
+  # "No CMAKE_ASM_NASM_COMPILER could be found". Unix hosts use their system
+  # assembler and need nothing.
+  if: runner.os == 'Windows'
+  shell: pwsh
+  run: |
+    choco install nasm --no-progress -y
+    $dirs = @("C:\Program Files\NASM", "C:\Program Files (x86)\NASM")
+    $found = Get-ChildItem -Path $dirs -Filter nasm.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $found) { throw "nasm.exe not found after install; checked $($dirs -join ', ')" }
+    $found.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+- name: Install node (kani-web build.rs runs esbuild + tailwind)
+  uses: actions/setup-node@v4
+  with:
+    node-version: "22"
+- name: Fetch JS vendors and CSS toolchain
+  run: cargo run --release -p kani-cli -- setup

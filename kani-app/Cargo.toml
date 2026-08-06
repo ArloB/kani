@@ -1,6 +1,8 @@
 [package]
 name = "kani-app"
-version = "0.1.0"
+version = "0.9.0"
+license.workspace = true
+repository.workspace = true
 edition = "2024"
 build = "build.rs"
 
@@ -11,6 +13,7 @@ unwrap_used = { level = "deny", priority = 1 }
 kani-core   = { path = "../kani-core" }
 kani-shared = { path = "../kani-shared", features = ["ssr"] }
 kani-yaml   = { path = "../kani-yaml" }
+kani-lease  = { path = "../kani-lease" }
 wasmtime    = { version = "46.0.1", features = ["async", "component-model"] }
 
 serde.workspace = true
@@ -20,6 +23,7 @@ urlencoding.workspace = true
 tokio         = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "process"] }
 tokio-util.workspace = true
 sqlx.workspace = true
+log = "0.4"
 rquest        = { version = "5.1", features = ["json"] }
 tracing.workspace = true
 futures.workspace = true
@@ -48,7 +52,7 @@ semver        = "1"
 uuid          = { version = "1", features = ["v4", "serde"] }
 lettre        = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "smtp-transport", "builder"] }
 image         = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
-zip           = "2"
+zip           = "7"
 flate2        = "1"
 prost         = "0.13"
 strsim        = "0.11"
@@ -58,6 +62,7 @@ which         = "6"
 tempfile      = "3"
 fs2           = "0.4"
 dunce         = "1"
+metrics = "0.24"
 
 [features]
 test-util = ["kani-core/test-util"]
@@ -69,8 +74,12 @@ kani-shared-test = { path = "../kani-shared-test" }
 tokio-util  = { workspace = true }
 tokio = { version = "1", features = ["net"] }
 ed25519-dalek.workspace = true
+mail-parser = "0.11.5"
 
 [build-dependencies]
 prost-build = "0.14.3"
 protox = "0.9.1"
+
+# `loom` model-checks the lease/drain coordination in src/source/lease.rs.
+# Only pulled in under `--cfg loom`; run: RUSTFLAGS="--cfg loom" cargo test -p kani-app --lib source::lease
 

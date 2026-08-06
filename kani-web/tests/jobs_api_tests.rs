@@ -172,3 +172,103 @@ async fn download_all_200_returns_job_id() {
         "response must contain a job_id string field; got: {body}"
     );
 }
+
+#[tokio::test]
+async fn a_queued_job_can_be_paused_and_resumed() {
+    let state = common::test_state().await;
+    let (u, p) = common::create_admin(&state).await;
+    let db = state.db.clone();
+
+    // A pending job with params the registry can rebuild from.
+    let id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO jobs (id, job_type, status, priority, description, params_json, created_at) \
+         VALUES (?, 'integrity_scrub', 'pending', 0, 'test', ?, unixepoch())",
+    )
+    .bind(&id)
+    .bind(
+        serde_json::json!({ "id": uuid::Uuid::new_v4(), "depth": "quick", "fix": false })
+            .to_string(),
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let app = common::build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .clone()
+        .oneshot(common::authed_post(
+            &format!("/rest/jobs/{id}/pause"),
+            &cookie,
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "pausing a queued job must work"
+    );
+
+    let status: String = sqlx::query_scalar("SELECT status FROM jobs WHERE id = ?")
+        .bind(&id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(status, "paused");
+
+    let res = app
+        .oneshot(common::authed_post(
+            &format!("/rest/jobs/{id}/resume"),
+            &cookie,
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let status: String = sqlx::query_scalar("SELECT status FROM jobs WHERE id = ?")
+        .bind(&id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(
+        status, "pending",
+        "resume must put it back where the scheduler will find it"
+    );
+}
+
+#[tokio::test]
+async fn pausing_a_job_that_is_not_pending_is_refused() {
+    let state = common::test_state().await;
+    let (u, p) = common::create_admin(&state).await;
+    let db = state.db.clone();
+
+    let id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO jobs (id, job_type, status, priority, description, created_at) \
+         VALUES (?, 'integrity_scrub', 'completed', 0, 'done', unixepoch())",
+    )
+    .bind(&id)
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let app = common::build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    let res = app
+        .oneshot(common::authed_post(
+            &format!("/rest/jobs/{id}/pause"),
+            &cookie,
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        !res.status().is_success(),
+        "a finished job cannot be paused; the old stub returned ok for this"
+    );
+}

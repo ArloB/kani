@@ -52,124 +52,82 @@ pub fn emit_request_block(
 
     if !filter_mapping.is_empty() {
         lines.push(String::new());
-        lines.push("for f in filters {".into());
-        lines.push("    let (group, action) = f.filter_name.split_once(':').unwrap_or((&f.filter_name, \"\"));".into());
-        lines.push("    match group {".into());
-
-        let bool_fmt = filter_format.map(|f| f.bool_format).unwrap_or_default();
-        let omit_empty = filter_format.map(|f| f.omit_empty).unwrap_or(true);
-        let array_fmt = filter_format.map(|f| f.multiselect).unwrap_or_default();
-        let array_sep = filter_format
-            .map(|f| f.array_separator.as_str())
-            .unwrap_or(",");
-
-        for (group, entry) in filter_mapping {
-            match entry {
-                FilterMappingEntry::Simple(param) => {
-                    let true_lit = bool_literal(bool_fmt, true);
-                    lines.push(format!("        \"{group}\" => match &f.state {{"));
-                    lines.push("            FilterState::Checkbox(c) if *c => {".to_string());
-                    lines.push(format!("                req = req.query(\"{param}\", if action.is_empty() {{ \"{true_lit}\" }} else {{ action }});"));
-                    lines.push("            }".into());
-                    if !omit_empty {
-                        let false_lit = bool_literal(bool_fmt, false);
-                        lines.push("            FilterState::Checkbox(_) => {".to_string());
-                        lines.push(format!(
-                            "                req = req.query(\"{param}\", \"{false_lit}\");"
-                        ));
-                        lines.push("            }".into());
-                    }
-                    match array_fmt {
-                        ArrayFormat::Default | ArrayFormat::Repeated => {
-                            lines.push(
-                                "            FilterState::Multiselect(values) => {".to_string(),
-                            );
-                            lines.push(format!("                for v in values {{ req = req.query(\"{param}\", v.as_str()); }}"));
-                            lines.push("            }".into());
-                        }
-                        ArrayFormat::Bracket => {
-                            lines.push(
-                                "            FilterState::Multiselect(values) => {".to_string(),
-                            );
-                            lines.push(format!("                for v in values {{ req = req.query(\"{param}[]\", v.as_str()); }}"));
-                            lines.push("            }".into());
-                        }
-                        ArrayFormat::CommaSeparated => {
-                            lines.push(
-                                "            FilterState::Multiselect(values) => {".to_string(),
-                            );
-                            lines.push(format!("                req = req.query(\"{param}\", values.join(\"{array_sep}\").as_str());"));
-                            lines.push("            }".into());
-                        }
-                    }
-                    lines.push(format!("            FilterState::Selection {{ value, .. }} => req = req.query(\"{param}\", value.as_str()),"));
-                    lines.push(format!("            FilterState::TextInput(s) => req = req.query(\"{param}\", s.as_str()),"));
-                    lines.push("            _ => {}".into());
-                    lines.push("        },".into());
-                }
-                FilterMappingEntry::SortPair {
-                    key_template,
-                    direction_param,
-                    ..
-                } => {
-                    lines.push(format!("        \"{group}\" => match &f.state {{"));
-                    lines.push("            FilterState::Selection { value, .. } => {".into());
-                    lines.push(
-                        "                if let Some((key_part, dir)) = value.split_once(':') {"
-                            .into(),
-                    );
-                    lines.push(format!("                    req = req.query(&format!(\"{key_template}\", key_part), dir);"));
-                    if let Some(dir_param) = direction_param {
-                        lines.push(format!(
-                            "                    req = req.query(\"{dir_param}\", dir);"
-                        ));
-                    }
-                    lines.push("                }".into());
-                    lines.push("            }".into());
-                    lines.push("            _ => {}".into());
-                    lines.push("        },".into());
-                }
-                FilterMappingEntry::TupleSplit {
-                    from_param,
-                    to_param,
-                    ..
-                } => {
-                    lines.push(format!("        \"{group}\" => match &f.state {{"));
-                    lines.push("            FilterState::TextInput(s) => {".into());
-                    lines.push(
-                        "                if let Some((from, to)) = s.split_once(':') {".into(),
-                    );
-                    lines.push(format!(
-                        "                    req = req.query(\"{from_param}\", from);"
-                    ));
-                    lines.push(format!(
-                        "                    req = req.query(\"{to_param}\", to);"
-                    ));
-                    lines.push("                }".into());
-                    lines.push("            }".into());
-                    lines.push("            _ => {}".into());
-                    lines.push("        },".into());
-                }
-            }
-        }
-
-        lines.push("        _ => {}".into());
-        lines.push("    }".into());
-        lines.push("}".into());
+        lines.push(emit_filter_apply(filter_mapping, filter_format));
     }
 
     lines.join("\n")
 }
 
-fn bool_literal(fmt: BoolFormat, value: bool) -> &'static str {
-    match (fmt, value) {
-        (BoolFormat::TrueFalse, true) => "true",
-        (BoolFormat::TrueFalse, false) => "false",
-        (BoolFormat::OneZero, true) => "1",
-        (BoolFormat::OneZero, false) => "0",
-        (BoolFormat::YesNo, true) => "yes",
-        (BoolFormat::YesNo, false) => "no",
-    }
+/// Emit a call to the shared `kani_shared::request::apply_filters`, with the
+/// endpoint's mapping and format rendered as literals. Replaces the previously
+/// hand-emitted per-group match — codegen no longer carries its own copy of the
+/// filter-mapping logic, so it can't drift from the interpreter's (A1).
+fn emit_filter_apply(
+    filter_mapping: &[(String, FilterMappingEntry)],
+    filter_format: Option<&FilterFormatCfg>,
+) -> String {
+    let mapping: Vec<String> = filter_mapping
+        .iter()
+        .map(|(group, entry)| {
+            let fm = match entry {
+                FilterMappingEntry::Simple(param) => format!(
+                    "kani_shared::request::FilterMapping::Simple({param:?}.to_string())"
+                ),
+                FilterMappingEntry::SortPair {
+                    key_template,
+                    direction_param,
+                    ..
+                } => {
+                    let dir = match direction_param {
+                        Some(d) => format!("Some({d:?}.to_string())"),
+                        None => "None".to_string(),
+                    };
+                    format!(
+                        "kani_shared::request::FilterMapping::SortPair {{ key_template: {key_template:?}.to_string(), direction_param: {dir} }}"
+                    )
+                }
+                FilterMappingEntry::TupleSplit {
+                    from_param,
+                    to_param,
+                    ..
+                } => format!(
+                    "kani_shared::request::FilterMapping::TupleSplit {{ from_param: {from_param:?}.to_string(), to_param: {to_param:?}.to_string() }}"
+                ),
+            };
+            format!("({group:?}.to_string(), {fm})")
+        })
+        .collect();
+
+    let format_lit = match filter_format {
+        Some(f) => {
+            let arr = match f.multiselect {
+                ArrayFormat::Default | ArrayFormat::Repeated => "Repeated",
+                ArrayFormat::Bracket => "Bracket",
+                ArrayFormat::CommaSeparated => "CommaSeparated",
+            };
+            let boolf = match f.bool_format {
+                BoolFormat::TrueFalse => "TrueFalse",
+                BoolFormat::OneZero => "OneZero",
+                BoolFormat::YesNo => "YesNo",
+            };
+            format!(
+                "Some(kani_shared::request::FilterFormat {{ multiselect: kani_shared::request::ArrayFormat::{arr}, omit_empty: {omit}, bool_format: kani_shared::request::BoolFormat::{boolf}, array_separator: {sep:?}.to_string() }})",
+                omit = f.omit_empty,
+                sep = f.array_separator,
+            )
+        }
+        None => "None".to_string(),
+    };
+
+    format!(
+        "let __filter_mapping: [(String, kani_shared::request::FilterMapping); {n}] = [{mapping}];\n\
+         let __filter_format: Option<kani_shared::request::FilterFormat> = {format_lit};\n\
+         for (k, v) in kani_shared::request::apply_filters(&__filter_mapping, __filter_format.as_ref(), filters) {{\n\
+             req = req.query(k, v);\n\
+         }}",
+        n = mapping.len(),
+        mapping = mapping.join(", "),
+    )
 }
 
 /// Convert a route with `$var$` placeholders into a `format!(...)` call.

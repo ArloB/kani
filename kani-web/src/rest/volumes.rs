@@ -25,6 +25,17 @@ pub(crate) struct AssignVolumeBody {
     pub volume_id: Option<i64>,
 }
 
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/volumes",
+    params(("id" = i64, Path, description = "Manga id")),
+    responses(
+        (status = 200, description = "Volumes defined for a manga"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
 pub(crate) async fn list_volumes(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
@@ -33,6 +44,18 @@ pub(crate) async fn list_volumes(
     Ok(Json(state.service.list_volumes(manga_id).await?))
 }
 
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/volumes",
+    params(("id" = i64, Path, description = "Manga id")),
+    request_body(content = inline(serde_json::Value), description = "Optional volume name and number"),
+    responses(
+        (status = 201, description = "Volume created"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
 pub(crate) async fn create_volume(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
@@ -46,6 +69,19 @@ pub(crate) async fn create_volume(
     Ok((StatusCode::CREATED, Json(vol)))
 }
 
+#[utoipa::path(
+    put, path = "/rest/manga/{id}/volumes/{vid}",
+    params(("id" = i64, Path, description = "Manga id"), ("vid" = i64, Path, description = "Volume id")),
+    request_body(content = inline(serde_json::Value), description = "Replacement volume name and number"),
+    responses(
+        (status = 200, description = "Volume updated"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such volume for this manga"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
 pub(crate) async fn update_volume(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
@@ -59,6 +95,18 @@ pub(crate) async fn update_volume(
     Ok(Json(vol))
 }
 
+#[utoipa::path(
+    delete, path = "/rest/manga/{id}/volumes/{vid}",
+    params(("id" = i64, Path, description = "Manga id"), ("vid" = i64, Path, description = "Volume id")),
+    responses(
+        (status = 204, description = "Volume deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such volume for this manga"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
 pub(crate) async fn delete_volume(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,
@@ -68,6 +116,19 @@ pub(crate) async fn delete_volume(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(
+    put, path = "/rest/manga/{id}/chapters/{cid}/volume",
+    params(("id" = i64, Path, description = "Manga id"), ("cid" = i64, Path, description = "Chapter id")),
+    request_body(content = inline(serde_json::Value), description = "Target volume id, or null to unassign"),
+    responses(
+        (status = 200, description = "Chapter assigned to the volume"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such chapter or volume"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
 pub(crate) async fn assign_chapter_volume(
     _: AuthGuard<crate::permissions::guards::LibraryManage>,
     State(state): State<AppState>,

@@ -132,11 +132,17 @@ impl AppService {
         Ok(enabled > 0)
     }
 
-    /// Returns `true` if `session_id` is recorded and has NOT been revoked.
-    /// Used by `auth_guard` to enforce revocation.
-    pub async fn is_session_valid(&self, session_id: &str) -> bool {
+    /// Returns `true` only when this session has an explicit revocation on
+    /// record.
+    ///
+    /// Deliberately *not* "is it valid": a session's row is created by the
+    /// first `touch_session`, which runs after this check on the very first
+    /// authenticated request. Treating "no row" as invalid would log every new
+    /// session straight back out. Absence means "not yet recorded", and only a
+    /// non-null `revoked_at` means "revoked".
+    pub async fn is_session_revoked(&self, session_id: &str) -> bool {
         sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM user_sessions WHERE id = ? AND revoked_at IS NULL",
+            "SELECT COUNT(*) FROM user_sessions WHERE id = ? AND revoked_at IS NOT NULL",
         )
         .bind(session_id)
         .fetch_one(&self.db_read)

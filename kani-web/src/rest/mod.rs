@@ -68,6 +68,7 @@ pub(crate) mod sse;
 pub(crate) mod stats;
 pub(crate) mod system;
 pub(crate) mod trackers;
+pub(crate) mod ui_themes;
 pub(crate) mod volumes;
 pub(crate) mod webhooks;
 
@@ -136,6 +137,49 @@ where
         parts: &mut axum::http::request::Parts,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
+        // A programmatic caller presents a bearer token and has no session. An
+        // explicit bearer that fails to authenticate is refused outright rather
+        // than falling through to session auth: silently downgrading would make
+        // a broken integration look like a working one.
+        if let Some(raw) = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+        {
+            let app_state = AppState::from_ref(state);
+            let auth = app_state
+                .service
+                .authenticate_api_token(raw)
+                .await
+                .map_err(|e| AppError::InternalServerError(e.to_string()))?
+                .ok_or_else(|| AppError::Unauthorized("Invalid API token".into()))?;
+
+            // Acceptance keys on kind, never on scope contents: a reader token
+            // must not reach the REST API even if its scopes were widened.
+            if auth.kind != kani_app::service::api_tokens::TokenKind::Api {
+                return Err(AppError::Forbidden(
+                    "This token is only valid for OPDS endpoints".into(),
+                ));
+            }
+
+            if let Some(perm) = P::required_permission()
+                && !auth.scopes.contains(&perm)
+            {
+                return Err(AppError::Forbidden(format!(
+                    "Token lacks permission: {perm}"
+                )));
+            }
+
+            let backend = crate::auth::AuthBackend::new(app_state.service.db.clone());
+            let user = backend
+                .fetch_user_by_id(auth.user_id)
+                .await?
+                .ok_or_else(|| AppError::Unauthorized("Token owner no longer exists".into()))?;
+
+            return Ok(Self(user, PhantomData));
+        }
+
         let auth_session = crate::auth::AuthSession::from_request_parts(parts, state)
             .await
             .map_err(|_| AppError::InternalServerError("Session error".into()))?;
@@ -189,6 +233,7 @@ pub fn routes(state: AppState) -> Router {
         .merge(downloads::router())
         .merge(jobs::router())
         .merge(trackers::router())
+        .merge(ui_themes::router())
         .merge(filters::router())
         .merge(settings::router())
         .merge(volumes::router())
@@ -246,6 +291,38 @@ pub(crate) struct TotpCodeRequest {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// The client's socket address, when the server was started with connect info.
+///
+/// Never fails: a synthetic request in a test simply has none, which callers
+/// treat as "not a local client".
+pub(crate) struct PeerAddr(pub(crate) Option<std::net::SocketAddr>);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for PeerAddr {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(PeerAddr(
+            parts
+                .extensions
+                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .map(|c| c.0),
+        ))
+    }
+}
+
+/// First-run account creation. No captcha: the endpoint exists only while the
+/// instance has no users, so there is nothing to spam.
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+pub(crate) struct SetupRequest {
+    pub(crate) username: String,
+    #[serde(default)]
+    pub(crate) email: String,
+    pub(crate) password: String,
+}
+
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 pub(crate) struct RegisterRequest {
     pub(crate) username: String,
@@ -270,23 +347,20 @@ async fn resolve_path_field(state: &AppState, field: &str) -> Result<std::path::
     }
 }
 
-const PER_HOST_CONCURRENCY: usize = 5;
-const PROXY_MAX_RETRIES: u32 = 3;
-const PROXY_BASE_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
-const PROXY_RETRY_AFTER_CAP_SECS: u64 = 60;
-
 fn proxy_retry_delay(
     headers: Option<&rquest::header::HeaderMap>,
     attempt: u32,
+    cfg: &crate::proxy::ProxyConfig,
 ) -> std::time::Duration {
-    let backoff = PROXY_BASE_DELAY * 2u32.pow(attempt);
+    let backoff = cfg.base_delay * 2u32.pow(attempt);
+    let cap_secs = cfg.retry_after_cap.as_secs();
     headers
         .and_then(|h| h.get(rquest::header::RETRY_AFTER))
         .and_then(|v| v.to_str().ok())
         .and_then(|s| {
             s.parse::<u64>()
                 .ok()
-                .map(|secs| secs.min(PROXY_RETRY_AFTER_CAP_SECS))
+                .map(|secs| secs.min(cap_secs))
                 .or_else(|| {
                     time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc2822)
                         .ok()
@@ -294,16 +368,20 @@ fn proxy_retry_delay(
                             let now = time::OffsetDateTime::now_utc();
                             (dt - now).whole_seconds().max(0) as u64
                         })
-                        .map(|secs| secs.min(PROXY_RETRY_AFTER_CAP_SECS))
+                        .map(|secs| secs.min(cap_secs))
                 })
         })
         .map(std::time::Duration::from_secs)
         .unwrap_or(backoff)
 }
 
-fn proxy_jitter() -> std::time::Duration {
+fn proxy_jitter(cfg: &crate::proxy::ProxyConfig) -> std::time::Duration {
     use rand::RngExt;
-    std::time::Duration::from_millis(rand::rng().random_range(0u64..1000))
+    let max_ms = cfg.retry_jitter.as_millis() as u64;
+    if max_ms == 0 {
+        return std::time::Duration::ZERO;
+    }
+    std::time::Duration::from_millis(rand::rng().random_range(0u64..max_ms))
 }
 
 fn is_retryable_proxy_status(status: rquest::StatusCode) -> bool {
@@ -319,10 +397,11 @@ fn is_retryable_proxy_status(status: rquest::StatusCode) -> bool {
 async fn host_semaphore(
     cache: &moka::future::Cache<String, Arc<tokio::sync::Semaphore>>,
     host: &str,
+    concurrency: usize,
 ) -> Arc<tokio::sync::Semaphore> {
     cache
         .get_with(host.to_string(), async {
-            Arc::new(tokio::sync::Semaphore::new(PER_HOST_CONCURRENCY))
+            Arc::new(tokio::sync::Semaphore::new(concurrency))
         })
         .await
 }
@@ -408,8 +487,21 @@ fn record_bandwidth(
         .fetch_add(bytes, Ordering::Relaxed);
 }
 
-async fn image_proxy(
-    AuthGuard(..): AuthGuard<crate::permissions::IsAuthenticated>,
+#[utoipa::path(
+    get, path = "/rest/image_proxy",
+    params(("token" = String, Query, description = "Sealed proxy token naming the upstream URL"), ("w" = Option<u32>, Query, description = "Target width in pixels, up to 4096"), ("transform" = Option<String>, Query, description = "Source-specific transform hint")),
+    responses(
+        (status = 200, description = "The upstream image, re-encoded and resized as requested"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 400, description = "Invalid or expired proxy token"),
+        (status = 502, description = "The upstream image could not be fetched"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn image_proxy(
+    _: AuthGuard<crate::permissions::IsAuthenticated>,
     State(state): State<AppState>,
     headers: HeaderMap,
     ValidatedQuery(query): ValidatedQuery<ProxyQuery>,
@@ -454,13 +546,13 @@ async fn image_proxy(
         .and_then(|u| u.host_str().map(|h| h.to_string()))
         .unwrap_or_else(|| url.clone());
 
-    const MIN_HOST_REQUEST_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+    let min_host_interval = state.proxy_config.min_host_interval;
     let throttle_mutex = state
         .proxy_throttle
         .get_with(host.clone(), async {
             Arc::new(tokio::sync::Mutex::new(
                 std::time::Instant::now()
-                    .checked_sub(MIN_HOST_REQUEST_INTERVAL)
+                    .checked_sub(min_host_interval)
                     .unwrap_or_else(std::time::Instant::now),
             ))
         })
@@ -468,8 +560,8 @@ async fn image_proxy(
     {
         let mut last = throttle_mutex.lock().await;
         let elapsed = last.elapsed();
-        if elapsed < MIN_HOST_REQUEST_INTERVAL {
-            tokio::time::sleep(MIN_HOST_REQUEST_INTERVAL - elapsed).await;
+        if elapsed < min_host_interval {
+            tokio::time::sleep(min_host_interval - elapsed).await;
         }
         *last = std::time::Instant::now();
     }
@@ -505,10 +597,12 @@ async fn image_proxy(
             let host = host.clone();
             let transform_hint = transform_hint.map(str::to_string);
             async move {
-                let semaphore = host_semaphore(&state.proxy_semaphores, &host).await;
+                let cfg = state.proxy_config;
+                let semaphore =
+                    host_semaphore(&state.proxy_semaphores, &host, cfg.per_host_concurrency).await;
                 let mut attempt = 0u32;
 
-                let (response, ct_string, scramble_seed) = loop {
+                let (response, ct_string, resolved) = loop {
                     let permit = Arc::clone(&semaphore)
                         .acquire_owned()
                         .await
@@ -528,20 +622,20 @@ async fn image_proxy(
                     );
 
                     let fetch = tokio::time::timeout(
-                        std::time::Duration::from_secs(35),
+                        cfg.request_timeout,
                         state.proxy_client.safe_get(&url, Some(req_headers)),
                     )
                     .await;
 
                     match fetch {
                         Err(_elapsed) => {
-                            if attempt < PROXY_MAX_RETRIES {
-                                let delay = proxy_retry_delay(None, attempt) + proxy_jitter();
+                            if attempt < cfg.max_retries {
+                                let delay = proxy_retry_delay(None, attempt, &cfg) + proxy_jitter(&cfg);
                                 tracing::warn!(
                                     "Upstream image timed out, retrying in {:?} (attempt {}/{})",
                                     delay,
                                     attempt + 1,
-                                    PROXY_MAX_RETRIES,
+                                    cfg.max_retries,
                                 );
                                 drop(permit);
                                 tokio::time::sleep(delay).await;
@@ -551,14 +645,14 @@ async fn image_proxy(
                             return Err(AppError::Other("Upstream image fetch timed out".into()));
                         }
                         Ok(Err(e)) => {
-                            if attempt < PROXY_MAX_RETRIES {
-                                let delay = proxy_retry_delay(None, attempt) + proxy_jitter();
+                            if attempt < cfg.max_retries {
+                                let delay = proxy_retry_delay(None, attempt, &cfg) + proxy_jitter(&cfg);
                                 tracing::warn!(
                                     "Upstream image fetch error ({}), retrying in {:?} (attempt {}/{})",
                                     e,
                                     delay,
                                     attempt + 1,
-                                    PROXY_MAX_RETRIES,
+                                    cfg.max_retries,
                                 );
                                 drop(permit);
                                 tokio::time::sleep(delay).await;
@@ -571,15 +665,15 @@ async fn image_proxy(
                         }
                         Ok(Ok(resp)) => {
                             let status = resp.status();
-                            if is_retryable_proxy_status(status) && attempt < PROXY_MAX_RETRIES {
+                            if is_retryable_proxy_status(status) && attempt < cfg.max_retries {
                                 let delay =
-                                    proxy_retry_delay(Some(resp.headers()), attempt) + proxy_jitter();
+                                    proxy_retry_delay(Some(resp.headers()), attempt, &cfg) + proxy_jitter(&cfg);
                                 tracing::warn!(
                                     "Upstream returned {}, retrying in {:?} (attempt {}/{})",
                                     status.as_u16(),
                                     delay,
                                     attempt + 1,
-                                    PROXY_MAX_RETRIES,
+                                    cfg.max_retries,
                                 );
                                 drop(permit);
                                 tokio::time::sleep(delay).await;
@@ -606,10 +700,17 @@ async fn image_proxy(
                                         "Upstream response missing Content-Type".into(),
                                     )
                                 })?;
+                            // The declared type is a claim, not evidence: CDNs
+                            // serve real images as `application/octet-stream`,
+                            // and a hostile origin can label a challenge page
+                            // `image/png`. The body is fully buffered below, so
+                            // the magic number decides — see the sniff after the
+                            // read. Only an outright HTML page is worth
+                            // rejecting this early, before spending the read.
                             let ct_str = content_type.to_str().unwrap_or("");
-                            if !ct_str.starts_with("image/") {
+                            if ct_str.starts_with("text/html") {
                                 tracing::warn!(
-                                    "Upstream proxy returned non-image Content-Type: {}",
+                                    "Upstream proxy returned an HTML page instead of an image: {}",
                                     ct_str
                                 );
                                 return Err(AppError::Other(format!(
@@ -618,29 +719,53 @@ async fn image_proxy(
                                 )));
                             }
                             let ct_string = ct_str.to_string();
-                            let scramble_seed = transform_hint
-                                .as_deref()
-                                .and_then(|hint| kani_core::image_transform::resolve_scramble_seed(hint, resp.headers()));
+                            let resolved = transform_hint.as_deref().and_then(|hint| {
+                                kani_core::transform::registry().resolve(
+                                    hint,
+                                    kani_core::transform::TransformKind::Image,
+                                    resp.headers(),
+                                )
+                            });
                             drop(permit);
-                            break (resp, ct_string, scramble_seed);
+                            break (resp, ct_string, resolved);
                         }
                     }
                 };
 
-                const MAX_IMAGE_BYTES: usize = 50 * 1024 * 1024;
+                let max_image_bytes = cfg.max_image_bytes;
                 let mut buf = bytes::BytesMut::new();
                 let mut resp = response;
                 while let Ok(Some(chunk)) = resp.chunk().await {
-                    if buf.len() + chunk.len() > MAX_IMAGE_BYTES {
+                    if buf.len() + chunk.len() > max_image_bytes {
                         return Err(AppError::Other("Upstream image exceeded size limit".into()));
                     }
                     buf.extend_from_slice(&chunk);
                 }
 
-                let (processed_bytes, processed_ct) = if let Some(seed) = scramble_seed {
-                    let descrambled = kani_core::image_transform::lcg_tile_descramble(&buf, seed)
+                // What the bytes actually are. A generic or wrong label is
+                // corrected here; anything that is not an image at all is
+                // refused, whatever the upstream called it.
+                let sniffed = kani_core::probe::sniff_image_mime(&buf);
+                let ct_string = match sniffed {
+                    Some(mime) => mime.to_string(),
+                    None if resolved.is_some() => ct_string,
+                    None => {
+                        tracing::warn!(
+                            "Upstream proxy body is not an image (declared {})",
+                            ct_string
+                        );
+                        return Err(AppError::Other(format!(
+                            "Expected image, upstream returned Content-Type: {ct_string}"
+                        )));
+                    }
+                };
+
+                let (processed_bytes, processed_ct) = if let Some(r) = &resolved {
+                    let out = r.output();
+                    let descrambled = r
+                        .apply(&buf)
                         .map_err(|e| AppError::InternalServerError(format!("Descramble failed: {e}")))?;
-                    (bytes::Bytes::from(descrambled), "image/jpeg".to_string())
+                    (bytes::Bytes::from(descrambled), out.content_type.to_string())
                 } else {
                     (buf.freeze(), ct_string)
                 };
@@ -704,7 +829,12 @@ async fn proxy_range_request(
     etag: &str,
     range: &header::HeaderValue,
 ) -> Result<axum::response::Response, AppError> {
-    let semaphore = host_semaphore(&state.proxy_semaphores, host).await;
+    let semaphore = host_semaphore(
+        &state.proxy_semaphores,
+        host,
+        state.proxy_config.per_host_concurrency,
+    )
+    .await;
     let _permit = Arc::clone(&semaphore)
         .acquire_owned()
         .await
@@ -728,7 +858,7 @@ async fn proxy_range_request(
     );
 
     let resp = tokio::time::timeout(
-        std::time::Duration::from_secs(35),
+        state.proxy_config.request_timeout,
         state.proxy_client.safe_get(url, Some(req_headers)),
     )
     .await
@@ -746,11 +876,11 @@ async fn proxy_range_request(
     let is_partial = upstream_status == rquest::StatusCode::PARTIAL_CONTENT;
     let out_headers = crate::proxy::build_range_response_headers(resp.headers(), etag);
 
-    const MAX_RANGE_BYTES: usize = 50 * 1024 * 1024;
+    let max_range_bytes = state.proxy_config.max_image_bytes;
     let mut buf = bytes::BytesMut::new();
     let mut resp = resp;
     while let Ok(Some(chunk)) = resp.chunk().await {
-        if buf.len() + chunk.len() > MAX_RANGE_BYTES {
+        if buf.len() + chunk.len() > max_range_bytes {
             return Err(AppError::Other("Range response exceeded size limit".into()));
         }
         buf.extend_from_slice(&chunk);
@@ -778,13 +908,26 @@ pub(crate) struct SaveToLibraryQuery {
 }
 
 #[derive(serde::Deserialize, Default)]
-struct CoverQuery {
+pub(crate) struct CoverQuery {
     size: Option<String>,
     h: Option<String>,
 }
 
-async fn serve_manga_cover(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/manga/{id}/cover",
+    params(("id" = i64, Path, description = "Manga id"), ("size" = Option<String>, Query, description = "One of xs, sm, md, lg; full size when omitted")),
+    responses(
+        (status = 200, description = "The cover image, at the requested size"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 304, description = "Not modified"),
+        (status = 404, description = "No cover stored for this manga"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn serve_manga_cover(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path(id): Path<MangaId>,
     headers: HeaderMap,
@@ -1026,8 +1169,21 @@ fn map_refresh_request(
 
 // ── Chapter CBZ reader ────────────────────────────────────────────────────────
 
-async fn serve_chapter_page(
-    AuthGuard(..): AuthGuard<crate::permissions::guards::LibraryView>,
+#[utoipa::path(
+    get, path = "/rest/chapter/{id}/page/{page_num}",
+    params(("id" = i64, Path, description = "Chapter id"), ("page_num" = i64, Path, description = "Zero-based page index")),
+    responses(
+        (status = 200, description = "One page image out of the downloaded CBZ"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 304, description = "Not modified"),
+        (status = 404, description = "The chapter is not downloaded, or has no such page"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn serve_chapter_page(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(state): State<AppState>,
     Path((id, page_num)): Path<(ChapterId, usize)>,
     headers: HeaderMap,

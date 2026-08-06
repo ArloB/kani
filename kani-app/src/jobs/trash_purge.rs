@@ -37,7 +37,12 @@ impl BackgroundJob for TrashPurgeJob {
         let svc = ctx.service();
         svc.purge_expired_trash(self.days)
             .await
-            .map(|_| ())
-            .map_err(|e| JobError::Internal(e.to_string()))
+            .map_err(|e| JobError::Internal(e.to_string()))?;
+        // Files displaced by an upgrade share the trash's retention window;
+        // until they are swept, applying an upgrade stays reversible.
+        if let Err(e) = svc.purge_replaced(self.days as i64).await {
+            tracing::warn!("Failed to sweep .replaced: {e}");
+        }
+        Ok(())
     }
 }

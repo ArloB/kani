@@ -489,6 +489,10 @@ async fn import_dedup_job_runs_to_completion() {
 #[tokio::test]
 async fn webhook_delivery_job_completes_on_2xx() {
     let svc = test_service().await;
+    // Delivery targets a loopback mock server, which the SSRF egress guard blocks
+    // in production; opt this test into private egress so it exercises the 2xx
+    // completion path rather than the (separately tested) refusal path.
+    svc.webhook_service.allow_private_egress_for_test();
     let port = start_mock_page_server().await;
     let url = format!("http://127.0.0.1:{port}/");
     let webhook_id: i64 =

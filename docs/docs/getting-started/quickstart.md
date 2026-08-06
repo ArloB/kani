@@ -1,61 +1,61 @@
 # Quickstart
 
-This guide gets Kani running on your machine using Docker Compose. The full reference is in [Install with Docker](install-docker.md).
+This guide builds and runs Kani from the checked-out repository with Docker Compose. Published
+image coordinates and tags are release-specific; see [Install with Docker](install-docker.md)
+before replacing the build with an image reference.
 
 ## Prerequisites
 
-- Docker 24+ and Docker Compose v2+
-- A machine with at least 1 GB of free RAM
+- Git
+- Docker Engine and Docker Compose v2
+- At least 1 GB of free memory
 
-## 1 — Create a compose file
-
-Create a directory and a `docker-compose.yml` inside it:
-
-```yaml
-services:
-  kani:
-    image: ghcr.io/arlob/kani:latest
-    container_name: kani
-    restart: unless-stopped
-    ports:
-      - "8242:8242"
-    volumes:
-      - ./data:/data
-      - ./library:/library
-    environment:
-      KANI_SECRET_KEY: "change-me-to-a-random-string"
-```
-
-## 2 — Start the server
+## 1. Get Kani
 
 ```bash
-docker compose up -d
+git clone https://github.com/ArloB/kani.git
+cd kani
 ```
 
-Wait a few seconds, then open [http://localhost:8242](http://localhost:8242) in your browser.
+For a long-lived installation, check out a release tag rather than an arbitrary development
+commit. The included Compose file persists application data in `./data` and downloaded files in
+`./library`.
 
-## 3 — First-run wizard
+## 2. Start the server
 
-Kani opens a setup wizard on first launch. It will ask for:
+```bash
+docker compose up --build -d
+docker compose logs -f kani
+```
 
-1. **Library path** — where downloaded chapters are stored inside the container (`/library` in the
-   default compose file maps to `./library` on the host).
-2. **Source install** — optionally install your first content source so you can start browsing immediately.
+When the health check passes, open [http://localhost:8242](http://localhost:8242).
 
-Complete the wizard and you land on the library screen.
+## 3. Create the administrator
 
-## 4 — Install a source
+A new database has no accounts. The setup page asks you to choose the first administrator's
+username, email address, and password, then signs you in.
 
-Navigate to **Settings → Sources** and click **Browse**. Find a source, click its card, and
-install it. Once installed it appears under **Sources** in the sidebar.
+Setup closes permanently as soon as the first account exists. It is accepted only from a loopback
+or private address unless `KANI_ALLOW_REMOTE_SETUP=true` is set. Prefer a LAN connection or SSH
+tunnel. If the override is unavoidable, remove it immediately after creating the account and
+restart Kani.
 
-## 5 — Follow a series
+## 4. Complete onboarding
 
-Open a source, search for a title, open the manga detail page, and click **Follow**. Kani will
-check for new chapters on its next scheduled scan.
+Choose the library directory and, if a repository is configured, install a first source. In the
+standard container the library directory is `/library`, mapped to `./library` on the host.
+
+## 5. Add a source and follow a title
+
+Open **Sources**. Add a signed extension repository or install an extension using a method allowed
+by the operator, then select the source in the sidebar. Search for a title, open it, and add it to
+the library. Kani can scan followed titles for new chapters and apply the title's download rules.
+
+See [Sources](../admin/sources.md) for installation methods and the repository trust model.
 
 ## Next steps
 
-- [Reverse proxy setup](reverse-proxy.md) — put Kani behind nginx or Caddy with HTTPS.
-- [Users & roles](../admin/users-roles.md) — create additional accounts.
-- [Sources admin guide](../admin/sources.md) — manage and update installed sources.
+- [Library guide](../user/library.md)
+- [Reverse proxy](reverse-proxy.md)
+- [Backup and restore](../admin/backup-restore.md)
+- [Users and roles](../admin/users-roles.md)

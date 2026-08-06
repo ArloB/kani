@@ -165,10 +165,10 @@ use std::sync::OnceLock;
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 {extract_import}
 use kani_shared::{{
-    ExtensionMetadata, ExtensionResult, MangaExtension, MangaStatus, bindings, wit_types,
+    ExtensionMetadata, ExtensionResult, MangaExtension, bindings, wit_types,
     types::ActiveFilter, to_shared_filters, filter_list{pref_import}, FilterState,
 }};
-{ast_import}use wit_types::{{Chapter, ChapterList, ChapterInfo, MangaInfo, MangaList, MangaListItem, Page, PreferenceSpec}};
+{ast_import}use wit_types::{{Chapter, ChapterList, ChapterInfo, MangaInfo, MangaList, PreferenceSpec}};
 
 kani_shared::guest_alloc!();
 

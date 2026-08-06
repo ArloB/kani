@@ -165,46 +165,28 @@ pub fn make_fetch_expr(
 
 /// Build a URL by substituting `$var$` placeholders in `route` from `args`.
 ///
-/// Composite-id sub-field placeholders (`$manga.hid$`) are looked up by the
-/// dot-replaced key (`manga_hid`). The `base_url` is prepended verbatim.
+/// Delegates to [`kani_shared::request::build_url`] — the single implementation
+/// both YAML engines share. Composite-id sub-field placeholders (`$manga.hid$`)
+/// are looked up by the dot-replaced key (`manga_hid`).
 pub fn build_url_with_args(
     base_url: &str,
     route: &str,
     args: &std::collections::HashMap<String, String>,
-) -> String {
-    let mut result = String::with_capacity(route.len());
-    let bytes = route.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' {
-            let start = i + 1;
-            let mut end = start;
-            while end < bytes.len()
-                && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_' || bytes[end] == b'.')
-            {
-                end += 1;
-            }
-            if end < bytes.len() && bytes[end] == b'$' && end > start {
-                let placeholder = &route[start..end];
-                let key = placeholder.replace('.', "_");
-                if let Some(val) = args.get(&key) {
-                    result.push_str(val);
-                } else {
-                    result.push('$');
-                    result.push_str(placeholder);
-                    result.push('$');
-                }
-                i = end + 1;
-            } else {
-                result.push('$');
-                i += 1;
-            }
-        } else {
-            result.push(bytes[i] as char);
-            i += 1;
+) -> Result<String, String> {
+    kani_shared::request::build_url(base_url, route, args)
+}
+
+impl From<&yaml::model::QueryEntry> for kani_shared::request::QuerySpec {
+    fn from(e: &yaml::model::QueryEntry) -> Self {
+        use yaml::model::QueryValue as Y;
+        kani_shared::request::QuerySpec {
+            key: e.key.clone(),
+            value: match &e.value {
+                Y::Static(s) => kani_shared::request::QueryValue::Static(s.clone()),
+                Y::Arg(a) => kani_shared::request::QueryValue::Arg(a.clone()),
+            },
         }
     }
-    format!("{}{}", base_url.trim_end_matches('/'), result)
 }
 
 /// Resolve query parameters from an endpoint's query list and a runtime args map.
@@ -212,17 +194,8 @@ pub fn build_queries(
     entries: &[yaml::model::QueryEntry],
     args: &std::collections::HashMap<String, String>,
 ) -> Vec<(String, String)> {
-    use yaml::model::QueryValue;
-    entries
-        .iter()
-        .filter_map(|e| {
-            let val = match &e.value {
-                QueryValue::Static(s) => s.clone(),
-                QueryValue::Arg(name) => args.get(name.as_str())?.clone(),
-            };
-            Some((e.key.clone(), val))
-        })
-        .collect()
+    let specs: Vec<kani_shared::request::QuerySpec> = entries.iter().map(Into::into).collect();
+    kani_shared::request::build_queries(&specs, args)
 }
 
 /// Decode composite IDs referenced by `ep` and add the decoded sub-fields to `args`.
@@ -255,5 +228,150 @@ pub fn resolve_composite_ids(
                 args.insert(format!("{}_{}", decode.role, field), value);
             }
         }
+    }
+}
+
+/// Maps active filters onto query parameters, per an endpoint's `filter_mapping`
+/// and `filter_format`.
+///
+/// This is the reference implementation for both execution paths. It previously
+/// existed only inside `kani-cli`'s codegen, which meant an interpreted YAML
+/// source rendered the filter panel, accepted a selection and then sent an
+/// unfiltered request — the same `.yaml` behaved differently depending on
+/// whether it had been compiled. The conformance suite (`kani-fixture-source`)
+/// exists to catch that class of divergence.
+pub fn apply_filters(
+    filter_mapping: &[(String, yaml::schema::FilterMappingEntry)],
+    filter_format: Option<&yaml::schema::FilterFormatCfg>,
+    filters: &[kani_shared::types::ActiveFilter],
+) -> Vec<(String, String)> {
+    let mapping: Vec<(String, kani_shared::request::FilterMapping)> = filter_mapping
+        .iter()
+        .map(|(group, entry)| (group.clone(), entry.into()))
+        .collect();
+    let format = filter_format.map(kani_shared::request::FilterFormat::from);
+    kani_shared::request::apply_filters(&mapping, format.as_ref(), filters)
+}
+
+impl From<&yaml::schema::FilterMappingEntry> for kani_shared::request::FilterMapping {
+    fn from(e: &yaml::schema::FilterMappingEntry) -> Self {
+        use kani_shared::request::FilterMapping as S;
+        use yaml::schema::FilterMappingEntry as Y;
+        match e {
+            Y::Simple(p) => S::Simple(p.clone()),
+            Y::SortPair {
+                key_template,
+                direction_param,
+                ..
+            } => S::SortPair {
+                key_template: key_template.clone(),
+                direction_param: direction_param.clone(),
+            },
+            Y::TupleSplit {
+                from_param,
+                to_param,
+                ..
+            } => S::TupleSplit {
+                from_param: from_param.clone(),
+                to_param: to_param.clone(),
+            },
+        }
+    }
+}
+
+impl From<&yaml::schema::FilterFormatCfg> for kani_shared::request::FilterFormat {
+    fn from(f: &yaml::schema::FilterFormatCfg) -> Self {
+        use kani_shared::request::{ArrayFormat as SA, BoolFormat as SB};
+        use yaml::schema::{ArrayFormat as YA, BoolFormat as YB};
+        kani_shared::request::FilterFormat {
+            // The interpreter always treated `Default` as `Repeated`.
+            multiselect: match f.multiselect {
+                YA::Default | YA::Repeated => SA::Repeated,
+                YA::Bracket => SA::Bracket,
+                YA::CommaSeparated => SA::CommaSeparated,
+            },
+            omit_empty: f.omit_empty,
+            bool_format: match f.bool_format {
+                YB::TrueFalse => SB::TrueFalse,
+                YB::OneZero => SB::OneZero,
+                YB::YesNo => SB::YesNo,
+            },
+            array_separator: f.array_separator.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::build_url_with_args;
+    use std::collections::HashMap;
+
+    fn args(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn substitutes_a_plain_id() {
+        let url = build_url_with_args(
+            "https://src.example/",
+            "/manga/$manga_id$",
+            &args(&[("manga_id", "abc123")]),
+        )
+        .unwrap();
+        assert_eq!(url, "https://src.example/manga/abc123");
+    }
+
+    #[test]
+    fn a_source_supplied_id_cannot_rewrite_the_path() {
+        // A10: a traversal, a query, or a space in the id must be percent-encoded
+        // into a single path segment, not smuggled into the request structure.
+        let url = build_url_with_args(
+            "https://src.example",
+            "/manga/$manga_id$/details",
+            &args(&[("manga_id", "../admin")]),
+        )
+        .unwrap();
+        assert_eq!(url, "https://src.example/manga/..%2Fadmin/details");
+
+        let url = build_url_with_args(
+            "https://src.example",
+            "/manga/$manga_id$",
+            &args(&[("manga_id", "x?y=1")]),
+        )
+        .unwrap();
+        assert_eq!(url, "https://src.example/manga/x%3Fy%3D1");
+
+        let url = build_url_with_args(
+            "https://src.example",
+            "/manga/$manga_id$",
+            &args(&[("manga_id", "a b")]),
+        )
+        .unwrap();
+        assert_eq!(url, "https://src.example/manga/a%20b");
+    }
+
+    #[test]
+    fn an_unresolved_placeholder_is_an_error_not_a_literal() {
+        // A11: a route slot with no argument must fail, never send `$page$`.
+        let err = build_url_with_args(
+            "https://src.example",
+            "/list/$page$",
+            &args(&[("manga_id", "x")]),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("page"),
+            "error should name the placeholder: {err}"
+        );
+    }
+
+    #[test]
+    fn a_lone_dollar_is_kept_literally() {
+        let url = build_url_with_args("https://src.example", "/price/$5", &args(&[])).unwrap();
+        assert_eq!(url, "https://src.example/price/$5");
     }
 }

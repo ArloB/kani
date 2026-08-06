@@ -71,9 +71,14 @@ cd kani
 docker compose up --build
 ```
 
-Open <http://localhost:8242>. On first run Kani creates an admin account; the credentials are
-printed to the container log and written to `~/.kani_admin_password` inside the container.
-Change the password immediately after logging in.
+Open <http://localhost:8242>. A new server has no accounts, so it shows a setup screen where you
+create the administrator — pick your own username and password. Setup closes permanently as soon as
+that account exists.
+
+For safety it is only accepted from a loopback or private address, so an instance published to the
+internet before you reach it cannot be claimed by someone else. If you must complete setup over the
+internet (a VPS reached directly rather than through a tunnel or reverse proxy), start the server
+with `KANI_ALLOW_REMOTE_SETUP=true`.
 
 Data is persisted in two directories created alongside `docker-compose.yml`:
 

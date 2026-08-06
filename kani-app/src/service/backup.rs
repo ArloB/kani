@@ -9,6 +9,10 @@ use super::AppService;
 use crate::error::{Result, ServiceError};
 use crate::events::AppEvent;
 use crate::ids::{MangaId, SourceId, UserId};
+use kani_shared::types::{
+    AdvancedSettings, DownloadSettings, EmailSettings, MaintenanceSettings, PerformanceSettings,
+    ScanSettings, SecuritySettings, SettingsUpdate, TrackingSettings,
+};
 
 // ── Serialisable backup structs ───────────────────────────────────────────────
 
@@ -81,12 +85,55 @@ pub struct BackupCategory {
     pub sort_order: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// The settings carried in a backup.
+///
+/// This used to be three loose fields against a settings row that has since
+/// grown to sixty-two, so a restore silently returned three of them and left
+/// the rest at whatever the target install happened to have. Enumerating all
+/// sixty-two here would only move the problem: the next setting added would be
+/// forgotten in exactly the same way.
+///
+/// Instead it carries the eight `SettingsUpdate` group structs, which between
+/// them cover sixty-one of the sixty-two fields — everything a user can edit.
+/// The sixty-second is `first_run_complete`, which must never be restored: it
+/// would re-arm or bypass the setup wizard on the target install. A setting
+/// added to any group from now on is backed up without touching this file.
+///
+/// Every group is optional, and absent means "leave alone" rather than "reset
+/// to default". That is what lets a backup written by an older version — which
+/// carried only the three flat fields — restore exactly as it always did
+/// instead of resetting the other fifty-eight to defaults.
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct BackupSettings {
-    pub scan_interval_minutes: i64,
-    pub auto_scan: bool,
-    pub concurrent_page_downloads: i64,
-    pub concurrent_manga_downloads: i64,
+    /// Written by versions that predate the group payloads, and still written
+    /// today so a backup taken here can be restored by one of those versions
+    /// rather than failing to deserialise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_interval_minutes: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_scan: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrent_page_downloads: Option<i64>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download: Option<DownloadSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<ScanSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advanced: Option<AdvancedSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracking: Option<TrackingSettings>,
+    /// Carried with credential values masked, exactly as the settings API
+    /// masks them. A backup file is not a place for the SMTP password, and
+    /// restoring through `update_settings` substitutes the stored value back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<EmailSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maintenance: Option<MaintenanceSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<SecuritySettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub performance: Option<PerformanceSettings>,
 }
 
 // ── Preview (read-only, no DB writes) ────────────────────────────────────────
@@ -441,14 +488,96 @@ impl AppService {
                 })
                 .collect();
 
-        let s = self.settings.read().await;
+        // Built from `get_settings` rather than the raw cache: it owns the
+        // conversions the cache does not (PathBuf to String, the category-id
+        // JSON to Vec<i64>) and it already masks the email credentials.
+        let s = self.get_settings().await;
         let settings = Some(BackupSettings {
-            scan_interval_minutes: s.scan_interval_minutes,
-            auto_scan: s.auto_scan,
-            concurrent_page_downloads: s.concurrent_page_downloads,
-            concurrent_manga_downloads: s.concurrent_manga_downloads,
+            // Kept so an older build can still read a backup written here.
+            scan_interval_minutes: Some(s.scan_interval_minutes),
+            auto_scan: Some(s.auto_scan),
+            concurrent_page_downloads: Some(s.concurrent_page_downloads),
+
+            download: Some(DownloadSettings {
+                concurrent_page_downloads: s.concurrent_page_downloads,
+                max_retries: s.max_retries,
+                initial_retry_delay_ms: s.initial_retry_delay_ms,
+                auto_download_category_ids: s.auto_download_category_ids.clone(),
+                scan_concurrency: s.scan_concurrency,
+                per_source_download_concurrency: s.per_source_download_concurrency,
+            }),
+            scan: Some(ScanSettings {
+                auto_scan: s.auto_scan,
+                scan_interval_minutes: s.scan_interval_minutes,
+                scan_exclude_completed: s.scan_exclude_completed,
+                upgrade_detection_enabled: s.upgrade_detection_enabled,
+                upgrade_min_res_gain: s.upgrade_min_res_gain,
+                upgrade_confirm_fetches: s.upgrade_confirm_fetches,
+                upgrade_axis_resolution: s.upgrade_axis_resolution.clone(),
+                upgrade_axis_colour: s.upgrade_axis_colour.clone(),
+                upgrade_axis_encoder: s.upgrade_axis_encoder.clone(),
+                upgrade_axis_bitrate: s.upgrade_axis_bitrate.clone(),
+                upgrade_show_downgrades: s.upgrade_show_downgrades,
+                upgrade_auto_replace_reasons: s.upgrade_auto_replace_reasons.clone(),
+                scan_barren_page_tolerance: s.scan_barren_page_tolerance,
+            }),
+            advanced: Some(AdvancedSettings {
+                flaresolverr_url: s.flaresolverr_url.clone(),
+                library_path: s.library_path.clone(),
+                wasm_storage_path: s.wasm_storage_path.clone(),
+                max_wasm_instances: s.max_wasm_instances,
+                http_request_logging: s.http_request_logging,
+                browser_debug_logging: s.browser_debug_logging,
+                registration_enabled: s.registration_enabled,
+                cover_max_dimension: s.cover_max_dimension,
+                browser_max_memory_mb: s.browser_max_memory_mb,
+                browser_max_instances: s.browser_max_instances,
+                browser_idle_timeout_s: s.browser_idle_timeout_s,
+                update_check_enabled: s.update_check_enabled,
+                opds_page_index_zero_based: s.opds_page_index_zero_based,
+                global_search_timeout_secs: s.global_search_timeout_secs,
+            }),
+            tracking: Some(TrackingSettings {
+                default_tracking_enabled: s.default_tracking_enabled,
+                tracker_auto_sync_enabled: s.tracker_auto_sync_enabled,
+                tracker_sync_interval_hours: s.tracker_sync_interval_hours,
+            }),
+            email: Some(EmailSettings {
+                email_enabled: s.email_enabled,
+                email_provider: s.email_provider.clone(),
+                // Already masked by get_settings, so the SMTP password never
+                // reaches the file.
+                email_provider_config: s.email_provider_config.clone(),
+                email_from_address: s.email_from_address.clone(),
+                app_url: s.app_url.clone(),
+                password_reset_enabled: s.password_reset_enabled,
+                email_verification_required: s.email_verification_required,
+            }),
+            maintenance: Some(MaintenanceSettings {
+                trash_retention_days: s.trash_retention_days,
+                audit_retention_days: s.audit_retention_days,
+                audit_security_retention_days: s.audit_security_retention_days,
+                disk_warn_threshold: s.disk_warn_threshold,
+                thumbnail_formats: s.thumbnail_formats.clone(),
+                integrity_quick_scrub_interval_hours: s.integrity_quick_scrub_interval_hours,
+                integrity_deep_scrub_interval_hours: s.integrity_deep_scrub_interval_hours,
+                scrub_on_startup: s.scrub_on_startup,
+                integrity_revalidate_after_days: s.integrity_revalidate_after_days,
+            }),
+            security: Some(SecuritySettings {
+                max_login_attempts: s.max_login_attempts,
+                max_ip_attempts: s.max_ip_attempts,
+                login_lockout_seconds: s.login_lockout_seconds,
+                session_timeout_secs: s.session_timeout_secs,
+            }),
+            performance: Some(PerformanceSettings {
+                max_concurrent_jobs: s.max_concurrent_jobs,
+                db_maintenance_interval_hours: s.db_maintenance_interval_hours,
+                db_vacuum_interval_hours: s.db_vacuum_interval_hours,
+                audit_prune_interval_hours: s.audit_prune_interval_hours,
+                trash_purge_interval_hours: s.trash_purge_interval_hours,
+            }),
         });
-        drop(s);
 
         let repos: Vec<BackupRepo> = sqlx::query!(
             "SELECT url, name, maintainer_key, trusted_level, index_cache FROM repo_trust ORDER BY url"
@@ -755,17 +884,100 @@ impl AppService {
         if opts.import_settings
             && let Some(ref s) = backup.settings
         {
-            sqlx::query!(
-                "UPDATE settings SET scan_interval_minutes = ?, auto_scan = ?, \
-                     concurrent_page_downloads = ?, concurrent_manga_downloads = ? \
-                     WHERE id = 'singleton'",
-                s.scan_interval_minutes,
-                s.auto_scan,
-                s.concurrent_page_downloads,
-                s.concurrent_manga_downloads
-            )
-            .execute(&self.db)
-            .await?;
+            // Everything goes through `update_settings` rather than raw SQL.
+            // That is not tidiness: it validates the values (a hand-edited
+            // backup cannot write a 900-thread download concurrency), it
+            // refreshes the in-memory settings cache — the previous UPDATE did
+            // not, so a restore appeared to do nothing until the next restart —
+            // and for email it substitutes the stored credentials back in place
+            // of the masked ones the backup carries.
+            let mut applied = false;
+            if let Some(g) = s.download.clone() {
+                self.update_settings(SettingsUpdate::Download(g), user_id)
+                    .await?;
+                applied = true;
+            }
+            if let Some(g) = s.scan.clone() {
+                self.update_settings(SettingsUpdate::Scan(g), user_id)
+                    .await?;
+                applied = true;
+            }
+            if let Some(g) = s.advanced.clone() {
+                self.update_settings(SettingsUpdate::Advanced(g), user_id)
+                    .await?;
+                applied = true;
+            }
+            if let Some(g) = s.tracking.clone() {
+                self.update_settings(SettingsUpdate::Tracking(g), user_id)
+                    .await?;
+                applied = true;
+            }
+            if let Some(g) = s.email.clone() {
+                self.update_settings(SettingsUpdate::Email(g), user_id)
+                    .await?;
+                applied = true;
+            }
+            if let Some(g) = s.maintenance.clone() {
+                self.update_settings(SettingsUpdate::Maintenance(g), user_id)
+                    .await?;
+                applied = true;
+            }
+            if let Some(g) = s.security.clone() {
+                self.update_settings(SettingsUpdate::Security(g), user_id)
+                    .await?;
+                applied = true;
+            }
+            if let Some(g) = s.performance.clone() {
+                self.update_settings(SettingsUpdate::Performance(g), user_id)
+                    .await?;
+                applied = true;
+            }
+
+            // A backup from before the group payloads carries only the three
+            // flat fields. Apply exactly those, by reading the current groups
+            // and overriding the three — so an old backup still changes only
+            // what it always changed, and still lands through the path that
+            // refreshes the cache.
+            if !applied {
+                let cur = self.get_settings().await;
+                if s.scan_interval_minutes.is_some() || s.auto_scan.is_some() {
+                    self.update_settings(
+                        SettingsUpdate::Scan(ScanSettings {
+                            auto_scan: s.auto_scan.unwrap_or(cur.auto_scan),
+                            scan_interval_minutes: s
+                                .scan_interval_minutes
+                                .unwrap_or(cur.scan_interval_minutes),
+                            scan_exclude_completed: cur.scan_exclude_completed,
+                            upgrade_detection_enabled: cur.upgrade_detection_enabled,
+                            upgrade_min_res_gain: cur.upgrade_min_res_gain,
+                            upgrade_confirm_fetches: cur.upgrade_confirm_fetches,
+                            upgrade_axis_resolution: cur.upgrade_axis_resolution.clone(),
+                            upgrade_axis_colour: cur.upgrade_axis_colour.clone(),
+                            upgrade_axis_encoder: cur.upgrade_axis_encoder.clone(),
+                            upgrade_axis_bitrate: cur.upgrade_axis_bitrate.clone(),
+                            upgrade_show_downgrades: cur.upgrade_show_downgrades,
+                            upgrade_auto_replace_reasons: cur.upgrade_auto_replace_reasons.clone(),
+                            scan_barren_page_tolerance: cur.scan_barren_page_tolerance,
+                        }),
+                        user_id,
+                    )
+                    .await?;
+                }
+                if let Some(cpd) = s.concurrent_page_downloads {
+                    self.update_settings(
+                        SettingsUpdate::Download(DownloadSettings {
+                            concurrent_page_downloads: cpd,
+                            max_retries: cur.max_retries,
+                            initial_retry_delay_ms: cur.initial_retry_delay_ms,
+                            auto_download_category_ids: cur.auto_download_category_ids.clone(),
+                            scan_concurrency: cur.scan_concurrency,
+                            per_source_download_concurrency: cur.per_source_download_concurrency,
+                        }),
+                        user_id,
+                    )
+                    .await?;
+                }
+            }
         }
 
         if opts.import_repos {

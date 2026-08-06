@@ -14,6 +14,7 @@ import { t } from './i18n.js';
 const _routes = [
   { path: '/login',                     load: () => import('./pages/login.js') },
   { path: '/register',                  load: () => import('./pages/register.js') },
+  { path: '/setup',                     load: () => import('./pages/setup.js') },
   { path: '/forgot-password',           load: () => import('./pages/forgot-password.js') },
   { path: '/reset-password',            load: () => import('./pages/reset-password.js') },
   { path: '/verify-email',              load: () => import('./pages/verify-email.js') },
@@ -27,6 +28,7 @@ const _routes = [
   { path: '/settings',                  load: () => import('./pages/settings/index.js') },
   { path: '/accounts',                  load: () => import('./pages/accounts.js') },
   { path: '/updates',                   load: () => import('./pages/recent-updates.js') },
+  { path: '/upgrades',                  load: () => import('./pages/upgrades.js') },
   { path: '/stats',                     load: () => import('./pages/stats.js') },
   { path: '/admin/logs',                load: () => import('./pages/admin/logs.js') },
   { path: '/admin/ui-showcase',         load: () => import('./pages/admin/ui-showcase.js') },
@@ -46,6 +48,14 @@ let _currentParams = {};
 /** @type {(() => Promise<boolean>) | null} — resolve false to cancel navigation */
 let _beforeNavigate = null;
 let _isInitialRoute = true;
+/**
+ * Bumped by every navigation. A route that started earlier compares its own
+ * value after each await and bails if a newer navigation has superseded it —
+ * otherwise a slow page's `await import()` resolves *after* a redirect and
+ * renders itself over the page the redirect chose, leaving the URL and the
+ * content disagreeing.
+ */
+let _navGeneration = 0;
 
 /**
  * Registers a guard called before every programmatic navigation.
@@ -88,6 +98,36 @@ export async function navigate(path, opts = {}) {
  * Returns the params extracted from the current matched route.
  * @returns {Record<string, string>}
  */
+const INTENDED_KEY = 'kani-intended-destination';
+
+/**
+ * Park the destination a redirect is about to discard, so the flow that
+ * interrupted the user can send them back to it.
+ * @param {string} path pathname + search
+ */
+export function rememberIntendedDestination(path) {
+  try {
+    if (path && path !== '/') sessionStorage.setItem(INTENDED_KEY, path);
+  } catch {
+    /* storage unavailable — the redirect still works, it just forgets */
+  }
+}
+
+/**
+ * Take the parked destination, clearing it so a later unrelated visit to the
+ * interrupting page does not bounce somewhere unexpected.
+ * @returns {string | null}
+ */
+export function consumeIntendedDestination() {
+  try {
+    const v = sessionStorage.getItem(INTENDED_KEY);
+    sessionStorage.removeItem(INTENDED_KEY);
+    return v;
+  } catch {
+    return null;
+  }
+}
+
 export function getCurrentParams() {
   return { ..._currentParams };
 }
@@ -116,6 +156,7 @@ export function onNavigate(callback) {
  */
 async function _route(path, fromPopstate = false) {
   if (!_container) return;
+  const generation = ++_navGeneration;
 
   // Strip query string before matching — pages read location.search directly
   const pathname = path.split('?')[0];
@@ -142,13 +183,21 @@ async function _route(path, fromPopstate = false) {
   _activePage = null;
   _currentParams = params;
 
+  // A page opts into the fixed-viewport layout by adding `page-fixed` to the
+  // shared container; the router takes it back off on the way out. Left on, it
+  // applies `overflow: hidden` to the next page too — statistics lost 615 px
+  // with no way to scroll to it after any visit to a manga.
+  _container.classList.remove('page-fixed');
+
   if (!matched) {
     _container.innerHTML = `<div style="padding:2rem;text-align:center;color:var(--color-text-muted)">${t('router.not_found')}</div>`;
     document.title = t('router.not_found.title');
   } else {
     try {
       const mod = await matched.load();
+      if (generation !== _navGeneration) return;
       const swap = async () => {
+        if (generation !== _navGeneration) return;
         // Clear old content only once the new module is ready to render
         /** @type {HTMLElement} */ (_container).innerHTML = '';
         _activePage = mod;

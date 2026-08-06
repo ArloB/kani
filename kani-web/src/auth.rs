@@ -20,6 +20,21 @@ use sqlx::SqlitePool;
 
 use crate::error::AppError;
 
+/// Where the first-run admin password is written.
+///
+/// The **data directory**, not the home directory. In Docker `HOME` is `/app`,
+/// which is root-owned and not writable by the `kani` user the container runs
+/// as — so this write failed *after* the admin account had already been
+/// created, leaving a fresh deployment with an account whose randomly generated
+/// password nobody could ever read. The data dir is a mounted volume, is
+/// writable, and is where an operator would think to look.
+pub fn admin_password_path() -> std::path::PathBuf {
+    std::env::var("KANI_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| ".".into()))
+        .join(".kani_admin_password")
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
     pub id: UserId,
@@ -210,9 +225,7 @@ impl AuthBackend {
         user_id: UserId,
         new_password: &str,
     ) -> Result<(), AppError> {
-        let path = dirs::home_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".kani_admin_password");
+        let path = admin_password_path();
 
         if let Err(e) = std::fs::remove_file(&path)
             && e.kind() != std::io::ErrorKind::NotFound
@@ -607,6 +620,19 @@ pub async fn auth_guard(auth: AuthSession, request: Request, next: Next) -> Resp
         return next.run(request).await;
     }
 
+    // Bearer-authenticated callers have no session, so this guard cannot judge
+    // them. Let them through and leave the decision to the AuthGuard extractor,
+    // which validates the token, its kind and its scopes. A bogus bearer is
+    // refused there, not here — it never reaches a handler either way.
+    if request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("Bearer "))
+    {
+        return next.run(request).await;
+    }
+
     match &auth.user {
         None => {
             if path.starts_with("/rest/") || path.starts_with("/api/") {
@@ -635,6 +661,7 @@ pub async fn auth_guard(auth: AuthSession, request: Request, next: Next) -> Resp
 /// Returns `true` for paths that are always accessible without a session.
 fn is_public_path(path: &str) -> bool {
     path == "/login"
+        || path == "/setup"
         || path == "/register"
         || path == "/forgot-password"
         || path == "/reset-password"
@@ -646,7 +673,10 @@ fn is_public_path(path: &str) -> bool {
         || path.starts_with("/fonts/")
         || path == "/favicon.ico"
         || path == "/health"
+        || path == "/healthz"
         || path == "/ready"
+        || path == "/readyz"
+        || path == "/metrics"
         || path == "/manifest.webmanifest"
         || path == "/sw.js"
         || path.starts_with("/icons/")
@@ -736,6 +766,25 @@ mod tests {
     use super::*;
     use axum_login::AuthzBackend;
 
+    // The first-run admin password must land in the data directory. It used to
+    // use `dirs::home_dir()`, which in Docker is `/app` — root-owned and not
+    // writable by the container's `kani` user. The write failed *after* the
+    // admin account was created, so a fresh deployment ended up with an account
+    // whose password nobody could read, while still reporting healthy.
+    #[test]
+    fn the_admin_password_is_written_to_the_data_dir_not_the_home_dir() {
+        // SAFETY: single-threaded test process; no other thread reads the env.
+        unsafe { std::env::set_var("KANI_DATA_DIR", "/tmp/kani-data-dir-test") };
+        let path = admin_password_path();
+        unsafe { std::env::remove_var("KANI_DATA_DIR") };
+
+        assert_eq!(
+            path,
+            std::path::Path::new("/tmp/kani-data-dir-test/.kani_admin_password"),
+            "the password file must sit in the data dir, which is a writable volume"
+        );
+    }
+
     // ── hash / verify password ───────────────────────────────────────────────
 
     #[test]
@@ -773,6 +822,10 @@ mod tests {
     #[test]
     fn auth_pages_are_public() {
         assert!(is_public_path("/register"));
+        assert!(
+            is_public_path("/setup"),
+            "first-run setup is reached before any account exists, so it cannot require a session"
+        );
         assert!(is_public_path("/forgot-password"));
         assert!(is_public_path("/reset-password"));
         assert!(is_public_path("/verify-email"));
@@ -805,6 +858,17 @@ mod tests {
     fn health_is_public() {
         assert!(is_public_path("/health"));
         assert!(is_public_path("/ready"));
+    }
+
+    #[test]
+    fn metrics_is_public_for_scrapers() {
+        assert!(is_public_path("/metrics"));
+    }
+
+    #[test]
+    fn healthz_aliases_are_public() {
+        assert!(is_public_path("/healthz"));
+        assert!(is_public_path("/readyz"));
     }
 
     #[test]

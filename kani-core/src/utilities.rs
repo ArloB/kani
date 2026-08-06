@@ -55,6 +55,25 @@ pub fn sanitize_filename(name: &str) -> String {
     }
 }
 
+/// Expresses `target` relative to `root`, with `/` separators, for storing in the
+/// database.
+///
+/// Both sides are canonicalised first, because `assert_within_root` hands back
+/// canonical absolute paths while the configured root is often neither — the
+/// default `library_path` is the relative `./library`. Comparing those two forms
+/// directly never matches, so a caller that skipped this would silently store
+/// nothing.
+pub fn relative_within_root(root: &Path, target: &Path) -> Option<String> {
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let canonical_target = dunce::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+
+    canonical_target
+        .strip_prefix(&canonical_root)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .filter(|p| !p.is_empty())
+}
+
 /// Resolves `target` and asserts it remains under `root`.
 /// Fails if `target` does not yet exist — use the parent dir for new files.
 pub fn assert_within_root(root: &Path, target: &Path) -> Result<PathBuf> {
@@ -275,5 +294,72 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    // ── relative_within_root ─────────────────────────────────────────────────
+
+    #[test]
+    fn a_path_under_the_root_becomes_a_relative_string() {
+        let dir = tempdir().unwrap();
+        let manga = dir.path().join("Some Manga - 1");
+        fs::create_dir(&manga).unwrap();
+        let cbz = manga.join("0001.cbz");
+        fs::write(&cbz, b"x").unwrap();
+
+        assert_eq!(
+            relative_within_root(dir.path(), &cbz).as_deref(),
+            Some("Some Manga - 1/0001.cbz")
+        );
+    }
+
+    #[test]
+    fn a_non_canonical_root_still_yields_a_relative_path() {
+        let dir = tempdir().unwrap();
+        let real = dir.path().join("real-library");
+        fs::create_dir(&real).unwrap();
+        let cbz = real.join("0001.cbz");
+        fs::write(&cbz, b"x").unwrap();
+
+        let uncanonical = dir.path().join("./real-library/../real-library");
+        assert_eq!(
+            relative_within_root(&uncanonical, &cbz).as_deref(),
+            Some("0001.cbz"),
+            "a root that needs normalising must still match its own files"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_root_still_yields_a_relative_path() {
+        let dir = tempdir().unwrap();
+        let real = dir.path().join("real-library");
+        fs::create_dir(&real).unwrap();
+        let cbz = real.join("0001.cbz");
+        fs::write(&cbz, b"x").unwrap();
+        let link = dir.path().join("library-link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        // This is the shape the bug took in production: `assert_within_root`
+        // returns the canonical path while the configured root is the symlink.
+        assert_eq!(
+            relative_within_root(&link, &cbz).as_deref(),
+            Some("0001.cbz")
+        );
+    }
+
+    #[test]
+    fn a_path_outside_the_root_yields_nothing() {
+        let root = tempdir().unwrap();
+        let elsewhere = tempdir().unwrap();
+        let cbz = elsewhere.path().join("0001.cbz");
+        fs::write(&cbz, b"x").unwrap();
+
+        assert!(relative_within_root(root.path(), &cbz).is_none());
+    }
+
+    #[test]
+    fn the_root_itself_yields_nothing() {
+        let dir = tempdir().unwrap();
+        assert!(relative_within_root(dir.path(), dir.path()).is_none());
     }
 }

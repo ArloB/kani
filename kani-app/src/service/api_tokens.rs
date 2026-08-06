@@ -10,6 +10,7 @@ pub struct ApiToken {
     pub id: String,
     pub user_id: UserId,
     pub name: String,
+    pub kind: String,
     pub scopes: String,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
@@ -24,6 +25,7 @@ pub struct CreatedApiToken {
 
 pub struct ApiTokenAuth {
     pub user_id: UserId,
+    pub kind: TokenKind,
     pub scopes: Vec<Permission>,
 }
 
@@ -44,26 +46,145 @@ pub(crate) fn parse_scopes(scopes: &str) -> Vec<Permission> {
         .collect()
 }
 
+/// Programmatic tokens are scopable; OPDS reader tokens are not. Route
+/// acceptance keys on this, never on scope contents, so an OPDS token cannot
+/// reach /rest/* even if a broader scope string ends up in its row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenKind {
+    Opds,
+    Api,
+}
+
+impl TokenKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Opds => "opds",
+            Self::Api => "api",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "opds" => Some(Self::Opds),
+            "api" => Some(Self::Api),
+            _ => None,
+        }
+    }
+}
+
+/// Fixed scope set for an OPDS reader token. Not user-selectable.
+pub const OPDS_TOKEN_SCOPES: &str = "opds:read opds:progress";
+
+/// Upper bounds so a never-expiring credential is a deliberate choice rather
+/// than the default, and one account cannot mint an unbounded number.
+pub const MAX_TOKENS_PER_USER: i64 = 25;
+pub const MAX_TOKEN_LIFETIME_DAYS: u32 = 365;
+
 impl AppService {
-    pub async fn create_api_token(
+    /// The permissions a user currently holds, resolved through role inheritance.
+    /// Canonical for both token scope validation and use-time intersection.
+    pub async fn user_permissions(&self, user_id: UserId) -> Result<Vec<Permission>> {
+        let uid = user_id.0;
+        let rows = sqlx::query_scalar!(
+            "WITH RECURSIVE role_tree(slug) AS (
+                SELECT role_slug FROM user_roles WHERE user_id = ?
+                UNION
+                SELECT r.parent FROM roles r JOIN role_tree rt ON r.slug = rt.slug
+                WHERE r.parent IS NOT NULL
+            )
+            SELECT DISTINCT rp.permission
+            FROM role_permissions rp
+            JOIN role_tree rt ON rp.role_slug = rt.slug",
+            uid
+        )
+        .fetch_all(&self.db_read)
+        .await?;
+
+        Ok(rows.into_iter().filter_map(|s| s.parse().ok()).collect())
+    }
+
+    /// Mints a token of the given kind.
+    ///
+    /// For `TokenKind::Api`, `scopes` must be a subset of what the creator holds:
+    /// a user must never be able to mint a credential more capable than
+    /// themselves. This is only half the guarantee — see
+    /// `authenticate_token`, which re-intersects at use time.
+    pub async fn create_token(
         &self,
         user_id: UserId,
         name: &str,
         expires_in_days: Option<u32>,
+        kind: TokenKind,
+        scopes: Option<&[Permission]>,
     ) -> Result<CreatedApiToken> {
+        if name.trim().is_empty() {
+            return Err(ServiceError::Validation("token name is required".into()));
+        }
+        if let Some(days) = expires_in_days
+            && days > MAX_TOKEN_LIFETIME_DAYS
+        {
+            return Err(ServiceError::Validation(format!(
+                "token lifetime cannot exceed {MAX_TOKEN_LIFETIME_DAYS} days"
+            )));
+        }
+
+        let uid = user_id.0;
+        let live: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL",
+            uid
+        )
+        .fetch_one(&self.db_read)
+        .await?;
+        if live >= MAX_TOKENS_PER_USER {
+            return Err(ServiceError::Validation(format!(
+                "at most {MAX_TOKENS_PER_USER} live tokens per user; revoke one first"
+            )));
+        }
+
+        let scope_str = match kind {
+            TokenKind::Opds => OPDS_TOKEN_SCOPES.to_string(),
+            TokenKind::Api => {
+                let requested = scopes.unwrap_or(&[]);
+                if requested.is_empty() {
+                    return Err(ServiceError::Validation(
+                        "an API token needs at least one scope".into(),
+                    ));
+                }
+                let held = self.user_permissions(user_id).await?;
+                let over: Vec<String> = requested
+                    .iter()
+                    .filter(|p| !held.contains(p))
+                    .map(|p| p.to_string())
+                    .collect();
+                if !over.is_empty() {
+                    return Err(ServiceError::Validation(format!(
+                        "cannot grant permissions you do not hold: {}",
+                        over.join(", ")
+                    )));
+                }
+                requested
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
+        };
+
         let raw_token = generate_raw_token();
         let hash = hash_token(&raw_token);
-        let uid = user_id.0;
         let days = expires_in_days.map(i64::from);
+        let kind_str = kind.as_str();
 
         sqlx::query!(
             r#"
-            INSERT INTO api_tokens (user_id, name, token_hash, expires_at)
-            VALUES (?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE unixepoch() + ? * 86400 END)
+            INSERT INTO api_tokens (user_id, name, token_hash, kind, scopes, expires_at)
+            VALUES (?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE unixepoch() + ? * 86400 END)
             "#,
             uid,
             name,
             hash,
+            kind_str,
+            scope_str,
             days,
             days,
         )
@@ -72,7 +193,7 @@ impl AppService {
 
         let row = sqlx::query!(
             r#"
-            SELECT id AS "id!", user_id, name, scopes, created_at,
+            SELECT id AS "id!", user_id, name, kind, scopes, created_at,
                    last_used_at, expires_at, revoked_at
             FROM api_tokens WHERE token_hash = ?
             "#,
@@ -86,6 +207,7 @@ impl AppService {
                 id: row.id,
                 user_id: UserId(row.user_id),
                 name: row.name,
+                kind: row.kind,
                 scopes: row.scopes,
                 created_at: row.created_at,
                 last_used_at: row.last_used_at,
@@ -100,7 +222,7 @@ impl AppService {
         let uid = user_id.0;
         let rows = sqlx::query!(
             r#"
-            SELECT id AS "id!", user_id, name, scopes, created_at,
+            SELECT id AS "id!", user_id, name, kind, scopes, created_at,
                    last_used_at, expires_at, revoked_at
             FROM api_tokens
             WHERE user_id = ? AND revoked_at IS NULL
@@ -117,6 +239,7 @@ impl AppService {
                 id: row.id,
                 user_id: UserId(row.user_id),
                 name: row.name,
+                kind: row.kind,
                 scopes: row.scopes,
                 created_at: row.created_at,
                 last_used_at: row.last_used_at,
@@ -154,7 +277,7 @@ impl AppService {
 
         let row = sqlx::query!(
             r#"
-            SELECT id AS "id!", user_id, scopes
+            SELECT id AS "id!", user_id, scopes, kind
             FROM api_tokens
             WHERE token_hash = ? AND revoked_at IS NULL
               AND (expires_at IS NULL OR expires_at > unixepoch())
@@ -179,9 +302,23 @@ impl AppService {
         .execute(&self.db)
         .await?;
 
+        let owner = UserId(row.user_id);
+        let kind = TokenKind::parse(&row.kind).unwrap_or(TokenKind::Opds);
+        let declared = parse_scopes(&row.scopes);
+
+        // Both kinds are intersected with what the owner holds *now*. Validating
+        // at creation is not enough: tokens are long-lived, so a role downgrade
+        // afterwards would otherwise leave a token more privileged than its
+        // owner. This matters for OPDS too — opds_allowed checks only the
+        // token's scopes and never re-checks the owner, so without this a reader
+        // token kept working after its owner lost library:view.
+        let held = self.user_permissions(owner).await?;
+        let scopes: Vec<Permission> = declared.into_iter().filter(|p| held.contains(p)).collect();
+
         Ok(Some(ApiTokenAuth {
-            user_id: UserId(row.user_id),
-            scopes: parse_scopes(&row.scopes),
+            user_id: owner,
+            kind,
+            scopes,
         }))
     }
 }

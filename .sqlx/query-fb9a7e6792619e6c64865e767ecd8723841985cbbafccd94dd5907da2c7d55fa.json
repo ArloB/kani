@@ -112,6 +112,16 @@
         "name": "deleted_at",
         "ordinal": 21,
         "type_info": "Datetime"
+      },
+      {
+        "name": "upgrade_auto_replace",
+        "ordinal": 22,
+        "type_info": "Bool"
+      },
+      {
+        "name": "suppressed_chapter_count",
+        "ordinal": 23,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -139,7 +149,9 @@
       false,
       false,
       true,
-      true
+      true,
+      false,
+      false
     ]
   },
   "hash": "fb9a7e6792619e6c64865e767ecd8723841985cbbafccd94dd5907da2c7d55fa"

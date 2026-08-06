@@ -14,10 +14,11 @@
 
 ## Checklist
 
-- [ ] Tests added / updated (`cargo test` passes)
+- [ ] Tests added / updated (`cargo nextest run` passes)
 - [ ] `cargo clippy -- -D warnings` passes
 - [ ] SQL schema changes: `cargo sqlx prepare --workspace` run and `.sqlx/` committed
-- [ ] Frontend: new user-visible strings use `t("key")` from `i18n.js` and key added to `_catalog`
+- [ ] Frontend: new user-visible strings use `t("key")` from `i18n.js` and key added to `static/locales/en.js`
+- [ ] User-visible change: entry added under `## [Unreleased]` in `CHANGELOG.md` (release notes are assembled from it)
 
 ## Screenshots (if UI changes)
 

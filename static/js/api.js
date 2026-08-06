@@ -16,6 +16,25 @@ async function _parseBody(res) {
  * @param {string} path
  * @param {{ body?: any, params?: Record<string, any>, signal?: AbortSignal, timeoutMs?: number }} [opts]
  */
+/**
+ * Pages a signed-out visitor is *meant* to be on. A 401 there is the expected
+ * answer, not a reason to bounce them to the login form — which is what used to
+ * happen on /setup and /register, kicking the operator off the first-run screen
+ * before it could render.
+ */
+const UNAUTHENTICATED_PAGES = [
+  '/login',
+  '/setup',
+  '/register',
+  '/forgot-password',
+  '/reset-password',
+  '/verify-email',
+];
+
+function _onUnauthenticatedPage() {
+  return UNAUTHENTICATED_PAGES.includes(location.pathname);
+}
+
 async function _req(method, path, opts = {}) {
   let url = `/rest${path}`;
 
@@ -61,7 +80,7 @@ async function _req(method, path, opts = {}) {
   }
 
   if (res.status === 401) {
-    if (location.pathname !== '/login') window.location.href = '/login';
+    if (!_onUnauthenticatedPage()) window.location.href = '/login';
     throw Object.assign(new Error('Unauthorized'), { status: 401 });
   }
 
@@ -73,6 +92,7 @@ async function _req(method, path, opts = {}) {
       code: body?.code ?? null,
       hint: body?.hint ?? null,
       suggestions: body?.suggestions ?? null,
+      traceId: res.headers.get('x-request-id'),
       body,
     });
   }
@@ -131,10 +151,6 @@ export async function getPermissions() {
   return _req('GET', '/auth/permissions');
 }
 
-export async function getMe() {
-  return _req('GET', '/auth/me');
-}
-
 export async function getCurrentUser() {
   return _req('GET', '/auth/current_user');
 }
@@ -146,7 +162,26 @@ export async function login(username, password) {
 
 export async function logout() {
   clearSWRCache();
+  // Dynamic import: session.js imports this module, so a static one would cycle.
+  await import('./session.js').then((m) => m.clearRememberedPermissions()).catch(() => {});
+  await _forgetOfflinePages();
   return _req('POST', '/auth/logout');
+}
+
+/**
+ * Drop cached chapter images on the way out.
+ *
+ * The service worker serves `/rest/chapter/{id}/page/{n}` cache-first, which
+ * means a cached page is returned *without* a session — verified: after clearing
+ * every cookie, a cached page still came back 200 with the full JPEG. On a
+ * shared browser profile that leaves one account's reading readable by the next
+ * person, so signing out clears it. The cost is that offline chapters must be
+ * re-cached after signing back in; Settings → Offline lists them.
+ */
+async function _forgetOfflinePages() {
+  try {
+    if ('caches' in window) await caches.delete('kani-pages-v1');
+  } catch { /* nothing cached, or storage unavailable */ }
 }
 
 /** @param {string} currentPassword @param {string} newPassword */
@@ -158,6 +193,8 @@ export async function changePassword(currentPassword, newPassword) {
 
 export async function logoutEverywhere() {
   clearSWRCache();
+  await import('./session.js').then((m) => m.clearRememberedPermissions()).catch(() => {});
+  await _forgetOfflinePages();
   return _req('POST', '/auth/logout_everywhere');
 }
 
@@ -172,9 +209,9 @@ export async function listApiTokens() {
 }
 
 /** @param {string} name @param {number|null} [expiresInDays] */
-export async function createApiToken(name, expiresInDays) {
+export async function createApiToken(name, expiresInDays, kind = 'opds', scopes = []) {
   return _req('POST', '/me/api-tokens', {
-    body: { name, expires_in_days: expiresInDays ?? null },
+    body: { name, expires_in_days: expiresInDays ?? null, kind, scopes },
   });
 }
 
@@ -241,6 +278,47 @@ export async function getSourcesHealth() {
   return _req('GET', '/sources/health');
 }
 
+export async function getSystemUpdate() {
+  return _req('GET', '/system/update');
+}
+
+export async function getDiagnostics() {
+  return _req('GET', '/admin/diagnostics');
+}
+
+export async function getSourceCircuits() {
+  return _req('GET', '/admin/sources/circuits');
+}
+
+export async function resetSourceCircuit(host) {
+  return _req('POST', `/admin/sources/circuits/${encodeURIComponent(host)}/reset`);
+}
+
+export async function getProxyStats() {
+  return _req('GET', '/admin/proxy/stats');
+}
+
+export async function downloadSupportBundle() {
+  const res = await fetch('/rest/admin/support-bundle', {
+    method: 'GET',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    throw Object.assign(new Error(`HTTP ${res.status}`), {
+      status: res.status,
+      traceId: res.headers.get('x-request-id'),
+    });
+  }
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const disp = res.headers.get('Content-Disposition') ?? '';
+  const match = disp.match(/filename="?([^"]+)"?/);
+  a.download = match?.[1] ?? 'kani-support.zip';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 /** @param {string} name */
 export async function createSource(name) {
   return _req('POST', '/sources', { body: { name } });
@@ -257,11 +335,26 @@ export async function deleteSource(id) {
 }
 
 /** @param {number} id */
-export async function getSourceMetadata(id) {
-  return _req('GET', `/sources/${id}/metadata`);
+export async function getUiThemes() {
+  return _req('GET', '/ui/themes');
 }
 
-/** @param {number} id */
+export async function saveUiTheme(body) {
+  return _req('POST', '/ui/themes', { body });
+}
+
+export async function activateUiTheme(id) {
+  return _req('PUT', `/ui/themes/${id}/activate`);
+}
+
+export async function deactivateUiTheme() {
+  return _req('PUT', '/ui/themes/deactivate');
+}
+
+export async function deleteUiTheme(id) {
+  return _req('DELETE', `/ui/themes/${id}`);
+}
+
 export async function reloadSource(id) {
   return _req('POST', `/sources/${id}/reload`);
 }
@@ -298,7 +391,7 @@ export async function uploadWasm(id, file) {
     body,
   });
   if (res.status === 401) {
-    if (location.pathname !== '/login') window.location.href = '/login';
+    if (!_onUnauthenticatedPage()) window.location.href = '/login';
     throw Object.assign(new Error('Unauthorized'), { status: 401 });
   }
   if (!res.ok) {
@@ -309,6 +402,7 @@ export async function uploadWasm(id, file) {
       code: body?.code ?? null,
       hint: body?.hint ?? null,
       suggestions: body?.suggestions ?? null,
+      traceId: res.headers.get('x-request-id'),
       body,
     });
   }
@@ -358,11 +452,6 @@ export async function getRemoteChapters(sid, mangaId, page, size, signal, sort) 
 /** @param {number} sid @param {string} mangaId */
 export async function getRemoteChapterSorts(sid, mangaId) {
   return _req('GET', `/sources/${sid}/chapter-sorts/${encodeURIComponent(mangaId)}`);
-}
-
-/** @param {number} sid @param {string} mangaId @param {string} chapterId */
-export async function getPages(sid, mangaId, chapterId) {
-  return _req('GET', `/sources/${sid}/pages/${encodeURIComponent(mangaId)}/${encodeURIComponent(chapterId)}`);
 }
 
 /**
@@ -448,11 +537,6 @@ export async function addRepo(url, confirmFingerprint) {
       ? { url, confirm_fingerprint: confirmFingerprint }
       : { url },
   });
-}
-
-/** @param {number} id */
-export async function getRepo(id) {
-  return _req('GET', `/sources/repos/${id}`);
 }
 
 /** @param {number} id */
@@ -553,11 +637,6 @@ export async function globalSearch(query, scope, page, pageSize, signal) {
 // ── Manga ─────────────────────────────────────────────────────────────────────
 
 /** @param {number} id */
-export async function getManga(id) {
-  return _req('GET', `/manga/${id}`);
-}
-
-/** @param {number} id */
 export async function deleteManga(id) {
   return _req('DELETE', `/manga/${id}`);
 }
@@ -588,10 +667,10 @@ export async function getMangaDetails(id, signal) {
  * @param {number} pageSize
  * @param {string} sortOrder
  * @param {AbortSignal | undefined} signal
- * @param {{ filterDownloaded?: boolean|null, filterUnread?: boolean|null, filterScanlator?: string|null }} [filters]
+ * @param {{ filterDownloaded?: boolean|null, filterUnread?: boolean|null, filterScanlator?: string|null, filterOrphaned?: boolean|null }} [filters]
  */
 export async function getLocalChapters(id, page, pageSize, sortOrder, signal, filters = {}) {
-  const { filterDownloaded, filterUnread, filterScanlator } = filters;
+  const { filterDownloaded, filterUnread, filterScanlator, filterOrphaned } = filters;
   return _req('GET', `/manga/${id}/chapters`, {
     params: {
       page,
@@ -599,7 +678,9 @@ export async function getLocalChapters(id, page, pageSize, sortOrder, signal, fi
       sort_order: sortOrder,
       ...(filterDownloaded != null && { filter_downloaded: filterDownloaded }),
       ...(filterUnread != null && { filter_unread: filterUnread }),
+      ...(filterOrphaned != null && { filter_orphaned: filterOrphaned }),
       ...(filterScanlator != null && { filter_scanlator: filterScanlator }),
+      ...(filterOrphaned != null && { filter_orphaned: filterOrphaned }),
     },
     signal,
   });
@@ -608,15 +689,16 @@ export async function getLocalChapters(id, page, pageSize, sortOrder, signal, fi
 /**
  * Returns all chapter IDs matching the given filters (no pagination).
  * @param {number} id
- * @param {{ filterDownloaded?: boolean|null, filterUnread?: boolean|null, filterScanlator?: string|null, preferredOnly?: boolean, sortOrder?: string }} [opts]
+ * @param {{ filterDownloaded?: boolean|null, filterUnread?: boolean|null, filterScanlator?: string|null, preferredOnly?: boolean, sortOrder?: string, filterOrphaned?: boolean|null }} [opts]
  * @returns {Promise<{ ids: number[] }>}
  */
 export async function getChapterIds(id, opts = {}) {
-  const { filterDownloaded, filterUnread, filterScanlator, preferredOnly, sortOrder } = opts;
+  const { filterDownloaded, filterUnread, filterScanlator, preferredOnly, sortOrder, filterOrphaned } = opts;
   return _req('GET', `/manga/${id}/chapter_ids`, {
     params: {
       ...(filterDownloaded != null && { filter_downloaded: filterDownloaded }),
       ...(filterUnread != null && { filter_unread: filterUnread }),
+      ...(filterOrphaned != null && { filter_orphaned: filterOrphaned }),
       ...(filterScanlator != null && { filter_scanlator: filterScanlator }),
       ...(preferredOnly && { preferred_only: true }),
       ...(sortOrder && { sort_order: sortOrder }),
@@ -642,6 +724,11 @@ export async function refreshManga(id, opts) {
 /** @param {number} id @returns {Promise<{ job_id: string }>} */
 export async function scanManga(id) {
   return _req('POST', `/manga/${id}/scan`);
+}
+
+/** @param {number} id */
+export async function dismissSuppressedChapters(id) {
+  return _req('POST', `/manga/${id}/dismiss-suppressed`);
 }
 
 /** @returns {Promise<{ queued: number }>} */
@@ -689,7 +776,7 @@ export async function uploadMangaCover(id, file) {
   body.append('file', file);
   const res = await fetch(`/rest/manga/${id}/cover`, { method: 'POST', credentials: 'include', body });
   if (res.status === 401) {
-    if (location.pathname !== '/login') window.location.href = '/login';
+    if (!_onUnauthenticatedPage()) window.location.href = '/login';
     throw Object.assign(new Error('Unauthorized'), { status: 401 });
   }
   if (!res.ok) {
@@ -922,10 +1009,6 @@ export async function getSettings() {
  */
 export async function updateSettings(payload) {
   return _req('PATCH', '/settings', { body: payload });
-}
-
-export async function getRefreshStatus() {
-  return _req('GET', '/refresh/status');
 }
 
 export async function startRefreshAll() {
@@ -1168,30 +1251,6 @@ export function downloadBackup(includeChapterProgress = false) {
 }
 
 /** @param {File} file */
-export async function previewBackup(file) {
-  const body = new FormData();
-  body.append('file', file);
-  const res = await fetch('/rest/library/backup/preview', { method: 'POST', credentials: 'include', body });
-  if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
-  return res.json();
-}
-
-/**
- * @param {File} file
- * @param {{ merge?: boolean, import_manga?: boolean, import_categories?: boolean,
- *            import_download_rules?: boolean, import_tracking?: boolean,
- *            import_chapter_progress?: boolean, import_settings?: boolean }} [opts]
- */
-export async function restoreBackup(file, opts = {}) {
-  const body = new FormData();
-  body.append('file', file);
-  for (const [k, v] of Object.entries(opts)) body.append(k, String(v));
-  const res = await fetch('/rest/library/restore', { method: 'POST', credentials: 'include', body });
-  if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
-  return res.json();
-}
-
-/** @param {File} file */
 export async function previewTachiyomiImport(file) {
   const body = new FormData();
   body.append('file', file);
@@ -1212,6 +1271,26 @@ export async function importTachiyomiBackup(file, opts = {}) {
   const res = await fetch('/rest/library/import/tachiyomi', { method: 'POST', credentials: 'include', body });
   if (!res.ok) { let b; try { b = await res.json(); } catch { b = {}; } throw Object.assign(new Error(b?.error || `HTTP ${res.status}`), { status: res.status }); }
   return res.json();
+}
+
+// ── Admin: database maintenance ──────────────────────────────────────────────
+
+/** @returns {Promise<{db_size_bytes:number, wal_size_bytes:number}>} */
+export async function getDbStats() {
+  return _req('GET', '/admin/db/stats');
+}
+
+export async function analyzeDb() {
+  return _req('POST', '/admin/db/analyze');
+}
+
+export async function vacuumDb() {
+  return _req('POST', '/admin/db/vacuum');
+}
+
+/** @param {string} kind */
+export async function triggerRecurring(kind) {
+  return _req('POST', `/admin/recurring/${encodeURIComponent(kind)}/run`);
 }
 
 // ── Pending imports ───────────────────────────────────────────────────────────
@@ -1346,12 +1425,6 @@ export async function getMangaChapterNotes(mangaId) {
   return _req('GET', `/manga/${mangaId}/chapter-notes`);
 }
 
-/** @deprecated Use getMangaChapterNotes instead; kept for callers that only need IDs.
- * @param {number} mangaId @returns {Promise<number[]>} */
-export async function getNotedChapterIds(mangaId) {
-  const res = await getMangaChapterNotes(mangaId);
-  return (res?.notes ?? []).map((/** @type {{chapter_id:number}} */ n) => n.chapter_id);
-}
 
 /** @param {number} chapterId @returns {Promise<{note:string|null}>} */
 export async function getChapterNote(chapterId) {
@@ -1364,11 +1437,6 @@ export async function setChapterNote(chapterId, note) {
 }
 
 // ── Reading-pace history (#34) ────────────────────────────────────────────────
-
-/** @param {number} [period] */
-export async function getReadingPace(period = 90) {
-  return _req('GET', '/stats/pace', { params: { period } });
-}
 
 // ── Security — sessions ───────────────────────────────────────────────────────
 
@@ -1507,11 +1575,6 @@ export async function retryChapterDownload(id) {
   return _req('POST', `/chapter/${id}/download/retry`);
 }
 
-/** @param {number} mangaId */
-export async function getMangaDownloadStatus(mangaId) {
-  return _req('GET', `/manga/${mangaId}/download-status`);
-}
-
 // ── Trash ─────────────────────────────────────────────────────────────────────
 
 export async function listTrash() {
@@ -1621,11 +1684,81 @@ export async function getAdminStorageStatsHistory() {
   return _req('GET', '/admin/storage/stats/history');
 }
 
-// ── Admin — integrity check ───────────────────────────────────────────────────
+// ── Chapter upgrades ─────────────────────────────────────────────────────────
 
-/** @param {boolean} [fix] */
-export async function runIntegrityCheck(fix = false) {
-  return _req('POST', `/admin/library/integrity-check${fix ? '?fix=true' : ''}`);
+/** @returns {Promise<{muted:number[]}>} */
+export async function getNotifyPrefs() {
+  return _req('GET', '/me/notify-prefs');
+}
+
+export async function getAllUpgrades() {
+  return _req('GET', '/me/upgrades');
+}
+
+/** @param {number|string} chapterId */
+export async function applyChapterUpgrade(chapterId) {
+  return _req('POST', `/chapters/${chapterId}/upgrade`);
+}
+
+/** @param {number|string} chapterId */
+export async function dismissChapterUpgrade(chapterId) {
+  return _req('POST', `/chapters/${chapterId}/upgrade/dismiss`);
+}
+
+/** @param {number|string} mangaId @param {boolean} enabled */
+export async function setUpgradeAutoReplace(mangaId, enabled) {
+  return _req('PUT', `/manga/${mangaId}/upgrade-auto-replace`, { body: { enabled } });
+}
+
+// ── Admin — archive export ───────────────────────────────────────────────────
+
+/** @param {{ manga_ids?: number[]|null, zip?: boolean, include_viewer?: boolean }} spec */
+export async function exportArchive(spec) {
+  return _req('POST', '/admin/library/archive', { body: spec });
+}
+
+/** @param {string} jobId */
+export function archiveDownloadUrl(jobId) {
+  return `/rest/admin/library/archive/${jobId}/download`;
+}
+
+// ── Scanlator preferences (library-wide defaults) ────────────────────────────
+
+export async function getGlobalScanlatorPrefs() {
+  return _req('GET', '/scanlator_preferences/global');
+}
+
+/** @param {string} scanlator @param {number} priority @param {boolean} blocked */
+export async function setGlobalScanlatorPref(scanlator, priority, blocked) {
+  return _req('POST', '/scanlator_preferences/global', {
+    body: { scanlator, priority, blocked },
+  });
+}
+
+export async function getKnownScanlators() {
+  return _req('GET', '/scanlator_preferences/known');
+}
+
+// ── Admin — integrity scrub ───────────────────────────────────────────────────
+
+/**
+ * @param {'quick'|'deep'} depth
+ * @param {boolean} [fix]
+ */
+export async function runScrub(depth, fix = false) {
+  return _req('POST', '/admin/library/scrub', { body: { depth, fix } });
+}
+
+export async function getLastScrub() {
+  return _req('GET', '/admin/library/scrub/last');
+}
+
+/**
+ * @param {string[]} paths
+ * @param {boolean} dryRun
+ */
+export async function deleteOrphans(paths, dryRun) {
+  return _req('POST', '/admin/library/orphans/delete', { body: { paths, dry_run: dryRun } });
 }
 
 // ── Admin — backup schedule ───────────────────────────────────────────────────

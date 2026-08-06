@@ -4,7 +4,8 @@
 mod common;
 use axum::http::StatusCode;
 use common::{
-    authed_get, authed_patch, body_json, build_test_app, create_admin, get_req, login, test_state,
+    authed_get, authed_patch, body_json, build_test_app, create_admin, create_regular_user,
+    get_req, login, test_state,
 };
 use tower::ServiceExt;
 
@@ -26,6 +27,89 @@ async fn get_settings_returns_200_for_authed_user() {
     assert!(
         body.get("auto_scan").is_some(),
         "settings must include auto_scan"
+    );
+}
+
+/// `settings:view` belongs to the default `user` role, so this payload is read
+/// by every account on the instance. It must not describe the deployment.
+#[tokio::test]
+async fn a_plain_user_cannot_read_the_infrastructure_settings() {
+    let state = test_state().await;
+    let (admin_u, admin_p) = create_admin(&state).await;
+    let (user_u, user_p) = create_regular_user(&state, "plain").await;
+    let app = build_test_app(state).await;
+
+    // The admin configures an SMTP relay and a solver on the internal network.
+    let admin_cookie = login(&app, admin_u, admin_p).await;
+    let res = app
+        .clone()
+        .oneshot(authed_patch(
+            "/rest/settings",
+            &admin_cookie,
+            serde_json::json!({ "Email": {
+                "email_enabled": true,
+                "email_provider": "smtp",
+                "email_provider_config": "{\"host\":\"smtp.internal.lan\",\"port\":587,\"username\":\"kani@example.com\",\"password\":\"hunter2\"}",
+                "email_from_address": "kani@example.com",
+                "app_url": "https://kani.internal.lan",
+                "password_reset_enabled": true,
+                "email_verification_required": false
+            }}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "admin may configure email");
+
+    let user_cookie = login(&app, user_u, user_p).await;
+    let res = app
+        .clone()
+        .oneshot(authed_get("/rest/settings", &user_cookie))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "a plain user may read settings"
+    );
+    let body = body_json(res).await;
+
+    for field in [
+        "email_provider_config",
+        "email_from_address",
+        "app_url",
+        "flaresolverr_url",
+        "library_path",
+        "wasm_storage_path",
+    ] {
+        assert_eq!(
+            body.get(field).and_then(|v| v.as_str()),
+            Some(""),
+            "{field} describes the deployment and must be withheld from a plain user"
+        );
+    }
+    let serialised = body.to_string();
+    assert!(
+        !serialised.contains("smtp.internal.lan") && !serialised.contains("kani.internal.lan"),
+        "no infrastructure host may appear anywhere in the payload: {serialised}"
+    );
+
+    // The toggles the UI keys off are still readable, or the app breaks.
+    assert!(body.get("auto_scan").is_some());
+    assert_eq!(
+        body.get("email_enabled").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+
+    // And an admin still sees the real values.
+    let res = app
+        .oneshot(authed_get("/rest/settings", &admin_cookie))
+        .await
+        .unwrap();
+    let admin_body = body_json(res).await;
+    assert_eq!(
+        admin_body.get("app_url").and_then(|v| v.as_str()),
+        Some("https://kani.internal.lan"),
+        "an admin must still be able to read what they configured"
     );
 }
 
@@ -55,7 +139,10 @@ async fn patch_settings_scan_updates_interval() {
                 "Scan": {
                     "auto_scan": false,
                     "scan_interval_minutes": 120,
-                    "scan_exclude_completed": false
+                    "scan_exclude_completed": false,
+                    "upgrade_detection_enabled": true,
+                    "upgrade_min_res_gain": 1.5,
+                    "upgrade_confirm_fetches": 2
                 }
             }),
         ))
@@ -156,7 +243,10 @@ async fn patch_settings_maintenance_updates() {
                     "audit_retention_days": 180,
                     "audit_security_retention_days": 90,
                     "disk_warn_threshold": 0.25,
-                    "thumbnail_formats": "jpeg"
+                    "thumbnail_formats": "jpeg",
+                    "integrity_quick_scrub_interval_hours": 12,
+                    "integrity_deep_scrub_interval_hours": 336,
+                    "scrub_on_startup": true
                 }
             }),
         ))
@@ -172,6 +262,15 @@ async fn patch_settings_maintenance_updates() {
     assert_eq!(body["trash_retention_days"], serde_json::json!(14));
     assert_eq!(body["audit_retention_days"], serde_json::json!(180));
     assert_eq!(body["audit_security_retention_days"], serde_json::json!(90));
+    assert_eq!(
+        body["integrity_quick_scrub_interval_hours"],
+        serde_json::json!(12)
+    );
+    assert_eq!(
+        body["integrity_deep_scrub_interval_hours"],
+        serde_json::json!(336)
+    );
+    assert_eq!(body["scrub_on_startup"], serde_json::json!(true));
     assert_eq!(body["disk_warn_threshold"], serde_json::json!(0.25));
 }
 
@@ -359,4 +458,73 @@ async fn patch_settings_performance_invalid_returns_4xx() {
         "max_concurrent_jobs=0 should return 4xx, got {}",
         res.status()
     );
+}
+
+#[tokio::test]
+async fn patch_settings_rejects_a_zero_scrub_interval() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_patch(
+            "/rest/settings",
+            &cookie,
+            serde_json::json!({
+                "Maintenance": {
+                    "trash_retention_days": 14,
+                    "audit_retention_days": 180,
+                    "audit_security_retention_days": 90,
+                    "disk_warn_threshold": 0.25,
+                    "thumbnail_formats": "jpeg",
+                    "integrity_quick_scrub_interval_hours": 0,
+                    "integrity_deep_scrub_interval_hours": 168,
+                    "scrub_on_startup": false
+                }
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert!(
+        res.status().is_client_error(),
+        "a zero interval would reschedule the scrub continuously and hash the \
+         whole library in a loop"
+    );
+}
+
+#[tokio::test]
+async fn patch_settings_rejects_an_out_of_range_upgrade_gain() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, username, password).await;
+
+    for gain in [0.5, 9.0] {
+        let res = app
+            .clone()
+            .oneshot(authed_patch(
+                "/rest/settings",
+                &cookie,
+                serde_json::json!({
+                    "Scan": {
+                        "auto_scan": false,
+                        "scan_interval_minutes": 120,
+                        "scan_exclude_completed": false,
+                        "upgrade_detection_enabled": true,
+                        "upgrade_min_res_gain": gain,
+                        "upgrade_confirm_fetches": 2
+                    }
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(
+            res.status().is_client_error(),
+            "a gain below 1.0 would flag every re-encode as an upgrade, and an \
+             absurd one would flag nothing; got {} for {gain}",
+            res.status()
+        );
+    }
 }

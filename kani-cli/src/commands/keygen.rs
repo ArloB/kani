@@ -5,21 +5,13 @@ use ed25519_dalek::SigningKey;
 
 use crate::{error::CliError, signing::key_fingerprint};
 
-pub fn run(out_dir: &PathBuf, name: &str, passphrase_env: Option<&str>) -> Result<(), CliError> {
-    if passphrase_env.is_some() {
-        eprintln!(
-            "warning: --passphrase-env is not yet implemented; key will be stored unencrypted"
-        );
-    }
-
+pub fn run(out_dir: &PathBuf, name: &str) -> Result<(), CliError> {
     std::fs::create_dir_all(out_dir)?;
 
     let seed: [u8; 32] = {
         let mut bytes = [0u8; 32];
-        use std::io::Read as _;
-        std::fs::File::open("/dev/urandom")
-            .and_then(|mut f| f.read_exact(&mut bytes))
-            .map_err(|_| CliError::Other("failed to read random bytes".to_string()))?;
+        getrandom::getrandom(&mut bytes)
+            .map_err(|e| CliError::Other(format!("failed to read random bytes: {e}")))?;
         bytes
     };
 
@@ -32,6 +24,15 @@ pub fn run(out_dir: &PathBuf, name: &str, passphrase_env: Option<&str>) -> Resul
 
     std::fs::write(&pub_file, pub_b64.as_bytes())?;
     std::fs::write(&key_file, seed_b64.as_bytes())?;
+
+    // The private key is plaintext base64, so the file mode is the only thing
+    // protecting it. Default umask gives 0644 — readable by every account on
+    // the machine.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600))?;
+    }
 
     let fp = key_fingerprint(&signing_key.verifying_key().to_bytes());
 

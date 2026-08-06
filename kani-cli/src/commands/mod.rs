@@ -1,4 +1,4 @@
-pub mod audit_tokens;
+pub mod archive;
 pub mod build;
 pub mod css;
 pub mod dsl_cmd;
@@ -8,7 +8,9 @@ pub mod keygen;
 pub mod lint;
 pub mod new;
 pub mod publish;
+pub mod quality;
 pub mod repo;
+pub mod rollback;
 pub mod setup;
 pub mod validate;
 
@@ -50,22 +52,24 @@ pub enum Command {
     },
     /// Compile extension(s) to WASM
     Build {
-        /// Extension crate name (e.g. kani-weebcentral)
+        /// Extension crate name (e.g. kani-example, or kani-weebcentral with --ext-dir)
         #[arg(conflicts_with_all = ["all", "dev"])]
         extension: Option<String>,
         /// Build all production extensions (excludes dev/test extensions)
         #[arg(long, conflicts_with = "dev")]
         all: bool,
-        /// Build dev/test extensions only (kani-example, kani-test-abi); excluded from --all
+        /// Build dev/test extensions only (kani-example, kani-test-abi, kani-fixture-source); excluded from --all
         #[arg(long)]
         dev: bool,
         /// Override the version embedded in the WASM (e.g. 1.2.3)
         #[arg(long, value_name = "SEMVER")]
         set_version: Option<String>,
-        /// Directory containing extension crates (default: kani-extensions)
+        /// Directory containing extension crates. Falls back to $KANI_EXT_DIR,
+        /// then kani-extensions/, then ../kani-extensions/
         #[arg(long, value_name = "PATH")]
         ext_dir: Option<String>,
-        /// Output directory for compiled .wasm files (default: wasm_sources)
+        /// Output directory for compiled .wasm files. Falls back to
+        /// $KANI_OUT_DIR, then wasm_sources/
         #[arg(long, value_name = "PATH")]
         out_dir: Option<String>,
         /// Build with debug info (larger binary, readable WASM backtraces)
@@ -113,9 +117,6 @@ pub enum Command {
         /// Base name for the generated files (e.g. "author" → author.pub + author.key)
         #[arg(long, default_value = "author")]
         name: String,
-        /// Environment variable holding the passphrase for key encryption (not yet implemented)
-        #[arg(long, value_name = "ENV_VAR")]
-        passphrase_env: Option<String>,
     },
     /// Sign an extension and publish it to a local repository
     Publish {
@@ -140,17 +141,44 @@ pub enum Command {
     /// REPL: inspect, explain, test, replay, or record a YAML extension
     #[command(subcommand)]
     Repl(ReplCommand),
-    /// Scan static/js for hard-coded colour literals and report violations
-    AuditTokens {
-        /// Directory to scan (default: static/js)
-        #[arg(long, value_name = "PATH", default_value = "static/js")]
-        dir: std::path::PathBuf,
-        /// Exit non-zero if violations exceed the baseline (for CI use)
-        #[arg(long)]
-        check: bool,
-        /// With --check, tolerate up to N existing violations; fail only when exceeded
-        #[arg(long, default_value_t = 0)]
-        max: usize,
+    /// Re-hash every file a Kani archive export claims, without needing Kani
+    ArchiveVerify {
+        /// Path to the exported `kani-archive` directory
+        #[arg(value_name = "ARCHIVE_DIR")]
+        path: std::path::PathBuf,
+    },
+    /// Print the quality score and per-page dimensions for a CBZ
+    Quality {
+        /// Path to a .cbz file
+        #[arg(value_name = "CBZ")]
+        path: std::path::PathBuf,
+    },
+    /// Show what a header probe learns from an image's first few kilobytes
+    Probe {
+        /// Path to an image file
+        #[arg(value_name = "IMAGE")]
+        path: std::path::PathBuf,
+    },
+    /// Compare two CBZs page by page with perceptual hashes
+    PhashCompare {
+        /// First .cbz
+        #[arg(value_name = "A")]
+        a: std::path::PathBuf,
+        /// Second .cbz
+        #[arg(value_name = "B")]
+        b: std::path::PathBuf,
+    },
+    /// Print the manifest computed from a CBZ on disk
+    Manifest {
+        /// Path to a .cbz file
+        #[arg(value_name = "CBZ")]
+        path: std::path::PathBuf,
+    },
+    /// Verify a backup archive can be restored onto this build
+    Rollback {
+        /// Path to a backup .zip produced by Kani
+        #[arg(value_name = "BACKUP_ZIP")]
+        path: std::path::PathBuf,
     },
 }
 
@@ -289,17 +317,18 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             tailwind,
             esbuild,
         } => setup::run(vendors, tailwind, esbuild),
+        Command::ArchiveVerify { path } => archive::verify(&path),
+        Command::Quality { path } => quality::score(&path),
+        Command::Probe { path } => quality::probe(&path),
+        Command::PhashCompare { a, b } => quality::phash_compare(&a, &b),
+        Command::Manifest { path } => archive::manifest(&path),
         Command::Icons => icons::run(),
         Command::Dsl {
             expression,
             scripts,
         } => dsl_cmd::run(&expression, scripts.as_deref()),
         Command::Lint => lint::run(),
-        Command::Keygen {
-            out_dir,
-            name,
-            passphrase_env,
-        } => keygen::run(&out_dir, &name, passphrase_env.as_deref()),
+        Command::Keygen { out_dir, name } => keygen::run(&out_dir, &name),
         Command::Publish {
             file,
             sign_key,
@@ -338,7 +367,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 repo::run_verify(&repo_dir, repo_key.as_deref())
             }
         },
-        Command::AuditTokens { dir, check, max } => audit_tokens::run(&dir, check, max),
+        Command::Rollback { path } => rollback::run(&path),
         Command::Repl(repl_cmd) => match repl_cmd {
             ReplCommand::Inspect { file } => crate::repl::inspect::run(&file),
             ReplCommand::Explain { expression } => crate::repl::explain::run(&expression),

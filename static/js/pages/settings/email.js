@@ -141,6 +141,7 @@ export function EmailSection({ settings }) {
         <input
           type="number"
           class="input w-24 text-sm"
+          aria-label=${t('settings.email.smtp.port.label')}
           min="1"
           max="65535"
           value=${String(form.port)}

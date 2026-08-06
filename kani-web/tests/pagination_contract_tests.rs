@@ -1,0 +1,114 @@
+#![allow(clippy::unwrap_used)]
+
+//! Paginated GETs must honour the contract their OpenAPI parameters advertise.
+//!
+//! Every paginated endpoint documents `page`/`page_size` as `Option<_>`, so a
+//! client generated from the spec sends neither. Four of them used to answer
+//! that request with 400 `missing field \`page\`` — the annotation said optional
+//! while the query struct had no serde default. The browser never noticed
+//! because the SPA always passes both.
+//!
+//! These tests pin the documented shape: omitting paging must succeed. Assert on
+//! the *status*, not on the body, so they stay valid as the payloads evolve.
+
+mod common;
+use axum::http::StatusCode;
+use common::{authed_get, build_test_app, create_admin, login, test_state};
+use tower::ServiceExt;
+
+/// Endpoints whose `page`/`page_size` parameters are documented optional.
+const PAGINATED: &[&str] = &[
+    "/rest/library",
+    "/rest/recent_updates",
+    "/rest/admin/logs",
+    "/rest/admin/audit-log",
+];
+
+#[tokio::test]
+async fn paginated_endpoints_accept_a_request_with_no_paging_params() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, u, p).await;
+
+    for path in PAGINATED {
+        let res = app
+            .clone()
+            .oneshot(authed_get(path, &cookie))
+            .await
+            .unwrap();
+        assert_ne!(
+            res.status(),
+            StatusCode::BAD_REQUEST,
+            "{path} documents page/page_size as optional but rejected a request that omitted them"
+        );
+        assert!(
+            res.status().is_success(),
+            "{path} without paging params returned {}",
+            res.status()
+        );
+    }
+}
+
+#[tokio::test]
+async fn global_search_accepts_only_its_required_query_param() {
+    // `scope`, `page` and `page_size` are all documented optional; only `query`
+    // is required.
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, u, p).await;
+
+    let res = app
+        .oneshot(authed_get("/rest/global_search?query=whatever", &cookie))
+        .await
+        .unwrap();
+    assert!(
+        res.status().is_success(),
+        "global_search with only `query` returned {}",
+        res.status()
+    );
+}
+
+#[tokio::test]
+async fn chapter_listing_defaults_its_page_when_omitted() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, u, p).await;
+
+    // No such manga, so 404 is the correct answer — the point is that it is not
+    // 400 for a missing `page`, which is what a spec-generated client would hit.
+    let res = app
+        .oneshot(authed_get("/rest/manga/1/chapters", &cookie))
+        .await
+        .unwrap();
+    assert_ne!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "chapter listing rejected a request with no `page`, but documents it as optional"
+    );
+}
+
+// Paging is still validated once supplied — the defaults must not turn a bad
+// value into a silent success.
+#[tokio::test]
+async fn an_explicitly_invalid_page_is_still_rejected() {
+    let state = test_state().await;
+    let (u, p) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, u, p).await;
+
+    for path in ["/rest/library?page=0", "/rest/library?page_size=99999"] {
+        let res = app
+            .clone()
+            .oneshot(authed_get(path, &cookie))
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::BAD_REQUEST,
+            "{path} should still fail validation"
+        );
+    }
+}

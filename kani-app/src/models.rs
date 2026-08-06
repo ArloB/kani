@@ -20,15 +20,12 @@ pub struct Settings {
     pub library_path: std::path::PathBuf,
     pub wasm_storage_path: std::path::PathBuf,
     pub concurrent_page_downloads: i64,
-    pub concurrent_manga_downloads: i64,
-    pub chapter_queue_size: i64,
     pub max_retries: i64,
     pub initial_retry_delay_ms: i64,
     pub max_wasm_instances: i64,
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
     pub scan_exclude_completed: bool,
-    pub auto_download_category_id: Option<i64>,
     pub auto_download_category_ids: String,
     pub default_tracking_enabled: bool,
     pub http_request_logging: bool,
@@ -63,9 +60,26 @@ pub struct Settings {
     pub db_vacuum_interval_hours: i64,
     pub audit_prune_interval_hours: i64,
     pub trash_purge_interval_hours: i64,
+    pub integrity_quick_scrub_interval_hours: i64,
+    pub integrity_deep_scrub_interval_hours: i64,
+    pub scrub_on_startup: bool,
+    pub integrity_revalidate_after_days: i64,
+    pub upgrade_detection_enabled: bool,
+    pub upgrade_min_res_gain: f64,
+    pub upgrade_confirm_fetches: i64,
+    pub upgrade_axis_resolution: String,
+    pub upgrade_axis_colour: String,
+    pub upgrade_axis_encoder: String,
+    pub upgrade_axis_bitrate: String,
+    pub upgrade_show_downgrades: bool,
+    pub upgrade_auto_replace_reasons: String,
     pub browser_max_memory_mb: i64,
     pub browser_max_instances: i64,
     pub browser_idle_timeout_s: i64,
+    pub update_check_enabled: bool,
+    pub opds_page_index_zero_based: bool,
+    pub scan_barren_page_tolerance: i64,
+    pub global_search_timeout_secs: i64,
 }
 
 #[derive(sqlx::FromRow)]
@@ -148,6 +162,8 @@ pub struct Manga {
     pub cover_hash: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub deleted_at: Option<time::OffsetDateTime>,
+    pub upgrade_auto_replace: bool,
+    pub suppressed_chapter_count: i64,
 }
 
 /// DB row fetched when listing chapters for a manga.
@@ -167,6 +183,7 @@ pub struct ChapterRow {
     pub is_read: Option<bool>,
     pub last_page_read: Option<i64>,
     pub download_error: Option<String>,
+    pub upgrade_available: Option<String>,
 }
 
 /// Slim row returned by filtered library queries (joins manga + source).
@@ -285,6 +302,9 @@ pub struct LocalMangaDetails {
     pub local_tags: Vec<String>,
     pub has_local_people: bool,
     pub has_local_tags: bool,
+    /// Chapters currently held for this series, excluding ones a migration
+    /// orphaned. The rail states it; the chapter list's own count is filtered.
+    pub chapter_count: i64,
 }
 
 /// Orphaned manga — the source they came from has been soft-deleted.
@@ -480,6 +500,8 @@ mod tests {
             is_orphaned: false,
             cover_hash: None,
             deleted_at: Some(time::macros::datetime!(2026-07-13 05:00:00 UTC)),
+            upgrade_auto_replace: false,
+            suppressed_chapter_count: 0,
         }
     }
 

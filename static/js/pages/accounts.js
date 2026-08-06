@@ -8,7 +8,7 @@ import * as api from '../api.js';
 import { hasPermission } from '../session.js';
 import { escapeHtml, formatDate } from '../utils.js';
 import { t } from '../i18n.js';
-import { showToast } from '../components/toast.js';
+import { showToast, showApiError } from '../components/toast.js';
 import { Modal, mountIntoModalRoot, showConfirm } from '../components/modal.js';
 import { mountMasterDetail } from '../components/master-detail.js';
 import { renderTabs } from '../components/tabs.js';
@@ -63,7 +63,7 @@ export async function init(container) {
 
   // Content area — full height master-detail (below global header)
   const contentEl = document.createElement('div');
-  contentEl.style.cssText = 'display:flex;flex-direction:column;overflow:hidden;height:calc(100dvh - var(--header-h));';
+  contentEl.style.cssText = 'display:flex;flex-direction:column;overflow:hidden;height:100%;min-height:0;';
 
   container.innerHTML = '';
   container.appendChild(contentEl);
@@ -320,6 +320,7 @@ function _renderUserDetail(el, user) {
         </div>
         <div class="flex items-center gap-1 shrink-0">
           <button type="button" class="btn-ghost btn-sm js-edit-user">${t('accounts.action.edit')}</button>
+          <button type="button" class="btn-ghost btn-sm js-reset-pw">${t('accounts.action.reset_password')}</button>
           <button type="button" class="btn-danger btn-sm js-delete-user">${t('common.delete')}</button>
         </div>
       </div>
@@ -367,6 +368,20 @@ function _renderUserDetail(el, user) {
       _rerenderList();
       if (_detailEl && _selected) _renderUserDetail(_detailEl, _selected);
     });
+  });
+
+  // Sends the user a reset link rather than setting a password on their behalf,
+  // so an admin never learns or chooses their credential.
+  const _resetPwBtn = /** @type {HTMLButtonElement|null} */ (el.querySelector('.js-reset-pw'));
+  _resetPwBtn?.addEventListener('click', async () => {
+    if (!(await showConfirm(t('accounts.user.reset_pw.message', { username: user.username }),
+      { title: t('accounts.action.reset_password') }))) return;
+    try {
+      await api.adminTriggerPasswordReset(user.id);
+      showToast(t('accounts.user.reset_pw.sent'), { type: 'success' });
+    } catch (e) {
+      showApiError(e);
+    }
   });
 
   const _delUserBtn = /** @type {HTMLButtonElement|null} */ (el.querySelector('.js-delete-user'));

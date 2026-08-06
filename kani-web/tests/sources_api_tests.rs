@@ -284,3 +284,141 @@ async fn set_browser_enabled_rejects_invalid_body() {
         res.status()
     );
 }
+
+// ── Bulk capabilities ─────────────────────────────────────────────────────────
+//
+// The point of this endpoint is one round trip instead of one request per
+// source, so the tests check the shape a client depends on — and the route
+// ordering, which is the way this breaks silently.
+
+#[tokio::test]
+async fn bulk_capabilities_returns_200_with_auth() {
+    let state = test_state().await;
+    let (user, pass) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, user, pass).await;
+
+    create_source(&app, &cookie, "alpha").await;
+    create_source(&app, &cookie, "beta").await;
+
+    let res = app
+        .clone()
+        .oneshot(authed_get("/rest/sources/capabilities", &cookie))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = body_array(res).await;
+    assert_eq!(body.len(), 2, "one entry per installed source");
+    for entry in &body {
+        assert!(
+            entry.get("source_id").is_some(),
+            "each entry names its source"
+        );
+        assert_eq!(
+            entry.get("streaming_chapters").and_then(|v| v.as_bool()),
+            Some(true),
+            "capability flags are flattened, not nested"
+        );
+    }
+}
+
+#[tokio::test]
+async fn bulk_capabilities_returns_401_without_auth() {
+    let state = test_state().await;
+    let app = build_test_app(state).await;
+    let res = app
+        .oneshot(get_req("/rest/sources/capabilities"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn bulk_capabilities_is_empty_not_an_error_with_no_sources() {
+    let state = test_state().await;
+    let (user, pass) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, user, pass).await;
+
+    let res = app
+        .clone()
+        .oneshot(authed_get("/rest/sources/capabilities", &cookie))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(body_array(res).await.is_empty());
+}
+
+#[tokio::test]
+async fn bulk_route_is_not_swallowed_by_the_per_source_route() {
+    // `/sources/{id}/capabilities` is registered too. If the parameterised
+    // route were matched first, "capabilities" would be parsed as an id and
+    // this would 400 or 404 rather than listing.
+    let state = test_state().await;
+    let (user, pass) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, user, pass).await;
+    let id = create_source(&app, &cookie, "gamma").await;
+
+    let bulk = app
+        .clone()
+        .oneshot(authed_get("/rest/sources/capabilities", &cookie))
+        .await
+        .unwrap();
+    assert_eq!(bulk.status(), StatusCode::OK, "bulk route must win");
+
+    // And the per-source route still works alongside it.
+    let single = app
+        .clone()
+        .oneshot(authed_get(
+            &format!("/rest/sources/{id}/capabilities"),
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(single.status(), StatusCode::OK);
+    let one = body_json(single).await;
+    assert_eq!(
+        one.get("streaming_chapters").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+}
+
+#[tokio::test]
+async fn bulk_and_per_source_agree() {
+    // Two endpoints answering the same question must not drift.
+    let state = test_state().await;
+    let (user, pass) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = login(&app, user, pass).await;
+    let id = create_source(&app, &cookie, "delta").await;
+
+    let bulk = body_array(
+        app.clone()
+            .oneshot(authed_get("/rest/sources/capabilities", &cookie))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let single = body_json(
+        app.clone()
+            .oneshot(authed_get(
+                &format!("/rest/sources/{id}/capabilities"),
+                &cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+
+    let from_bulk = bulk
+        .iter()
+        .find(|e| e.get("source_id").and_then(|v| v.as_i64()) == Some(id))
+        .expect("the created source appears in the bulk listing");
+    assert_eq!(
+        from_bulk.get("streaming_chapters"),
+        single.get("streaming_chapters"),
+        "bulk and per-source disagree about the same source"
+    );
+}

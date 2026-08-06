@@ -25,6 +25,7 @@ use kani_shared::types::{
 use trackers::TrackerRegistry;
 
 pub mod api_tokens;
+pub mod archive;
 mod audit;
 pub mod backup;
 pub mod backup_scheduler;
@@ -33,6 +34,8 @@ mod chapters;
 mod cover;
 pub mod credential_migration;
 pub mod dedup;
+pub mod degradations;
+pub mod diagnostics;
 mod downloads;
 pub mod email;
 pub mod email_templates;
@@ -44,6 +47,7 @@ pub mod fs_browse;
 pub mod import;
 pub mod integrity;
 pub mod library;
+pub mod manifest_capture;
 pub mod metadata_provider;
 mod migration;
 pub mod opds;
@@ -53,6 +57,7 @@ pub mod path_migration;
 pub mod pending_imports;
 mod preferences;
 pub(crate) mod progress;
+pub mod quality;
 pub mod repos;
 pub mod saved_searches;
 mod scanlators;
@@ -61,16 +66,22 @@ mod settings;
 pub mod smart_collections;
 mod sources;
 mod stats;
+pub mod support_bundle;
 pub mod thumbnails;
 pub mod totp;
 pub mod trackers;
 pub mod traits;
+pub mod ui_ext;
+pub mod update_check;
 pub mod volumes;
 pub mod webhooks;
 
 #[derive(Clone)]
 pub struct AppService {
     pub db: SqlitePool,
+    /// Where the database actually lives. Several callers need the sidecar
+    /// files (`-wal`, `-shm`) and must not assume the working directory.
+    pub db_path: std::path::PathBuf,
     pub db_read: SqlitePool,
     pub wasm_runtime: Arc<WasmRuntime>,
     pub sources: Arc<SourceRegistry>,
@@ -90,10 +101,13 @@ pub struct AppService {
     /// Optional authenticated-encryption cipher for credential fields.
     /// Present when `KANI_SECRET_KEY` or `KANI_SECRET_KEY_FILE` is set at startup.
     pub encryption: Option<Arc<encryption::CredentialCipher>>,
+    /// Subsystems running in a reduced state. Surfaced in Settings → Diagnostics.
+    pub degradations: Arc<degradations::DegradationRegistry>,
     pub webhook_service: webhooks::WebhookService,
     pub metadata_provider_registry:
         Arc<tokio::sync::RwLock<metadata_provider::MetadataProviderRegistry>>,
     pub job_manager: crate::jobs::JobManager,
+    pub latest_version: Arc<tokio::sync::RwLock<Option<update_check::UpdateInfo>>>,
     /// Per-extension install/update locks, keyed by extension id. Serializes
     /// concurrent install/update of the same extension so the upsert (which keys on
     /// `sources.name`) cannot race two writers into duplicate rows + backends.
@@ -114,19 +128,26 @@ pub struct AppService {
 /// The auto-provisioned file is written with `0o600` permissions (owner-read only on Unix).
 fn load_or_provision_credential_cipher(
     data_dir: &std::path::Path,
+    reg: &degradations::DegradationRegistry,
 ) -> Option<encryption::CredentialCipher> {
     if let Ok(path) = std::env::var("KANI_SECRET_KEY_FILE") {
         let hex = match std::fs::read_to_string(path.trim()) {
             Ok(s) => s.trim().to_string(),
             Err(e) => {
-                tracing::error!("KANI_SECRET_KEY_FILE set but could not read file: {e}");
+                reg.register(
+                    degradations::ids::CREDENTIAL_KEY,
+                    degradations::Severity::Error,
+                    "Credential encryption",
+                    format!("KANI_SECRET_KEY_FILE is set but the file could not be read ({e}), so credential encryption is disabled."),
+                    "Check the path and that the server user can read it.",
+                );
                 return None;
             }
         };
-        return parse_cipher_hex(&hex);
+        return parse_cipher_hex(&hex, reg);
     }
     if let Ok(val) = std::env::var("KANI_SECRET_KEY") {
-        return parse_cipher_hex(val.trim());
+        return parse_cipher_hex(val.trim(), reg);
     }
 
     // Auto-provision path.
@@ -161,23 +182,57 @@ fn load_or_provision_credential_cipher(
         );
         hex
     };
-    parse_cipher_hex(&hex)
+    parse_cipher_hex(&hex, reg)
 }
 
-fn parse_cipher_hex(hex: &str) -> Option<encryption::CredentialCipher> {
+fn parse_cipher_hex(
+    hex: &str,
+    reg: &degradations::DegradationRegistry,
+) -> Option<encryption::CredentialCipher> {
     match encryption::CredentialCipher::from_hex(hex) {
         Ok(c) => {
             tracing::info!("Credential encryption enabled");
             Some(c)
         }
         Err(e) => {
-            tracing::error!("Invalid encryption key — credential encryption disabled: {e}");
+            reg.register(
+                degradations::ids::CREDENTIAL_KEY,
+                degradations::Severity::Error,
+                "Credential encryption",
+                format!(
+                    "The encryption key is not usable, so credential encryption is disabled: {e}"
+                ),
+                "Check KANI_SECRET_KEY / KANI_SECRET_KEY_FILE, or the secret.key file in the data \
+                 directory — it must be 64 hex characters.",
+            );
             None
         }
     }
 }
 
-async fn make_write_pool(url: &str) -> sqlx::Result<SqlitePool> {
+/// Takes a filesystem path rather than a URL: the database lives wherever
+/// `KANI_DATA_DIR` says, and a path with a space, a `?` or a `#` in it cannot be
+/// pasted into a `sqlite://…` string without corrupting the URL.
+fn connect_options(
+    path: &std::path::Path,
+    slow_query_threshold_ms: u64,
+) -> sqlx::sqlite::SqliteConnectOptions {
+    use sqlx::ConnectOptions;
+
+    sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .log_statements(log::LevelFilter::Debug)
+        .log_slow_statements(
+            log::LevelFilter::Warn,
+            std::time::Duration::from_millis(slow_query_threshold_ms),
+        )
+}
+
+async fn make_write_pool(
+    path: &std::path::Path,
+    slow_query_threshold_ms: u64,
+) -> sqlx::Result<SqlitePool> {
     SqlitePoolOptions::new()
         .max_connections(1)
         .after_connect(|conn, _| {
@@ -186,11 +241,15 @@ async fn make_write_pool(url: &str) -> sqlx::Result<SqlitePool> {
                 Ok(())
             })
         })
-        .connect(url)
+        .connect_with(connect_options(path, slow_query_threshold_ms))
         .await
 }
 
-async fn make_read_pool(url: &str, size: u32) -> sqlx::Result<SqlitePool> {
+async fn make_read_pool(
+    path: &std::path::Path,
+    size: u32,
+    slow_query_threshold_ms: u64,
+) -> sqlx::Result<SqlitePool> {
     SqlitePoolOptions::new()
         .max_connections(size)
         .after_connect(|conn, _| {
@@ -199,7 +258,7 @@ async fn make_read_pool(url: &str, size: u32) -> sqlx::Result<SqlitePool> {
                 Ok(())
             })
         })
-        .connect(url)
+        .connect_with(connect_options(path, slow_query_threshold_ms))
         .await
 }
 
@@ -230,13 +289,25 @@ async fn apply_pragmas(
 
 impl AppService {
     pub async fn new(data_dir: &std::path::Path) -> Result<Self> {
-        let db_url = "sqlite://kani.db?mode=rwc";
+        // The database belongs in the data directory, alongside the keyfiles.
+        // It used to be opened as a bare `sqlite://kani.db`, resolved against
+        // the *working directory* — so `KANI_DATA_DIR` moved the keys and left
+        // the database behind, silently splitting an install across two places.
+        // Docker never noticed because its working directory is already /data.
+        let db_path = data_dir.join("kani.db");
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
         let read_pool_size: u32 = std::env::var("KANI_DB_READ_POOL_SIZE")
             .ok()
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(8);
-        let pool = make_write_pool(db_url).await?;
-        let read_pool = make_read_pool(db_url, read_pool_size).await?;
+        let slow_query_threshold_ms: u64 = std::env::var("KANI_SLOW_QUERY_THRESHOLD_MS")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(100);
+        let pool = make_write_pool(&db_path, slow_query_threshold_ms).await?;
+        let read_pool = make_read_pool(&db_path, read_pool_size, slow_query_threshold_ms).await?;
 
         tracing::info!("SQL Pool Created");
 
@@ -244,9 +315,10 @@ impl AppService {
 
         let sources_registry = SourceRegistry::new();
 
-        let enc = load_or_provision_credential_cipher(data_dir);
+        let degradation_registry = Arc::new(degradations::DegradationRegistry::new());
+        let enc = load_or_provision_credential_cipher(data_dir, &degradation_registry);
 
-        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, chapter_queue_size, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_id, auto_download_category_ids, concurrent_manga_downloads, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours, browser_max_memory_mb, browser_max_instances, browser_idle_timeout_s FROM settings")
+        let mut settings = sqlx::query_as!(Settings, "SELECT flaresolverr_url, library_path, wasm_storage_path, concurrent_page_downloads, max_retries, initial_retry_delay_ms, max_wasm_instances, auto_scan, scan_interval_minutes, scan_exclude_completed, auto_download_category_ids, default_tracking_enabled, http_request_logging, browser_debug_logging, registration_enabled, cover_max_dimension, email_enabled, email_provider, email_provider_config, email_from_address, app_url, password_reset_enabled, email_verification_required, first_run_complete, scan_concurrency, per_source_download_concurrency, job_max_history, job_shutdown_timeout_secs, trash_retention_days, audit_retention_days, audit_security_retention_days, disk_warn_threshold, thumbnail_formats, max_login_attempts, max_ip_attempts, login_lockout_seconds, session_timeout_secs, tracker_auto_sync_enabled, tracker_sync_interval_hours, max_concurrent_jobs, db_maintenance_interval_hours, db_vacuum_interval_hours, audit_prune_interval_hours, trash_purge_interval_hours, browser_max_memory_mb, browser_max_instances, browser_idle_timeout_s, update_check_enabled, integrity_quick_scrub_interval_hours, integrity_deep_scrub_interval_hours, scrub_on_startup, integrity_revalidate_after_days, upgrade_detection_enabled, upgrade_min_res_gain, upgrade_confirm_fetches, upgrade_axis_resolution, upgrade_axis_colour, upgrade_axis_encoder, upgrade_axis_bitrate, upgrade_show_downgrades, upgrade_auto_replace_reasons, opds_page_index_zero_based, scan_barren_page_tolerance, global_search_timeout_secs FROM settings")
             .fetch_one(&pool)
             .await?;
         tracing::info!("Settings retrieved");
@@ -261,7 +333,15 @@ impl AppService {
         if let Some(ref cipher) = enc {
             match cipher.decrypt(&settings.email_provider_config) {
                 Ok(plain) => settings.email_provider_config = plain,
-                Err(e) => tracing::warn!("Cannot decrypt email_provider_config on startup: {e}"),
+                Err(e) => degradation_registry.register(
+                    degradations::ids::ENCRYPTED_SETTINGS,
+                    degradations::Severity::Error,
+                    "Encrypted settings",
+                    format!("The stored email provider configuration cannot be decrypted: {e}. Email sending will not work."),
+                    "This normally means secret.key was lost or replaced. Restore the \
+                     original key file, or re-enter the email settings to store them \
+                     under the new key.",
+                ),
             }
         }
 
@@ -397,8 +477,24 @@ impl AppService {
         }
 
         let max_wasm_instances = settings.max_wasm_instances as u32;
-        let wasm_runtime =
-            Arc::new(WasmRuntime::new(max_wasm_instances).map_err(ServiceError::Core)?);
+        let wasm_runtime = {
+            let mut runtime = WasmRuntime::new(max_wasm_instances).map_err(ServiceError::Core)?;
+            if let Err((dir, e)) = runtime.attach_module_cache(data_dir) {
+                degradation_registry.register(
+                    degradations::ids::WASM_MODULE_CACHE,
+                    degradations::Severity::Warn,
+                    "WASM module cache",
+                    format!(
+                        "The compiled-module cache at {} is unavailable ({e}), so every \
+                             extension is recompiled on each load.",
+                        dir.display()
+                    ),
+                    "Make the directory writable by the server user, or point \
+                         KANI_WASM_MODULE_CACHE_DIR somewhere that is.",
+                );
+            }
+            Arc::new(runtime)
+        };
 
         let shutdown_token = tokio_util::sync::CancellationToken::new();
 
@@ -421,10 +517,41 @@ impl AppService {
             }
         });
 
+        // Create everything the app expects to find under its data and library
+        // directories, on every start. A fresh deployment has none of them: the
+        // Docker image mounts an empty /data, so the very first boot logged
+        // "Failed to scan and register sources: No such file or directory"
+        // because `wasm_sources/` — the extension directory it is meant to read
+        // — had never been created. Directories are cheap; assuming they exist
+        // is what cost a clean install its extension registry.
+        for (label, dir) in [
+            ("WASM storage", settings.wasm_storage_path.as_path()),
+            ("library", settings.library_path.as_path()),
+        ] {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                degradation_registry.register(
+                    degradations::ids::STORAGE_DIRECTORY,
+                    degradations::Severity::Error,
+                    "Storage directory",
+                    format!(
+                        "The {label} directory {} could not be created: {e}",
+                        dir.display()
+                    ),
+                    "Check the path in Settings and that the server user can write to it.",
+                );
+            }
+        }
+
         let library_path = std::path::Path::new(&settings.library_path);
         if library_path.exists() {
             if let Err(e) = cleanup_staging_dirs(library_path, &pool).await {
-                tracing::warn!("Failed to read library path for cleanup: {}", e);
+                degradation_registry.register(
+                    degradations::ids::LIBRARY_PATH,
+                    degradations::Severity::Warn,
+                    "Library path",
+                    format!("The library directory could not be read at startup: {e}"),
+                    "Check that the library path exists and is readable by the server user.",
+                );
             }
             tracing::info!("Library cleanup complete");
         }
@@ -451,7 +578,13 @@ impl AppService {
         )
         .await
         {
-            tracing::error!("Failed to scan and register sources: {}", e);
+            degradation_registry.register(
+                degradations::ids::SOURCE_REGISTRY,
+                degradations::Severity::Error,
+                "Source registry",
+                format!("Installed extensions could not be scanned or registered: {e}. Sources may be missing."),
+                "Check that the WASM storage directory exists and is readable, then restart.",
+            );
         }
         tracing::info!("Sources scanned and registered");
 
@@ -478,8 +611,38 @@ impl AppService {
                 .wasm_storage_path
                 .join(format!("{}.wasm", source.name));
 
+            // One unreadable extension file used to abort startup entirely, with
+            // an IoError that named neither the source nor the path. A missing
+            // extension is a degraded source, not a dead server.
+            if !yaml_path.exists() && !wasm_path.exists() {
+                degradation_registry.register(
+                    &degradations::ids::source_load(&source.name),
+                    degradations::Severity::Error,
+                    format!("Source '{}'", source.name),
+                    format!(
+                        "No extension file at {} or {}, so this source cannot be used.",
+                        yaml_path.display(),
+                        wasm_path.display()
+                    ),
+                    "Reinstall the extension, or remove the source if it is no longer wanted.",
+                );
+                continue;
+            }
+
             let backend = if yaml_path.exists() {
-                let text = tokio::fs::read_to_string(&yaml_path).await?;
+                let text = match tokio::fs::read_to_string(&yaml_path).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        degradation_registry.register(
+                            &degradations::ids::source_load(&source.name),
+                            degradations::Severity::Error,
+                            format!("Source '{}'", source.name),
+                            format!("Cannot read {}: {e}", yaml_path.display()),
+                            "Check the file's permissions, then restart.",
+                        );
+                        continue;
+                    }
+                };
                 match kani_yaml::parse_and_validate(&text, &yaml_path) {
                     Ok(ext) => {
                         if wasm_path.exists() {
@@ -508,16 +671,41 @@ impl AppService {
                     }
                 }
             } else {
-                let bytes = tokio::fs::read(&wasm_path).await?;
+                let bytes = match tokio::fs::read(&wasm_path).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        degradation_registry.register(
+                            &degradations::ids::source_load(&source.name),
+                            degradations::Severity::Error,
+                            format!("Source '{}'", source.name),
+                            format!("Cannot read {}: {e}", wasm_path.display()),
+                            "Reinstall the extension, or remove the source if it is no longer wanted.",
+                        );
+                        continue;
+                    }
+                };
                 live_wasm_hashes
                     .insert(kani_core::wasm::cache::WasmModuleCache::sha256_hex(&bytes));
-                let component = wasm_runtime
+                let compiled = wasm_runtime
                     .compile_component(&bytes)
-                    .map_err(ServiceError::Core)?;
-
-                let instance_pre = wasm_runtime
-                    .instantiate_pre(&component)
-                    .map_err(ServiceError::Core)?;
+                    .and_then(|component| {
+                        wasm_runtime
+                            .instantiate_pre(&component)
+                            .map(|pre| (component, pre))
+                    });
+                let (component, instance_pre) = match compiled {
+                    Ok(pair) => pair,
+                    Err(e) => {
+                        degradation_registry.register(
+                            &degradations::ids::source_load(&source.name),
+                            degradations::Severity::Error,
+                            format!("Source '{}'", source.name),
+                            format!("{} is not a loadable extension: {e}", wasm_path.display()),
+                            "Reinstall the extension — the file is corrupt or built for another Kani version.",
+                        );
+                        continue;
+                    }
+                };
 
                 let (pure_registry, hook_registry, max_hook_requests) = {
                     let mut inst = kani_core::sources::SourceInstance::new(
@@ -648,7 +836,8 @@ impl AppService {
         job_registry.register::<crate::jobs::scan::AutoScanJob>();
         job_registry.register::<crate::jobs::backup::ScheduledBackupJob>();
         job_registry.register::<crate::jobs::storage::StorageMonitorJob>();
-        job_registry.register::<crate::jobs::integrity::IntegrityCheckJob>();
+        job_registry.register::<crate::jobs::scrub::ScrubJob>();
+        job_registry.register::<crate::jobs::archive_export::ArchiveExportJob>();
         job_registry.register::<crate::jobs::audit_prune::AuditPruneJob>();
         job_registry.register::<crate::jobs::trash_purge::TrashPurgeJob>();
         job_registry.register::<crate::jobs::pending_delete_retry::PendingDeleteRetryJob>();
@@ -657,6 +846,9 @@ impl AppService {
         job_registry.register::<crate::jobs::webhook_delivery::WebhookDeliveryJob>();
         job_registry.register::<crate::jobs::tracker_sync::TrackerSyncJob>();
         job_registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
+        job_registry.register::<crate::jobs::update_check::UpdateCheckJob>();
+        job_registry.register::<crate::jobs::manifest_backfill::ManifestBackfillJob>();
+        job_registry.register::<crate::jobs::migration::MigrationJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),
@@ -694,6 +886,7 @@ impl AppService {
 
         let svc = Self {
             db: pool,
+            db_path,
             db_read: read_pool,
             wasm_runtime,
             sources: Arc::new(sources_registry),
@@ -710,11 +903,13 @@ impl AppService {
             cover_retry_queue: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             email_service: Arc::new(tokio::sync::RwLock::new(email_svc)),
             encryption: enc,
+            degradations: Arc::clone(&degradation_registry),
             webhook_service,
             metadata_provider_registry: Arc::new(tokio::sync::RwLock::new(
                 metadata_provider::MetadataProviderRegistry::new(),
             )),
             job_manager,
+            latest_version: Arc::new(tokio::sync::RwLock::new(None)),
             install_locks: Arc::new(DashMap::new()),
             progress_buffer: progress::ReadProgressBuffer::default(),
             undo_tokens: Arc::new(DashMap::new()),
@@ -726,10 +921,19 @@ impl AppService {
 
         // Encrypt any plaintext credentials left over from pre-encryption installs.
         if let Err(e) = svc.migrate_credentials_to_encrypted().await {
-            tracing::warn!("Credential encryption migration on startup failed: {e}");
+            degradation_registry.register(
+                degradations::ids::CREDENTIAL_MIGRATION,
+                degradations::Severity::Error,
+                "Credential encryption migration",
+                format!("Stored credentials could not be migrated to the current key: {e}"),
+                "Check the server log for the failing row, then restart. Until this \
+                 succeeds, some credentials remain in their previous form.",
+            );
         } else if svc.encryption.is_some() {
             tracing::info!("Credential encryption migration complete");
         }
+
+        degradations::log_startup_summary(&degradation_registry);
 
         Ok(svc)
     }
@@ -748,15 +952,12 @@ impl AppService {
             library_path: test_dir.clone(),
             wasm_storage_path: test_dir,
             concurrent_page_downloads: 4,
-            concurrent_manga_downloads: 2,
-            chapter_queue_size: 32,
             max_retries: 3,
             initial_retry_delay_ms: 100,
             max_wasm_instances: 1,
             auto_scan: false,
             scan_interval_minutes: 60,
             scan_exclude_completed: false,
-            auto_download_category_id: None,
             auto_download_category_ids: "[]".to_string(),
             default_tracking_enabled: false,
             http_request_logging: false,
@@ -792,15 +993,39 @@ impl AppService {
             db_vacuum_interval_hours: 168,
             audit_prune_interval_hours: 168,
             trash_purge_interval_hours: 168,
+            integrity_quick_scrub_interval_hours: 24,
+            integrity_deep_scrub_interval_hours: 168,
+            scrub_on_startup: false,
+            integrity_revalidate_after_days: 30,
+            upgrade_detection_enabled: true,
+            upgrade_min_res_gain: 1.2,
+            upgrade_confirm_fetches: 3,
+            upgrade_axis_resolution: "both".into(),
+            upgrade_axis_colour: "both".into(),
+            upgrade_axis_encoder: "both".into(),
+            upgrade_axis_bitrate: "gain".into(),
+            upgrade_show_downgrades: false,
+            upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
             browser_max_memory_mb: 512,
             browser_max_instances: 2,
             browser_idle_timeout_s: 300,
+            update_check_enabled: true,
+            opds_page_index_zero_based: false,
+            scan_barren_page_tolerance: 3,
+            global_search_timeout_secs: 6,
         };
 
-        let smart_client =
-            kani_core::http::SmartClient::new(None).expect("SmartClient::new failed in test");
-        let proxy_client =
-            kani_core::http::SmartClient::new(None).expect("proxy SmartClient::new failed in test");
+        // Every test origin is on loopback, and production `new()`/`new_proxy()`
+        // refuse redirects to private hosts — so the test clients must opt into
+        // private egress or no service-level test could follow a redirect to a
+        // TestOrigin. SSRF blocking itself is verified at the http.rs unit and
+        // webhook levels, which use their own clients.
+        let smart_client = kani_core::http::SmartClient::new(None)
+            .expect("SmartClient::new failed in test")
+            .with_allow_private_egress(true);
+        let proxy_client = kani_core::http::SmartClient::new(None)
+            .expect("proxy SmartClient::new failed in test")
+            .with_allow_private_egress(true);
         let wasm_runtime =
             Arc::new(WasmRuntime::new_on_demand().expect("WasmRuntime::new failed in test"));
         let downloader = DownloaderManager::new(
@@ -836,8 +1061,11 @@ impl AppService {
         registry.register::<crate::jobs::scan::AutoScanJob>();
         registry.register::<crate::jobs::backup::ScheduledBackupJob>();
         registry.register::<crate::jobs::storage::StorageMonitorJob>();
-        registry.register::<crate::jobs::integrity::IntegrityCheckJob>();
+        registry.register::<crate::jobs::scrub::ScrubJob>();
+        registry.register::<crate::jobs::archive_export::ArchiveExportJob>();
         registry.register::<crate::jobs::browser_reap::BrowserReapJob>();
+        registry.register::<crate::jobs::update_check::UpdateCheckJob>();
+        registry.register::<crate::jobs::manifest_backfill::ManifestBackfillJob>();
 
         let job_manager = crate::jobs::JobManager::new(
             pool.clone(),
@@ -865,6 +1093,7 @@ impl AppService {
 
         let svc = Self {
             db: pool.clone(),
+            db_path: std::path::PathBuf::from("kani.db"),
             db_read: pool.clone(),
             wasm_runtime,
             sources: Arc::new(SourceRegistry::new()),
@@ -881,11 +1110,13 @@ impl AppService {
             cover_retry_queue: Arc::new(tokio::sync::Mutex::new(HashSet::new())),
             email_service: Arc::new(tokio::sync::RwLock::new(None)),
             encryption: None,
+            degradations: Arc::new(degradations::DegradationRegistry::new()),
             webhook_service: webhooks::WebhookService::new(pool.clone(), pool),
             metadata_provider_registry: Arc::new(tokio::sync::RwLock::new(
                 metadata_provider::MetadataProviderRegistry::new(),
             )),
             job_manager,
+            latest_version: Arc::new(tokio::sync::RwLock::new(None)),
             install_locks: Arc::new(DashMap::new()),
             progress_buffer: progress::ReadProgressBuffer::default(),
             undo_tokens: Arc::new(DashMap::new()),
@@ -1160,12 +1391,40 @@ impl AppService {
                                 "All new chapters for manga {} filtered out by download rules",
                                 manga_db_id
                             );
+                            let suppressed = new_ids.len() as i64;
+                            if let Err(e) = sqlx::query!(
+                                "UPDATE manga SET suppressed_chapter_count = ? WHERE id = ?",
+                                suppressed,
+                                manga_db_id
+                            )
+                            .execute(&self.db)
+                            .await
+                            {
+                                tracing::warn!(
+                                    "Failed to record suppressed-chapter count for manga {}: {}",
+                                    manga_db_id,
+                                    e
+                                );
+                            }
                         } else {
                             tracing::info!(
                                 "{} new chapters passed download rules for manga {}",
                                 filtered_ids.len(),
                                 manga_db_id
                             );
+                            if let Err(e) = sqlx::query!(
+                                "UPDATE manga SET suppressed_chapter_count = 0 WHERE id = ?",
+                                manga_db_id
+                            )
+                            .execute(&self.db)
+                            .await
+                            {
+                                tracing::warn!(
+                                    "Failed to clear suppressed-chapter count for manga {}: {}",
+                                    manga_db_id,
+                                    e
+                                );
+                            }
                             let mut join_set = tokio::task::JoinSet::new();
                             for new_id in filtered_ids {
                                 let s = self.clone();

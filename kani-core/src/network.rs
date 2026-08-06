@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 /// Every private, reserved, or otherwise untrusted IP range.
-fn is_forbidden_ip(ip: IpAddr) -> bool {
+pub fn is_forbidden_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             v4.is_loopback()
@@ -46,6 +46,41 @@ fn is_ipv4_mapped_private(ip: Ipv6Addr) -> bool {
         return is_forbidden_ip(IpAddr::V4(v4));
     }
     false
+}
+
+/// Whether a URL's host is an IP literal in a forbidden range.
+///
+/// The [`ValidatingResolver`] guards hostnames (and DNS rebinding) at resolve
+/// time, but it is never consulted for a URL that already names a literal IP —
+/// the connector dials those directly. So `http://169.254.169.254/` or
+/// `http://127.0.0.1:9000/` would bypass it entirely. This closes that gap:
+/// callers that accept a user-supplied URL (webhooks, trackers) reject a
+/// forbidden IP literal before dialling. Returns `false` for hostnames (left to
+/// the resolver) and for URLs that do not parse or carry no host.
+pub fn is_forbidden_url_host(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    match parsed.host() {
+        Some(url::Host::Ipv4(v4)) => is_forbidden_ip(IpAddr::V4(v4)),
+        Some(url::Host::Ipv6(v6)) => is_forbidden_ip(IpAddr::V6(v6)),
+        _ => false,
+    }
+}
+
+/// Build an HTTP client that refuses to reach private/reserved hosts, for
+/// server-initiated egress to user-supplied URLs (webhooks). Redirects are
+/// disabled so a `3xx` cannot bounce the request to an internal host that the
+/// literal-host check never saw; the [`ValidatingResolver`] still guards every
+/// hostname it does resolve.
+pub fn build_validating_client() -> Result<rquest::Client> {
+    let resolver = ValidatingResolver::new()?;
+    let client = rquest::Client::builder()
+        .redirect(rquest::redirect::Policy::none())
+        .dns_resolver(Arc::new(resolver))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+    Ok(client)
 }
 
 /// A DNS resolver that validates every address before returning it.
@@ -169,5 +204,43 @@ mod tests {
     #[test]
     fn cloudflare_ipv6_is_allowed() {
         assert!(!is_forbidden_ip(ip6("2606:4700::1")));
+    }
+
+    #[test]
+    fn url_host_literal_loopback_is_forbidden() {
+        assert!(is_forbidden_url_host("http://127.0.0.1:9000/hook"));
+    }
+
+    #[test]
+    fn url_host_literal_cloud_metadata_is_forbidden() {
+        assert!(is_forbidden_url_host(
+            "http://169.254.169.254/latest/meta-data/"
+        ));
+    }
+
+    #[test]
+    fn url_host_literal_private_ranges_are_forbidden() {
+        assert!(is_forbidden_url_host("https://10.0.0.5/x"));
+        assert!(is_forbidden_url_host("https://192.168.1.1/x"));
+        assert!(is_forbidden_url_host("http://[::1]:8080/x"));
+        assert!(is_forbidden_url_host("http://[::ffff:192.168.1.1]/x"));
+    }
+
+    #[test]
+    fn url_host_public_literal_is_allowed() {
+        assert!(!is_forbidden_url_host("https://8.8.8.8/x"));
+    }
+
+    #[test]
+    fn url_hostname_is_left_to_the_resolver() {
+        // A hostname is not an IP literal, so this guard returns false and the
+        // ValidatingResolver handles it at resolve time.
+        assert!(!is_forbidden_url_host("https://example.com/hook"));
+        assert!(!is_forbidden_url_host("https://localhost/hook"));
+    }
+
+    #[test]
+    fn unparseable_url_is_not_flagged() {
+        assert!(!is_forbidden_url_host("not a url"));
     }
 }

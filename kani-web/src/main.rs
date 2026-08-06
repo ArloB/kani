@@ -27,6 +27,132 @@ async fn cache_control_middleware(
     response
 }
 
+/// The interval at which the limiter replenishes one request, for a given rate.
+///
+/// `GovernorConfigBuilder::per_second` is named for the unit of its argument,
+/// not for what the argument means: it sets the replenishment *period*. Passing
+/// a requests-per-second figure to it therefore inverts the limit — the larger
+/// the intended rate, the slower the actual one.
+/// Sustained requests per second, and the burst above it, for each bucket.
+/// The tests below assert against these rather than repeating the numbers, so a
+/// default cannot be lowered without the assertion that guards it moving too.
+const API_RATE_RELEASE: u64 = 20;
+const API_RATE_DEBUG: u64 = 200;
+const API_BURST_RELEASE: u32 = 300;
+const API_BURST_DEBUG: u32 = 4000;
+const PROXY_RATE_RELEASE: u64 = 45;
+const PROXY_RATE_DEBUG: u64 = 450;
+const PROXY_BURST_RELEASE: u32 = 600;
+const PROXY_BURST_DEBUG: u32 = 6000;
+
+// Compile-time guards on the shipped defaults.
+//
+// These were `assert!` inside a test, which clippy correctly flagged as
+// constant-valued: comparing two consts is decided at compile time, so the test
+// added nothing a const assertion does not. As const assertions they are
+// stronger — lowering a default is a build failure, not a test failure that
+// could be skipped or filtered out.
+const _: () = {
+    // Measured: a library page costs 21 REST calls and a manga page 24, both
+    // arriving at about 7/s while the page settles. The sustained release rate
+    // has to clear that or the bucket drains faster than it fills.
+    const OBSERVED_PEAK_PER_SECOND: u64 = 8;
+    assert!(
+        API_RATE_RELEASE > OBSERVED_PEAK_PER_SECOND,
+        "release API rate does not clear measured browsing"
+    );
+
+    // A login plus eight navigations cost 148 calls; the burst must absorb a
+    // session like that without the sustained rate having to keep up.
+    const OBSERVED_SESSION_CALLS: u32 = 148;
+    assert!(
+        API_BURST_RELEASE > OBSERVED_SESSION_CALLS,
+        "release API burst cannot absorb a measured session"
+    );
+
+    // Debug exists to be looser than release. A larger rate is a shorter
+    // period, so this also pins the direction of the conversion.
+    assert!(
+        API_RATE_DEBUG > API_RATE_RELEASE,
+        "debug API rate must exceed release"
+    );
+    assert!(
+        API_BURST_DEBUG > API_BURST_RELEASE,
+        "debug API burst must exceed release"
+    );
+    assert!(
+        PROXY_RATE_DEBUG > PROXY_RATE_RELEASE,
+        "debug proxy rate must exceed release"
+    );
+
+    // Measured against the proxy bucket, which serves image_proxy, the reader's
+    // per-page route and manga covers — three routes, one budget, which is not
+    // obvious from their names:
+    //
+    //     library grid          2 requests, peak  2/s
+    //     source browse        18 requests, peak 18/s   <- the peak
+    //     reading, paging      19 requests, peak  7/s
+    //     fast scrubbing       36 requests, peak 12/s
+    //
+    // The cover grid dominates because a page of covers arrives at once, while
+    // reader pages serialise behind decode and network.
+    const OBSERVED_PROXY_PEAK: u64 = 18;
+
+    // Both buckets clear their measured peak with the same margin. Stating the
+    // rule rather than the numbers is what stops one bucket being tuned to a
+    // different standard than the other by accident.
+    const HEADROOM: u64 = 2;
+    assert!(
+        API_RATE_RELEASE >= OBSERVED_PEAK_PER_SECOND * HEADROOM,
+        "release API rate leaves less headroom over measured browsing than the proxy does"
+    );
+    assert!(
+        PROXY_RATE_RELEASE >= OBSERVED_PROXY_PEAK * HEADROOM,
+        "release proxy rate leaves less headroom over a measured cover grid than the API does"
+    );
+};
+
+fn replenish_period(requests_per_second: u64) -> std::time::Duration {
+    const NANOS_PER_SEC: u64 = 1_000_000_000;
+    std::time::Duration::from_nanos(NANOS_PER_SEC / requests_per_second.max(1))
+}
+
+/// Serves one asset tree under `/<prefix>/...`.
+///
+/// Replaces a `ServeDir` mount. The wildcard capture is the path *within* the
+/// tree, so `/js/dist/app.js` resolves the asset `js/dist/app.js` whether that
+/// comes from disk or from the binary.
+fn asset_routes(prefix: &'static str, assets: &kani_web::assets::Assets) -> axum::Router {
+    let a = assets.clone();
+    axum::Router::new().route(
+        &format!("/{prefix}/{{*path}}"),
+        axum::routing::get(
+            move |axum::extract::Path(path): axum::extract::Path<String>,
+                  headers: axum::http::HeaderMap| {
+                let a = a.clone();
+                async move { kani_web::assets::serve_prefixed(prefix, a, path, headers).await }
+            },
+        ),
+    )
+}
+
+/// Serves a single named asset, for the SPA shell and the changelog.
+fn named_asset(
+    assets: &kani_web::assets::Assets,
+    name: &'static str,
+) -> impl Fn(
+    axum::http::HeaderMap,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = axum::response::Response> + Send>>
++ Clone
++ Send
++ 'static {
+    let a = assets.clone();
+    move |headers: axum::http::HeaderMap| {
+        let a = a.clone();
+        Box::pin(async move { kani_web::assets::serve_named(name, a, headers).await })
+    }
+}
+
 #[tokio::main]
 async fn main() {
     use axum::Router;
@@ -42,7 +168,6 @@ async fn main() {
     use tower_http::{
         compression::CompressionLayer,
         cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer},
-        services::{ServeDir, ServeFile},
         set_header::SetResponseHeaderLayer,
         trace::TraceLayer,
     };
@@ -64,14 +189,30 @@ async fn main() {
     };
 
     use tracing_subscriber::prelude::*;
-    tracing_subscriber::registry()
+
+    let json_logs = std::env::var("KANI_LOG_FORMAT").is_ok_and(|v| v.eq_ignore_ascii_case("json"));
+
+    let fmt_layer = if json_logs {
+        tracing_subscriber::fmt::layer()
+            .json()
+            .flatten_event(true)
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+            .with_filter(make_filter())
+            .boxed()
+    } else {
+        tracing_subscriber::fmt::layer()
+            .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+            .with_filter(make_filter())
+            .boxed()
+    };
+
+    let registry = tracing_subscriber::registry()
         .with(ring_layer.with_filter(make_filter()))
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
-                .with_filter(make_filter()),
-        )
-        .init();
+        .with(fmt_layer);
+
+    registry.init();
+
+    kani_app::service::diagnostics::init(env!("CARGO_PKG_VERSION"), env!("GIT_SHA"));
 
     tracing::info!("Starting Kani Web Server");
 
@@ -114,8 +255,8 @@ async fn main() {
     let auth_backend = AuthBackend::new(state.db.clone());
     let auth_layer = AuthManagerLayerBuilder::new(auth_backend.clone(), session_layer).build();
 
-    if let Err(e) = ensure_default_user(&auth_backend).await {
-        tracing::error!("Failed to ensure default user: {}", e);
+    if let Err(e) = announce_first_run(&auth_backend).await {
+        tracing::error!("Failed to check for a first-run instance: {}", e);
     }
 
     kani_web::HTTP_LOGGING_ENABLED.store(
@@ -156,33 +297,131 @@ async fn main() {
     state.spawn_cache_prune();
     state.spawn_progress_flush();
 
+    {
+        let backfill_state = state.clone();
+        tokio::spawn(async move {
+            backfill_state.submit_manifest_backfill_if_needed().await;
+
+            // After the backfill, so a startup scrub judges the paths and
+            // hashes the backfill just wrote rather than the gaps it filled.
+            if backfill_state.get_settings().await.scrub_on_startup {
+                let job = kani_app::jobs::scrub::ScrubJob::new(
+                    kani_app::service::integrity::ScrubDepth::Quick,
+                    false,
+                );
+                if let Err(e) = backfill_state.service.job_manager.submit(job).await {
+                    tracing::warn!("Failed to submit startup integrity scrub: {e}");
+                }
+            }
+        });
+    }
+
     if let Err(e) = kani_app::jobs::recurring::ensure_recurring_rows(&state.db).await {
         tracing::warn!("Failed to initialise recurring job rows: {e}");
     }
     kani_app::jobs::recurring::spawn_recurring_scheduler(&state);
 
     // Rate limiter settings.
-    // API: enough for normal UI use while protecting against abuse.
+    // API: enough for normal UI use while protecting against abuse. Measured
+    // rather than guessed — a library page costs 21 REST calls and a manga page
+    // 24, both arriving at 7/s while the page settles, and a login plus eight
+    // navigations costs 148. A 5/s sustained rate is therefore *below* what
+    // ordinary browsing draws: the bucket drains faster than it fills and the
+    // burst is three-quarters gone after eight page views. 20/s leaves real
+    // headroom over that while still capping a single token or address at
+    // 1200 requests a minute.
     // Proxy: much more permissive — the reader fires many concurrent image
     // requests; the per-host semaphore in rest.rs already throttles upstream.
-    const API_RATE_PER_SECOND: u64 = 5;
-    const API_BURST_SIZE: u32 = 200;
-    const PROXY_RATE_PER_SECOND: u64 = 30;
-    const PROXY_BURST_SIZE: u32 = 600;
+    //
+    // A debug build raises both by an order of magnitude. Automated browsing —
+    // a Playwright sweep, a load of the whole settings tree — drains the release
+    // budget in seconds, and every subsequent call 429s, which reads as a pile
+    // of application bugs rather than the limiter doing its job. The release
+    // defaults are what ships; `KANI_API_RATE_PER_SECOND` and friends override
+    // either build.
+    let dev_build = cfg!(debug_assertions);
+    let env_u64 = |name: &str, default: u64| -> u64 {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(default)
+    };
+    let env_u32 = |name: &str, default: u32| -> u32 {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(default)
+    };
+
+    let api_rate_per_second = env_u64(
+        "KANI_API_RATE_PER_SECOND",
+        if dev_build {
+            API_RATE_DEBUG
+        } else {
+            API_RATE_RELEASE
+        },
+    );
+    let api_burst_size = env_u32(
+        "KANI_API_BURST_SIZE",
+        if dev_build {
+            API_BURST_DEBUG
+        } else {
+            API_BURST_RELEASE
+        },
+    );
+    let proxy_rate_per_second = env_u64(
+        "KANI_PROXY_RATE_PER_SECOND",
+        if dev_build {
+            PROXY_RATE_DEBUG
+        } else {
+            PROXY_RATE_RELEASE
+        },
+    );
+    let proxy_burst_size = env_u32(
+        "KANI_PROXY_BURST_SIZE",
+        if dev_build {
+            PROXY_BURST_DEBUG
+        } else {
+            PROXY_BURST_RELEASE
+        },
+    );
+
+    // These are rates — requests per second — and every name here says so. The
+    // builder's `per_second` takes the opposite: the *interval* at which one
+    // cell is replenished. Passing a rate to it inverted the whole scheme, so
+    // release replenished one request every five seconds (0.2/s, not 5/s) and
+    // the "relaxed" debug build replenished one every fifty, ten times stricter
+    // than the build it was meant to loosen. Convert once, here.
+    let api_period = replenish_period(api_rate_per_second);
+    let proxy_period = replenish_period(proxy_rate_per_second);
+
+    if dev_build {
+        tracing::info!(
+            api_rate_per_second,
+            api_burst_size,
+            "Debug build: rate limits relaxed for local development"
+        );
+    }
 
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(API_RATE_PER_SECOND)
-            .burst_size(API_BURST_SIZE)
+            .period(api_period)
+            .burst_size(api_burst_size)
+            // Bucket bearer traffic per token, so a busy integration cannot
+            // spend its owner's browsing budget.
+            .key_extractor(kani_web::rate_limit_key::TokenOrPeerIp)
+            // Emit x-ratelimit-* and retry-after: a client that cannot see its
+            // budget can only retry blindly, which makes congestion worse.
+            .use_headers()
             .finish()
-            .expect("API_RATE_PER_SECOND/API_BURST_SIZE constants are valid"),
+            .expect("api rate/burst values are valid"),
     );
     let proxy_governor_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(PROXY_RATE_PER_SECOND)
-            .burst_size(PROXY_BURST_SIZE)
+            .period(proxy_period)
+            .burst_size(proxy_burst_size)
             .finish()
-            .expect("PROXY_RATE_PER_SECOND/PROXY_BURST_SIZE constants are valid"),
+            .expect("proxy rate/burst values are valid"),
     );
 
     let cors_layer = {
@@ -214,8 +453,13 @@ async fn main() {
     let opds_router = kani_web::opds::routes(state.clone());
     let health_router = axum::Router::new()
         .route("/health", axum::routing::get(rest::health))
+        .route("/healthz", axum::routing::get(rest::health))
         .route("/ready", axum::routing::get(rest::ready))
+        .route("/readyz", axum::routing::get(rest::ready))
         .with_state(state.clone());
+    let (prometheus_layer, _) = kani_web::metrics::prometheus();
+    kani_web::metrics::describe();
+    let metrics_router = kani_web::metrics::router(state.clone());
 
     {
         let db = state.db.clone();
@@ -358,67 +602,77 @@ async fn main() {
         });
     }
 
-    let static_dir = std::env::var("KANI_STATIC_DIR").unwrap_or_else(|_| "static".to_string());
-    tracing::info!("Serving static files from: {static_dir}");
+    // Resolved once: KANI_STATIC_DIR, else the copy embedded in a release
+    // binary, else ./static on a debug build. `Assets::resolve` logs which,
+    // because "every page 404s" is otherwise hard to attribute.
+    let assets = kani_web::assets::Assets::resolve();
 
     // Release builds serve the production bundle (bundled/minified JS, no import map).
     // Debug builds serve raw source files so changes are picked up without rebuilding.
-    let index_html = if cfg!(debug_assertions) {
-        format!("{static_dir}/index.html")
+    // Debug serves raw modules through an import map; release serves the bundle.
+    let index_name = if cfg!(debug_assertions) {
+        "index.html"
     } else {
-        format!("{static_dir}/index.prod.html")
+        "index.prod.html"
     };
-
-    let manifest_path = format!("{static_dir}/manifest.webmanifest");
-    let sw_path = format!("{static_dir}/sw.js");
 
     let app = Router::new()
         // PWA — manifest and service worker need explicit Content-Type headers
         .route(
             "/manifest.webmanifest",
-            axum::routing::get(move || {
-                let p = manifest_path.clone();
-                async move {
-                    match tokio::fs::read(&p).await {
-                        Ok(b) => (
-                            [(
-                                header::CONTENT_TYPE,
-                                "application/manifest+json; charset=utf-8",
-                            )],
-                            b,
-                        )
-                            .into_response(),
-                        Err(_) => StatusCode::NOT_FOUND.into_response(),
+            axum::routing::get({
+                let a = assets.clone();
+                move || {
+                    let a = a.clone();
+                    async move {
+                        // Explicit content type: the manifest needs
+                        // application/manifest+json, which mime_guess will not infer.
+                        match a.get("manifest.webmanifest") {
+                            Some(asset) => (
+                                [(
+                                    header::CONTENT_TYPE,
+                                    "application/manifest+json; charset=utf-8",
+                                )],
+                                asset.bytes.into_owned(),
+                            )
+                                .into_response(),
+                            None => StatusCode::NOT_FOUND.into_response(),
+                        }
                     }
                 }
             }),
         )
         .route(
             "/sw.js",
-            axum::routing::get(move || {
-                let p = sw_path.clone();
-                async move {
-                    match tokio::fs::read(&p).await {
-                        Ok(b) => {
-                            let mut h = axum::http::HeaderMap::new();
-                            h.insert(
-                                header::CONTENT_TYPE,
-                                header::HeaderValue::from_static(
-                                    "application/javascript; charset=utf-8",
-                                ),
-                            );
-                            h.insert(
-                                header::HeaderName::from_static("service-worker-allowed"),
-                                header::HeaderValue::from_static("/"),
-                            );
-                            (StatusCode::OK, h, b).into_response()
+            axum::routing::get({
+                let a = assets.clone();
+                move || {
+                    let a = a.clone();
+                    async move {
+                        // Service-Worker-Allowed lets a worker served from /sw.js
+                        // claim the whole origin; without it the scope is /.
+                        match a.get("sw.js") {
+                            Some(asset) => {
+                                let mut h = axum::http::HeaderMap::new();
+                                h.insert(
+                                    header::CONTENT_TYPE,
+                                    header::HeaderValue::from_static(
+                                        "application/javascript; charset=utf-8",
+                                    ),
+                                );
+                                h.insert(
+                                    header::HeaderName::from_static("service-worker-allowed"),
+                                    header::HeaderValue::from_static("/"),
+                                );
+                                (StatusCode::OK, h, asset.bytes.into_owned()).into_response()
+                            }
+                            None => StatusCode::NOT_FOUND.into_response(),
                         }
-                        Err(_) => StatusCode::NOT_FOUND.into_response(),
                     }
                 }
             }),
         )
-        .nest_service("/icons", ServeDir::new(format!("{static_dir}/icons")))
+        .merge(asset_routes("icons", &assets))
         // OPDS catalog — auth is handled per-handler (supports Basic auth)
         .nest("/opds", opds_router)
         .merge(
@@ -436,15 +690,14 @@ async fn main() {
                 }),
         )
         .merge(health_router)
-        .nest_service("/js", ServeDir::new(format!("{static_dir}/js")))
-        .nest_service("/css", ServeDir::new(format!("{static_dir}/css")))
-        .nest_service("/locales", ServeDir::new(format!("{static_dir}/locales")))
-        .nest_service("/fonts", ServeDir::new(format!("{static_dir}/fonts")))
-        .route_service(
-            "/changelog.md",
-            ServeFile::new(format!("{static_dir}/changelog.md")),
-        )
-        .fallback_service(ServeFile::new(index_html))
+        .merge(metrics_router)
+        .merge(asset_routes("js", &assets))
+        .merge(asset_routes("css", &assets))
+        .merge(asset_routes("locales", &assets))
+        .merge(asset_routes("fonts", &assets))
+        .route("/changelog.md", axum::routing::get(named_asset(&assets, "changelog.md")))
+        // Anything unmatched is a client-side route, so the SPA shell answers.
+        .fallback(named_asset(&assets, index_name))
         .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -504,11 +757,17 @@ async fn main() {
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
                 if kani_web::HTTP_LOGGING_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                    let request_id = request
+                        .extensions()
+                        .get::<tower_http::request_id::RequestId>()
+                        .and_then(|id| id.header_value().to_str().ok())
+                        .unwrap_or_default();
                     tracing::info_span!(
                         "http",
                         method = %request.method(),
                         uri = %request.uri(),
                         status = tracing::field::Empty,
+                        request_id = %request_id,
                     )
                 } else {
                     tracing::Span::none()
@@ -516,8 +775,27 @@ async fn main() {
             }),
         );
 
+    // Swagger UI, debug builds only. Merged here rather than inside the chain
+    // above so it sits outside the auth layers — the UI is a plain static page
+    // that fetches the spec, and an auth redirect would break it. `build_app`
+    // mounts its own copy for tests; this is the one the server actually serves.
+    #[cfg(debug_assertions)]
+    let app = {
+        use utoipa::OpenApi;
+        app.merge(utoipa_swagger_ui::SwaggerUi::new("/api-docs").url(
+            "/api-docs/openapi.json",
+            kani_web::openapi::ApiDoc::openapi(),
+        ))
+    };
+
     // Cache-Control for static assets: immutable in release, no-cache in debug.
-    let app = app.layer(axum::middleware::from_fn(cache_control_middleware));
+    let app = app
+        .layer(axum::middleware::from_fn(cache_control_middleware))
+        .layer(prometheus_layer.clone())
+        .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
+        .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
+            kani_web::middleware::trace_id::UuidRequestId,
+        ));
 
     let bind_addr = std::env::var("KANI_BIND").unwrap_or_else(|_| "0.0.0.0:8242".into());
     let listener = tokio::net::TcpListener::bind(&bind_addr)
@@ -567,54 +845,79 @@ async fn main() {
     .unwrap_or_else(|e| panic!("Server error: {e}"));
 }
 
-fn write_admin_file(
-    user: &kani_web::types::User,
-    password: &str,
-) -> Result<(), kani_web::error::AppError> {
-    use std::fs::OpenOptions;
-    use std::io::Write;
-    #[cfg(unix)]
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let path = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".kani_admin_password");
-
-    let content = format!(
-        "Username: {}\nEmail: {}\nPassword: {}",
-        user.username, user.email, password
-    );
-
-    let mut options = OpenOptions::new();
-    options.create(true).write(true).truncate(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-
-    options.open(&path)
-        .and_then(|mut f| f.write_all(content.as_bytes()))
-        .inspect(|_| tracing::info!("No users found - admin password written to: {}\n\nPlease change this password immediately after logging in!\n\n", path.display()))
-        .map_err(|e| {
-            tracing::error!("Failed to write admin password to {:?}: {}", path, e);
-            kani_web::error::AppError::InternalServerError(e.to_string())
-        })
-}
-
-async fn ensure_default_user(
+/// A fresh instance has no accounts and no generated password: the first person
+/// to reach it over the local network creates the administrator through the
+/// in-app setup screen (`POST /rest/auth/setup`), which closes the moment that
+/// account exists.
+///
+/// This replaced a generated `admin` password written to the data directory. The
+/// file had to be found and copy-pasted, and the wizard then made the operator
+/// change it — which invalidated their session mid-setup — so the first
+/// experience was two logins and a file hunt.
+async fn announce_first_run(
     backend: &kani_web::auth::AuthBackend,
 ) -> Result<(), kani_web::error::AppError> {
     if backend.user_count().await? == 0 {
-        use argon2::password_hash::rand_core::{OsRng, RngCore};
+        tracing::info!(
+            "No accounts yet — open Kani in a browser on this machine or your local \
+             network to create the administrator. Setup closes as soon as that \
+             account exists. Set KANI_ALLOW_REMOTE_SETUP=true if you must do it \
+             over the internet."
+        );
+    }
+    Ok(())
+}
 
-        let mut bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut bytes);
-        let password = hex::encode(bytes);
+#[cfg(test)]
+mod rate_limit_config_tests {
+    use super::replenish_period;
+    use std::time::Duration;
 
-        let user = backend
-            .create_user("admin", "admin@localhost", &password)
-            .await?;
-        write_admin_file(&user, &password)?;
-        backend.grant_role(user.id, "admin", None).await?;
+    #[test]
+    fn a_rate_becomes_its_reciprocal() {
+        assert_eq!(replenish_period(1), Duration::from_secs(1));
+        assert_eq!(replenish_period(5), Duration::from_millis(200));
+        assert_eq!(replenish_period(50), Duration::from_millis(20));
+        assert_eq!(replenish_period(500), Duration::from_millis(2));
     }
 
-    Ok(())
+    #[test]
+    fn a_higher_rate_is_never_a_stricter_limit() {
+        // The bug this replaced: `per_second(50)` was ten times harsher than
+        // `per_second(5)`, so the debug build throttled harder than release.
+        let mut previous = replenish_period(1);
+        for rate in [2, 5, 30, 50, 300, 500, 20_000] {
+            let period = replenish_period(rate);
+            assert!(
+                period < previous,
+                "rate {rate} produced period {period:?}, not shorter than {previous:?}"
+            );
+            previous = period;
+        }
+    }
+
+    #[test]
+    fn zero_does_not_divide_by_zero() {
+        assert_eq!(replenish_period(0), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn the_period_helper_is_used_by_both_buckets() {
+        // The constants themselves are guarded at compile time below; this only
+        // confirms the conversion is applied rather than bypassed.
+        // Derived from the constants rather than written out. Hard-coding the
+        // expected period meant this went stale the moment a rate moved, and
+        // then failed for a reason unrelated to the behaviour it guards.
+        for rate in [super::API_RATE_RELEASE, super::PROXY_RATE_RELEASE] {
+            assert_eq!(
+                replenish_period(rate),
+                Duration::from_nanos(1_000_000_000 / rate),
+                "the period must be the reciprocal of the rate"
+            );
+        }
+        // A rate is requests per second, so a higher rate is a shorter period.
+        assert!(
+            replenish_period(super::PROXY_RATE_RELEASE) < replenish_period(super::API_RATE_RELEASE)
+        );
+    }
 }

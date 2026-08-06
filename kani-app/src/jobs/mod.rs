@@ -1,3 +1,4 @@
+pub mod archive_export;
 pub mod audit_prune;
 pub mod backup;
 pub mod browser_reap;
@@ -6,17 +7,20 @@ pub mod download;
 pub mod error;
 pub mod framework;
 pub mod import_dedup;
-pub mod integrity;
 pub mod maintenance;
 pub mod manager;
+pub mod manifest_backfill;
+pub mod migration;
 pub mod pending_delete_retry;
 pub mod recurring;
 pub mod refresh;
 pub mod scan;
+pub mod scrub;
 pub mod storage;
 pub mod thumbnail;
 pub mod tracker_sync;
 pub mod trash_purge;
+pub mod update_check;
 pub mod webhook_delivery;
 
 pub use error::{DownloadErrorKind, JobError, RetryPolicy};

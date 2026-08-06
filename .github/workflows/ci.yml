@@ -56,6 +56,15 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
+    # Same reasoning as the test job. Clippy builds dev rlibs with `debug = 1`,
+    # and `cargo bench --no-run` uses [profile.bench], which inherits release
+    # and then re-adds `debug = 1` — the one release profile that is not
+    # stripped. Neither needs debuginfo to answer "does it compile".
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_BENCH_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "4"
     steps:
       - uses: actions/checkout@v6
 
@@ -83,9 +92,95 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --no-deps -- -D warnings
 
+      # `cargo bench --no-run` below is the first *release*-profile build in this
+      # job, and kani-web's build.rs bundles JS only on release (build.rs:30) —
+      # so this is the one step in the whole workflow that needs the asset
+      # toolchain, and it panics without it. Clippy above builds debug and never
+      # noticed. Provisioned rather than skipped: the panic is what stops a
+      # release shipping without its JS, and CI should build the way a release
+      # does.
+      - name: Restore asset toolchain
+        uses: actions/cache/restore@v5
+        id: tools-cache
+        with:
+          # esbuild and the Tailwind CLI, plus the vendored JS and fonts they
+          # bundle. All four are gitignored, so a fresh checkout has none of
+          # them and build.rs cannot resolve its `preact` alias without them.
+          path: |
+            tools
+            static/js/vendor
+            static/fonts
+          key: kani-tools-${{ runner.os }}-${{ hashFiles('kani-cli/src/commands/setup.rs') }}
+
+      - name: Restore kani-cli binary
+        uses: actions/cache/restore@v5
+        id: lint-kani-cli-cache
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        with:
+          path: target/release/kani-cli
+          key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
+
+      - name: Download the asset toolchain
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        run: |
+          if [ ! -x target/release/kani-cli ]; then
+            cargo build --release -p kani-cli
+          fi
+          # --vendors is not optional: build.rs aliases `preact` and friends to
+          # static/js/vendor, so esbuild resolves nothing without it. Naming all
+          # three flags also skips the icon and git-hook steps a bare `setup`
+          # would run, which CI has no use for.
+          ./target/release/kani-cli setup --vendors --esbuild --tailwind
+        env:
+          SQLX_OFFLINE: "true"
+
+      # Only on success. `always()` here cached a half-populated directory once
+      # already, and a later run then took the hit and skipped the download.
+      - name: Save asset toolchain
+        uses: actions/cache/save@v5
+        if: success() && steps.tools-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            tools
+            static/js/vendor
+            static/fonts
+          key: kani-tools-${{ runner.os }}-${{ hashFiles('kani-cli/src/commands/setup.rs') }}
+
+      # Benches are not run in CI (a shared runner gives meaningless numbers), but
+      # they must keep compiling. No --workspace: kani-extensions/* are WASM-only.
+      - name: Check benchmarks compile
+        run: cargo bench --locked --no-run
+        env:
+          SQLX_OFFLINE: "true"
+
+      # The release workflow is generated from dist-workspace.toml. Regenerate it
+      # (`dist generate`) whenever that config changes, or releases silently drift.
+      - name: Check release workflow is in sync with dist config
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh | sh
+          dist generate --check
+
   test:
     name: Test
     needs: changes
+    # Debuginfo is what filled the runner's disk. `[profile.dev] debug = 1`
+    # applies to every test target and dependency rlib, and this workspace links
+    # roughly sixty test binaries that each statically pull in BoringSSL, SQLite
+    # and zstd. Measured on one target: 514 MB -> 200 MB per binary, 5.6 GB ->
+    # 2.9 GB of target/, and 11% less build time. Backtraces keep their function
+    # names (that is the symbol table, not debuginfo); they lose line numbers,
+    # which is the price of the job finishing at all. Local builds are untouched.
+    #
+    # `.cargo/config.toml` sets `jobs = 8` for an 8-core desktop, and that
+    # applies here too — on a 4-vCPU runner it oversubscribes, which costs both
+    # contention and peak disk, since every extra rustc holds its own object
+    # files open. Match the runner instead.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "4"
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -168,6 +263,10 @@ jobs:
   js:
     name: JS
     needs: changes
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "4"
     if: needs.changes.outputs.js == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -179,36 +278,19 @@ jobs:
       - name: Unit tests (pure JS modules)
         run: node --test "static/js/**/*.test.js"
 
-      - name: Restore kani-cli binary
-        uses: actions/cache/restore@v5
-        id: kani-cli-cache
-        with:
-          path: target/release/kani-cli
-          key: kani-cli-${{ runner.os }}-${{ hashFiles('kani-cli/**', 'kani-shared/**', 'Cargo.lock') }}
-
-      - name: Install mold linker
-        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
-        run: sudo apt-get install -y mold
-
-      - uses: dtolnay/rust-toolchain@stable
-        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
-
-      - uses: Swatinem/rust-cache@v2
-        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
-        with:
-          shared-key: "ci"
-          cache-on-failure: true
-
-      - name: Build kani-cli
-        if: steps.kani-cli-cache.outputs.cache-hit != 'true'
-        run: cargo build --release -p kani-cli
-
       # Zero-tolerance: the semantic-colour migration is complete, so any new
       # hard-coded colour literal fails CI. Intentional literals (the pure-black
       # reader, scrims, contrast text) carry a `// audit-ignore` directive, and
       # the colour-palette module uses `audit-ignore-file`.
+      #
+      # A Node script rather than a kani-cli subcommand: it is a text scan
+      # needing none of the workspace's types, and in Rust it made this job
+      # install a toolchain and compile kani-cli in release just to lint colours.
       - name: Audit hard-coded colour tokens
-        run: ./target/release/kani-cli audit-tokens --check --max 0
+        run: node scripts/audit-tokens.mjs --check --max 0
+
+      - name: Test the audit scanner itself
+        run: node --test scripts/audit-tokens.test.mjs
 
   docs:
     name: Docs & i18n
@@ -222,6 +304,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      # pip resolves and downloads mkdocs-material and its dependency tree on
+      # every run otherwise. There is no requirements file for setup-python's
+      # own cache to key on, so cache the wheel directory directly.
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-mkdocs-material
 
       - name: Install mkdocs-material
         run: pip install mkdocs-material
@@ -242,3 +333,34 @@ jobs:
 
       - name: Untranslated string check
         run: node scripts/check-untranslated-strings.js
+
+      # The theme editor previews what the server will store. If the client
+      # mirror drifts from the Rust sanitiser it misreports what gets saved.
+      - name: CSS sanitiser parity check
+        run: node scripts/check-sanitize-css-parity.mjs
+
+  # The one check branch protection should require. Every job above is gated on
+  # a path filter, and a required check that is *skipped* never reports — so
+  # requiring `Lint` directly would block a docs-only pull request forever.
+  # `always()` makes this run regardless, and it fails only on genuine failure:
+  # skipped is a pass.
+  ci:
+    name: CI
+    needs: [changes, lint, test, js, docs]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any job failed or was cancelled
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              failure|cancelled)
+                echo "::error::a required job reported '$r'"
+                exit 1
+                ;;
+            esac
+          done
+          echo "all jobs succeeded or were skipped"

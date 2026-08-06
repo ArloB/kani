@@ -17,9 +17,10 @@ const html = htm.bind(h);
  *   items: MenuItem[],
  *   trigger: { current: HTMLElement | null } | { x: number, y: number },
  *   onClose: () => void,
+ *   id?: string,
  * }} props
  */
-export function ContextMenu({ items, trigger, onClose }) {
+export function ContextMenu({ items, trigger, onClose, id }) {
   const menuRef = useRef(/** @type {HTMLDivElement|null} */(null));
   const [pos, setPos] = useState(/** @type {{ top: number|null, bottom: number|null, left: number|null, right: number|null }} */({ top: 0, bottom: null, left: 0, right: null }));
   const [visible, setVisible] = useState(false);
@@ -92,6 +93,7 @@ export function ContextMenu({ items, trigger, onClose }) {
   return html`
     <div
       ref=${menuRef}
+      id=${id}
       class="min-w-40 max-w-64 rounded-lg bg-surface shadow-lg py-1"
       role="menu"
       style=${{
@@ -115,6 +117,7 @@ export function ContextMenu({ items, trigger, onClose }) {
             type="button"
             role="menuitem"
             disabled=${!!item.disabled}
+            aria-disabled=${item.disabled ? 'true' : undefined}
             class=${[
               'w-full text-left px-4 py-2 text-sm transition-colors',
               item.danger ? 'text-danger hover:bg-danger/10' : 'text-text hover:bg-surface-2',

@@ -42,9 +42,11 @@ pub async fn test_state() -> AppState {
         proxy_throttle: moka::future::Cache::builder().max_capacity(100).build(),
         proxy_coalesce: moka::future::Cache::builder().max_capacity(100).build(),
         proxy_bandwidth: Arc::new(DashMap::<String, Arc<AtomicU64>>::new()),
+        proxy_config: kani_web::proxy::ProxyConfig::default(),
         boot_id: "test".to_string(),
         restart_requested: Arc::new(AtomicBool::new(false)),
         log_handle,
+        idempotency: kani_web::idempotency::IdempotencyStore::new(),
     }
 }
 
@@ -148,6 +150,16 @@ pub fn authed_post(uri: &str, cookie: &str, body: serde_json::Value) -> Request<
         .unwrap()
 }
 
+pub fn authed_put(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method("PUT")
+        .uri(uri)
+        .header("Content-Type", "application/json")
+        .header("Cookie", cookie)
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap()
+}
+
 pub fn authed_patch(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Body> {
     Request::builder()
         .method("PATCH")
@@ -186,6 +198,12 @@ pub fn put_json(uri: &str, cookie: &str, body: serde_json::Value) -> Request<Bod
         .unwrap()
 }
 
+/// Drain the response body as raw bytes.
+#[allow(dead_code)]
+pub async fn body_bytes(res: axum::response::Response) -> axum::body::Bytes {
+    res.into_body().collect().await.unwrap().to_bytes()
+}
+
 /// Drain the response body and parse as JSON.
 pub async fn body_json(res: axum::response::Response) -> serde_json::Value {
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
@@ -212,6 +230,30 @@ pub async fn build_test_app_with_opds(state: AppState) -> Router {
     Router::new()
         .nest("/rest", kani_web::rest::routes(state.clone()))
         .nest("/opds", kani_web::opds::routes(state.clone()))
+        .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            kani_web::session_touch::session_touch_middleware,
+        ))
+        .layer(auth_layer)
+}
+
+/// Like `build_test_app` but also mounts the image-proxy router (a separate
+/// router in production, composed in `main.rs`), so tests can drive `/rest/image_proxy`.
+#[allow(dead_code)]
+pub async fn build_test_app_with_proxy(state: AppState) -> Router {
+    let session_store = SqliteStore::new(state.db.clone());
+    session_store.migrate().await.unwrap();
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_secure(false)
+        .with_http_only(true)
+        .with_same_site(SameSite::Lax);
+    let auth_backend = AuthBackend::new(state.db.clone());
+    let auth_layer = AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
+
+    Router::new()
+        .merge(Router::new().nest("/rest", kani_web::rest::routes(state.clone())))
+        .merge(Router::new().nest("/rest", kani_web::rest::image_proxy_route(state.clone())))
         .layer(axum::middleware::from_fn(kani_web::auth::auth_guard))
         .layer(axum::middleware::from_fn_with_state(
             state,

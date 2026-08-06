@@ -1,0 +1,73 @@
+#![allow(clippy::unwrap_used)]
+// Guards the migration set itself: every migration must apply cleanly to an
+// empty database, in order, with no manual repair step.
+
+use sqlx::SqlitePool;
+
+async fn fresh_pool() -> SqlitePool {
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    sqlx::migrate!("../migrations").run(&pool).await.unwrap();
+    pool
+}
+
+#[tokio::test]
+async fn all_migrations_apply_to_an_empty_database() {
+    let pool = fresh_pool().await;
+
+    let tables: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    assert!(
+        tables > 10,
+        "expected a populated schema after migrating, found {tables} tables"
+    );
+}
+
+#[tokio::test]
+async fn migrations_are_idempotent_across_a_second_run() {
+    let pool = fresh_pool().await;
+
+    // Re-running the migrator on an already-migrated database must be a no-op
+    // rather than an error; this is what happens on every restart.
+    sqlx::migrate!("../migrations").run(&pool).await.unwrap();
+}
+
+#[tokio::test]
+async fn settings_singleton_exists_with_recent_columns() {
+    let pool = fresh_pool().await;
+
+    // Spot-check the newest columns: a migration that fails to add one would
+    // otherwise only surface as a query error at runtime.
+    let row: (bool, i64) = sqlx::query_as(
+        "SELECT update_check_enabled, browser_max_instances \
+         FROM settings WHERE id = 'singleton'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert!(row.0, "update checking defaults on");
+    assert!(row.1 > 0, "browser_max_instances should have a default");
+}
+
+#[tokio::test]
+async fn recurring_job_kinds_can_be_persisted() {
+    let pool = fresh_pool().await;
+    kani_app::jobs::recurring::ensure_recurring_rows(&pool)
+        .await
+        .unwrap();
+
+    let kinds: Vec<String> = sqlx::query_scalar("SELECT kind FROM recurring_jobs ORDER BY kind")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+    for expected in ["update_check", "browser_process_reap", "db_maintenance"] {
+        assert!(
+            kinds.iter().any(|k| k == expected),
+            "{expected} should be seeded, got {kinds:?}"
+        );
+    }
+}

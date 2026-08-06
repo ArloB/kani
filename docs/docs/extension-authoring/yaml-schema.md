@@ -1,80 +1,208 @@
-# YAML Schema
+# YAML Extension Schema
 
-Kani provides a declarative YAML format for writing simple extensions without raw Rust. The CLI
-validates and compiles YAML definitions into WASM Components.
+Kani's declarative format describes source metadata, requests, extraction, filters, preferences,
+and optional sandboxed scripts. `kani-yaml` owns parsing and validation; `kani-cli` scaffolds,
+validates, inspects, generates, and builds it.
 
-!!! note "TODO"
-    Full schema reference coming soon. The authoritative schema is at `kani-cli/src/yaml/schema.rs`.
-
-## Quick example
-
-```yaml
-name: my-source
-base_url: https://example.com
-version: "0.1.0"
-
-search:
-  path: /search?q={query}
-  container: .manga-list .item
-  fields:
-    title: h3
-    url: a[href]
-    cover: img[src]
-
-manga_detail:
-  container: .manga-detail
-  fields:
-    title: h1
-    description: .synopsis
-    cover: .cover img[src]
-
-chapter_list:
-  container: .chapter-list li
-  fields:
-    title: a
-    url: a[href]
-    number: .chapter-num
-
-page_list:
-  container: .page-list img
-  fields:
-    url: "[src]"
-```
-
-## Scaffold a new extension
+## Start an extension
 
 ```bash
 cargo run -p kani-cli -- new my-source
+cargo run -p kani-cli -- validate my-source.yaml
+cargo run -p kani-cli -- repl inspect my-source.yaml
 ```
 
-## Validate
+A compact HTML source looks like this:
+
+```yaml
+id: my-source
+name: My Source
+version: "0.1.0"
+base_url: "https://example.com"
+language: en
+
+endpoints:
+  search:
+    route: "/search"
+    queries:
+      q: "$query$"
+      page: "$page$"
+    container: ".manga-list .item"
+    fields:
+      id: 'self.first("a").attr("href").split("/").at(-1)'
+      title: 'self.first("h3").text().trim()'
+      cover_url:
+        expr: 'self.first("img").attr("src").resolve_url("https://example.com")'
+        optional: true
+
+  manga_details:
+    route: "/manga/$manga_id$"
+    container: ":root"
+    fields:
+      id: '"$manga_id$"'
+      title: 'dom("h1").text().trim()'
+      status: 'dom(".status").text().trim().lower().fallback("unknown")'
+
+  chapter_list:
+    route: "/manga/$manga_id$"
+    container: ".chapter-list a"
+    fields:
+      id: 'self.attr("href").split("/").at(-1)'
+      number: 'self.text().capture("([0-9.]+)").at(1).parse_float()'
+      language: '"en"'
+    has_next_page: false
+
+  pages:
+    route: "/chapter/$chapter_id$"
+    container: ".reader img"
+    fields:
+      index: "index()"
+      url: 'self.attr("src").resolve_url("https://example.com")'
+```
+
+Validate examples rather than treating this page as a substitute for the parser.
+
+## Top-level fields
+
+| Field | Required | Purpose |
+|---|---|---|
+| `id` | yes | Lowercase identifier matching `[a-z][a-z0-9-]*` |
+| `name` | yes | Display name |
+| `version` | yes | Semantic version |
+| `base_url` | yes | Absolute source origin |
+| `language` | no | Language code, default `en` |
+| `nsfw` | no | Content-rating declaration |
+| `unrestricted_http` | no | Permit requests beyond the normal host restriction |
+| `schema_version` | no | Declarative schema compatibility level |
+| `min_kani_version` | no | Minimum host semantic version |
+| `requires_capabilities` | no | Host capabilities required at install time |
+| `metadata` | no | Description, icon, languages, sections, and rate limit |
+| `endpoints` | effectively | Provider operations implemented by the source |
+| `filters` / `option_sets` | no | Search and browse controls |
+| `preferences` | no | Installation-specific configuration |
+| `id_encoding` | no | Pack and unpack composite manga or chapter IDs |
+| `cache` | no | Named cache namespaces |
+| `chapter_sort` | no | Source-supported chapter ordering |
+| `factory` | no | Expand one template into several sources |
+| `browser_scripts` | no | JavaScript payload capture in Chromium |
+| `scripts`, `pre_request`, `on_status` | no | Sandboxed Rhai logic |
+
+## Metadata and rate limits
+
+`metadata.icon` accepts a base64 PNG, WebP, or SVG up to the validator's 64 KiB decoded limit.
+`metadata.languages` can advertise more than the primary language. Sections describe named source
+views.
+
+```yaml
+metadata:
+  description: "Example catalogue"
+  rate_limit:
+    rps: 2.0
+    burst: 8
+    max_concurrent: 4
+    max_hook_requests: 3
+  languages: [en, ja]
+  sections:
+    - id: latest
+      name: Latest
+```
+
+The host enforces these limits around extension requests. Do not set them above what the upstream
+service permits.
+
+## Endpoints
+
+The available endpoint keys are `popular`, `search`, `manga_details`, `chapter_list`, and `pages`.
+Each common endpoint can declare:
+
+- `route`, HTTP `method`, `headers`, and `queries`.
+- `type: html` or `type: json`.
+- A `container`, document `bindings`, row `fields`, and document `scalars`.
+- `has_next_page`, `total_pages`, and source-native `pagination` where applicable.
+- Document-level `then` or row-level `for_each` sub-fetches.
+- Browser payload capture or request/response hooks.
+
+Routes, headers, and queries interpolate `$query$`, `$page$`, `$page_size$`, `$manga_id$`,
+`$chapter_id$`, `$pref:key$`, and declared composite-ID fields where the endpoint makes them
+available.
+
+A field is either a DSL string or an object with `expr` and `optional`. Required provider fields
+are validated: manga details need `id`, `title`, and `status`; chapters need `id`, `number`, and
+`language`; pages need `index` and `url`.
+
+`popular` may be a full endpoint or delegate to another endpoint:
+
+```yaml
+endpoints:
+  popular:
+    delegate_to: search
+    empty_without_filters: true
+```
+
+## HTML and JSON extraction
+
+HTML containers and DOM methods use CSS selectors. JSON navigation uses RFC 6901 JSON Pointers:
+
+```yaml
+endpoints:
+  search:
+    route: "/api/search"
+    type: json
+    container: "/data"
+    fields:
+      id: 'self.ptr("/id").str()'
+      title: 'self.ptr("/attributes/title").get(pref("language")).str().fallback("Unknown")'
+```
+
+See [DSL grammar](dsl-grammar.md) for expression types and null behavior.
+
+## Pagination and chaining
+
+Use `$page$` and `$page_size$` directly when the upstream accepts them. For fixed chunks, declare
+`pagination` with `native_page_size`, `offset_param`, and an `offset_type` of `item`, `page`, or
+`cursor`. Cursor pagination also declares the JSON Pointer that yields the next token.
+
+`then` performs one sub-fetch for the document. `for_each` performs a bounded sub-fetch per row.
+Each step names another declared endpoint, a URL expression, `merge_as`, concurrency, and failure
+behavior. Keep per-row fan-out small and within the source rate limit.
+
+## Filters and preferences
+
+Filters support checkbox, select, text, sort, multiselect, integer-range, and date-range controls.
+An endpoint maps filter IDs to query parameters and can configure boolean, array, and omission
+formatting. Reusable option sets may be static or fetched and cached.
+
+Preferences support toggle, select, text, and multi-value-list kinds. Text preferences can be
+marked secret. Access them with `pref("key")` in the DSL or `$pref:key$` in request templates.
+
+## Composite IDs, cache, and factories
+
+`id_encoding` declares named fields, delimiter, and base64-url, base64, passthrough, or hex
+encoding. Field maps build an encoded ID; `$manga.field$` and `$chapter.field$` unpack it for later
+requests.
+
+Cache declarations specify namespace scope, TTL, entry limit, and an optional key template. Rhai
+hooks can read and write declared namespaces through `ctx.cache`.
+
+A `factory` contains several source identities and dot-path overrides. Building the template
+validates each expansion and emits one extension per source.
+
+## Browser endpoints
+
+`via: browser_payload` loads `page_url` in Chromium and runs a named `browser_scripts` entry that
+must call `passPayload`. The interpreted YAML backend supports extracting the returned payload.
+Browser support must be present in the image and enabled at runtime. Prefer direct HTTP extraction
+when possible.
+
+## Build and inspect
 
 ```bash
 cargo run -p kani-cli -- validate my-source.yaml
+cargo run -p kani-cli -- generate --force my-source.yaml
+cargo run -p kani-cli -- build kani-my-source
+cargo run -p kani-cli -- repl inspect my-source.yaml
+cargo run -p kani-cli -- repl test my-source.yaml
 ```
 
-## Generate and build
-
-```bash
-cargo run -p kani-cli -- generate my-source.yaml   # produces Rust source
-cargo run -p kani-cli -- build my-source            # compiles to WASM
-```
-
-## Preferences
-
-Declare user-configurable preferences that appear in the source settings UI:
-
-```yaml
-preferences:
-  - key: nsfw
-    type: bool
-    default: false
-    label: "Show NSFW content"
-```
-
-Access in DSL: `$pref:nsfw`.
-
-## See also
-
-- [DSL grammar](dsl-grammar.md) — the expression language used in field definitions.
-- [Rhai hooks](rhai-hooks.md) — escape hatch for logic that the YAML DSL can't express.
+Use `kani-cli --help` and subcommand help for the current flags. Generated Rust is an artifact of
+the YAML definition; edit the YAML and regenerate rather than maintaining both by hand.

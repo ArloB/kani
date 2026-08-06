@@ -1,0 +1,416 @@
+//! Guest-safe row access for unpacking blueprint extraction results.
+//!
+//! Extraction returns `{ "rows": [...], "scalars": {...} }`. The interpreted
+//! engine holds it as a `serde_json::Value`; the guest holds a `JsonHandle` (an
+//! opaque handle to the same tree living host-side, never materialised guest-side).
+//! [`JsonRows`] is the common surface over both, so the `unpack_*` functions can be
+//! written once and run in either engine — the interpreter over a `Value`, the
+//! generated guest code over a `JsonHandle`.
+
+use crate::extension::ExtensionError;
+
+/// Read access to a blueprint extraction result and its rows, by JSON Pointer.
+///
+/// The same type answers both roles: the whole result (`rows_len`, `rows_get`,
+/// `get_scalar_*`) and a single row (`get_str`, `require_str`, …), mirroring how a
+/// `JsonHandle` returned from `rows_get` is itself queried by field pointer.
+pub trait JsonRows: Sized {
+    fn get_str(&self, ptr: &str) -> Option<String>;
+    fn get_i64(&self, ptr: &str) -> Option<i64>;
+    fn get_f64(&self, ptr: &str) -> Option<f64>;
+    fn get_bool(&self, ptr: &str) -> Option<bool>;
+    fn get_array_of_strings(&self, ptr: &str) -> Vec<String>;
+
+    /// A required string field; absence is a spec mismatch.
+    fn require_str(&self, ptr: &str) -> Result<String, ExtensionError> {
+        self.get_str(ptr)
+            .ok_or_else(|| ExtensionError::parse(format!("Missing required field: {ptr}")))
+    }
+
+    fn rows_len(&self) -> i32;
+    fn rows_get(&self, index: i32) -> Result<Self, ExtensionError>;
+
+    fn get_scalar_str(&self, name: &str) -> Option<String>;
+    fn get_scalar_bool(&self, name: &str) -> bool;
+    fn get_scalar_i64(&self, name: &str) -> Option<i64>;
+}
+
+// ── Guest: JsonHandle (host-side tree behind an opaque handle) ────────────────
+
+impl JsonRows for crate::host_abi::JsonHandle {
+    // Inherent methods win name resolution, so these forward without recursion.
+    fn get_str(&self, ptr: &str) -> Option<String> {
+        crate::host_abi::JsonHandle::get_str(self, ptr)
+    }
+    fn get_i64(&self, ptr: &str) -> Option<i64> {
+        crate::host_abi::JsonHandle::get_i64(self, ptr)
+    }
+    fn get_f64(&self, ptr: &str) -> Option<f64> {
+        crate::host_abi::JsonHandle::get_f64(self, ptr)
+    }
+    fn get_bool(&self, ptr: &str) -> Option<bool> {
+        crate::host_abi::JsonHandle::get_bool(self, ptr)
+    }
+    fn get_array_of_strings(&self, ptr: &str) -> Vec<String> {
+        crate::host_abi::JsonHandle::get_array_of_strings(self, ptr)
+    }
+    fn require_str(&self, ptr: &str) -> Result<String, ExtensionError> {
+        crate::host_abi::JsonHandle::require_str(self, ptr)
+    }
+    fn rows_len(&self) -> i32 {
+        crate::host_abi::JsonHandle::rows_len(self)
+    }
+    fn rows_get(&self, index: i32) -> Result<Self, ExtensionError> {
+        crate::host_abi::JsonHandle::rows_get(self, index)
+    }
+    fn get_scalar_str(&self, name: &str) -> Option<String> {
+        crate::host_abi::JsonHandle::get_scalar_str(self, name)
+    }
+    fn get_scalar_bool(&self, name: &str) -> bool {
+        crate::host_abi::JsonHandle::get_scalar_bool(self, name)
+    }
+    fn get_scalar_i64(&self, name: &str) -> Option<i64> {
+        crate::host_abi::JsonHandle::get_scalar_i64(self, name)
+    }
+}
+
+// ── Host: serde_json::Value (the interpreted engine's representation) ──────────
+
+#[cfg(feature = "host")]
+impl JsonRows for serde_json::Value {
+    fn get_str(&self, ptr: &str) -> Option<String> {
+        self.pointer(ptr)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
+    fn get_i64(&self, ptr: &str) -> Option<i64> {
+        self.pointer(ptr).and_then(serde_json::Value::as_i64)
+    }
+    fn get_f64(&self, ptr: &str) -> Option<f64> {
+        self.pointer(ptr).and_then(serde_json::Value::as_f64)
+    }
+    fn get_bool(&self, ptr: &str) -> Option<bool> {
+        self.pointer(ptr).and_then(serde_json::Value::as_bool)
+    }
+    fn get_array_of_strings(&self, ptr: &str) -> Vec<String> {
+        self.pointer(ptr)
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    fn rows_len(&self) -> i32 {
+        self.pointer("/rows")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| a.len() as i32)
+            .unwrap_or(0)
+    }
+    fn rows_get(&self, index: i32) -> Result<Self, ExtensionError> {
+        self.pointer(&format!("/rows/{index}"))
+            .cloned()
+            .ok_or_else(|| ExtensionError::parse(format!("row {index} out of bounds")))
+    }
+    fn get_scalar_str(&self, name: &str) -> Option<String> {
+        self.get_str(&format!("/scalars/{name}"))
+    }
+    fn get_scalar_bool(&self, name: &str) -> bool {
+        self.get_bool(&format!("/scalars/{name}")).unwrap_or(false)
+    }
+    fn get_scalar_i64(&self, name: &str) -> Option<i64> {
+        self.get_i64(&format!("/scalars/{name}"))
+    }
+}
+
+// ── Shared unpack: JsonRows → wit_types ───────────────────────────────────────
+//
+// `wit_types` is generated by wit-bindgen under both host and guest builds, so it
+// is the one result representation both engines can produce. The interpreter
+// converts these to the wasmtime types `SourceBackend` returns; the guest uses
+// them natively.
+
+use crate::wit_types;
+
+/// How an endpoint's `has_next_page` is determined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HasNextPage {
+    /// A fixed value baked into the spec.
+    Static(bool),
+    /// Read the `has_next_page` scalar from the extraction result.
+    FromScalar,
+}
+
+/// How an endpoint's `total_pages` is determined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TotalPages {
+    None,
+    Static(u32),
+    /// Read the `total_pages` scalar from the extraction result.
+    FromScalar,
+}
+
+/// Function-argument field overrides: `(field_name, value)` pairs for fields
+/// whose value is a method argument (`id: "$manga_id$"`) rather than extracted.
+/// The interpreter injects these into the result before unpack, so it passes an
+/// empty slice; the guest can't mutate its handle, so codegen passes them here.
+pub type FnArgs<'a> = &'a [(&'a str, &'a str)];
+
+fn arg_or_field<T: JsonRows>(row: &T, fn_args: FnArgs, name: &str) -> Option<String> {
+    let ptr = format!("/{name}");
+    fn_args
+        .iter()
+        .find(|(k, _)| *k == name)
+        .map(|(_, v)| v.to_string())
+        .or_else(|| row.get_str(&ptr))
+        // A JSON number is a legitimate id on plenty of sources. `get_str`
+        // returns None for one, and for `id` that None used to drop the entire
+        // row from the listing (`.ok()?` inside a `filter_map`) — a chapter
+        // silently disappearing rather than any error being reported.
+        .or_else(|| row.get_i64(&ptr).map(|n| n.to_string()))
+}
+
+fn arg_or_field_req<T: JsonRows>(
+    row: &T,
+    fn_args: FnArgs,
+    name: &str,
+) -> Result<String, ExtensionError> {
+    arg_or_field(row, fn_args, name)
+        .ok_or_else(|| ExtensionError::parse(format!("Missing required field: /{name}")))
+}
+
+fn resolve_has_next_page<T: JsonRows>(result: &T, hnp: HasNextPage) -> bool {
+    match hnp {
+        HasNextPage::Static(b) => b,
+        HasNextPage::FromScalar => result.get_scalar_bool("has_next_page"),
+    }
+}
+
+fn resolve_total_pages<T: JsonRows>(result: &T, total: TotalPages) -> Option<u32> {
+    match total {
+        TotalPages::None => None,
+        TotalPages::Static(n) => Some(n),
+        TotalPages::FromScalar => result.get_scalar_i64("total_pages").map(|n| n as u32),
+    }
+}
+
+/// Unpack a manga listing. Rows missing a required field are skipped, matching the
+/// list semantics both engines already had.
+pub fn unpack_manga_list<T: JsonRows>(
+    result: &T,
+    hnp: HasNextPage,
+    total: TotalPages,
+    fn_args: FnArgs,
+) -> wit_types::MangaList {
+    let has_next_page = resolve_has_next_page(result, hnp);
+    let total_pages = resolve_total_pages(result, total);
+    let manga = (0..result.rows_len())
+        .filter_map(|i| {
+            let row = result.rows_get(i).ok()?;
+            Some(wit_types::MangaListItem {
+                id: arg_or_field_req(&row, fn_args, "id").ok()?,
+                title: arg_or_field_req(&row, fn_args, "title").ok()?,
+                cover_url: arg_or_field(&row, fn_args, "cover_url"),
+            })
+        })
+        .collect();
+    wit_types::MangaList {
+        manga,
+        has_next_page,
+        total_pages,
+    }
+}
+
+/// Unpack manga details from the first row. A missing `id`/`title` is a spec
+/// mismatch (`Result`), where the old interpreter silently produced neither.
+pub fn unpack_manga_info<T: JsonRows>(
+    result: &T,
+    fn_args: FnArgs,
+) -> Result<wit_types::MangaInfo, ExtensionError> {
+    let row = result
+        .rows_get(0)
+        .map_err(|_| ExtensionError::parse("manga_details: no result row".to_string()))?;
+    let status = match row.get_str("/status").as_deref() {
+        Some("ongoing") => crate::types::MangaStatus::Ongoing,
+        Some("completed") => crate::types::MangaStatus::Completed,
+        Some("hiatus") => crate::types::MangaStatus::Hiatus,
+        Some("cancelled") => crate::types::MangaStatus::Cancelled,
+        _ => crate::types::MangaStatus::Unknown,
+    };
+    Ok(wit_types::MangaInfo {
+        id: arg_or_field_req(&row, fn_args, "id")?,
+        title: arg_or_field_req(&row, fn_args, "title")?,
+        cover_url: arg_or_field(&row, fn_args, "cover_url"),
+        description: arg_or_field(&row, fn_args, "description"),
+        authors: row.get_array_of_strings("/authors"),
+        artists: row.get_array_of_strings("/artists"),
+        status,
+        tags: row.get_array_of_strings("/tags"),
+    })
+}
+
+/// Unpack a chapter listing.
+pub fn unpack_chapter_list<T: JsonRows>(
+    result: &T,
+    hnp: HasNextPage,
+    total: TotalPages,
+    fn_args: FnArgs,
+) -> wit_types::ChapterList {
+    let has_next_page = resolve_has_next_page(result, hnp);
+    let total_pages = resolve_total_pages(result, total);
+    let chapters = (0..result.rows_len())
+        .filter_map(|i| {
+            let row = result.rows_get(i).ok()?;
+            Some(wit_types::ChapterInfo {
+                id: arg_or_field_req(&row, fn_args, "id").ok()?,
+                // Accept a number encoded as a JSON string ("12.5") — some sources
+                // emit it that way — rather than silently zeroing it.
+                number: row
+                    .get_f64("/number")
+                    .or_else(|| {
+                        row.get_str("/number")
+                            .and_then(|s| s.trim().parse::<f64>().ok())
+                    })
+                    // "NaN"/"inf" parse happily via the string path above, and a
+                    // non-finite number poisons everything downstream: NaN != NaN
+                    // so migration matching silently finds nothing, and sort order
+                    // becomes inconsistent. Never let one reach the database.
+                    .filter(|n| n.is_finite())
+                    .unwrap_or(0.0),
+                title: arg_or_field(&row, fn_args, "title"),
+                volume: row.get_i64("/volume").map(|v| v as i32),
+                scanlator: arg_or_field(&row, fn_args, "scanlator"),
+                date_uploaded: row.get_i64("/date_uploaded"),
+                language: arg_or_field(&row, fn_args, "language")
+                    .unwrap_or_else(|| "en".to_string()),
+                // Accept a numeric or string-encoded page count, as the
+                // interpreter did.
+                page_count: row
+                    .get_i64("/page_count")
+                    .map(|n| n as u32)
+                    .or_else(|| row.get_str("/page_count").and_then(|s| s.parse().ok())),
+            })
+        })
+        .collect();
+    wit_types::ChapterList {
+        chapters,
+        has_next_page,
+        total_pages,
+    }
+}
+
+/// Unpack a chapter's page list. Index falls back to row order when absent.
+pub fn unpack_pages<T: JsonRows>(result: &T, fn_args: FnArgs) -> wit_types::Chapter {
+    let pages = (0..result.rows_len())
+        .filter_map(|i| {
+            let row = result.rows_get(i).ok()?;
+            Some(wit_types::Page {
+                index: row.get_i64("/index").unwrap_or(i as i64) as i32,
+                url: arg_or_field_req(&row, fn_args, "url").ok()?,
+                transform: None,
+            })
+        })
+        .collect();
+    wit_types::Chapter { pages }
+}
+
+#[cfg(all(test, feature = "host"))]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn value_rows_and_fields() {
+        let result = json!({
+            "rows": [{"id": "a", "n": 3, "tags": ["x", "y"]}, {"id": "b"}],
+            "scalars": {"has_next_page": true, "total_pages": 5}
+        });
+        assert_eq!(result.rows_len(), 2);
+        let row0 = result.rows_get(0).unwrap();
+        assert_eq!(row0.require_str("/id").unwrap(), "a");
+        assert_eq!(row0.get_i64("/n"), Some(3));
+        assert_eq!(row0.get_array_of_strings("/tags"), vec!["x", "y"]);
+        let row1 = result.rows_get(1).unwrap();
+        assert!(row1.require_str("/id").is_ok());
+        assert_eq!(row1.get_str("/id").as_deref(), Some("b"));
+        assert!(result.get_scalar_bool("has_next_page"));
+        assert_eq!(result.get_scalar_i64("total_pages"), Some(5));
+    }
+
+    #[test]
+    fn value_missing_required_is_error() {
+        let row = json!({"title": "t"});
+        assert!(row.require_str("/id").is_err());
+    }
+
+    #[test]
+    fn value_out_of_bounds_row_is_error() {
+        let result = json!({"rows": []});
+        assert!(result.rows_get(0).is_err());
+    }
+
+    #[test]
+    fn unpack_manga_list_reads_rows_and_scalars() {
+        let result = json!({
+            "rows": [{"id": "m1", "title": "A"}, {"id": "m2", "title": "B", "cover_url": "c"}],
+            "scalars": {"has_next_page": true}
+        });
+        let out = unpack_manga_list(&result, HasNextPage::FromScalar, TotalPages::None, &[]);
+        assert_eq!(out.manga.len(), 2);
+        assert_eq!(out.manga[0].id, "m1");
+        assert_eq!(out.manga[1].cover_url.as_deref(), Some("c"));
+        assert!(out.has_next_page);
+        assert_eq!(out.total_pages, None);
+    }
+
+    #[test]
+    fn unpack_manga_info_requires_id_and_title() {
+        let ok = json!({"rows": [{"id": "m1", "title": "A", "status": "ongoing"}]});
+        let info = unpack_manga_info(&ok, &[]).unwrap();
+        assert_eq!(info.id, "m1");
+        assert_eq!(info.status, crate::types::MangaStatus::Ongoing);
+
+        let missing = json!({"rows": [{"title": "A"}]});
+        assert!(unpack_manga_info(&missing, &[]).is_err());
+
+        let empty = json!({"rows": []});
+        assert!(unpack_manga_info(&empty, &[]).is_err());
+    }
+
+    #[test]
+    fn unpack_chapter_list_defaults_and_page_count_string() {
+        let result = json!({
+            "rows": [{"id": "c1", "number": 1.5, "page_count": "20"}]
+        });
+        let out = unpack_chapter_list(&result, HasNextPage::Static(false), TotalPages::None, &[]);
+        assert_eq!(out.chapters.len(), 1);
+        assert_eq!(out.chapters[0].number, 1.5);
+        assert_eq!(out.chapters[0].language, "en");
+        assert_eq!(out.chapters[0].page_count, Some(20));
+    }
+
+    #[test]
+    fn fn_args_supply_a_field_the_extraction_lacks() {
+        // The guest path: `id` is a method argument (`$manga_id$`), never
+        // extracted, so it arrives via fn_args rather than the row.
+        let result = json!({"rows": [{"title": "T"}]});
+        let info = unpack_manga_info(&result, &[("id", "m-99")]).unwrap();
+        assert_eq!(info.id, "m-99");
+        assert_eq!(info.title, "T");
+
+        // An extracted field still wins when no fn_arg overrides it.
+        let extracted = json!({"rows": [{"id": "from-page", "title": "T"}]});
+        assert_eq!(unpack_manga_info(&extracted, &[]).unwrap().id, "from-page");
+    }
+
+    #[test]
+    fn unpack_pages_falls_back_to_row_order() {
+        let result = json!({"rows": [{"url": "a"}, {"url": "b", "index": 5}]});
+        let out = unpack_pages(&result, &[]);
+        assert_eq!(out.pages.len(), 2);
+        assert_eq!(out.pages[0].index, 0);
+        assert_eq!(out.pages[1].index, 5);
+    }
+}

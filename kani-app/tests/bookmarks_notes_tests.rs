@@ -74,8 +74,14 @@ async fn get_noted_chapter_ids_excludes_empty_notes() {
     svc.set_chapter_note(uid, c1, "note here").await.unwrap();
     svc.set_chapter_note(uid, c2, "").await.unwrap(); // empty — should be excluded
 
-    let ids = svc.get_noted_chapter_ids(uid, mid).await.unwrap();
-    assert_eq!(ids, vec![c1]);
+    // The dedicated id-only query was a redundant second path; the note
+    // listing applies the same `note != ''` filter and is what the UI uses.
+    let noted = svc
+        .get_manga_chapter_notes_with_text(uid, mid)
+        .await
+        .unwrap();
+    let ids: Vec<_> = noted.into_iter().map(|(id, _, _)| id).collect();
+    assert_eq!(ids, vec![c1], "an empty note must not count as a note");
 }
 
 #[tokio::test]

@@ -75,5 +75,7 @@ export function showToast(message, { type = 'info', duration = 3000, action = nu
  * @param {any} err
  */
 export function showApiError(err) {
-  showToast(err?.hint ?? err?.message ?? t('common.error_occurred'), { type: 'error' });
+  const msg = err?.hint ?? err?.message ?? t('common.error_occurred');
+  const traceId = err?.traceId;
+  showToast(traceId ? `${msg} — ${t('error.trace_id', { id: traceId })}` : msg, { type: 'error' });
 }

@@ -1,11 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web", "kani-app", "kani-cli", "kani-yaml", "kani-shared-test"]
+members = ["kani-core", "kani-shared", "kani-extensions/*", "kani-web", "kani-app", "kani-cli", "kani-yaml", "kani-shared-test", "kani-lease"]
 # Extensions are WASM-only; their WIT-generated ABI symbols (e.g. `cabi_post_kani:...#...`)
 # are invalid in the GNU ld version script used when linking native binaries. Excluding them
 # from default-members means `cargo test` / `cargo clippy` skip them on the native target.
 # They remain workspace members so `kani-cli build` can reach them via -p.
-default-members = ["kani-core", "kani-shared", "kani-app", "kani-web", "kani-cli", "kani-yaml"]
+default-members = ["kani-core", "kani-shared", "kani-app", "kani-web", "kani-cli", "kani-yaml", "kani-lease"]
 
 [profile.dev]
 opt-level = 0
@@ -37,6 +37,24 @@ lto = "thin"
 debug = true
 strip = "none"
 debug-assertions = true
+
+[profile.bench]
+inherits = "release"
+debug = 1
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# Inherited by every crate via `license.workspace = true` and friends, so these
+# are stated once. `license` in particular is not decoration: crates.io refuses
+# a publish without it, and publishing kani-shared is what lets a third party
+# build an extension against the ABI without vendoring this repository.
+[workspace.package]
+license = "MIT"
+repository = "https://github.com/ArloB/kani"
+edition = "2024"
 
 [workspace.dependencies]
 serde       = { version = "1.0", features = ["derive"] }

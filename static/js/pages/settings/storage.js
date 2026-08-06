@@ -1,5 +1,5 @@
 // @ts-check
-// Settings — Storage: disk usage and library integrity check (admin only).
+// Settings — Storage: disk usage and the library integrity scrub (admin only).
 
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
@@ -7,19 +7,15 @@ import htm from 'htm';
 import * as api from '../../api.js';
 import { EmptyState } from '../../components/empty-state.js';
 import { t } from '../../i18n.js';
-import { showApiError } from '../../components/toast.js';
+import { showApiError, showToast } from '../../components/toast.js';
 import { SettingsGroup, SettingsRow } from './_shared.js';
+import { formatBytes, formatRelativeTime } from '../../utils.js';
+import { useSSE } from '../../hooks/use-sse.js';
+import { ScrubReport } from '../../components/scrub-report.js';
+import { ArchiveExportModal } from '../../components/archive-export.js';
 
 const html = htm.bind(h);
-
-/** @param {number} bytes */
-function fmt(bytes) {
-  if (bytes == null) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
-}
+const fmt = formatBytes;
 
 function UsageGroup() {
   const [state, setState] = useState(
@@ -83,68 +79,86 @@ function Stat({ label, value }) {
   `;
 }
 
-function IntegrityGroup() {
+function ScrubGroup() {
   const [running, setRunning] = useState(false);
-  const [results, setResults] = useState(/** @type {{ fix: boolean, res: any } | null} */ (null));
+  const [depth, setDepth] = useState('quick');
+  const [fix, setFix] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [last, setLast] = useState(/** @type {any} */ (undefined));
 
-  const run = async (/** @type {boolean} */ fix) => {
-    setRunning(true);
-    setResults(null);
+  const load = async () => {
     try {
-      const res = await api.runIntegrityCheck(fix);
-      setResults({ fix, res });
+      setLast(await api.getLastScrub());
     } catch (e) {
       showApiError(e);
-    } finally {
-      setRunning(false);
+      setLast(null);
     }
   };
 
-  const label = running ? t('storage.integrity.running') : null;
+  useEffect(() => {
+    load();
+  }, []);
 
-  let body = null;
-  if (results) {
-    const { fix, res } = results;
-    if (fix) {
-      body = [
-        html`<${Stat} label=${t('storage.integrity.removed')} value=${res.removed_count ?? 0} />`,
-        html`<${Stat} label=${t('storage.integrity.failed')} value=${res.failed_count ?? 0} />`,
-      ];
-    } else {
-      const orphaned = res.orphaned_files?.length ?? 0;
-      const missing = res.missing_files?.length ?? 0;
-      const covers = res.cover_mismatches?.length ?? 0;
-      if (orphaned === 0 && missing === 0 && covers === 0) {
-        body = html`<p class="px-4 py-3 text-sm text-success">${t('storage.integrity.ok')}</p>`;
-      } else {
-        body = [
-          html`<${Stat} label=${t('storage.integrity.orphaned')} value=${orphaned} />`,
-          html`<${Stat} label=${t('storage.integrity.missing')} value=${missing} />`,
-          html`<${Stat} label=${t('storage.integrity.cover_mismatches')} value=${covers} />`,
-          html`<${Stat} label=${t('storage.integrity.chapter_count')} value=${res.db_chapter_count ?? '—'} />`,
-          html`<${Stat} label=${t('storage.integrity.disk_count')} value=${res.disk_file_count ?? '—'} />`,
-        ];
-      }
+  // The scrub is a job, so completion arrives over SSE rather than in the
+  // submit response.
+  useSSE('job_completed', (/** @type {any} */ ev) => {
+    if (ev?.job_type === 'integrity_scrub') {
+      setRunning(false);
+      load();
     }
-  }
+  });
+
+  const run = async () => {
+    setRunning(true);
+    try {
+      await api.runScrub(depth, fix);
+      showToast(t('storage.scrub.started'), { type: 'success' });
+    } catch (e) {
+      setRunning(false);
+      showApiError(e);
+    }
+  };
 
   return html`
     <${SettingsGroup} label=${t('storage.group.integrity')}>
-      <p class="text-xs text-text-muted px-4 py-2">${t('storage.integrity.desc')}</p>
-      <div class="flex items-center gap-2 px-4 py-3 border-t border-border-subtle">
-        <button type="button" class="btn-secondary btn-sm" disabled=${running} onClick=${() => run(false)}>
-          ${label ?? t('storage.integrity.run')}
+      <p class="text-xs text-text-muted px-4 py-2">${t('storage.scrub.desc')}</p>
+
+      <div class="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-border-subtle">
+        <select
+          class="input text-sm w-auto"
+          value=${depth}
+          disabled=${running}
+          onChange=${(/** @type {any} */ e) => setDepth(e.target.value)}
+        >
+          <option value="quick">${t('storage.scrub.depth.quick')}</option>
+          <option value="deep">${t('storage.scrub.depth.deep')}</option>
+        </select>
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            class="accent-accent cursor-pointer"
+            checked=${fix}
+            disabled=${running}
+            onChange=${(/** @type {any} */ e) => setFix(e.target.checked)}
+          />
+          ${t('storage.scrub.repair')}
+        </label>
+        <button type="button" class="btn-secondary btn-sm" disabled=${running} onClick=${run}>
+          ${running ? t('storage.scrub.running') : t('storage.scrub.run')}
         </button>
-        <button type="button" class="btn-danger btn-sm" disabled=${running} onClick=${() => run(true)}>
-          ${label ?? t('storage.integrity.fix')}
+        <button type="button" class="btn-ghost btn-sm" onClick=${() => setExportOpen(true)}>
+          ${t('storage.archive.open')}
         </button>
       </div>
-      ${body &&
-      html`<div class="flex flex-col gap-0 divide-y divide-border-subtle">${body}</div>`}
+
+      <p class="text-xs text-text-muted px-4 pb-2">${t('storage.scrub.repair.desc')}</p>
+
+      <${ScrubReport} last=${last} onChanged=${load} />
     <//>
+
+    <${ArchiveExportModal} open=${exportOpen} onClose=${() => setExportOpen(false)} />
   `;
 }
-
 function HistoryGroup() {
   const [state, setState] = useState(
     /** @type {{ status: string, rows: any[], error: string }} */ ({
@@ -208,7 +222,7 @@ function HistoryGroup() {
 export function StorageSection() {
   return html`
     <${UsageGroup} />
-    <${IntegrityGroup} />
+    <${ScrubGroup} />
     <${HistoryGroup} />
   `;
 }

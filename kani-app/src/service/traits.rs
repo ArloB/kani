@@ -13,8 +13,8 @@ use crate::service::import::tachiyomi::{
 use crate::service::trackers::{TrackerMangaResult, TrackerMappingItem, TrackerStatusItem};
 use kani_shared::types::{
     AppSettings, Category, Chapter, ChapterSortOrder, ContinueReadingChapter, DownloadRule,
-    DownloadRuleKind, MangaTracking, MangaTrackingStatus, MigrationPreview, MigrationResult,
-    ScanlatorPreference, SettingsUpdate, SortOption, Source,
+    DownloadRuleKind, MangaTracking, MangaTrackingStatus, MigrationPreview, ScanlatorPreference,
+    SettingsUpdate, SortOption, Source,
 };
 
 #[async_trait::async_trait]
@@ -239,6 +239,8 @@ pub trait JobDomain: Send + Sync {
     async fn list_jobs(&self, filter: JobListFilter) -> Result<JobListPage>;
     async fn get_job_status(&self, id: uuid::Uuid) -> Result<JobStatus>;
     async fn cancel_job(&self, id: uuid::Uuid) -> Result<()>;
+    async fn pause_job(&self, id: uuid::Uuid) -> Result<()>;
+    async fn resume_job(&self, id: uuid::Uuid) -> Result<()>;
     fn active_job_summaries(&self) -> Vec<serde_json::Value>;
 }
 
@@ -254,6 +256,14 @@ impl JobDomain for AppService {
 
     async fn cancel_job(&self, id: uuid::Uuid) -> Result<()> {
         self.job_manager.cancel(id).await
+    }
+
+    async fn pause_job(&self, id: uuid::Uuid) -> Result<()> {
+        self.job_manager.pause(id).await
+    }
+
+    async fn resume_job(&self, id: uuid::Uuid) -> Result<()> {
+        self.job_manager.resume(id).await
     }
 
     fn active_job_summaries(&self) -> Vec<serde_json::Value> {
@@ -570,6 +580,7 @@ pub trait MangaDomain: Send + Sync {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
+        filter_orphaned: Option<bool>,
     ) -> Result<(Vec<Chapter>, bool, Option<u32>, u32)>;
     #[allow(clippy::too_many_arguments)]
     async fn get_chapter_ids(
@@ -581,6 +592,7 @@ pub trait MangaDomain: Send + Sync {
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
         preferred_only: bool,
+        filter_orphaned: Option<bool>,
     ) -> Result<Vec<ChapterId>>;
     async fn download_all_chapters(&self, manga_id: MangaId) -> Result<uuid::Uuid>;
     async fn queue_manga_scan(&self, manga_id: MangaId, trigger: String) -> Result<uuid::Uuid>;
@@ -608,13 +620,14 @@ pub trait MangaDomain: Send + Sync {
         target_source_id: i64,
         target_source_manga_id: String,
     ) -> Result<MigrationPreview>;
-    async fn migrate_manga(
+    /// Queues the migration; the caller polls the returned job.
+    async fn submit_migration(
         &self,
         manga_id: MangaId,
         target_source_id: i64,
         target_source_manga_id: String,
         keep_orphaned_downloads: bool,
-    ) -> Result<MigrationResult>;
+    ) -> Result<crate::jobs::JobId>;
     async fn get_download_rules(&self, manga_id: MangaId) -> Result<Vec<DownloadRule>>;
     async fn add_download_rule(&self, manga_id: MangaId, kind: DownloadRuleKind) -> Result<i64>;
     async fn delete_download_rule(&self, rule_id: i64) -> Result<()>;
@@ -673,6 +686,7 @@ impl MangaDomain for AppService {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
+        filter_orphaned: Option<bool>,
     ) -> Result<(Vec<Chapter>, bool, Option<u32>, u32)> {
         self.get_local_chapters(
             manga_id,
@@ -683,6 +697,7 @@ impl MangaDomain for AppService {
             filter_downloaded,
             filter_unread,
             filter_scanlator,
+            filter_orphaned,
         )
         .await
     }
@@ -697,6 +712,7 @@ impl MangaDomain for AppService {
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
         preferred_only: bool,
+        filter_orphaned: Option<bool>,
     ) -> Result<Vec<ChapterId>> {
         self.get_chapter_ids(
             manga_id,
@@ -706,6 +722,7 @@ impl MangaDomain for AppService {
             filter_unread,
             filter_scanlator,
             preferred_only,
+            filter_orphaned,
         )
         .await
     }
@@ -784,14 +801,14 @@ impl MangaDomain for AppService {
             .await
     }
 
-    async fn migrate_manga(
+    async fn submit_migration(
         &self,
         manga_id: MangaId,
         target_source_id: i64,
         target_source_manga_id: String,
         keep_orphaned_downloads: bool,
-    ) -> Result<MigrationResult> {
-        self.migrate_manga(
+    ) -> Result<crate::jobs::JobId> {
+        self.submit_migration(
             manga_id,
             target_source_id,
             target_source_manga_id,
@@ -1199,7 +1216,6 @@ impl ScanlatorDomain for AppService {
 pub trait SettingsDomain: Send + Sync {
     async fn get_settings(&self) -> AppSettings;
     async fn update_settings(&self, update: SettingsUpdate, user_id: UserId) -> Result<()>;
-    async fn toggle_auto_scan(&self) -> Result<bool>;
     async fn start_refresh_all(&self) -> Result<()>;
     async fn is_refreshing(&self) -> bool;
 }
@@ -1211,9 +1227,6 @@ impl SettingsDomain for AppService {
     }
     async fn update_settings(&self, update: SettingsUpdate, user_id: UserId) -> Result<()> {
         self.update_settings(update, user_id).await
-    }
-    async fn toggle_auto_scan(&self) -> Result<bool> {
-        self.toggle_auto_scan().await
     }
     async fn start_refresh_all(&self) -> Result<()> {
         self.start_refresh_all().await
@@ -1629,6 +1642,7 @@ mod tests {
             _filter_downloaded: Option<bool>,
             _filter_unread: Option<bool>,
             _filter_scanlator: Option<String>,
+            _filter_orphaned: Option<bool>,
         ) -> Result<(Vec<Chapter>, bool, Option<u32>, u32)> {
             unimplemented!()
         }
@@ -1642,6 +1656,7 @@ mod tests {
             _filter_unread: Option<bool>,
             _filter_scanlator: Option<String>,
             _preferred_only: bool,
+            _filter_orphaned: Option<bool>,
         ) -> Result<Vec<ChapterId>> {
             unimplemented!()
         }
@@ -1707,13 +1722,13 @@ mod tests {
         ) -> Result<MigrationPreview> {
             unimplemented!()
         }
-        async fn migrate_manga(
+        async fn submit_migration(
             &self,
             _manga_id: MangaId,
             _target_source_id: i64,
             _target_source_manga_id: String,
             _keep_orphaned_downloads: bool,
-        ) -> Result<MigrationResult> {
+        ) -> Result<crate::jobs::JobId> {
             unimplemented!()
         }
         async fn add_download_rule(
@@ -1784,6 +1799,7 @@ mod tests {
                 name: "stub".into(),
                 configured: false,
                 linked: false,
+                needs_reauth: false,
             }])
         }
         async fn get_tracker_auth_url(
@@ -2015,9 +2031,6 @@ mod tests {
         async fn update_settings(&self, _update: SettingsUpdate, _user_id: UserId) -> Result<()> {
             unimplemented!()
         }
-        async fn toggle_auto_scan(&self) -> Result<bool> {
-            Ok(true)
-        }
         async fn start_refresh_all(&self) -> Result<()> {
             unimplemented!()
         }
@@ -2029,7 +2042,6 @@ mod tests {
     #[tokio::test]
     async fn settings_via_mock_no_appservice() {
         let svc: Arc<dyn SettingsDomain> = Arc::new(FixedSettings);
-        let result = svc.toggle_auto_scan().await.unwrap();
-        assert!(result);
+        assert!(!svc.is_refreshing().await);
     }
 }

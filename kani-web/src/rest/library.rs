@@ -4,11 +4,18 @@ use super::*;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/library", get(get_library_filtered))
+        .route(
+            "/library",
+            get(get_library_filtered)
+                .route_layer(axum::middleware::from_fn(crate::etag::etag_middleware)),
+        )
         .route("/library/scan-all", post(scan_all_library))
         .route("/manga/scan", post(scan_manga_multiple))
         .route("/library/continue_reading", get(get_continue_reading_shelf))
-        .route("/library/{page}/{order}", get(get_library))
+        .route(
+            "/library/{page}/{order}",
+            get(get_library).route_layer(axum::middleware::from_fn(crate::etag::etag_middleware)),
+        )
         .route("/library/backup", get(library_backup))
         .route(
             "/library/backup/preview",

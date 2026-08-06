@@ -468,6 +468,13 @@
     }
   }
 
+  /* .input fixes a one-line height, which silently clips any textarea that
+     asks for more via `rows`. Let the row count decide instead. */
+  textarea.input {
+    height: auto;
+    padding-block: 0.5rem;
+  }
+
   select.input {
     appearance: none;
     padding-right: 2rem;
@@ -948,13 +955,6 @@
   /* Manga-details metadata panel: a gentle raised surface sitting halfway
      between the page bg and a full surface, so it separates from the background
      without reading as a stark white card (notably in the light theme). */
-  .meta-card {
-    background-color: color-mix(in srgb, var(--color-surface) 50%, var(--color-bg));
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-lg);
-    padding: 0.75rem 1rem;
-  }
-
   /* ── Manga details hero (D5) ──
      A blurred, cover-derived band bleeding past the page gutters, with the title
      set in the display face. The cover (first child of the left column) rises into
@@ -1516,10 +1516,16 @@
     display: flex;
     flex-direction: column;
     @media (max-width: 767px) { margin-left: 0; }
-    @media (min-width: 768px) and (max-width: 1023px) {
-      margin-left: 200px;
-    }
   }
+
+  /* ── Sidebar width ──
+     Every offset in the app — the shell, the full-bleed banners, the bulk bar —
+     reads this one value, so collapsing is a single token change rather than a
+     class on each of them. The tablet step is narrower because 234 px of a
+     1024 px screen is a lot to spend on navigation; the collapsed rail keeps
+     the icons and drops everything else. */
+  @media (min-width: 768px) and (max-width: 1023px) { :root { --sidebar-w: 200px; } }
+  html[data-sidebar="collapsed"] { --sidebar-w: 60px; }
   #page-content {
     flex: 1;
     min-height: 0;
@@ -1535,6 +1541,7 @@
       padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
     }
   }
+
   @media (prefers-reduced-motion: reduce) {
     #page-content { scroll-behavior: auto; }
   }
@@ -1553,11 +1560,8 @@
     overflow-y: auto;
     z-index: var(--z-sidebar);
     @media (max-width: 767px) { display: none; }
-    /* On tablets, the full 234px sidebar eats too much horizontal real estate.
-       Shrink to 200px between md and lg breakpoints. */
-    @media (min-width: 768px) and (max-width: 1023px) {
-      width: 200px;
-    }
+    transition: width 160ms cubic-bezier(0.2, 0, 0, 1);
+    @media (prefers-reduced-motion: reduce) { transition: none; }
   }
   .sidebar-brand {
     display: flex; align-items: center; gap: 10px;
@@ -1599,6 +1603,12 @@
     color: var(--color-text);
   }
   .sidebar-nav { padding: 10px 8px; flex: 1; }
+  .sidebar-user-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
   .sidebar-footer {
     border-top: 1px solid var(--color-border-subtle);
     padding: 10px 12px;
@@ -1629,6 +1639,47 @@
     &.active,
     &[aria-current="page"] { background: var(--color-accent-dim); color: var(--color-accent); }
   }
+  /* ── Collapsed rail ──
+     60 px of icons. Everything that needs width to be legible — labels, section
+     headings, the user's name — is removed rather than squeezed, and the icons
+     centre so the rail reads as a deliberate second state and not a clipped
+     first one. Labels come back as tooltips, set on the anchors by the toggle. */
+  html[data-sidebar="collapsed"] {
+    & .sidebar-title,
+    & .sidebar-mark,
+    & .nav-item > span:not(.nav-badge),
+    & .sidebar-user-text { display: none; }
+
+    /* The section heading still divides the rail, just without its word. Height
+       0 with overflow hidden rather than `display: none` — the boundary is the
+       point, and a screen reader should still hear "Admin". */
+    & .nav-section {
+      height: 0;
+      padding: 0;
+      margin: 10px 10px 9px;
+      overflow: hidden;
+      border-top: 1px solid var(--color-border-subtle);
+    }
+
+    & .sidebar-brand { justify-content: center; padding-inline: 8px; }
+    & .sidebar-nav { padding-inline: 6px; }
+    & .nav-item { justify-content: center; padding-inline: 0; gap: 0; }
+    & .nav-badge {
+      position: absolute; top: 2px; right: 4px;
+      margin-left: 0; padding: 0 4px;
+    }
+    & .sidebar-footer { flex-direction: column; gap: 8px; padding-inline: 6px; }
+  }
+  html[data-sidebar="collapsed"] .nav-item { position: relative; }
+
+  .sidebar-toggle { margin-left: auto; flex-shrink: 0; }
+  html[data-sidebar="collapsed"] .sidebar-toggle { margin-left: 0; }
+  .sidebar-toggle .icon-sm { transition: transform 160ms cubic-bezier(0.2, 0, 0, 1); }
+  html[data-sidebar="collapsed"] .sidebar-toggle .icon-sm { transform: rotate(180deg); }
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-toggle .icon-sm { transition: none; }
+  }
+
   .nav-badge {
     margin-left: auto;
     font-size: var(--text-2xs); font-family: var(--font-mono);
@@ -1902,10 +1953,329 @@
   .max-h-modal  { max-height: 90vh; max-height: 90dvh; }
   .max-h-sheet  { max-height: 85vh; max-height: 85dvh; }
 
+  /* ── Manga details rail ──
+     Credits then facts, in the shape of a book's edition page. The label sits
+     above its value like the old eyebrow did, so the calibration is the whole
+     point: the label is smaller, lighter, less tracked and fainter than the
+     value on every axis at once. The previous eyebrow was heavier (600) and
+     more tracked (0.07em) than the value it named, which is why it won the eye. */
+  .rail-credit-name {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.0625rem;
+    line-height: 1.25;
+    letter-spacing: -0.005em;
+  }
+  /* Trailing credits: a series with four credited people must not grow four
+     headlines, so everyone after the byline drops to the body face. */
+  .rail-credit-name--secondary {
+    font-family: var(--font-body);
+    font-weight: 500;
+    font-size: 0.9375rem;
+    color: var(--color-text-muted);
+  }
+  .rail-credit-role {
+    font-size: 0.6875rem;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-text-faint);
+  }
+  .rail-facts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem 1rem;
+  }
+  /* An odd last fact has an empty cell beside it anyway, so let it take the
+     width — at 390 px "2 months ago" was truncating in half a column. */
+  .rail-facts > *:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .rail-fact-k {
+    font-size: 0.6875rem;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--color-text-faint);
+  }
+  .rail-fact-v {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+  /* The one vermilion mark in the rail. A seal, not a traffic light — hence a
+     small square with a softened corner rather than a dot. */
+  .rail-seal {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 2px;
+    flex: none;
+    display: inline-block;
+  }
+
+  /* ── Description disclosure ──
+     Clamp on, clamp off. The previous version tweened max-height by measuring
+     scrollHeight, forcing a reflow, caching the collapsed height on a dataset
+     attribute and racing a transitionend against a safety timer — about ninety
+     lines to animate text height, which reads worse than simply revealing it.
+     The mask makes the cut deliberate; the cap keeps a long synopsis from
+     running off the page. */
+  /* ── Description: the rail re-composes, nothing overlays ──
+     Expanding used to raise a panel over the column. Anything that covers
+     other content needs its own opaque fill, which is precisely what makes it
+     read as a pasted-on surface. So nothing covers anything: the artwork crops
+     from the bottom, the credits and facts step aside, and the description
+     takes the space they vacate. One ground throughout, no border, no shadow,
+     no second plane — the column simply shows something else.
+
+     The exchange is even: what the cover and facts give up, the description
+     takes, so the rail's height never changes and nothing below it moves. */
+  .rail-desc {
+    /* flex: none or the rail's column squeezes the three-line window shut. */
+    flex: none;
+    height: 4.4rem;
+    overflow: hidden;
+    cursor: pointer;
+    mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  }
+  .rail-desc:hover { color: var(--color-text); }
+
+  /* One gesture, not three. The cover's height is the animation worth having
+     because it *is* the exchange — space visibly moving from the artwork to
+     the text — and the arriving text eases in on the same curve so it does not
+     pop while the cover glides. The departing facts are not animated: things
+     leaving should get out of the way, not perform. */
+  .rail-cover-slot { transition: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .rail-cover-box { transition: height 220ms cubic-bezier(0.2, 0, 0, 1); }
+    .rail--reading .rail-desc { animation: rail-desc-in 220ms cubic-bezier(0.2, 0, 0, 1); }
+    @keyframes rail-desc-in {
+      from { opacity: 0.35; }
+      to   { opacity: 1; }
+    }
+  }
+
+  /* The frame only exists on the two-column layout. On mobile the cover is
+     itself the flex item beside the title, so the wrapper gets out of the way. */
+  .rail-cover-box { display: contents; }
+  .rail-cover-slot { aspect-ratio: 2 / 3; }
+
+  @media (min-width: 1024px) {
+    .rail-cover-box {
+      display: block;
+      flex: none;
+      width: 100%;
+      height: 26.25rem;           /* 2:3 jacket at 280 px */
+    }
+    .rail-cover-slot {
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      aspect-ratio: auto;
+      flex: none;
+    }
+    .rail-cover-slot img { object-fit: cover; object-position: top center; }
+  }
+
+  .rail--reading .rail-cover-box {
+    /* Crops rather than scales: the artwork keeps its width and loses its
+       lower half, which is what "covering the bottom of the cover" looked
+       like when it was an overlay. */
+    height: 8.5rem;
+  }
+  .rail--reading .rail-cover-slot img { object-fit: cover; object-position: top center; }
+  .rail--reading .rail-metapanel { overflow: hidden; }
+  .rail--reading .rail-desc {
+    height: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    cursor: default;
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+
+  /* The rail holds a cover, a 2x2 fact grid and a synopsis, all of which were
+     drawn for about 300 px. As a fraction of the viewport it was 186 px at
+     1024 and 305 px at 1500 — the same column doing the same job at wildly
+     different sizes, clipping its own labels at the small end. A pixel range
+     keeps it legible everywhere and makes the layout question arithmetic:
+     260 + ~450 for chapters + gap is roughly 740 px of content. */
+  @media (min-width: 1024px) {
+    /* The cover is the element that gives way. Everything else in the rail —
+       the actions, the credits, the facts, three lines of synopsis — has a
+       size it needs, and the artwork is the only part that can lose height and
+       still do its job. Left fixed, a 420 px cover on a 768 px screen pushed
+       the description off the bottom entirely, which is the one thing in the
+       rail people actually read. */
+    /* Height flexes and the width follows from the 2:3 ratio, so the jacket
+       gets smaller rather than letterboxed. Cropping kept the frame 280 px
+       wide and squashed it to a 2.5:1 strip, which stops reading as a cover
+       at all. Centred, because a narrower cover in a 280 px rail should look
+       placed rather than left-aligned by accident. */
+    /* The cover always spans the rail. Its edges line up with the Read button,
+       the facts and the synopsis, because a column whose widest element wanders
+       is the most visible kind of wrong.
+
+       What changes with height is the crop, and it changes in steps rather than
+       continuously: a jacket, a plate, a band. Sliding through every ratio in
+       between is what read as broken — no single frame looked chosen. Three
+       fixed ratios each look deliberate, and all three keep the top of the
+       artwork, where the title and the character are. */
+  }
+
+  /* Not enough height for the full jacket: a square plate. */
+  @media (min-width: 1024px) and (min-height: 700px) and (max-height: 1009px) {
+    .rail-cover-box { height: 17.5rem; }
+  }
+  /* Shorter still: a band, the shape a chapter header would use. */
+  @media (min-width: 1024px) and (min-height: 700px) and (max-height: 859px) {
+    .rail-cover-box { height: 8.5rem; }
+  }
+
+  @media (min-width: 1024px) and (min-height: 700px) {
+    .rail-content { flex: 0 0 auto; min-height: 0; }
+
+    /* Sized to what it holds, so it is never the thing that gets squeezed;
+       it only scrolls if even the cover's minimum cannot buy enough room. */
+    .rail-meta-panel {
+      flex: 0 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
+
+    .manga-rail {
+      /* flex-basis, not width: the stacked layout needs `w-full` on this
+         element and a utility width outranks anything declared here, so the
+         rail pinned to its max instead of its intended size. */
+      flex: 0 0 17.5rem;
+      max-width: 17.5rem;
+    }
+  }
+
+  /* ── Fixed-viewport page layout ──
+     A desktop page fills the shell exactly and never scrolls itself: its
+     heading, filters and pagination hold their place and only the data region
+     moves. Three primitives, used together:
+
+       .page-fixed   the page root — fills the shell, lays out as a column
+       .page-body    the one region that scrolls; everything else is chrome
+       .page-col     a nested column that also needs to distribute height
+
+     Gated on height as well as width. At 768 px wide but 600 px tall a pinned
+     layout leaves a scroll region a few rows deep, which is worse than simply
+     scrolling the page — so below the floor these are inert and the document
+     scrolls as normal. Tailwind's `md:` cannot express that, which is why
+     these are real classes rather than utilities. */
+  @media (min-width: 1024px) and (min-height: 700px) {
+    /* The page root is #page-content itself, which already lays out as a
+       scrolling column. What it needs is for its child to be allowed to
+       shrink — and `#page-content > * { flex-shrink: 0 }` outranks a plain
+       class, so the primitive has to be scoped to beat it. Without this the
+       page silently kept scrolling and every measurement said so. */
+    #page-content.page-fixed { overflow: hidden; }
+    #page-content.page-fixed > .page-body-host { flex: 1 1 auto; min-height: 0; }
+    .page-fixed {
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .page-col {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .page-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    /* Sized to its content, capped by the space available — a short list must
+       not stretch into an empty box with its footer stranded below. */
+    .page-body--fit {
+      flex: 0 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    /* Grows to fill without becoming a scroller itself — for the wrappers
+       between the page root and the region that does scroll. */
+    .page-fill { flex: 1 1 auto; min-height: 0; }
+    .page-body-host { flex: 1 1 auto; min-height: 0; }
+  }
+
+  /* Below lg the rail is a stacked row and the cover must hold its size; the
+     `shrink-0` utility that used to do this was removed because at lg it beat
+     the rule that lets the cover absorb the column's squeeze. */
+  @media (max-width: 1023px) {
+    .rail-cover-slot { flex: none; }
+  }
+
+  /* ── Chapter tab row: sticky on a phone ──
+     Vertical space above the list is cheap on mobile — a flick clears the hero
+     — so nothing here is about saving pixels. It is about reach: once the hero
+     has scrolled past, a 219-chapter list leaves the sort, filters and the
+     Manage tab stranded at the top of the document. Sticking the row keeps
+     them a thumb away. Desktop does not need it; nothing scrolls there. */
+  /* Up to lg, since that is where the stacked layout ends — a 900 px tablet
+     gets the same treatment as a phone because it has the same layout. */
+  @media (max-width: 1023px) {
+    /* Full width, split evenly: two tabs sharing a phone's width read as a
+       segmented control, which is what they are. The controls wrap beneath —
+       vertical space is the cheap axis here. */
+    .chapter-tabs { width: 100%; }
+    .chapter-tabs [role="tab"] { flex: 1 1 0; justify-content: center; text-align: center; }
+    .chapter-tabrow > * { width: 100%; }
+    /* Sort and page size read left-to-right with the rows they order; Filters
+       is the odd one out and sits on the opposite edge, where the thumb is. */
+    .chapter-filter-btn { margin-left: auto; }
+
+    .chapter-tabrow {
+      position: sticky;
+      /* Zero, not the header height: #page-content is the scroll container and
+         the app header sits outside it, so its offset is already accounted
+         for. */
+      top: 0;
+      z-index: var(--z-sticky, 20);
+      background: var(--color-bg);
+      padding-block: 0.4rem;
+      margin-inline: -1rem;
+      padding-inline: 1rem;
+      box-shadow: 0 1px 0 var(--color-border-subtle);
+    }
+  }
+
+  /* ── Floating bulk bar ──
+     Centres over the content column, not the viewport, so the selection count
+     does not sit behind the sidebar. Deliberately one class rather than a
+     stack of inset utilities: `inset-x-0` and the offset fight over source
+     order, and the loser is invisible until someone screenshots it. No
+     transform — a transformed ancestor becomes the containing block for the
+     `position: fixed` dropdown rendered inside this bar. */
+  .bulk-bar-dock {
+    position: fixed;
+    left: 0;
+    right: 0;
+    /* Above the mobile tab bar (h-16), not underneath it. */
+    bottom: 4rem;
+    @media (min-width: 768px) {
+      left: var(--sidebar-w);
+      bottom: 1.5rem;
+      margin-inline: auto;
+      width: fit-content;
+      max-width: calc(100vw - 2rem);
+    }
+  }
+
   /* ── Sidebar offset (for full-bleed banners on desktop) ── */
+  /* Owns `left` at every width. It cannot merely override at md and up: the
+     `left-0` utility this used to be paired with lives in Tailwind's utilities
+     layer and outranks anything declared here, so the banners never actually
+     cleared the sidebar. The utility is gone from the markup; this is the only
+     rule setting their left edge now. */
   .md\:left-sidebar {
-    @media (min-width: 768px) and (max-width: 1023px) { left: 200px; }
-    @media (min-width: 1024px) { left: var(--sidebar-w); }
+    left: 0;
+    @media (min-width: 768px) { left: var(--sidebar-w); }
   }
 
   /* ── Safe-area padding ── */

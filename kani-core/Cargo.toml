@@ -1,6 +1,8 @@
 [package]
 name = "kani-core"
-version = "0.1.0"
+version = "0.9.0"
+license.workspace = true
+repository.workspace = true
 edition = "2024"
 build = "build.rs"
 
@@ -68,11 +70,17 @@ urlencoding.workspace = true
 time = { workspace = true, features = ["parsing"] }
 regex = "1.12.3"
 rand = "0.10.0"
+blake3 = "1.8.5"
 
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 kani-shared = { path = "../kani-shared", features = ["builder"] }
 tempfile = "3.27.0"
 tokio = { version = "1", features = ["test-util"] }
 tokio-test = "0.4"
 wiremock = "0.6"
+
+[[bench]]
+name = "blueprint_eval"
+harness = false

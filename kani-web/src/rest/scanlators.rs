@@ -10,6 +10,11 @@ pub fn router() -> Router<AppState> {
         )
         .route("/scanlator_preferences/{id}", delete(delete_scanlator_pref))
         .route(
+            "/scanlator_preferences/global",
+            get(get_global_prefs).post(set_global_pref),
+        )
+        .route("/scanlator_preferences/known", get(get_known_scanlators))
+        .route(
             "/manga/{id}/scanlator_mode",
             patch(set_scanlator_mode_handler),
         )
@@ -208,4 +213,79 @@ mod tests {
         let resp = axum::response::IntoResponse::into_response(response);
         assert_eq!(resp.status(), axum::http::StatusCode::OK);
     }
+}
+
+// ── Library-wide defaults ────────────────────────────────────────────────────
+
+#[utoipa::path(
+    get, path = "/rest/scanlator_preferences/global",
+    responses(
+        (status = 200, description = "Library-wide scanlator priorities and blocks"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_global_prefs(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(state.service.get_global_scanlator_prefs().await?))
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct GlobalPrefBody {
+    pub scanlator: String,
+    #[serde(default)]
+    pub priority: i64,
+    #[serde(default)]
+    pub blocked: bool,
+}
+
+#[utoipa::path(
+    post, path = "/rest/scanlator_preferences/global",
+    request_body(content = inline(serde_json::Value), description = "Scanlator name, priority and blocked flag"),
+    responses(
+        (status = 200, description = "Global scanlator preference saved"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn set_global_pref(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(state): State<AppState>,
+    Json(body): Json<GlobalPrefBody>,
+) -> Result<impl IntoResponse, AppError> {
+    state
+        .service
+        .set_global_scanlator_pref(&body.scanlator, body.priority, body.blocked)
+        .await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Scanlators seen in the library, commonest first, so the UI can offer real
+/// names instead of a free-text box.
+#[utoipa::path(
+    get, path = "/rest/scanlator_preferences/known",
+    responses(
+        (status = 200, description = "Scanlators seen in the library, commonest first, with their chapter counts"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_known_scanlators(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let rows = state.service.scanlators_by_usage().await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|(name, count)| serde_json::json!({ "scanlator": name, "chapters": count }))
+            .collect::<Vec<_>>(),
+    ))
 }

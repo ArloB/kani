@@ -208,7 +208,7 @@ fn repo_verify_detects_tampered_artifact() {
 #[test]
 fn keygen_creates_pub_and_key_files() {
     let tmp = tempfile::tempdir().unwrap();
-    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "author", None).unwrap();
+    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "author").unwrap();
 
     let pub_path = tmp.path().join("author.pub");
     let key_path = tmp.path().join("author.key");
@@ -219,10 +219,39 @@ fn keygen_creates_pub_and_key_files() {
     let _ = signing::load_signing_key(&key_path).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn keygen_writes_the_private_key_unreadable_to_other_accounts() {
+    // The key is plaintext base64, so the file mode is the only thing guarding
+    // it; the default umask would leave it world-readable.
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let tmp = tempfile::tempdir().unwrap();
+    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "author").unwrap();
+
+    let mode = std::fs::metadata(tmp.path().join("author.key"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600, "private key is readable beyond its owner");
+}
+
+#[test]
+fn keygen_produces_a_different_key_each_time() {
+    let tmp = tempfile::tempdir().unwrap();
+    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "one").unwrap();
+    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "two").unwrap();
+
+    let one = signing::load_signing_key(&tmp.path().join("one.key")).unwrap();
+    let two = signing::load_signing_key(&tmp.path().join("two.key")).unwrap();
+    assert_ne!(one.to_bytes(), two.to_bytes());
+}
+
 #[test]
 fn keygen_pub_matches_private_key() {
     let tmp = tempfile::tempdir().unwrap();
-    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "test", None).unwrap();
+    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "test").unwrap();
 
     let signing_key = signing::load_signing_key(&tmp.path().join("test.key")).unwrap();
     let (verifying_bytes, verifying_b64) =
@@ -235,7 +264,7 @@ fn keygen_pub_matches_private_key() {
 #[test]
 fn show_fingerprint_prints_sha256_prefix() {
     let tmp = tempfile::tempdir().unwrap();
-    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "test", None).unwrap();
+    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "test").unwrap();
 
     let (key_bytes, _) = signing::load_verifying_key(&tmp.path().join("test.pub")).unwrap();
     let fp = signing::key_fingerprint(&key_bytes);
@@ -269,7 +298,7 @@ fn repo_list_shows_extensions() {
 #[test]
 fn repo_list_empty_repo() {
     let tmp = tempfile::tempdir().unwrap();
-    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "m", None).unwrap();
+    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "m").unwrap();
 
     let repo_dir = tmp.path().join("repo");
     kani_cli::commands::repo::run_init(&repo_dir, "Empty Repo", &tmp.path().join("m.pub")).unwrap();
@@ -341,7 +370,7 @@ fn repo_add_rejects_tampered_artifact() {
 #[test]
 fn repo_init_creates_index_and_extensions_dir() {
     let tmp = tempfile::tempdir().unwrap();
-    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "maintainer", None).unwrap();
+    kani_cli::commands::keygen::run(&tmp.path().to_path_buf(), "maintainer").unwrap();
 
     let repo_dir = tmp.path().join("my-repo");
     kani_cli::commands::repo::run_init(

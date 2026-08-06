@@ -217,3 +217,159 @@ async fn encrypted_backup_without_passphrase_is_rejected() {
         "encrypted backup without passphrase should fail"
     );
 }
+
+// ── Settings round-trip ───────────────────────────────────────────────────────
+//
+// The backup used to carry three settings against a row of sixty-two, so a
+// restore returned three and silently left the rest at whatever the target
+// install happened to hold. These pin the whole surface rather than a sample:
+// a setting added to any group is covered without touching this file, and a
+// setting that stops round-tripping fails here.
+
+use kani_shared::types::{MaintenanceSettings, SecuritySettings, SettingsUpdate};
+
+#[tokio::test]
+async fn backup_settings_round_trip_covers_every_group() {
+    let svc = test_service().await;
+
+    // Move one value in each group away from its default, spread across the
+    // groups that the old three-field backup could not reach at all.
+    let before = svc.get_settings().await;
+    svc.update_settings(
+        SettingsUpdate::Security(SecuritySettings {
+            max_login_attempts: 17,
+            max_ip_attempts: 41,
+            login_lockout_seconds: 123,
+            session_timeout_secs: 4567,
+        }),
+        UserId(1),
+    )
+    .await
+    .unwrap();
+    svc.update_settings(
+        SettingsUpdate::Maintenance(MaintenanceSettings {
+            trash_retention_days: 19,
+            audit_retention_days: 23,
+            audit_security_retention_days: 29,
+            disk_warn_threshold: 0.77,
+            thumbnail_formats: "avif".into(),
+            integrity_quick_scrub_interval_hours: 31,
+            integrity_deep_scrub_interval_hours: 37,
+            scrub_on_startup: !before.scrub_on_startup,
+            integrity_revalidate_after_days: 41,
+        }),
+        UserId(1),
+    )
+    .await
+    .unwrap();
+
+    let zip = svc.export_backup(UserId(1), false, None).await.unwrap();
+
+    // Put everything back to where it started, then restore.
+    svc.update_settings(
+        SettingsUpdate::Security(SecuritySettings {
+            max_login_attempts: before.max_login_attempts,
+            max_ip_attempts: before.max_ip_attempts,
+            login_lockout_seconds: before.login_lockout_seconds,
+            session_timeout_secs: before.session_timeout_secs,
+        }),
+        UserId(1),
+    )
+    .await
+    .unwrap();
+
+    let opts = RestoreOptions {
+        import_settings: true,
+        ..RestoreOptions::default()
+    };
+    svc.restore_backup(UserId(1), &zip, opts, None)
+        .await
+        .unwrap();
+
+    let after = svc.get_settings().await;
+    assert_eq!(
+        after.max_login_attempts, 17,
+        "security group did not round-trip"
+    );
+    assert_eq!(after.max_ip_attempts, 41);
+    assert_eq!(after.login_lockout_seconds, 123);
+    assert_eq!(after.session_timeout_secs, 4567);
+    assert_eq!(
+        after.trash_retention_days, 19,
+        "maintenance group did not round-trip"
+    );
+    assert_eq!(after.thumbnail_formats, "avif");
+    assert!((after.disk_warn_threshold - 0.77).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn restoring_settings_refreshes_the_live_cache_not_just_the_row() {
+    // The old restore wrote SQL directly and left the cached copy untouched, so
+    // the change did not take effect until the process restarted.
+    let svc = test_service().await;
+    svc.update_settings(
+        SettingsUpdate::Security(SecuritySettings {
+            max_login_attempts: 13,
+            max_ip_attempts: 14,
+            login_lockout_seconds: 900,
+            session_timeout_secs: 3600,
+        }),
+        UserId(1),
+    )
+    .await
+    .unwrap();
+    let zip = svc.export_backup(UserId(1), false, None).await.unwrap();
+
+    svc.update_settings(
+        SettingsUpdate::Security(SecuritySettings {
+            max_login_attempts: 99,
+            max_ip_attempts: 98,
+            login_lockout_seconds: 1800,
+            session_timeout_secs: 7200,
+        }),
+        UserId(1),
+    )
+    .await
+    .unwrap();
+
+    let opts = RestoreOptions {
+        import_settings: true,
+        ..RestoreOptions::default()
+    };
+    svc.restore_backup(UserId(1), &zip, opts, None)
+        .await
+        .unwrap();
+
+    // Read through the cache, without re-reading the database.
+    assert_eq!(svc.get_settings().await.max_login_attempts, 13);
+    assert_eq!(svc.get_settings().await.session_timeout_secs, 3600);
+}
+
+#[tokio::test]
+async fn the_smtp_password_never_reaches_the_backup_file() {
+    let svc = test_service().await;
+    let before = svc.get_settings().await;
+    svc.update_settings(
+        SettingsUpdate::Email(kani_shared::types::EmailSettings {
+            email_enabled: true,
+            email_provider: "smtp".into(),
+            email_provider_config:
+                r#"{"host":"smtp.example.com","username":"postmaster","password":"hunter2-secret"}"#
+                    .into(),
+            email_from_address: "kani@example.com".into(),
+            app_url: before.app_url.clone(),
+            password_reset_enabled: before.password_reset_enabled,
+            email_verification_required: before.email_verification_required,
+        }),
+        UserId(1),
+    )
+    .await
+    .unwrap();
+
+    let zip = svc.export_backup(UserId(1), false, None).await.unwrap();
+    let haystack = String::from_utf8_lossy(&zip).to_string();
+    assert!(
+        !haystack.contains("hunter2-secret"),
+        "the backup archive contains the SMTP password"
+    );
+}

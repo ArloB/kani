@@ -1,14 +1,71 @@
 use crate::error::{Error, Result};
 use crate::http::SmartClient;
+use crate::wasm::AllowedHost;
 use kani_shared::FilterFetchDef;
+
+/// The host of a URL, or `None` if it has none / does not parse.
+fn url_host(url: &str) -> Option<String> {
+    url.parse::<url::Url>()
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+}
+
+/// Resolve an option-set route against the source's `base_url`: an absolute
+/// route is used as-is, a relative one is joined against the base (so
+/// `/filters/genres` resolves the way the guest's own requests would). Without
+/// this a relative route reached `SmartClient::get` with no base and failed.
+fn resolve_route(base_url: &str, route: &str) -> Result<String> {
+    if route.starts_with("http://") || route.starts_with("https://") {
+        return Ok(route.to_string());
+    }
+    let base = url::Url::parse(base_url)
+        .map_err(|e| Error::Other(format!("invalid source base_url '{base_url}': {e}")))?;
+    base.join(route)
+        .map(|u| u.to_string())
+        .map_err(|e| Error::Other(format!("cannot resolve option-set route '{route}': {e}")))
+}
+
+/// Enforce the source's HTTP policy on a resolved option-set URL: unrestricted
+/// sources may fetch anywhere, restricted ones only from their own host (exact
+/// match, the same rule the guest HTTP path applies).
+fn enforce_option_set_host(base_url: &str, url: &str, unrestricted_http: bool) -> Result<()> {
+    if unrestricted_http {
+        return Ok(());
+    }
+    let base_host = url_host(base_url)
+        .ok_or_else(|| Error::Other(format!("source base_url '{base_url}' has no host")))?;
+    let req_host = url_host(url)
+        .ok_or_else(|| Error::Other(format!("option-set route '{url}' has no host")))?;
+    AllowedHost::Restricted(base_host)
+        .allows_host(&req_host)
+        .map_err(Error::Other)
+}
 
 /// Fetches and parses a `FilterFetchDef`, returning `(name, value)` pairs.
 /// Options with `nsfw=true` are excluded.
+///
+/// `base_url` / `unrestricted_http` are the owning source's HTTP policy: the
+/// route is resolved against `base_url` and, unless the source is unrestricted,
+/// must resolve to the source's own host — otherwise a def could point the
+/// server at an arbitrary host, outside the WASM sandbox's allowed-host check.
 pub async fn fetch_option_set(
     client: &SmartClient,
     def: &FilterFetchDef,
+    base_url: &str,
+    unrestricted_http: bool,
 ) -> Result<Vec<(String, String)>> {
-    let response = client.get(&def.route).await?.text().await?;
+    let url = resolve_route(base_url, &def.route)?;
+    enforce_option_set_host(base_url, &url, unrestricted_http)?;
+
+    // Bounded: this is an operator-supplied URL fetched to populate a filter
+    // dropdown. An option set is kilobytes; anything past the cap is not a
+    // document we were going to parse.
+    let bytes = client
+        .get(&url)
+        .await?
+        .bytes_prefix(client.budgets().max_option_set_bytes)
+        .await?;
+    let response = String::from_utf8_lossy(&bytes).into_owned();
 
     match def.response_type.as_str() {
         "json" => parse_json_options(&response, def),
@@ -222,6 +279,116 @@ mod tests {
         let opts = parse_json_options(json, &def).unwrap();
         assert_eq!(opts.len(), 1);
         assert_eq!(opts[0].0, "Action");
+    }
+
+    #[test]
+    fn resolve_route_passes_through_absolute() {
+        assert_eq!(
+            resolve_route("https://src.example", "https://cdn.example/x").unwrap(),
+            "https://cdn.example/x"
+        );
+    }
+
+    #[test]
+    fn resolve_route_joins_relative_against_base() {
+        assert_eq!(
+            resolve_route("https://src.example/manga/", "/api/genres").unwrap(),
+            "https://src.example/api/genres"
+        );
+    }
+
+    #[test]
+    fn restricted_source_blocks_a_host_escape() {
+        let err = enforce_option_set_host(
+            "https://source.invalid",
+            "https://evil.invalid/steal",
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("may only contact"),
+            "expected an allowed-host refusal, got: {err}"
+        );
+    }
+
+    #[test]
+    fn restricted_source_allows_its_own_host() {
+        // A relative route resolves to the source host and is permitted.
+        let url = resolve_route("https://source.invalid/manga/", "/api/genres").unwrap();
+        assert!(enforce_option_set_host("https://source.invalid", &url, false).is_ok());
+    }
+
+    #[test]
+    fn unrestricted_source_allows_any_host() {
+        assert!(
+            enforce_option_set_host("https://source.invalid", "https://anywhere.invalid/x", true)
+                .is_ok()
+        );
+    }
+
+    /// The option-set ceiling truncates rather than refusing, so an oversized
+    /// document yields the options that fit and drops the rest. Proving that
+    /// needs the budget seam: the shipped ceiling is 4 MB.
+    #[tokio::test]
+    async fn an_option_set_past_the_budget_is_truncated_at_the_ceiling() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let mut body = String::from("<html><body><ul>");
+        for i in 0..200 {
+            body.push_str(&format!(
+                "<li><span class=\"name\">Option {i}</span><a data-id=\"v{i}\">v{i}</a></li>"
+            ));
+        }
+        body.push_str("</ul></body></html>");
+        let full_len = body.len();
+
+        Mock::given(method("GET"))
+            .and(path("/options"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body.into_bytes(), "text/html"))
+            .mount(&server)
+            .await;
+
+        let def = FilterFetchDef {
+            route: format!("{}/options", server.uri()),
+            ..make_def(
+                "html",
+                Some("li"),
+                vec![("name", "span.name"), ("value", "a|data-id")],
+                None,
+            )
+        };
+
+        let generous = SmartClient::new_for_test()
+            .unwrap()
+            .with_allow_private_egress(true);
+        let all = fetch_option_set(&generous, &def, &server.uri(), true)
+            .await
+            .unwrap();
+        assert!(all.len() > 10, "fixture must produce a long option set");
+
+        let stingy = SmartClient::new_for_test()
+            .unwrap()
+            .with_allow_private_egress(true)
+            .with_budgets(crate::http::Budgets {
+                max_option_set_bytes: full_len / 8,
+                ..crate::http::Budgets::default()
+            });
+        let truncated = fetch_option_set(&stingy, &def, &server.uri(), true)
+            .await
+            .unwrap();
+
+        assert!(
+            truncated.len() < all.len(),
+            "the ceiling did not bound the document: {} vs {}",
+            truncated.len(),
+            all.len()
+        );
+        assert!(
+            !truncated.is_empty(),
+            "truncation must keep the prefix, not discard everything"
+        );
     }
 
     #[test]

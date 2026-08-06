@@ -305,6 +305,9 @@ impl From<kani_app::ServiceError> for AppError {
             kani_app::ServiceError::Internal(s) => Self::InternalServerError(s),
             kani_app::ServiceError::Validation(s) => Self::ValidationError(s),
             kani_app::ServiceError::RateLimited { .. } => Self::RateLimitExceeded,
+            // Not Unauthorized/Forbidden: the caller's own session is fine, it
+            // is the linked tracker account that needs re-authorising.
+            kani_app::ServiceError::TrackerAuthExpired(s) => Self::Conflict(s),
             kani_app::ServiceError::Core(e) => Self::CoreError(e),
             kani_app::ServiceError::Db(e) => Self::SqlxError(e),
             kani_app::ServiceError::Migration(e) => Self::MigrationError(e),

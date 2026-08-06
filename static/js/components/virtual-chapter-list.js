@@ -3,20 +3,23 @@
 
 import { h } from 'preact';
 import { memo } from 'preact/compat';
-import { useState, useEffect, useRef, useMemo } from 'preact/hooks';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'preact/hooks';
 import htm from 'htm';
 import { hasPermission } from '../session.js';
+import { UpgradeCompare } from './upgrade-compare.js';
 import { getState, subscribe } from '../cache.js';
 import { formatDate, isChapterDownloaded } from '../utils.js';
 import { useBusy } from '../hooks/use-busy.js';
 import { navigate } from '../router.js';
 import { downloadChapter, deleteChapter, cancelDownload, setChapterReadStatus, markChaptersUpTo, retryChapterDownload } from '../api.js';
-import { iconCheck, iconDownload, iconCloud, iconCloudCheck } from '../icons.js';
+import * as api from '../api.js';
+import { Modal } from './modal.js';
+import { iconCheck, iconDownload, iconCloud, iconCloudCheck, iconPencil, iconEllipsisVertical } from '../icons.js';
 import { Icon } from './icon.js';
 import { ContextMenu } from './menu.js';
 import { BulkBar } from './bulk-bar.js';
 import { cacheChapter, evictChapter } from '../offline.js';
-import { showApiError } from './toast.js';
+import { showApiError, showToast } from './toast.js';
 import { t } from '../i18n.js';
 const html = htm.bind(h);
 
@@ -27,6 +30,10 @@ const html = htm.bind(h);
  * comfortable, denser in compact mode). Read per mount: `.chapter-row` in CSS
  * consumes the same token, so JS offsets and rendered heights stay in lockstep.
  */
+export function readChapterRowHeight() {
+  return _readRowH();
+}
+
 function _readRowH() {
   const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chapter-row-h'), 10);
   return Number.isFinite(v) && v > 0 ? v : 56;
@@ -68,7 +75,11 @@ const OVERSCAN = 5;
  *   onCacheChange?: (id: number, cached: boolean) => void,
  * }} props
  */
-function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, selected, isCached, kccAvailable, hasNote, showScanlator, isKeyboardActive, menuTick, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange }) {
+function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, onAssignVolume, selectMode, selected, isCached, kccAvailable, hasNote, showScanlator, isKeyboardActive, menuTick, onToggleRead, onMarkUpTo, onToggleSelect, onEnterSelectWithChapter, onDelete, onCacheChange, onUpgradeClick }) {
+  // The first candidate is enough for a badge; the dialogue shows the detail.
+  const upgradeCandidate = chapter.upgrade_available?.candidates?.[0] ?? null;
+  const upgradeIsReassurance = upgradeCandidate?.kind === 'source_downgraded';
+
   const [progress, setProgress] = useState(/** @type {ChapterProgress|null} */(null));
   const [isRead, setIsRead] = useState(!!chapter.read);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -239,8 +250,13 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, 
         ? [{ label: t('chapter.menu.remove_offline'), action: handleCacheToggle }]
         : [{ label: t('chapter.menu.save_offline'), action: handleCacheToggle }]),
     ] : []),
+    ...(mangaId ? [
+      { divider: /** @type {true} */ (true) },
+      { label: t('chapter.menu.assign_volume'), action: () => onAssignVolume?.(chapter) },
+    ] : []),
     ...(!isActive && downloaded && !isCancelled ? [
       { divider: /** @type {true} */ (true) },
+      { label: t('chapter.menu.download_cbz'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/cbz`) },
       { label: t('chapter.menu.export_epub'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/epub`) },
       { label: t('chapter.menu.export_epub_kindle'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/epub?profile=kindle-pw`) },
       { label: t('chapter.menu.export_kepub_kobo'), action: () => handleExportDownload(`/rest/chapters/${chapter.id}/export/kepub?profile=kobo-libra`) },
@@ -254,11 +270,13 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, 
         ref=${btnRef}
         class="inline-flex items-center justify-center w-9 h-9 text-text-muted hover:text-text rounded-md cursor-pointer select-none transition-colors"
         aria-label=${t('chapter.list.more_actions')}
+        aria-haspopup="menu"
         aria-expanded=${menuOpen}
+        aria-controls=${menuOpen ? `chapter-menu-${chapter.id}` : undefined}
         tabindex="-1"
         onClick=${(e) => { e.preventDefault(); e.stopPropagation(); setMenuOpen(o => !o); }}
-      >⋮</button>
-      ${menuOpen && html`<${ContextMenu} items=${menuItems} trigger=${btnRef} onClose=${() => setMenuOpen(false)} />`}
+      ><${Icon} svg=${iconEllipsisVertical} class="icon-sm" /></button>
+      ${menuOpen && html`<${ContextMenu} id=${`chapter-menu-${chapter.id}`} items=${menuItems} trigger=${btnRef} onClose=${() => setMenuOpen(false)} />`}
     </div>
   ` : null;
 
@@ -323,6 +341,19 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, 
           ${chapter.is_orphaned && html`
             <span class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-sm bg-warn/20 text-warn">${t('chapter.badge.orphaned')}</span>
           `}
+          ${upgradeCandidate && html`
+            <button
+              type="button"
+              class=${'inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-sm ' +
+                (upgradeIsReassurance ? 'bg-success/20 text-success' : 'bg-accent/15 text-accent')}
+              title=${t(upgradeCandidate.reason_key)}
+              onClick=${(/** @type {any} */ e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onUpgradeClick?.(upgradeCandidate, chapter);
+              }}
+            >${upgradeIsReassurance ? t('upgrade.badge.downgrade') : t('upgrade.badge')}</button>
+          `}
           ${statusIndicator}
           ${isClickable
       ? html`<a class=${'text-sm truncate hover:text-accent transition-colors ' + (!downloaded ? 'text-text-muted' : isRead ? 'text-text-faint' : 'text-text')} href=${readerHref} tabindex="-1" title=${!downloaded ? t('chapter.list.download_to_read') : undefined}>${chapter.title}</a>`
@@ -332,7 +363,9 @@ function ChapterRowInner({ chapter, readerHref, inLibrary, mangaId, selectMode, 
         <div class="flex items-center gap-3 text-xs text-text-muted">
           ${showScanlator && chapter.scanlator && html`<span>${chapter.scanlator}</span>`}
           ${chapter.date_uploaded && html`<span>${formatDate(chapter.date_uploaded)}</span>`}
-          ${hasNote && html`<span class="text-accent" title=${t('chapter.badge.has_note')}>✎</span>`}
+          ${hasNote && html`<span class="text-accent icon-2xs" title=${t('chapter.badge.has_note')}>
+            <${Icon} svg=${iconPencil} label=${t('chapter.badge.has_note')} />
+          </span>`}
         </div>
       </div>
       <div class="flex items-center gap-1 shrink-0">
@@ -386,6 +419,8 @@ const ChapterRow = memo(ChapterRowInner);
  *   onFlipSelection?: () => void,
  *   onSelectUndownloaded?: () => void,
  *   onSelectUnread?: () => void,
+ *   onSelectOrphaned?: () => void,
+ *   orphanCount?: number,
  *   onBulkRead?: (isRead: boolean) => void,
  *   onBulkDownload?: () => void,
  *   onBulkDelete?: () => void,
@@ -397,7 +432,82 @@ const ChapterRow = memo(ChapterRowInner);
  *   onCacheChange?: (id: number, cached: boolean) => void,
  * }} props
  */
-export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId, height, hasMore, loading, selectMode, selected, canDownload, canDelete, allSelectedProp, onLoadMore, onToggleRead, onMarkUpTo, onToggleSelect, onSelectAll, onFlipSelection, onSelectUndownloaded, onSelectUnread, onBulkRead, onBulkDownload, onBulkDelete, onExitSelect, onEnterSelectWithChapter, onDelete, cachedChapterIds, kccAvailable, onCacheChange, notedChapterIds }) {
+/**
+ * Assigns a chapter to one of the manga's volumes, or clears the assignment.
+ *
+ * `assignChapterVolume` had no caller: volumes could be created, renamed,
+ * listed and deleted, but nothing could put a chapter in one.
+ */
+function VolumePicker({ chapter, mangaId, onClose, onAssigned }) {
+  const [volumes, setVolumes] = useState(/** @type {any[]|null} */ (null));
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!chapter || !mangaId) return;
+    setVolumes(null);
+    api.listVolumes(mangaId).then((v) => setVolumes(Array.isArray(v) ? v : [])).catch(() => setVolumes([]));
+  }, [chapter, mangaId]);
+
+  if (!chapter) return null;
+
+  const assign = async (/** @type {number|null} */ volumeId) => {
+    setBusy(true);
+    try {
+      await api.assignChapterVolume(mangaId, chapter.id, volumeId);
+      showToast(t('chapter.volume.assigned'), { type: 'success' });
+      onAssigned?.();
+      onClose();
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return html`
+    <${Modal} open=${true} title=${t('chapter.menu.assign_volume')} onClose=${onClose}>
+      <div class="flex flex-col gap-2 px-1">
+        <p class="text-xs text-text-muted">${t('chapter.volume.desc')}</p>
+        ${volumes === null
+          ? html`<p class="text-sm text-text-muted">${t('common.loading')}</p>`
+          : html`
+              <button
+                type="button"
+                class="text-left px-1 py-2 border-b border-border-subtle hover:bg-surface-hover text-sm"
+                disabled=${busy}
+                onClick=${() => assign(null)}
+              >
+                ${t('chapter.volume.none')}
+              </button>
+              ${volumes.length === 0
+                ? html`<p class="text-sm text-text-muted pt-2">${t('chapter.volume.empty')}</p>`
+                : volumes.map(
+                    (v) => html`
+                      <button
+                        type="button"
+                        key=${v.id}
+                        class="text-left px-1 py-2 border-b border-border-subtle hover:bg-surface-hover text-sm"
+                        disabled=${busy}
+                        onClick=${() => assign(v.id)}
+                      >
+                        ${v.name || t('chapter.volume.numbered', { n: v.volume_num })}
+                      </button>
+                    `,
+                  )}
+            `}
+      </div>
+    <//>
+  `;
+}
+
+export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId, height, hasMore, loading, selectMode, selected, canDownload, canDelete, allSelectedProp, onLoadMore, onToggleRead, onMarkUpTo, onToggleSelect, onSelectAll, onFlipSelection, onSelectUndownloaded, onSelectUnread, onSelectOrphaned, orphanCount = 0, onBulkRead, onBulkDownload, onBulkDelete, onExitSelect, onEnterSelectWithChapter, onDelete, cachedChapterIds, kccAvailable, onCacheChange, notedChapterIds, onUpgradeApplied }) {
+  const [upgrade, setUpgrade] = useState(/** @type {any} */ (null));
+  const [volumeFor, setVolumeFor] = useState(/** @type {any} */ (null));
+  const openAssignVolume = useCallback((/** @type {any} */ ch) => setVolumeFor(ch), []);
+  const openUpgrade = useCallback((/** @type {any} */ candidate, /** @type {any} */ ch) => {
+    setUpgrade({ candidate, title: ch.title });
+  }, []);
+
   const [scrollTop, setScrollTop] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [focused, setFocused] = useState(false);
@@ -527,6 +637,18 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
     ...(onFlipSelection ? [{ label: t('chapter.bulk.flip'), onClick: () => onFlipSelection() }] : []),
     ...(onSelectUndownloaded ? [{ label: t('chapter.bulk.undownloaded'), onClick: () => onSelectUndownloaded() }] : []),
     ...(onSelectUnread ? [{ label: t('chapter.bulk.unread'), onClick: () => onSelectUnread() }] : []),
+    // Kept from a previous source. Offered even at zero so the capability is
+    // discoverable, but disabled with a reason rather than silently inert.
+    ...(onSelectOrphaned
+      ? [{
+          label: t('chapter.bulk.orphaned'),
+          title: orphanCount > 0
+            ? t('chapter.bulk.orphaned.title', { count: orphanCount })
+            : t('chapter.bulk.orphaned.none'),
+          disabled: orphanCount === 0,
+          onClick: () => onSelectOrphaned(),
+        }]
+      : []),
   ];
   const bulkActions = [
     { label: t('chapter.bulk.mark_read'), onClick: () => onBulkRead && runBulk(() => onBulkRead(true)), disabled: selectedCount === 0 },
@@ -590,6 +712,8 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
               isCached=${cachedChapterIds ? cachedChapterIds.has(ch.id) : false}
               kccAvailable=${!!kccAvailable}
               onCacheChange=${onCacheChange}
+              onUpgradeClick=${openUpgrade}
+            onAssignVolume=${openAssignVolume}
               hasNote=${notedChapterIds ? notedChapterIds.has(ch.id) : false}
             />
           `)}
@@ -651,6 +775,8 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
                 onToggleSelect=${onToggleSelect}
                 onEnterSelectWithChapter=${onEnterSelectWithChapter}
                 onDelete=${onDelete}
+                onUpgradeClick=${openUpgrade}
+            onAssignVolume=${openAssignVolume}
                 hasNote=${notedChapterIds ? notedChapterIds.has(ch.id) : false}
               />
             </div>
@@ -660,5 +786,18 @@ export function VirtualChapterList({ chapters, readerHrefFn, inLibrary, mangaId,
       </div>
       ${bulkBar}
     </div>
+    <${VolumePicker}
+      chapter=${volumeFor}
+      mangaId=${mangaId}
+      onClose=${() => setVolumeFor(null)}
+      onAssigned=${() => onUpgradeApplied?.()}
+    />
+    <${UpgradeCompare}
+      open=${!!upgrade}
+      candidate=${upgrade?.candidate}
+      chapterTitle=${upgrade?.title ?? ''}
+      onClose=${() => setUpgrade(null)}
+      onChanged=${() => onUpgradeApplied?.()}
+    />
   `;
 }

@@ -61,6 +61,20 @@ function BehaviourGroup({ settings }) {
     tracker_sync_interval_hours: settings?.tracker_sync_interval_hours ?? 24,
   });
 
+  const [syncing, setSyncing] = useState(false);
+
+  const syncNow = async () => {
+    setSyncing(true);
+    try {
+      await api.syncAllTrackers();
+      showToast(t('settings.trackers.sync_now.started'), { type: 'success' });
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const patch = async (/** @type {any} */ next) => {
     const prev = tracking;
     setTracking(next);
@@ -94,6 +108,19 @@ function BehaviourGroup({ settings }) {
         max=${168}
         onChange=${(v) => patch({ ...tracking, tracker_sync_interval_hours: v })}
       />
+      <${SettingsRow}
+        label=${t('settings.trackers.sync_now')}
+        description=${t('settings.trackers.sync_now_desc')}
+      >
+        <button
+          type="button"
+          class="btn-secondary btn-sm"
+          disabled=${syncing}
+          onClick=${syncNow}
+        >
+          ${t('settings.trackers.sync_now.action')}
+        </button>
+      <//>
     <//>
   `;
 }
@@ -234,18 +261,28 @@ function TrackerCard({ tracker, isAdmin, onChanged }) {
     <${SettingsGroup} label=${tracker.name}>
       ${tracker.configured
         ? html`<${SettingsRow}
-            label=${tracker.linked ? t('trackers.linked_label') : t('trackers.not_linked_label')}
-            description=${tracker.linked
-              ? t('trackers.linked_desc', { name: tracker.name })
-              : t('trackers.not_linked_desc', { name: tracker.name })}
+            label=${tracker.needs_reauth
+              ? t('trackers.needs_reauth_label')
+              : tracker.linked
+                ? t('trackers.linked_label')
+                : t('trackers.not_linked_label')}
+            description=${tracker.needs_reauth
+              ? t('trackers.needs_reauth_desc', { name: tracker.name })
+              : tracker.linked
+                ? t('trackers.linked_desc', { name: tracker.name })
+                : t('trackers.not_linked_desc', { name: tracker.name })}
           >
-            <button
-              type="button"
-              class=${(tracker.linked ? 'btn-danger' : 'btn-secondary') + ' btn-sm'}
-              onClick=${tracker.linked ? unlink : link}
-            >
-              ${tracker.linked ? t('trackers.unlink') : t('trackers.link')}
-            </button>
+            ${tracker.needs_reauth
+              ? html`<button type="button" class="btn-secondary btn-sm" onClick=${link}>
+                  ${t('trackers.relink')}
+                </button>`
+              : html`<button
+                  type="button"
+                  class=${(tracker.linked ? 'btn-danger' : 'btn-secondary') + ' btn-sm'}
+                  onClick=${tracker.linked ? unlink : link}
+                >
+                  ${tracker.linked ? t('trackers.unlink') : t('trackers.link')}
+                </button>`}
           <//>`
         : html`<${SettingsRow}
             label=${t('trackers.not_configured')}

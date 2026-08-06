@@ -6,6 +6,9 @@ import { getState as getSession, setState as setSession } from './session.js';
 import { getState, setState, updateState } from './cache.js';
 import { getState as getUiState } from './ui-state.js';
 import { postToServiceWorker, cacheChapter } from './offline.js';
+import { showToast } from './components/toast.js';
+import { t } from './i18n.js';
+import * as api from './api.js';
 
 const SSE_URL = '/rest/events';
 const MAX_DELAY_MS = 30_000;
@@ -48,6 +51,12 @@ export function subscribeJob(jobId, { onProgress, onComplete, onFailed, onCancel
  * @returns {{ disconnect: () => void }}
  */
 export function connectSSE() {
+  // Load the muted set before events start arriving, so the notification
+  // preference holds from the first chapter of the session rather than only
+  // for series the user has since opened.
+  api.getNotifyPrefs()
+    .then((res) => setState('mutedManga', new Set((res?.muted ?? []).map(Number))))
+    .catch(() => {});
   _connect();
   return { disconnect: _disconnect };
 }
@@ -254,6 +263,27 @@ function _handleEvent(data) {
     return;
   }
 
+  // ── Upgrades found by a scan ─────────────────────────────────────────────
+  // Emitted since upgrade detection shipped and handled by nobody, so a scan
+  // that found replaceable chapters left no trace until the user happened to
+  // open the Upgrades page.
+  if (type === 'upgrades_found') {
+    updateState('upgradesPending', (n) => (Number(n) || 0) + (Number(data.count) || 0));
+    return;
+  }
+
+  // ── A source tripped its circuit breaker ─────────────────────────────────
+  // The event carries the host and failure count and was broadcast to nothing,
+  // so requests to a failing source simply started erroring with no
+  // explanation of why or for how long.
+  if (type === 'circuit_open') {
+    showToast(
+      t('sse.circuit_open', { host: data.host ?? '?', count: data.failure_count ?? 0 }),
+      { type: 'error' },
+    );
+    return;
+  }
+
   // ── New chapters ─────────────────────────────────────────────────────────
   if (type === 'new_chapters') {
     // In-app badge notifications
@@ -281,10 +311,14 @@ function _handleEvent(data) {
 
     // Browser push notifications
     const mangaId = Number(data.manga_id);
+    // The muted set is loaded once per session, so this holds for every series
+    // rather than only those whose detail page happened to be opened. The
+    // per-page Map still wins when present, so a toggle applies immediately.
     const notifyPrefs = getUiState('mangaNotifyPrefs');
-    const notifyAllowed = notifyPrefs instanceof Map
-      ? (notifyPrefs.has(mangaId) ? notifyPrefs.get(mangaId) : true)
-      : true;
+    const muted = getState('mutedManga');
+    const notifyAllowed = notifyPrefs instanceof Map && notifyPrefs.has(mangaId)
+      ? notifyPrefs.get(mangaId)
+      : !(muted instanceof Set && muted.has(mangaId));
     if (
       notifyAllowed &&
       localStorage.getItem('kani_browser_notifications') === 'true' &&

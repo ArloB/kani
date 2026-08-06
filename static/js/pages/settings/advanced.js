@@ -161,6 +161,9 @@ export function AdvancedSection({ settings, bootId }) {
     browser_max_instances: settings?.browser_max_instances ?? null,
     browser_idle_timeout_s: settings?.browser_idle_timeout_s ?? null,
     http_request_logging: settings?.http_request_logging ?? false,
+    update_check_enabled: settings?.update_check_enabled ?? true,
+    global_search_timeout_secs: Number(settings?.global_search_timeout_secs ?? 6),
+    opds_page_index_zero_based: settings?.opds_page_index_zero_based ?? false,
     browser_debug_logging: settings?.browser_debug_logging ?? false,
     registration_enabled: settings?.registration_enabled ?? false,
   };
@@ -202,6 +205,7 @@ export function AdvancedSection({ settings, bootId }) {
   const numInput = (/** @type {string} */ key, /** @type {any} */ opts) => html`<input
     type="number"
     class="input w-24 text-sm"
+    aria-label=${opts.label}
     min=${opts.min}
     max=${opts.max}
     placeholder=${opts.placeholder}
@@ -256,40 +260,58 @@ export function AdvancedSection({ settings, bootId }) {
         description=${t('settings.advanced.wasm_instances.desc')}
         badge=${t('settings.badge.restart_required')}
       >
-        ${numInput('max_wasm_instances', { min: 1 })}
+        ${numInput('max_wasm_instances', { min: 1, label: t('settings.advanced.wasm_instances.label') })}
       <//>
       <${SettingsRow}
         label=${t('settings.advanced.cover_dim.label')}
         description=${t('settings.advanced.cover_dim.desc')}
       >
-        ${numInput('cover_max_dimension', { min: 100, max: 2000, placeholder: '800' })}
+        ${numInput('cover_max_dimension', { min: 100, max: 2000, placeholder: '800', label: t('settings.advanced.cover_dim.label') })}
       <//>
       <${SettingsRow}
         label=${t('settings.advanced.browser_max_memory.label')}
         description=${t('settings.advanced.browser_max_memory.desc')}
         tooltip=${t('settings.advanced.browser_caps.tooltip')}
       >
-        ${numInput('browser_max_memory_mb', { min: 64, max: 8192, placeholder: '512' })}
+        ${numInput('browser_max_memory_mb', { min: 64, max: 8192, placeholder: '512', label: t('settings.advanced.browser_max_memory.label') })}
       <//>
       <${SettingsRow}
         label=${t('settings.advanced.browser_max_instances.label')}
         description=${t('settings.advanced.browser_max_instances.desc')}
         tooltip=${t('settings.advanced.browser_caps.tooltip')}
       >
-        ${numInput('browser_max_instances', { min: 1, max: 16, placeholder: '2' })}
+        ${numInput('browser_max_instances', { min: 1, max: 16, placeholder: '2', label: t('settings.advanced.browser_max_instances.label') })}
       <//>
       <${SettingsRow}
         label=${t('settings.advanced.browser_idle_timeout.label')}
         description=${t('settings.advanced.browser_idle_timeout.desc')}
         tooltip=${t('settings.advanced.browser_caps.tooltip')}
       >
-        ${numInput('browser_idle_timeout_s', { min: 10, max: 3600, placeholder: '300' })}
+        ${numInput('browser_idle_timeout_s', { min: 10, max: 3600, placeholder: '300', label: t('settings.advanced.browser_idle_timeout.label') })}
       <//>
       <${ToggleRow}
         label=${t('settings.advanced.http_logging.label')}
         description=${t('settings.advanced.http_logging.desc')}
         checked=${form.http_request_logging}
         onChange=${(v) => set('http_request_logging', v)}
+      />
+      <${ToggleRow}
+        label=${t('settings.advanced.update_check.label')}
+        description=${t('settings.advanced.update_check.desc')}
+        checked=${form.update_check_enabled}
+        onChange=${(v) => set('update_check_enabled', v)}
+      />
+      <${SettingsRow}
+        label=${t('settings.advanced.global_search_timeout.label')}
+        description=${t('settings.advanced.global_search_timeout.desc')}
+      >
+        ${numInput('global_search_timeout_secs', { min: 1, max: 60, placeholder: '6', label: t('settings.advanced.global_search_timeout.label') })}
+      <//>
+      <${ToggleRow}
+        label=${t('settings.advanced.opds_zero_based.label')}
+        description=${t('settings.advanced.opds_zero_based.desc')}
+        checked=${form.opds_page_index_zero_based}
+        onChange=${(v) => set('opds_page_index_zero_based', v)}
       />
       <${ToggleRow}
         label=${t('settings.advanced.browser_logging.label')}

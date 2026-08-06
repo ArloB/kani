@@ -234,3 +234,66 @@ async fn untrash_by_token_round_trip_restores_manga() {
         .unwrap();
     assert_eq!(restore.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn notify_prefs_lists_only_the_muted_manga() {
+    let state = common::test_state().await;
+    let (u, p) = common::create_admin(&state).await;
+    let db = state.db.clone();
+    let src: i64 =
+        sqlx::query_scalar("INSERT INTO sources (name, version) VALUES ('s','1') RETURNING id")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    let mut ids = Vec::new();
+    for name in ["Muted", "Loud"] {
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO manga (source_id, source_manga_id, name, status) \
+             VALUES (?, ?, ?, 0) RETURNING id",
+        )
+        .bind(src)
+        .bind(name)
+        .bind(name)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        ids.push(id);
+    }
+
+    let app = common::build_test_app(state).await;
+    let cookie = common::login(&app, u, p).await;
+
+    // Mute the first, explicitly un-mute the second.
+    for (id, notify) in [(ids[0], false), (ids[1], true)] {
+        let res = app
+            .clone()
+            .oneshot(common::authed_put(
+                &format!("/rest/manga/{id}/tracking"),
+                &cookie,
+                serde_json::json!({ "notify_new_chapters": notify }),
+            ))
+            .await
+            .unwrap();
+        assert!(res.status().is_success(), "manga {id}: {}", res.status());
+    }
+
+    let res = app
+        .oneshot(common::authed_get("/rest/me/notify-prefs", &cookie))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = common::body_json(res).await;
+    let muted: Vec<i64> = body["muted"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_i64())
+        .collect();
+
+    assert_eq!(
+        muted,
+        vec![ids[0]],
+        "only the muted series belongs here — the client defaults to notifying, \
+         so shipping the whole library would be wasteful and wrong"
+    );
+}

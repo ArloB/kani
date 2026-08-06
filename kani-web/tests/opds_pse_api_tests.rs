@@ -88,7 +88,13 @@ async fn chapter_feed_auth_matrix() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -150,13 +156,30 @@ async fn page_endpoint_validation() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
     let app = build_test_app_with_opds(state).await;
 
-    // Valid page.
+    // Valid page — 1 is the first page.
+    let res = app
+        .clone()
+        .oneshot(bearer_get(
+            &format!("/opds/chapters/{}/page?page=1", ch.0),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Page 0 is not a valid 1-based page number.
     let res = app
         .clone()
         .oneshot(bearer_get(
@@ -165,7 +188,7 @@ async fn page_endpoint_validation() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
     // Missing page param → 400.
     let res = app
@@ -206,7 +229,13 @@ async fn file_endpoint_supports_range() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -261,7 +290,13 @@ async fn file_endpoint_streams_full_download() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -306,7 +341,13 @@ async fn progress_push_updates_last_read() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -341,6 +382,54 @@ async fn progress_push_updates_last_read() {
     assert!(text.contains(r#"pse:lastRead="2""#), "feed: {text}");
 }
 
+// The round-trip above passes under either convention, because the shift on the
+// way in cancels the shift on the way out. This pins the conversion itself: the
+// page a reader reports is 1-based, what gets stored is the 0-based index the
+// web reader also uses, and the two must not silently become the same number.
+#[tokio::test]
+async fn a_reported_page_is_stored_as_a_zero_based_index() {
+    let state = test_state().await;
+    create_admin(&state).await;
+    let ch = seed_downloaded_chapter(&state).await;
+    let uid = admin_user_id(&state).await;
+    let service = state.service.clone();
+    let token = service
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
+        .await
+        .unwrap()
+        .raw_token;
+    let app = build_test_app_with_opds(state).await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/opds/chapters/{}/progress", ch.0))
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"page":2}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    service.flush_progress_buffer().await;
+
+    let stored = service.get_chapter_progress(uid, ch).await.unwrap();
+    assert_eq!(
+        stored.map(|(p, _)| p),
+        Some(1),
+        "OPDS page 2 is the second page, stored as index 1"
+    );
+}
+
 #[tokio::test]
 async fn progress_post_with_bad_body_is_rejected() {
     let state = test_state().await;
@@ -349,7 +438,13 @@ async fn progress_post_with_bad_body_is_rejected() {
     let uid = admin_user_id(&state).await;
     let token = state
         .service
-        .create_api_token(uid, "reader", None)
+        .create_token(
+            uid,
+            "reader",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap()
         .raw_token;
@@ -381,7 +476,13 @@ async fn token_semantics() {
     // A token we will revoke.
     let revoked = state
         .service
-        .create_api_token(uid, "revoked", None)
+        .create_token(
+            uid,
+            "revoked",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
     state
@@ -393,7 +494,13 @@ async fn token_semantics() {
     // An expired token.
     let expired = state
         .service
-        .create_api_token(uid, "expired", Some(1))
+        .create_token(
+            uid,
+            "expired",
+            Some(1),
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
     sqlx::query("UPDATE api_tokens SET expires_at = unixepoch() - 10 WHERE id = ?")
@@ -405,7 +512,13 @@ async fn token_semantics() {
     // A read-only token (no opds:progress).
     let readonly = state
         .service
-        .create_api_token(uid, "readonly", None)
+        .create_token(
+            uid,
+            "readonly",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
     sqlx::query("UPDATE api_tokens SET scopes = 'opds:read' WHERE id = ?")
@@ -417,7 +530,13 @@ async fn token_semantics() {
     // A valid token used for the wrong-username Basic check.
     let good = state
         .service
-        .create_api_token(uid, "basic", None)
+        .create_token(
+            uid,
+            "basic",
+            None,
+            kani_app::service::api_tokens::TokenKind::Opds,
+            None,
+        )
         .await
         .unwrap();
 

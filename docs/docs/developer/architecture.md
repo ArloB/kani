@@ -1,119 +1,106 @@
 # Architecture
 
-Kani is a manga/anime server built around a WASM plugin system. Content sources ("extensions") are
-compiled to WASM Components; the host runtime loads and sandboxes them, then exposes a DOM/JSON
-extraction API so extensions can scrape external websites without owning the networking code.
+Kani is an Axum application and vanilla-JS/Preact SPA built around sandboxed content-source
+extensions. The service layer owns durable behavior; the web crate translates HTTP to service
+calls; `kani-core` hosts WASM, networking, extraction, downloads, archives, and scripting.
 
-## Crate layout
+## Layers
 
-| Crate | Role |
-|-------|------|
-| `kani-core` | WASM runtime, host ABI, extraction engine, CBZ/ComicInfo, downloader, V8 subprocess |
-| `kani-shared` | Shared types and traits for both host and guest |
-| `kani-app` | Business logic: library, chapters, downloads, trackers, categories, scanlators, OPDS, email, webhooks, backup/restore, import, dedup, audit, export, encryption, preferences, settings, stats |
-| `kani-web` | Axum HTTP server, REST API, RBAC auth, frontend serving |
-| `kani-cli` | Extension tooling: YAML schema, DSL parser, codegen, build orchestration, CSS/icon/setup |
-| `kani-extensions/*` | Individual extension WASM modules |
+```text
+browser / OPDS / API client
+          |
+       kani-web          HTTP, auth, permissions, CSRF, metrics, static frontend
+          |
+       kani-app          services, SQLite, jobs, sources, integrations
+          |
+       kani-core         WASM host, HTTP, extraction, download/archive machinery
+          |
+      kani-shared        guest/host ABI types and extraction AST
+```
 
-## WIT interface
+`kani-yaml` parses and validates declarative extensions. `kani-cli` uses it for authoring and build
+workflows. `kani-lease` isolates source hot-swap lease/drain coordination. Test-support crates and
+WASM-only extension members sit beside the runtime crates.
 
-Extensions are WASM Components built against a WIT world (`kani-extension`, defined in `kani-core/wit/kani.wit`).
+## WASM component interface
 
-**Host provides (imports into guest):** `http`, `html`, `json`, `utility`, `prefs`, `extraction`
+`kani-core/wit/kani.wit` defines the `kani-extension` world. The host imports HTTP, HTML, JSON,
+utility, preferences, extraction, cache, and scripting interfaces into the guest. The guest exports
+`manga-provider`.
 
-**Guest exports:** `manga-provider`
+Host calls are genuinely asynchronous. Guest bindings look synchronous for most imports, but
+Wasmtime suspends the component fiber while the host awaits I/O. The chapter-list stream export is
+a component-model async stream; the default guest bridge produces it from page-granular chapter
+calls.
 
-All cross-boundary values are opaque integer handles allocated on the host:
-
-| Handle type | Meaning |
-|-------------|---------|
-| `doc-handle` | Parsed HTML document |
-| `list-handle` | Element list from a selector query |
-| `json-handle` | JSON value tree |
-
-Handles are freed explicitly. RAII wrappers in `kani-shared/src/host_abi.rs` (`HtmlDocument`, `JsonHandle`) do this automatically.
+HTML documents, element lists, and JSON trees cross the boundary as opaque integer handles. The
+host owns their storage. Guest RAII wrappers release handles explicitly and must not be bypassed by
+retaining stale raw integers.
 
 ## Declarative extraction
 
-The primary performance primitive. Instead of the guest driving DOM traversal via hundreds of FFI
-calls, it serialises a `Blueprint` and sends it across the boundary in a single call. The host
-evaluates it natively.
+An extension sends a serialized `Blueprint` rather than making hundreds of selector calls over
+FFI. A blueprint contains a container, fields, bindings, document scalars, optional request, and
+chained-fetch behavior. The HTML or JSON evaluator returns rows and scalars in one JSON tree.
 
-| Symbol | File | Role |
-|--------|------|------|
-| `Expr` | `kani-shared/src/ast.rs` | DSL AST, ~40 variants |
-| `Blueprint` | `kani-shared/src/ast.rs` | Container selector + field definitions + bindings + scalars |
-| `BlueprintBuilder` | `kani-shared/src/ast.rs` | Fluent builder; all methods `#[inline]`, zero-cost |
-| HTML evaluator | `kani-core/src/evaluator/html_eval.rs` | Evaluates against a parsed document |
-| JSON evaluator | `kani-core/src/evaluator/json_eval.rs` | Evaluates against a JSON value tree |
+The shared `Expr` AST covers DOM and JSON navigation, lists, strings, dates, URLs, control flow,
+preferences, scalar references, and user functions. `postcard` is used for the compact guest/host
+blueprint encoding.
 
-Serialisation: `postcard`. Output: `{ "rows": [...], "scalars": {...} }`.
+Declarative YAML uses the same AST and evaluators as Rust-authored blueprints. This is an important
+contract: a feature wired only into code generation or only into interpreted YAML is not complete.
 
-Preferences are injected as `$pref:key` — use `Expr::pref("key")` in DSL.
+## Source lifecycle
 
-## Extension pattern
+Installed source metadata and artifact paths are stored in SQLite. `SourceRegistry` holds active
+backends. Installation verifies compatibility and, for repository sources, trust, digest, and
+signatures before persisting or inserting the backend.
 
-Every extension implements two traits:
+Updates are serialized per extension ID. Hot-swap uses leases so an in-flight call can finish on
+the old backend while new calls move to the replacement. A failed verification or load must leave
+the previous source usable.
 
-1. `MangaExtension` (`kani-shared/src/lib.rs`) — the actual logic.
-2. `Guest` (WIT binding) — thin delegation via a `OnceLock<T>` singleton.
+## Application service
 
-Key helpers from `kani_shared::host_abi::extract`:
+`AppService` is the shared application handle. It owns write and read pools, database path,
+`WasmRuntime`, source registry, settings cache, download manager, smart HTTP clients, event
+broadcast, request and extension caches, cancellation, trackers, email, encryption, degradations,
+webhooks, metadata providers, background jobs, update state, and per-source install locks.
 
-- `extract::html(doc_handle, &blueprint)` — evaluate a Blueprint against HTML.
-- `extract::json(handle, &blueprint)` — evaluate a Blueprint against JSON.
+Services contain business logic and SQL without depending on Axum. The web crate's `AppState`
+wraps the service and adds HTTP concerns such as authentication backend, rate limiting, CSRF,
+metrics, and static delivery.
 
-Attach HTTP requests via `.request(HttpRequest::get(...))` on the Blueprint to avoid a separate `send_html()` call.
+## Background work
 
-Return type: `ExtensionResult<T>` = `Result<T, ExtensionError>`.
+Long-lived work implements `BackgroundJob` and runs through `JobManager`. Recurring work is a
+`RecurringJobKind` dispatched by the recurring scheduler. This provides persistence, progress,
+retry, cancellation, deduplication, and UI visibility instead of unrelated `tokio::spawn` loops.
 
-## HTTP layer
+Request-scoped side effects may still spawn a task when they need none of those properties.
 
-`kani-web` is an Axum 0.8 server. Routing:
+## HTTP and authorization
 
-- REST API under `/rest/` — per-domain modules in `kani-web/src/rest/`, each exposing
-  `pub fn router() -> Router<AppState>`, merged in `rest::routes()`.
-- Static assets and SPA fallback — served from the `static/` directory embedded at compile time.
-- Swagger UI — mounted at `/api-docs`.
+REST routers are composed under `/rest`. Global middleware handles tracing, request limits,
+security headers, rate limits, sessions, API-token authentication, CSRF, and permission guards.
+Some top-level endpoints bypass cookie middleware and perform their own authentication.
 
-Auth is a global `auth_guard` middleware layer with an `is_public_path()` allow-list
-(`kani-web/src/auth.rs`). Role-based access: permissions are `resource:action` strings
-(e.g. `library:view`, `source:install`, `admin:manage`).
-
-## AppService
-
-`AppService` (`kani-app/src/service/mod.rs`) is the central application handle passed through the Axum state. It holds:
-
-- `SqlitePool`
-- `WasmRuntime`
-- `SourceManager` map
-- `DownloaderManager`
-- SSE broadcast channel
-- `TrackerRegistry`
-- `EmailService`
-- optional `CredentialCipher`
-- `WebhookService`
-- `settings: RwLock<Settings>` — in-memory cache of the singleton settings row
-
-`kani-web`'s `AppState` derefs to `AppService`, so handlers call `state.get_settings().await` directly.
+Each protected handler declares an `AuthRequirement`. Permissions are parsed `resource:action`
+values shared with roles and frontend gating. OpenAPI is generated from handler annotations and is
+served only in debug builds.
 
 ## Frontend
 
-Vanilla JS SPA (`static/js/`). Build: esbuild bundles into `static/js/dist/`. Always edit source files, never `dist/`.
+Source JavaScript lives under `static/js`; esbuild outputs `static/js/dist`. Pages are loaded by the
+SPA router. New UI is Preact/htm, while documented large or performance-sensitive pages retain
+vanilla hosts and Preact islands.
 
-Key infrastructure files:
+State is separated into session identity (`session.js`), SSE-fed server cache (`cache.js`), and
+browser-local UI state (`ui-state.js`). `api.js` owns HTTP calls, `sse.js` owns live events, and the
+flat English catalogue in `static/locales/en.js` owns visible copy.
 
-| File | Role |
-|------|------|
-| `api.js` | HTTP client, all REST calls |
-| `router.js` | SPA routing, page lifecycle |
-| `state.js` | Shared state management |
-| `sse.js` | Server-Sent Events (download progress) |
-| `i18n.js` | `t("key")` translation helper |
-| `components/` | Reusable UI components |
-| `pages/` | Page modules exported as `init(container, params)` |
+## Persistence
 
-## Database
-
-SQLite via `sqlx`. Schema managed by migrations in `migrations/`. Offline query metadata in
-`.sqlx/` (committed). Build without a live DB: `SQLX_OFFLINE=true cargo build`.
+SQLite migrations live under `migrations/`; SQLx offline metadata is committed under `.sqlx`.
+Downloaded files and manifests live under configured storage volumes. Generated encryption keys
+are sidecars to the database and are part of disaster recovery.

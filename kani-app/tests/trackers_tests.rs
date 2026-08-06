@@ -12,6 +12,17 @@ use kani_app::service::trackers::{
     store_pkce_state,
 };
 
+/// `get_tracker_mappings` walks the live registry, which only holds trackers
+/// that have an app config — an unconfigured instance returns nothing at all.
+async fn configure_both(svc: &kani_app::AppService) {
+    for name in ["AniList", "MyAnimeList"] {
+        let tid = tracker_id(svc, name).await;
+        svc.set_tracker_config(tid, "client-id", Some("client-secret"))
+            .await
+            .unwrap();
+    }
+}
+
 /// Look up the DB id of a seeded tracker by name.
 async fn tracker_id(svc: &kani_app::AppService, name: &str) -> i64 {
     sqlx::query_scalar("SELECT id FROM trackers WHERE name = ?")
@@ -189,4 +200,110 @@ async fn set_and_get_tracker_config_round_trips() {
     let items = svc.list_trackers_status(UserId(1)).await.unwrap();
     let anilist = items.iter().find(|i| i.name == "AniList").unwrap();
     assert!(anilist.configured);
+}
+
+#[tokio::test]
+async fn an_external_id_is_offered_as_a_link_suggestion() {
+    // `manga_external_ids` had a writer and no readers: migration
+    // 20260614000002 folded manga.anilist_id / mal_id into it and dropped both
+    // columns, so ids users already had became unreachable. The tracker panel
+    // now offers them.
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, "reader").await;
+    let src = insert_source(&svc.db, "src").await;
+    let manga = insert_manga(&svc.db, src, "m1", "Vagabond").await;
+    configure_both(&svc).await;
+
+    sqlx::query("INSERT INTO manga_external_ids (manga_id, provider, external_id) VALUES (?, 'anilist', '30002')")
+        .bind(manga)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let mappings = svc.get_tracker_mappings(user, manga).await.unwrap();
+    let anilist = mappings
+        .iter()
+        .find(|m| m.tracker_name == "AniList")
+        .unwrap();
+    let mal = mappings
+        .iter()
+        .find(|m| m.tracker_name == "MyAnimeList")
+        .unwrap();
+
+    assert_eq!(
+        anilist.suggested_manga_id.as_deref(),
+        Some("30002"),
+        "the stored AniList id has to reach the panel or it is dead data again"
+    );
+    assert!(
+        mal.suggested_manga_id.is_none(),
+        "an AniList id must not be offered as a MyAnimeList link"
+    );
+}
+
+#[tokio::test]
+async fn a_users_own_mapping_is_never_overridden_by_a_suggestion() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, "reader").await;
+    let src = insert_source(&svc.db, "src").await;
+    let manga = insert_manga(&svc.db, src, "m1", "Vagabond").await;
+    let tid = tracker_id(&svc, "AniList").await;
+    configure_both(&svc).await;
+
+    sqlx::query("INSERT INTO manga_external_ids (manga_id, provider, external_id) VALUES (?, 'anilist', '30002')")
+        .bind(manga)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+    set_mapping(&svc.db, user, tid, manga, "99999")
+        .await
+        .unwrap();
+
+    let mappings = svc.get_tracker_mappings(user, manga).await.unwrap();
+    let anilist = mappings
+        .iter()
+        .find(|m| m.tracker_name == "AniList")
+        .unwrap();
+
+    assert_eq!(anilist.tracker_manga_id.as_deref(), Some("99999"));
+    assert!(
+        anilist.suggested_manga_id.is_none(),
+        "once the user has chosen, their choice stands"
+    );
+}
+
+#[tokio::test]
+async fn a_mapping_reports_whether_it_has_ever_synced() {
+    let svc = test_service().await;
+    let user = insert_user(&svc.db, "reader").await;
+    let src = insert_source(&svc.db, "src").await;
+    let manga = insert_manga(&svc.db, src, "m1", "Vagabond").await;
+    let tid = tracker_id(&svc, "AniList").await;
+    configure_both(&svc).await;
+    set_mapping(&svc.db, user, tid, manga, "30002")
+        .await
+        .unwrap();
+
+    let before = svc.get_tracker_mappings(user, manga).await.unwrap();
+    let anilist = before.iter().find(|m| m.tracker_name == "AniList").unwrap();
+    assert!(
+        anilist.last_synced_at.is_none(),
+        "a fresh mapping has never synced"
+    );
+
+    sqlx::query("UPDATE tracker_manga_mappings SET last_synced_at = ? WHERE user_id = ? AND tracker_id = ? AND manga_id = ?")
+        .bind(time::OffsetDateTime::now_utc())
+        .bind(user)
+        .bind(tid)
+        .bind(manga)
+        .execute(&svc.db)
+        .await
+        .unwrap();
+
+    let after = svc.get_tracker_mappings(user, manga).await.unwrap();
+    let anilist = after.iter().find(|m| m.tracker_name == "AniList").unwrap();
+    assert!(
+        anilist.last_synced_at.is_some(),
+        "the sync schedule reads this column; so should the panel"
+    );
 }

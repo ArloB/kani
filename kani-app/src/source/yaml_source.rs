@@ -4,9 +4,8 @@ use std::sync::Arc;
 use kani_core::error::{Error, Result};
 use kani_core::wasm::AllowedHost;
 use kani_core::wasm::kani::extension::types::{
-    Chapter, ChapterInfo, ChapterList, FilterDef, FilterList, FilterOption, FilterSemantic,
-    FilterState, FilterTypeTag, MangaInfo, MangaList, MangaListItem, MangaStatus, OptionState,
-    Page, PrefKind, PreferenceSpec, SortOption,
+    Chapter, ChapterList, FilterDef, FilterList, FilterOption, FilterSemantic, FilterState,
+    FilterTypeTag, MangaInfo, MangaList, OptionState, PrefKind, PreferenceSpec, SortOption,
 };
 
 pub struct YamlSource {
@@ -22,6 +21,7 @@ pub struct YamlSource {
     browser_scripts: Arc<kani_core::scripting::BrowserScriptRegistry>,
     browser_enabled: Arc<std::sync::atomic::AtomicBool>,
     max_hook_requests: u32,
+    eval_limits: kani_core::evaluator::EvalLimits,
 }
 
 impl YamlSource {
@@ -89,7 +89,14 @@ impl YamlSource {
             browser_scripts,
             browser_enabled: Arc::new(std::sync::atomic::AtomicBool::new(browser_enabled)),
             max_hook_requests,
+            eval_limits: kani_core::evaluator::EvalLimits::default(),
         }
+    }
+
+    /// Override the evaluator limits (test seam — trip a cap without a giant fixture).
+    pub fn with_eval_limits(mut self, limits: kani_core::evaluator::EvalLimits) -> Self {
+        self.eval_limits = limits;
+        self
     }
 
     pub fn update_preferences(&self, prefs: HashMap<String, String>) {
@@ -125,6 +132,7 @@ impl YamlSource {
         state.pure_fn_registry = self.pure_fn_registry.clone();
         state.browser_scripts = Some(Arc::clone(&self.browser_scripts));
         state.max_hook_requests = self.max_hook_requests;
+        state.set_eval_limits(self.eval_limits);
         Ok(state)
     }
 
@@ -148,18 +156,24 @@ impl YamlSource {
         ext: &kani_yaml::ValidatedExtension,
         args: &HashMap<String, String>,
         endpoint_name: &str,
-    ) -> kani_shared::ast::RequestDef {
+        filters: &[kani_shared::types::ActiveFilter],
+    ) -> std::result::Result<kani_shared::ast::RequestDef, String> {
         let mut resolved = args.clone();
         kani_yaml::resolve_composite_ids(ep, &mut resolved);
-        let url = kani_yaml::build_url_with_args(&ext.base_url, &ep.route, &resolved);
-        let queries = kani_yaml::build_queries(&ep.queries, &resolved);
-        kani_shared::ast::RequestDef {
+        let url = kani_yaml::build_url_with_args(&ext.base_url, &ep.route, &resolved)?;
+        let mut queries = kani_yaml::build_queries(&ep.queries, &resolved);
+        queries.extend(kani_yaml::apply_filters(
+            &ep.filter_mapping,
+            ep.filter_format.as_ref(),
+            filters,
+        ));
+        Ok(kani_shared::ast::RequestDef {
             url,
             method: ep.method.clone(),
             headers: ep.headers.clone(),
             queries,
             endpoint_id: Some(endpoint_name.to_string()),
-        }
+        })
     }
 
     async fn eval_endpoint_once(
@@ -167,13 +181,35 @@ impl YamlSource {
         ep: &kani_yaml::ValidatedEndpoint,
         endpoint_name: &str,
         args: &HashMap<String, String>,
+        filters: &[kani_shared::types::ActiveFilter],
     ) -> std::result::Result<serde_json::Value, String> {
         use kani_core::evaluator::{html_eval, json_eval};
         use kani_yaml::yaml::schema::ResponseType;
 
-        let req = Self::make_request(ep, &self.config, args, endpoint_name);
+        let req = Self::make_request(ep, &self.config, args, endpoint_name, filters)?;
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
         let mut state = self.make_host_state().map_err(|e| e.to_string())?;
+
+        // A paginated endpoint must go through the paginated extractor — the same
+        // one codegen invokes — so the offset param (e.g. `page=1`) reaches the
+        // wire and multi-page stitching happens. The plain extractor ignores the
+        // blueprint's pagination config entirely, so an interpreted paginated
+        // source diverged from the compiled one on both request and results.
+        if ep.pagination.is_some() {
+            let page = args.get("page").and_then(|p| p.parse().ok()).unwrap_or(1);
+            let page_size = args
+                .get("page_size")
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(20);
+            return match ep.response_type {
+                ResponseType::Html => {
+                    html_eval::extract_html_paginated(&mut state, page, page_size, &bp).await
+                }
+                ResponseType::Json => {
+                    json_eval::extract_json_paginated(&mut state, page, page_size, &bp).await
+                }
+            };
+        }
 
         match ep.response_type {
             ResponseType::Html => html_eval::extract_html(&mut state, None, &bp).await,
@@ -211,7 +247,7 @@ impl YamlSource {
 
         let mut resolved = args.clone();
         kani_yaml::resolve_composite_ids(ep, &mut resolved);
-        let page_url = kani_yaml::build_url_with_args("", page_url_template, &resolved);
+        let page_url = kani_yaml::build_url_with_args("", page_url_template, &resolved)?;
 
         let mut state = self.make_host_state().map_err(|e| e.to_string())?;
         let profile_key = state.browser_profile_key.clone();
@@ -235,7 +271,7 @@ impl YamlSource {
         )
         .await?;
 
-        let req = Self::make_request(ep, &self.config, args, endpoint_name);
+        let req = Self::make_request(ep, &self.config, args, endpoint_name, &[])?;
         let bp = kani_yaml::build_blueprint(ep, &self.config, endpoint_name, req);
         json_eval::extract_json_str(&mut state, &payload, &bp).await
     }
@@ -245,20 +281,29 @@ impl YamlSource {
         ep: &kani_yaml::ValidatedEndpoint,
         endpoint_name: &str,
         args: &HashMap<String, String>,
+        filters: &[kani_shared::types::ActiveFilter],
     ) -> Result<serde_json::Value> {
         use kani_yaml::yaml::schema::EndpointVia;
 
         if ep.via == Some(EndpointVia::BrowserPayload) {
-            return self
+            let mut v = self
                 .eval_browser_payload_endpoint(ep, endpoint_name, args)
                 .await
-                .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)));
+                .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))?;
+            inject_fn_arg_fields(&mut v, ep, args);
+            return Ok(v);
         }
 
         let mut retries_left = self.max_hook_requests;
         loop {
-            match self.eval_endpoint_once(ep, endpoint_name, args).await {
-                Ok(v) => return Ok(v),
+            match self
+                .eval_endpoint_once(ep, endpoint_name, args, filters)
+                .await
+            {
+                Ok(mut v) => {
+                    inject_fn_arg_fields(&mut v, ep, args);
+                    return Ok(v);
+                }
                 Err(ref e) if e.starts_with("__refresh_auth__:") => {
                     if retries_left == 0 {
                         return Err(Error::Extension(
@@ -272,14 +317,12 @@ impl YamlSource {
                     if let Some(auth_ep) = self.config.endpoint_by_name(auth_endpoint_name) {
                         let auth_args = HashMap::new();
                         let _ = self
-                            .eval_endpoint_once(auth_ep, auth_endpoint_name, &auth_args)
+                            .eval_endpoint_once(auth_ep, auth_endpoint_name, &auth_args, &[])
                             .await;
                     }
                 }
                 Err(e) => {
-                    return Err(Error::Extension(
-                        kani_shared::extension::ExtensionError::parse(e),
-                    ));
+                    return Err(Error::Extension(classify_eval_error(e)));
                 }
             }
         }
@@ -352,14 +395,14 @@ impl YamlSource {
                         total_pages: None,
                     });
                 }
-                self.search_inner("", page, page_size).await
+                self.search_inner("", page, page_size, filters).await
             }
             Some(ValidatedPopular::Full(ep)) => {
                 let args = Self::build_args(&[
                     ("page", &page.to_string()),
                     ("page_size", &page_size.to_string()),
                 ]);
-                let result = self.eval_endpoint(ep, "popular", &args).await?;
+                let result = self.eval_endpoint(ep, "popular", &args, filters).await?;
                 Ok(unpack_manga_list(&result, ep))
             }
             None => Err(Error::Extension(
@@ -370,7 +413,13 @@ impl YamlSource {
         }
     }
 
-    async fn search_inner(&self, query: &str, page: i32, page_size: i32) -> Result<MangaList> {
+    async fn search_inner(
+        &self,
+        query: &str,
+        page: i32,
+        page_size: i32,
+        filters: &[kani_shared::types::ActiveFilter],
+    ) -> Result<MangaList> {
         let ep = self.config.search.as_ref().ok_or_else(|| {
             Error::Extension(kani_shared::extension::ExtensionError::parse(
                 "search endpoint not configured".to_string(),
@@ -383,7 +432,7 @@ impl YamlSource {
             ("page", &page_str),
             ("page_size", &page_size_str),
         ]);
-        let result = self.eval_endpoint(ep, "search", &args).await?;
+        let result = self.eval_endpoint(ep, "search", &args, filters).await?;
         Ok(unpack_manga_list(&result, ep))
     }
 
@@ -392,10 +441,10 @@ impl YamlSource {
         query: &str,
         page: i32,
         page_size: i32,
-        _filters: &[kani_shared::types::ActiveFilter],
+        filters: &[kani_shared::types::ActiveFilter],
     ) -> Result<MangaList> {
         let _permit = self.acquire().await?;
-        self.search_inner(query, page, page_size).await
+        self.search_inner(query, page, page_size, filters).await
     }
 
     pub async fn get_manga_details(&self, manga_id: &str) -> Result<MangaInfo> {
@@ -408,7 +457,7 @@ impl YamlSource {
         })?;
 
         let args = Self::build_args(&[("manga_id", manga_id)]);
-        let result = self.eval_endpoint(ep, "manga_details", &args).await?;
+        let result = self.eval_endpoint(ep, "manga_details", &args, &[]).await?;
         unpack_manga_info(&result)
     }
 
@@ -436,7 +485,7 @@ impl YamlSource {
             ("page_size", &page_size_str),
             ("sort", sort_str),
         ]);
-        let result = self.eval_endpoint(ep, "chapter_list", &args).await?;
+        let result = self.eval_endpoint(ep, "chapter_list", &args, &[]).await?;
         Ok(unpack_chapter_list(&result, ep))
     }
 
@@ -450,7 +499,7 @@ impl YamlSource {
         })?;
 
         let args = Self::build_args(&[("manga_id", manga_id), ("chapter_id", chapter_id)]);
-        let result = self.eval_endpoint(ep, "pages", &args).await?;
+        let result = self.eval_endpoint(ep, "pages", &args, &[]).await?;
         Ok(unpack_chapter(&result))
     }
 
@@ -479,11 +528,8 @@ impl YamlSource {
             ))
         })?;
         let args = Self::build_args(&[("manga_id", manga_id)]);
-        Ok(kani_yaml::build_url_with_args(
-            &self.config.base_url,
-            template,
-            &args,
-        ))
+        kani_yaml::build_url_with_args(&self.config.base_url, template, &args)
+            .map_err(|e| Error::Extension(kani_shared::extension::ExtensionError::parse(e)))
     }
 
     pub async fn get_filter_list(&self) -> Result<FilterList> {
@@ -637,159 +683,98 @@ impl YamlSource {
     }
 }
 
-fn unpack_manga_list(result: &serde_json::Value, ep: &kani_yaml::ValidatedEndpoint) -> MangaList {
-    use kani_yaml::yaml::model::{ValidatedHnp, ValidatedTotalPages};
+/// Turns an evaluator error string into a typed `ExtensionError`.
+///
+/// The evaluator marks HTTP failures whose body is not extraction-worthy
+/// (`__http_status__:429:120`); everything else is a genuine parse/extraction
+/// failure. Without this every interpreted-source failure collapsed to
+/// `ExtensionErrorKind::Parse`, so a rate-limited source could never report
+/// `RateLimited` (and honour `Retry-After`) and a 5xx could not be marked
+/// retryable distinctly.
+fn classify_eval_error(e: String) -> kani_shared::extension::ExtensionError {
+    kani_shared::extension::classify_status_error(&e)
+        .unwrap_or_else(|| kani_shared::extension::ExtensionError::parse(e))
+}
 
-    let empty = vec![];
-    let rows = result["rows"].as_array().unwrap_or(&empty);
-    let has_next_page = match &ep.has_next_page {
-        ValidatedHnp::Static(b) => *b,
-        _ => result["scalars"]["has_next_page"]
-            .as_bool()
-            .unwrap_or(false),
-    };
-    let total_pages = match &ep.total_pages {
-        ValidatedTotalPages::Static(n) => Some(*n),
-        ValidatedTotalPages::None => None,
-        ValidatedTotalPages::Scalar(_) => {
-            result["scalars"]["total_pages"].as_u64().map(|n| n as u32)
+/// Lower an endpoint's `has_next_page` config to the shared unpack spec.
+fn hnp_spec(ep: &kani_yaml::ValidatedEndpoint) -> kani_shared::unpack::HasNextPage {
+    match &ep.has_next_page {
+        kani_yaml::yaml::model::ValidatedHnp::Static(b) => {
+            kani_shared::unpack::HasNextPage::Static(*b)
         }
-    };
-    let manga = rows
+        _ => kani_shared::unpack::HasNextPage::FromScalar,
+    }
+}
+
+/// Lower an endpoint's `total_pages` config to the shared unpack spec.
+fn total_pages_spec(ep: &kani_yaml::ValidatedEndpoint) -> kani_shared::unpack::TotalPages {
+    match &ep.total_pages {
+        kani_yaml::yaml::model::ValidatedTotalPages::Static(n) => {
+            kani_shared::unpack::TotalPages::Static(*n)
+        }
+        kani_yaml::yaml::model::ValidatedTotalPages::None => kani_shared::unpack::TotalPages::None,
+        kani_yaml::yaml::model::ValidatedTotalPages::Scalar(_) => {
+            kani_shared::unpack::TotalPages::FromScalar
+        }
+    }
+}
+
+fn unpack_manga_list(result: &serde_json::Value, ep: &kani_yaml::ValidatedEndpoint) -> MangaList {
+    kani_shared::unpack::unpack_manga_list(result, hnp_spec(ep), total_pages_spec(ep), &[]).into()
+}
+
+/// Graft function-argument fields (`id: "$manga_id$"`) onto each extracted row.
+///
+/// Codegen substitutes such a field from the method argument, but the
+/// interpreted engine builds a blueprint from only the `Blueprint`-sourced
+/// fields, so a `FnArg` field never appears in the extraction result. Without
+/// this, `unpack_manga_info` sees a row missing `id` and fails — a divergence
+/// from the compiled path for the standard `$manga_id$` id pattern.
+fn inject_fn_arg_fields(
+    result: &mut serde_json::Value,
+    ep: &kani_yaml::ValidatedEndpoint,
+    args: &HashMap<String, String>,
+) {
+    use kani_yaml::yaml::model::FieldSource;
+
+    let fn_arg_fields: Vec<(String, String)> = ep
+        .fields
         .iter()
-        .filter_map(|row| {
-            let id = row["id"].as_str()?.to_string();
-            let title = row["title"].as_str()?.to_string();
-            let cover_url = row["cover_url"].as_str().map(|s| s.to_string());
-            Some(MangaListItem {
-                id,
-                title,
-                cover_url,
-            })
+        .filter_map(|f| match &f.source {
+            FieldSource::FnArg(arg) => args.get(arg).map(|v| (f.name.clone(), v.clone())),
+            _ => None,
         })
         .collect();
-    MangaList {
-        manga,
-        has_next_page,
-        total_pages,
+    if fn_arg_fields.is_empty() {
+        return;
+    }
+
+    if let Some(rows) = result.get_mut("rows").and_then(|r| r.as_array_mut()) {
+        for row in rows.iter_mut() {
+            if let Some(obj) = row.as_object_mut() {
+                for (name, val) in &fn_arg_fields {
+                    obj.insert(name.clone(), serde_json::Value::String(val.clone()));
+                }
+            }
+        }
     }
 }
 
 fn unpack_manga_info(result: &serde_json::Value) -> Result<MangaInfo> {
-    let empty = vec![];
-    let rows = result["rows"].as_array().unwrap_or(&empty);
-    let row = rows.first().ok_or_else(|| {
-        Error::Extension(kani_shared::extension::ExtensionError::parse(
-            "manga_details: no result row".to_string(),
-        ))
-    })?;
-
-    let id = row["id"]
-        .as_str()
-        .ok_or_else(|| {
-            Error::Extension(kani_shared::extension::ExtensionError::parse(
-                "manga_details: missing id".to_string(),
-            ))
-        })?
-        .to_string();
-    let title = row["title"]
-        .as_str()
-        .ok_or_else(|| {
-            Error::Extension(kani_shared::extension::ExtensionError::parse(
-                "manga_details: missing title".to_string(),
-            ))
-        })?
-        .to_string();
-    let status = match row["status"].as_str() {
-        Some("ongoing") => MangaStatus::Ongoing,
-        Some("completed") => MangaStatus::Completed,
-        Some("hiatus") => MangaStatus::Hiatus,
-        Some("cancelled") => MangaStatus::Cancelled,
-        _ => MangaStatus::Unknown,
-    };
-    Ok(MangaInfo {
-        id,
-        title,
-        cover_url: row["cover_url"].as_str().map(|s| s.to_string()),
-        description: row["description"].as_str().map(|s| s.to_string()),
-        authors: str_array(row, "authors"),
-        artists: str_array(row, "artists"),
-        status,
-        tags: str_array(row, "tags"),
-    })
-}
-
-fn str_array(row: &serde_json::Value, key: &str) -> Vec<String> {
-    row[key]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default()
+    kani_shared::unpack::unpack_manga_info(result, &[])
+        .map(Into::into)
+        .map_err(Error::Extension)
 }
 
 fn unpack_chapter_list(
     result: &serde_json::Value,
     ep: &kani_yaml::ValidatedEndpoint,
 ) -> ChapterList {
-    use kani_yaml::yaml::model::{ValidatedHnp, ValidatedTotalPages};
-
-    let empty = vec![];
-    let rows = result["rows"].as_array().unwrap_or(&empty);
-    let has_next_page = match &ep.has_next_page {
-        ValidatedHnp::Static(b) => *b,
-        _ => result["scalars"]["has_next_page"]
-            .as_bool()
-            .unwrap_or(false),
-    };
-    let total_pages = match &ep.total_pages {
-        ValidatedTotalPages::Static(n) => Some(*n),
-        ValidatedTotalPages::None => None,
-        ValidatedTotalPages::Scalar(_) => {
-            result["scalars"]["total_pages"].as_u64().map(|n| n as u32)
-        }
-    };
-    let chapters = rows
-        .iter()
-        .filter_map(|row| {
-            let id = row["id"].as_str()?.to_string();
-            Some(ChapterInfo {
-                id,
-                number: row["number"].as_f64().unwrap_or(0.0),
-                title: row["title"].as_str().map(|s| s.to_string()),
-                volume: row["volume"].as_i64().map(|v| v as i32),
-                scanlator: row["scanlator"].as_str().map(|s| s.to_string()),
-                date_uploaded: row["date_uploaded"].as_i64(),
-                language: row["language"].as_str().unwrap_or("en").to_string(),
-            })
-        })
-        .collect();
-    ChapterList {
-        chapters,
-        has_next_page,
-        total_pages,
-    }
+    kani_shared::unpack::unpack_chapter_list(result, hnp_spec(ep), total_pages_spec(ep), &[]).into()
 }
 
 fn unpack_chapter(result: &serde_json::Value) -> Chapter {
-    let empty = vec![];
-    let rows = result["rows"].as_array().unwrap_or(&empty);
-    let pages = rows
-        .iter()
-        .enumerate()
-        .filter_map(|(i, row)| {
-            let url = row["url"].as_str()?.to_string();
-            let index = row["index"].as_i64().unwrap_or(i as i64) as i32;
-            Some(Page {
-                index,
-                url,
-                transform: None,
-            })
-        })
-        .collect();
-    Chapter { pages }
+    kani_shared::unpack::unpack_pages(result, &[]).into()
 }
 
 #[cfg(test)]
@@ -809,6 +794,7 @@ impl YamlSource {
             browser_scripts: Arc::new(kani_core::scripting::BrowserScriptRegistry::default()),
             browser_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             max_hook_requests: 3,
+            eval_limits: kani_core::evaluator::EvalLimits::default(),
         }
     }
 }

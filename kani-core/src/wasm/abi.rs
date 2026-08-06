@@ -13,8 +13,6 @@ use crate::wasm::kani::extension::{
 
 use postcard;
 
-const MAX_HTTP_RESPONSE_BYTES: usize = 15 * 1024 * 1024; // 15 MB
-
 fn decode_blueprint(bytes: &[u8]) -> Result<kani_shared::ast::Blueprint, String> {
     let (version, rest) = postcard::take_from_bytes::<u32>(bytes)
         .map_err(|e| format!("Invalid blueprint header: {}", e))?;
@@ -81,7 +79,7 @@ impl http::Host for HostState {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
         let body = response
-            .bytes_limited(MAX_HTTP_RESPONSE_BYTES)
+            .bytes_limited(self.http_client.budgets().max_http_response_bytes)
             .await
             .map_err(|e| e.to_string())?
             .to_vec();

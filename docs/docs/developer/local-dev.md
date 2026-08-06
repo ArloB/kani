@@ -2,77 +2,94 @@
 
 ## Prerequisites
 
-- Rust toolchain (stable + `wasm32-unknown-unknown` target)
-- Node.js 20+ (for esbuild and the i18n check script)
-- `wasm-opt` and `wasm-tools` on `PATH`
-- Docker (optional, for integration testing against a real DB)
+- Stable Rust with the `wasm32-unknown-unknown` target.
+- Node.js for frontend checks and bundling.
+- `wasm-tools` and Binaryen's `wasm-opt` for extension components.
+- Python with MkDocs Material for documentation.
+- Docker when exercising the production image or external dependencies.
 
-## First-time setup
+## First setup
 
 ```bash
 cargo run -p kani-cli -- setup
 ```
 
-This fetches JS vendor files, downloads the Tailwind CLI binary, and configures git hooks.
+Setup downloads Preact/htm vendor files, Tailwind's standalone CLI, esbuild, and configures the git
+hooks. Re-run the relevant setup mode when a downloaded tool or vendor asset is missing.
 
-## Running the server
+## Run the server and frontend
 
 ```bash
 cargo run -p kani-web
 ```
 
-Open [http://localhost:8242](http://localhost:8242).
+Open `http://localhost:8242`. Debug builds also expose Swagger UI at `/api-docs`.
 
-## CSS (Tailwind)
+For live CSS rebuilds:
 
 ```bash
 cargo run -p kani-cli -- css --watch
 ```
 
-## Building extensions
+JavaScript source lives in `static/js`; never edit `static/js/dist`. Production builds run the
+bundling pipeline through the web crate's build script.
+
+## Build extensions
 
 ```bash
-cargo run -p kani-cli -- build kani-weebcentral
+cargo run -p kani-cli -- build kani-example
+cargo run -p kani-cli -- build kani-weebcentral --ext-dir ../kani-extensions
 cargo run -p kani-cli -- build --all
+cargo run -p kani-cli -- build --dev
 ```
 
-Output: `wasm_sources/<name>.wasm`.
+The output directory is `wasm_sources`. `--all` excludes development and ABI fixtures. Do not use a
+native `cargo build -p` for an extension.
 
-## Tests
+## Test and lint
 
 ```bash
-cargo test                                      # all non-extension crates
-cargo test -p kani-web --test system_api_tests  # specific integration test
+cargo test
+cargo test -p kani-app --lib
+cargo clippy --locked --no-deps -- -D warnings
+cargo fmt --all --check
 ```
 
-Extension crates target `wasm32-unknown-unknown` and are excluded from `default-members` — do not use `--workspace`.
+Do not add `--workspace`: WASM-only extension crates cannot link for the native target. Run focused
+DB-backed or REST tests while developing, then the default-member suite before handoff.
 
-## SQLx offline mode
+`unwrap_used` is denied. Use error propagation or an explicit branch; `expect` is reserved for a
+condition whose invariant is clear from context.
 
-All SQL queries are pre-validated. After changing a query:
+## SQLx metadata
+
+After a schema or checked-query change:
 
 ```bash
 cargo sqlx prepare --workspace -- --all-targets
 ```
 
-Commit the updated `.sqlx/` directory. Build without a live database:
+Commit `.sqlx` changes. Build without a live database with `SQLX_OFFLINE=true`.
 
-```bash
-SQLX_OFFLINE=true cargo build
-```
-
-## Linting
-
-```bash
-cargo clippy --workspace -- -D warnings
-```
-
-`unwrap_used` is denied workspace-wide — use `?`, `unwrap_or`, `expect`, or `match`.
-
-## i18n check
+## Frontend checks
 
 ```bash
 node scripts/check-i18n-keys.js
+node scripts/check-untranslated-strings.js
+node scripts/check-sanitize-css-parity.mjs
+node scripts/audit-tokens.mjs --check --max 0
 ```
 
-Fails if any `t("key")` call in `static/js/**/*.js` references a key not defined in `_catalog` (`static/js/i18n.js`).
+Visible strings use `t("key")`; English values live in `static/locales/en.js`. Color, radius,
+shadow, motion, and z-index values use design tokens.
+
+## Documentation
+
+```bash
+cd docs
+mkdocs serve
+mkdocs build --strict
+```
+
+Add every authored page to `mkdocs.yml`. `docs/site` is generated and ignored. Planning notes do
+not belong in the published docs tree.

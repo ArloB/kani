@@ -118,6 +118,7 @@ export function ImageSection({ prefs: p, setPref, applyPresentation, applyCropTo
         <div class="flex items-center justify-between gap-3">
           <span class="text-sm text-text">${t('reader.settings.tint_color')}</span>
           <input type="color" value=${p.tintColor}
+                 aria-label=${t('reader.settings.tint_color')}
                  class="w-8 h-8 rounded cursor-pointer border border-border bg-transparent shrink-0"
                  onInput=${(/** @type {any} */ e) => tint('tintColor', e.currentTarget.value)} />
         </div>

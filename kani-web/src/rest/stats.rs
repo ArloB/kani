@@ -3,9 +3,7 @@
 use super::*;
 
 pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/stats", get(reading_stats))
-        .route("/stats/pace", get(reading_pace_handler))
+    Router::new().route("/stats", get(reading_stats))
 }
 
 #[utoipa::path(
@@ -28,26 +26,4 @@ pub(crate) async fn reading_stats(
     let period = q.period.unwrap_or(90);
     let stats = state.get_reading_stats(user.id, period).await?;
     Ok(Json((*stats).clone()))
-}
-
-#[utoipa::path(
-    get, path = "/rest/stats/pace",
-    params(
-        ("period" = Option<i32>, Query, description = "Rolling window in days (default 90)"),
-    ),
-    responses(
-        (status = 200, description = "Daily reading pace: chapters-per-day for each day in the period"),
-        (status = 401, description = "Not authenticated"),
-    ),
-    security(("session" = [])),
-    tag = "chapters"
-)]
-pub(crate) async fn reading_pace_handler(
-    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
-    State(state): State<AppState>,
-    Query(q): Query<crate::models::PaceQuery>,
-) -> Result<impl IntoResponse, AppError> {
-    let period = q.period.unwrap_or(90);
-    let rows = state.get_reading_pace(user.id, period).await?;
-    Ok(Json(rows))
 }

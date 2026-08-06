@@ -11,25 +11,59 @@ use std::sync::{Arc, Mutex};
 pub const MAX_EVAL_ITERATIONS: u32 = 100_000;
 pub const MAX_EVAL_DEPTH: u32 = 50;
 pub const MAX_LIST_SIZE: usize = 10_000;
+
+/// Marker on an evaluator error that carries an HTTP status the caller should
+/// classify (`__http_status__:429:120`). Canonical definition lives in
+/// `kani_shared` so both backends decode it identically; re-exported here for
+/// the evaluator that produces it.
+pub use kani_shared::extension::HTTP_STATUS_ERR_PREFIX;
 pub const MAX_STRING_LENGTH: usize = 1_000_000;
+
+/// Overridable ceilings for the declarative evaluator. Production uses
+/// [`EvalLimits::default`] (the `MAX_*` consts); tests shrink them via
+/// [`EvalBudget::with_limits`] to trip a cap without a giant fixture.
+#[derive(Debug, Clone, Copy)]
+pub struct EvalLimits {
+    pub max_iterations: u32,
+    pub max_depth: u32,
+    pub max_list_size: usize,
+    pub max_string_length: usize,
+}
+
+impl Default for EvalLimits {
+    fn default() -> Self {
+        Self {
+            max_iterations: MAX_EVAL_ITERATIONS,
+            max_depth: MAX_EVAL_DEPTH,
+            max_list_size: MAX_LIST_SIZE,
+            max_string_length: MAX_STRING_LENGTH,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct EvalBudget {
     pub steps_remaining: AtomicU32,
     pub depth_current: AtomicU32,
+    pub limits: EvalLimits,
 }
 
 impl EvalBudget {
     pub fn new() -> Self {
+        Self::with_limits(EvalLimits::default())
+    }
+
+    pub fn with_limits(limits: EvalLimits) -> Self {
         Self {
-            steps_remaining: AtomicU32::new(MAX_EVAL_ITERATIONS),
+            steps_remaining: AtomicU32::new(limits.max_iterations),
             depth_current: AtomicU32::new(0),
+            limits,
         }
     }
 
     pub fn reset(&self) {
         self.steps_remaining
-            .store(MAX_EVAL_ITERATIONS, Ordering::Relaxed);
+            .store(self.limits.max_iterations, Ordering::Relaxed);
         self.depth_current.store(0, Ordering::Relaxed);
     }
 
@@ -40,7 +74,10 @@ impl EvalBudget {
                 if n > 0 { Some(n - 1) } else { None }
             });
         if prev.is_err() {
-            Err(format!("limit:max_iterations:{MAX_EVAL_ITERATIONS}"))
+            Err(format!(
+                "limit:max_iterations:{}",
+                self.limits.max_iterations
+            ))
         } else {
             Ok(())
         }
@@ -48,9 +85,9 @@ impl EvalBudget {
 
     pub fn enter_depth(self: &Arc<Self>) -> Result<DepthGuard, String> {
         let d = self.depth_current.fetch_add(1, Ordering::Relaxed);
-        if d >= MAX_EVAL_DEPTH {
+        if d >= self.limits.max_depth {
             self.depth_current.fetch_sub(1, Ordering::Relaxed);
-            Err(format!("limit:max_depth:{MAX_EVAL_DEPTH}"))
+            Err(format!("limit:max_depth:{}", self.limits.max_depth))
         } else {
             Ok(DepthGuard {
                 budget: Arc::clone(self),
@@ -206,6 +243,7 @@ pub async fn eval_common_expr<'a, F>(
     env: Env,
     recurse: &F,
     registry: Option<&'a crate::scripting::PureFunctionRegistry>,
+    limits: EvalLimits,
 ) -> Option<Result<Value, String>>
 where
     F: Fn(&'a Expr, Env) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>,
@@ -260,8 +298,8 @@ where
                     .split(delimiter.as_str())
                     .map(|p| Value::Str(p.to_owned()))
                     .collect();
-                if parts.len() > MAX_LIST_SIZE {
-                    return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                if parts.len() > limits.max_list_size {
+                    return Err(format!("limit:max_list_size:{}", limits.max_list_size));
                 }
                 Ok(Value::List(parts))
             })
@@ -302,8 +340,11 @@ where
                     (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
                     (s, p) => {
                         let result = p.into_str("prepend")? + s.into_str("prepend")?.as_str();
-                        if result.len() > MAX_STRING_LENGTH {
-                            return Err(format!("limit:max_string_length:{MAX_STRING_LENGTH}"));
+                        if result.len() > limits.max_string_length {
+                            return Err(format!(
+                                "limit:max_string_length:{}",
+                                limits.max_string_length
+                            ));
                         }
                         Ok(Value::Str(result))
                     }
@@ -320,8 +361,11 @@ where
                     (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
                     (s, x) => {
                         let result = s.into_str("append")? + x.into_str("append")?.as_str();
-                        if result.len() > MAX_STRING_LENGTH {
-                            return Err(format!("limit:max_string_length:{MAX_STRING_LENGTH}"));
+                        if result.len() > limits.max_string_length {
+                            return Err(format!(
+                                "limit:max_string_length:{}",
+                                limits.max_string_length
+                            ));
                         }
                         Ok(Value::Str(result))
                     }
@@ -469,8 +513,11 @@ where
                             .await
                             .and_then(|v| v.into_str("concat"))?,
                     );
-                    if s.len() > MAX_STRING_LENGTH {
-                        return Err(format!("limit:max_string_length:{MAX_STRING_LENGTH}"));
+                    if s.len() > limits.max_string_length {
+                        return Err(format!(
+                            "limit:max_string_length:{}",
+                            limits.max_string_length
+                        ));
                     }
                 }
                 Ok(Value::Str(s))
@@ -494,8 +541,8 @@ where
                 let items = recurse(target, env.clone())
                     .await
                     .and_then(|v| v.into_list("map"))?;
-                if items.len() > MAX_LIST_SIZE {
-                    return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                if items.len() > limits.max_list_size {
+                    return Err(format!("limit:max_list_size:{}", limits.max_list_size));
                 }
                 let mut results = Vec::with_capacity(items.len());
                 for (i, item) in items.into_iter().enumerate() {
@@ -517,8 +564,8 @@ where
                 let items = recurse(target, env.clone())
                     .await
                     .and_then(|v| v.into_list("flat_map"))?;
-                if items.len() > MAX_LIST_SIZE {
-                    return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                if items.len() > limits.max_list_size {
+                    return Err(format!("limit:max_list_size:{}", limits.max_list_size));
                 }
                 let mut results = Vec::new();
                 for (i, item) in items.into_iter().enumerate() {
@@ -540,8 +587,8 @@ where
                 let items = recurse(target, env.clone())
                     .await
                     .and_then(|v| v.into_list("filter"))?;
-                if items.len() > MAX_LIST_SIZE {
-                    return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                if items.len() > limits.max_list_size {
+                    return Err(format!("limit:max_list_size:{}", limits.max_list_size));
                 }
                 let mut results = Vec::new();
                 for (i, item) in items.into_iter().enumerate() {
@@ -568,8 +615,8 @@ where
                 let items = recurse(target, env.clone())
                     .await
                     .and_then(|v| v.into_list("fold"))?;
-                if items.len() > MAX_LIST_SIZE {
-                    return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                if items.len() > limits.max_list_size {
+                    return Err(format!("limit:max_list_size:{}", limits.max_list_size));
                 }
                 let mut acc = recurse(base, env.clone()).await?;
                 for (i, item) in items.into_iter().enumerate() {
@@ -632,8 +679,8 @@ where
                 .await
                 .and_then(|v| v.into_list("join"))
                 .and_then(|items| {
-                    if items.len() > MAX_LIST_SIZE {
-                        return Err(format!("limit:max_list_size:{MAX_LIST_SIZE}"));
+                    if items.len() > limits.max_list_size {
+                        return Err(format!("limit:max_list_size:{}", limits.max_list_size));
                     }
                     items
                         .into_iter()
@@ -642,8 +689,11 @@ where
                         .collect::<Result<Vec<_>, _>>()
                         .and_then(|parts| {
                             let result = parts.join(delimiter);
-                            if result.len() > MAX_STRING_LENGTH {
-                                Err(format!("limit:max_string_length:{MAX_STRING_LENGTH}"))
+                            if result.len() > limits.max_string_length {
+                                Err(format!(
+                                    "limit:max_string_length:{}",
+                                    limits.max_string_length
+                                ))
                             } else {
                                 Ok(Value::Str(result))
                             }
@@ -967,6 +1017,19 @@ pub async fn fetch_body(
             );
         }
 
+        // `Retry-After`, read before the response is consumed, so a 429 can
+        // carry the server's own wait time to the retry policy.
+        let retry_after = response
+            .headers()
+            .get(rquest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u32>().ok());
+
+        // Whether an on_status hook explicitly accepted this status. A source
+        // with hooks has opted into its own status handling, so the typed-error
+        // default below defers to it.
+        let mut proceeded = false;
+
         if let Some(ref registry) = hook_registry {
             let resp_headers: Vec<(String, String)> = response
                 .headers()
@@ -990,7 +1053,9 @@ pub async fn fetch_body(
                 .map_err(|e| format!("on_status hook: {e}"))?;
 
             match action.kind {
-                HookActionKind::Proceed => {}
+                HookActionKind::Proceed => {
+                    proceeded = true;
+                }
                 HookActionKind::Retry if hook_retries < max_hook_retries => {
                     hook_retries += 1;
                     continue;
@@ -1008,6 +1073,19 @@ pub async fn fetch_body(
                 }
                 _ => {}
             }
+        }
+
+        // Surface a typed error for statuses whose body is never useful to
+        // extraction, so an interpreted-YAML source can report RateLimited /
+        // Auth / a retryable server error instead of collapsing every failure
+        // into a parse error. 404 is deliberately excluded: some sources return
+        // it to signal "no more pages", and the chapter-list loop treats a
+        // fatal error differently from an empty body. A source that wants a
+        // non-2xx body extracted can accept it with an `on_status` Proceed hook.
+        let code = status.as_u16();
+        if !proceeded && (code == 429 || code == 401 || code == 403 || (500..600).contains(&code)) {
+            let ra = retry_after.map(|s| s.to_string()).unwrap_or_default();
+            return Err(format!("{HTTP_STATUS_ERR_PREFIX}{code}:{ra}"));
         }
 
         const MAX_BYTES: usize = 15 * 1024 * 1024;

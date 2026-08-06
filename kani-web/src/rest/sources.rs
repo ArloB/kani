@@ -1,7 +1,6 @@
 //! Extension source management & browsing routes.
 
 use super::*;
-use sqlx::Row;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -69,6 +68,7 @@ pub fn router() -> Router<AppState> {
             "/sources/{id}/preferences/{key}/toggle_select",
             post(toggle_pref_select_item),
         )
+        .route("/sources/capabilities", get(get_all_capabilities))
         .route("/sources/{id}/capabilities", get(get_capabilities))
         .route(
             "/sources/repos",
@@ -970,6 +970,13 @@ struct SourceCapabilities {
     streaming_chapters: bool,
 }
 
+#[derive(serde::Serialize)]
+struct SourceCapabilityEntry {
+    source_id: i64,
+    #[serde(flatten)]
+    capabilities: SourceCapabilities,
+}
+
 #[utoipa::path(
     get, path = "/rest/sources/{id}/capabilities",
     params(("id" = i64, Path, description = "Source ID")),
@@ -986,17 +993,61 @@ pub(crate) async fn get_capabilities(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let row =
-        sqlx::query("SELECT streaming_chapters FROM sources WHERE id = ? AND deleted_at IS NULL")
+    // Incremental chapter delivery is host-side page polling, so every
+    // installed source has it. The flag this used to read was never written.
+    let exists: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM sources WHERE id = ? AND deleted_at IS NULL")
             .bind(id)
             .fetch_optional(&state.db)
             .await
-            .map_err(|e| AppError::InternalServerError(e.to_string()))?
-            .ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
-    let streaming: bool = row.get::<i64, _>(0) != 0;
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+    exists.ok_or_else(|| AppError::NotFound(format!("Source {id} not found")))?;
     Ok(Json(SourceCapabilities {
-        streaming_chapters: streaming,
+        streaming_chapters: true,
     }))
+}
+
+/// Capabilities for every installed source in one round trip.
+///
+/// A client rendering a source list would otherwise issue one request per
+/// source to `/sources/{id}/capabilities`, which is the shape this exists to
+/// avoid — so it answers from a single query rather than looping internally
+/// and reproducing the same N problem on the server.
+#[utoipa::path(
+    get, path = "/rest/sources/capabilities",
+    responses(
+        (status = 200, description = "Capability flags for every installed source"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "sources"
+)]
+pub(crate) async fn get_all_capabilities(
+    _: AuthGuard<crate::permissions::guards::SourceBrowse>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let ids: Vec<(i64,)> =
+        sqlx::query_as("SELECT id FROM sources WHERE deleted_at IS NULL ORDER BY id")
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+    // Incremental chapter delivery is host-side page polling, so every
+    // installed source has it — the same reasoning as the per-source route.
+    // Kept in step with it deliberately: two endpoints answering the same
+    // question must not drift.
+    let out: Vec<SourceCapabilityEntry> = ids
+        .into_iter()
+        .map(|(source_id,)| SourceCapabilityEntry {
+            source_id,
+            capabilities: SourceCapabilities {
+                streaming_chapters: true,
+            },
+        })
+        .collect();
+
+    Ok(Json(out))
 }
 
 #[utoipa::path(

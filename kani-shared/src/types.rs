@@ -766,6 +766,9 @@ pub struct Chapter {
     pub last_page_read: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub download_error: Option<serde_json::Value>,
+    /// Upgrade candidates found for this chapter, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upgrade_available: Option<serde_json::Value>,
 }
 
 #[cfg(feature = "host")]
@@ -1134,7 +1137,8 @@ pub struct DownloadRule {
 #[cfg_attr(feature = "ssr", derive(sqlx::FromRow))]
 pub struct ScanlatorPreference {
     pub id: i64,
-    pub manga_id: i64,
+    /// `None` for a library-wide default. A per-manga row always wins over it.
+    pub manga_id: Option<i64>,
     pub scanlator: String,
     pub priority: i64,
     /// In `priority` mode: if `true` this scanlator is completely blocked.
@@ -1167,15 +1171,12 @@ pub struct AppSettings {
     pub library_path: String,
     pub wasm_storage_path: String,
     pub concurrent_page_downloads: i64,
-    pub concurrent_manga_downloads: i64,
-    pub chapter_queue_size: i64,
     pub max_retries: i64,
     pub initial_retry_delay_ms: i64,
     pub max_wasm_instances: i64,
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
     pub scan_exclude_completed: bool,
-    pub auto_download_category_id: Option<i64>,
     pub auto_download_category_ids: Vec<i64>,
     pub default_tracking_enabled: bool,
     pub http_request_logging: bool,
@@ -1208,9 +1209,31 @@ pub struct AppSettings {
     pub db_vacuum_interval_hours: i64,
     pub audit_prune_interval_hours: i64,
     pub trash_purge_interval_hours: i64,
+    pub integrity_quick_scrub_interval_hours: i64,
+    pub integrity_deep_scrub_interval_hours: i64,
+    pub scrub_on_startup: bool,
+    #[serde(default = "default_revalidate_days")]
+    pub integrity_revalidate_after_days: i64,
+    pub upgrade_detection_enabled: bool,
+    pub upgrade_min_res_gain: f64,
+    pub upgrade_confirm_fetches: i64,
+    pub upgrade_axis_resolution: String,
+    pub upgrade_axis_colour: String,
+    pub upgrade_axis_encoder: String,
+    pub upgrade_axis_bitrate: String,
+    pub upgrade_show_downgrades: bool,
+    pub upgrade_auto_replace_reasons: String,
     pub browser_max_memory_mb: i64,
     pub browser_max_instances: i64,
     pub browser_idle_timeout_s: i64,
+    pub update_check_enabled: bool,
+    /// OPDS-PSE `?page=` numbering. Default false = 1-based, matching how most
+    /// readers substitute `{pageNumber}`; true restores the old 0-based index.
+    pub opds_page_index_zero_based: bool,
+    #[serde(default = "default_barren_page_tolerance")]
+    pub scan_barren_page_tolerance: i64,
+    #[serde(default = "default_global_search_timeout_secs")]
+    pub global_search_timeout_secs: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1297,8 +1320,6 @@ impl AuthenticatedUser {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DownloadSettings {
     pub concurrent_page_downloads: i64,
-    pub concurrent_manga_downloads: i64,
-    pub chapter_queue_size: i64,
     pub max_retries: i64,
     pub initial_retry_delay_ms: i64,
     pub auto_download_category_ids: Vec<i64>,
@@ -1312,6 +1333,56 @@ pub struct ScanSettings {
     pub auto_scan: bool,
     pub scan_interval_minutes: i64,
     pub scan_exclude_completed: bool,
+    pub upgrade_detection_enabled: bool,
+    pub upgrade_min_res_gain: f64,
+    pub upgrade_confirm_fetches: i64,
+    // Defaulted so a client that predates the per-axis policy can still PATCH
+    // the scan settings it does know about, rather than being rejected for
+    // omitting fields it has never heard of.
+    #[serde(default = "default_axis_both")]
+    pub upgrade_axis_resolution: String,
+    #[serde(default = "default_axis_both")]
+    pub upgrade_axis_colour: String,
+    #[serde(default = "default_axis_both")]
+    pub upgrade_axis_encoder: String,
+    #[serde(default = "default_axis_gain")]
+    pub upgrade_axis_bitrate: String,
+    #[serde(default)]
+    pub upgrade_show_downgrades: bool,
+    #[serde(default = "default_auto_replace_reasons")]
+    pub upgrade_auto_replace_reasons: String,
+    #[serde(default = "default_barren_page_tolerance")]
+    pub scan_barren_page_tolerance: i64,
+}
+
+#[cfg(feature = "host")]
+fn default_revalidate_days() -> i64 {
+    30
+}
+
+#[cfg(feature = "host")]
+fn default_barren_page_tolerance() -> i64 {
+    3
+}
+
+#[cfg(feature = "host")]
+fn default_global_search_timeout_secs() -> i64 {
+    6
+}
+
+#[cfg(feature = "host")]
+fn default_axis_both() -> String {
+    "both".into()
+}
+
+#[cfg(feature = "host")]
+fn default_axis_gain() -> String {
+    "gain".into()
+}
+
+#[cfg(feature = "host")]
+fn default_auto_replace_reasons() -> String {
+    "preferred_scanlator,resolution,colour".into()
 }
 
 #[cfg(feature = "host")]
@@ -1328,6 +1399,12 @@ pub struct AdvancedSettings {
     pub browser_max_memory_mb: i64,
     pub browser_max_instances: i64,
     pub browser_idle_timeout_s: i64,
+    pub update_check_enabled: bool,
+    /// OPDS-PSE `?page=` numbering. Default false = 1-based, matching how most
+    /// readers substitute `{pageNumber}`; true restores the old 0-based index.
+    pub opds_page_index_zero_based: bool,
+    #[serde(default = "default_global_search_timeout_secs")]
+    pub global_search_timeout_secs: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1360,6 +1437,11 @@ pub struct MaintenanceSettings {
     pub audit_security_retention_days: i64,
     pub disk_warn_threshold: f64,
     pub thumbnail_formats: String,
+    pub integrity_quick_scrub_interval_hours: i64,
+    pub integrity_deep_scrub_interval_hours: i64,
+    pub scrub_on_startup: bool,
+    #[serde(default = "default_revalidate_days")]
+    pub integrity_revalidate_after_days: i64,
 }
 
 #[cfg(feature = "host")]
@@ -1636,6 +1718,7 @@ mod tests {
             is_read: true,
             last_page_read: Some(10),
             download_error: None,
+            upgrade_available: None,
         });
     }
 
@@ -1967,8 +2050,6 @@ mod tests {
     fn settings_update_json_round_trip_all_variants() {
         json_rt(&SettingsUpdate::Download(DownloadSettings {
             concurrent_page_downloads: 4,
-            concurrent_manga_downloads: 2,
-            chapter_queue_size: 100,
             max_retries: 3,
             initial_retry_delay_ms: 1000,
             auto_download_category_ids: vec![1, 2],
@@ -1979,6 +2060,16 @@ mod tests {
             auto_scan: true,
             scan_interval_minutes: 60,
             scan_exclude_completed: false,
+            upgrade_detection_enabled: true,
+            upgrade_min_res_gain: 1.2,
+            upgrade_confirm_fetches: 3,
+            upgrade_axis_resolution: "both".into(),
+            upgrade_axis_colour: "both".into(),
+            upgrade_axis_encoder: "both".into(),
+            upgrade_axis_bitrate: "gain".into(),
+            upgrade_show_downgrades: false,
+            upgrade_auto_replace_reasons: "preferred_scanlator,resolution,colour".into(),
+            scan_barren_page_tolerance: 3,
         }));
         json_rt(&SettingsUpdate::Advanced(AdvancedSettings {
             flaresolverr_url: String::new(),
@@ -1992,6 +2083,9 @@ mod tests {
             browser_max_memory_mb: 512,
             browser_max_instances: 2,
             browser_idle_timeout_s: 300,
+            update_check_enabled: true,
+            opds_page_index_zero_based: false,
+            global_search_timeout_secs: 6,
         }));
         json_rt(&SettingsUpdate::Tracking(TrackingSettings {
             default_tracking_enabled: true,

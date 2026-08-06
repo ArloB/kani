@@ -19,8 +19,18 @@ const html = htm.bind(h);
  * @param {string} initialMode
  * @param {number} dbId
  * @param {(prefs: any[]) => void} onPrefsChange
+ * @param {boolean} [initialAutoReplace]
+ * @param {(on: boolean) => void} [onAutoReplaceChange]
  */
-export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId, onPrefsChange) {
+export function mountScanlatorPrefsPanel(
+  bodyEl,
+  initialPrefs,
+  initialMode,
+  dbId,
+  onPrefsChange,
+  initialAutoReplace = false,
+  onAutoReplaceChange = () => {},
+) {
   const mount = document.createElement('div');
   bodyEl.appendChild(mount);
   render(html`<${ScanlatorPrefsPanel}
@@ -28,12 +38,23 @@ export function mountScanlatorPrefsPanel(bodyEl, initialPrefs, initialMode, dbId
     initialMode=${initialMode}
     dbId=${dbId}
     onPrefsChange=${onPrefsChange}
+    initialAutoReplace=${initialAutoReplace}
+    onAutoReplaceChange=${onAutoReplaceChange}
   />`, mount);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-function ScanlatorPrefsPanel({ initialPrefs, initialMode, dbId, onPrefsChange }) {
+function ScanlatorPrefsPanel({
+  initialPrefs,
+  initialMode,
+  dbId,
+  onPrefsChange,
+  initialAutoReplace,
+  onAutoReplaceChange,
+}) {
+  const [autoReplace, setAutoReplace] = useState(Boolean(initialAutoReplace));
+  const [autoReplaceBusy, setAutoReplaceBusy] = useState(false);
   const [prefs, setPrefs] = useState(/** @type {any[]} */ (Array.isArray(initialPrefs) ? [...initialPrefs] : []));
   const [mode, setMode] = useState(/** @type {string} */ (initialMode ?? 'priority'));
   const [scOptions, setScOptions] = useState(/** @type {Array<{id:number,name:string}>} */ ([{ id: -1, name: '* (Any scanlator)' }]));
@@ -133,6 +154,24 @@ function ScanlatorPrefsPanel({ initialPrefs, initialMode, dbId, onPrefsChange })
     };
   }, [prefs, mode, dbId]);
 
+  async function handleAutoReplaceChange(on) {
+    setAutoReplaceBusy(true);
+    const previous = autoReplace;
+    setAutoReplace(on);
+    try {
+      await api.setUpgradeAutoReplace(dbId, on);
+      onAutoReplaceChange(on);
+    } catch (e) {
+      setAutoReplace(previous);
+      showToast(
+        /** @type {any} */ (e)?.hint ?? /** @type {any} */ (e)?.message ?? t('manga.scanlator.auto_replace.failed'),
+        { type: 'error' },
+      );
+    } finally {
+      setAutoReplaceBusy(false);
+    }
+  }
+
   async function handleModeChange(newMode) {
     try {
       await api.setScanlatorMode(dbId, newMode);
@@ -216,6 +255,20 @@ function ScanlatorPrefsPanel({ initialPrefs, initialMode, dbId, onPrefsChange })
         </div>
         <button type="button" class="btn-ghost btn-sm" onClick=${handleAdd}>${t('common.add')}</button>
       </div>
+
+      <label class="flex items-start gap-3 pt-3 mt-1 border-t border-border-subtle cursor-pointer">
+        <input
+          type="checkbox"
+          class="mt-0.5"
+          checked=${autoReplace}
+          disabled=${autoReplaceBusy}
+          onChange=${(/** @type {any} */ e) => handleAutoReplaceChange(e.currentTarget.checked)}
+        />
+        <span class="flex flex-col gap-0.5">
+          <span class="text-sm text-text">${t('manga.scanlator.auto_replace')}</span>
+          <span class="text-xs text-text-muted">${t('manga.scanlator.auto_replace.desc')}</span>
+        </span>
+      </label>
     </div>
   `;
 }

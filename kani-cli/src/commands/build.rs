@@ -3,7 +3,70 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const DEV_EXTENSIONS: &[&str] = &["kani-example", "kani-test-abi"];
+const DEV_EXTENSIONS: &[&str] = &[
+    "kani-example",
+    "kani-test-abi",
+    "kani-fixture-source",
+    "kani-fixture-gen",
+];
+
+/// Where the extension crates live.
+///
+/// Site-targeting extensions are published from their own repository, so the
+/// usual working arrangement is two checkouts side by side rather than one
+/// tree. Resolution, most explicit first:
+///
+/// 1. `--ext-dir`
+/// 2. `$KANI_EXT_DIR`
+/// 3. `kani-extensions/` under the current directory
+/// 4. `../kani-extensions/` — the sibling checkout
+///
+/// The sibling step only applies when that directory actually exists, and the
+/// caller is told which one was chosen, so a build never silently compiles from
+/// somewhere the developer did not mean.
+fn resolve_dir(
+    flag: Option<&str>,
+    env_var: &str,
+    default_name: &str,
+    exists: &dyn Fn(&Path) -> bool,
+) -> (PathBuf, DirSource) {
+    if let Some(p) = flag {
+        return (PathBuf::from(p), DirSource::Flag);
+    }
+    if let Ok(p) = std::env::var(env_var)
+        && !p.trim().is_empty()
+    {
+        return (PathBuf::from(p), DirSource::Env);
+    }
+    let local = PathBuf::from(default_name);
+    if exists(&local) {
+        return (local, DirSource::Local);
+    }
+    let sibling = PathBuf::from("..").join(default_name);
+    if exists(&sibling) {
+        return (sibling, DirSource::Sibling);
+    }
+    (local, DirSource::Local)
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum DirSource {
+    Flag,
+    Env,
+    Local,
+    Sibling,
+}
+
+impl DirSource {
+    const fn describe(self) -> &'static str {
+        match self {
+            Self::Flag => "--ext-dir",
+            Self::Env => "KANI_EXT_DIR",
+            Self::Local => "the working directory",
+            Self::Sibling => "a sibling checkout",
+        }
+    }
+}
 
 pub fn run(
     extension: Option<&str>,
@@ -23,23 +86,41 @@ pub fn run(
     if let Some(ext_arg) = extension
         && (ext_arg.ends_with(".yaml") || ext_arg.ends_with(".yml"))
     {
-        let out_dir = PathBuf::from(out_dir.unwrap_or("wasm_sources"));
-        return build_factory_yaml(ext_arg, set_version, &out_dir, debug);
+        let (out_dir, _) = resolve_dir(out_dir, "KANI_OUT_DIR", "wasm_sources", &|_| true);
+        let (ext_root, _) =
+            resolve_dir(ext_dir, "KANI_EXT_DIR", "kani-extensions", &|p| p.exists());
+        return build_factory_yaml(ext_arg, &ext_root, set_version, &out_dir, debug);
     }
 
-    let extensions_dir = PathBuf::from(ext_dir.unwrap_or("kani-extensions"));
+    let (extensions_dir, from) =
+        resolve_dir(ext_dir, "KANI_EXT_DIR", "kani-extensions", &|p| p.exists());
     if !extensions_dir.exists() {
         return Err(CliError::Other(format!(
-            "{} not found — run kani-cli from the workspace root",
-            extensions_dir.display()
+            "{} not found (looked via {}). Extensions live in their own \
+             repository: clone it beside this one, or point at it with \
+             --ext-dir or KANI_EXT_DIR.",
+            extensions_dir.display(),
+            from.describe()
         )));
     }
+    if from == DirSource::Sibling || from == DirSource::Env {
+        println!(
+            "Building from {} ({})",
+            extensions_dir.display(),
+            from.describe()
+        );
+    }
 
-    let out_dir = PathBuf::from(out_dir.unwrap_or("wasm_sources"));
+    let (out_dir, _) = resolve_dir(out_dir, "KANI_OUT_DIR", "wasm_sources", &|_| true);
 
+    // An extension directory is one holding a Cargo.toml. When extensions lived
+    // inside the server tree this could assume every subdirectory was a crate;
+    // an external checkout is a repository root, so it also contains .git, and
+    // target/ once anything has been built there.
     let dirs: Vec<String> = fs::read_dir(&extensions_dir)?
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| e.path().join("Cargo.toml").is_file())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
 
@@ -65,7 +146,13 @@ pub fn run(
     };
 
     for name in &to_build {
-        build_one(name, set_version, &out_dir, debug)?;
+        build_one(
+            name,
+            &extensions_dir.join(name),
+            set_version,
+            &out_dir,
+            debug,
+        )?;
     }
 
     Ok(())
@@ -73,6 +160,7 @@ pub fn run(
 
 fn build_factory_yaml(
     yaml_path: &str,
+    ext_root: &Path,
     set_version: Option<&str>,
     out_dir: &Path,
     debug: bool,
@@ -107,13 +195,6 @@ fn build_factory_yaml(
     let base_value: serde_yaml::Value = serde_yaml::from_str(&source)
         .map_err(|e| CliError::Other(format!("YAML re-parse error: {e}")))?;
 
-    let workspace_root = path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .ancestors()
-        .find(|p| p.join("Cargo.toml").exists())
-        .unwrap_or(Path::new("."));
-
     let sources = factory.sources.clone();
     for source_def in &sources {
         println!("── Factory source: {}", source_def.id);
@@ -147,9 +228,7 @@ fn build_factory_yaml(
 
         let generated = crate::codegen::generate(&validated, false);
 
-        let crate_dir = workspace_root
-            .join("kani-extensions")
-            .join(format!("kani-{}", generated.id));
+        let crate_dir = ext_root.join(format!("kani-{}", generated.id));
 
         fs::create_dir_all(crate_dir.join("src"))?;
         fs::write(crate_dir.join("Cargo.toml"), &generated.cargo_toml)?;
@@ -167,7 +246,7 @@ fn build_factory_yaml(
         println!("   Generated: {}", crate_dir.display());
 
         let crate_name = format!("kani-{}", generated.id);
-        build_one(&crate_name, set_version, out_dir, debug)?;
+        build_one(&crate_name, &crate_dir, set_version, out_dir, debug)?;
     }
 
     Ok(())
@@ -247,8 +326,17 @@ fn set_dot_path(root: &mut serde_yaml::Value, path: &str, value: serde_yaml::Val
     }
 }
 
+/// Compile one extension crate to a WASM component.
+///
+/// `crate_dir` matters: extensions live in their own repository now, so the
+/// crate is usually *not* a member of the workspace kani-cli was invoked from.
+/// `cargo build -p <name>` would resolve against the caller's workspace and
+/// fail with "package not found" — every cargo call here is anchored to the
+/// crate's own manifest instead, and the artifact is located through the
+/// `target_directory` cargo reports rather than assuming `./target`.
 fn build_one(
     name: &str,
+    crate_dir: &Path,
     set_version: Option<&str>,
     out_dir: &Path,
     debug: bool,
@@ -256,14 +344,23 @@ fn build_one(
     let profile = if debug { "wasm-debug" } else { "wasm-release" };
     println!("── Building {name} [{profile}]");
 
+    let manifest = crate_dir.join("Cargo.toml");
+    if !manifest.exists() {
+        return Err(CliError::Other(format!(
+            "{} not found — is {name} an extension crate?",
+            manifest.display()
+        )));
+    }
+    let manifest_str = manifest.to_string_lossy().into_owned();
+
     let mut cargo_args = vec![
         "build",
         "--target",
         "wasm32-unknown-unknown",
         "--profile",
         profile,
-        "-p",
-        name,
+        "--manifest-path",
+        &manifest_str,
     ];
     // Temporary storage so the string outlives the vec push
     let version_config;
@@ -278,30 +375,42 @@ fn build_one(
     }
 
     let metadata_output = Command::new("cargo")
-        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--manifest-path",
+            &manifest_str,
+        ])
         .output()?;
 
     let mut ext_id = name.to_string();
+    let mut target_dir = PathBuf::from("target");
 
     if metadata_output.status.success()
         && let Ok(json) = serde_json::from_slice::<serde_json::Value>(&metadata_output.stdout)
-        && let Some(pkg) = json["packages"]
+    {
+        if let Some(dir) = json["target_directory"].as_str() {
+            target_dir = PathBuf::from(dir);
+        }
+        if let Some(pkg) = json["packages"]
             .as_array()
             .and_then(|pkgs| pkgs.iter().find(|p| p["name"] == name))
-        && let Some(id) = pkg["metadata"]["id"]
-            .as_str()
-            .or_else(|| pkg["metadata"]["kani"]["id"].as_str())
-    {
-        ext_id = id.to_string();
+            && let Some(id) = pkg["metadata"]["id"]
+                .as_str()
+                .or_else(|| pkg["metadata"]["kani"]["id"].as_str())
+        {
+            ext_id = id.to_string();
+        }
     }
 
     fs::create_dir_all(out_dir)?;
 
-    let src = PathBuf::from(format!(
-        "target/wasm32-unknown-unknown/{}/{}.wasm",
-        profile,
-        name.replace('-', "_"),
-    ));
+    let src = target_dir
+        .join("wasm32-unknown-unknown")
+        .join(profile)
+        .join(format!("{}.wasm", name.replace('-', "_")));
 
     let dest = out_dir.join(format!("{ext_id}.wasm"));
     fs::copy(&src, &dest)?;
@@ -384,5 +493,98 @@ fn is_available(tool: &str) -> bool {
     match Command::new(tool).arg("--version").output() {
         Ok(_) => true,
         Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    }
+}
+
+#[cfg(test)]
+mod dir_resolution_tests {
+    use super::{DirSource, resolve_dir};
+    use std::path::{Path, PathBuf};
+
+    /// Env vars are process-global; these tests share one and must not run
+    /// concurrently with each other.
+    fn with_env<T>(key: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let previous = std::env::var(key).ok();
+        match value {
+            // Safety: single-threaded within the guard, and restored after.
+            Some(v) => unsafe { std::env::set_var(key, v) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+        let out = f();
+        match previous {
+            Some(p) => unsafe { std::env::set_var(key, p) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+        out
+    }
+
+    const NOTHING_EXISTS: &dyn Fn(&Path) -> bool = &|_: &Path| false;
+
+    #[test]
+    fn the_flag_wins_over_everything() {
+        with_env("KANI_TEST_EXT_DIR", Some("/from/env"), || {
+            let (p, src) = resolve_dir(
+                Some("/from/flag"),
+                "KANI_TEST_EXT_DIR",
+                "kani-extensions",
+                &|_| true,
+            );
+            assert_eq!(p, PathBuf::from("/from/flag"));
+            assert_eq!(src, DirSource::Flag);
+        });
+    }
+
+    #[test]
+    fn the_env_var_wins_over_a_directory_that_exists_locally() {
+        with_env("KANI_TEST_EXT_DIR2", Some("/from/env"), || {
+            let (p, src) = resolve_dir(None, "KANI_TEST_EXT_DIR2", "kani-extensions", &|_| true);
+            assert_eq!(p, PathBuf::from("/from/env"));
+            assert_eq!(src, DirSource::Env);
+        });
+    }
+
+    #[test]
+    fn an_empty_env_var_is_ignored_rather_than_used_as_a_path() {
+        with_env("KANI_TEST_EXT_DIR3", Some("   "), || {
+            let (p, src) = resolve_dir(None, "KANI_TEST_EXT_DIR3", "kani-extensions", &|_| true);
+            assert_eq!(p, PathBuf::from("kani-extensions"));
+            assert_eq!(src, DirSource::Local);
+        });
+    }
+
+    #[test]
+    fn a_local_directory_is_preferred_to_the_sibling() {
+        with_env("KANI_TEST_EXT_DIR4", None, || {
+            let (p, src) = resolve_dir(None, "KANI_TEST_EXT_DIR4", "kani-extensions", &|p| {
+                p == Path::new("kani-extensions")
+            });
+            assert_eq!(p, PathBuf::from("kani-extensions"));
+            assert_eq!(src, DirSource::Local);
+        });
+    }
+
+    #[test]
+    fn the_sibling_checkout_is_found_when_there_is_no_local_one() {
+        with_env("KANI_TEST_EXT_DIR5", None, || {
+            let (p, src) = resolve_dir(None, "KANI_TEST_EXT_DIR5", "kani-extensions", &|p| {
+                p == Path::new("../kani-extensions")
+            });
+            assert_eq!(p, PathBuf::from("../kani-extensions"));
+            assert_eq!(src, DirSource::Sibling);
+        });
+    }
+
+    #[test]
+    fn with_neither_present_it_reports_the_local_path_so_the_error_names_it() {
+        with_env("KANI_TEST_EXT_DIR6", None, || {
+            let (p, src) = resolve_dir(
+                None,
+                "KANI_TEST_EXT_DIR6",
+                "kani-extensions",
+                NOTHING_EXISTS,
+            );
+            assert_eq!(p, PathBuf::from("kani-extensions"));
+            assert_eq!(src, DirSource::Local);
+        });
     }
 }

@@ -120,6 +120,25 @@ function ManageSearchesModal({ searches, onChanged, onClose }) {
   const [items, setItems] = useState(searches);
   const [busyId, setBusyId] = useState(/** @type {number|null} */ (null));
 
+  async function _rename(/** @type {any} */ s) {
+    const name = prompt(t('saved_searches.rename.prompt'), s.name);
+    const trimmed = name?.trim();
+    if (!trimmed || trimmed === s.name) return;
+    setBusyId(s.id);
+    try {
+      // The endpoint takes the whole body, so the query has to be resent
+      // unchanged or a rename would blank it.
+      await api.updateSavedSearch(s.id, { name: trimmed, query_json: s.query_json });
+      showToast(t('saved_searches.toast.renamed'), { type: 'success' });
+      setItems(prev => prev.map(x => (x.id === s.id ? { ...x, name: trimmed } : x)));
+      onChanged();
+    } catch (e) {
+      showApiError(e);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function _delete(/** @type {any} */ s) {
     const ok = await showConfirm(t('saved_searches.delete.confirm', { name: s.name }),
       { title: t('common.delete'), confirmLabel: t('common.delete'), danger: true });
@@ -146,6 +165,10 @@ function ManageSearchesModal({ searches, onChanged, onClose }) {
             ${items.map(s => html`
               <div key=${s.id} class="flex items-center gap-3 py-2.5">
                 <span class="flex-1 text-sm text-text truncate">${s.name}</span>
+                <button type="button" class="btn-ghost btn-sm shrink-0"
+                  disabled=${busyId === s.id} onClick=${() => _rename(s)}>
+                  ${t('saved_searches.rename')}
+                </button>
                 <button type="button" class="btn-icon text-danger shrink-0"
                   aria-label=${t('common.delete')} disabled=${busyId === s.id}
                   onClick=${() => _delete(s)}>

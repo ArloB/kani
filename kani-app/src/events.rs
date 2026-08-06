@@ -44,6 +44,10 @@ pub enum AppEvent {
         field: String,
         error: String,
     },
+    UpgradesFound {
+        manga_id: i64,
+        count: u64,
+    },
     ChapterListPartial {
         manga_id: MangaId,
         received: usize,

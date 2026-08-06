@@ -1,6 +1,8 @@
 [package]
 name = "kani-web"
-version = "0.1.0"
+version = "0.9.0"
+license.workspace = true
+repository.workspace = true
 edition = "2024"
 build = "build.rs"
 
@@ -27,13 +29,14 @@ tower-http = { version = "0.6", features = [
   "fs",
   "set-header",
   "trace",
+  "request-id",
 ] }
 sqlx.workspace = true
 rquest = { version = "5.1", features = ["json"] }
 rquest-util = "2.2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 kani-core = { path = "../kani-core" }
 kani-app  = { path = "../kani-app" }
@@ -65,13 +68,21 @@ tower = { version = "0.5", features = ["util"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 semver = "1"
+axum-prometheus = "0.10.0"
+metrics = "0.24"
+# interpolate-folder-path expands $OUT_DIR in the #[folder] attribute, which is
+# how the embed reads the assets build.rs stages rather than the source tree.
+rust-embed = { version = "8.12.0", features = ["mime-guess", "interpolate-folder-path"] }
+mime_guess = "2.0.5"
 
 [dev-dependencies]
 tempfile = "3.27.0"
 http-body-util = "0.1"
-zip = "2"
+zip = "7"
 kani-app = { path = "../kani-app", features = ["test-util"] }
 kani-shared-test = { path = "../kani-shared-test" }
+kani-yaml = { path = "../kani-yaml" }
+quick-xml = "0.39.2"
 moka = { workspace = true }
 async-trait = "0.1"
 ed25519-dalek.workspace = true

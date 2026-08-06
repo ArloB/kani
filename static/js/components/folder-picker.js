@@ -5,6 +5,9 @@ import { h } from 'preact';
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import htm from 'htm';
 import { Modal } from './modal.js';
+import { Icon } from './icon.js';
+import { EmptyState } from './empty-state.js';
+import { iconFolder, iconChevronRight, iconSpinner } from '../icons.js';
 import * as api from '../api.js';
 import { t } from '../i18n.js';
 
@@ -90,7 +93,12 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
 
   return html`
     <${Modal} open=${open} onClose=${onClose} title=${t('folder_picker.title')} wide=${true} footer=${footer}>
-      ${loading && html`<p class="text-sm text-text-muted py-2">${t('common.loading')}</p>`}
+      ${loading && html`
+        <p class="flex items-center gap-2 text-sm text-text-muted py-2">
+          <span class="icon-sm"><${Icon} svg=${iconSpinner} /></span>
+          ${t('common.loading')}
+        </p>
+      `}
       ${error && html`<p class="text-sm text-danger py-2">${error}</p>`}
 
       ${/* Drives (Windows only, shown at root level) */ drives.length > 0 && html`
@@ -109,40 +117,52 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
       `}
 
       ${/* Breadcrumb */ segments.length > 0 && html`
-        <div class="flex items-center flex-wrap gap-1 text-sm mb-3 font-mono">
+        <nav class="flex items-center flex-wrap gap-1 text-sm mb-3" aria-label=${t('folder_picker.breadcrumb')}>
           ${segments.map((seg, i) => html`
-            ${i > 0 && html`<span class="text-text-muted">/</span>`}
+            ${i > 0 && html`
+              <span class="icon-xs text-text-faint" aria-hidden="true"><${Icon} svg=${iconChevronRight} /></span>
+            `}
             <button
               type="button"
-              class="text-primary hover:underline"
+              class=${'font-mono px-1 py-0.5 rounded ' + (i === segments.length - 1
+                ? 'text-text font-medium'
+                : 'text-text-muted hover:text-text hover:bg-surface-2')}
+              aria-current=${i === segments.length - 1 ? 'location' : undefined}
               onClick=${() => load(buildPath(segments, i))}
             >${seg}</button>
           `)}
-        </div>
+        </nav>
       `}
 
       ${/* Directory list */ !loading && html`
-        <div class="border border-border rounded-lg overflow-hidden mb-3">
-          ${dirs.length === 0 && html`
-            <p class="text-sm text-text-muted px-3 py-2">${t('folder_picker.no_subdirs')}</p>
-          `}
-          ${dirs.map(dir => html`
-            <button
-              type="button"
-              key=${dir}
-              class=${'w-full text-left flex items-center gap-2 px-3 py-2 text-sm hover:bg-surface-2 ' + (selectedPath === currentPath + '/' + dir || selectedPath === currentPath + dir ? 'bg-surface-2 font-medium' : '')}
-              onClick=${() => {
-                const next = currentPath.endsWith('/') || currentPath.endsWith('\\')
-                  ? currentPath + dir
-                  : currentPath + '/' + dir;
-                setSelectedPath(next);
-                load(next);
-              }}
-            >
-              <span class="text-text-muted">📁</span>
-              <span>${dir}</span>
-            </button>
-          `)}
+        <div class="border border-border rounded-lg overflow-hidden mb-3 max-h-72 overflow-y-auto">
+          ${dirs.length === 0
+            ? html`<${EmptyState} compact=${true} title=${t('folder_picker.no_subdirs')} />`
+            : html`
+              <ul class="divide-y divide-border-subtle">
+                ${dirs.map(dir => html`
+                  <li key=${dir}>
+                    <button
+                      type="button"
+                      class="w-full text-left flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-surface-2 focus-visible:bg-surface-2"
+                      onClick=${() => {
+                        const next = currentPath.endsWith('/') || currentPath.endsWith('\\')
+                          ? currentPath + dir
+                          : currentPath + '/' + dir;
+                        setSelectedPath(next);
+                        load(next);
+                      }}
+                    >
+                      <span class="icon-sm text-text-faint shrink-0"><${Icon} svg=${iconFolder} /></span>
+                      <span class="truncate">${dir}</span>
+                      <span class="icon-xs text-text-faint ml-auto shrink-0" aria-hidden="true">
+                        <${Icon} svg=${iconChevronRight} />
+                      </span>
+                    </button>
+                  </li>
+                `)}
+              </ul>
+            `}
         </div>
       `}
 
@@ -150,6 +170,7 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
         <input
           type="text"
           class="input text-sm flex-1"
+          aria-label=${t('folder_picker.new_folder')}
           placeholder=${t('folder_picker.new_folder_placeholder')}
           value=${newFolderName}
           onInput=${(/** @type {any} */ e) => { setNewFolderName(e.target.value); setCreateError(null); }}
@@ -166,8 +187,8 @@ export function FolderPicker({ open, onClose, onSelect, initialPath = '/' }) {
       ${createError && html`<p class="text-xs text-danger mt-1">${createError}</p>`}
 
       <div class="mt-4 pt-3 border-t border-border-subtle">
-        <p class="text-xs text-text-muted">${t('folder_picker.selected')}</p>
-        <p class="text-sm font-mono text-text break-all">${selectedPath}</p>
+        <p class="text-xs uppercase tracking-wide text-text-muted">${t('folder_picker.selected')}</p>
+        <p class="text-sm font-mono text-text break-all mt-0.5">${selectedPath}</p>
       </div>
     </${Modal}>
   `;

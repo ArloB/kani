@@ -1,16 +1,14 @@
 // @ts-check
 import { h, render } from 'preact';
 import htm from 'htm';
+import { Icon } from '../icon.js';
+import { iconSpinner } from '../../icons.js';
 import { t } from '../../i18n.js';
 
 const html = htm.bind(h);
 
 function Spinner() {
-  return html`
-    <svg class="animate-spin w-8 h-8 text-accent" viewBox="0 0 24 24" fill="none">
-      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
-    </svg>`;
+  return html`<span class="icon-2xl text-accent"><${Icon} svg=${iconSpinner} /></span>`;
 }
 
 /** @param {{ progressText: string, onCancel: () => void }} props */

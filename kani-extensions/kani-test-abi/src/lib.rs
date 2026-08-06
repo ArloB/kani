@@ -34,6 +34,13 @@
 //!                                               call from inside its spawn_local writer
 //!                                               while the host is concurrently draining
 
+#[cfg(not(target_family = "wasm"))]
+compile_error!(
+    "kani-extensions/* are WASM-only -- build with `cargo run -p kani-cli -- build <name>`. \
+     If a tool triggered this, it is using --workspace (or defaulting to it); scope it to \
+     default-members instead -- clippy/nextest omit the flag, cargo-dist needs precise-builds."
+);
+
 use kani_shared::bindings::exports::kani::extension::manga_provider::Guest;
 use kani_shared::bindings::kani::extension::{json, prefs as prefs_raw};
 use kani_shared::html;
@@ -380,6 +387,7 @@ fn test_native_chapter_list_stream()
             scanlator: None,
             date_uploaded: None,
             language: "en".into(),
+            page_count: Some(19),
         };
         let (result, _buf) = tx.write(vec![Ok(first)]).await;
         if !matches!(result, kani_shared::StreamResult::Complete(_)) {
@@ -403,6 +411,7 @@ fn test_native_chapter_list_stream()
             scanlator: None,
             date_uploaded: None,
             language: "en".into(),
+            page_count: None,
         };
         let _ = tx.write(vec![Ok(second)]).await;
     });
@@ -484,6 +493,7 @@ fn test_paginated_chapter_list(page: i32) -> ChapterList {
             scanlator: None,
             date_uploaded: None,
             language: "en".to_string(),
+            page_count: Some(number as u32 + 10),
         }
     }
     match page {

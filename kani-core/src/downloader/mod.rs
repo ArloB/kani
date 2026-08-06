@@ -21,8 +21,23 @@ use tokio_util::sync::CancellationToken;
 #[derive(Debug)]
 pub enum DownloadError {
     PageFetch(String),
+    /// A page failed with a specific HTTP status. Kept structured so retry
+    /// policy is a numeric decision rather than a substring search over
+    /// formatted error text.
+    PageHttp {
+        status: u16,
+        retry_after_secs: Option<u64>,
+        message: String,
+    },
     Io(std::io::Error),
-    Extension(String),
+    Extension {
+        kind: kani_shared::extension::ExtensionErrorKind,
+        message: String,
+        /// From the extension's `ExtensionError` — a source's own `Retry-After`
+        /// when it reported RateLimited. Dropped here before, so the retry
+        /// policy could not honour it.
+        retry_after_secs: Option<u32>,
+    },
     Cancelled,
 }
 
@@ -30,14 +45,34 @@ impl std::fmt::Display for DownloadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PageFetch(msg) => write!(f, "page fetch failed: {msg}"),
+            Self::PageHttp {
+                status, message, ..
+            } => write!(f, "page fetch failed with HTTP {status}: {message}"),
             Self::Io(e) => write!(f, "io error: {e}"),
-            Self::Extension(msg) => write!(f, "extension error: {msg}"),
+            Self::Extension { message, .. } => write!(f, "extension error: {message}"),
             Self::Cancelled => write!(f, "cancelled"),
         }
     }
 }
 
 impl std::error::Error for DownloadError {}
+
+impl DownloadError {
+    fn from_page_list_error(e: crate::error::Error) -> Self {
+        match e {
+            crate::error::Error::Extension(ext) => Self::Extension {
+                kind: ext.kind,
+                message: ext.message,
+                retry_after_secs: ext.retry_after_secs,
+            },
+            other => Self::Extension {
+                kind: kani_shared::extension::ExtensionErrorKind::Unknown,
+                message: other.to_string(),
+                retry_after_secs: None,
+            },
+        }
+    }
+}
 
 /// Successful outcome of [`DownloaderManager::download_chapter_direct`].
 pub struct DownloadOutcome {
@@ -227,6 +262,26 @@ impl DownloaderManager {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// `Retry-After` as whole seconds. Only the delta-seconds form is read; the
+    /// HTTP-date form is rare in practice and guessing at clock skew is worse than
+    /// falling back to our own backoff.
+    fn retry_after_secs(headers: &rquest::header::HeaderMap) -> Option<u64> {
+        headers
+            .get(rquest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+    }
+
+    /// Statuses no amount of retrying will change.
+    fn is_permanent_http(e: &error::Error) -> bool {
+        matches!(
+            e,
+            error::Error::HttpStatus { status, .. }
+                if matches!(status, 400 | 401 | 403 | 404 | 405 | 410 | 451)
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn download_page_with_retry(
         client: &SmartClient,
         url: &str,
@@ -247,6 +302,14 @@ impl DownloaderManager {
             {
                 Ok(data) => return Ok(data),
                 Err(e) => {
+                    // A page that is gone, forbidden or malformed will still be
+                    // gone on the third attempt. Retrying it burns the whole
+                    // backoff schedule — up to 30s a step — per page, turning a
+                    // chapter with one dead image into a multi-minute stall.
+                    if Self::is_permanent_http(&e) {
+                        tracing::warn!("Page {page_index} failed permanently: {e}");
+                        return Err(e);
+                    }
                     attempts += 1;
                     if attempts >= max_attempts {
                         tracing::error!(
@@ -277,6 +340,46 @@ impl DownloaderManager {
         }
     }
 
+    /// Test hook for `download_page_with_retry`.
+    #[cfg(any(test, feature = "test-util"))]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn download_page_with_retry_for_test(
+        client: &SmartClient,
+        url: &str,
+        page_index: i32,
+        staging_dir: &std::path::Path,
+        max_attempts: i64,
+        initial_retry_delay_ms: i64,
+        base_url: &str,
+        transform: Option<&str>,
+    ) -> Result<(PathBuf, String)> {
+        Self::download_page_with_retry(
+            client,
+            url,
+            page_index,
+            staging_dir,
+            max_attempts,
+            initial_retry_delay_ms,
+            base_url,
+            transform,
+        )
+        .await
+    }
+
+    /// Test hook for `download_page`, which is otherwise reachable only through
+    /// a whole chapter download.
+    #[cfg(any(test, feature = "test-util"))]
+    pub async fn download_page_for_test(
+        client: &SmartClient,
+        url: &str,
+        page: i32,
+        staging_dir: &std::path::Path,
+        referer: &str,
+        transform: Option<&str>,
+    ) -> Result<(PathBuf, String)> {
+        Self::download_page(client, url, page, staging_dir, referer, transform).await
+    }
+
     async fn download_page(
         client: &SmartClient,
         url: &str,
@@ -296,24 +399,56 @@ impl DownloaderManager {
 
         let status = resp.status();
         if !status.is_success() {
-            return Err(error::Error::Other(format!(
-                "HTTP {status} downloading page {page}"
-            )));
+            return Err(error::Error::HttpStatus {
+                status: status.as_u16(),
+                retry_after_secs: Self::retry_after_secs(resp.headers()),
+                context: format!("downloading page {page}"),
+            });
         }
 
-        let scramble_seed = transform
-            .and_then(|hint| crate::image_transform::resolve_scramble_seed(hint, resp.headers()));
+        let resolved = transform.and_then(|hint| {
+            crate::transform::registry().resolve(
+                hint,
+                crate::transform::TransformKind::Image,
+                resp.headers(),
+            )
+        });
 
-        let (extension, filename) = if scramble_seed.is_some() {
-            ("jpg", format!("{:04}.jpg", page))
+        let announced = resp
+            .headers()
+            .get(rquest::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+
+        // The first chunk is read before the name is chosen, so a body whose
+        // Content-Type and URL both say nothing can still be identified from
+        // its magic bytes.
+        let first_chunk = resp.chunk().await?;
+        let (extension, filename) = if let Some(r) = &resolved {
+            let ext = r.output().file_extension;
+            (ext, format!("{:04}.{}", page, ext))
         } else {
-            let ext = Self::get_image_extension(&resp, url);
+            let ext = Self::get_image_extension_sniffed(
+                &resp,
+                url,
+                first_chunk.as_deref().unwrap_or(&[]),
+            );
             (ext, format!("{:04}.{}", page, ext))
         };
         let tmp_file_path = staging_dir.join(format!("{:04}.{}.tmp", page, extension));
+        // Written under `.part` and renamed only once the body is complete.
+        // `.tmp` is what a resumed download treats as "already fetched", so a
+        // file must never carry that name until it is whole — an interrupted
+        // transfer used to leave a truncated `.tmp` behind, and the next run
+        // sealed it into the CBZ without re-fetching, then recorded its hash as
+        // correct. Silent and permanent.
+        let part_file_path = staging_dir.join(format!("{:04}.{}.part", page, extension));
 
-        if let Some(seed) = scramble_seed {
+        if let Some(r) = &resolved {
             let mut raw: Vec<u8> = Vec::new();
+            if let Some(ref c) = first_chunk {
+                raw.extend_from_slice(c);
+            }
             while let Some(chunk) = resp.chunk().await? {
                 raw.extend_from_slice(&chunk);
             }
@@ -322,13 +457,18 @@ impl DownloaderManager {
                     "Server returned empty body for page {page}"
                 )));
             }
-            let descrambled = crate::image_transform::lcg_tile_descramble(&raw, seed)?;
-            let mut file = tokio::fs::File::create(&tmp_file_path).await?;
+            Self::check_complete(announced, raw.len() as u64, page)?;
+            let descrambled = r.apply(&raw)?;
+            let mut file = tokio::fs::File::create(&part_file_path).await?;
             file.write_all(&descrambled).await?;
             file.flush().await?;
         } else {
-            let mut file = tokio::fs::File::create(&tmp_file_path).await?;
+            let mut file = tokio::fs::File::create(&part_file_path).await?;
             let mut bytes_written: u64 = 0;
+            if let Some(ref c) = first_chunk {
+                bytes_written += c.len() as u64;
+                file.write_all(c).await?;
+            }
             while let Some(chunk) = resp.chunk().await? {
                 bytes_written += chunk.len() as u64;
                 file.write_all(&chunk).await?;
@@ -339,9 +479,63 @@ impl DownloaderManager {
                     "Server returned empty body for page {page}"
                 )));
             }
+            Self::check_complete(announced, bytes_written, page)?;
         }
 
+        tokio::fs::rename(&part_file_path, &tmp_file_path).await?;
+
         Ok((tmp_file_path, filename))
+    }
+
+    /// Rejects a body that stopped short of the length the server announced.
+    ///
+    /// A silently truncated image still decodes to *something* often enough
+    /// that nothing downstream notices, so the mismatch has to be caught here
+    /// where the promise and the delivery are both in hand.
+    fn check_complete(announced: Option<u64>, received: u64, page: i32) -> Result<()> {
+        match announced {
+            Some(expected) if received < expected => Err(error::Error::Other(format!(
+                "Truncated body for page {page}: got {received} of {expected} bytes"
+            ))),
+            _ => Ok(()),
+        }
+    }
+
+    /// Extension for a page, from the Content-Type, then the URL, then the
+    /// first bytes.
+    ///
+    /// The byte-sniff matters: a source serving
+    /// `Content-Type: application/octet-stream` from an extensionless URL used
+    /// to fall through to `jpg`, so a PNG was stored inside the CBZ as
+    /// `0001.jpg`. Readers mostly cope, but the manifest records a name that
+    /// contradicts the bytes.
+    fn get_image_extension_sniffed(resp: &SmartResponse, url: &str, prefix: &[u8]) -> &'static str {
+        let by_header_or_url = Self::get_image_extension(resp, url);
+        // Only second-guess the fallback, never a definite answer.
+        if by_header_or_url != "jpg" || Self::looks_like_jpeg(prefix) {
+            return by_header_or_url;
+        }
+        Self::sniff_extension(prefix).unwrap_or(by_header_or_url)
+    }
+
+    fn looks_like_jpeg(b: &[u8]) -> bool {
+        b.starts_with(&[0xFF, 0xD8])
+    }
+
+    fn sniff_extension(b: &[u8]) -> Option<&'static str> {
+        if b.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+            return Some("png");
+        }
+        if b.starts_with(b"GIF87a") || b.starts_with(b"GIF89a") {
+            return Some("gif");
+        }
+        if b.len() >= 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+            return Some("webp");
+        }
+        if b.len() >= 12 && &b[4..8] == b"ftyp" && (&b[8..12] == b"avif" || &b[8..12] == b"avis") {
+            return Some("avif");
+        }
+        None
     }
 
     fn get_image_extension(resp: &SmartResponse, url: &str) -> &'static str {
@@ -445,8 +639,7 @@ impl DownloaderManager {
                             error: format!("Failed to fetch pages: {e}"),
                         },
                     );
-                    let msg = e.to_string();
-                    return Err(DownloadError::Extension(msg));
+                    return Err(DownloadError::from_page_list_error(e));
                 }
             },
             _ = cancel.cancelled() => {
@@ -463,6 +656,27 @@ impl DownloaderManager {
 
         let pages = chapter_data.0.pages;
         let base_url = chapter_data.1;
+
+        // A chapter with zero pages is never legitimate — it means a challenge
+        // page, a transient block, or an extraction miss returned an empty list.
+        // Without this guard the download loop below runs over nothing, no page
+        // error fires, and create_cbz seals a 0-page archive that is then marked
+        // Completed: the user sees a "downloaded" chapter that cannot be read.
+        // Fail instead (retryable, so a transient empty response is re-attempted).
+        if pages.is_empty() {
+            Self::send_event(
+                &self.progress_tx,
+                DownloadProgressEvent::ChapterFailed {
+                    chapter_id,
+                    chapter_name: name.clone(),
+                    error: "Source returned no pages for this chapter".to_string(),
+                },
+            );
+            return Err(DownloadError::PageFetch(
+                "source returned no pages for this chapter".to_string(),
+            ));
+        }
+
         let total_pages = pages.len() as u64;
 
         // Count already-staged pages for resume reporting.
@@ -553,13 +767,24 @@ impl DownloaderManager {
                         on_page2(done, total_pages);
                     }
 
-                    result.map_err(|e| e.to_string())
+                    result.map_err(|e| match e {
+                        error::Error::HttpStatus {
+                            status,
+                            retry_after_secs,
+                            ref context,
+                        } => DownloadError::PageHttp {
+                            status,
+                            retry_after_secs,
+                            message: format!("HTTP {status}: {context}"),
+                        },
+                        other => DownloadError::PageFetch(other.to_string()),
+                    })
                 }
             })
             .buffer_unordered(concurrent_pages);
 
         let mut successful: Vec<(PathBuf, String)> = Vec::new();
-        let mut page_error: Option<String> = None;
+        let mut page_error: Option<DownloadError> = None;
         let mut is_cancelled = false;
 
         while let Some(result) = tokio::select! {
@@ -593,8 +818,9 @@ impl DownloaderManager {
         }
 
         if let Some(err) = page_error {
+            let err_text = err.to_string();
             Self::update_active(&active_ref, chapter_id, |s| {
-                s.status = ActiveDownloadStatus::Failed(err.clone());
+                s.status = ActiveDownloadStatus::Failed(err_text.clone());
             })
             .await;
             Self::send_event(
@@ -602,11 +828,11 @@ impl DownloaderManager {
                 DownloadProgressEvent::ChapterFailed {
                     chapter_id,
                     chapter_name: name.clone(),
-                    error: format!("Page download failed: {err}"),
+                    error: format!("Page download failed: {err_text}"),
                 },
             );
             Self::schedule_active_cleanup(active_ref.clone(), chapter_id);
-            return Err(DownloadError::PageFetch(err));
+            return Err(err);
         }
 
         let successful_len = successful.len();
@@ -681,6 +907,13 @@ impl DownloaderManager {
         while let Ok(Some(entry)) = dir.next_entry().await {
             let name = entry.file_name();
             let s = name.to_string_lossy();
+            // Leftovers from a transfer that died mid-body. They are never
+            // resumable — the next attempt rewrites them from scratch — so
+            // sweep them rather than letting them accumulate.
+            if s.ends_with(".part") {
+                let _ = tokio::fs::remove_file(entry.path()).await;
+                continue;
+            }
             let Some(rest) = s.strip_suffix(".tmp") else {
                 continue;
             };
@@ -796,12 +1029,81 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
 
+    #[tokio::test]
+    async fn an_empty_page_list_fails_rather_than_sealing_a_zero_page_cbz() {
+        let tmp = tempfile::tempdir().unwrap();
+        let library_path = tmp.path().to_path_buf();
+        let save_path = library_path.join("manga");
+
+        let mgr =
+            DownloaderManager::new(SmartClient::new(None).unwrap(), DownloaderConfig::default())
+                .await
+                .unwrap();
+
+        let task = DownloadTask {
+            chapter_id: 1,
+            manga_id: 1,
+            manga_title: "M".to_string(),
+            source_manager: MockPageListFetcher::succeeding(0, 0), // empty page list
+            source_manga_id: "m".to_string(),
+            source_chapter_id: "c".to_string(),
+            name: "Chapter 1".to_string(),
+            library_path,
+            save_path: save_path.clone(),
+            comic_info: None,
+        };
+
+        let result = mgr
+            .download_chapter_direct(task, CancellationToken::new(), None, |_, _| {})
+            .await;
+
+        match result {
+            Err(DownloadError::PageFetch(_)) => {}
+            Err(other) => panic!("expected PageFetch error, got {other:?}"),
+            Ok(_) => panic!("an empty page list must fail, not seal a CBZ"),
+        }
+        // And crucially no .cbz was sealed.
+        assert!(
+            !save_path.join("Chapter 1.cbz").exists(),
+            "a zero-page CBZ must not be written"
+        );
+    }
+
     #[test]
     fn downloader_config_default_values() {
         let c = DownloaderConfig::default();
         assert_eq!(c.concurrent_pages, 4);
         assert_eq!(c.max_attempts, 3);
         assert_eq!(c.initial_retry_delay_ms, 1_000);
+    }
+
+    #[test]
+    fn from_page_list_error_preserves_extension_kind() {
+        use kani_shared::extension::{ExtensionError, ExtensionErrorKind};
+        let e = crate::error::Error::Extension(ExtensionError {
+            kind: ExtensionErrorKind::Updating,
+            message: "source updating".to_string(),
+            source_url: None,
+            retry_after_secs: None,
+        });
+        match DownloadError::from_page_list_error(e) {
+            DownloadError::Extension { kind, message, .. } => {
+                assert_eq!(kind, ExtensionErrorKind::Updating);
+                assert_eq!(message, "source updating");
+            }
+            other => panic!("expected Extension, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_page_list_error_defaults_unknown_for_non_extension() {
+        let e = crate::error::Error::Other("weird".to_string());
+        match DownloadError::from_page_list_error(e) {
+            DownloadError::Extension { kind, .. } => {
+                assert_eq!(kind, kani_shared::extension::ExtensionErrorKind::Unknown);
+            }
+            other => panic!("expected Extension, got {other:?}"),
+        }
     }
 
     async fn make_manager() -> DownloaderManager {
@@ -972,6 +1274,228 @@ mod tests {
         assert!(
             entry_names.iter().any(|n| n == "ComicInfo.xml"),
             "ComicInfo.xml not found: {entry_names:?}"
+        );
+    }
+
+    // ── Group P — the ComicInfo.xml a consumer actually reads ────────────────
+    //
+    // Komga, Kavita, Calibre and Jellyfin parse this sidecar. The tests above
+    // only assert the *entry exists*; these read it back out of the archive and
+    // parse it, so a document that is present but unusable cannot pass.
+
+    fn full_info() -> crate::comic_info::ComicInfo {
+        crate::comic_info::ComicInfo {
+            xmlns_xsi: "http://www.w3.org/2001/XMLSchema-instance",
+            series: "Berserk".to_string(),
+            title: Some("The Black Swordsman".to_string()),
+            number: 12.5,
+            volume: Some(3),
+            summary: Some("A summary.".to_string()),
+            language_iso: Some("en".to_string()),
+            writer: Some("Kentaro Miura".to_string()),
+            penciller: Some("Kentaro Miura".to_string()),
+            genre: Some("Dark Fantasy".to_string()),
+            web: Some("https://example.com/berserk".to_string()),
+            pages: None,
+        }
+    }
+
+    /// Build a CBZ through the real writer and return its ComicInfo.xml.
+    async fn cbz_comic_info(
+        dir: &std::path::Path,
+        info: crate::comic_info::ComicInfo,
+        page_count: usize,
+    ) -> String {
+        let mut staged = Vec::new();
+        for i in 0..page_count {
+            let p = dir.join(format!("p{i}.tmp"));
+            tokio::fs::write(&p, b"data").await.unwrap();
+            staged.push((p, format!("{:04}.jpg", i + 1)));
+        }
+        let cbz_path = dir.join("out.cbz");
+        DownloaderManager::create_cbz(&cbz_path, staged, Some(info))
+            .await
+            .unwrap();
+
+        let file = std::fs::File::open(&cbz_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let mut xml = String::new();
+        std::io::Read::read_to_string(&mut archive.by_name("ComicInfo.xml").unwrap(), &mut xml)
+            .unwrap();
+        xml
+    }
+
+    /// Read `<Tag>` text out of the document, parsing rather than substring
+    /// matching — a malformed document fails here, which is the point.
+    fn xml_field(xml: &str, tag: &str) -> Option<String> {
+        let mut reader = quick_xml::Reader::from_str(xml);
+        let mut buf = Vec::new();
+        let mut capture = false;
+        let mut out = String::new();
+        let mut seen = false;
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(quick_xml::events::Event::Eof) => break,
+                Err(e) => panic!("ComicInfo.xml is not well-formed, no reader could use it: {e}"),
+                Ok(quick_xml::events::Event::Start(e)) => {
+                    if e.name().as_ref() == tag.as_bytes() {
+                        capture = true;
+                        seen = true;
+                    }
+                }
+                Ok(quick_xml::events::Event::End(e)) => {
+                    if e.name().as_ref() == tag.as_bytes() {
+                        capture = false;
+                    }
+                }
+                Ok(quick_xml::events::Event::Text(t)) if capture => {
+                    out.push_str(&t.xml_content().unwrap_or_default());
+                }
+                Ok(quick_xml::events::Event::GeneralRef(r)) if capture => {
+                    if let Ok(Some(c)) = r.resolve_char_ref() {
+                        out.push(c);
+                    } else {
+                        out.push_str(match String::from_utf8_lossy(r.as_ref()).as_ref() {
+                            "amp" => "&",
+                            "lt" => "<",
+                            "gt" => ">",
+                            "quot" => "\"",
+                            "apos" => "'",
+                            other => panic!("unresolvable entity &{other}; in ComicInfo.xml"),
+                        });
+                    }
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+        seen.then_some(out)
+    }
+
+    // P1/P2 — the sidecar parses, and every field round-trips.
+    #[tokio::test]
+    async fn a_written_cbz_contains_parseable_comicinfo_that_round_trips() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let xml = cbz_comic_info(dir.path(), full_info(), 2).await;
+
+        assert_eq!(xml_field(&xml, "Series").as_deref(), Some("Berserk"));
+        assert_eq!(
+            xml_field(&xml, "Title").as_deref(),
+            Some("The Black Swordsman")
+        );
+        assert_eq!(xml_field(&xml, "Number").as_deref(), Some("12.5"));
+        assert_eq!(xml_field(&xml, "Volume").as_deref(), Some("3"));
+        assert_eq!(xml_field(&xml, "Writer").as_deref(), Some("Kentaro Miura"));
+        assert_eq!(xml_field(&xml, "LanguageISO").as_deref(), Some("en"));
+        assert_eq!(
+            xml_field(&xml, "Web").as_deref(),
+            Some("https://example.com/berserk")
+        );
+    }
+
+    // P3 — XML-hostile metadata must not produce a document readers choke on.
+    // A `contains()` assertion cannot catch this: the substrings survive in a
+    // broken document.
+    #[tokio::test]
+    async fn xml_hostile_metadata_still_parses() {
+        const NASTY: &str = r#"Tom & Jerry <vol "1"> 'x' ]]> --"#;
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut info = full_info();
+        info.series = NASTY.to_string();
+        info.summary = Some(NASTY.to_string());
+
+        let xml = cbz_comic_info(dir.path(), info, 1).await;
+        assert_eq!(
+            xml_field(&xml, "Series").as_deref(),
+            Some(NASTY),
+            "the series title must round-trip through escaping intact"
+        );
+        assert_eq!(xml_field(&xml, "Summary").as_deref(), Some(NASTY));
+    }
+
+    // P4 — element names are the ComicRack names consumers match on. A rename
+    // compiles and ships, and every consumer silently loses that field.
+    #[tokio::test]
+    async fn comicinfo_element_names_match_the_schema() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let xml = cbz_comic_info(dir.path(), full_info(), 1).await;
+        for tag in [
+            "Series",
+            "Title",
+            "Number",
+            "Volume",
+            "Summary",
+            "LanguageISO",
+            "Writer",
+            "Penciller",
+            "Genre",
+            "Web",
+        ] {
+            assert!(
+                xml_field(&xml, tag).is_some(),
+                "consumers match on <{tag}>; it is missing from the sidecar"
+            );
+        }
+    }
+
+    // P5 — an absent optional is omitted, not emitted empty. A reader that sees
+    // `<Writer></Writer>` records a writer whose name is the empty string.
+    #[tokio::test]
+    async fn absent_optional_metadata_is_omitted_not_emitted_empty() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let info = crate::comic_info::ComicInfo {
+            title: None,
+            volume: None,
+            summary: None,
+            writer: None,
+            penciller: None,
+            genre: None,
+            web: None,
+            language_iso: None,
+            ..full_info()
+        };
+        let xml = cbz_comic_info(dir.path(), info, 1).await;
+
+        for tag in ["Title", "Volume", "Summary", "Writer", "Penciller", "Web"] {
+            assert!(
+                xml_field(&xml, tag).is_none(),
+                "<{tag}> was absent and must be omitted entirely, not emitted empty"
+            );
+        }
+        // The required fields are still there.
+        assert_eq!(xml_field(&xml, "Series").as_deref(), Some("Berserk"));
+    }
+
+    // P6 — the Pages block describes the images actually in the archive. Drift
+    // here is the classic sidecar-vs-payload mismatch.
+    #[tokio::test]
+    async fn page_metadata_matches_the_images_actually_in_the_archive() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut staged = Vec::new();
+        for i in 0..4 {
+            let p = dir.path().join(format!("p{i}.tmp"));
+            tokio::fs::write(&p, b"data").await.unwrap();
+            staged.push((p, format!("{:04}.jpg", i + 1)));
+        }
+        let cbz_path = dir.path().join("pages.cbz");
+        DownloaderManager::create_cbz(&cbz_path, staged, Some(full_info()))
+            .await
+            .unwrap();
+
+        let file = std::fs::File::open(&cbz_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let images = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .filter(|n| n != "ComicInfo.xml")
+            .count();
+        let mut xml = String::new();
+        std::io::Read::read_to_string(&mut archive.by_name("ComicInfo.xml").unwrap(), &mut xml)
+            .unwrap();
+
+        let page_elements = xml.matches("<Page ").count();
+        assert_eq!(
+            page_elements, images,
+            "the Pages block describes {page_elements} pages but the archive holds {images}"
         );
     }
 

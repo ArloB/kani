@@ -23,6 +23,22 @@ impl ReadProgressBuffer {
 }
 
 impl AppService {
+    /// Manga this user has muted new-chapter notifications for.
+    ///
+    /// Only the muted ones: the default is to notify, so the exceptions are the
+    /// short list. The client previously learned this per-manga, and only for
+    /// manga whose detail page happened to be opened in the current session —
+    /// so the toggle silently stopped working after a reload.
+    pub async fn muted_manga_ids(&self, user_id: UserId) -> Result<Vec<i64>> {
+        Ok(sqlx::query_scalar!(
+            "SELECT manga_id FROM user_manga_tracking \
+             WHERE user_id = ? AND notify_new_chapters = FALSE",
+            user_id
+        )
+        .fetch_all(&self.db_read)
+        .await?)
+    }
+
     pub async fn set_chapter_progress(
         &self,
         user_id: UserId,
@@ -430,7 +446,10 @@ impl AppService {
             JOIN manga m ON m.id = c.manga_id
             JOIN user_chapter_tracking uct ON uct.chapter_id = c.id
             LEFT JOIN scanlator_preferences sp
-                ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator
+                ON sp.id = (SELECT sp2.id FROM scanlator_preferences sp2
+                            WHERE (sp2.manga_id = c.manga_id OR sp2.manga_id IS NULL)
+                              AND sp2.scanlator = c.scanlator
+                            ORDER BY sp2.manga_id IS NULL LIMIT 1)
             WHERE c.manga_id = ? AND uct.user_id = ?
               AND uct.is_read = false AND uct.last_page_read > 0
               AND c.download_status = 2
@@ -464,7 +483,10 @@ impl AppService {
             FROM chapters c
             JOIN manga m ON m.id = c.manga_id
             LEFT JOIN scanlator_preferences sp 
-                ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator
+                ON sp.id = (SELECT sp2.id FROM scanlator_preferences sp2
+                            WHERE (sp2.manga_id = c.manga_id OR sp2.manga_id IS NULL)
+                              AND sp2.scanlator = c.scanlator
+                            ORDER BY sp2.manga_id IS NULL LIMIT 1)
             WHERE c.manga_id = ?
               AND c.download_status = 2
               AND (
@@ -497,7 +519,10 @@ impl AppService {
             FROM chapters c
             JOIN manga m ON m.id = c.manga_id
             LEFT JOIN scanlator_preferences sp
-                ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator
+                ON sp.id = (SELECT sp2.id FROM scanlator_preferences sp2
+                            WHERE (sp2.manga_id = c.manga_id OR sp2.manga_id IS NULL)
+                              AND sp2.scanlator = c.scanlator
+                            ORDER BY sp2.manga_id IS NULL LIMIT 1)
             WHERE c.manga_id = ? AND c.chapter_number = ?
               AND c.download_status = 2
               AND (
@@ -597,25 +622,6 @@ impl AppService {
         .fetch_optional(&self.db_read)
         .await?;
         Ok(note)
-    }
-
-    /// Returns chapter IDs that have a non-empty note for this user + manga.
-    pub async fn get_noted_chapter_ids(
-        &self,
-        user_id: UserId,
-        manga_id: MangaId,
-    ) -> Result<Vec<ChapterId>> {
-        let ids: Vec<i64> = sqlx::query_scalar!(
-            r#"SELECT ucn.chapter_id as "id: i64"
-               FROM user_chapter_notes ucn
-               JOIN chapters c ON c.id = ucn.chapter_id
-               WHERE ucn.user_id = ? AND c.manga_id = ? AND ucn.note != ''"#,
-            user_id,
-            manga_id,
-        )
-        .fetch_all(&self.db_read)
-        .await?;
-        Ok(ids.into_iter().map(ChapterId).collect())
     }
 
     /// Returns chapter notes with text for a given user + manga, ordered by chapter number.

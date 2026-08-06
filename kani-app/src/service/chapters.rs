@@ -1,6 +1,11 @@
 use super::*;
 use crate::ids::{ChapterId, MangaId, UserId};
 
+/// Ceiling on chapter-listing pagination. A long series runs to a few dozen
+/// pages; a source claiming more than this is malfunctioning, and following it
+/// grows memory and the database without bound.
+const MAX_CHAPTER_LIST_PAGES: usize = 500;
+
 /// Resolved metadata for a downloaded chapter, including its on-disk CBZ path.
 /// Returned by [`AppService::chapter_cbz_path`]; all callers get everything
 /// they need from one query instead of issuing follow-up round-trips.
@@ -28,6 +33,7 @@ impl AppService {
         filter_downloaded: Option<bool>,
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
+        filter_orphaned: Option<bool>,
     ) -> Result<(Vec<kani_shared::types::Chapter>, bool, Option<u32>, u32)> {
         let limit = (page_size as i64) + 1;
         let offset = ((page - 1).max(0) as i64) * (page_size as i64);
@@ -41,29 +47,37 @@ impl AppService {
         if filter_unread == Some(true) {
             extra.push_str(" AND (uct.is_read IS NULL OR uct.is_read = 0)");
         }
+        // Chapters kept by a migration's "keep downloaded chapters" are hidden
+        // unless asked for: they no longer exist on the series' current source,
+        // so they are an archive rather than part of the listing.
+        extra.push_str(if filter_orphaned == Some(true) {
+            " AND c.is_orphaned = true"
+        } else {
+            " AND c.is_orphaned = false"
+        });
 
         let sql = format!(
             r#"SELECT c.id, c.source_chapter_id, c.name, c.chapter_number, c.language,
                       c.volume, c.scanlator, c.uploaded_at, c.download_status, c.is_orphaned,
-                      c.page_count, c.download_error,
+                      c.page_count, c.download_error, c.upgrade_available,
                       uct.is_read, uct.last_page_read
                FROM chapters c
-               LEFT JOIN scanlator_preferences sp
-                   ON sp.manga_id = c.manga_id AND sp.manga_id = ?
-                   AND (c.scanlator = sp.scanlator OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
                LEFT JOIN user_chapter_tracking uct
                    ON uct.chapter_id = c.id AND uct.user_id = ?
                WHERE c.manga_id = ?{extra}
-                 AND c.is_orphaned = false
                  AND (? IS NULL OR c.scanlator = ?)
-               ORDER BY {}, COALESCE(sp.priority, -1) DESC
+               ORDER BY {}, COALESCE((
+                   SELECT sp.priority FROM scanlator_preferences sp
+                   WHERE (sp.manga_id = c.manga_id OR sp.manga_id IS NULL)
+                     AND (c.scanlator = sp.scanlator
+                          OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
+                   ORDER BY sp.manga_id IS NULL LIMIT 1), -1) DESC
                LIMIT ? OFFSET ?"#,
             sort_order.to_sql_order()
         );
 
         let scanlator_for_count = filter_scanlator.clone();
         let mut rows = sqlx::query_as::<_, crate::models::ChapterRow>(&sql)
-            .bind(manga_id)
             .bind(user_id)
             .bind(manga_id)
             .bind(filter_scanlator.clone())
@@ -94,6 +108,9 @@ impl AppService {
                 is_read: c.is_read.unwrap_or(false),
                 last_page_read: c.last_page_read,
                 download_error: c.download_error.and_then(|s| serde_json::from_str(&s).ok()),
+                upgrade_available: c
+                    .upgrade_available
+                    .and_then(|s| serde_json::from_str(&s).ok()),
             })
             .collect();
 
@@ -133,6 +150,7 @@ impl AppService {
         filter_unread: Option<bool>,
         filter_scanlator: Option<String>,
         preferred_only: bool,
+        filter_orphaned: Option<bool>,
     ) -> Result<Vec<ChapterId>> {
         // When preferred_only is set, restrict to undownloaded chapters and
         // apply filter_chapters_by_rules afterwards.
@@ -151,24 +169,37 @@ impl AppService {
         if filter_unread == Some(true) {
             extra.push_str(" AND (uct.is_read IS NULL OR uct.is_read = 0)");
         }
+        // Opt-in, like the listing. Bulk download and preferred-version
+        // selection pass None, so they never reach for a chapter the current
+        // source does not carry; only "select orphaned" asks for them.
+        extra.push_str(if filter_orphaned == Some(true) {
+            " AND c.is_orphaned = true"
+        } else {
+            " AND c.is_orphaned = false"
+        });
 
         let sql = format!(
             r#"SELECT c.id
                FROM chapters c
-               LEFT JOIN scanlator_preferences sp
-                   ON sp.manga_id = c.manga_id AND sp.manga_id = ?
-                   AND (c.scanlator = sp.scanlator OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
                LEFT JOIN user_chapter_tracking uct
                    ON uct.chapter_id = c.id AND uct.user_id = ?
                WHERE c.manga_id = ?{extra}
-                 AND c.is_orphaned = false
                  AND (? IS NULL OR c.scanlator = ?)
-               ORDER BY {}, COALESCE(sp.priority, -1) DESC"#,
+               ORDER BY {}, COALESCE((
+                   SELECT sp.priority FROM scanlator_preferences sp
+                   WHERE (sp.manga_id = c.manga_id OR sp.manga_id IS NULL)
+                     AND (c.scanlator = sp.scanlator
+                          OR (c.scanlator IS NULL AND sp.scanlator = 'Unknown'))
+                   ORDER BY sp.manga_id IS NULL LIMIT 1), -1) DESC"#,
             sort_order.to_sql_order()
         );
 
+        // Bind in placeholder order: the join's user_id, the manga_id, then the
+        // scanlator guard twice. This bound five values for four placeholders,
+        // which put manga_id into `? IS NULL` — never null, so the guard failed
+        // for every row and the whole call returned nothing unless a scanlator
+        // filter happened to be set.
         let ids: Vec<ChapterId> = sqlx::query_scalar::<_, i64>(&sql)
-            .bind(manga_id)
             .bind(user_id)
             .bind(manga_id)
             .bind(filter_scanlator.clone())
@@ -192,6 +223,7 @@ impl AppService {
     pub async fn chapter_cbz_path(&self, chapter_id: ChapterId) -> Result<ChapterCbzInfo> {
         let rec = sqlx::query!(
             "SELECT c.download_status, c.volume, c.chapter_number, c.name, c.scanlator,
+                    c.file_path,
                     m.id as manga_id, m.name as manga_name,
                     s.name as source_name
              FROM chapters c
@@ -212,6 +244,25 @@ impl AppService {
 
         let chapter_title = chapter_name(rec.volume, rec.chapter_number, rec.name);
         let library_path = self.settings.read().await.library_path.clone();
+
+        // A stored path wins over title derivation: renaming a manga must not
+        // orphan its files. Rows predating the backfill fall through below.
+        if let Some(rel) = rec.file_path.as_deref().filter(|p| !p.is_empty()) {
+            let resolved =
+                kani_core::utilities::assert_within_root(&library_path, &library_path.join(rel))
+                    .map_err(|e| ServiceError::Internal(format!("Path traversal blocked: {e}")))?;
+
+            return Ok(ChapterCbzInfo {
+                path: resolved,
+                chapter_title,
+                manga_id: MangaId(rec.manga_id),
+                manga_name: rec.manga_name,
+                chapter_number: rec.chapter_number,
+                scanlator: rec.scanlator,
+                source_name: rec.source_name,
+            });
+        }
+
         let safe_manga_dir = format!(
             "{} - {}",
             kani_core::utilities::sanitize_filename(&rec.manga_name),
@@ -364,15 +415,20 @@ impl AppService {
                 " AND EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator)"
             }
             _ => {
-                " AND NOT EXISTS (SELECT 1 FROM scanlator_preferences sp WHERE sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator AND sp.blocked = 1)"
+                " AND NOT EXISTS (SELECT 1 FROM scanlator_preferences sp \
+                   WHERE (sp.manga_id = c.manga_id OR sp.manga_id IS NULL) \
+                     AND sp.scanlator = c.scanlator AND sp.blocked = 1)"
             }
         };
         let (cmp, order) = if next { (">", "ASC") } else { ("<", "DESC") };
         let sql = format!(
             "SELECT c.id FROM chapters c
-             LEFT JOIN scanlator_preferences sp ON sp.manga_id = c.manga_id AND sp.scanlator = c.scanlator
              WHERE c.manga_id = ? AND c.chapter_number {cmp} ?{scanlator_filter}
-             ORDER BY c.chapter_number {order}, COALESCE(sp.priority, -1) DESC LIMIT 1"
+             ORDER BY c.chapter_number {order}, COALESCE((
+                 SELECT sp.priority FROM scanlator_preferences sp
+                 WHERE (sp.manga_id = c.manga_id OR sp.manga_id IS NULL)
+                   AND sp.scanlator = c.scanlator
+                 ORDER BY sp.manga_id IS NULL LIMIT 1), -1) DESC LIMIT 1"
         );
         let id: Option<i64> = sqlx::query_scalar(&sql)
             .bind(manga_id)
@@ -397,11 +453,14 @@ impl AppService {
             .map_err(ServiceError::Core)
     }
 
-    pub(super) async fn fetch_all_chapter_pages(
+    /// Every chapter the source lists, plus whether the page ceiling cut the
+    /// listing short. A truncated listing must never be read as "these are all
+    /// the chapters that exist" — callers that delete on absence have to know.
+    pub(super) async fn fetch_all_chapter_pages_checked(
         &self,
         source_id: i64,
         source_manga_id: &str,
-    ) -> Result<Vec<wit_types::ChapterInfo>> {
+    ) -> Result<(Vec<wit_types::ChapterInfo>, bool)> {
         let backend = self
             .sources
             .get_backend(source_id)
@@ -418,12 +477,29 @@ impl AppService {
             let list: wit_types::ChapterList = serde_json::from_str(&json).map_err(|e| {
                 ServiceError::Internal(format!("Failed to parse chapter list: {e}"))
             })?;
+            let empty = list.chapters.is_empty();
+            let more = list.has_next_page;
             all.extend(list.chapters);
-            if !list.has_next_page {
-                break;
+            // A source that always answers `has_next_page: true` would spin
+            // here forever, growing the vector without bound. This is reachable
+            // from a REST handler (`preview_migration`), so the ceiling is not
+            // hypothetical.
+            if empty || !more || page as usize >= MAX_CHAPTER_LIST_PAGES {
+                // Hitting the ceiling while the source still claims more pages
+                // means the listing is INCOMPLETE. Report that instead of
+                // pretending otherwise: a caller that deletes downloads for
+                // chapters "missing" from the listing would destroy data over
+                // chapters it simply never fetched.
+                let truncated = !empty && more && page as usize >= MAX_CHAPTER_LIST_PAGES;
+                if truncated {
+                    tracing::warn!(
+                        "Chapter listing for source {source_id}/{source_manga_id} hit the \
+                         {MAX_CHAPTER_LIST_PAGES}-page ceiling and is incomplete"
+                    );
+                }
+                return Ok((all, truncated));
             }
             page += 1;
         }
-        Ok(all)
     }
 }

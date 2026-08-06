@@ -104,10 +104,13 @@ async fn admin_storage_stats_history_returns_403_for_regular_user() {
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
 
-// ── POST /rest/admin/library/integrity-check ──────────────────────────────────
+// ── POST /rest/admin/library/scrub ───────────────────────────────────────────
+// Supersedes /admin/library/integrity-check, which was removed with
+// check_library/cleanup_orphans. The scrub is a job, so it returns 202 + job_id
+// rather than an inline report.
 
 #[tokio::test]
-async fn admin_integrity_check_returns_200_for_admin() {
+async fn admin_scrub_returns_202_for_admin() {
     let state = test_state().await;
     let (username, password) = create_admin(&state).await;
     let app = build_test_app(state).await;
@@ -115,29 +118,28 @@ async fn admin_integrity_check_returns_200_for_admin() {
 
     let res = app
         .oneshot(authed_post(
-            "/rest/admin/library/integrity-check",
+            "/rest/admin/library/scrub",
             &cookie,
-            json!({}),
+            json!({ "depth": "quick", "fix": false }),
         ))
         .await
         .unwrap();
 
-    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
     let body = body_json(res).await;
-    assert!(body.get("orphaned_files").is_some());
-    assert!(body.get("missing_files").is_some());
-    assert!(body.get("cover_mismatches").is_some());
-    assert!(body.get("db_chapter_count").is_some());
-    assert!(body.get("disk_file_count").is_some());
+    assert!(
+        body.get("job_id").is_some(),
+        "the caller needs the id to follow progress over SSE"
+    );
 }
 
 #[tokio::test]
-async fn admin_integrity_check_returns_401_without_auth() {
+async fn admin_scrub_returns_401_without_auth() {
     let state = test_state().await;
     let app = build_test_app(state).await;
 
     let res = app
-        .oneshot(post_json("/rest/admin/library/integrity-check", json!({})))
+        .oneshot(post_json("/rest/admin/library/scrub", json!({})))
         .await
         .unwrap();
 
@@ -145,9 +147,46 @@ async fn admin_integrity_check_returns_401_without_auth() {
 }
 
 #[tokio::test]
-async fn admin_integrity_check_returns_403_for_regular_user() {
+async fn admin_scrub_returns_403_for_regular_user() {
     let state = test_state().await;
     let (username, password) = create_regular_user(&state, "carol").await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post("/rest/admin/library/scrub", &cookie, json!({})))
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn admin_scrub_rejects_an_unknown_depth() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
+    let app = build_test_app(state).await;
+    let cookie = common::login(&app, username, password).await;
+
+    let res = app
+        .oneshot(authed_post(
+            "/rest/admin/library/scrub",
+            &cookie,
+            json!({ "depth": "thorough" }),
+        ))
+        .await
+        .unwrap();
+
+    assert!(
+        res.status().is_client_error(),
+        "an unrecognised depth must not silently become 'quick'"
+    );
+}
+
+#[tokio::test]
+async fn the_removed_integrity_check_endpoint_is_gone() {
+    let state = test_state().await;
+    let (username, password) = create_admin(&state).await;
     let app = build_test_app(state).await;
     let cookie = common::login(&app, username, password).await;
 
@@ -160,29 +199,10 @@ async fn admin_integrity_check_returns_403_for_regular_user() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
-async fn admin_integrity_check_fix_mode_returns_cleanup_result() {
-    let state = test_state().await;
-    let (username, password) = create_admin(&state).await;
-    let app = build_test_app(state).await;
-    let cookie = common::login(&app, username, password).await;
-
-    let res = app
-        .oneshot(authed_post(
-            "/rest/admin/library/integrity-check?fix=true",
-            &cookie,
-            json!({}),
-        ))
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::OK);
-    let body = body_json(res).await;
-    assert!(body.get("removed_count").is_some());
-    assert!(body.get("failed_count").is_some());
-    assert!(body.get("dry_run").is_some());
-    assert_eq!(body["dry_run"], false);
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "the old endpoint deleted orphans as a side effect of ?fix=true; it must \
+         not linger once deletion needs an explicit path list"
+    );
 }

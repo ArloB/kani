@@ -17,12 +17,31 @@ pub fn router() -> Router<AppState> {
             post(upload_manga_cover_handler).delete(clear_manga_cover_handler),
         )
         .route("/manga/{id}/details", get(get_local_manga_details))
-        .route("/manga/{id}/chapters", get(get_local_chapters))
+        .route(
+            "/manga/{id}/chapters",
+            get(get_local_chapters)
+                .route_layer(axum::middleware::from_fn(crate::etag::etag_middleware)),
+        )
         .route("/manga/{id}/chapter_ids", get(get_chapter_ids))
+        .route(
+            "/manga/{id}/upgrade-auto-replace",
+            put(set_upgrade_auto_replace),
+        )
+        .route("/me/upgrades", get(get_all_upgrades))
+        .route("/me/notify-prefs", get(get_notify_prefs))
+        .route("/chapters/{id}/upgrade", post(apply_chapter_upgrade))
+        .route(
+            "/chapters/{id}/upgrade/dismiss",
+            post(dismiss_chapter_upgrade),
+        )
         .route("/manga/{id}/download_all", post(download_all))
         .route("/manga/{id}/cancel_all", post(cancel_all_downloads))
         .route("/manga/{id}/refresh", post(refresh_manga))
         .route("/manga/{id}/scan", post(scan_manga))
+        .route(
+            "/manga/{id}/dismiss-suppressed",
+            post(dismiss_suppressed_chapters),
+        )
         .route(
             "/manga/{id}/toggle_auto_download",
             post(toggle_auto_download),
@@ -57,10 +76,6 @@ pub fn router() -> Router<AppState> {
             post(preview_download_rules),
         )
         .route("/manga/{id}/enrich-metadata", post(enrich_metadata_handler))
-        .route(
-            "/manga/{id}/chapters/stream/{source_id}",
-            post(trigger_chapter_stream),
-        )
 }
 
 #[utoipa::path(
@@ -103,6 +118,18 @@ pub(crate) async fn delete_manga(
     Ok(Json(json!({ "undo_token": undo_token })))
 }
 
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/untrash",
+    params(("id" = i64, Path, description = "Manga id")),
+    responses(
+        (status = 200, description = "Manga restored from the trash"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such manga in the trash"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub(crate) async fn untrash_manga_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(svc): State<Arc<dyn MangaDomain>>,
@@ -117,6 +144,18 @@ pub(crate) struct UndoTokenBody {
     token: uuid::Uuid,
 }
 
+#[utoipa::path(
+    post, path = "/rest/manga/untrash",
+    request_body(content = inline(serde_json::Value), description = "The undo token returned when the manga was trashed"),
+    responses(
+        (status = 200, description = "Manga restored from the trash by undo token"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Unknown or expired undo token"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub(crate) async fn untrash_manga_by_token_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(svc): State<Arc<dyn MangaDomain>>,
@@ -126,6 +165,16 @@ pub(crate) async fn untrash_manga_by_token_handler(
     Ok(Json(json!({})))
 }
 
+#[utoipa::path(
+    get, path = "/rest/trash",
+    responses(
+        (status = 200, description = "Manga currently in the trash, with their retention deadlines"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub(crate) async fn list_trash_handler(
     _: AuthGuard<crate::permissions::guards::LibraryView>,
     State(svc): State<Arc<dyn MangaDomain>>,
@@ -133,6 +182,18 @@ pub(crate) async fn list_trash_handler(
     Ok(Json(svc.list_trash().await?))
 }
 
+#[utoipa::path(
+    delete, path = "/rest/trash/{id}",
+    params(("id" = i64, Path, description = "Manga id")),
+    responses(
+        (status = 200, description = "Manga permanently deleted"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No such manga in the trash"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub(crate) async fn purge_trash_one_handler(
     AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(svc): State<Arc<dyn MangaDomain>>,
@@ -142,6 +203,16 @@ pub(crate) async fn purge_trash_one_handler(
     Ok(Json(json!({})))
 }
 
+#[utoipa::path(
+    delete, path = "/rest/trash",
+    responses(
+        (status = 200, description = "The trash was emptied; responds with the number purged"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "library"
+)]
 pub(crate) async fn purge_trash_all_handler(
     _: AuthGuard<crate::permissions::guards::LibraryDelete>,
     State(svc): State<Arc<dyn MangaDomain>>,
@@ -266,8 +337,10 @@ pub(crate) async fn get_local_manga_details(
         "auto_scan":                   d.auto_scan,
         "scanlator_mode":              d.manga.scanlator_mode,
         "download_all_preferred_only": d.manga.download_all_preferred_only,
+        "upgrade_auto_replace":        d.manga.upgrade_auto_replace,
         "notes":                       d.manga.notes,
         "cover_overridden":            d.manga.cover_overridden,
+        "suppressed_chapter_count":    d.manga.suppressed_chapter_count,
         "local_name":                  d.manga.local_name,
         "local_description":           d.manga.local_description,
         "local_status":                d.manga.local_status,
@@ -282,6 +355,10 @@ pub(crate) async fn get_local_manga_details(
         "source_authors":              d.source_authors,
         "source_artists":              d.source_artists,
         "source_tags":                 d.source_tags,
+        "chapter_count":               d.chapter_count,
+        // RFC 3339 — time's default serde emits an array `new Date()` cannot parse.
+        "added_at":                    d.manga.created_at
+            .format(&time::format_description::well_known::Rfc3339).ok(),
     })))
 }
 
@@ -290,11 +367,12 @@ pub(crate) async fn get_local_manga_details(
     params(
         ("id" = i64, Path, description = "Manga ID"),
         ("page" = Option<i32>, Query, description = "Page number (default 1)"),
-        ("page_size" = Option<i32>, Query, description = "Items per page (default 20, max 200)"),
+        ("page_size" = Option<i32>, Query, description = "Items per page (default 50, max 200)"),
         ("sort_order" = Option<String>, Query, description = "asc or desc"),
         ("filter_downloaded" = Option<bool>, Query, description = "true = downloaded only, false = undownloaded only"),
         ("filter_unread" = Option<bool>, Query, description = "true = unread only"),
         ("filter_scanlator" = Option<String>, Query, description = "Scanlator name"),
+        ("filter_orphaned" = Option<bool>, Query, description = "true = only chapters a migration orphaned; absent hides them"),
     ),
     responses(
         (status = 200, description = "Paginated chapter list"),
@@ -319,6 +397,7 @@ pub(crate) async fn get_local_chapters(
             q.filter_downloaded,
             q.filter_unread,
             q.filter_scanlator,
+            q.filter_orphaned,
         )
         .await?;
     Ok(Json(crate::types::ChapterList {
@@ -337,6 +416,7 @@ pub(crate) async fn get_local_chapters(
         ("filter_downloaded" = Option<bool>, Query, description = "Downloaded only"),
         ("filter_unread" = Option<bool>, Query, description = "Unread only"),
         ("filter_scanlator" = Option<String>, Query, description = "Scanlator name"),
+        ("filter_orphaned" = Option<bool>, Query, description = "true = only chapters a migration orphaned; absent hides them"),
         ("preferred_only" = Option<bool>, Query, description = "Preferred scanlator only"),
     ),
     responses(
@@ -361,6 +441,7 @@ pub(crate) async fn get_chapter_ids(
             q.filter_unread,
             q.filter_scanlator,
             q.preferred_only,
+            q.filter_orphaned,
         )
         .await?;
     Ok(Json(json!({ "ids": ids })))
@@ -620,9 +701,10 @@ pub(crate) async fn preview_migration(
     params(("id" = i64, Path, description = "Manga ID")),
     request_body = MigrateMangaRequest,
     responses(
-        (status = 200, description = "Manga migrated to new source"),
+        (status = 202, description = "Migration queued; poll GET /rest/jobs/{job_id} for the result"),
         (status = 401, description = "Not authenticated"),
         (status = 403, description = "Insufficient permissions"),
+        (status = 409, description = "A migration for this manga is already in progress"),
     ),
     security(("session" = [])),
     tag = "manga"
@@ -633,15 +715,15 @@ pub(crate) async fn migrate_manga_handler(
     Path(manga_id): Path<MangaId>,
     Json(body): Json<MigrateMangaRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let result = svc
-        .migrate_manga(
+    let job_id = svc
+        .submit_migration(
             manga_id,
             body.target_source_id,
             body.target_source_manga_id,
             body.keep_orphaned_downloads,
         )
         .await?;
-    Ok(Json(result))
+    Ok((StatusCode::ACCEPTED, Json(json!({ "job_id": job_id }))))
 }
 
 #[utoipa::path(
@@ -806,51 +888,6 @@ pub(crate) async fn enrich_metadata_handler(
     Ok(Json(result))
 }
 
-#[utoipa::path(
-    post, path = "/rest/manga/{id}/chapters/stream/{source_id}",
-    params(
-        ("id" = i64, Path, description = "Manga ID"),
-        ("source_id" = i64, Path, description = "Source ID"),
-    ),
-    responses(
-        (status = 202, description = "Streaming chapter fetch triggered"),
-        (status = 401, description = "Not authenticated"),
-        (status = 403, description = "Insufficient permissions"),
-    ),
-    security(("session" = [])),
-    tag = "manga"
-)]
-pub(crate) async fn trigger_chapter_stream(
-    _: AuthGuard<crate::permissions::guards::LibraryRefresh>,
-    State(state): State<AppState>,
-    Path((manga_id, source_id)): Path<(MangaId, i64)>,
-) -> Result<impl IntoResponse, AppError> {
-    use sqlx::Row;
-    let row =
-        sqlx::query("SELECT streaming_chapters FROM sources WHERE id = ? AND deleted_at IS NULL")
-            .bind(source_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| AppError::InternalServerError(e.to_string()))?
-            .ok_or_else(|| AppError::NotFound(format!("Source {source_id} not found")))?;
-
-    let streaming_ok: bool = row.get::<i64, _>(0) != 0;
-    if !streaming_ok {
-        return Err(AppError::Other(
-            "Source does not support streaming chapter lists".into(),
-        ));
-    }
-
-    let _ = state
-        .refresh_tx
-        .send(kani_app::events::AppEvent::ChapterListPartial {
-            manga_id,
-            received: 0,
-        });
-
-    Ok((StatusCode::ACCEPTED, Json(json!({}))))
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -860,7 +897,6 @@ mod tests {
     use kani_app::service::traits::MangaDomain;
     use kani_shared::types::{
         Chapter, ChapterSortOrder, DownloadRule, DownloadRuleKind, MigrationPreview,
-        MigrationResult,
     };
     use std::sync::Arc;
 
@@ -914,6 +950,7 @@ mod tests {
             _filter_downloaded: Option<bool>,
             _filter_unread: Option<bool>,
             _filter_scanlator: Option<String>,
+            _filter_orphaned: Option<bool>,
         ) -> kani_app::error::Result<(Vec<Chapter>, bool, Option<u32>, u32)> {
             unimplemented!()
         }
@@ -927,6 +964,7 @@ mod tests {
             _filter_unread: Option<bool>,
             _filter_scanlator: Option<String>,
             _preferred_only: bool,
+            _filter_orphaned: Option<bool>,
         ) -> kani_app::error::Result<Vec<kani_app::ids::ChapterId>> {
             unimplemented!()
         }
@@ -1010,13 +1048,13 @@ mod tests {
         ) -> kani_app::error::Result<MigrationPreview> {
             unimplemented!()
         }
-        async fn migrate_manga(
+        async fn submit_migration(
             &self,
             _manga_id: MangaId,
             _target_source_id: i64,
             _target_source_manga_id: String,
             _keep_orphaned_downloads: bool,
-        ) -> kani_app::error::Result<MigrationResult> {
+        ) -> kani_app::error::Result<kani_app::jobs::JobId> {
             unimplemented!()
         }
         async fn add_download_rule(
@@ -1112,4 +1150,142 @@ mod tests {
         let body = axum::response::IntoResponse::into_response(response);
         assert_eq!(body.status(), axum::http::StatusCode::OK);
     }
+}
+
+// ── Upgrade detection ────────────────────────────────────────────────────────
+
+/// The manga this user has muted, so the client can honour the setting for
+/// every series rather than only those it happens to have loaded.
+#[utoipa::path(
+    get, path = "/rest/me/notify-prefs",
+    responses(
+        (status = 200, description = "The manga the caller has muted, so the client can suppress their notifications"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_notify_prefs(
+    AuthGuard(user, _): AuthGuard<crate::permissions::IsAuthenticated>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let muted = state.service.muted_manga_ids(user.id).await?;
+    Ok(Json(json!({ "muted": muted })))
+}
+
+#[utoipa::path(
+    get, path = "/rest/me/upgrades",
+    responses(
+        (status = 200, description = "Every available chapter upgrade across the library"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn get_all_upgrades(
+    _: AuthGuard<crate::permissions::guards::LibraryView>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    Ok(Json(state.service.all_upgrades().await?))
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct AutoReplaceBody {
+    pub enabled: bool,
+}
+
+#[utoipa::path(
+    put, path = "/rest/manga/{id}/upgrade-auto-replace",
+    params(("id" = i64, Path, description = "Manga id")),
+    request_body(content = inline(serde_json::Value), description = "Whether better versions replace the downloaded chapter automatically"),
+    responses(
+        (status = 200, description = "Auto-replace setting saved for this manga"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn set_upgrade_auto_replace(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(state): State<AppState>,
+    Path(manga_id): Path<MangaId>,
+    Json(body): Json<AutoReplaceBody>,
+) -> Result<impl IntoResponse, AppError> {
+    state
+        .service
+        .set_upgrade_auto_replace(manga_id, body.enabled)
+        .await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Replacing a held chapter moves the old file aside and re-queues the
+/// download, so this returns the download job id rather than a finished result.
+#[utoipa::path(
+    post, path = "/rest/chapters/{id}/upgrade",
+    params(("id" = i64, Path, description = "Chapter id")),
+    responses(
+        (status = 200, description = "Upgrade accepted; responds with the id of the job that performs it"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "No upgrade is available for this chapter"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn apply_chapter_upgrade(
+    AuthGuard(user, _): AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(state): State<AppState>,
+    Path(chapter_id): Path<ChapterId>,
+) -> Result<impl IntoResponse, AppError> {
+    let job_id = state
+        .service
+        .apply_upgrade(chapter_id, Some(user.id))
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "job_id": job_id })),
+    ))
+}
+
+#[utoipa::path(
+    post, path = "/rest/chapters/{id}/upgrade/dismiss",
+    params(("id" = i64, Path, description = "Chapter id")),
+    responses(
+        (status = 200, description = "Upgrade dismissed; it will not be offered again"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "chapters"
+)]
+pub(crate) async fn dismiss_chapter_upgrade(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(state): State<AppState>,
+    Path(chapter_id): Path<ChapterId>,
+) -> Result<impl IntoResponse, AppError> {
+    state.service.dismiss_upgrade(chapter_id).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[utoipa::path(
+    post, path = "/rest/manga/{id}/dismiss-suppressed",
+    params(("id" = i64, Path, description = "Manga id")),
+    responses(
+        (status = 200, description = "The suppressed-chapter notice was dismissed for this manga"),
+        (status = 401, description = "Not authenticated"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    security(("session" = [])),
+    tag = "manga"
+)]
+pub(crate) async fn dismiss_suppressed_chapters(
+    _: AuthGuard<crate::permissions::guards::LibraryManage>,
+    State(state): State<AppState>,
+    Path(manga_id): Path<MangaId>,
+) -> Result<impl IntoResponse, AppError> {
+    state.service.dismiss_suppressed_chapters(manga_id).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
 }

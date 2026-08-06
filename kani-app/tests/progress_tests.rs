@@ -24,6 +24,7 @@ async fn set_chapter_progress_creates_tracking_row() {
             None,
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -60,6 +61,7 @@ async fn set_chapter_progress_higher_page_marks_read() {
             None,
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -89,6 +91,7 @@ async fn set_chapter_read_status_marks_chapters_as_read() {
             20,
             kani_shared::types::ChapterSortOrder::ChapterDesc,
             user_id,
+            None,
             None,
             None,
             None,
@@ -123,6 +126,7 @@ async fn set_chapter_read_status_can_mark_as_unread() {
             None,
             None,
             None,
+            None,
         )
         .await
         .unwrap();
@@ -151,6 +155,7 @@ async fn filter_unread_only_returns_unread_chapters() {
             user_id,
             None,
             Some(true),
+            None,
             None,
         )
         .await

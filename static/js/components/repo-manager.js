@@ -249,6 +249,10 @@ export function mountRepoManager(container) {
   function _onSse(e) {
     const d = /** @type {any} */ (e).detail;
     if (!d?.type) return;
+    if (d.type === 'source_updating') {
+      showToast(t('repo.source_updating', { name: d.source_name ?? '?' }));
+      return;
+    }
     if (d.type === 'repo_refreshed' || d.type === 'update_available' || d.type === 'source_installed') {
       _loadRepos();
       if (_selectedRepoId !== null) _selectRepo(_selectedRepoId);

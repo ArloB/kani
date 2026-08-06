@@ -817,10 +817,18 @@ export async function init(container, { id }) {
 
   // The Preferences tab starts greyed out; enable it once the schema shows
   // this source actually exposes preferences.
+  //
+  // A failed probe is not an answer. Swallowing it left the tab disabled
+  // forever on any transient error — a rate limit, a restart mid-load — so the
+  // source could never be configured and nothing said why. Unknown enables the
+  // tab instead: the panel re-fetches on open and reports its own error.
   api.getPreferenceSchema(_sourceId).then(schema => {
     _hasPrefs = Array.isArray(schema) && schema.length > 0;
     if (_hasPrefs) _tabsUpdateFn?.(_activeTab, _tabDefs());
-  }).catch(() => {});
+  }).catch(() => {
+    _hasPrefs = true;
+    _tabsUpdateFn?.(_activeTab, _tabDefs());
+  });
 
   _switchTab(_activeTab);
 
